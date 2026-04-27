@@ -1,0 +1,10 @@
+id: underwater
+name: Underwater
+description: Low-pass + slow tremolo for submerged / suspended feel.
+effects:
+  - type: lowpass
+    frequency: 800
+    q: 1.2
+  - type: tremolo
+    rate_hz: 0.8
+    depth: 0.3

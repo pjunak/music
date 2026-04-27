@@ -1,0 +1,9 @@
+/* DnD mode theme overrides. Loaded on top of frontend/src/styles/global.css. */
+:root[data-mode="dnd"] {
+  --bg: #0d0a06;
+  --fg: #f0e4c8;
+  --muted: #a08a5f;
+  --accent: #c8882a;
+  --surface: #17120a;
+  --border: #3a2a12;
+}

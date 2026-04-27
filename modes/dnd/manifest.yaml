@@ -1,0 +1,20 @@
+id: dnd
+name: Dungeons & Dragons
+theme: theme.css
+panels:
+  - now-playing
+  - mode-player        # quick-select ambient playlists by category
+  - soundboard
+  - interrupts
+  - queue
+playlist_categories:
+  - combat
+  - exploration
+  - wonder
+  - danger
+  - downtime
+default_crossfade_ms: 2000
+default_soundboard: default
+interrupts: []         # predefined interrupt templates; ad-hoc interrupts go through the WS interrupt lane
+integrations:
+  lights: null         # stub; will point at an MQTT topic once lights are wired

@@ -1,0 +1,11 @@
+id: distant
+name: Distant
+description: As if heard from far away — rolled-off highs and light reverb.
+effects:
+  - type: lowpass
+    frequency: 2500
+    q: 0.7
+  - type: reverb
+    room_size: medium
+    wet: 0.2
+    damping: 0.5

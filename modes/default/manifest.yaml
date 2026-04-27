@@ -1,0 +1,6 @@
+id: default
+name: Default
+panels:
+  - now-playing
+  - queue
+  - library-browser

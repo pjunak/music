@@ -1,0 +1,12 @@
+id: radio-vintage
+name: Vintage Radio
+description: Narrow band-pass and light distortion — like a pre-war gramophone or crystal radio.
+effects:
+  - type: highpass
+    frequency: 400
+    q: 0.9
+  - type: lowpass
+    frequency: 3500
+    q: 0.9
+  - type: distortion
+    amount: 0.15

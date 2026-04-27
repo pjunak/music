@@ -1,0 +1,7 @@
+id: muffled
+name: Muffled
+description: Heavy low-pass — behind a door, through a wall, underwater's cousin.
+effects:
+  - type: lowpass
+    frequency: 1200
+    q: 1.0

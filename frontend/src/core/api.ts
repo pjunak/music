@@ -1,0 +1,78 @@
+import type {
+  ModeSummary,
+  PlaylistMeta,
+  Track,
+  TrackInPlaylist,
+} from "@/core/types";
+
+const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public detail: string,
+  ) {
+    super(`API ${status}: ${detail}`);
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const init: RequestInit = { method, credentials: "include" };
+  if (body !== undefined) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(`${BASE}${path}`, init);
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  const parsed = text ? (JSON.parse(text) as unknown) : undefined;
+
+  if (!response.ok) {
+    const detail =
+      parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
+        ? String((parsed as { detail: unknown }).detail)
+        : response.statusText;
+    throw new ApiError(response.status, detail);
+  }
+
+  return parsed as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>("GET", path),
+  post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
+  patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
+  delete: <T>(path: string) => request<T>("DELETE", path),
+};
+
+// --- Typed helpers per resource ------------------------------------------
+
+export const modesApi = {
+  list: () => api.get<ModeSummary[]>("/api/modes"),
+};
+
+export const playlistsApi = {
+  list: (params: { mode_id?: string; category?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.mode_id !== undefined) q.set("mode_id", params.mode_id);
+    if (params.category !== undefined) q.set("category", params.category);
+    const qs = q.toString();
+    return api.get<PlaylistMeta[]>(`/api/playlists${qs ? `?${qs}` : ""}`);
+  },
+  tracks: (playlistId: number) =>
+    api.get<TrackInPlaylist[]>(`/api/playlists/${playlistId}/tracks`),
+};
+
+export const libraryApi = {
+  search: (q: string, limit = 50) => {
+    const qs = new URLSearchParams({ q, limit: String(limit) });
+    return api.get<{ tracks: Track[]; limit: number; offset: number }>(
+      `/api/library/search?${qs.toString()}`,
+    );
+  },
+};

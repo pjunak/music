@@ -1,0 +1,11 @@
+id: cave
+name: Cave / Cavern
+description: Underground reverb with slight muffling — good for dungeons, tunnels, vaults.
+effects:
+  - type: reverb
+    room_size: large
+    wet: 0.45
+    damping: 0.3
+  - type: lowpass
+    frequency: 4000
+    q: 0.9

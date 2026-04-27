@@ -1,0 +1,4 @@
+id: default
+name: Default
+# Drop .ogg/.mp3/.wav files into modes/dnd/soundboards/files/ and reference them here.
+categories: []

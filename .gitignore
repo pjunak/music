@@ -1,0 +1,115 @@
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+.turbo/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+.history/
+
+# Backup / temp / merge leftovers
+*.bak
+*.orig
+*.rej
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.pytype/
+.hypothesis/
+.dmypy.json
+dmypy.json
+.python-version
+.tool-versions
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Databases (Beets' library.db + our app.db are both runtime state)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Media / runtime content (never commit user music or uploaded files).
+# Anchored to repo root so we don't shadow code dirs like backend/app/library/.
+/incoming/
+/library/
+/uploads/
+/media/
+/music/
+modes/*/soundboard/files/
+modes/*/cache/
+
+# Testing & Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+coverage/
+
+# Frontend cache
+.eslintcache
+*.tsbuildinfo
+
+# Agent / AI tooling — agent-only, never published to GitHub.
+# README.md on GitHub is for humans; anything agent-facing stays local.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.aider*
+.cursor/
+.continue/
+.copilot/
+.windsurf/
+.codeium/
+
+# Internal planning / spec docs — local-only, not for the public repo.
+docs/
+
+# VS code
+.vscode/settings.json
+.vscode
+.vscode/*

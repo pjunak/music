@@ -1,0 +1,52 @@
+[project]
+name = "music-backend"
+version = "0.1.0"
+description = "Self-hosted music player and DnD session orchestrator — backend"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.118.0",
+    "uvicorn[standard]==0.32.1",
+    "sqlalchemy==2.0.36",
+    "alembic==1.14.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-multipart==0.0.20",
+    "argon2-cffi==23.1.0",
+    "pyyaml==6.0.2",
+    "beets==2.2.0",
+    "mutagen==1.47.0",
+    "itsdangerous==2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "httpx==0.28.1",
+    "ruff==0.8.4",
+    "mypy==1.13.0",
+]
+
+[project.scripts]
+music-cli = "app.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
