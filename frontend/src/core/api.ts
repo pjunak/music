@@ -29,13 +29,29 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 
   const text = await response.text();
-  const parsed = text ? (JSON.parse(text) as unknown) : undefined;
+  const contentType = response.headers.get("content-type") ?? "";
+  const looksLikeJson = contentType.includes("application/json");
 
-  if (!response.ok) {
-    const detail =
+  let parsed: unknown = undefined;
+  if (text && looksLikeJson) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // fall through — we'll surface the body as the error detail below.
+    }
+  }
+
+  if (!response.ok || (text && !looksLikeJson)) {
+    const fromJson =
       parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
         ? String((parsed as { detail: unknown }).detail)
-        : response.statusText;
+        : null;
+    const snippet = text.slice(0, 200).replace(/\s+/g, " ").trim();
+    const detail =
+      fromJson ??
+      (looksLikeJson
+        ? response.statusText
+        : `non-JSON response (${contentType || "no content-type"}): ${snippet}`);
     throw new ApiError(response.status, detail);
   }
 
