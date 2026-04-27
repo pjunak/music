@@ -166,17 +166,31 @@ export function UploadManager({ onIngestComplete }: UploadManagerProps) {
       )}
 
       {lastIngest !== null ? (
-        <details className="ingest-result">
-          <summary>
-            Last import: {lastIngest.ok ? "ok" : `failed (${lastIngest.returncode})`}
-          </summary>
-          {lastIngest.stdout ? (
-            <pre className="ingest-output">{lastIngest.stdout}</pre>
-          ) : null}
+        <div
+          className={`ingest-result ${
+            lastIngest.ok ? "ingest-ok" : "ingest-failed"
+          }`}
+        >
+          <p className="ingest-summary">
+            {lastIngest.ok
+              ? "Last import: ok"
+              : `Last import failed (exit code ${lastIngest.returncode})`}
+          </p>
           {lastIngest.stderr ? (
             <pre className="ingest-output ingest-stderr">{lastIngest.stderr}</pre>
           ) : null}
-        </details>
+          {lastIngest.stdout ? (
+            <pre className="ingest-output">{lastIngest.stdout}</pre>
+          ) : null}
+          {!lastIngest.stdout && !lastIngest.stderr ? (
+            <p className="muted small">
+              beet returned no output. Common causes: no Beets config on the
+              server (set <code>directory:</code> and <code>library:</code> in{" "}
+              <code>beets.yaml</code>), or the files don't look like recognised
+              audio to the auto-tagger.
+            </p>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );
