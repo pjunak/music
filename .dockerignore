@@ -1,0 +1,53 @@
+# Keep the build context lean. Excludes here apply to every COPY in the
+# Dockerfile; the file is read from the same dir as the Dockerfile.
+
+# VCS / CI / editor metadata — not needed in the image, may leak refs
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+
+# AI tooling working files
+.claude
+CLAUDE.md
+AGENTS.md
+.aider*
+.cursorrules
+.cursor
+.continue
+
+# Python build / runtime artefacts (huge .venv especially)
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.venv
+**/.mypy_cache
+**/.ruff_cache
+**/*.egg-info
+
+# Node — npm ci re-installs inside the build stage
+**/node_modules
+**/dist
+**/build
+**/.vite
+
+# Environment files — secrets never go in images
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs / temp
+*.log
+*.tmp
+*.bak

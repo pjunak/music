@@ -1,9 +1,12 @@
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
 
 from app.api import auth, health, library, modes, nicknames, playlists, presets
 from app.core.config import get_settings
@@ -12,6 +15,20 @@ from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
 from app.sync import router as sync_router
 from app.sync import state as sync_state
+
+
+class SpaStaticFiles(StaticFiles):
+    """Serve a built React/Vite SPA — fall back to index.html on 404 so the
+    client-side router can handle the route. Mounted at "/" after all API
+    routers, so API paths still win."""
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        try:
+            return await super().get_response(path, scope)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
 
 
 def _configure_logging(level: str) -> None:
@@ -54,6 +71,15 @@ def create_app() -> FastAPI:
     app.include_router(playlists.router)
     app.include_router(presets.router)
     app.include_router(sync_router.router)
+
+    # Mount the built frontend SPA last so API routes win. Falls back to
+    # index.html on 404 so React Router can take over client-side routes.
+    # In dev (no built static dir present), the mount is skipped so the
+    # API still works via uvicorn alone.
+    static_dir = os.environ.get("STATIC_DIR", "/app/static")
+    if os.path.isdir(static_dir):
+        app.mount("/", SpaStaticFiles(directory=static_dir, html=True), name="spa")
+
     return app
 
 
