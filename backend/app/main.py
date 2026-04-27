@@ -3,8 +3,9 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
@@ -15,6 +16,8 @@ from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
 from app.sync import router as sync_router
 from app.sync import state as sync_state
+
+logger = logging.getLogger(__name__)
 
 
 class SpaStaticFiles(StaticFiles):
@@ -63,6 +66,19 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    # Single-user app — surface unhandled exception details in the response
+    # so the operator (you) can debug from the browser without server logs.
+    # FastAPI's HTTPException handler is more specific, so this only catches
+    # genuinely unhandled exceptions.
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("unhandled exception in %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"{type(exc).__name__}: {exc}"},
+        )
+
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(library.router)
