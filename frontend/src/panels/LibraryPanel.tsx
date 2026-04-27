@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { libraryApi } from "@/core/api";
 import type { Track } from "@/core/types";
 import { wsClient } from "@/core/ws";
+import { UploadManager } from "@/panels/UploadManager";
 
 export function LibraryPanel() {
   const [query, setQuery] = useState("");
@@ -11,12 +12,7 @@ export function LibraryPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Initial load — first 50 tracks from the library.
-    void runSearch("");
-  }, []);
-
-  async function runSearch(q: string) {
+  const runSearch = useCallback(async (q: string) => {
     setLoading(true);
     setError(null);
     try {
@@ -28,7 +24,12 @@ export function LibraryPanel() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    // Initial load — first 50 tracks from the library.
+    void runSearch("");
+  }, [runSearch]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -46,6 +47,7 @@ export function LibraryPanel() {
   return (
     <section className="panel">
       <h2>Library</h2>
+      <UploadManager onIngestComplete={() => void runSearch(query)} />
       <form onSubmit={onSubmit} className="library-search">
         <input
           type="search"

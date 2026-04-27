@@ -18,7 +18,10 @@ export class ApiError extends Error {
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, credentials: "include" };
-  if (body !== undefined) {
+  if (body instanceof FormData) {
+    // Let the browser set Content-Type with the multipart boundary.
+    init.body = body;
+  } else if (body !== undefined) {
     init.headers = { "Content-Type": "application/json" };
     init.body = JSON.stringify(body);
   }
@@ -84,6 +87,19 @@ export const playlistsApi = {
     api.get<TrackInPlaylist[]>(`/api/playlists/${playlistId}/tracks`),
 };
 
+export interface IncomingFile {
+  name: string;
+  size_bytes: number;
+  modified_at: string;
+}
+
+export interface IngestResult {
+  ok: boolean;
+  returncode: number;
+  stdout: string;
+  stderr: string;
+}
+
 export const libraryApi = {
   search: (q: string, limit = 50) => {
     const qs = new URLSearchParams({ q, limit: String(limit) });
@@ -91,4 +107,13 @@ export const libraryApi = {
       `/api/library/search?${qs.toString()}`,
     );
   },
+  listIncoming: () => api.get<{ files: IncomingFile[] }>("/api/library/incoming"),
+  upload: (files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    return api.post<{ saved: IncomingFile[] }>("/api/library/upload", form);
+  },
+  deleteIncoming: (filename: string) =>
+    api.delete<void>(`/api/library/incoming/${encodeURIComponent(filename)}`),
+  ingest: () => api.post<IngestResult>("/api/library/ingest"),
 };
