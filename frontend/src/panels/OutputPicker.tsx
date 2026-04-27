@@ -2,9 +2,14 @@ import { usePlayerStore } from "@/core/playerStore";
 import { wsClient } from "@/core/ws";
 
 export function OutputPicker() {
-  const devices = usePlayerStore((s) => s.state?.connected_devices ?? []);
-  const activeIds = usePlayerStore((s) => s.state?.active_output_device_ids ?? []);
+  // Select `state` once and apply fallbacks in render. Returning a fresh
+  // `[]` from inside a zustand selector creates a new reference on every
+  // render and fails Object.is comparison, causing an infinite re-render
+  // loop until the first WS state snapshot arrives.
+  const state = usePlayerStore((s) => s.state);
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
+  const devices = state?.connected_devices ?? [];
+  const activeIds = state?.active_output_device_ids ?? [];
 
   const audioOutputs = devices.filter((d) => d.capabilities.includes("audio_output"));
 
