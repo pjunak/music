@@ -33,13 +33,14 @@ FROM python:3.11-slim AS runtime
 
 # OS deps:
 #   build-essential + libffi-dev — for any wheels that need to compile (argon2-cffi etc.)
-#   ffmpeg                       — beets/mutagen audio probing
 #   ca-certificates              — TLS for any outbound HTTPS calls
+# Note: ffmpeg used to be here for beets; mutagen reads tags from file
+# headers directly so we don't need it. Add back if/when we ship the
+# auto-format-conversion feature listed in docs/FUTURE.md.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libffi-dev \
         ca-certificates \
-        ffmpeg \
         && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -49,8 +50,6 @@ WORKDIR /app
 # install .` after copying both the manifest and the source.
 COPY backend/pyproject.toml ./
 COPY backend/app ./app
-COPY backend/migrations ./migrations
-COPY backend/alembic.ini ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
@@ -74,6 +73,7 @@ USER music
 
 EXPOSE 8000
 
-# Run alembic migrations on startup, then exec uvicorn so signals propagate
-# correctly (graceful shutdown on SIGTERM from `docker stop`).
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info"]
+# Schema is created (idempotently) by the FastAPI lifespan — no migrations
+# step. exec'ing uvicorn directly keeps signal handling clean (graceful
+# shutdown on SIGTERM from `docker stop`).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

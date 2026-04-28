@@ -11,8 +11,9 @@ from starlette.exceptions import HTTPException
 
 from app.api import auth, health, library, modes, playlists, presets, sfx
 from app.core.config import get_settings
-from app.core.db import SessionLocal
+from app.core.db import SessionLocal, engine
 from app.library import index as library_index
+from app.models import Base
 from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
 from app.sync import router as sync_router
@@ -46,6 +47,12 @@ def _configure_logging(level: str) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     _configure_logging(settings.log_level)
+    # No alembic — solo-deployed app where regenerable data dominates.
+    # `create_all` is idempotent (skips existing tables), so first boot
+    # creates everything and subsequent boots are a no-op. When the schema
+    # changes incompatibly, the operator wipes app.db and re-creates the
+    # auth user via `music-cli create-user`.
+    Base.metadata.create_all(bind=engine)
     modes_loader.load_all()
     presets_loader.load_all()
     # Walk the music dir on boot so search/tree work immediately. A noop on
