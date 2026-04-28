@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 
 import { libraryApi } from "@/core/api";
 import {
@@ -24,6 +25,7 @@ export function NowPlayingBar() {
   );
 
   const [track, setTrack] = useState<Track | null>(null);
+  const progressRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch metadata for whatever's currently playing (interrupt wins).
   const displayId = interruptId ?? currentId;
@@ -35,16 +37,7 @@ export function NowPlayingBar() {
     let cancelled = false;
     void (async () => {
       try {
-        // We use the library search trick because there's no direct
-        // /tracks/{id} typed helper yet — but search by id works.
-        // (Direct fetch would be cleaner; deferred to cleanup.)
-        const url = `/api/library/tracks/${displayId}`;
-        const r = await fetch(url, { credentials: "include" });
-        if (!r.ok) {
-          if (!cancelled) setTrack(null);
-          return;
-        }
-        const t = (await r.json()) as Track;
+        const t = await libraryApi.getTrack(displayId);
         if (!cancelled) setTrack(t);
       } catch {
         if (!cancelled) setTrack(null);
@@ -55,8 +48,7 @@ export function NowPlayingBar() {
     };
   }, [displayId]);
 
-  // Tick the position display once per second so it advances visually
-  // while playing.
+  // Tick the position display so it advances visually while playing.
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!isPlaying) return;
@@ -84,8 +76,22 @@ export function NowPlayingBar() {
     wsClient.send({ type: "ambient_skip_prev" });
   }
 
-  // Keep search-utility import referenced (lint guard).
-  void libraryApi;
+  function onSeek(e: MouseEvent<HTMLDivElement>) {
+    if (totalMs <= 0) return;
+    const el = progressRef.current;
+    if (el === null) return;
+    const rect = el.getBoundingClientRect();
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const seekMs = Math.round(fraction * totalMs);
+    if (interruptId !== null) {
+      wsClient.send({ type: "interrupt_seek", position_ms: seekMs });
+    } else {
+      wsClient.send({ type: "ambient_seek", position_ms: seekMs });
+    }
+  }
+
+  const seekable = totalMs > 0;
+  const fraction = seekable ? Math.min(1, positionMs / totalMs) : 0;
 
   return (
     <footer className="now-playing">
@@ -104,22 +110,34 @@ export function NowPlayingBar() {
         )}
       </div>
       <div className="now-playing-controls">
-        <button onClick={prev}>⏮</button>
+        <button onClick={prev} title="Previous">⏮</button>
         {isPlaying ? (
-          <button onClick={pause}>⏸</button>
+          <button onClick={pause} title="Pause">⏸</button>
         ) : (
-          <button onClick={play}>▶</button>
+          <button onClick={play} title="Play">▶</button>
         )}
-        <button onClick={next}>⏭</button>
+        <button onClick={next} title="Next">⏭</button>
       </div>
       <div className="now-playing-position">
         <span>{formatTime(positionMs)}</span>
-        {totalMs > 0 ? (
-          <>
-            <progress max={totalMs} value={Math.min(positionMs, totalMs)} />
-            <span>{formatTime(totalMs)}</span>
-          </>
-        ) : null}
+        <div
+          ref={progressRef}
+          className={`seek-bar${seekable ? "" : " seek-bar-disabled"}`}
+          onClick={seekable ? onSeek : undefined}
+          role={seekable ? "slider" : undefined}
+          aria-label={seekable ? "Seek" : undefined}
+          aria-valuemin={0}
+          aria-valuemax={totalMs}
+          aria-valuenow={Math.min(positionMs, totalMs)}
+          tabIndex={seekable ? 0 : -1}
+          title={seekable ? "Click to seek" : undefined}
+        >
+          <div
+            className="seek-bar-fill"
+            style={{ width: `${(fraction * 100).toFixed(2)}%` }}
+          />
+        </div>
+        <span>{seekable ? formatTime(totalMs) : "—"}</span>
       </div>
     </footer>
   );

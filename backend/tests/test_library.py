@@ -17,29 +17,63 @@ def test_search_returns_seeded_track(auth_client: TestClient) -> None:
     body = response.json()
     assert body["limit"] == 100
     assert body["offset"] == 0
-    assert len(body["tracks"]) == 1
+    assert body["total"] >= 1
+    assert body["sort"] == "artist"
+    assert body["order"] == "asc"
+    assert len(body["tracks"]) >= 1
 
-    track = body["tracks"][0]
-    assert track["title"] == "Test Song"
-    assert track["artist"] == "Test Artist"
-    assert track["album"] == "Test Album"
+    titles = {t["title"] for t in body["tracks"]}
+    assert "Test Song" in titles
 
 
 def test_search_query_filter_excludes_non_matches(auth_client: TestClient) -> None:
     response = auth_client.get("/api/library/search", params={"q": "artist:nonexistent"})
     assert response.status_code == 200
-    assert response.json()["tracks"] == []
+    body = response.json()
+    assert body["tracks"] == []
+    assert body["total"] == 0
 
 
-def test_search_pagination(auth_client: TestClient) -> None:
-    response = auth_client.get("/api/library/search", params={"limit": 1, "offset": 1})
+def test_search_pagination(
+    auth_client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    """With multiple tracks seeded, limit+offset should slice correctly."""
+    response = auth_client.get("/api/library/search", params={"limit": 1, "offset": 0})
     assert response.status_code == 200
-    assert response.json()["tracks"] == []
+    body = response.json()
+    assert len(body["tracks"]) == 1
+    assert body["total"] >= 4  # 1 primary + 3 extras
+
+    # Page through and confirm total is consistent.
+    page2 = auth_client.get(
+        "/api/library/search", params={"limit": 2, "offset": 2}
+    ).json()
+    assert page2["total"] == body["total"]
+    assert len(page2["tracks"]) == 2
 
 
-def test_get_track_by_id(auth_client: TestClient) -> None:
-    seeded_id = auth_client.get("/api/library/search").json()["tracks"][0]["beets_id"]
-    response = auth_client.get(f"/api/library/tracks/{seeded_id}")
+def test_search_sort_by_title_asc_and_desc(
+    auth_client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    asc = auth_client.get(
+        "/api/library/search", params={"sort": "title", "order": "asc"}
+    ).json()
+    desc = auth_client.get(
+        "/api/library/search", params={"sort": "title", "order": "desc"}
+    ).json()
+    asc_titles = [t["title"] for t in asc["tracks"]]
+    desc_titles = [t["title"] for t in desc["tracks"]]
+    assert asc_titles == sorted(asc_titles, key=str.lower)
+    assert desc_titles == list(reversed(asc_titles))
+
+
+def test_search_rejects_unknown_sort_key(auth_client: TestClient) -> None:
+    response = auth_client.get("/api/library/search", params={"sort": "nope"})
+    assert response.status_code == 422
+
+
+def test_get_track_by_id(auth_client: TestClient, seeded_track_id: int) -> None:
+    response = auth_client.get(f"/api/library/tracks/{seeded_track_id}")
     assert response.status_code == 200
     assert response.json()["title"] == "Test Song"
 
@@ -49,19 +83,21 @@ def test_get_track_missing_returns_404(auth_client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_stream_returns_audio_bytes_inline(auth_client: TestClient) -> None:
-    seeded_id = auth_client.get("/api/library/search").json()["tracks"][0]["beets_id"]
-    response = auth_client.get(f"/api/library/tracks/{seeded_id}/stream")
+def test_stream_returns_audio_bytes_inline(
+    auth_client: TestClient, seeded_track_id: int
+) -> None:
+    response = auth_client.get(f"/api/library/tracks/{seeded_track_id}/stream")
     assert response.status_code == 200
     assert len(response.content) == 1100
     # `inline` (or absent attachment) lets <audio> play instead of forcing download.
     assert "attachment" not in response.headers.get("content-disposition", "")
 
 
-def test_stream_supports_range_requests(auth_client: TestClient) -> None:
-    seeded_id = auth_client.get("/api/library/search").json()["tracks"][0]["beets_id"]
+def test_stream_supports_range_requests(
+    auth_client: TestClient, seeded_track_id: int
+) -> None:
     response = auth_client.get(
-        f"/api/library/tracks/{seeded_id}/stream",
+        f"/api/library/tracks/{seeded_track_id}/stream",
         headers={"Range": "bytes=0-9"},
     )
     assert response.status_code == 206
@@ -233,15 +269,49 @@ def test_ingest_invokes_run_autoimport_and_returns_result(
 ) -> None:
     from app.library import ingest
 
-    async def _fake_autoimport(path: Path):
-        return ingest.IngestResult(returncode=0, stdout="imported 1\n", stderr="")
+    captured: dict = {}
+
+    async def _fake_autoimport(path: Path, *, autotag: bool = False):
+        captured["autotag"] = autotag
+        return ingest.IngestResult(
+            returncode=0,
+            stdout="/in/song.mp3 -> /lib/Artist/Album/song.mp3\n",
+            stderr="",
+            imported=1,
+            skipped=0,
+        )
 
     with patch.object(ingest, "run_autoimport", side_effect=_fake_autoimport):
         r = auth_client.post("/api/library/ingest")
 
     assert r.status_code == 200
     body = r.json()
-    assert body == {"ok": True, "returncode": 0, "stdout": "imported 1\n", "stderr": ""}
+    assert body["ok"] is True
+    assert body["returncode"] == 0
+    assert body["imported"] == 1
+    assert body["skipped"] == 0
+    # Default flow is no-autotag — Beets imports as-is using existing tags.
+    assert captured["autotag"] is False
+
+
+def test_ingest_passes_autotag_flag_when_requested(
+    auth_client: TestClient, isolated_incoming: Path
+) -> None:
+    from app.library import ingest
+
+    captured: dict = {}
+
+    async def _fake_autoimport(path: Path, *, autotag: bool = False):
+        captured["autotag"] = autotag
+        return ingest.IngestResult(
+            returncode=0, stdout="", stderr="", imported=0, skipped=0
+        )
+
+    with patch.object(ingest, "run_autoimport", side_effect=_fake_autoimport):
+        r = auth_client.post("/api/library/ingest", json={"autotag": True})
+
+    assert r.status_code == 200
+    assert captured["autotag"] is True
 
 
 def test_ingest_surfaces_failure_returncode_and_stderr(
@@ -249,8 +319,14 @@ def test_ingest_surfaces_failure_returncode_and_stderr(
 ) -> None:
     from app.library import ingest
 
-    async def _fake_autoimport(path: Path):
-        return ingest.IngestResult(returncode=2, stdout="", stderr="beet: bad config\n")
+    async def _fake_autoimport(path: Path, *, autotag: bool = False):
+        return ingest.IngestResult(
+            returncode=2,
+            stdout="",
+            stderr="beet: bad config\n",
+            imported=0,
+            skipped=0,
+        )
 
     with patch.object(ingest, "run_autoimport", side_effect=_fake_autoimport):
         r = auth_client.post("/api/library/ingest")
@@ -269,7 +345,7 @@ def test_ingest_503_when_beet_binary_missing(
     FileNotFoundError — surface as 503 so the operator knows to install it."""
     from app.library import ingest
 
-    async def _fake_autoimport(path: Path):
+    async def _fake_autoimport(path: Path, *, autotag: bool = False):
         raise FileNotFoundError("[Errno 2] No such file or directory: 'beet'")
 
     with patch.object(ingest, "run_autoimport", side_effect=_fake_autoimport):
@@ -277,3 +353,20 @@ def test_ingest_503_when_beet_binary_missing(
 
     assert r.status_code == 503
     assert "beet" in r.json()["detail"]
+
+
+def test_ingest_summary_parser_counts_imports_and_skips() -> None:
+    """The summary parser is what powers the 'X imported, Y skipped' display.
+    Spot-check it against representative beet `-A -q` output."""
+    from app.library.ingest import _summarize
+
+    sample = (
+        "/in/track1.mp3 -> /lib/A/01.mp3\n"
+        "/in/track2.flac -> /lib/B/02.flac\n"
+        "Skipping.\n"
+        "/in/track3.mp3 -> /lib/C/03.mp3\n"
+        "Skipping.\n"
+    )
+    imported, skipped = _summarize(sample)
+    assert imported == 3
+    assert skipped == 2

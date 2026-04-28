@@ -17,10 +17,73 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+interface UploadProgress {
+  /** 0..1 — derived from XHR upload events. Falls back to 1 when totals unavailable. */
+  fraction: number;
+  /** Bytes transferred so far. */
+  loaded: number;
+  /** Total bytes to transfer (sum across all files). */
+  total: number;
+  /** Number of files in the batch. */
+  files: number;
+}
+
+/** Upload via XMLHttpRequest because fetch() doesn't expose upload-progress
+ *  events. Same response semantics as the rest of api.ts. */
+function uploadWithProgress(
+  files: File[],
+  onProgress: (p: UploadProgress) => void,
+): Promise<{ saved: IncomingFile[] }> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    const total = files.reduce((sum, f) => sum + f.size, 0);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/library/upload");
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress({
+          fraction: e.total > 0 ? e.loaded / e.total : 1,
+          loaded: e.loaded,
+          total: e.total,
+          files: files.length,
+        });
+      } else {
+        onProgress({ fraction: 1, loaded: total, total, files: files.length });
+      }
+    };
+    xhr.onerror = () => reject(new Error("network error during upload"));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as { saved: IncomingFile[] });
+        } catch {
+          reject(new Error("upload succeeded but response wasn't JSON"));
+        }
+        return;
+      }
+      let detail = `${xhr.status}: ${xhr.statusText}`;
+      try {
+        const body = JSON.parse(xhr.responseText) as { detail?: unknown };
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        if (xhr.responseText) {
+          detail = xhr.responseText.slice(0, 200);
+        }
+      }
+      reject(new Error(`API ${xhr.status}: ${detail}`));
+    };
+    xhr.send(form);
+  });
+}
+
 export function UploadManager({ onIngestComplete }: UploadManagerProps) {
   const [incoming, setIncoming] = useState<IncomingFile[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [ingesting, setIngesting] = useState(false);
+  const [autotag, setAutotag] = useState(false);
   const [lastIngest, setLastIngest] = useState<IngestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -41,15 +104,15 @@ export function UploadManager({ onIngestComplete }: UploadManagerProps) {
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
-    setUploading(true);
     setError(null);
+    setProgress({ fraction: 0, loaded: 0, total: 0, files: files.length });
     try {
-      await libraryApi.upload(files);
+      await uploadWithProgress(files, setProgress);
       await refreshIncoming();
     } catch (e) {
       setError(e instanceof Error ? e.message : "upload failed");
     } finally {
-      setUploading(false);
+      setProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -90,7 +153,7 @@ export function UploadManager({ onIngestComplete }: UploadManagerProps) {
     setIngesting(true);
     setError(null);
     try {
-      const result = await libraryApi.ingest();
+      const result = await libraryApi.ingest(autotag);
       setLastIngest(result);
       await refreshIncoming();
       onIngestComplete?.();
@@ -102,36 +165,61 @@ export function UploadManager({ onIngestComplete }: UploadManagerProps) {
   }
 
   const hasFiles = incoming.length > 0;
+  const uploading = progress !== null;
   const busy = uploading || ingesting;
 
   return (
     <section className="upload-manager">
       <div className="upload-manager-header">
         <h3>Add music</h3>
-        <button
-          type="button"
-          onClick={() => void runIngest()}
-          disabled={busy || !hasFiles}
-        >
-          {ingesting ? "Importing…" : "Run import"}
-        </button>
+        <div className="upload-manager-actions">
+          <label className="autotag-toggle" title="Try to match each file against MusicBrainz. Files without a strong match will be skipped.">
+            <input
+              type="checkbox"
+              checked={autotag}
+              disabled={busy}
+              onChange={(e) => setAutotag(e.target.checked)}
+            />
+            <span>Match via MusicBrainz</span>
+          </label>
+          <button
+            type="button"
+            onClick={() => void runIngest()}
+            disabled={busy || !hasFiles}
+          >
+            {ingesting ? "Importing…" : "Run import"}
+          </button>
+        </div>
       </div>
 
       <div
-        className={`drop-zone${dragOver ? " drop-zone-active" : ""}`}
+        className={`drop-zone${dragOver ? " drop-zone-active" : ""}${
+          uploading ? " drop-zone-uploading" : ""
+        }`}
         onDrop={onDrop}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => !busy && fileInputRef.current?.click()}
         role="button"
         tabIndex={0}
+        aria-busy={uploading}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
+          if (!busy && (e.key === "Enter" || e.key === " ")) {
+            fileInputRef.current?.click();
+          }
         }}
       >
-        {uploading
-          ? "Uploading…"
-          : "Drop audio files here, or click to choose. They'll be queued for import."}
+        {uploading && progress !== null ? (
+          <div className="upload-progress">
+            <div className="upload-progress-label">
+              Uploading {progress.files} file{progress.files === 1 ? "" : "s"} —{" "}
+              {formatSize(progress.loaded)} / {formatSize(progress.total)}
+            </div>
+            <progress value={progress.fraction} max={1} />
+          </div>
+        ) : (
+          "Drop audio files here, or click to choose. They'll queue for import."
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -148,7 +236,7 @@ export function UploadManager({ onIngestComplete }: UploadManagerProps) {
         <ul className="incoming-list">
           {incoming.map((f) => (
             <li key={f.name} className="incoming-item">
-              <span className="incoming-name">{f.name}</span>
+              <span className="incoming-name" title={f.name}>{f.name}</span>
               <span className="muted small">{formatSize(f.size_bytes)}</span>
               <button
                 type="button"
@@ -172,22 +260,46 @@ export function UploadManager({ onIngestComplete }: UploadManagerProps) {
           }`}
         >
           <p className="ingest-summary">
-            {lastIngest.ok
-              ? "Last import: ok"
-              : `Last import failed (exit code ${lastIngest.returncode})`}
+            {lastIngest.ok ? "Import completed" : `Import failed (exit code ${lastIngest.returncode})`}
+            {lastIngest.imported > 0 || lastIngest.skipped > 0 ? (
+              <span className="ingest-counts">
+                {" — "}
+                <strong>{lastIngest.imported}</strong> imported
+                {lastIngest.skipped > 0 ? (
+                  <>, <strong>{lastIngest.skipped}</strong> skipped</>
+                ) : null}
+              </span>
+            ) : null}
           </p>
+
+          {lastIngest.imported === 0 && lastIngest.skipped > 0 && !autotag ? (
+            <p className="muted small">
+              Beets skipped every file. With autotag off this is rare — check
+              the output below; the most common cause is a missing or
+              misconfigured Beets library directory.
+            </p>
+          ) : null}
+
+          {lastIngest.imported === 0 && lastIngest.skipped > 0 && autotag ? (
+            <p className="muted small">
+              Beets couldn't auto-match these files against MusicBrainz. Try
+              again with <strong>Match via MusicBrainz</strong> off — that
+              imports files using their existing tags instead of querying MB.
+            </p>
+          ) : null}
+
           {lastIngest.stderr ? (
             <pre className="ingest-output ingest-stderr">{lastIngest.stderr}</pre>
           ) : null}
           {lastIngest.stdout ? (
             <pre className="ingest-output">{lastIngest.stdout}</pre>
           ) : null}
+
           {!lastIngest.stdout && !lastIngest.stderr ? (
             <p className="muted small">
-              beet returned no output. Common causes: no Beets config on the
-              server (set <code>directory:</code> and <code>library:</code> in{" "}
-              <code>beets.yaml</code>), or the files don't look like recognised
-              audio to the auto-tagger.
+              beet returned no output. Likely a config issue on the server —
+              check that <code>directory:</code> and <code>library:</code> are
+              set in <code>beets.yaml</code>.
             </p>
           ) : null}
         </div>

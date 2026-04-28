@@ -309,14 +309,204 @@ select:focus {
   font-weight: 600;
 }
 
+/* --- expanded playlist tracks --- */
+
+.playlist-list-item-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.playlist-list-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius);
+}
+.playlist-list-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.playlist-disclosure {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0 0.2rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  width: 1.4rem;
+}
+.playlist-disclosure:hover {
+  color: var(--accent);
+}
+.playlist-tracks {
+  margin: 0.2rem 0 0.4rem 1.4rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--border);
+}
+.playlist-track-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  counter-reset: none;
+}
+.playlist-track {
+  display: grid;
+  grid-template-columns: 2ch 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.25rem 0.4rem;
+  border-radius: var(--radius);
+}
+.playlist-track:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.playlist-track.playing {
+  background: rgba(106, 166, 255, 0.07);
+  border-left: 2px solid var(--accent);
+  padding-left: calc(0.4rem - 2px);
+}
+.playlist-track-pos {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.playlist-track-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.playlist-track-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.9rem;
+}
+.playlist-track-actions {
+  display: flex;
+  gap: 0.2rem;
+}
+.playlist-track-actions button {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.85rem;
+}
+
 /* --- library search --- */
 
+.library-panel {
+  min-height: 0;
+  overflow: hidden;
+}
 .library-search {
   display: flex;
   gap: 0.5rem;
 }
 .library-search input {
   flex: 1;
+}
+.library-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.library-pager {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.track-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex: 1;
+  min-height: 0;
+}
+.track-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.track-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  z-index: 1;
+}
+.track-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.track-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.track-table th.sortable:hover {
+  color: var(--accent);
+}
+.track-table th.sort-active {
+  color: var(--accent-strong);
+}
+.track-table th .sort-indicator {
+  display: inline-block;
+  width: 1ch;
+  margin-left: 0.4ch;
+  font-size: 0.7rem;
+}
+.track-table td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+}
+.track-table td.col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  width: 1%;
+}
+.track-table td.col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+.track-table td.col-actions button {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.85rem;
+  margin-left: 0.2rem;
+}
+.track-table tr.track-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.track-table tr.track-row.playing {
+  background: rgba(106, 166, 255, 0.07);
+}
+.track-table tr.track-row.playing td:first-child {
+  border-left: 2px solid var(--accent);
+  padding-left: calc(0.6rem - 2px);
+}
+
+.cell-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+}
+.cell-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 /* --- upload manager --- */
@@ -333,6 +523,8 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 .upload-manager-header h3 {
   margin: 0;
@@ -341,6 +533,59 @@ select:focus {
   color: var(--muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+.upload-manager-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.autotag-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.autotag-toggle input[type="checkbox"] {
+  margin: 0;
+}
+.upload-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+.upload-progress-label {
+  font-size: 0.85rem;
+}
+.upload-progress progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+}
+.upload-progress progress::-webkit-progress-bar {
+  background: var(--border);
+  border-radius: 3px;
+}
+.upload-progress progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 3px;
+}
+.upload-progress progress::-moz-progress-bar {
+  background: var(--accent);
+}
+.drop-zone-uploading {
+  cursor: progress;
+}
+.ingest-counts {
+  font-weight: 400;
+  color: var(--muted);
+}
+.ingest-counts strong {
+  color: var(--fg);
 }
 
 .drop-zone {
@@ -477,19 +722,31 @@ select:focus {
   font-size: 0.8rem;
   color: var(--muted);
 }
-.now-playing-position progress {
+.seek-bar {
   width: clamp(120px, 30vw, 320px);
-  height: 4px;
-  appearance: none;
-}
-.now-playing-position progress::-webkit-progress-bar {
+  height: 6px;
   background: var(--border);
-  border-radius: 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
 }
-.now-playing-position progress::-webkit-progress-value {
-  background: var(--accent);
-  border-radius: 2px;
+.seek-bar:hover {
+  background: var(--surface);
 }
-.now-playing-position progress::-moz-progress-bar {
+.seek-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.seek-bar-fill {
+  height: 100%;
   background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.2s linear;
+}
+.seek-bar.seek-bar-disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.seek-bar.seek-bar-disabled:hover {
+  background: var(--border);
 }

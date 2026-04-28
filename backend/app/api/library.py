@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
@@ -16,11 +16,17 @@ router = APIRouter(prefix="/api/library", tags=["library"])
 # Streamed upload chunk size. 1 MiB balances memory use against syscall count.
 _UPLOAD_CHUNK = 1 << 20
 
+SortKey = Literal["title", "artist", "album", "album_artist", "year", "length_s", "track_no"]
+SortOrder = Literal["asc", "desc"]
+
 
 class SearchResponse(BaseModel):
     tracks: list[Track]
+    total: int
     limit: int
     offset: int
+    sort: SortKey
+    order: SortOrder
 
 
 class IncomingFile(BaseModel):
@@ -37,11 +43,35 @@ class UploadResult(BaseModel):
     saved: list[IncomingFile]
 
 
+class IngestRequest(BaseModel):
+    autotag: bool = False
+
+
 class IngestResponse(BaseModel):
     ok: bool
     returncode: int
+    imported: int
+    skipped: int
     stdout: str
     stderr: str
+
+
+def _sort_key(track: Track, key: SortKey) -> tuple:
+    """Return a normalized comparison key for sorting. Tuple keeps None
+    values consistently sorted to the end without TypeErrors."""
+    value = getattr(track, key)
+    if isinstance(value, str):
+        # Case-insensitive sort, with leading articles ignored for "title-ish" fields.
+        normalized = value.lower().strip()
+        if key in ("title", "album", "artist", "album_artist"):
+            for article in ("the ", "a ", "an "):
+                if normalized.startswith(article):
+                    normalized = normalized[len(article):]
+                    break
+        return (0, normalized)
+    if value is None:
+        return (1, 0)
+    return (0, value)
 
 
 @router.get("/search", response_model=SearchResponse)
@@ -50,9 +80,23 @@ def search(
     q: str = Query("", description="Beets query DSL (e.g. 'artist:daft year:2001..2003')"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    sort: Annotated[SortKey, Query(description="Sort key")] = "artist",
+    order: Annotated[SortOrder, Query(description="Sort direction")] = "asc",
 ) -> SearchResponse:
-    tracks = beets_adapter.search(q, limit=limit, offset=offset)
-    return SearchResponse(tracks=tracks, limit=limit, offset=offset)
+    # Pull all matches first (Beets queries are cheap; the library fits in
+    # memory for any single-user case), then sort and paginate. Cleaner than
+    # mapping our sort keys into Beets' query DSL.
+    all_tracks = beets_adapter.search(q)
+    all_tracks.sort(key=lambda t: _sort_key(t, sort), reverse=(order == "desc"))
+    page = all_tracks[offset : offset + limit]
+    return SearchResponse(
+        tracks=page,
+        total=len(all_tracks),
+        limit=limit,
+        offset=offset,
+        sort=sort,
+        order=order,
+    )
 
 
 @router.get("/tracks/{beets_id}", response_model=Track)
@@ -170,15 +214,22 @@ def delete_incoming(filename: str, _: CurrentUser) -> None:
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def trigger_ingest(_: CurrentUser) -> IngestResponse:
-    """Run `beet import -q` against the incoming directory.
+async def trigger_ingest(
+    _: CurrentUser, payload: IngestRequest | None = None
+) -> IngestResponse:
+    """Run `beet import` against the incoming directory.
 
-    Strong matches are moved into the Beets library; weak ones stay in
-    incoming/ for manual review. Bubbles `beet`'s stdout/stderr back to the
-    caller so the operator can see what happened (or why it didn't)."""
+    Default is no-autotag (``-A -q``): files import as-is using their
+    embedded tags, which works for any audio Beets can read. Pass
+    ``{"autotag": true}`` to run with MusicBrainz auto-tagging instead —
+    that mode skips files that don't get a strong match.
+
+    Bubbles `beet`'s stdout/stderr plus a parsed imported/skipped summary
+    back to the caller."""
     incoming = _incoming_dir()
+    autotag = payload.autotag if payload is not None else False
     try:
-        result = await ingest.run_autoimport(incoming)
+        result = await ingest.run_autoimport(incoming, autotag=autotag)
     except FileNotFoundError as e:
         # `beet` not on PATH, or the dir disappeared between the mkdir above
         # and the subprocess call.
@@ -191,6 +242,8 @@ async def trigger_ingest(_: CurrentUser) -> IngestResponse:
     return IngestResponse(
         ok=result.ok,
         returncode=result.returncode,
+        imported=result.imported,
+        skipped=result.skipped,
         stdout=result.stdout,
         stderr=result.stderr,
     )

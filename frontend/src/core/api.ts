@@ -96,15 +96,51 @@ export interface IncomingFile {
 export interface IngestResult {
   ok: boolean;
   returncode: number;
+  imported: number;
+  skipped: number;
   stdout: string;
   stderr: string;
 }
 
+export type LibrarySortKey =
+  | "title"
+  | "artist"
+  | "album"
+  | "album_artist"
+  | "year"
+  | "length_s"
+  | "track_no";
+export type SortOrder = "asc" | "desc";
+
+export interface SearchParams {
+  q?: string;
+  limit?: number;
+  offset?: number;
+  sort?: LibrarySortKey;
+  order?: SortOrder;
+}
+
+export interface SearchResponse {
+  tracks: Track[];
+  total: number;
+  limit: number;
+  offset: number;
+  sort: LibrarySortKey;
+  order: SortOrder;
+}
+
 export const libraryApi = {
-  search: (q: string, limit = 50) => {
-    const qs = new URLSearchParams({ q, limit: String(limit) });
-    return api.get<{ tracks: Track[]; limit: number; offset: number }>(
-      `/api/library/search?${qs.toString()}`,
+  getTrack: (beetsId: number) => api.get<Track>(`/api/library/tracks/${beetsId}`),
+  search: (params: SearchParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q !== undefined) qs.set("q", params.q);
+    if (params.limit !== undefined) qs.set("limit", String(params.limit));
+    if (params.offset !== undefined) qs.set("offset", String(params.offset));
+    if (params.sort !== undefined) qs.set("sort", params.sort);
+    if (params.order !== undefined) qs.set("order", params.order);
+    const query = qs.toString();
+    return api.get<SearchResponse>(
+      query ? `/api/library/search?${query}` : "/api/library/search",
     );
   },
   listIncoming: () => api.get<{ files: IncomingFile[] }>("/api/library/incoming"),
@@ -115,5 +151,6 @@ export const libraryApi = {
   },
   deleteIncoming: (filename: string) =>
     api.delete<void>(`/api/library/incoming/${encodeURIComponent(filename)}`),
-  ingest: () => api.post<IngestResult>("/api/library/ingest"),
+  ingest: (autotag = false) =>
+    api.post<IngestResult>("/api/library/ingest", { autotag }),
 };
