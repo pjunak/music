@@ -23,9 +23,19 @@ export function PlayerView() {
   const trackId = usePlayerStore(selectActiveTrackId);
   const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
   const interruptActive = usePlayerStore((s) => s.state?.interrupt !== null);
-  const queueIds = usePlayerStore((s) => s.state?.ambient.queue ?? []);
-  const historyIds = usePlayerStore((s) => s.state?.ambient.history ?? []);
+  // Subscribe directly to the array reference (or `undefined` when the WS
+  // hasn't sent a snapshot yet). Don't `?? []` inside the selector — that
+  // creates a fresh array literal on every render, which makes a downstream
+  // `useEffect([queueIds])` see a "changed" dep on every render and loops
+  // until React error #185 fires.
+  const queueIds = usePlayerStore((s) => s.state?.ambient.queue);
+  const historyIds = usePlayerStore((s) => s.state?.ambient.history);
   const positionMs = usePlayerStore(selectAmbientPositionMs);
+  // Stable string keys derived from the id arrays — re-runs the fetch
+  // effects only when the ids that matter actually change, not on every
+  // unrelated state_changed broadcast.
+  const queueKey = (queueIds ?? []).slice(0, 3).join("|");
+  const historyKey = (historyIds ?? []).slice(-2).join("|");
   const hidePlayerArt = useUiStore((s) => s.hidePlayerArt);
 
   const [track, setTrack] = useState<Track | null>(null);
@@ -57,27 +67,38 @@ export function PlayerView() {
   // Fetch metadata for the next 3 in queue and most recent 2 in history.
   useEffect(() => {
     let cancelled = false;
-    const upcoming = queueIds.slice(0, 3);
-    Promise.all(upcoming.map((id) => libraryApi.getTrack(id).catch(() => null)))
-      .then((rs) => {
+    if (queueKey === "") {
+      setQueueTracks([]);
+      return;
+    }
+    const ids = queueKey.split("|").map(Number);
+    void Promise.all(ids.map((id) => libraryApi.getTrack(id).catch(() => null))).then(
+      (rs) => {
         if (!cancelled) setQueueTracks(rs.filter((t): t is Track => t !== null));
-      });
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, [queueIds]);
+  }, [queueKey]);
 
   useEffect(() => {
     let cancelled = false;
-    const recent = historyIds.slice(-2).reverse();
-    Promise.all(recent.map((id) => libraryApi.getTrack(id).catch(() => null)))
-      .then((rs) => {
+    if (historyKey === "") {
+      setHistoryTracks([]);
+      return;
+    }
+    // Most-recent-first.
+    const ids = historyKey.split("|").map(Number).reverse();
+    void Promise.all(ids.map((id) => libraryApi.getTrack(id).catch(() => null))).then(
+      (rs) => {
         if (!cancelled) setHistoryTracks(rs.filter((t): t is Track => t !== null));
-      });
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, [historyIds]);
+  }, [historyKey]);
 
   // Tick once per 500ms while playing so the position display advances.
   const [, setTick] = useState(0);
@@ -186,9 +207,9 @@ export function PlayerView() {
                     ) : null}
                   </li>
                 ))}
-                {queueIds.length > queueTracks.length ? (
+                {(queueIds?.length ?? 0) > queueTracks.length ? (
                   <li className="muted small">
-                    +{queueIds.length - queueTracks.length} more
+                    +{(queueIds?.length ?? 0) - queueTracks.length} more
                   </li>
                 ) : null}
               </ol>
