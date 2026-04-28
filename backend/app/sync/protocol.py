@@ -56,17 +56,17 @@ class PositionReportAction(_Action):
 
 class AmbientPlayTrackAction(_Action):
     type: Literal["ambient_play_track"]
-    beets_id: int
+    track_id: int
 
 
 class AmbientSetQueueAction(_Action):
     type: Literal["ambient_set_queue"]
-    beets_ids: list[int] = Field(default_factory=list)
+    track_ids: list[int] = Field(default_factory=list)
 
 
 class AmbientEnqueueAction(_Action):
     type: Literal["ambient_enqueue"]
-    beets_id: int
+    track_id: int
     position: int | None = None  # None = append at end
 
 
@@ -125,7 +125,7 @@ class SetCrossfadeAction(_Action):
 
 class FireInterruptTrackAction(_Action):
     type: Literal["fire_interrupt_track"]
-    beets_id: int
+    track_id: int
     return_to_ambient: bool = True
     fade_in_ms: int = Field(0, ge=0, le=10000)
     fade_out_ms: int = Field(0, ge=0, le=10000)
@@ -232,7 +232,7 @@ class AmbientState(BaseModel):
     automatically.
     """
 
-    current_beets_id: int | None = None
+    current_track_id: int | None = None
     queue: list[int] = Field(default_factory=list)
     history: list[int] = Field(default_factory=list)
     position_ms: int = 0
@@ -247,7 +247,7 @@ class InterruptState(BaseModel):
     position; false → playback stops.
     """
 
-    current_beets_id: int
+    current_track_id: int
     queue: list[int] = Field(default_factory=list)
     position_ms: int = 0
     return_to_ambient: bool = True

@@ -15,10 +15,16 @@ class Settings(BaseSettings):
     secret_key: str = Field(min_length=32)
 
     database_url: str = "sqlite:///./app.db"
-    beets_library_db: Path
 
-    incoming_dir: Path = Path("./incoming")
-    library_dir: Path = Path("./library")
+    # The music library is the directory the app indexes and serves from.
+    # Audio files placed under it (any depth) appear in the Library; uploads
+    # land in `<music_dir>/<destination>/` and get indexed.
+    music_dir: Path = Path("./music")
+
+    # SFX assets used by mode soundboards live under their own root, separate
+    # from music. Mode manifests refer to files relative to this directory.
+    sfx_library_dir: Path = Path("./sfx")
+
     modes_dir: Path = Path("../modes")
     presets_dir: Path = Path("../presets")
 

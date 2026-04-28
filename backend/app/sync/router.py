@@ -19,9 +19,9 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.domain import playlists as playlists_domain
-from app.library import beets_adapter
 from app.models.auth_session import AuthSession
 from app.models.playlist import Playlist
+from app.models.track import Track
 from app.models.user import User
 from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
@@ -93,8 +93,15 @@ async def _send_error(websocket: WebSocket, detail: str) -> None:
     await _send(websocket, ErrorMessage(detail=detail))
 
 
-async def _track_exists(beets_id: int) -> bool:
-    return await run_in_threadpool(lambda: beets_adapter.get_track(beets_id) is not None)
+async def _track_exists(track_id: int) -> bool:
+    def _work() -> bool:
+        db = SessionLocal()
+        try:
+            return db.get(Track, track_id) is not None
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_work)
 
 
 async def _resolve_playlist_track_ids(playlist_id: int) -> tuple[list[int] | None, str | None]:
@@ -106,11 +113,8 @@ async def _resolve_playlist_track_ids(playlist_id: int) -> tuple[list[int] | Non
             pl = db.get(Playlist, playlist_id)
             if pl is None:
                 return (None, "playlist not found")
-            if pl.source == "manual":
-                items = playlists_domain.list_manual_items(db, pl)
-                return ([it.beets_id for it in items], None)
-            tracks = playlists_domain.resolve_smart_tracks(pl)
-            return ([t.beets_id for t in tracks], None)
+            items = playlists_domain.list_items(db, pl)
+            return ([it.track_id for it in items], None)
         finally:
             db.close()
 
@@ -135,11 +139,8 @@ async def _resolve_playlist_by_name(
             pl = db.scalars(stmt).first()
             if pl is None:
                 return (None, f"no playlist named '{name}' for mode '{mode_id}'")
-            if pl.source == "manual":
-                items = playlists_domain.list_manual_items(db, pl)
-                return ([it.beets_id for it in items], None)
-            tracks = playlists_domain.resolve_smart_tracks(pl)
-            return ([t.beets_id for t in tracks], None)
+            items = playlists_domain.list_items(db, pl)
+            return ([it.track_id for it in items], None)
         finally:
             db.close()
 
@@ -203,22 +204,22 @@ async def _dispatch(action: Any, device_id: str, websocket: WebSocket) -> None:
     # --- ambient lane -----------------------------------------------------
 
     if isinstance(action, AmbientPlayTrackAction):
-        if not await _track_exists(action.beets_id):
+        if not await _track_exists(action.track_id):
             await _send_error(websocket, "track not in library")
             return
-        await _apply_and_broadcast(state_module.ambient_play_track(action.beets_id))
+        await _apply_and_broadcast(state_module.ambient_play_track(action.track_id))
         return
 
     if isinstance(action, AmbientSetQueueAction):
-        await _apply_and_broadcast(state_module.ambient_set_queue(action.beets_ids))
+        await _apply_and_broadcast(state_module.ambient_set_queue(action.track_ids))
         return
 
     if isinstance(action, AmbientEnqueueAction):
-        if not await _track_exists(action.beets_id):
+        if not await _track_exists(action.track_id):
             await _send_error(websocket, "track not in library")
             return
         await _apply_and_broadcast(
-            state_module.ambient_enqueue(action.beets_id, action.position)
+            state_module.ambient_enqueue(action.track_id, action.position)
         )
         return
 
@@ -311,12 +312,12 @@ async def _dispatch(action: Any, device_id: str, websocket: WebSocket) -> None:
     # --- interrupt lane ---------------------------------------------------
 
     if isinstance(action, FireInterruptTrackAction):
-        if not await _track_exists(action.beets_id):
+        if not await _track_exists(action.track_id):
             await _send_error(websocket, "track not in library")
             return
         await _apply_and_broadcast(
             state_module.fire_interrupt_track(
-                action.beets_id,
+                action.track_id,
                 action.return_to_ambient,
                 action.fade_in_ms,
                 action.fade_out_ms,

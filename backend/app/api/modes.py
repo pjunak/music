@@ -130,38 +130,3 @@ def get_mode_theme(mode_id: str, _: CurrentUser) -> FileResponse:
     return FileResponse(path, media_type="text/css", content_disposition_type="inline")
 
 
-def _is_referenced_sfx(manifest: ModeManifest, filename: str) -> bool:
-    for soundboard in manifest.soundboards.values():
-        for category in soundboard.categories:
-            for item in category.items:
-                if item.file == filename:
-                    return True
-    return False
-
-
-@router.get("/{mode_id}/soundboards/files/{filename}")
-def get_sfx_file(mode_id: str, filename: str, _: CurrentUser) -> FileResponse:
-    """Stream an SFX audio file. Only files referenced by some soundboard
-    in the mode are served — prevents arbitrary file access via a crafted
-    filename. Path is also re-validated against the mode's root_dir to
-    defend against a manifest with traversal paths."""
-    manifest = modes_loader.get_mode(mode_id)
-    if manifest is None or manifest.root_dir is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="mode not loaded")
-    if not _is_referenced_sfx(manifest, filename):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="sfx file not referenced by any soundboard",
-        )
-    candidate = (manifest.root_dir / "soundboards" / "files" / filename).resolve()
-    try:
-        candidate.relative_to(manifest.root_dir)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="invalid path"
-        ) from e
-    if not candidate.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE, detail="sfx file missing on disk"
-        )
-    return FileResponse(candidate, content_disposition_type="inline")

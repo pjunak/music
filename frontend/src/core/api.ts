@@ -1,8 +1,11 @@
 import type {
+  FolderEntry,
+  ModeDetail,
   ModeSummary,
   PlaylistMeta,
   Track,
   TrackInPlaylist,
+  TreeResponse,
 } from "@/core/types";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -19,7 +22,6 @@ export class ApiError extends Error {
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, credentials: "include" };
   if (body instanceof FormData) {
-    // Let the browser set Content-Type with the multipart boundary.
     init.body = body;
   } else if (body !== undefined) {
     init.headers = { "Content-Type": "application/json" };
@@ -40,7 +42,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     try {
       parsed = JSON.parse(text);
     } catch {
-      // fall through — we'll surface the body as the error detail below.
+      // fall through — surfaced as the error detail below.
     }
   }
 
@@ -69,10 +71,27 @@ export const api = {
   delete: <T>(path: string) => request<T>("DELETE", path),
 };
 
-// --- Typed helpers per resource ------------------------------------------
+// --- typed helpers per resource -----------------------------------------
 
 export const modesApi = {
   list: () => api.get<ModeSummary[]>("/api/modes"),
+  get: (id: string) => api.get<ModeDetail>(`/api/modes/${encodeURIComponent(id)}`),
+};
+
+export interface PresetEffect {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface PresetManifest {
+  id: string;
+  name: string;
+  description?: string | null;
+  effects: PresetEffect[];
+}
+
+export const presetsApi = {
+  list: () => api.get<PresetManifest[]>("/api/presets"),
 };
 
 export const playlistsApi = {
@@ -85,22 +104,17 @@ export const playlistsApi = {
   },
   tracks: (playlistId: number) =>
     api.get<TrackInPlaylist[]>(`/api/playlists/${playlistId}/tracks`),
+  create: (payload: { name: string; mode_id?: string | null; category?: string | null }) =>
+    api.post<PlaylistMeta>("/api/playlists", payload),
+  delete: (playlistId: number) => api.delete<void>(`/api/playlists/${playlistId}`),
+  addTrack: (playlistId: number, trackId: number, position?: number) =>
+    api.post<TrackInPlaylist>(`/api/playlists/${playlistId}/tracks`, {
+      track_id: trackId,
+      position,
+    }),
+  removeTrack: (playlistId: number, position: number) =>
+    api.delete<void>(`/api/playlists/${playlistId}/tracks/${position}`),
 };
-
-export interface IncomingFile {
-  name: string;
-  size_bytes: number;
-  modified_at: string;
-}
-
-export interface IngestResult {
-  ok: boolean;
-  returncode: number;
-  imported: number;
-  skipped: number;
-  stdout: string;
-  stderr: string;
-}
 
 export type LibrarySortKey =
   | "title"
@@ -109,7 +123,9 @@ export type LibrarySortKey =
   | "album_artist"
   | "year"
   | "length_s"
-  | "track_no";
+  | "track_no"
+  | "added_at"
+  | "path";
 export type SortOrder = "asc" | "desc";
 
 export interface SearchParams {
@@ -129,8 +145,30 @@ export interface SearchResponse {
   order: SortOrder;
 }
 
+export interface UploadResult {
+  saved: Track[];
+  destination: string;
+}
+
+export interface RescanResult {
+  added: number;
+  updated: number;
+  removed: number;
+  unchanged: number;
+}
+
+export interface MetadataUpdate {
+  title?: string;
+  artist?: string;
+  album_artist?: string;
+  album?: string;
+  track_no?: number | null;
+  year?: number | null;
+  genre?: string;
+}
+
 export const libraryApi = {
-  getTrack: (beetsId: number) => api.get<Track>(`/api/library/tracks/${beetsId}`),
+  getTrack: (id: number) => api.get<Track>(`/api/library/tracks/${id}`),
   search: (params: SearchParams = {}) => {
     const qs = new URLSearchParams();
     if (params.q !== undefined) qs.set("q", params.q);
@@ -143,14 +181,60 @@ export const libraryApi = {
       query ? `/api/library/search?${query}` : "/api/library/search",
     );
   },
-  listIncoming: () => api.get<{ files: IncomingFile[] }>("/api/library/incoming"),
-  upload: (files: File[]) => {
+  tree: (path = "") =>
+    api.get<TreeResponse>(
+      path ? `/api/library/tree?path=${encodeURIComponent(path)}` : "/api/library/tree",
+    ),
+  upload: (
+    files: File[],
+    dest: string,
+    onProgress?: (loaded: number, total: number) => void,
+  ): Promise<UploadResult> => {
     const form = new FormData();
     for (const f of files) form.append("files", f, f.name);
-    return api.post<{ saved: IncomingFile[] }>("/api/library/upload", form);
+    return new Promise<UploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const path = `/api/library/upload?dest=${encodeURIComponent(dest)}`;
+      xhr.open("POST", `${BASE}${path}`);
+      xhr.withCredentials = true;
+      xhr.responseType = "text";
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
+      };
+      xhr.onerror = () => reject(new Error("network error during upload"));
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as UploadResult);
+          } catch {
+            reject(new Error("upload succeeded but response wasn't JSON"));
+          }
+          return;
+        }
+        let detail = `${xhr.status}: ${xhr.statusText}`;
+        try {
+          const body = JSON.parse(xhr.responseText) as { detail?: unknown };
+          if (body && typeof body.detail === "string") detail = body.detail;
+        } catch {
+          if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
+        }
+        reject(new ApiError(xhr.status, detail));
+      };
+      xhr.send(form);
+    });
   },
-  deleteIncoming: (filename: string) =>
-    api.delete<void>(`/api/library/incoming/${encodeURIComponent(filename)}`),
-  ingest: (autotag = false) =>
-    api.post<IngestResult>("/api/library/ingest", { autotag }),
+  rescan: () => api.post<RescanResult>("/api/library/rescan"),
+  updateMetadata: (id: number, payload: MetadataUpdate) =>
+    api.patch<Track>(`/api/library/tracks/${id}/metadata`, payload),
+  moveTrack: (id: number, destination: string, newFilename?: string) =>
+    api.post<Track>(`/api/library/tracks/${id}/move`, {
+      destination,
+      new_filename: newFilename,
+    }),
+  deleteTrack: (id: number) => api.delete<void>(`/api/library/tracks/${id}`),
+  coverUrl: (id: number) => `${BASE}/api/library/tracks/${id}/cover`,
+  streamUrl: (id: number) => `${BASE}/api/library/tracks/${id}/stream`,
 };
+
+// Re-export types we already had so callers don't need to dig in /core/types.
+export type { FolderEntry };

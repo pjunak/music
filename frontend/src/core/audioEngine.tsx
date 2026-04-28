@@ -1,103 +1,123 @@
 import { useEffect, useRef } from "react";
 
+import { presetsApi } from "@/core/api";
+import { playbackEngine } from "@/core/playbackEngine";
+import type { PresetManifest } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
 import { wsClient } from "@/core/ws";
 
-const POSITION_REPORT_INTERVAL_MS = 1000;
-
-/** Drives a hidden <audio> element from PlayerState.
+/** Drives the imperative PlaybackEngine from React state.
  *
- *  Responsibilities:
- *  - Keep audio.src in sync with state.ambient.current_beets_id
- *  - Play / pause based on (is_playing && I am an active output)
- *  - Sync volume
- *  - Report position back to the server every second while playing
- *  - On 'ended', send ambient_skip_next so the queue advances
- *
- *  Renders an invisible <audio> tag; no visible UI of its own.
+ *  Renders three hidden <audio> elements (two ambient for crossfade, one
+ *  interrupt) plus zero-or-more transient SFX elements created by the
+ *  engine itself. No visible UI of its own.
  */
 export function AudioEngine() {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ambientARef = useRef<HTMLAudioElement | null>(null);
+  const ambientBRef = useRef<HTMLAudioElement | null>(null);
+  const interruptRef = useRef<HTMLAudioElement | null>(null);
 
-  const state = usePlayerStore((s) => s.state);
-  const isMyOutput = usePlayerStore(selectIsMyOutput);
+  // --- engine wiring on mount -----------------------------------------
 
-  const ambientCurrentId = state?.ambient.current_beets_id ?? null;
-  const isPlaying = state?.is_playing ?? false;
-  const volume = state?.volume ?? 1.0;
-  const interruptActive = state?.interrupt !== null && state?.interrupt !== undefined;
-
-  // Sync audio src whenever the current ambient track changes.
   useEffect(() => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    if (ambientCurrentId === null) {
-      audio.removeAttribute("src");
-      audio.load();
-      return;
-    }
-    const targetSrc = `/api/library/tracks/${ambientCurrentId}/stream`;
-    // Compare the resolved URL since browsers normalise it.
-    const resolved = new URL(targetSrc, window.location.origin).toString();
-    if (audio.src !== resolved) {
-      audio.src = targetSrc;
-      audio.load();
-    }
-  }, [ambientCurrentId]);
+    if (!ambientARef.current || !ambientBRef.current || !interruptRef.current) return;
+    playbackEngine.setAmbientElements(ambientARef.current, ambientBRef.current);
+    playbackEngine.setInterruptElement(interruptRef.current);
+    playbackEngine.setHandlers({
+      onSkipNext: () => wsClient.send({ type: "ambient_skip_next" }),
+      onInterruptSkipNext: () => wsClient.send({ type: "interrupt_skip_next" }),
+      onPositionReport: (ms) =>
+        wsClient.send({ type: "position_report", position_ms: ms }),
+    });
 
-  // Play / pause based on global is_playing AND this client being an
-  // active output. Interrupt lane currently bypassed for first-usable —
-  // when implemented, the same audio element will switch its src to the
-  // interrupt's track.
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    const shouldPlay =
-      isPlaying && isMyOutput && ambientCurrentId !== null && !interruptActive;
-    if (shouldPlay) {
-      void audio.play().catch(() => {
-        // Autoplay was blocked or another play() was already pending.
-        // Silent — user will retry by clicking play.
-      });
-    } else {
-      audio.pause();
-    }
-  }, [isPlaying, isMyOutput, ambientCurrentId, interruptActive]);
+    // Browser autoplay policy: AudioContext can't run until a user
+    // gesture. Hook a one-shot global click to unlock it.
+    const onUserGesture = () => playbackEngine.unlock();
+    window.addEventListener("click", onUserGesture, { once: true });
+    window.addEventListener("keydown", onUserGesture, { once: true });
 
-  // Sync volume.
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    audio.volume = volume;
-  }, [volume]);
-
-  // 'ended' → advance the queue.
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (audio === null) return;
-    function onEnded() {
-      wsClient.send({ type: "ambient_skip_next" });
-    }
-    audio.addEventListener("ended", onEnded);
     return () => {
-      audio.removeEventListener("ended", onEnded);
+      window.removeEventListener("click", onUserGesture);
+      window.removeEventListener("keydown", onUserGesture);
+      playbackEngine.destroy();
     };
   }, []);
 
-  // Report position back to the server periodically while we're an
-  // active output and audio is actually playing.
-  useEffect(() => {
-    if (!isPlaying || !isMyOutput || ambientCurrentId === null) return;
-    const interval = window.setInterval(() => {
-      const audio = audioRef.current;
-      if (audio === null) return;
-      const positionMs = Math.floor(audio.currentTime * 1000);
-      wsClient.send({ type: "position_report", position_ms: positionMs });
-    }, POSITION_REPORT_INTERVAL_MS);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [isPlaying, isMyOutput, ambientCurrentId]);
+  // --- preset definitions: fetch once, refresh when active set changes --
 
-  return <audio ref={audioRef} hidden preload="auto" />;
+  useEffect(() => {
+    let cancelled = false;
+    void presetsApi
+      .list()
+      .then((presets: PresetManifest[]) => {
+        if (!cancelled) playbackEngine.setPresets(presets);
+      })
+      .catch(() => {
+        /* empty preset library is a valid state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // --- drive the engine from PlayerState ------------------------------
+
+  useEffect(() => {
+    const unsub = usePlayerStore.subscribe((s) => {
+      if (s.state === null) return;
+      const isMine = selectIsMyOutput(s);
+      playbackEngine.applyState(s.state, isMine);
+    });
+    return unsub;
+  }, []);
+
+  // --- WS event subscription: SFX --------------------------------------
+
+  useEffect(() => {
+    const unsub = wsClient.subscribe((msg) => {
+      if (msg.type === "sfx_fired") {
+        const url = `/api/sfx/file?path=${encodeURIComponent(msg.item_path)}`;
+        playbackEngine.fireSfx(url, msg.volume);
+      }
+    });
+    return unsub;
+  }, []);
+
+  // --- auto-claim active output ---------------------------------------
+  //
+  // First time we see a state snapshot with no active outputs and our
+  // device is registered (id known), claim ourselves so Play actually
+  // produces audio. Skip if outputs are already configured — don't fight
+  // the user's prior choice.
+
+  useEffect(() => {
+    let claimed = false;
+    const unsub = usePlayerStore.subscribe((s) => {
+      if (claimed || s.state === null || s.myDeviceId === null) return;
+      const me = s.state.connected_devices.find(
+        (d) => d.device_id === s.myDeviceId,
+      );
+      if (!me || !me.capabilities.includes("audio_output")) return;
+      if (s.state.active_output_device_ids.length > 0) {
+        // Someone (maybe us, on a previous run) already configured outputs.
+        // If we're already in the set, treat as claimed.
+        if (s.state.active_output_device_ids.includes(s.myDeviceId)) claimed = true;
+        return;
+      }
+      claimed = true;
+      wsClient.send({
+        type: "set_active_outputs",
+        device_ids: [s.myDeviceId],
+      });
+    });
+    return unsub;
+  }, []);
+
+  return (
+    <>
+      <audio ref={ambientARef} hidden preload="auto" />
+      <audio ref={ambientBRef} hidden preload="auto" />
+      <audio ref={interruptRef} hidden preload="auto" />
+    </>
+  );
 }

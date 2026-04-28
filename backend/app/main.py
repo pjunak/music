@@ -9,9 +9,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
-from app.api import auth, health, library, modes, nicknames, playlists, presets
+from app.api import auth, health, library, modes, playlists, presets, sfx
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.library import index as library_index
 from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
 from app.sync import router as sync_router
@@ -47,6 +48,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _configure_logging(settings.log_level)
     modes_loader.load_all()
     presets_loader.load_all()
+    # Walk the music dir on boot so search/tree work immediately. A noop on
+    # first deploy when MUSIC_DIR is empty.
+    db = SessionLocal()
+    try:
+        library_index.scan_full(db)
+    except Exception:
+        logger.exception("startup library scan failed; continuing")
+    finally:
+        db.close()
     await sync_state.machine.load(SessionLocal)
     yield
 
@@ -83,9 +93,9 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(library.router)
     app.include_router(modes.router)
-    app.include_router(nicknames.router)
     app.include_router(playlists.router)
     app.include_router(presets.router)
+    app.include_router(sfx.router)
     app.include_router(sync_router.router)
 
     # Mount the built frontend SPA last so API routes win. Falls back to

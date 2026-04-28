@@ -1,11 +1,18 @@
 """Test harness.
 
-Points the app at an in-memory SQLite app DB and a tmp Beets DB stub so
-tests don't need any external state. One throwaway track is seeded into
-Beets so library/streaming tests have something to query.
+Per-session: stand up an isolated tmp dir, point env vars at it (app DB,
+music dir, sfx dir, modes dir, presets dir), seed some YAML for modes/
+presets, drop a real silent WAV into the music dir, and create the schema.
+
+Per-test: a `client` and an authenticated `auth_client`.
+
+We use real WAV bytes so mutagen actually parses something; tests can rely
+on length/title/etc behaviour rather than mocks.
 """
+from __future__ import annotations
+
 import os
-import sqlite3
+import struct
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,28 +24,50 @@ TEST_USERNAME = "tester"
 TEST_PASSWORD = "test-password"
 
 
+def _silent_wav_bytes(seconds: float = 0.5, sample_rate: int = 8000) -> bytes:
+    """Build a minimal valid WAV file in pure Python so we don't ship
+    binary fixtures. mutagen can read these; reliably reports `length`."""
+    n_samples = int(seconds * sample_rate)
+    pcm = b"\x00\x00" * n_samples  # 16-bit silence, mono
+    # WAV header (RIFF / fmt / data chunks).
+    header = b"RIFF"
+    header += struct.pack("<I", 36 + len(pcm))
+    header += b"WAVE"
+    header += b"fmt "
+    header += struct.pack("<I", 16)            # subchunk1 size
+    header += struct.pack("<H", 1)             # PCM
+    header += struct.pack("<H", 1)             # mono
+    header += struct.pack("<I", sample_rate)
+    header += struct.pack("<I", sample_rate * 2)  # byte rate
+    header += struct.pack("<H", 2)             # block align
+    header += struct.pack("<H", 16)            # bits per sample
+    header += b"data"
+    header += struct.pack("<I", len(pcm))
+    return header + pcm
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _test_env() -> Iterator[None]:
     tmp = Path(tempfile.mkdtemp(prefix="music-test-"))
 
-    beets_db = tmp / "beets.db"
-    sqlite3.connect(beets_db).close()
+    music_dir = tmp / "music"
+    sfx_dir = tmp / "sfx"
+    modes_dir = tmp / "modes"
+    presets_dir = tmp / "presets"
+    music_dir.mkdir()
+    sfx_dir.mkdir()
+    modes_dir.mkdir()
+    presets_dir.mkdir()
 
     os.environ["SECRET_KEY"] = "x" * 64
     os.environ["DATABASE_URL"] = f"sqlite:///{tmp / 'app.db'}"
-    os.environ["BEETS_LIBRARY_DB"] = str(beets_db)
-    os.environ["MODES_DIR"] = str(tmp / "modes")
-    os.environ["INCOMING_DIR"] = str(tmp / "incoming")
-    os.environ["LIBRARY_DIR"] = str(tmp / "library")
-    os.environ["PRESETS_DIR"] = str(tmp / "presets")
-    (tmp / "modes").mkdir()
-    (tmp / "incoming").mkdir()
-    (tmp / "library").mkdir()
-    (tmp / "presets").mkdir()
+    os.environ["MUSIC_DIR"] = str(music_dir)
+    os.environ["SFX_LIBRARY_DIR"] = str(sfx_dir)
+    os.environ["MODES_DIR"] = str(modes_dir)
+    os.environ["PRESETS_DIR"] = str(presets_dir)
 
-    # Seed a test mode with theme, two soundboards, and a scene so the
-    # corresponding endpoints have content to return.
-    dnd_dir = tmp / "modes" / "dnd"
+    # Seed modes/dnd with theme + soundboards + a scene.
+    dnd_dir = modes_dir / "dnd"
     dnd_dir.mkdir()
     (dnd_dir / "manifest.yaml").write_text(
         "id: dnd\n"
@@ -54,13 +83,14 @@ def _test_env() -> Iterator[None]:
         encoding="utf-8",
     )
     (dnd_dir / "soundboards").mkdir()
+    # Soundboard items reference SFX paths relative to SFX_LIBRARY_DIR.
     (dnd_dir / "soundboards" / "tavern.yaml").write_text(
         "name: Tavern\n"
         "categories:\n"
         "  - id: doors\n"
         "    name: Doors\n"
         "    items:\n"
-        "      - file: door.ogg\n"
+        "      - file: dnd/door.ogg\n"
         "        name: Door slam\n"
         "        hotkey: d\n",
         encoding="utf-8",
@@ -71,14 +101,10 @@ def _test_env() -> Iterator[None]:
         "  - id: combat\n"
         "    name: Combat\n"
         "    items:\n"
-        "      - file: sword.ogg\n"
+        "      - file: dnd/sword.ogg\n"
         "        name: Swords clash\n",
         encoding="utf-8",
     )
-    # Real bytes for door.ogg so the SFX stream endpoint has something to
-    # serve. sword.ogg deliberately not written — exercises the 410 path.
-    (dnd_dir / "soundboards" / "files").mkdir()
-    (dnd_dir / "soundboards" / "files" / "door.ogg").write_bytes(b"FAKEOGGDATA" * 50)
     (dnd_dir / "scenes").mkdir()
     (dnd_dir / "scenes" / "tavern.yaml").write_text(
         "name: Stonehill Inn\n"
@@ -87,51 +113,38 @@ def _test_env() -> Iterator[None]:
         encoding="utf-8",
     )
 
-    # Seed two preset YAMLs for test_presets.
-    (tmp / "presets" / "cave.yaml").write_text(
+    # SFX library: dnd/door.ogg is referenced and present; dnd/sword.ogg is
+    # referenced but missing (exercises the 410 path). Use WAV bytes via the
+    # ".ogg" extension here — the endpoint just streams whatever's at the
+    # path; the soundboard ref check is what gates it.
+    (sfx_dir / "dnd").mkdir()
+    (sfx_dir / "dnd" / "door.ogg").write_bytes(b"FAKEOGGDATA" * 50)
+
+    # Seed two preset YAMLs.
+    (presets_dir / "cave.yaml").write_text(
         "id: cave\nname: Cave\neffects:\n  - type: reverb\n    wet: 0.4\n",
         encoding="utf-8",
     )
-    (tmp / "presets" / "radio-vintage.yaml").write_text(
+    (presets_dir / "radio-vintage.yaml").write_text(
         "id: radio-vintage\nname: Vintage Radio\neffects:\n  - type: highpass\n    frequency: 400\n",
         encoding="utf-8",
     )
 
-    # Reset cached settings so the values above take effect.
+    # Seed one music file under MUSIC_DIR/Demo/.
+    demo_dir = music_dir / "Demo"
+    demo_dir.mkdir()
+    (demo_dir / "test-song.wav").write_bytes(_silent_wav_bytes())
+
+    # Reset cached settings + Library handle so the values above take effect.
     from app.core import config
 
     config.get_settings.cache_clear()
 
-    # Create our app's schema. Tests don't run alembic — that's covered by a
-    # separate manual smoke. Here we trust the model declarations match the
-    # migration.
+    # Create our app's schema.
     from app.core.db import engine
     from app.models import Base
 
     Base.metadata.create_all(bind=engine)
-
-    # Seed a single Beets item pointing at a real (tiny) audio file so the
-    # streaming endpoint has bytes to serve.
-    audio_dir = tmp / "audio"
-    audio_dir.mkdir()
-    audio_path = audio_dir / "test.mp3"
-    audio_path.write_bytes(b"FAKEMP3DATA" * 100)  # 1100 bytes
-
-    from beets.library import Item, Library
-
-    lib = Library(str(beets_db))
-    with lib.transaction():
-        item = Item(
-            title="Test Song",
-            artist="Test Artist",
-            albumartist="Test Artist",
-            album="Test Album",
-            track=1,
-            length=180.0,
-        )
-        item.path = str(audio_path).encode()
-        lib.add(item)
-    lib._close()
 
     yield
 
@@ -139,7 +152,7 @@ def _test_env() -> Iterator[None]:
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     """TestClient as a context manager — without `with`, FastAPI's lifespan
-    (modes loader, future startup hooks) never runs."""
+    (modes loader, library scan, etc.) never runs."""
     from app.main import app
 
     with TestClient(app) as c:
@@ -155,49 +168,52 @@ def db_session():
 
 
 @pytest.fixture
-def seeded_track_id() -> int:
-    """The id of the primary seeded track ('Test Song'). Stable across runs
-    regardless of how many extras have been seeded."""
-    from app.library import beets_adapter
+def seeded_track_id(client: TestClient) -> int:
+    """The id of the primary seeded track. The lifespan startup scan
+    indexes it; we just look it up by path."""
+    from sqlalchemy import select
 
-    matches = [t for t in beets_adapter.search(limit=20) if t.title == "Test Song"]
-    assert matches, "primary seeded track 'Test Song' missing"
-    return matches[0].beets_id
+    from app.core.db import SessionLocal
+    from app.models.track import Track
+
+    with SessionLocal() as db:
+        track = db.scalar(select(Track).where(Track.path == "Demo/test-song.wav"))
+        assert track is not None, "primary seeded track not indexed"
+        return track.id
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def extra_seeded_track_ids() -> list[int]:
-    """Seed 3 additional tracks once per session and return their ids.
+    """Drop three extra silent WAVs into the library and index them.
 
-    Used by tests that need multiple tracks (playlist add/move/remove).
-    Independent of the primary seeded track so existing single-track
-    assertions stay valid.
-    """
-    from pathlib import Path
+    Returns the ids in walk order. A separate fixture so tests that don't
+    need the extras don't pay the cost of indexing them."""
+    from sqlalchemy import select
 
-    from beets.library import Item, Library
+    from app.core.db import SessionLocal
+    from app.library import index as library_index
+    from app.models.track import Track
 
-    beets_db = os.environ["BEETS_LIBRARY_DB"]
-    audio_dir = Path(beets_db).parent / "audio"
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    extras = music_dir / "Extras"
+    extras.mkdir(exist_ok=True)
+    paths: list[Path] = []
+    for n in range(2, 5):
+        p = extras / f"extra-{n}.wav"
+        if not p.exists():
+            p.write_bytes(_silent_wav_bytes())
+        paths.append(p)
+
+    with SessionLocal() as db:
+        library_index.scan_paths(db, paths)
 
     ids: list[int] = []
-    lib = Library(beets_db)
-    with lib.transaction():
-        for n in range(2, 5):  # tracks 2, 3, 4
-            audio_path = audio_dir / f"test{n}.mp3"
-            audio_path.write_bytes(b"FAKEMP3DATA" * 100)
-            item = Item(
-                title=f"Extra Song {n}",
-                artist="Extra Artist",
-                albumartist="Extra Artist",
-                album="Extra Album",
-                track=n,
-                length=180.0,
-            )
-            item.path = str(audio_path).encode()
-            lib.add(item)
-            ids.append(item.id)
-    lib._close()
+    with SessionLocal() as db:
+        for p in paths:
+            rel = library_index.to_relative(p)
+            track = db.scalar(select(Track).where(Track.path == rel))
+            assert track is not None
+            ids.append(track.id)
     return ids
 
 

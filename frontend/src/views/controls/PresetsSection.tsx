@@ -1,0 +1,70 @@
+import { useEffect, useState } from "react";
+
+import { presetsApi } from "@/core/api";
+import type { PresetManifest } from "@/core/api";
+import { usePlayerStore } from "@/core/playerStore";
+import { wsClient } from "@/core/ws";
+
+export function PresetsSection() {
+  const activeIds = usePlayerStore((s) => s.state?.active_preset_ids ?? []);
+  const [presets, setPresets] = useState<PresetManifest[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void presetsApi
+      .list()
+      .then((p) => {
+        if (!cancelled) setPresets(p);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : "failed to load presets");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function toggle(id: string) {
+    const next = activeIds.includes(id)
+      ? activeIds.filter((p) => p !== id)
+      : [...activeIds, id];
+    wsClient.send({ type: "set_active_presets", preset_ids: next });
+  }
+
+  function clear() {
+    wsClient.send({ type: "set_active_presets", preset_ids: [] });
+  }
+
+  if (error !== null) return <p className="error small">{error}</p>;
+  if (presets.length === 0) {
+    return <p className="muted small">No presets installed under PRESETS_DIR.</p>;
+  }
+
+  return (
+    <div className="presets-section">
+      <div className="presets-grid">
+        {presets.map((p) => {
+          const on = activeIds.includes(p.id);
+          return (
+            <button
+              key={p.id}
+              type="button"
+              className={`preset-chip${on ? " active" : ""}`}
+              onClick={() => toggle(p.id)}
+              title={p.description ?? undefined}
+            >
+              {p.name}
+            </button>
+          );
+        })}
+      </div>
+      {activeIds.length > 0 ? (
+        <button type="button" className="preset-clear" onClick={clear}>
+          Clear all
+        </button>
+      ) : null}
+    </div>
+  );
+}

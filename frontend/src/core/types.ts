@@ -4,7 +4,7 @@
 export type LoopMode = "off" | "queue" | "track";
 
 export interface AmbientState {
-  current_beets_id: number | null;
+  current_track_id: number | null;
   queue: number[];
   history: number[];
   position_ms: number;
@@ -12,7 +12,7 @@ export interface AmbientState {
 }
 
 export interface InterruptState {
-  current_beets_id: number;
+  current_track_id: number;
   queue: number[];
   position_ms: number;
   return_to_ambient: boolean;
@@ -51,7 +51,8 @@ export interface PlayerState {
 
 // Library track shape returned by /api/library/*.
 export interface Track {
-  beets_id: number;
+  id: number;
+  path: string;
   title: string;
   artist: string;
   album_artist: string;
@@ -62,7 +63,18 @@ export interface Track {
   genre: string;
   length_s: number;
   bpm: number | null;
+  size_bytes: number;
+  added_at: string;
+}
+
+// Compact track summary returned in playlist listings.
+export interface TrackSummary {
+  id: number;
   path: string;
+  title: string;
+  artist: string;
+  album: string;
+  length_s: number;
 }
 
 // Mode summary shape returned by /api/modes.
@@ -76,14 +88,58 @@ export interface ModeSummary {
   default_soundboard: string | null;
 }
 
+// Detail shape returned by /api/modes/{id}.
+export interface SoundboardItem {
+  file: string;
+  name: string;
+  icon?: string | null;
+  hotkey?: string | null;
+}
+
+export interface SoundboardCategory {
+  id: string;
+  name: string;
+  items: SoundboardItem[];
+}
+
+export interface SoundboardManifest {
+  id: string;
+  name?: string | null;
+  categories: SoundboardCategory[];
+}
+
+export interface SceneSpec {
+  id: string;
+  name: string;
+  description?: string | null;
+  ambient?: { playlist?: string; crossfade_ms?: number } | null;
+  presets?: string[];
+  // looping_sfx, lights, external — opaque from the frontend's perspective.
+  [key: string]: unknown;
+}
+
+export interface InterruptSpec {
+  name: string;
+  playlist?: string | null;
+  soundboard_item?: string | null;
+  fade_in_ms?: number;
+  fade_out_ms?: number;
+  return_to_ambient?: boolean;
+}
+
+export interface ModeDetail extends ModeSummary {
+  interrupts: InterruptSpec[];
+  integrations: { lights?: unknown };
+  soundboards: Record<string, SoundboardManifest>;
+  scenes: Record<string, SceneSpec>;
+}
+
 // Playlist meta shape returned by /api/playlists.
 export interface PlaylistMeta {
   id: number;
   name: string;
   mode_id: string | null;
   category: string | null;
-  source: "manual" | "smart";
-  rules_json: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -91,9 +147,21 @@ export interface PlaylistMeta {
 // Track-in-playlist shape returned by /api/playlists/{id}/tracks.
 export interface TrackInPlaylist {
   position: number;
-  beets_id: number;
-  display_name: string | null;
-  track: Track | null;
+  track_id: number;
+  track: TrackSummary | null;
+}
+
+// Library tree shape returned by /api/library/tree.
+export interface FolderEntry {
+  name: string;
+  path: string;
+  track_count: number;
+}
+
+export interface TreeResponse {
+  path: string;
+  folders: FolderEntry[];
+  tracks: Track[];
 }
 
 // --- WebSocket actions (client → server) ---------------------------------
@@ -106,9 +174,9 @@ export type WsAction =
   | { type: "set_active_mode"; mode_id: string | null }
   | { type: "set_active_outputs"; device_ids: string[] }
   | { type: "position_report"; position_ms: number }
-  | { type: "ambient_play_track"; beets_id: number }
-  | { type: "ambient_set_queue"; beets_ids: number[] }
-  | { type: "ambient_enqueue"; beets_id: number; position?: number }
+  | { type: "ambient_play_track"; track_id: number }
+  | { type: "ambient_set_queue"; track_ids: number[] }
+  | { type: "ambient_enqueue"; track_id: number; position?: number }
   | { type: "ambient_clear_queue" }
   | { type: "ambient_skip_next" }
   | { type: "ambient_skip_prev" }
@@ -121,7 +189,7 @@ export type WsAction =
   | { type: "set_crossfade"; crossfade_ms: number; crossfade_type?: string }
   | {
       type: "fire_interrupt_track";
-      beets_id: number;
+      track_id: number;
       return_to_ambient?: boolean;
       fade_in_ms?: number;
       fade_out_ms?: number;

@@ -19,9 +19,9 @@ function formatTime(ms: number): string {
 
 export function NowPlayingBar() {
   const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
-  const currentId = usePlayerStore((s) => s.state?.ambient.current_beets_id ?? null);
+  const currentId = usePlayerStore((s) => s.state?.ambient.current_track_id ?? null);
   const interruptId = usePlayerStore(
-    (s) => s.state?.interrupt?.current_beets_id ?? null,
+    (s) => s.state?.interrupt?.current_track_id ?? null,
   );
 
   const [track, setTrack] = useState<Track | null>(null);

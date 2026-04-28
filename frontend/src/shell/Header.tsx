@@ -1,18 +1,22 @@
-import { useAuthStore } from "@/core/auth";
+import { useEffect, useState } from "react";
+
+import { modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
-import { wsClient } from "@/core/ws";
-import { ModePicker } from "@/panels/ModePicker";
-import { OutputPicker } from "@/panels/OutputPicker";
+import type { ModeSummary } from "@/core/types";
+
+import { Tabs } from "./Tabs";
 
 export function Header() {
-  const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
   const wsStatus = usePlayerStore((s) => s.wsStatus);
-  const volume = usePlayerStore((s) => s.state?.volume ?? 1.0);
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
+  const activeSceneId = usePlayerStore((s) => s.state?.active_scene_id ?? null);
 
-  function onVolume(v: number) {
-    wsClient.send({ type: "set_volume", volume: v });
-  }
+  const [modes, setModes] = useState<ModeSummary[]>([]);
+  useEffect(() => {
+    modesApi.list().then(setModes).catch(() => setModes([]));
+  }, []);
+
+  const activeMode = modes.find((m) => m.id === activeModeId) ?? null;
 
   return (
     <header className="app-header">
@@ -20,24 +24,21 @@ export function Header() {
         <h1>Music</h1>
         <span className={`ws-status ws-status-${wsStatus}`}>{wsStatus}</span>
       </div>
-      <div className="app-header-center">
-        <ModePicker />
-        <OutputPicker />
-        <label className="volume-slider">
-          <span>Vol</span>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={volume}
-            onChange={(e) => onVolume(parseFloat(e.target.value))}
-          />
-        </label>
-      </div>
+      <Tabs />
       <div className="app-header-right">
-        <span className="muted">{user?.username}</span>
-        <button onClick={() => void logout()}>Sign out</button>
+        {activeModeId !== null ? (
+          <span className="context-badge" title="Active mode / scene">
+            <span className="muted small">mode</span>
+            <strong>{activeMode?.name ?? activeModeId}</strong>
+            {activeSceneId !== null ? (
+              <>
+                <span className="muted small">·</span>
+                <span className="muted small">scene</span>
+                <strong>{activeSceneId}</strong>
+              </>
+            ) : null}
+          </span>
+        ) : null}
       </div>
     </header>
   );

@@ -1,4 +1,4 @@
-"""Modes API: list/get/active/reload/theme."""
+"""Modes API: list, detail, active, reload, theme."""
 import os
 from pathlib import Path
 
@@ -28,14 +28,10 @@ def test_get_mode_includes_soundboards_and_scenes(auth_client: TestClient) -> No
     assert r.status_code == 200
     body = r.json()
     assert body["id"] == "dnd"
-
-    # Two soundboards keyed by id.
     assert set(body["soundboards"].keys()) == {"tavern", "dungeon"}
     tavern = body["soundboards"]["tavern"]
     assert tavern["categories"][0]["id"] == "doors"
     assert tavern["categories"][0]["items"][0]["hotkey"] == "d"
-
-    # One scene keyed by id.
     assert "tavern" in body["scenes"]
     scene = body["scenes"]["tavern"]
     assert scene["name"] == "Stonehill Inn"
@@ -61,8 +57,7 @@ def test_set_active_mode_persists(auth_client: TestClient) -> None:
 
 
 def test_set_active_mode_validates(auth_client: TestClient) -> None:
-    r = auth_client.put("/api/modes/active", json={"mode_id": "nope"})
-    assert r.status_code == 400
+    assert auth_client.put("/api/modes/active", json={"mode_id": "nope"}).status_code == 400
 
 
 def test_set_active_mode_can_clear(auth_client: TestClient) -> None:
@@ -97,43 +92,13 @@ def test_reload_picks_up_new_mode(auth_client: TestClient) -> None:
         assert "cyberpunk" in body["loaded"]
         assert body["errors"] == {}
 
-        # And it shows up in the list
         ids = {m["id"] for m in auth_client.get("/api/modes").json()}
         assert "cyberpunk" in ids
     finally:
         import shutil
 
         shutil.rmtree(new_dir)
-        auth_client.post("/api/modes/reload")  # restore registry
-
-
-def test_sfx_file_served(auth_client: TestClient) -> None:
-    r = auth_client.get("/api/modes/dnd/soundboards/files/door.ogg")
-    assert r.status_code == 200
-    assert len(r.content) > 0
-
-
-def test_sfx_file_404_for_unknown_mode(auth_client: TestClient) -> None:
-    assert (
-        auth_client.get("/api/modes/nope/soundboards/files/door.ogg").status_code
-        == 404
-    )
-
-
-def test_sfx_file_404_for_unreferenced_filename(auth_client: TestClient) -> None:
-    """Files not referenced by any soundboard yaml are not servable, even if
-    they exist on disk — prevents arbitrary file access via crafted names."""
-    r = auth_client.get("/api/modes/dnd/soundboards/files/totally_random.ogg")
-    assert r.status_code == 404
-
-
-def test_sfx_file_410_when_referenced_but_missing_on_disk(
-    auth_client: TestClient,
-) -> None:
-    """sword.ogg is referenced by the dungeon soundboard but no bytes were
-    seeded into files/, so the endpoint returns 410 Gone."""
-    r = auth_client.get("/api/modes/dnd/soundboards/files/sword.ogg")
-    assert r.status_code == 410
+        auth_client.post("/api/modes/reload")
 
 
 def test_reload_surfaces_broken_manifests(auth_client: TestClient) -> None:
@@ -141,7 +106,7 @@ def test_reload_surfaces_broken_manifests(auth_client: TestClient) -> None:
     bad_dir = modes_dir / "broken"
     bad_dir.mkdir(exist_ok=True)
     (bad_dir / "manifest.yaml").write_text(
-        "id: not-broken\nname: Mismatch\n",  # id doesn't match folder name
+        "id: not-broken\nname: Mismatch\n",
         encoding="utf-8",
     )
     try:

@@ -1,27 +1,72 @@
+"""Library HTTP surface.
+
+The library is the indexed view of MUSIC_DIR. Uploads, browsing, search,
+metadata edits, and file moves all funnel through here. The sync layer
+references tracks by `id` minted in this index.
+"""
+from __future__ import annotations
+
+import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 
-from app.api.deps import CurrentUser
-from app.core.config import get_settings
-from app.library import beets_adapter, ingest
-from app.library.beets_adapter import Track
+from app.api.deps import CurrentUser, DbSession
+from app.library import index as library_index
+from app.models.track import Track
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/library", tags=["library"])
 
 # Streamed upload chunk size. 1 MiB balances memory use against syscall count.
 _UPLOAD_CHUNK = 1 << 20
 
-SortKey = Literal["title", "artist", "album", "album_artist", "year", "length_s", "track_no"]
+SortKey = Literal["title", "artist", "album", "album_artist", "year", "length_s", "track_no", "added_at", "path"]
 SortOrder = Literal["asc", "desc"]
 
 
+# --- response models ------------------------------------------------------
+
+
+class TrackOut(BaseModel):
+    id: int
+    path: str
+    title: str
+    artist: str
+    album_artist: str
+    album: str
+    track_no: int | None
+    disc_no: int | None
+    year: int | None
+    genre: str
+    length_s: float
+    bpm: int | None
+    size_bytes: int
+    added_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FolderOut(BaseModel):
+    name: str
+    path: str
+    track_count: int
+
+
+class TreeResponse(BaseModel):
+    path: str
+    folders: list[FolderOut]
+    tracks: list[TrackOut]
+
+
 class SearchResponse(BaseModel):
-    tracks: list[Track]
+    tracks: list[TrackOut]
     total: int
     limit: int
     offset: int
@@ -29,39 +74,40 @@ class SearchResponse(BaseModel):
     order: SortOrder
 
 
-class IncomingFile(BaseModel):
-    name: str
-    size_bytes: int
-    modified_at: datetime
-
-
-class IncomingListing(BaseModel):
-    files: list[IncomingFile]
-
-
 class UploadResult(BaseModel):
-    saved: list[IncomingFile]
+    saved: list[TrackOut]
+    destination: str
 
 
-class IngestRequest(BaseModel):
-    autotag: bool = False
+class RescanResult(BaseModel):
+    added: int
+    updated: int
+    removed: int
+    unchanged: int
 
 
-class IngestResponse(BaseModel):
-    ok: bool
-    returncode: int
-    imported: int
-    skipped: int
-    stdout: str
-    stderr: str
+class TrackMetadataUpdate(BaseModel):
+    title: str | None = Field(None, max_length=512)
+    artist: str | None = Field(None, max_length=512)
+    album_artist: str | None = Field(None, max_length=512)
+    album: str | None = Field(None, max_length=512)
+    track_no: int | None = Field(None, ge=0, le=9999)
+    year: int | None = Field(None, ge=0, le=9999)
+    genre: str | None = Field(None, max_length=128)
+
+
+class TrackMoveRequest(BaseModel):
+    destination: str = Field(description="Folder path relative to MUSIC_DIR; '' for root")
+    new_filename: str | None = Field(None, description="If set, also rename the file")
+
+
+# --- helpers --------------------------------------------------------------
 
 
 def _sort_key(track: Track, key: SortKey) -> tuple:
-    """Return a normalized comparison key for sorting. Tuple keeps None
-    values consistently sorted to the end without TypeErrors."""
+    """Normalised sort key. None values land at the end without TypeErrors."""
     value = getattr(track, key)
     if isinstance(value, str):
-        # Case-insensitive sort, with leading articles ignored for "title-ish" fields.
         normalized = value.lower().strip()
         if key in ("title", "album", "artist", "album_artist"):
             for article in ("the ", "a ", "an "):
@@ -71,27 +117,65 @@ def _sort_key(track: Track, key: SortKey) -> tuple:
         return (0, normalized)
     if value is None:
         return (1, 0)
+    if isinstance(value, datetime):
+        return (0, value.timestamp())
     return (0, value)
+
+
+def _track_or_404(db: DbSession, track_id: int) -> Track:
+    track = db.get(Track, track_id)
+    if track is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="track not found")
+    return track
+
+
+# --- browse ---------------------------------------------------------------
+
+
+@router.get("/tree", response_model=TreeResponse)
+def get_tree(
+    _: CurrentUser,
+    db: DbSession,
+    path: str = Query("", description="Folder path relative to MUSIC_DIR; empty for root"),
+) -> TreeResponse:
+    """Direct contents of a folder: subfolder summaries (with recursive
+    track counts) plus the audio files immediately in this folder."""
+    folders, tracks = library_index.list_folder(db, path)
+    return TreeResponse(
+        path=path.strip("/"),
+        folders=[
+            FolderOut(name=f.name, path=f.path, track_count=f.track_count) for f in folders
+        ],
+        tracks=[TrackOut.model_validate(t) for t in tracks],
+    )
 
 
 @router.get("/search", response_model=SearchResponse)
 def search(
     _: CurrentUser,
-    q: str = Query("", description="Beets query DSL (e.g. 'artist:daft year:2001..2003')"),
+    db: DbSession,
+    q: str = Query("", description="Substring match across title/artist/album/path"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     sort: Annotated[SortKey, Query(description="Sort key")] = "artist",
     order: Annotated[SortOrder, Query(description="Sort direction")] = "asc",
 ) -> SearchResponse:
-    # Pull all matches first (Beets queries are cheap; the library fits in
-    # memory for any single-user case), then sort and paginate. Cleaner than
-    # mapping our sort keys into Beets' query DSL.
-    all_tracks = beets_adapter.search(q)
-    all_tracks.sort(key=lambda t: _sort_key(t, sort), reverse=(order == "desc"))
-    page = all_tracks[offset : offset + limit]
+    rows = db.scalars(select(Track)).all()
+    if q:
+        needle = q.lower()
+        rows = [
+            t
+            for t in rows
+            if needle in t.title.lower()
+            or needle in t.artist.lower()
+            or needle in t.album.lower()
+            or needle in t.path.lower()
+        ]
+    rows.sort(key=lambda t: _sort_key(t, sort), reverse=(order == "desc"))
+    page = rows[offset : offset + limit]
     return SearchResponse(
-        tracks=page,
-        total=len(all_tracks),
+        tracks=[TrackOut.model_validate(t) for t in page],
+        total=len(rows),
         limit=limit,
         offset=offset,
         sort=sort,
@@ -99,151 +183,173 @@ def search(
     )
 
 
-@router.get("/tracks/{beets_id}", response_model=Track)
-def get_track(beets_id: int, _: CurrentUser) -> Track:
-    track = beets_adapter.get_track(beets_id)
-    if track is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="track not found")
-    return track
+@router.get("/tracks/{track_id}", response_model=TrackOut)
+def get_track(track_id: int, _: CurrentUser, db: DbSession) -> TrackOut:
+    return TrackOut.model_validate(_track_or_404(db, track_id))
 
 
-@router.get("/tracks/{beets_id}/stream")
-def stream_track(beets_id: int, _: CurrentUser) -> FileResponse:
-    track = beets_adapter.get_track(beets_id)
-    if track is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="track not found")
-    path = Path(track.path)
-    if not path.is_file():
-        # Beets DB references a file that's no longer on disk.
+@router.get("/tracks/{track_id}/stream")
+def stream_track(track_id: int, _: CurrentUser, db: DbSession) -> FileResponse:
+    track = _track_or_404(db, track_id)
+    abs_path = library_index.to_absolute(track.path)
+    if not abs_path.is_file():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="track file missing")
-    return FileResponse(path, content_disposition_type="inline")
+    return FileResponse(abs_path, content_disposition_type="inline")
 
 
-# --- Upload manager --------------------------------------------------------
-#
-# The "incoming/" directory is the staging area for tracks awaiting Beets
-# ingestion. Upload writes here; ingest hands the directory to `beet import`,
-# which moves successful matches into the Beets-managed library tree.
+@router.get("/tracks/{track_id}/cover")
+def track_cover(track_id: int, _: CurrentUser, db: DbSession) -> Response:
+    track = _track_or_404(db, track_id)
+    art = library_index.cover_art_for(track)
+    if art is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no cover art")
+    data, mime = art
+    return Response(content=data, media_type=mime)
 
 
-def _incoming_dir() -> Path:
-    """Return the configured incoming dir, creating it on demand. Beets and
-    the user can drop files here directly too — we just manage uploads."""
-    path = get_settings().incoming_dir
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+# --- file-manager actions -------------------------------------------------
 
 
-def _stat_incoming(path: Path) -> IncomingFile:
-    s = path.stat()
-    return IncomingFile(
-        name=path.name,
-        size_bytes=s.st_size,
-        modified_at=datetime.fromtimestamp(s.st_mtime).astimezone(),
-    )
+@router.patch("/tracks/{track_id}/metadata", response_model=TrackOut)
+def update_metadata(
+    track_id: int,
+    payload: TrackMetadataUpdate,
+    _: CurrentUser,
+    db: DbSession,
+) -> TrackOut:
+    """Edit ID3-style tags on the underlying file, then re-index the row.
+    Only fields that were explicitly set in the request are written."""
+    track = _track_or_404(db, track_id)
+    abs_path = library_index.to_absolute(track.path)
+    if not abs_path.is_file():
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="track file missing")
+
+    fields = payload.model_dump(exclude_unset=True)
+    if not fields:
+        return TrackOut.model_validate(track)
+
+    try:
+        library_index.write_tags(abs_path, fields)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    library_index.scan_paths(db, [abs_path])
+    db.refresh(track)
+    return TrackOut.model_validate(track)
 
 
-def _safe_target(name: str, incoming: Path) -> Path:
-    """Resolve `name` to a non-colliding path inside `incoming`. Strips any
-    directory components from the supplied filename to defeat path traversal,
-    and de-duplicates `foo.mp3` → `foo-1.mp3` if a file already exists."""
-    base = Path(name).name
-    if not base or base in {".", ".."}:
+@router.post("/tracks/{track_id}/move", response_model=TrackOut)
+def move_track_file(
+    track_id: int,
+    payload: TrackMoveRequest,
+    _: CurrentUser,
+    db: DbSession,
+) -> TrackOut:
+    """Move the file to another folder under MUSIC_DIR, optionally with a new
+    filename. Both the disk move and the index update happen atomically from
+    the caller's point of view (we move first; if that succeeds, we update)."""
+    track = _track_or_404(db, track_id)
+    src = library_index.to_absolute(track.path)
+    if not src.is_file():
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="source file missing")
+
+    target_name = payload.new_filename or src.name
+    try:
+        dest_dir = library_index.ensure_folder(payload.destination)
+        target = library_index.safe_join(payload.destination, target_name)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    if target == src:
+        return TrackOut.model_validate(track)
+    if target.exists():
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"invalid filename: {name!r}"
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"a file already exists at {dest_dir.name}/{target_name}",
         )
-    target = incoming / base
-    if not target.exists():
-        return target
-    stem, suffix = target.stem, target.suffix
-    n = 1
-    while True:
-        candidate = incoming / f"{stem}-{n}{suffix}"
-        if not candidate.exists():
-            return candidate
-        n += 1
+
+    shutil.move(str(src), str(target))
+    new_rel = library_index.to_relative(target)
+    library_index.update_path(db, track.path, new_rel)
+    db.refresh(track)
+    return TrackOut.model_validate(track)
 
 
-@router.get("/incoming", response_model=IncomingListing)
-def list_incoming(_: CurrentUser) -> IncomingListing:
-    incoming = _incoming_dir()
-    files = sorted(
-        (_stat_incoming(p) for p in incoming.iterdir() if p.is_file()),
-        key=lambda f: f.name,
-    )
-    return IncomingListing(files=files)
+@router.delete("/tracks/{track_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_track(track_id: int, _: CurrentUser, db: DbSession) -> None:
+    """Delete the file from disk AND the row from the index. Any playlist
+    items referencing this track id cascade-delete (FK on playlist_items)."""
+    track = _track_or_404(db, track_id)
+    abs_path = library_index.to_absolute(track.path)
+    if abs_path.is_file():
+        abs_path.unlink()
+    db.delete(track)
+    db.commit()
+
+
+# --- upload + rescan ------------------------------------------------------
 
 
 @router.post(
     "/upload", response_model=UploadResult, status_code=status.HTTP_201_CREATED
 )
 async def upload(
-    _: CurrentUser, files: Annotated[list[UploadFile], File()]
+    _: CurrentUser,
+    db: DbSession,
+    files: Annotated[list[UploadFile], File()],
+    dest: str = Query("Uploads", description="Destination folder under MUSIC_DIR"),
 ) -> UploadResult:
+    """Stream files into `<MUSIC_DIR>/<dest>/<original-name>`, dedupe name
+    collisions, then index whatever just landed."""
     if not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="no files provided"
         )
-    incoming = _incoming_dir()
-    saved: list[IncomingFile] = []
+
+    try:
+        dest_dir = library_index.ensure_folder(dest)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    written: list[Path] = []
     for upload_file in files:
         if not upload_file.filename:
             continue
-        target = _safe_target(upload_file.filename, incoming)
+        try:
+            target = library_index.safe_join(dest, upload_file.filename)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+            ) from e
+        # Dedupe name collisions: foo.mp3 -> foo-1.mp3, foo-2.mp3, ...
+        if target.exists():
+            stem, suffix = target.stem, target.suffix
+            n = 1
+            while True:
+                candidate = dest_dir / f"{stem}-{n}{suffix}"
+                if not candidate.exists():
+                    target = candidate
+                    break
+                n += 1
         with target.open("wb") as out:
             while chunk := await upload_file.read(_UPLOAD_CHUNK):
                 out.write(chunk)
-        saved.append(_stat_incoming(target))
-    return UploadResult(saved=saved)
+        written.append(target)
+
+    indexed = library_index.scan_paths(db, written)
+    return UploadResult(
+        saved=[TrackOut.model_validate(t) for t in indexed],
+        destination=dest.strip("/"),
+    )
 
 
-@router.delete(
-    "/incoming/{filename}", status_code=status.HTTP_204_NO_CONTENT
-)
-def delete_incoming(filename: str, _: CurrentUser) -> None:
-    incoming = _incoming_dir()
-    base = Path(filename).name
-    if not base or base in {".", ".."}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"invalid filename: {filename!r}"
-        )
-    target = incoming / base
-    if not target.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="file not found")
-    target.unlink()
-
-
-@router.post("/ingest", response_model=IngestResponse)
-async def trigger_ingest(
-    _: CurrentUser, payload: IngestRequest | None = None
-) -> IngestResponse:
-    """Run `beet import` against the incoming directory.
-
-    Default is no-autotag (``-A -q``): files import as-is using their
-    embedded tags, which works for any audio Beets can read. Pass
-    ``{"autotag": true}`` to run with MusicBrainz auto-tagging instead —
-    that mode skips files that don't get a strong match.
-
-    Bubbles `beet`'s stdout/stderr plus a parsed imported/skipped summary
-    back to the caller."""
-    incoming = _incoming_dir()
-    autotag = payload.autotag if payload is not None else False
-    try:
-        result = await ingest.run_autoimport(incoming, autotag=autotag)
-    except FileNotFoundError as e:
-        # `beet` not on PATH, or the dir disappeared between the mkdir above
-        # and the subprocess call.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
-        ) from e
-    # A fresh ingest may have created the Beets DB; drop the cached handle so
-    # the next search re-opens it.
-    beets_adapter.invalidate_cache()
-    return IngestResponse(
-        ok=result.ok,
-        returncode=result.returncode,
-        imported=result.imported,
-        skipped=result.skipped,
-        stdout=result.stdout,
-        stderr=result.stderr,
+@router.post("/rescan", response_model=RescanResult)
+def rescan(_: CurrentUser, db: DbSession) -> RescanResult:
+    """Walk the entire music directory and reconcile the index against disk."""
+    summary = library_index.scan_full(db)
+    return RescanResult(
+        added=summary.added,
+        updated=summary.updated,
+        removed=summary.removed,
+        unchanged=summary.unchanged,
     )

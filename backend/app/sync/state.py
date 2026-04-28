@@ -214,13 +214,13 @@ def _replace_ambient(state: PlayerState, ambient: AmbientState) -> PlayerState:
     return state.model_copy(update={"ambient": ambient})
 
 
-def ambient_play_track(beets_id: int) -> Any:
+def ambient_play_track(track_id: int) -> Any:
     """Play this track now. Replaces current; clears queue and history.
     Implicitly sets is_playing=true."""
 
     def _mut(state: PlayerState) -> PlayerState:
         new_ambient = AmbientState(
-            current_beets_id=beets_id,
+            current_track_id=track_id,
             queue=[],
             history=[],
             position_ms=0,
@@ -231,24 +231,24 @@ def ambient_play_track(beets_id: int) -> Any:
     return _mut
 
 
-def ambient_set_queue(beets_ids: list[int]) -> Any:
+def ambient_set_queue(track_ids: list[int]) -> Any:
     """Replace the queue. Doesn't touch current."""
 
     def _mut(state: PlayerState) -> PlayerState:
-        if list(state.ambient.queue) == list(beets_ids):
+        if list(state.ambient.queue) == list(track_ids):
             return state
-        return _replace_ambient(state, state.ambient.model_copy(update={"queue": list(beets_ids)}))
+        return _replace_ambient(state, state.ambient.model_copy(update={"queue": list(track_ids)}))
 
     return _mut
 
 
-def ambient_enqueue(beets_id: int, position: int | None) -> Any:
+def ambient_enqueue(track_id: int, position: int | None) -> Any:
     """Add a track to the queue at `position` (default: append)."""
 
     def _mut(state: PlayerState) -> PlayerState:
         new_queue = list(state.ambient.queue)
         idx = len(new_queue) if position is None else max(0, min(position, len(new_queue)))
-        new_queue.insert(idx, beets_id)
+        new_queue.insert(idx, track_id)
         return _replace_ambient(state, state.ambient.model_copy(update={"queue": new_queue}))
 
     return _mut
@@ -268,25 +268,25 @@ def ambient_skip_next() -> Any:
 
     def _mut(state: PlayerState) -> PlayerState:
         amb = state.ambient
-        if amb.current_beets_id is None and not amb.queue:
+        if amb.current_track_id is None and not amb.queue:
             return state  # nothing to skip from
 
-        if amb.loop == "track" and amb.current_beets_id is not None:
+        if amb.loop == "track" and amb.current_track_id is not None:
             # Restart current.
             return _replace_ambient(state, amb.model_copy(update={"position_ms": 0}))
 
         if amb.queue:
             # Normal advance.
             new_history = list(amb.history)
-            if amb.current_beets_id is not None:
-                new_history.append(amb.current_beets_id)
+            if amb.current_track_id is not None:
+                new_history.append(amb.current_track_id)
             new_current = amb.queue[0]
             new_queue = amb.queue[1:]
             return _replace_ambient(
                 state,
                 amb.model_copy(
                     update={
-                        "current_beets_id": new_current,
+                        "current_track_id": new_current,
                         "queue": new_queue,
                         "history": new_history,
                         "position_ms": 0,
@@ -298,15 +298,15 @@ def ambient_skip_next() -> Any:
         if amb.loop == "queue" and amb.history:
             # Wrap around: rebuild queue from history + current; play first.
             full = [*amb.history]
-            if amb.current_beets_id is not None:
-                full.append(amb.current_beets_id)
+            if amb.current_track_id is not None:
+                full.append(amb.current_track_id)
             new_current = full[0]
             new_queue = full[1:]
             return _replace_ambient(
                 state,
                 amb.model_copy(
                     update={
-                        "current_beets_id": new_current,
+                        "current_track_id": new_current,
                         "queue": new_queue,
                         "history": [],
                         "position_ms": 0,
@@ -318,7 +318,7 @@ def ambient_skip_next() -> Any:
         return _replace_ambient(
             state,
             amb.model_copy(
-                update={"current_beets_id": None, "position_ms": 0}
+                update={"current_track_id": None, "position_ms": 0}
             ),
         )
 
@@ -331,7 +331,7 @@ def ambient_skip_prev() -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         amb = state.ambient
         if not amb.history:
-            if amb.current_beets_id is None:
+            if amb.current_track_id is None:
                 return state
             if amb.position_ms == 0:
                 return state
@@ -339,15 +339,15 @@ def ambient_skip_prev() -> Any:
 
         # Move current back to queue head, pop history.
         new_queue = list(amb.queue)
-        if amb.current_beets_id is not None:
-            new_queue.insert(0, amb.current_beets_id)
+        if amb.current_track_id is not None:
+            new_queue.insert(0, amb.current_track_id)
         new_history = list(amb.history)
         new_current = new_history.pop()
         return _replace_ambient(
             state,
             amb.model_copy(
                 update={
-                    "current_beets_id": new_current,
+                    "current_track_id": new_current,
                     "queue": new_queue,
                     "history": new_history,
                     "position_ms": 0,
@@ -384,7 +384,7 @@ def ambient_stop() -> Any:
 
     def _mut(state: PlayerState) -> PlayerState:
         if (
-            state.ambient.current_beets_id is None
+            state.ambient.current_track_id is None
             and not state.ambient.queue
             and not state.ambient.history
             and state.ambient.position_ms == 0
@@ -398,18 +398,18 @@ def ambient_stop() -> Any:
     return _mut
 
 
-def ambient_play_playlist(beets_ids: list[int], start_index: int) -> Any:
+def ambient_play_playlist(track_ids: list[int], start_index: int) -> Any:
     """Load a pre-resolved track list into ambient and start at start_index.
     Implicitly sets is_playing=true."""
 
     def _mut(state: PlayerState) -> PlayerState:
-        if not beets_ids:
+        if not track_ids:
             return state
-        idx = max(0, min(start_index, len(beets_ids) - 1))
+        idx = max(0, min(start_index, len(track_ids) - 1))
         new_ambient = AmbientState(
-            current_beets_id=beets_ids[idx],
-            queue=list(beets_ids[idx + 1 :]),
-            history=list(beets_ids[:idx]),
+            current_track_id=track_ids[idx],
+            queue=list(track_ids[idx + 1 :]),
+            history=list(track_ids[:idx]),
             position_ms=0,
             loop=state.ambient.loop,
         )
@@ -422,14 +422,14 @@ def ambient_play_playlist(beets_ids: list[int], start_index: int) -> Any:
 
 
 def fire_interrupt_track(
-    beets_id: int,
+    track_id: int,
     return_to_ambient: bool,
     fade_in_ms: int,
     fade_out_ms: int,
 ) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         new_interrupt = InterruptState(
-            current_beets_id=beets_id,
+            current_track_id=track_id,
             queue=[],
             position_ms=0,
             return_to_ambient=return_to_ambient,
@@ -442,7 +442,7 @@ def fire_interrupt_track(
 
 
 def fire_interrupt_playlist(
-    beets_ids: list[int],
+    track_ids: list[int],
     return_to_ambient: bool,
     fade_in_ms: int,
     fade_out_ms: int,
@@ -450,11 +450,11 @@ def fire_interrupt_playlist(
     """Load a pre-resolved track list as an interrupt; first becomes current."""
 
     def _mut(state: PlayerState) -> PlayerState:
-        if not beets_ids:
+        if not track_ids:
             return state
         new_interrupt = InterruptState(
-            current_beets_id=beets_ids[0],
-            queue=list(beets_ids[1:]),
+            current_track_id=track_ids[0],
+            queue=list(track_ids[1:]),
             position_ms=0,
             return_to_ambient=return_to_ambient,
             fade_in_ms=fade_in_ms,
@@ -489,7 +489,7 @@ def interrupt_skip_next() -> Any:
             new_queue = state.interrupt.queue[1:]
             new_interrupt = state.interrupt.model_copy(
                 update={
-                    "current_beets_id": new_current,
+                    "current_track_id": new_current,
                     "queue": new_queue,
                     "position_ms": 0,
                 }
@@ -550,7 +550,7 @@ def activate_scene(
 
         if ambient_track_ids:
             new_ambient = AmbientState(
-                current_beets_id=ambient_track_ids[0],
+                current_track_id=ambient_track_ids[0],
                 queue=list(ambient_track_ids[1:]),
                 history=[],
                 position_ms=0,

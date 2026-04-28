@@ -1,4 +1,5 @@
 import type { WsAction, WsMessage } from "@/core/types";
+import { defaultDeviceName, useUiStore } from "@/core/uiStore";
 
 type Listener = (msg: WsMessage) => void;
 type StatusListener = (status: WsStatus) => void;
@@ -47,6 +48,18 @@ class WsClient {
     }
   }
 
+  /** Re-send the `register` action with whatever the UI store currently
+   *  reports for device name + capabilities. Idempotent on the server —
+   *  replaces the prior registration for this connection. */
+  sendRegister(): void {
+    const { deviceName, capabilities } = useUiStore.getState();
+    this.send({
+      type: "register",
+      name: deviceName ?? defaultDeviceName(),
+      capabilities,
+    });
+  }
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -69,13 +82,7 @@ class WsClient {
 
     ws.onopen = () => {
       this.setStatus("connected");
-      // Default registration: a browser tab is both controller and output.
-      // The user can change roles later via the UI (deferred).
-      this.send({
-        type: "register",
-        name: defaultDeviceName(),
-        capabilities: ["controls", "audio_output"],
-      });
+      this.sendRegister();
     };
 
     ws.onmessage = (event) => {
@@ -113,13 +120,6 @@ class WsClient {
       l(status);
     });
   }
-}
-
-function defaultDeviceName(): string {
-  if (/Mobile|Android|iPhone/i.test(navigator.userAgent)) {
-    return "Phone";
-  }
-  return "Browser";
 }
 
 // Module-level singleton — a single WS connection per page load.

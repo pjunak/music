@@ -1,7 +1,8 @@
-"""Playlist domain logic: position arithmetic, manual mutators, smart resolution.
+"""Playlist domain logic: position arithmetic, manual mutators.
 
-The position invariant: a manual playlist's items occupy contiguous,
-0-indexed integer positions. Insert/delete/move all maintain that.
+Playlists are now manual-only — see docs/FUTURE.md for the smart-playlist
+plan. The position invariant: items occupy contiguous, 0-indexed integer
+positions. Insert/delete/move all maintain that.
 
 The shifts use a two-pass negation pattern so SQLite's PK uniqueness
 constraint on (playlist_id, position) doesn't blow up mid-update —
@@ -13,17 +14,11 @@ from __future__ import annotations
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.library import beets_adapter
-from app.library.beets_adapter import Track
 from app.models.playlist import Playlist, PlaylistItem
 
 
 class PlaylistError(Exception):
     """Domain-level error — API layer maps to appropriate HTTP status."""
-
-
-class NotManual(PlaylistError):
-    pass
 
 
 class PositionOutOfRange(PlaylistError):
@@ -80,11 +75,8 @@ def _shift_down(db: Session, playlist_id: int, after_position: int) -> None:
 
 
 def add_track(
-    db: Session, playlist: Playlist, beets_id: int, position: int | None = None
+    db: Session, playlist: Playlist, track_id: int, position: int | None = None
 ) -> PlaylistItem:
-    if playlist.source != "manual":
-        raise NotManual("cannot add tracks to a smart playlist")
-
     length = _length(db, playlist.id)
     target = length if position is None else position
     if target < 0 or target > length:
@@ -93,7 +85,7 @@ def add_track(
     if target < length:
         _shift_up(db, playlist.id, target)
 
-    item = PlaylistItem(playlist_id=playlist.id, position=target, beets_id=beets_id)
+    item = PlaylistItem(playlist_id=playlist.id, position=target, track_id=track_id)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -101,9 +93,6 @@ def add_track(
 
 
 def remove_track(db: Session, playlist: Playlist, position: int) -> None:
-    if playlist.source != "manual":
-        raise NotManual("cannot remove tracks from a smart playlist")
-
     item = db.get(PlaylistItem, (playlist.id, position))
     if item is None:
         raise PositionOutOfRange(f"no item at position {position}")
@@ -115,8 +104,6 @@ def remove_track(db: Session, playlist: Playlist, position: int) -> None:
 
 
 def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> None:
-    if playlist.source != "manual":
-        raise NotManual("cannot move tracks in a smart playlist")
     if from_pos == to_pos:
         return
 
@@ -171,7 +158,7 @@ def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> N
     db.commit()
 
 
-def list_manual_items(db: Session, playlist: Playlist) -> list[PlaylistItem]:
+def list_items(db: Session, playlist: Playlist) -> list[PlaylistItem]:
     return list(
         db.scalars(
             select(PlaylistItem)
@@ -179,12 +166,3 @@ def list_manual_items(db: Session, playlist: Playlist) -> list[PlaylistItem]:
             .order_by(PlaylistItem.position)
         ).all()
     )
-
-
-def resolve_smart_tracks(playlist: Playlist) -> list[Track]:
-    if playlist.source != "smart":
-        raise PlaylistError("playlist is not smart")
-    rules = playlist.rules_json or {}
-    query = str(rules.get("query") or "")
-    limit = rules.get("limit")
-    return beets_adapter.search(query, limit=int(limit) if limit else None)

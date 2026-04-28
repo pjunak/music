@@ -67,3 +67,9 @@ export function selectAmbientPositionMs(s: PlayerStore): number {
   const elapsed = Date.now() - s.stateReceivedAt;
   return base + Math.max(0, elapsed);
 }
+
+/** Whichever lane is currently playing — interrupt wins over ambient. */
+export function selectActiveTrackId(s: PlayerStore): number | null {
+  if (s.state === null) return null;
+  return s.state.interrupt?.current_track_id ?? s.state.ambient.current_track_id ?? null;
+}

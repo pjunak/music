@@ -317,20 +317,20 @@ def test_malformed_payload_returns_error(client: TestClient) -> None:
 def test_ambient_play_track(client: TestClient, seeded_track_id: int) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         msg = ws.receive_json()
         assert msg["type"] == "state_changed"
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] == seeded_track_id
+        assert amb["current_track_id"] == seeded_track_id
         assert amb["queue"] == []
         assert amb["position_ms"] == 0
         assert msg["state"]["is_playing"] is True
 
 
-def test_ambient_play_track_validates_beets_id(client: TestClient) -> None:
+def test_ambient_play_track_validates_track_id(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": 999999})
+        ws.send_json({"type": "ambient_play_track", "track_id": 999999})
         msg = ws.receive_json()
         assert msg["type"] == "error"
 
@@ -340,7 +340,7 @@ def test_ambient_set_queue(
 ) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_set_queue", "beets_ids": extra_seeded_track_ids})
+        ws.send_json({"type": "ambient_set_queue", "track_ids": extra_seeded_track_ids})
         msg = ws.receive_json()
         assert msg["state"]["ambient"]["queue"] == extra_seeded_track_ids
 
@@ -351,12 +351,12 @@ def test_ambient_enqueue_appends_and_inserts(
     a, b, c = extra_seeded_track_ids
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_enqueue", "beets_id": a})
+        ws.send_json({"type": "ambient_enqueue", "track_id": a})
         ws.receive_json()
-        ws.send_json({"type": "ambient_enqueue", "beets_id": c})
+        ws.send_json({"type": "ambient_enqueue", "track_id": c})
         ws.receive_json()
         # Insert b at position 1.
-        ws.send_json({"type": "ambient_enqueue", "beets_id": b, "position": 1})
+        ws.send_json({"type": "ambient_enqueue", "track_id": b, "position": 1})
         msg = ws.receive_json()
         assert msg["state"]["ambient"]["queue"] == [a, b, c]
 
@@ -366,7 +366,7 @@ def test_ambient_clear_queue(
 ) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_set_queue", "beets_ids": extra_seeded_track_ids})
+        ws.send_json({"type": "ambient_set_queue", "track_ids": extra_seeded_track_ids})
         ws.receive_json()
         ws.send_json({"type": "ambient_clear_queue"})
         msg = ws.receive_json()
@@ -379,15 +379,15 @@ def test_ambient_skip_next_advances_through_queue(
     a, b, _c = extra_seeded_track_ids
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
-        ws.send_json({"type": "ambient_set_queue", "beets_ids": [a, b]})
+        ws.send_json({"type": "ambient_set_queue", "track_ids": [a, b]})
         ws.receive_json()
 
         ws.send_json({"type": "ambient_skip_next"})
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] == a
+        assert amb["current_track_id"] == a
         assert amb["queue"] == [b]
         assert amb["history"] == [seeded_track_id]
         assert amb["position_ms"] == 0
@@ -398,12 +398,12 @@ def test_ambient_skip_next_at_end_of_queue_loop_off(
 ) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_skip_next"})
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] is None
+        assert amb["current_track_id"] is None
 
 
 def test_ambient_skip_next_loop_track_replays(
@@ -411,7 +411,7 @@ def test_ambient_skip_next_loop_track_replays(
 ) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 30000})
         ws.receive_json()
@@ -420,7 +420,7 @@ def test_ambient_skip_next_loop_track_replays(
         ws.send_json({"type": "ambient_skip_next"})
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] == seeded_track_id  # unchanged
+        assert amb["current_track_id"] == seeded_track_id  # unchanged
         assert amb["position_ms"] == 0  # reset
 
 
@@ -430,9 +430,9 @@ def test_ambient_skip_next_loop_queue_wraps(
     a = extra_seeded_track_ids[0]
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
-        ws.send_json({"type": "ambient_set_queue", "beets_ids": [a]})
+        ws.send_json({"type": "ambient_set_queue", "track_ids": [a]})
         ws.receive_json()
         ws.send_json({"type": "ambient_set_loop", "loop": "queue"})
         ws.receive_json()
@@ -444,7 +444,7 @@ def test_ambient_skip_next_loop_queue_wraps(
         ws.send_json({"type": "ambient_skip_next"})
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] == seeded_track_id
+        assert amb["current_track_id"] == seeded_track_id
         assert amb["queue"] == [a]
         assert amb["history"] == []
 
@@ -455,9 +455,9 @@ def test_ambient_skip_prev_with_history(
     a = extra_seeded_track_ids[0]
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
-        ws.send_json({"type": "ambient_set_queue", "beets_ids": [a]})
+        ws.send_json({"type": "ambient_set_queue", "track_ids": [a]})
         ws.receive_json()
         ws.send_json({"type": "ambient_skip_next"})
         ws.receive_json()  # now current=a, history=[seeded]
@@ -465,7 +465,7 @@ def test_ambient_skip_prev_with_history(
         ws.send_json({"type": "ambient_skip_prev"})
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] == seeded_track_id
+        assert amb["current_track_id"] == seeded_track_id
         assert amb["queue"] == [a]
         assert amb["history"] == []
 
@@ -475,20 +475,20 @@ def test_ambient_skip_prev_no_history_seeks_to_start(
 ) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 12345})
         ws.receive_json()
         ws.send_json({"type": "ambient_skip_prev"})
         msg = ws.receive_json()
-        assert msg["state"]["ambient"]["current_beets_id"] == seeded_track_id
+        assert msg["state"]["ambient"]["current_track_id"] == seeded_track_id
         assert msg["state"]["ambient"]["position_ms"] == 0
 
 
 def test_ambient_seek(client: TestClient, seeded_track_id: int) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 42000})
         msg = ws.receive_json()
@@ -509,14 +509,14 @@ def test_ambient_stop_clears_lane(
 ) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
-        ws.send_json({"type": "ambient_set_queue", "beets_ids": extra_seeded_track_ids})
+        ws.send_json({"type": "ambient_set_queue", "track_ids": extra_seeded_track_ids})
         ws.receive_json()
         ws.send_json({"type": "ambient_stop"})
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] is None
+        assert amb["current_track_id"] is None
         assert amb["queue"] == []
         assert amb["history"] == []
         assert amb["position_ms"] == 0
@@ -531,7 +531,7 @@ def test_ambient_play_playlist_manual(
     ).json()["id"]
     track_ids = [seeded_track_id, *extra_seeded_track_ids]
     for bid in track_ids:
-        auth_client.post(f"/api/playlists/{pid}/tracks", json={"beets_id": bid})
+        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": bid})
 
     with client.websocket_connect("/api/ws") as ws:
         ws.receive_json()  # snapshot
@@ -540,7 +540,7 @@ def test_ambient_play_playlist_manual(
         )
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
-        assert amb["current_beets_id"] == track_ids[1]
+        assert amb["current_track_id"] == track_ids[1]
         assert amb["queue"] == track_ids[2:]
         assert amb["history"] == track_ids[:1]
         assert msg["state"]["is_playing"] is True
@@ -691,7 +691,7 @@ def test_position_report_stamps_ambient_position(
         a.receive_json()
         b.receive_json()
 
-        b.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        b.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         a.receive_json()
         b.receive_json()
 
@@ -713,29 +713,29 @@ def test_fire_interrupt_track(
     with _ws_authed(client) as ws:
         ws.receive_json()
         # Set ambient first.
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 30000})
         ws.receive_json()
 
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": interrupt_id})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": interrupt_id})
         msg = ws.receive_json()
         assert msg["type"] == "state_changed"
         intr = msg["state"]["interrupt"]
         assert intr is not None
-        assert intr["current_beets_id"] == interrupt_id
+        assert intr["current_track_id"] == interrupt_id
         assert intr["queue"] == []
         assert intr["return_to_ambient"] is True
         assert msg["state"]["is_playing"] is True
         # Ambient state preserved.
-        assert msg["state"]["ambient"]["current_beets_id"] == seeded_track_id
+        assert msg["state"]["ambient"]["current_track_id"] == seeded_track_id
         assert msg["state"]["ambient"]["position_ms"] == 30000
 
 
-def test_fire_interrupt_track_validates_beets_id(client: TestClient) -> None:
+def test_fire_interrupt_track_validates_track_id(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": 999999})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": 999999})
         msg = ws.receive_json()
         assert msg["type"] == "error"
 
@@ -746,11 +746,11 @@ def test_fire_interrupt_replaces_existing_interrupt(
     a, b, _c = extra_seeded_track_ids
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": a})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": a})
         ws.receive_json()
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": b})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": b})
         msg = ws.receive_json()
-        assert msg["state"]["interrupt"]["current_beets_id"] == b
+        assert msg["state"]["interrupt"]["current_track_id"] == b
 
 
 def test_fire_interrupt_playlist_loads_tracks(
@@ -760,14 +760,14 @@ def test_fire_interrupt_playlist_loads_tracks(
         "/api/playlists", json={"name": "InterruptTest", "source": "manual"}
     ).json()["id"]
     for bid in extra_seeded_track_ids:
-        auth_client.post(f"/api/playlists/{pid}/tracks", json={"beets_id": bid})
+        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": bid})
 
     with client.websocket_connect("/api/ws") as ws:
         ws.receive_json()
         ws.send_json({"type": "fire_interrupt_playlist", "playlist_id": pid})
         msg = ws.receive_json()
         intr = msg["state"]["interrupt"]
-        assert intr["current_beets_id"] == extra_seeded_track_ids[0]
+        assert intr["current_track_id"] == extra_seeded_track_ids[0]
         assert intr["queue"] == extra_seeded_track_ids[1:]
 
 
@@ -786,7 +786,7 @@ def test_interrupt_skip_next_advances_within_queue(
         "/api/playlists", json={"name": "InterruptSkipTest", "source": "manual"}
     ).json()["id"]
     for bid in extra_seeded_track_ids:
-        auth_client.post(f"/api/playlists/{pid}/tracks", json={"beets_id": bid})
+        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": bid})
 
     with client.websocket_connect("/api/ws") as ws:
         ws.receive_json()
@@ -795,7 +795,7 @@ def test_interrupt_skip_next_advances_within_queue(
         ws.send_json({"type": "interrupt_skip_next"})
         msg = ws.receive_json()
         intr = msg["state"]["interrupt"]
-        assert intr["current_beets_id"] == extra_seeded_track_ids[1]
+        assert intr["current_track_id"] == extra_seeded_track_ids[1]
         assert intr["queue"] == extra_seeded_track_ids[2:]
         assert intr["position_ms"] == 0
 
@@ -806,17 +806,17 @@ def test_interrupt_skip_next_at_end_returns_to_ambient(
     interrupt_id = extra_seeded_track_ids[0]
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 45000})
         ws.receive_json()
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": interrupt_id})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": interrupt_id})
         ws.receive_json()
         ws.send_json({"type": "interrupt_skip_next"})  # auto-completes
         msg = ws.receive_json()
         assert msg["state"]["interrupt"] is None
         # Ambient lane intact, position preserved.
-        assert msg["state"]["ambient"]["current_beets_id"] == seeded_track_id
+        assert msg["state"]["ambient"]["current_track_id"] == seeded_track_id
         assert msg["state"]["ambient"]["position_ms"] == 45000
         assert msg["state"]["is_playing"] is True
 
@@ -830,7 +830,7 @@ def test_interrupt_skip_next_at_end_no_return_stops_playback(
         ws.send_json(
             {
                 "type": "fire_interrupt_track",
-                "beets_id": interrupt_id,
+                "track_id": interrupt_id,
                 "return_to_ambient": False,
             }
         )
@@ -847,7 +847,7 @@ def test_interrupt_seek(
     interrupt_id = extra_seeded_track_ids[0]
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": interrupt_id})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": interrupt_id})
         ws.receive_json()
         ws.send_json({"type": "interrupt_seek", "position_ms": 8000})
         msg = ws.receive_json()
@@ -860,11 +860,11 @@ def test_cancel_interrupt_returns_to_ambient(
     interrupt_id = extra_seeded_track_ids[0]
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 12000})
         ws.receive_json()
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": interrupt_id})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": interrupt_id})
         ws.receive_json()
         ws.send_json({"type": "cancel_interrupt"})
         msg = ws.receive_json()
@@ -882,7 +882,7 @@ def test_cancel_interrupt_no_return_stops_playback(
         ws.send_json(
             {
                 "type": "fire_interrupt_track",
-                "beets_id": interrupt_id,
+                "track_id": interrupt_id,
                 "return_to_ambient": False,
             }
         )
@@ -904,11 +904,11 @@ def test_position_report_stamps_interrupt_when_active(
         ws.send_json({"type": "register", "name": "TV", "capabilities": ["audio_output"]})
         ws.receive_json()
 
-        ws.send_json({"type": "ambient_play_track", "beets_id": seeded_track_id})
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 25000})
         ws.receive_json()
-        ws.send_json({"type": "fire_interrupt_track", "beets_id": interrupt_id})
+        ws.send_json({"type": "fire_interrupt_track", "track_id": interrupt_id})
         ws.receive_json()
 
         # position_report while interrupt is active should stamp the
@@ -945,7 +945,7 @@ def test_fire_sfx_requires_active_mode(client: TestClient) -> None:
             {
                 "type": "fire_sfx",
                 "soundboard_id": "tavern",
-                "item_path": "door.ogg",
+                "item_path": "dnd/door.ogg",
             }
         )
         msg = ws.receive_json()
@@ -986,15 +986,15 @@ def test_fire_sfx_validates_item_path(client: TestClient) -> None:
 # --- scene activation -----------------------------------------------------
 
 
-def _make_tavern_playlist(auth_client, beets_ids: list[int]) -> int:
+def _make_tavern_playlist(auth_client, track_ids: list[int]) -> int:
     """Create a manual playlist named 'tavern-music' in dnd mode for the
     test scene to resolve to. Returns the playlist id."""
     pid = auth_client.post(
         "/api/playlists",
         json={"name": "tavern-music", "source": "manual", "mode_id": "dnd"},
     ).json()["id"]
-    for bid in beets_ids:
-        auth_client.post(f"/api/playlists/{pid}/tracks", json={"beets_id": bid})
+    for bid in track_ids:
+        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": bid})
     return pid
 
 
@@ -1051,7 +1051,7 @@ def test_activate_scene_composite_apply(
         assert s["active_scene_id"] == "tavern"
         assert s["active_preset_ids"] == ["radio-vintage"]
         assert s["crossfade_ms"] == 2500
-        assert s["ambient"]["current_beets_id"] == extra_seeded_track_ids[0]
+        assert s["ambient"]["current_track_id"] == extra_seeded_track_ids[0]
         assert s["ambient"]["queue"] == extra_seeded_track_ids[1:]
         assert s["is_playing"] is True
 
@@ -1128,7 +1128,7 @@ def test_fire_sfx_broadcasts_to_audio_output_devices(client: TestClient) -> None
             {
                 "type": "fire_sfx",
                 "soundboard_id": "tavern",
-                "item_path": "door.ogg",
+                "item_path": "dnd/door.ogg",
                 "volume": 0.5,
             }
         )
@@ -1136,7 +1136,7 @@ def test_fire_sfx_broadcasts_to_audio_output_devices(client: TestClient) -> None
         msg = output.receive_json()
         assert msg["type"] == "sfx_fired"
         assert msg["soundboard_id"] == "tavern"
-        assert msg["item_path"] == "door.ogg"
+        assert msg["item_path"] == "dnd/door.ogg"
         assert msg["volume"] == 0.5
 
         # Controller did NOT receive sfx_fired. Verify by sending a state-
