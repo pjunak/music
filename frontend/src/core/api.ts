@@ -280,6 +280,7 @@ export interface SfxUploadResult {
 }
 
 export const sfxApi = {
+  allFiles: () => api.get<SfxFile[]>("/api/sfx/files"),
   tree: (path = "") =>
     api.get<SfxTreeResponse>(
       path ? `/api/sfx/tree?path=${encodeURIComponent(path)}` : "/api/sfx/tree",
@@ -373,6 +374,61 @@ export const modesAdminApi = {
   deleteScene: (modeId: string, sceneId: string) =>
     api.delete<void>(
       `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
+    ),
+
+  // Soundboard editor — categories + items inside an existing soundboard.
+  // Each call returns the updated SoundboardManifest so the UI can re-render
+  // without a separate fetch.
+  addCategory: (
+    modeId: string,
+    soundboardId: string,
+    payload: { id: string; name: string },
+  ) =>
+    api.post<{
+      id: string;
+      name?: string | null;
+      categories: Array<{
+        id: string;
+        name: string;
+        items: Array<{ file: string; name: string; hotkey?: string | null; icon?: string | null }>;
+      }>;
+    }>(
+      `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories`,
+      payload,
+    ),
+  deleteCategory: (modeId: string, soundboardId: string, categoryId: string) =>
+    api.delete<unknown>(
+      `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}`,
+    ),
+  addItem: (
+    modeId: string,
+    soundboardId: string,
+    categoryId: string,
+    payload: { file: string; name: string; hotkey?: string; icon?: string },
+  ) =>
+    api.post<unknown>(
+      `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items`,
+      payload,
+    ),
+  updateItem: (
+    modeId: string,
+    soundboardId: string,
+    categoryId: string,
+    index: number,
+    payload: { name?: string; hotkey?: string; icon?: string; file?: string },
+  ) =>
+    api.patch<unknown>(
+      `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items/${index}`,
+      payload,
+    ),
+  deleteItem: (
+    modeId: string,
+    soundboardId: string,
+    categoryId: string,
+    index: number,
+  ) =>
+    api.delete<unknown>(
+      `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items/${index}`,
     ),
 };
 

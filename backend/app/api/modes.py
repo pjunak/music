@@ -101,6 +101,25 @@ class CreateSceneRequest(BaseModel):
     description: str | None = None
 
 
+class AddCategoryRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+
+
+class AddItemRequest(BaseModel):
+    file: str = Field(min_length=1, description="Path relative to SFX_LIBRARY_DIR")
+    name: str = Field(min_length=1, max_length=128)
+    hotkey: str | None = Field(None, max_length=8)
+    icon: str | None = Field(None, max_length=8)
+
+
+class UpdateItemRequest(BaseModel):
+    name: str | None = Field(None, max_length=128)
+    hotkey: str | None = Field(None, max_length=8)
+    icon: str | None = Field(None, max_length=8)
+    file: str | None = None
+
+
 def _theme_path(manifest: ModeManifest) -> Path | None:
     """Resolve the theme file path safely: must be inside the mode's
     root_dir to prevent traversal via a malicious manifest."""
@@ -315,5 +334,158 @@ def delete_scene(mode_id: str, scene_id: str, _: CurrentUser) -> None:
         )
     scene_path.unlink()
     modes_loader.load_all()
+
+
+# --- soundboard editing (categories + items inside an existing soundboard) ---
+
+
+def _load_soundboard_yaml(mode_id: str, soundboard_id: str) -> tuple[Path, dict]:
+    """Read the soundboard YAML for editing. Returns (path, parsed dict).
+    The dict shape mirrors mutagen-loose: `id`, `name?`, `categories: [{id, name, items: [{file, name, hotkey?, icon?}]}]`."""
+    mode_dir = _mode_dir_or_404(mode_id)
+    sb_path = mode_dir / "soundboards" / f"{soundboard_id}.yaml"
+    if not sb_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"soundboard '{soundboard_id}' not found in mode '{mode_id}'",
+        )
+    raw = yaml.safe_load(sb_path.read_text(encoding="utf-8")) or {}
+    raw.setdefault("id", soundboard_id)
+    raw.setdefault("categories", [])
+    return (sb_path, raw)
+
+
+def _save_soundboard_yaml(path: Path, payload: dict, mode_id: str) -> SoundboardManifest:
+    _write_yaml(path, payload)
+    modes_loader.load_all()
+    manifest = modes_loader.get_mode(mode_id)
+    if manifest is None or payload["id"] not in manifest.soundboards:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="soundboard saved but failed to reload",
+        )
+    return manifest.soundboards[payload["id"]]
+
+
+def _find_category(sb: dict, category_id: str) -> dict:
+    for cat in sb.get("categories", []):
+        if cat.get("id") == category_id:
+            return cat
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"category '{category_id}' not found",
+    )
+
+
+@router.post(
+    "/{mode_id}/soundboards/{soundboard_id}/categories",
+    response_model=SoundboardManifest,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_soundboard_category(
+    mode_id: str,
+    soundboard_id: str,
+    payload: AddCategoryRequest,
+    _: CurrentUser,
+) -> SoundboardManifest:
+    _validate_slug(payload.id, "category")
+    path, sb = _load_soundboard_yaml(mode_id, soundboard_id)
+    if any(c.get("id") == payload.id for c in sb.get("categories", [])):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"category '{payload.id}' already exists",
+        )
+    sb.setdefault("categories", []).append(
+        {"id": payload.id, "name": payload.name, "items": []}
+    )
+    return _save_soundboard_yaml(path, sb, mode_id)
+
+
+@router.delete(
+    "/{mode_id}/soundboards/{soundboard_id}/categories/{category_id}",
+    response_model=SoundboardManifest,
+)
+def delete_soundboard_category(
+    mode_id: str, soundboard_id: str, category_id: str, _: CurrentUser
+) -> SoundboardManifest:
+    path, sb = _load_soundboard_yaml(mode_id, soundboard_id)
+    _find_category(sb, category_id)  # 404 if missing
+    sb["categories"] = [c for c in sb["categories"] if c.get("id") != category_id]
+    return _save_soundboard_yaml(path, sb, mode_id)
+
+
+@router.post(
+    "/{mode_id}/soundboards/{soundboard_id}/categories/{category_id}/items",
+    response_model=SoundboardManifest,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_soundboard_item(
+    mode_id: str,
+    soundboard_id: str,
+    category_id: str,
+    payload: AddItemRequest,
+    _: CurrentUser,
+) -> SoundboardManifest:
+    path, sb = _load_soundboard_yaml(mode_id, soundboard_id)
+    cat = _find_category(sb, category_id)
+    items = cat.setdefault("items", [])
+    item: dict = {"file": payload.file, "name": payload.name}
+    if payload.hotkey:
+        item["hotkey"] = payload.hotkey
+    if payload.icon:
+        item["icon"] = payload.icon
+    items.append(item)
+    return _save_soundboard_yaml(path, sb, mode_id)
+
+
+@router.patch(
+    "/{mode_id}/soundboards/{soundboard_id}/categories/{category_id}/items/{index}",
+    response_model=SoundboardManifest,
+)
+def update_soundboard_item(
+    mode_id: str,
+    soundboard_id: str,
+    category_id: str,
+    index: int,
+    payload: UpdateItemRequest,
+    _: CurrentUser,
+) -> SoundboardManifest:
+    path, sb = _load_soundboard_yaml(mode_id, soundboard_id)
+    cat = _find_category(sb, category_id)
+    items = cat.get("items", [])
+    if index < 0 or index >= len(items):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="item index out of range"
+        )
+    item = items[index]
+    fields = payload.model_dump(exclude_unset=True)
+    for key, value in fields.items():
+        if value is None or value == "":
+            item.pop(key, None)
+        else:
+            item[key] = value
+    return _save_soundboard_yaml(path, sb, mode_id)
+
+
+@router.delete(
+    "/{mode_id}/soundboards/{soundboard_id}/categories/{category_id}/items/{index}",
+    response_model=SoundboardManifest,
+)
+def delete_soundboard_item(
+    mode_id: str,
+    soundboard_id: str,
+    category_id: str,
+    index: int,
+    _: CurrentUser,
+) -> SoundboardManifest:
+    path, sb = _load_soundboard_yaml(mode_id, soundboard_id)
+    cat = _find_category(sb, category_id)
+    items = cat.get("items", [])
+    if index < 0 or index >= len(items):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="item index out of range"
+        )
+    items.pop(index)
+    return _save_soundboard_yaml(path, sb, mode_id)
 
 

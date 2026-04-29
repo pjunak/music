@@ -183,6 +183,25 @@ def get_sfx_file(
 # --- management surface ---------------------------------------------------
 
 
+@router.get("/files", response_model=list[SfxFileOut])
+def list_all_files(_: CurrentUser) -> list[SfxFileOut]:
+    """Flat list of every SFX file, recursive. Used by the soundboard editor
+    to populate the file picker without round-tripping per folder."""
+    root = sfx_root()
+    out: list[SfxFileOut] = []
+
+    def walk(folder: Path) -> None:
+        for entry in sorted(folder.iterdir(), key=lambda p: p.name.lower()):
+            if entry.is_dir():
+                walk(entry)
+            elif entry.suffix.lower() in _SFX_EXTENSIONS:
+                out.append(_stat_file(entry, root))
+
+    if root.is_dir():
+        walk(root)
+    return out
+
+
 @router.get("/tree", response_model=SfxTreeResponse)
 def list_tree(
     _: CurrentUser,

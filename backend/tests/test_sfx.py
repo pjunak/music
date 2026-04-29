@@ -50,6 +50,21 @@ def test_tree_root_lists_seeded(auth_client: TestClient) -> None:
     assert "dnd" in folder_paths
 
 
+def test_files_returns_flat_list_recursive(auth_client: TestClient) -> None:
+    """Used by the soundboard editor to populate file pickers without
+    walking the tree from the client."""
+    auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("nested.wav", b"x" * 8, "audio/wav"))],
+        params={"dest": "deep/path"},
+    )
+    r = auth_client.get("/api/sfx/files")
+    assert r.status_code == 200
+    paths = {f["path"] for f in r.json()}
+    assert "deep/path/nested.wav" in paths
+    assert "dnd/door.ogg" in paths  # seeded
+
+
 def test_tree_subfolder_includes_files_and_referenced_flag(auth_client: TestClient) -> None:
     r = auth_client.get("/api/sfx/tree", params={"path": "dnd"})
     body = r.json()

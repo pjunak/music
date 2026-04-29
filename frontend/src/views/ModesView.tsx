@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { SoundboardEditor } from "@/components/SoundboardEditor";
 import { modesAdminApi, modesApi } from "@/core/api";
 import { toast } from "@/core/toast";
 import type { ModeDetail, ModeSummary } from "@/core/types";
@@ -10,6 +11,12 @@ export function ModesView() {
   const [modes, setModes] = useState<ModeSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // When the user clicks "Edit" on a soundboard, we replace the right
+  // pane with the soundboard editor. Cleared via "Back to mode".
+  const [editingSoundboard, setEditingSoundboard] = useState<{
+    modeId: string;
+    soundboardId: string;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -17,6 +24,7 @@ export function ModesView() {
       setModes(list);
       if (selectedId !== null && !list.some((m) => m.id === selectedId)) {
         setSelectedId(null);
+        setEditingSoundboard(null);
       }
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
@@ -84,6 +92,12 @@ export function ModesView() {
               setSelectedId(id);
             }}
           />
+        ) : editingSoundboard !== null ? (
+          <SoundboardEditor
+            modeId={editingSoundboard.modeId}
+            soundboardId={editingSoundboard.soundboardId}
+            onBack={() => setEditingSoundboard(null)}
+          />
         ) : selectedId !== null ? (
           <ModeDetailPane
             modeId={selectedId}
@@ -92,6 +106,9 @@ export function ModesView() {
               setSelectedId(null);
               void refresh();
             }}
+            onEditSoundboard={(sbId) =>
+              setEditingSoundboard({ modeId: selectedId, soundboardId: sbId })
+            }
           />
         ) : (
           <div className="empty-detail">
@@ -175,10 +192,12 @@ function ModeDetailPane({
   modeId,
   onChanged,
   onDeleted,
+  onEditSoundboard,
 }: {
   modeId: string;
   onChanged: () => Promise<void>;
   onDeleted: () => void;
+  onEditSoundboard: (soundboardId: string) => void;
 }) {
   const [detail, setDetail] = useState<ModeDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -245,6 +264,7 @@ function ModeDetailPane({
           modesAdminApi.createSoundboard(modeId, name ? { id, name } : { id })
         }
         onDelete={(id) => modesAdminApi.deleteSoundboard(modeId, id)}
+        onEdit={onEditSoundboard}
         onChanged={async () => {
           await load();
           await onChanged();
@@ -297,6 +317,7 @@ function SubresourceList({
   onCreate,
   onDelete,
   onChanged,
+  onEdit,
 }: {
   kind: "soundboard" | "scene";
   title: string;
@@ -304,6 +325,10 @@ function SubresourceList({
   onCreate: (id: string, name?: string) => Promise<unknown>;
   onDelete: (id: string) => Promise<void>;
   onChanged: () => Promise<void>;
+  /** When provided, each row gets an Edit button that calls this with the
+   *  item id. Used for soundboards (where we have a full editor); scenes
+   *  don't have one yet. */
+  onEdit?: (id: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [id, setId] = useState("");
@@ -377,13 +402,20 @@ function SubresourceList({
           {items.map((itemId) => (
             <li key={itemId}>
               <span>{itemId}</span>
-              <button
-                type="button"
-                className="btn-danger"
-                onClick={() => void remove(itemId)}
-              >
-                🗑
-              </button>
+              <span className="simple-list-actions">
+                {onEdit ? (
+                  <button type="button" onClick={() => onEdit(itemId)}>
+                    ✎ Edit
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn-danger"
+                  onClick={() => void remove(itemId)}
+                >
+                  🗑
+                </button>
+              </span>
             </li>
           ))}
         </ul>
