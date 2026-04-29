@@ -331,6 +331,62 @@ def test_set_active_outputs_does_not_re_validate_existing_ids(
         assert snap_fresh["your_device_id"] in msg["state"]["active_output_device_ids"]
 
 
+def test_state_load_prunes_dangling_track_ids(
+    auth_client: TestClient,
+    seeded_track_id: int,
+) -> None:
+    """A `current_track_id` referencing a track that's no longer in the
+    DB must be cleared on state machine reload. Otherwise the audio
+    engine fetches `/api/library/tracks/{stale}/stream` and gets 404.
+    Same rule for queue / history / interrupt."""
+    from app.core.db import SessionLocal
+    from app.domain import playback_state as playback_state_domain
+    from app.sync.state import StateMachine
+
+    # Seed a known-bad state directly into the DB.
+    with SessionLocal() as db:
+        playback_state_domain.update_state(
+            db,
+            ambient={
+                "current_track_id": 999_999,  # doesn't exist
+                "queue": [seeded_track_id, 999_998],  # mix valid + invalid
+                "history": [999_997],
+                "position_ms": 0,
+                "loop": "off",
+            },
+            interrupt={
+                "current_track_id": 999_996,
+                "queue": [],
+                "position_ms": 0,
+                "return_to_ambient": True,
+                "fade_in_ms": 0,
+                "fade_out_ms": 0,
+            },
+            active_mode_id="ghost-mode",
+            active_soundboard_id="ghost-sb",
+            active_scene_id="ghost-scene",
+            active_preset_ids=["cave", "nope-preset"],
+            active_output_device_ids=["dev-stale-1", "dev-stale-2"],
+        )
+
+    machine = StateMachine()
+    import asyncio
+
+    asyncio.run(machine.load(SessionLocal))
+    snap = asyncio.run(machine.snapshot())
+
+    assert snap.ambient.current_track_id is None
+    assert snap.ambient.queue == [seeded_track_id]
+    assert snap.ambient.history == []
+    assert snap.interrupt is None
+    assert snap.active_mode_id is None
+    assert snap.active_soundboard_id is None
+    assert snap.active_scene_id is None
+    assert "cave" in snap.active_preset_ids
+    assert "nope-preset" not in snap.active_preset_ids
+    assert snap.active_output_device_ids == []
+
+
 def test_remove_active_output_mutator() -> None:
     """Unit-test the mutator the WS disconnect path uses to prune stale
     device ids. (A full WS-disconnect integration test had timing issues

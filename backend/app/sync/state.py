@@ -39,16 +39,26 @@ class StateMachine:
         self._loaded = False
 
     async def load(self, db_factory: Any) -> None:
-        """Hydrate state from the playback_state DB row. Call once at startup."""
+        """Hydrate state from the playback_state DB row, then prune dangling
+        references so the runtime never tries to act on tracks / modes /
+        presets that disappeared between sessions (e.g. a track row that
+        scan_full removed because its file went away — without this pass
+        the audio engine would request a 404 stream URL and surface as
+        SRC_NOT_SUPPORTED). Persists the cleaned state immediately so the
+        next boot starts from the same trimmed snapshot."""
 
-        def _load() -> dict:
+        def _load_and_clean() -> dict:
             db: Session = db_factory()
             try:
-                return playback_state_domain.get_state(db)
+                raw = playback_state_domain.get_state(db)
+                cleaned = _prune_dangling_state(raw, db)
+                if cleaned != raw:
+                    playback_state_domain.update_state(db, **cleaned)
+                return cleaned
             finally:
                 db.close()
 
-        raw = await run_in_threadpool(_load)
+        raw = await run_in_threadpool(_load_and_clean)
         merged: dict[str, Any] = self._state.model_dump()
         for key, value in raw.items():
             if key in merged:
@@ -106,6 +116,92 @@ class StateMachine:
                 db.close()
 
         await run_in_threadpool(_write)
+
+
+def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
+    """Drop references inside `raw` to tracks / modes / presets / scenes /
+    soundboards that no longer exist. Returns a new dict; caller decides
+    whether to persist it.
+
+    Pruning rules:
+      - `ambient.current_track_id`, `ambient.queue`, `ambient.history`,
+        `interrupt.current_track_id`, `interrupt.queue`: keep only ids
+        that still resolve to a row in `tracks`.
+      - `active_mode_id`: cleared if the mode is no longer loaded.
+      - `active_soundboard_id`: cleared if no active mode or soundboard
+        isn't part of it.
+      - `active_scene_id`: same scoping rule.
+      - `active_preset_ids`: filtered to only loaded presets.
+      - `active_output_device_ids`: cleared. Device ids are per-WS-connection
+        and a server restart wipes them all; auto-claim re-establishes.
+    """
+    from app.models.track import Track  # local to keep cyclic-import risk down
+    from app.modes import loader as modes_loader
+    from app.presets import loader as presets_loader
+
+    out = dict(raw)
+
+    valid_track_ids = {row[0] for row in db.query(Track.id).all()}
+
+    def _filter_track_id(value: Any) -> Any:
+        if isinstance(value, int) and value in valid_track_ids:
+            return value
+        return None
+
+    def _filter_track_list(value: Any) -> list[int]:
+        if not isinstance(value, list):
+            return []
+        return [v for v in value if isinstance(v, int) and v in valid_track_ids]
+
+    ambient = dict(out.get("ambient") or {})
+    if ambient:
+        ambient["current_track_id"] = _filter_track_id(ambient.get("current_track_id"))
+        ambient["queue"] = _filter_track_list(ambient.get("queue"))
+        ambient["history"] = _filter_track_list(ambient.get("history"))
+        out["ambient"] = ambient
+
+    interrupt = out.get("interrupt")
+    if isinstance(interrupt, dict):
+        if _filter_track_id(interrupt.get("current_track_id")) is None:
+            out["interrupt"] = None
+        else:
+            interrupt = dict(interrupt)
+            interrupt["queue"] = _filter_track_list(interrupt.get("queue"))
+            out["interrupt"] = interrupt
+
+    loaded_modes = modes_loader.all_modes()
+    active_mode_id = out.get("active_mode_id")
+    if active_mode_id is not None and active_mode_id not in loaded_modes:
+        active_mode_id = None
+    out["active_mode_id"] = active_mode_id
+
+    active_mode = loaded_modes.get(active_mode_id) if active_mode_id else None
+
+    active_soundboard_id = out.get("active_soundboard_id")
+    if active_soundboard_id is not None and (
+        active_mode is None or active_soundboard_id not in active_mode.soundboards
+    ):
+        out["active_soundboard_id"] = None
+
+    active_scene_id = out.get("active_scene_id")
+    if active_scene_id is not None and (
+        active_mode is None or active_scene_id not in active_mode.scenes
+    ):
+        out["active_scene_id"] = None
+
+    loaded_presets = presets_loader.all_presets()
+    active_preset_ids = out.get("active_preset_ids") or []
+    if isinstance(active_preset_ids, list):
+        out["active_preset_ids"] = [
+            p for p in active_preset_ids if isinstance(p, str) and p in loaded_presets
+        ]
+
+    # Wipe active outputs: device ids are per-connection so every restart
+    # leaves the previous list stale. Auto-claim re-establishes once a
+    # client reconnects.
+    out["active_output_device_ids"] = []
+
+    return out
 
 
 # Module-level singleton.
