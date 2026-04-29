@@ -732,6 +732,16 @@ function TrackTable({
   function enqueue(t: Track) {
     wsClient.send({ type: "ambient_enqueue", track_id: t.id });
   }
+  function fireInterrupt(t: Track) {
+    wsClient.send({
+      type: "fire_interrupt_track",
+      track_id: t.id,
+      return_to_ambient: true,
+      fade_in_ms: 500,
+      fade_out_ms: 500,
+    });
+    toast.info("Interrupt fired", t.title || t.path);
+  }
   async function deleteTrack(t: Track) {
     const ok = await confirmDialog({
       title: "Delete track?",
@@ -793,6 +803,12 @@ function TrackTable({
                   </button>
                   <button onClick={() => enqueue(t)} title="Queue">
                     ＋
+                  </button>
+                  <button
+                    onClick={() => fireInterrupt(t)}
+                    title="Fire as interrupt (overrides ambient until done, then resumes)"
+                  >
+                    ⚡
                   </button>
                   <button onClick={() => setEditing(t)} title="Edit metadata">
                     ✎

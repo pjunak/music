@@ -1,26 +1,33 @@
 /**
- * Plain `<audio>` playback engine driven by `PlayerState`.
+ * Playback engine driven by `PlayerState`.
  *
- * Channels (each is a plain HTMLAudioElement; no Web Audio):
+ * Channels:
  *
- *   ambient A  ┐
- *   ambient B  ┴── two elements so we can crossfade by overlapping playback
- *   interrupt  ── short overrides; pauses ambient while live, resumes after
- *   sfx (transient) ── one disposable element per fire_sfx event
+ *   ambient A  ┐                     ┌── effect chain ──┐
+ *   ambient B  ┴── source nodes ─────┤                  ├── ambient master ── destination
+ *                                     └── (passthrough) ─┘
  *
- * Volume is the product of master × per-channel gain, applied directly to
- * each element's `.volume`. Crossfade and interrupt fade-in/out animate
- * the per-channel gain via requestAnimationFrame, so we never have to
- * touch a Web Audio graph.
+ *   interrupt  ── source ── interrupt master ── destination   (bypasses effects)
  *
- * Why not Web Audio? Wrapping an `<audio>` in `MediaElementAudioSourceNode`
- * removes the element's default output and routes it through the
- * AudioContext. If the context is `suspended` (browser autoplay policy)
- * `currentTime` still advances but nothing reaches the speakers — exactly
- * the silent-but-ticking failure mode we hit. Plain `<audio>` only needs
- * a single user gesture before its first `play()` and after that just
- * works. Preset effects (which *do* need Web Audio) are deferred — see
- * `docs/FUTURE.md`.
+ *   sfx        ── transient `<audio>` direct to default output (no AudioContext routing)
+ *
+ * Ambient audio is routed through a single `AudioContext` graph so active
+ * preset effects can be applied. Interrupts and SFX bypass the chain — the
+ * intent is "scene effects colour the background music; alerts and stings
+ * play clean".
+ *
+ * The biggest risk with Web Audio is the autoplay-blocked failure mode: an
+ * `AudioContext` starts `suspended` until a user gesture, and audio routed
+ * through it is silently sunk until `ctx.resume()` resolves. We defend
+ * against this by:
+ *   1. Calling `unlock()` from every user-driven entry point (transport
+ *      buttons, play actions, etc.) which `resume()`s the context.
+ *   2. Calling `resume()` lazily inside `safePlay()` before each `play()`.
+ *   3. Surfacing a one-time toast if the context is still suspended when
+ *      we attempt playback.
+ *
+ * The effect chain is rebuilt whenever active presets change. Each effect
+ * type maps to a small graph of native Web Audio nodes — see `buildEffect`.
  */
 
 import { toast } from "@/core/toast";
@@ -40,12 +47,29 @@ export interface PresetManifest {
 
 interface AmbientChannel {
   el: HTMLAudioElement;
-  /** Per-channel gain (0..1) used for crossfade. Multiplied by master to
-   *  produce the actual `audio.volume`. */
-  gain: number;
-  /** A monotonically-incrementing token so a stale animation frame
-   *  callback can tell it's been superseded by a newer animation. */
+  /** Per-channel gain node controlling crossfade. */
+  gainNode: GainNode;
+  /** MediaElementAudioSourceNode wrapping `el`. Browsers permit only one
+   *  per element; we create it once and reuse. */
+  source: MediaElementAudioSourceNode;
+  /** Token used to cancel in-flight rAF ramps when superseded. */
   rampToken: number;
+}
+
+interface InterruptChannel {
+  el: HTMLAudioElement;
+  gainNode: GainNode;
+  source: MediaElementAudioSourceNode;
+  rampToken: number;
+}
+
+interface BuiltEffect {
+  /** First node in the effect's graph — receives audio from upstream. */
+  input: AudioNode;
+  /** Last node in the effect's graph — feeds audio downstream. */
+  output: AudioNode;
+  /** Optional teardown (stop oscillators, etc.). */
+  dispose?: () => void;
 }
 
 type Slot = "A" | "B";
@@ -56,16 +80,26 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-// One-shot guard for the autoplay-blocked toast: the browser blocks every
-// programmatic play() until first user gesture, and we don't want to spam
-// the toast layer with five identical errors back-to-back.
+function numParam(
+  effect: EffectSpec,
+  key: string,
+  fallback: number,
+): number {
+  const raw = effect[key];
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 let autoplayBlockedReported = false;
 
 function attachErrorLogger(label: string, el: HTMLAudioElement): void {
   el.addEventListener("error", () => {
     const err = el.error;
     if (err === null) return;
-    // MediaError codes: 1 ABORTED, 2 NETWORK, 3 DECODE, 4 SRC_NOT_SUPPORTED.
     const codeName = ["?", "ABORTED", "NETWORK", "DECODE", "SRC_NOT_SUPPORTED"][err.code] ?? "?";
     console.warn(`[playbackEngine] ${label} audio error`, {
       code: err.code,
@@ -80,60 +114,34 @@ function attachErrorLogger(label: string, el: HTMLAudioElement): void {
   });
 }
 
-/** Attempt to play an element. Surfaces autoplay-blocked and other failures
- *  via console + toast. Safe to call repeatedly; play() on an
- *  already-playing element resolves immediately. */
-function safePlay(label: string, el: HTMLAudioElement): void {
-  if (!el.src) return; // nothing to play yet
-  void el
-    .play()
-    .then(() => {
-      console.info(`[playbackEngine] ${label} play OK`, {
-        src: el.src,
-        volume: el.volume,
-      });
-    })
-    .catch((err: DOMException) => {
-      console.warn(`[playbackEngine] ${label} play rejected`, {
-        name: err.name,
-        message: err.message,
-        src: el.src,
-        volume: el.volume,
-        muted: el.muted,
-        readyState: el.readyState,
-      });
-      if (err.name === "NotAllowedError") {
-        if (!autoplayBlockedReported) {
-          autoplayBlockedReported = true;
-          toast.error(
-            "Browser blocked playback",
-            "Click anywhere on the page once, then press Play again.",
-          );
-        }
-      } else if (err.name !== "AbortError") {
-        // AbortError just means we paused mid-load — not interesting.
-        toast.error(`Playback failed (${err.name})`, err.message);
-      }
-    });
-}
-
 export class PlaybackEngine {
+  private audioContext: AudioContext | null = null;
+
   private ambientA: AmbientChannel | null = null;
   private ambientB: AmbientChannel | null = null;
   private currentSlot: Slot = "A";
 
-  private interruptEl: HTMLAudioElement | null = null;
-  private interruptGain = 0;
-  private interruptRampToken = 0;
+  private interrupt: InterruptChannel | null = null;
 
-  // Last applied state — used to skip work when a state_changed broadcast
-  // doesn't affect this channel.
+  /** Splitter feeding both ambient channels into the head of the effect
+   *  chain. Created once when the AudioContext is built. */
+  private effectChainHead: GainNode | null = null;
+  /** Master ambient gain node — drives master volume and is the chain's
+   *  terminal node before `destination`. */
+  private ambientMaster: GainNode | null = null;
+  /** Master interrupt gain node — bypasses the effect chain. */
+  private interruptMaster: GainNode | null = null;
+
+  /** Currently inserted effect graphs. Disposed when presets change. */
+  private installedEffects: BuiltEffect[] = [];
+
+  // --- last-applied state, used to short-circuit no-op state changes -----
   private lastAmbientId: number | null = null;
   private lastInterruptId: number | null = null;
   private lastIsPlaying = false;
   private lastVolume = 1.0;
   private lastInterruptFadeOut = 0;
-  private warnedAboutPresets = false;
+  private lastPresetSignature = "";
 
   private isMyOutput = false;
 
@@ -149,20 +157,49 @@ export class PlaybackEngine {
   // ----- wiring -------------------------------------------------------
 
   setAmbientElements(a: HTMLAudioElement, b: HTMLAudioElement): void {
-    this.ambientA = { el: a, gain: 1, rampToken: 0 };
-    this.ambientB = { el: b, gain: 0, rampToken: 0 };
+    const ctx = this.ensureAudioContext();
+    if (ctx === null) {
+      // Web Audio unavailable — bail; we can't drive ambient without a graph.
+      console.warn("[playbackEngine] AudioContext unavailable; ambient muted");
+      return;
+    }
+    // Browsers ignore `audio.volume` once a MediaElementAudioSourceNode is
+    // attached on Firefox in some setups; we explicitly drive volume via
+    // GainNodes from here on. Keep element volume at 1.0.
+    a.volume = 1;
+    b.volume = 1;
+    const sourceA = ctx.createMediaElementSource(a);
+    const sourceB = ctx.createMediaElementSource(b);
+    const gainA = ctx.createGain();
+    const gainB = ctx.createGain();
+    gainA.gain.value = 1;
+    gainB.gain.value = 0;
+    sourceA.connect(gainA);
+    sourceB.connect(gainB);
+    if (this.effectChainHead !== null) {
+      gainA.connect(this.effectChainHead);
+      gainB.connect(this.effectChainHead);
+    }
+    this.ambientA = { el: a, gainNode: gainA, source: sourceA, rampToken: 0 };
+    this.ambientB = { el: b, gainNode: gainB, source: sourceB, rampToken: 0 };
     a.addEventListener("ended", this.handleAmbientEnded);
     b.addEventListener("ended", this.handleAmbientEnded);
     attachErrorLogger("ambientA", a);
     attachErrorLogger("ambientB", b);
-    this.applyAmbientVolume(this.ambientA);
-    this.applyAmbientVolume(this.ambientB);
   }
 
   setInterruptElement(el: HTMLAudioElement): void {
-    this.interruptEl = el;
-    this.interruptGain = 0;
-    el.volume = 0;
+    const ctx = this.ensureAudioContext();
+    if (ctx === null) return;
+    el.volume = 1;
+    const source = ctx.createMediaElementSource(el);
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = 0;
+    source.connect(gainNode);
+    if (this.interruptMaster !== null) {
+      gainNode.connect(this.interruptMaster);
+    }
+    this.interrupt = { el, gainNode, source, rampToken: 0 };
     el.addEventListener("ended", this.handleInterruptEnded);
     attachErrorLogger("interrupt", el);
   }
@@ -182,20 +219,108 @@ export class PlaybackEngine {
     this.reportTimer = null;
     if (this.ambientA) this.ambientA.el.removeEventListener("ended", this.handleAmbientEnded);
     if (this.ambientB) this.ambientB.el.removeEventListener("ended", this.handleAmbientEnded);
-    if (this.interruptEl) this.interruptEl.removeEventListener("ended", this.handleInterruptEnded);
+    if (this.interrupt) this.interrupt.el.removeEventListener("ended", this.handleInterruptEnded);
+    this.disposeEffects();
   }
 
-  /** Kept for API compatibility. With plain `<audio>` we don't need an
-   *  AudioContext to unlock; the elements' own autoplay policy handles
-   *  itself once the user has clicked anywhere and we then call play(). */
+  /** Resume the AudioContext. Browsers require a user gesture before audio
+   *  reaches the speakers; transport buttons / play actions should call
+   *  this before their underlying state mutation. Idempotent. */
   unlock(): void {
-    /* intentionally empty */
+    const ctx = this.audioContext;
+    if (ctx === null || ctx.state === "running") return;
+    void ctx.resume().catch((err: unknown) => {
+      console.warn("[playbackEngine] AudioContext resume failed", err);
+    });
   }
 
-  setPresets(_presets: PresetManifest[]): void {
-    /* No-op in this engine version. Preset effects (Web Audio chain)
-     * are deferred — see docs/FUTURE.md. We keep the signature so the
-     * rest of the app doesn't have to know. */
+  // ----- Web Audio graph construction --------------------------------
+
+  private ensureAudioContext(): AudioContext | null {
+    if (this.audioContext !== null) return this.audioContext;
+    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (Ctor === undefined) return null;
+    const ctx = new Ctor();
+    this.audioContext = ctx;
+    this.ambientMaster = ctx.createGain();
+    this.interruptMaster = ctx.createGain();
+    this.effectChainHead = ctx.createGain();
+    this.ambientMaster.gain.value = clamp01(this.lastVolume);
+    this.interruptMaster.gain.value = clamp01(this.lastVolume);
+    this.ambientMaster.connect(ctx.destination);
+    this.interruptMaster.connect(ctx.destination);
+    // No effects yet — passthrough head → ambient master.
+    this.effectChainHead.connect(this.ambientMaster);
+    ctx.addEventListener("statechange", () => {
+      if (ctx.state === "suspended") {
+        console.info("[playbackEngine] AudioContext suspended");
+      }
+    });
+    return ctx;
+  }
+
+  // ----- preset / effect chain ---------------------------------------
+
+  setPresets(presets: PresetManifest[]): void {
+    const ctx = this.audioContext;
+    if (ctx === null || this.effectChainHead === null || this.ambientMaster === null) {
+      return; // Web Audio not available or not wired yet — no-op.
+    }
+    // Cheap fingerprint so we can skip rebuilds when the active presets
+    // didn't actually change. setPresets gets called on every state push.
+    const signature = JSON.stringify(
+      presets.map((p) => ({ id: p.id, effects: p.effects })),
+    );
+    if (signature === this.lastPresetSignature) return;
+    this.lastPresetSignature = signature;
+
+    // Tear down the current chain.
+    this.disposeEffects();
+    this.effectChainHead.disconnect();
+    this.ambientMaster.disconnect();
+    this.ambientMaster.connect(ctx.destination);
+
+    // Flatten preset chains in declaration order — preset[0].effects then
+    // preset[1].effects, etc. Skip unsupported effects; warn once per type.
+    const flat: EffectSpec[] = [];
+    for (const preset of presets) {
+      for (const eff of preset.effects) {
+        flat.push(eff);
+      }
+    }
+
+    if (flat.length === 0) {
+      // Empty chain — passthrough.
+      this.effectChainHead.connect(this.ambientMaster);
+      return;
+    }
+
+    let upstream: AudioNode = this.effectChainHead;
+    for (const spec of flat) {
+      const built = buildEffect(ctx, spec);
+      if (built === null) continue;
+      upstream.connect(built.input);
+      upstream = built.output;
+      this.installedEffects.push(built);
+    }
+    upstream.connect(this.ambientMaster);
+  }
+
+  private disposeEffects(): void {
+    for (const eff of this.installedEffects) {
+      try {
+        eff.input.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      try {
+        eff.output.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      eff.dispose?.();
+    }
+    this.installedEffects = [];
   }
 
   // ----- main state apply ---------------------------------------------
@@ -208,17 +333,7 @@ export class PlaybackEngine {
 
     if (state.volume !== this.lastVolume) {
       this.lastVolume = state.volume;
-      this.applyAllVolumes();
-    }
-
-    if (state.active_preset_ids.length > 0 && !this.warnedAboutPresets) {
-      this.warnedAboutPresets = true;
-      // Single warning per session — surfacing it via the toast layer
-      // would require a back-channel; console is enough for now.
-      console.warn(
-        "[playbackEngine] active presets are ignored — effect chain " +
-          "(Web Audio) is deferred. See docs/FUTURE.md.",
-      );
+      this.applyMasterVolume();
     }
 
     if (!isMyOutput) {
@@ -237,7 +352,6 @@ export class PlaybackEngine {
       this.lastInterruptFadeOut = state.interrupt.fade_out_ms ?? 0;
     }
 
-    // Interrupt transitions take precedence — they pause/resume ambient.
     if (newInterruptId !== this.lastInterruptId) {
       if (newInterruptId !== null) {
         const fadeIn = state.interrupt?.fade_in_ms ?? 0;
@@ -277,33 +391,27 @@ export class PlaybackEngine {
 
   fireSfx(streamUrl: string, volume: number): void {
     if (!this.isMyOutput) return;
+    // Transient one-shot: route directly via element.volume so a flood of
+    // SFX events doesn't pollute the long-lived effect graph.
     const el = new Audio();
     el.src = streamUrl;
     el.volume = clamp01(volume) * clamp01(this.lastVolume);
     attachErrorLogger("sfx", el);
-    const cleanup = (): void => {
-      el.removeEventListener("ended", cleanup);
-    };
-    el.addEventListener("ended", cleanup);
-    safePlay("sfx", el);
+    el.addEventListener("ended", () => {
+      el.removeAttribute("src");
+    });
+    void el.play().catch((err: DOMException) => {
+      if (err.name === "AbortError") return;
+      console.warn("[playbackEngine] sfx play rejected", err.message);
+    });
   }
 
-  // ----- volume math --------------------------------------------------
+  // ----- volume / master gain -----------------------------------------
 
-  private applyAmbientVolume(ch: AmbientChannel): void {
-    ch.el.volume = clamp01(this.lastVolume) * clamp01(ch.gain);
-  }
-
-  private applyInterruptVolume(): void {
-    if (this.interruptEl) {
-      this.interruptEl.volume = clamp01(this.lastVolume) * clamp01(this.interruptGain);
-    }
-  }
-
-  private applyAllVolumes(): void {
-    if (this.ambientA) this.applyAmbientVolume(this.ambientA);
-    if (this.ambientB) this.applyAmbientVolume(this.ambientB);
-    this.applyInterruptVolume();
+  private applyMasterVolume(): void {
+    const v = clamp01(this.lastVolume);
+    if (this.ambientMaster) this.ambientMaster.gain.value = v;
+    if (this.interruptMaster) this.interruptMaster.gain.value = v;
   }
 
   // ----- ambient ------------------------------------------------------
@@ -330,19 +438,16 @@ export class PlaybackEngine {
     if (!current || !other) return;
 
     if (crossfadeMs <= 0) {
-      // Snap-cut on the current channel.
       this.loadInto(current, url);
       this.setGainNow(current, 1);
       this.setGainNow(other, 0);
-      if (this.lastIsPlaying) safePlay("ambient", current.el);
+      if (this.lastIsPlaying) this.safePlay("ambient", current.el);
       return;
     }
 
-    // Crossfade: load on the OTHER channel and animate gains. After the
-    // ramp finishes, the other channel becomes "current".
     this.loadInto(other, url);
-    safePlay("ambient (incoming)", other.el);
-    this.rampGain(current, current.gain, 0, crossfadeMs, () => {
+    this.safePlay("ambient (incoming)", other.el);
+    this.rampGain(current, current.gainNode.gain.value, 0, crossfadeMs, () => {
       current.el.pause();
     });
     this.rampGain(other, 0, 1, crossfadeMs);
@@ -352,7 +457,7 @@ export class PlaybackEngine {
   private resumeAmbient(): void {
     if (this.lastInterruptId !== null) return;
     const ch = this.currentChannel();
-    if (ch) safePlay("ambient", ch.el);
+    if (ch) this.safePlay("ambient", ch.el);
   }
 
   private pauseAmbient(): void {
@@ -369,14 +474,10 @@ export class PlaybackEngine {
   }
 
   private setGainNow(ch: AmbientChannel, value: number): void {
-    ch.rampToken += 1; // cancel any in-flight ramp on this channel
-    ch.gain = clamp01(value);
-    this.applyAmbientVolume(ch);
+    ch.rampToken += 1;
+    ch.gainNode.gain.value = clamp01(value);
   }
 
-  /** Animate a channel's gain from `from` to `to` over `ms`, applying
-   *  the curve set on `crossfadeType`. Calls `onDone` when complete
-   *  (unless cancelled by another ramp on the same channel). */
   private rampGain(
     ch: AmbientChannel,
     from: number,
@@ -386,21 +487,18 @@ export class PlaybackEngine {
   ): void {
     ch.rampToken += 1;
     const myToken = ch.rampToken;
-    ch.gain = clamp01(from);
-    this.applyAmbientVolume(ch);
+    ch.gainNode.gain.value = clamp01(from);
     if (ms <= 0) {
-      ch.gain = clamp01(to);
-      this.applyAmbientVolume(ch);
+      ch.gainNode.gain.value = clamp01(to);
       onDone?.();
       return;
     }
     const start = performance.now();
     const tick = (now: number) => {
-      if (ch.rampToken !== myToken) return; // superseded
+      if (ch.rampToken !== myToken) return;
       const t = Math.min(1, (now - start) / ms);
       const eased = this.ease(t);
-      ch.gain = clamp01(from + (to - from) * eased);
-      this.applyAmbientVolume(ch);
+      ch.gainNode.gain.value = clamp01(from + (to - from) * eased);
       if (t < 1) {
         window.requestAnimationFrame(tick);
       } else {
@@ -411,12 +509,8 @@ export class PlaybackEngine {
   }
 
   private ease(t: number): number {
-    // `cut` is an instant transition; we already snap-cut for crossfadeMs<=0
-    // but if the operator picks "cut" with a non-zero ms, honour the spirit.
     if (this.crossfadeType === "cut") return t < 1 ? 0 : 1;
     if (this.crossfadeType === "equal_power") {
-      // Equal-power crossfade: sin/cos of a quarter circle. Smoother than
-      // a linear ramp at the centre.
       return Math.sin((t * Math.PI) / 2);
     }
     return t;
@@ -425,31 +519,32 @@ export class PlaybackEngine {
   // ----- interrupt ----------------------------------------------------
 
   private startInterrupt(trackId: number, fadeInMs: number): void {
-    if (!this.interruptEl) return;
+    if (!this.interrupt) return;
     const url = `/api/library/tracks/${trackId}/stream`;
-    if (!this.interruptEl.src.endsWith(url)) {
-      this.interruptEl.src = url;
-      this.interruptEl.load();
+    if (!this.interrupt.el.src.endsWith(url)) {
+      this.interrupt.el.src = url;
+      this.interrupt.el.load();
     }
     this.rampInterrupt(0, 1, fadeInMs);
-    safePlay("interrupt", this.interruptEl);
+    this.safePlay("interrupt", this.interrupt.el);
   }
 
   private fadeOutInterrupt(ms: number): void {
-    this.rampInterrupt(this.interruptGain, 0, ms, () => this.stopInterrupt());
+    if (!this.interrupt) return;
+    const from = this.interrupt.gainNode.gain.value;
+    this.rampInterrupt(from, 0, ms, () => this.stopInterrupt());
   }
 
   private stopInterrupt(): void {
-    if (this.interruptEl) {
-      this.interruptEl.pause();
-      this.interruptEl.removeAttribute("src");
-      this.interruptEl.load();
+    if (this.interrupt) {
+      this.interrupt.el.pause();
+      this.interrupt.el.removeAttribute("src");
+      this.interrupt.el.load();
+      this.interrupt.gainNode.gain.value = 0;
     }
-    this.interruptGain = 0;
-    this.applyInterruptVolume();
     if (this.lastIsPlaying) {
       const ch = this.currentChannel();
-      if (ch) safePlay("ambient", ch.el);
+      if (ch) this.safePlay("ambient", ch.el);
     }
   }
 
@@ -459,22 +554,21 @@ export class PlaybackEngine {
     ms: number,
     onDone?: () => void,
   ): void {
-    this.interruptRampToken += 1;
-    const myToken = this.interruptRampToken;
-    this.interruptGain = clamp01(from);
-    this.applyInterruptVolume();
+    if (!this.interrupt) return;
+    this.interrupt.rampToken += 1;
+    const myToken = this.interrupt.rampToken;
+    const node = this.interrupt.gainNode;
+    node.gain.value = clamp01(from);
     if (ms <= 0) {
-      this.interruptGain = clamp01(to);
-      this.applyInterruptVolume();
+      node.gain.value = clamp01(to);
       onDone?.();
       return;
     }
     const start = performance.now();
     const tick = (now: number) => {
-      if (this.interruptRampToken !== myToken) return;
+      if (!this.interrupt || this.interrupt.rampToken !== myToken) return;
       const t = Math.min(1, (now - start) / ms);
-      this.interruptGain = clamp01(from + (to - from) * t);
-      this.applyInterruptVolume();
+      node.gain.value = clamp01(from + (to - from) * t);
       if (t < 1) {
         window.requestAnimationFrame(tick);
       } else {
@@ -486,9 +580,53 @@ export class PlaybackEngine {
 
   private silenceAll(): void {
     this.pauseAmbient();
-    if (this.interruptEl) this.interruptEl.pause();
-    this.interruptGain = 0;
-    this.applyInterruptVolume();
+    if (this.interrupt) {
+      this.interrupt.el.pause();
+      this.interrupt.gainNode.gain.value = 0;
+    }
+  }
+
+  /** play() wrapper that ensures the AudioContext is running before
+   *  attempting playback, surfaces autoplay errors via toast, and is safe
+   *  to call repeatedly. */
+  private safePlay(label: string, el: HTMLAudioElement): void {
+    if (!el.src) return;
+    const ctx = this.audioContext;
+    const startPlay = () => {
+      void el
+        .play()
+        .then(() => {
+          console.info(`[playbackEngine] ${label} play OK`, {
+            src: el.src,
+          });
+        })
+        .catch((err: DOMException) => {
+          console.warn(`[playbackEngine] ${label} play rejected`, {
+            name: err.name,
+            message: err.message,
+            ctxState: ctx?.state ?? "no-ctx",
+          });
+          if (err.name === "NotAllowedError") {
+            if (!autoplayBlockedReported) {
+              autoplayBlockedReported = true;
+              toast.error(
+                "Browser blocked playback",
+                "Click anywhere on the page once, then press Play again.",
+              );
+            }
+          } else if (err.name !== "AbortError") {
+            toast.error(`Playback failed (${err.name})`, err.message);
+          }
+        });
+    };
+    if (ctx !== null && ctx.state !== "running") {
+      void ctx
+        .resume()
+        .catch(() => undefined)
+        .finally(startPlay);
+    } else {
+      startPlay();
+    }
   }
 
   // ----- position reports --------------------------------------------
@@ -503,8 +641,8 @@ export class PlaybackEngine {
   }
 
   private currentPositionMs(): number {
-    if (this.lastInterruptId !== null && this.interruptEl) {
-      return this.interruptEl.currentTime * 1000;
+    if (this.lastInterruptId !== null && this.interrupt) {
+      return this.interrupt.el.currentTime * 1000;
     }
     const ch = this.currentChannel();
     if (!ch) return 0;
@@ -513,8 +651,6 @@ export class PlaybackEngine {
 
   // ----- diagnostics -------------------------------------------------
 
-  /** Snapshot of engine state for the Settings → Diagnostics panel.
-   *  Plain JSON; cheap to call. */
   getDiagnostics(): {
     isMyOutput: boolean;
     masterVolume: number;
@@ -522,6 +658,8 @@ export class PlaybackEngine {
     lastIsPlaying: boolean;
     lastAmbientId: number | null;
     lastInterruptId: number | null;
+    audioContextState: string;
+    activeEffectCount: number;
     channels: {
       label: string;
       gain: number;
@@ -536,12 +674,12 @@ export class PlaybackEngine {
       errorCode: number | null;
     }[];
   } {
-    const snap = (label: string, ch: AmbientChannel | null) =>
+    const snapAmbient = (label: string, ch: AmbientChannel | null) =>
       ch === null
         ? null
         : {
             label,
-            gain: ch.gain,
+            gain: ch.gainNode.gain.value,
             paused: ch.el.paused,
             muted: ch.el.muted,
             volume: ch.el.volume,
@@ -553,20 +691,20 @@ export class PlaybackEngine {
             errorCode: ch.el.error?.code ?? null,
           };
     const interrupt =
-      this.interruptEl === null
+      this.interrupt === null
         ? null
         : {
             label: "interrupt",
-            gain: this.interruptGain,
-            paused: this.interruptEl.paused,
-            muted: this.interruptEl.muted,
-            volume: this.interruptEl.volume,
-            readyState: this.interruptEl.readyState,
-            networkState: this.interruptEl.networkState,
-            currentTime: this.interruptEl.currentTime,
-            duration: this.interruptEl.duration,
-            src: this.interruptEl.src,
-            errorCode: this.interruptEl.error?.code ?? null,
+            gain: this.interrupt.gainNode.gain.value,
+            paused: this.interrupt.el.paused,
+            muted: this.interrupt.el.muted,
+            volume: this.interrupt.el.volume,
+            readyState: this.interrupt.el.readyState,
+            networkState: this.interrupt.el.networkState,
+            currentTime: this.interrupt.el.currentTime,
+            duration: this.interrupt.el.duration,
+            src: this.interrupt.el.src,
+            errorCode: this.interrupt.el.error?.code ?? null,
           };
     return {
       isMyOutput: this.isMyOutput,
@@ -575,9 +713,11 @@ export class PlaybackEngine {
       lastIsPlaying: this.lastIsPlaying,
       lastAmbientId: this.lastAmbientId,
       lastInterruptId: this.lastInterruptId,
+      audioContextState: this.audioContext?.state ?? "none",
+      activeEffectCount: this.installedEffects.length,
       channels: [
-        snap("ambientA", this.ambientA),
-        snap("ambientB", this.ambientB),
+        snapAmbient("ambientA", this.ambientA),
+        snapAmbient("ambientB", this.ambientB),
         interrupt,
       ].filter((x): x is NonNullable<typeof x> => x !== null),
     };
@@ -599,6 +739,161 @@ export class PlaybackEngine {
     }
     this.onInterruptSkipNext?.();
   };
+}
+
+// ----- effect builders -----------------------------------------------
+
+const _warnedUnsupportedEffectTypes = new Set<string>();
+
+function buildEffect(ctx: AudioContext, spec: EffectSpec): BuiltEffect | null {
+  switch (spec.type) {
+    case "lowpass":
+    case "highpass":
+    case "bandpass":
+      return buildBiquad(ctx, spec, spec.type);
+    case "delay":
+      return buildDelay(ctx, spec);
+    case "distortion":
+      return buildDistortion(ctx, spec);
+    case "tremolo":
+      return buildTremolo(ctx, spec);
+    case "reverb":
+      return buildReverb(ctx, spec);
+    case "pitch_shift":
+      // Web Audio has no native pitch shifter and a third-party node would
+      // double the bundle. Skip silently — the docs in PresetsView call
+      // this out so users aren't surprised.
+      return null;
+    default:
+      if (!_warnedUnsupportedEffectTypes.has(spec.type)) {
+        _warnedUnsupportedEffectTypes.add(spec.type);
+        console.warn(`[playbackEngine] unsupported effect type '${spec.type}' — skipped`);
+      }
+      return null;
+  }
+}
+
+function buildBiquad(
+  ctx: AudioContext,
+  spec: EffectSpec,
+  kind: "lowpass" | "highpass" | "bandpass",
+): BuiltEffect {
+  const node = ctx.createBiquadFilter();
+  node.type = kind;
+  node.frequency.value = numParam(spec, "frequency", kind === "lowpass" ? 800 : kind === "highpass" ? 200 : 1000);
+  node.Q.value = numParam(spec, "q", 0.7);
+  return { input: node, output: node };
+}
+
+function buildDelay(ctx: AudioContext, spec: EffectSpec): BuiltEffect {
+  const time = Math.max(0, Math.min(numParam(spec, "time", 0.25), 5));
+  const feedback = clamp01(numParam(spec, "feedback", 0.3));
+  const wet = clamp01(numParam(spec, "wet", 0.4));
+
+  const inputNode = ctx.createGain();
+  const outputNode = ctx.createGain();
+  const delay = ctx.createDelay(5);
+  const fb = ctx.createGain();
+  const wetGain = ctx.createGain();
+  const dryGain = ctx.createGain();
+
+  delay.delayTime.value = time;
+  fb.gain.value = feedback;
+  wetGain.gain.value = wet;
+  dryGain.gain.value = 1;
+
+  inputNode.connect(dryGain);
+  inputNode.connect(delay);
+  delay.connect(fb);
+  fb.connect(delay);
+  delay.connect(wetGain);
+  wetGain.connect(outputNode);
+  dryGain.connect(outputNode);
+
+  return { input: inputNode, output: outputNode };
+}
+
+function buildDistortion(ctx: AudioContext, spec: EffectSpec): BuiltEffect {
+  const amount = Math.max(0, numParam(spec, "amount", 50));
+  const node = ctx.createWaveShaper();
+  // WaveShaperNode.curve narrowed to Float32Array<ArrayBuffer> in newer TS
+  // libs. Constructing in-place from an ArrayBuffer keeps the type happy
+  // without resorting to a cast.
+  const n = 4096;
+  const curve = new Float32Array(new ArrayBuffer(n * 4));
+  const deg = Math.PI / 180;
+  for (let i = 0; i < n; i++) {
+    const x = (i * 2) / n - 1;
+    curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
+  }
+  node.curve = curve;
+  node.oversample = "4x";
+  return { input: node, output: node };
+}
+
+function buildTremolo(ctx: AudioContext, spec: EffectSpec): BuiltEffect {
+  const rate = Math.max(0.01, numParam(spec, "rate", 5));
+  const depth = clamp01(numParam(spec, "depth", 0.5));
+
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = 1 - depth / 2;
+
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = rate;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = depth / 2;
+  lfo.connect(lfoGain);
+  lfoGain.connect(gainNode.gain);
+  lfo.start();
+
+  return {
+    input: gainNode,
+    output: gainNode,
+    dispose: () => {
+      try {
+        lfo.stop();
+      } catch {
+        /* already stopped */
+      }
+    },
+  };
+}
+
+function buildReverb(ctx: AudioContext, spec: EffectSpec): BuiltEffect {
+  const decay = Math.max(0.05, numParam(spec, "decay", 2));
+  const wet = clamp01(numParam(spec, "wet", 0.4));
+
+  const inputNode = ctx.createGain();
+  const outputNode = ctx.createGain();
+  const convolver = ctx.createConvolver();
+  convolver.buffer = makeReverbIR(ctx, decay);
+
+  const wetGain = ctx.createGain();
+  const dryGain = ctx.createGain();
+  wetGain.gain.value = wet;
+  dryGain.gain.value = 1;
+
+  inputNode.connect(dryGain);
+  dryGain.connect(outputNode);
+  inputNode.connect(convolver);
+  convolver.connect(wetGain);
+  wetGain.connect(outputNode);
+
+  return { input: inputNode, output: outputNode };
+}
+
+function makeReverbIR(ctx: AudioContext, decay: number): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const length = Math.max(1, Math.floor(sampleRate * decay));
+  const buffer = ctx.createBuffer(2, length, sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      const t = i / length;
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2);
+    }
+  }
+  return buffer;
 }
 
 export const playbackEngine = new PlaybackEngine();

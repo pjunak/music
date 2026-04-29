@@ -1,8 +1,11 @@
 import type {
   FolderEntry,
+  InterruptSpec,
   ModeDetail,
   ModeSummary,
   PlaylistMeta,
+  SceneLoopingSfx,
+  SceneSpec,
   Track,
   TrackInPlaylist,
   TreeResponse,
@@ -375,6 +378,22 @@ export const modesAdminApi = {
     api.delete<void>(
       `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
     ),
+  updateScene: (
+    modeId: string,
+    sceneId: string,
+    payload: {
+      name?: string;
+      description?: string;
+      ambient?: { playlist?: string; crossfade_ms?: number };
+      clear_ambient?: boolean;
+      presets?: string[];
+      looping_sfx?: SceneLoopingSfx[];
+    },
+  ) =>
+    api.patch<SceneSpec>(
+      `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
+      payload,
+    ),
 
   // Soundboard editor — categories + items inside an existing soundboard.
   // Each call returns the updated SoundboardManifest so the UI can re-render
@@ -429,6 +448,43 @@ export const modesAdminApi = {
   ) =>
     api.delete<unknown>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items/${index}`,
+    ),
+
+  // Interrupt templates — saved on the mode's manifest.yaml.
+  addInterrupt: (
+    modeId: string,
+    payload: {
+      name: string;
+      playlist?: string;
+      soundboard_item?: string;
+      fade_in_ms?: number;
+      fade_out_ms?: number;
+      return_to_ambient?: boolean;
+    },
+  ) =>
+    api.post<InterruptSpec[]>(
+      `/api/modes/${encodeURIComponent(modeId)}/interrupts`,
+      payload,
+    ),
+  updateInterrupt: (
+    modeId: string,
+    index: number,
+    payload: Partial<{
+      name: string;
+      playlist: string | null;
+      soundboard_item: string | null;
+      fade_in_ms: number;
+      fade_out_ms: number;
+      return_to_ambient: boolean;
+    }>,
+  ) =>
+    api.patch<InterruptSpec[]>(
+      `/api/modes/${encodeURIComponent(modeId)}/interrupts/${index}`,
+      payload,
+    ),
+  deleteInterrupt: (modeId: string, index: number) =>
+    api.delete<InterruptSpec[]>(
+      `/api/modes/${encodeURIComponent(modeId)}/interrupts/${index}`,
     ),
 };
 

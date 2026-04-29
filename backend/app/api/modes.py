@@ -336,6 +336,116 @@ def delete_scene(mode_id: str, scene_id: str, _: CurrentUser) -> None:
     modes_loader.load_all()
 
 
+# --- scene contents editing ----------------------------------------------
+
+
+class SceneAmbientUpdate(BaseModel):
+    """Just the ambient block. Empty/None clears it."""
+
+    playlist: str | None = Field(None, max_length=256)
+    crossfade_ms: int | None = Field(None, ge=0, le=30000)
+
+
+class SceneLoopingSfx(BaseModel):
+    soundboard: str = Field(min_length=1, max_length=128)
+    item: str = Field(min_length=1, max_length=512)
+    volume: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class SceneUpdate(BaseModel):
+    """Fields to overwrite on a scene's YAML. Anything left unset is
+    preserved; passing an explicit `null` (where allowed) clears the field."""
+
+    name: str | None = Field(None, min_length=1, max_length=128)
+    description: str | None = None
+    ambient: SceneAmbientUpdate | None = None
+    clear_ambient: bool = Field(
+        False,
+        description="When true, removes the ambient block entirely. Takes precedence over `ambient`.",
+    )
+    presets: list[str] | None = Field(None, max_length=32)
+    looping_sfx: list[SceneLoopingSfx] | None = None
+
+
+def _load_scene_yaml(mode_id: str, scene_id: str) -> tuple[Path, dict]:
+    mode_dir = _mode_dir_or_404(mode_id)
+    scene_path = mode_dir / "scenes" / f"{scene_id}.yaml"
+    if not scene_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"scene '{scene_id}' not found in mode '{mode_id}'",
+        )
+    raw = yaml.safe_load(scene_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"scene '{scene_id}' YAML is not a mapping",
+        )
+    raw.setdefault("id", scene_id)
+    return (scene_path, raw)
+
+
+def _save_scene_yaml(path: Path, payload: dict, mode_id: str, scene_id: str) -> SceneSpec:
+    _write_yaml(path, payload)
+    modes_loader.load_all()
+    manifest = modes_loader.get_mode(mode_id)
+    if manifest is None or scene_id not in manifest.scenes:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="scene saved but failed to reload",
+        )
+    return manifest.scenes[scene_id]
+
+
+@router.patch(
+    "/{mode_id}/scenes/{scene_id}",
+    response_model=SceneSpec,
+)
+def update_scene(
+    mode_id: str,
+    scene_id: str,
+    payload: SceneUpdate,
+    _: CurrentUser,
+) -> SceneSpec:
+    _validate_slug(scene_id, "scene")
+    path, scene = _load_scene_yaml(mode_id, scene_id)
+
+    fields = payload.model_dump(exclude_unset=True)
+    if "name" in fields and fields["name"] is not None:
+        scene["name"] = fields["name"]
+    if "description" in fields:
+        if fields["description"]:
+            scene["description"] = fields["description"]
+        else:
+            scene.pop("description", None)
+    if payload.clear_ambient:
+        scene.pop("ambient", None)
+    elif "ambient" in fields and payload.ambient is not None:
+        amb_payload = payload.ambient.model_dump(exclude_none=True)
+        if amb_payload:
+            scene["ambient"] = amb_payload
+        else:
+            # Both fields None — caller probably meant clear_ambient. Honour
+            # the literal request: empty dict means "ambient block exists
+            # but has nothing in it", which is functionally equivalent to
+            # absent. Drop it to keep YAML tidy.
+            scene.pop("ambient", None)
+    if "presets" in fields:
+        if payload.presets:
+            scene["presets"] = list(payload.presets)
+        else:
+            scene.pop("presets", None)
+    if "looping_sfx" in fields:
+        if payload.looping_sfx:
+            scene["looping_sfx"] = [
+                ls.model_dump(exclude_none=True) for ls in payload.looping_sfx
+            ]
+        else:
+            scene.pop("looping_sfx", None)
+
+    return _save_scene_yaml(path, scene, mode_id, scene_id)
+
+
 # --- soundboard editing (categories + items inside an existing soundboard) ---
 
 
@@ -487,5 +597,158 @@ def delete_soundboard_item(
         )
     items.pop(index)
     return _save_soundboard_yaml(path, sb, mode_id)
+
+
+# --- interrupt templates (CRUD on the mode's manifest.interrupts list) ----
+
+
+class InterruptTemplateCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    playlist: str | None = Field(None, max_length=256)
+    soundboard_item: str | None = Field(None, max_length=512)
+    fade_in_ms: int = Field(0, ge=0, le=10000)
+    fade_out_ms: int = Field(0, ge=0, le=10000)
+    return_to_ambient: bool = True
+
+
+class InterruptTemplateUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    playlist: str | None = Field(None, max_length=256)
+    soundboard_item: str | None = Field(None, max_length=512)
+    fade_in_ms: int | None = Field(None, ge=0, le=10000)
+    fade_out_ms: int | None = Field(None, ge=0, le=10000)
+    return_to_ambient: bool | None = None
+
+
+def _load_manifest_yaml(mode_id: str) -> tuple[Path, dict]:
+    """Read a mode's manifest.yaml for editing, returning the path and a
+    parsed dict (interrupts list seeded if missing)."""
+    mode_dir = _mode_dir_or_404(mode_id)
+    manifest_path = mode_dir / "manifest.yaml"
+    if not manifest_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"manifest.yaml missing for mode '{mode_id}'",
+        )
+    raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"manifest.yaml for mode '{mode_id}' is not a mapping",
+        )
+    raw.setdefault("interrupts", [])
+    return (manifest_path, raw)
+
+
+def _save_manifest_yaml(path: Path, payload: dict, mode_id: str) -> ModeManifest:
+    _write_yaml(path, payload)
+    modes_loader.load_all()
+    manifest = modes_loader.get_mode(mode_id)
+    if manifest is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="manifest saved but failed to reload",
+        )
+    return manifest
+
+
+def _validate_interrupt_payload(
+    playlist: str | None, soundboard_item: str | None
+) -> None:
+    """Exactly one of playlist / soundboard_item must be set. Both empty
+    is meaningless; both set is ambiguous."""
+    has_playlist = bool(playlist)
+    has_item = bool(soundboard_item)
+    if has_playlist == has_item:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "interrupt template must reference exactly one of "
+                "'playlist' or 'soundboard_item'"
+            ),
+        )
+
+
+@router.post(
+    "/{mode_id}/interrupts",
+    response_model=list[InterruptSpec],
+    status_code=status.HTTP_201_CREATED,
+)
+def add_interrupt_template(
+    mode_id: str, payload: InterruptTemplateCreate, _: CurrentUser
+) -> list[InterruptSpec]:
+    _validate_interrupt_payload(payload.playlist, payload.soundboard_item)
+    path, manifest = _load_manifest_yaml(mode_id)
+    interrupts = manifest.setdefault("interrupts", [])
+    new_entry: dict = {"name": payload.name}
+    if payload.playlist:
+        new_entry["playlist"] = payload.playlist
+    if payload.soundboard_item:
+        new_entry["soundboard_item"] = payload.soundboard_item
+    if payload.fade_in_ms:
+        new_entry["fade_in_ms"] = payload.fade_in_ms
+    if payload.fade_out_ms:
+        new_entry["fade_out_ms"] = payload.fade_out_ms
+    if not payload.return_to_ambient:
+        new_entry["return_to_ambient"] = False
+    interrupts.append(new_entry)
+    reloaded = _save_manifest_yaml(path, manifest, mode_id)
+    return reloaded.interrupts
+
+
+@router.patch(
+    "/{mode_id}/interrupts/{index}",
+    response_model=list[InterruptSpec],
+)
+def update_interrupt_template(
+    mode_id: str,
+    index: int,
+    payload: InterruptTemplateUpdate,
+    _: CurrentUser,
+) -> list[InterruptSpec]:
+    path, manifest = _load_manifest_yaml(mode_id)
+    interrupts = manifest.get("interrupts", [])
+    if index < 0 or index >= len(interrupts):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="interrupt index out of range",
+        )
+    entry = dict(interrupts[index])
+    fields = payload.model_dump(exclude_unset=True)
+    for key, value in fields.items():
+        if value is None or value == "":
+            entry.pop(key, None)
+        else:
+            entry[key] = value
+    # Re-validate the playlist / soundboard_item invariant against the merged
+    # entry — a partial update that nulls one source must leave the other set.
+    _validate_interrupt_payload(
+        entry.get("playlist") if isinstance(entry.get("playlist"), str) else None,
+        entry.get("soundboard_item")
+        if isinstance(entry.get("soundboard_item"), str)
+        else None,
+    )
+    interrupts[index] = entry
+    reloaded = _save_manifest_yaml(path, manifest, mode_id)
+    return reloaded.interrupts
+
+
+@router.delete(
+    "/{mode_id}/interrupts/{index}",
+    response_model=list[InterruptSpec],
+)
+def delete_interrupt_template(
+    mode_id: str, index: int, _: CurrentUser
+) -> list[InterruptSpec]:
+    path, manifest = _load_manifest_yaml(mode_id)
+    interrupts = manifest.get("interrupts", [])
+    if index < 0 or index >= len(interrupts):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="interrupt index out of range",
+        )
+    interrupts.pop(index)
+    reloaded = _save_manifest_yaml(path, manifest, mode_id)
+    return reloaded.interrupts
 
 

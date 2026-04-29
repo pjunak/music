@@ -7,10 +7,10 @@ import { wsClient } from "@/core/ws";
 
 /** Interrupt control surface.
  *
- *  When an interrupt is active, shows what's playing and offers a Cancel.
- *  When none is active, points the user at the Library tab — that's where
- *  you fire one (right-click a track → "Fire as interrupt", in a future UX).
- *  For now firing is via a track-id input as a fallback. */
+ *  When an interrupt is active, shows what's playing and offers Skip /
+ *  Cancel. When none is active, points the user at the Library tab — the
+ *  ⚡ button on each track row fires it, and mode interrupt templates
+ *  (Modes view) fire pre-configured ones. */
 export function InterruptSection() {
   const interrupt = usePlayerStore((s) => s.state?.interrupt ?? null);
   const [track, setTrack] = useState<Track | null>(null);
@@ -44,7 +44,8 @@ export function InterruptSection() {
   if (interrupt === null) {
     return (
       <p className="muted small">
-        No interrupt active. Fire one from the Library tab.
+        No interrupt active. Fire one from the Library (⚡ on a track row) or
+        from a mode interrupt template.
       </p>
     );
   }

@@ -108,13 +108,20 @@ export interface SoundboardManifest {
   categories: SoundboardCategory[];
 }
 
+export interface SceneLoopingSfx {
+  soundboard: string;
+  item: string;
+  volume?: number;
+}
+
 export interface SceneSpec {
   id: string;
   name: string;
   description?: string | null;
   ambient?: { playlist?: string; crossfade_ms?: number } | null;
   presets?: string[];
-  // looping_sfx, lights, external — opaque from the frontend's perspective.
+  looping_sfx?: SceneLoopingSfx[];
+  // lights, external — opaque from the frontend's perspective for now.
   [key: string]: unknown;
 }
 
