@@ -72,15 +72,37 @@ def _ws_authed(client: TestClient) -> Iterator:
 # --- auth -------------------------------------------------------------------
 
 
-def test_ws_rejects_without_cookie(client: TestClient) -> None:
-    from starlette.websockets import WebSocketDisconnect
+def test_ws_accepts_guest_connection_read_only(client: TestClient) -> None:
+    """Without a cookie the socket connects in guest mode: it gets the
+    state snapshot like any other client, but mutating actions are
+    rejected with an `error` message instead of being applied."""
+    with client.websocket_connect("/api/ws") as ws:
+        snap = ws.receive_json()
+        assert snap["type"] == "state_snapshot"
 
-    with (
-        pytest.raises(WebSocketDisconnect) as ei,
-        client.websocket_connect("/api/ws"),
-    ):
-        pass
-    assert ei.value.code == 4401
+        ws.send_json({"type": "set_volume", "volume": 0.5})
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert "guest" in err["detail"].lower()
+
+
+def test_ws_guest_can_register_to_appear_in_outputs(client: TestClient) -> None:
+    """Register is the one mutation a guest is allowed — so a logged-out
+    Player tab on a TV can show up in the operator's Outputs picker."""
+    with client.websocket_connect("/api/ws") as guest:
+        guest.receive_json()  # snapshot
+        guest.send_json(
+            {
+                "type": "register",
+                "name": "TV",
+                "capabilities": ["audio_output"],
+            }
+        )
+        # Register is broadcast as a state_changed; receive it.
+        msg = guest.receive_json()
+        assert msg["type"] == "state_changed"
+        names = [d["name"] for d in msg["state"]["connected_devices"]]
+        assert "TV" in names
 
 
 def test_ws_accepts_with_cookie_and_sends_snapshot(client: TestClient) -> None:
@@ -253,6 +275,77 @@ def test_set_active_outputs_accepts_audio_output_device(client: TestClient) -> N
         for msg in (msg_a, msg_b):
             assert msg["type"] == "state_changed"
             assert msg["state"]["active_output_device_ids"] == [snap_a["your_device_id"]]
+
+
+def test_set_active_outputs_does_not_re_validate_existing_ids(
+    client: TestClient,
+) -> None:
+    """Stale device ids that are already in active_output_device_ids must
+    not block the operator's next toggle. We only validate ids being
+    *added* to the list."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
+        snap_a = a.receive_json()
+        b.receive_json()
+        a.send_json(
+            {"type": "register", "name": "A", "capabilities": ["audio_output"]}
+        )
+        a.receive_json()
+        b.receive_json()
+        b.send_json(
+            {"type": "register", "name": "B", "capabilities": ["audio_output"]}
+        )
+        a.receive_json()
+        b.receive_json()
+
+        # Set A as the only active output.
+        b.send_json(
+            {"type": "set_active_outputs", "device_ids": [snap_a["your_device_id"]]}
+        )
+        a.receive_json()
+        b.receive_json()
+
+    # `a` socket closes; its device id is now stale in active_output_device_ids
+    # (the disconnect-prune state_changed will land on `b` before this block ends).
+    # `b` then logs in fresh and tries to add itself — the request will include
+    # both the stale id (from current state) and the new id (b). The server must
+    # not reject because of the stale one.
+
+    with client.websocket_connect("/api/ws") as fresh:
+        snap_fresh = fresh.receive_json()
+        fresh.send_json(
+            {"type": "register", "name": "Fresh", "capabilities": ["audio_output"]}
+        )
+        fresh.receive_json()
+        # Whatever's already in active_output_device_ids stays; we just add ourselves.
+        existing = list(snap_fresh["state"]["active_output_device_ids"])
+        fresh.send_json(
+            {
+                "type": "set_active_outputs",
+                "device_ids": [*existing, snap_fresh["your_device_id"]],
+            }
+        )
+        # Either we get a state_changed (success) — but never an error.
+        msg = fresh.receive_json()
+        assert msg["type"] == "state_changed"
+        assert snap_fresh["your_device_id"] in msg["state"]["active_output_device_ids"]
+
+
+def test_remove_active_output_mutator() -> None:
+    """Unit-test the mutator the WS disconnect path uses to prune stale
+    device ids. (A full WS-disconnect integration test had timing issues
+    with the TestClient that weren't worth the test's value.)"""
+    from app.sync.protocol import PlayerState
+    from app.sync.state import remove_active_output
+
+    initial = PlayerState(active_output_device_ids=["dev-keep", "dev-drop"])
+    mutated = remove_active_output("dev-drop")(initial)
+    assert mutated.active_output_device_ids == ["dev-keep"]
+
+    # No-op when the id isn't present — returns the same instance so the
+    # state machine knows to skip persistence + broadcast.
+    same = remove_active_output("dev-not-present")(initial)
+    assert same is initial
 
 
 # --- position reports -------------------------------------------------------

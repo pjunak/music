@@ -9,8 +9,12 @@ from fastapi.testclient import TestClient
 # --- playback: reference-gated -----------------------------------------------
 
 
-def test_playback_requires_auth(client: TestClient) -> None:
-    assert client.get("/api/sfx/file", params={"path": "dnd/door.ogg"}).status_code == 401
+def test_playback_open_to_guest(client: TestClient) -> None:
+    """SFX file playback is intentionally guest-accessible so a logged-out
+    Player tab (TV bookmark) can render soundboard fires without the
+    operator having to log in on the room display."""
+    r = client.get("/api/sfx/file", params={"path": "dnd/door.ogg"})
+    assert r.status_code == 200
 
 
 def test_playback_serves_referenced_file(auth_client: TestClient) -> None:

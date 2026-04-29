@@ -45,6 +45,16 @@ export function ControlsView() {
           <QuickPlaylists />
         </section>
       </div>
+      <footer className="controls-footer">
+        <a
+          href="/diagnostics"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-ghost"
+        >
+          🔧 Open diagnostics in new tab
+        </a>
+      </footer>
     </div>
   );
 }

@@ -190,8 +190,16 @@ async def _dispatch(action: Any, device_id: str, websocket: WebSocket) -> None:
         return
 
     if isinstance(action, SetActiveOutputsAction):
+        # Only validate device ids being **added** by this action. Existing
+        # ids in active_output_device_ids may be stale references to
+        # devices that disconnected long ago (e.g. left over in
+        # playback_state across server restarts) — re-validating them
+        # would block every toggle attempt for the user.
+        current_state = await state_module.machine.snapshot()
+        already_active = set(current_state.active_output_device_ids)
+        new_ids = [d for d in action.device_ids if d not in already_active]
         bad = [
-            d for d in action.device_ids if not registry.has_capability(d, "audio_output")
+            d for d in new_ids if not registry.has_capability(d, "audio_output")
         ]
         if bad:
             await _send_error(
@@ -473,10 +481,13 @@ async def _dispatch(action: Any, device_id: str, websocket: WebSocket) -> None:
 
 @router.websocket("/api/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
+    # Guests (no/invalid session cookie) get a read-only socket — they
+    # receive state broadcasts and SFX events so a logged-out Player tab
+    # (TV bookmark) can act as an audio output, but any mutating action
+    # they send is rejected. Keeps internet-exposed deployments from
+    # giving anonymous viewers control over playback.
     user = await _authenticate(websocket)
-    if user is None:
-        await websocket.close(code=4401)
-        return
+    is_guest = user is None
 
     await websocket.accept()
 
@@ -502,6 +513,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 await _send_error(websocket, f"invalid action: {e.errors()[0]['msg']}")
                 continue
 
+            # Guests can register themselves (so the device shows up as a
+            # potential audio_output) but nothing else.
+            if is_guest and not isinstance(action, RegisterAction):
+                await _send_error(
+                    websocket, "guest sessions cannot mutate state — please sign in"
+                )
+                continue
+
             try:
                 await _dispatch(action, device.device_id, websocket)
             except Exception:
@@ -510,6 +529,13 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     finally:
         manager.remove(device.device_id)
         registry.remove(device.device_id)
+        # Prune the disconnecting device from active_output_device_ids so
+        # the operator's next session doesn't inherit a stale reference
+        # that blocks toggle attempts (see set_active_outputs validation).
+        with contextlib.suppress(Exception):
+            await commit_and_broadcast(
+                state_module.remove_active_output(device.device_id)
+            )
         with contextlib.suppress(Exception):
             new_state = await state_module.machine.snapshot()
             await manager.broadcast_state(new_state)

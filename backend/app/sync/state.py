@@ -151,6 +151,20 @@ def set_active_outputs(device_ids: list[str]) -> Any:
     return _mut
 
 
+def remove_active_output(device_id: str) -> Any:
+    """Drop a single device id from `active_output_device_ids`. No-op if
+    the id isn't present. Used by the WS disconnect path to keep the list
+    free of stale device ids."""
+
+    def _mut(state: PlayerState) -> PlayerState:
+        if device_id not in state.active_output_device_ids:
+            return state
+        next_ids = [d for d in state.active_output_device_ids if d != device_id]
+        return state.model_copy(update={"active_output_device_ids": next_ids})
+
+    return _mut
+
+
 def set_active_soundboard(soundboard_id: str | None) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if state.active_soundboard_id == soundboard_id:

@@ -10,29 +10,50 @@ from app.models.auth_session import AuthSession
 from app.models.user import User
 
 
-def get_current_user(
-    db: Annotated[Session, Depends(get_db)],
-    session_cookie: Annotated[str | None, Cookie(alias="music_session")] = None,
-) -> User:
+def _resolve_user(
+    db: Session, session_cookie: str | None
+) -> User | None:
+    """Look up the user behind the session cookie. Returns None for absent
+    or invalid cookies (caller decides whether that's allowed)."""
     if not session_cookie:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
-
+        return None
     session = db.get(AuthSession, session_cookie)
     if session is None or session.expires_at <= datetime.now(UTC):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="session expired or invalid"
-        )
-
+        return None
     user = db.get(User, session.user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
-
+        return None
     session.last_seen = datetime.now(UTC)
     db.commit()
     return user
 
 
+def get_current_user(
+    db: Annotated[Session, Depends(get_db)],
+    session_cookie: Annotated[str | None, Cookie(alias="music_session")] = None,
+) -> User:
+    user = _resolve_user(db, session_cookie)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated"
+        )
+    return user
+
+
+def get_optional_user(
+    db: Annotated[Session, Depends(get_db)],
+    session_cookie: Annotated[str | None, Cookie(alias="music_session")] = None,
+) -> User | None:
+    """Soft auth — returns the user if logged in, None for guests. Used by
+    Player-relevant endpoints (track stream, cover art, single-track
+    metadata, SFX file) so a logged-out viewer (e.g. a TV bookmark) can
+    still play whatever the DM has queued up. Mutating endpoints continue
+    to use `CurrentUser` and reject guests with 401."""
+    return _resolve_user(db, session_cookie)
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 DbSession = Annotated[Session, Depends(get_db)]
 
 # Re-export so routers don't have to import get_settings directly for cookie config.

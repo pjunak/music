@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.library import index as library_index
 from app.models.track import Track
 
@@ -197,12 +197,16 @@ def search(
 
 
 @router.get("/tracks/{track_id}", response_model=TrackOut)
-def get_track(track_id: int, _: CurrentUser, db: DbSession) -> TrackOut:
+def get_track(track_id: int, _: OptionalUser, db: DbSession) -> TrackOut:
+    """Single-track metadata. Open to guests so a logged-out Player tab
+    (e.g. a bookmarked TV display) can show what's playing."""
     return TrackOut.model_validate(_track_or_404(db, track_id))
 
 
 @router.get("/tracks/{track_id}/stream")
-def stream_track(track_id: int, _: CurrentUser, db: DbSession) -> FileResponse:
+def stream_track(track_id: int, _: OptionalUser, db: DbSession) -> FileResponse:
+    """Stream audio bytes. Guest-accessible — same rationale as the
+    metadata endpoint; a TV display has to actually play the audio."""
     track = _track_or_404(db, track_id)
     abs_path = library_index.to_absolute(track.path)
     if not abs_path.is_file():
@@ -211,7 +215,8 @@ def stream_track(track_id: int, _: CurrentUser, db: DbSession) -> FileResponse:
 
 
 @router.get("/tracks/{track_id}/cover")
-def track_cover(track_id: int, _: CurrentUser, db: DbSession) -> Response:
+def track_cover(track_id: int, _: OptionalUser, db: DbSession) -> Response:
+    """Cover art. Guest-accessible — Player tab needs it for the room display."""
     track = _track_or_404(db, track_id)
     art = library_index.cover_art_for(track)
     if art is None:

@@ -123,6 +123,24 @@ export function SettingsView() {
           </button>
         </div>
       </section>
+
+      <section className="controls-section">
+        <h3>Diagnostics</h3>
+        <p className="muted small">
+          For debugging "no audio" or "device not showing up" issues. Opens in
+          a new tab so you can keep it open while clicking around in the main
+          window.
+        </p>
+        <div>
+          <a
+            href="/diagnostics"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            🔧 Open diagnostics in new tab
+          </a>
+        </div>
+      </section>
     </div>
   );
 }

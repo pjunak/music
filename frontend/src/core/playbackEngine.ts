@@ -23,6 +23,7 @@
  * `docs/FUTURE.md`.
  */
 
+import { toast } from "@/core/toast";
 import type { PlayerState } from "@/core/types";
 
 export interface EffectSpec {
@@ -53,6 +54,67 @@ const POSITION_REPORT_INTERVAL_MS = 1000;
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+// One-shot guard for the autoplay-blocked toast: the browser blocks every
+// programmatic play() until first user gesture, and we don't want to spam
+// the toast layer with five identical errors back-to-back.
+let autoplayBlockedReported = false;
+
+function attachErrorLogger(label: string, el: HTMLAudioElement): void {
+  el.addEventListener("error", () => {
+    const err = el.error;
+    if (err === null) return;
+    // MediaError codes: 1 ABORTED, 2 NETWORK, 3 DECODE, 4 SRC_NOT_SUPPORTED.
+    const codeName = ["?", "ABORTED", "NETWORK", "DECODE", "SRC_NOT_SUPPORTED"][err.code] ?? "?";
+    console.warn(`[playbackEngine] ${label} audio error`, {
+      code: err.code,
+      codeName,
+      message: err.message,
+      src: el.src,
+    });
+    toast.error(
+      `Audio failed to load (${codeName})`,
+      err.message || `${label} channel — check the file or the network`,
+    );
+  });
+}
+
+/** Attempt to play an element. Surfaces autoplay-blocked and other failures
+ *  via console + toast. Safe to call repeatedly; play() on an
+ *  already-playing element resolves immediately. */
+function safePlay(label: string, el: HTMLAudioElement): void {
+  if (!el.src) return; // nothing to play yet
+  void el
+    .play()
+    .then(() => {
+      console.info(`[playbackEngine] ${label} play OK`, {
+        src: el.src,
+        volume: el.volume,
+      });
+    })
+    .catch((err: DOMException) => {
+      console.warn(`[playbackEngine] ${label} play rejected`, {
+        name: err.name,
+        message: err.message,
+        src: el.src,
+        volume: el.volume,
+        muted: el.muted,
+        readyState: el.readyState,
+      });
+      if (err.name === "NotAllowedError") {
+        if (!autoplayBlockedReported) {
+          autoplayBlockedReported = true;
+          toast.error(
+            "Browser blocked playback",
+            "Click anywhere on the page once, then press Play again.",
+          );
+        }
+      } else if (err.name !== "AbortError") {
+        // AbortError just means we paused mid-load — not interesting.
+        toast.error(`Playback failed (${err.name})`, err.message);
+      }
+    });
 }
 
 export class PlaybackEngine {
@@ -91,6 +153,8 @@ export class PlaybackEngine {
     this.ambientB = { el: b, gain: 0, rampToken: 0 };
     a.addEventListener("ended", this.handleAmbientEnded);
     b.addEventListener("ended", this.handleAmbientEnded);
+    attachErrorLogger("ambientA", a);
+    attachErrorLogger("ambientB", b);
     this.applyAmbientVolume(this.ambientA);
     this.applyAmbientVolume(this.ambientB);
   }
@@ -100,6 +164,7 @@ export class PlaybackEngine {
     this.interruptGain = 0;
     el.volume = 0;
     el.addEventListener("ended", this.handleInterruptEnded);
+    attachErrorLogger("interrupt", el);
   }
 
   setHandlers(handlers: {
@@ -215,13 +280,12 @@ export class PlaybackEngine {
     const el = new Audio();
     el.src = streamUrl;
     el.volume = clamp01(volume) * clamp01(this.lastVolume);
+    attachErrorLogger("sfx", el);
     const cleanup = (): void => {
       el.removeEventListener("ended", cleanup);
-      el.removeEventListener("error", cleanup);
     };
     el.addEventListener("ended", cleanup);
-    el.addEventListener("error", cleanup);
-    void el.play().catch(() => cleanup());
+    safePlay("sfx", el);
   }
 
   // ----- volume math --------------------------------------------------
@@ -270,14 +334,14 @@ export class PlaybackEngine {
       this.loadInto(current, url);
       this.setGainNow(current, 1);
       this.setGainNow(other, 0);
-      if (this.lastIsPlaying) void current.el.play().catch(() => undefined);
+      if (this.lastIsPlaying) safePlay("ambient", current.el);
       return;
     }
 
     // Crossfade: load on the OTHER channel and animate gains. After the
     // ramp finishes, the other channel becomes "current".
     this.loadInto(other, url);
-    void other.el.play().catch(() => undefined);
+    safePlay("ambient (incoming)", other.el);
     this.rampGain(current, current.gain, 0, crossfadeMs, () => {
       current.el.pause();
     });
@@ -288,7 +352,7 @@ export class PlaybackEngine {
   private resumeAmbient(): void {
     if (this.lastInterruptId !== null) return;
     const ch = this.currentChannel();
-    if (ch) void ch.el.play().catch(() => undefined);
+    if (ch) safePlay("ambient", ch.el);
   }
 
   private pauseAmbient(): void {
@@ -368,7 +432,7 @@ export class PlaybackEngine {
       this.interruptEl.load();
     }
     this.rampInterrupt(0, 1, fadeInMs);
-    void this.interruptEl.play().catch(() => undefined);
+    safePlay("interrupt", this.interruptEl);
   }
 
   private fadeOutInterrupt(ms: number): void {
@@ -385,7 +449,7 @@ export class PlaybackEngine {
     this.applyInterruptVolume();
     if (this.lastIsPlaying) {
       const ch = this.currentChannel();
-      if (ch) void ch.el.play().catch(() => undefined);
+      if (ch) safePlay("ambient", ch.el);
     }
   }
 
@@ -445,6 +509,78 @@ export class PlaybackEngine {
     const ch = this.currentChannel();
     if (!ch) return 0;
     return ch.el.currentTime * 1000;
+  }
+
+  // ----- diagnostics -------------------------------------------------
+
+  /** Snapshot of engine state for the Settings → Diagnostics panel.
+   *  Plain JSON; cheap to call. */
+  getDiagnostics(): {
+    isMyOutput: boolean;
+    masterVolume: number;
+    currentSlot: Slot;
+    lastIsPlaying: boolean;
+    lastAmbientId: number | null;
+    lastInterruptId: number | null;
+    channels: {
+      label: string;
+      gain: number;
+      paused: boolean;
+      muted: boolean;
+      volume: number;
+      readyState: number;
+      networkState: number;
+      currentTime: number;
+      duration: number;
+      src: string;
+      errorCode: number | null;
+    }[];
+  } {
+    const snap = (label: string, ch: AmbientChannel | null) =>
+      ch === null
+        ? null
+        : {
+            label,
+            gain: ch.gain,
+            paused: ch.el.paused,
+            muted: ch.el.muted,
+            volume: ch.el.volume,
+            readyState: ch.el.readyState,
+            networkState: ch.el.networkState,
+            currentTime: ch.el.currentTime,
+            duration: ch.el.duration,
+            src: ch.el.src,
+            errorCode: ch.el.error?.code ?? null,
+          };
+    const interrupt =
+      this.interruptEl === null
+        ? null
+        : {
+            label: "interrupt",
+            gain: this.interruptGain,
+            paused: this.interruptEl.paused,
+            muted: this.interruptEl.muted,
+            volume: this.interruptEl.volume,
+            readyState: this.interruptEl.readyState,
+            networkState: this.interruptEl.networkState,
+            currentTime: this.interruptEl.currentTime,
+            duration: this.interruptEl.duration,
+            src: this.interruptEl.src,
+            errorCode: this.interruptEl.error?.code ?? null,
+          };
+    return {
+      isMyOutput: this.isMyOutput,
+      masterVolume: this.lastVolume,
+      currentSlot: this.currentSlot,
+      lastIsPlaying: this.lastIsPlaying,
+      lastAmbientId: this.lastAmbientId,
+      lastInterruptId: this.lastInterruptId,
+      channels: [
+        snap("ambientA", this.ambientA),
+        snap("ambientB", this.ambientB),
+        interrupt,
+      ].filter((x): x is NonNullable<typeof x> => x !== null),
+    };
   }
 
   // ----- DOM event handlers (bound) ----------------------------------

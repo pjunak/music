@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { ChangeEvent, MouseEvent } from "react";
 
 import { libraryApi } from "@/core/api";
 import {
   selectActiveTrackId,
   selectAmbientPositionMs,
+  selectIsMyOutput,
   usePlayerStore,
 } from "@/core/playerStore";
 import type { Track } from "@/core/types";
@@ -131,6 +132,7 @@ export function PlayerView() {
   if (track === null) {
     return (
       <div className="player-view player-view-empty">
+        <OutputBadge />
         <div className="player-empty-art" aria-hidden="true">
           ♪
         </div>
@@ -139,12 +141,14 @@ export function PlayerView() {
           Open <strong>Library</strong> and press ▶ on a track, or pick a
           playlist from <strong>Controls</strong>.
         </p>
+        <PlayerVolume />
       </div>
     );
   }
 
   return (
     <div className="player-view player-view-active">
+      <OutputBadge />
       <div className="player-stage">
         <div className="player-art player-art-large">
           {!coverFailed ? (
@@ -195,6 +199,8 @@ export function PlayerView() {
             </span>
           </div>
 
+          <PlayerVolume />
+
           {queueTracks.length > 0 ? (
             <section className="player-queue">
               <h3>Up next</h3>
@@ -232,5 +238,101 @@ export function PlayerView() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Always-visible "is this device the speaker?" indicator at the top of
+ *  the Player view. Green pill when yes, neutral pill with a one-click
+ *  "Make this device the speaker" button when no. Useful on a TV bookmark
+ *  where the operator opens the page and isn't sure if it's actually
+ *  going to play audio. */
+function OutputBadge() {
+  const isMyOutput = usePlayerStore(selectIsMyOutput);
+  const myDeviceId = usePlayerStore((s) => s.myDeviceId);
+  const activeIds = usePlayerStore(
+    (s) => s.state?.active_output_device_ids,
+  );
+  const me = usePlayerStore((s) =>
+    s.state?.connected_devices.find((d) => d.device_id === s.myDeviceId) ?? null,
+  );
+
+  function claim() {
+    if (myDeviceId === null) return;
+    const next = activeIds === undefined ? [myDeviceId] : [...activeIds, myDeviceId];
+    wsClient.send({ type: "set_active_outputs", device_ids: next });
+  }
+
+  function release() {
+    if (myDeviceId === null || activeIds === undefined) return;
+    wsClient.send({
+      type: "set_active_outputs",
+      device_ids: activeIds.filter((d) => d !== myDeviceId),
+    });
+  }
+
+  if (myDeviceId === null) {
+    return (
+      <div className="output-badge output-badge-disconnected">
+        <span className="badge">⏳ Connecting…</span>
+      </div>
+    );
+  }
+
+  if (me === null || !me.capabilities.includes("audio_output")) {
+    return (
+      <div className="output-badge output-badge-disabled">
+        <span className="badge">🔇 This device isn't an audio output</span>
+        <span className="muted small">
+          Enable in Settings → This device → Audio output
+        </span>
+      </div>
+    );
+  }
+
+  if (isMyOutput) {
+    return (
+      <div className="output-badge output-badge-active">
+        <span className="badge badge-ok">🔊 Playing on this device</span>
+        <button type="button" className="btn-ghost" onClick={release}>
+          Stop playing here
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="output-badge output-badge-inactive">
+      <span className="badge badge-warn">🔇 Not playing here</span>
+      <button type="button" className="btn-primary" onClick={claim}>
+        Play on this device
+      </button>
+    </div>
+  );
+}
+
+/** Volume slider on the Player tab. Mirrors the master volume from
+ *  PlayerState; sending `set_volume` updates the server, which broadcasts
+ *  back to all clients (including this one). */
+function PlayerVolume() {
+  const volume = usePlayerStore((s) => s.state?.volume ?? 1.0);
+  function onChange(e: ChangeEvent<HTMLInputElement>) {
+    wsClient.send({ type: "set_volume", volume: parseFloat(e.target.value) });
+  }
+  return (
+    <label className="player-volume">
+      <span className="muted small">Volume</span>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={volume}
+        onChange={onChange}
+        aria-label="Master volume"
+      />
+      <span className="muted small player-volume-pct">
+        {Math.round(volume * 100)}%
+      </span>
+    </label>
   );
 }

@@ -273,6 +273,13 @@ kbd,
   font-size: 0.85rem;
   white-space: nowrap;
 }
+.tabs-placeholder {
+  flex: 1;
+}
+.guest-signin-link {
+  text-decoration: none;
+  font-size: 0.9rem;
+}
 .context-badge strong {
   font-weight: 600;
   color: var(--accent-strong);
@@ -435,6 +442,48 @@ kbd,
 }
 .player-clock {
   font-size: 0.85rem;
+}
+
+.output-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  width: fit-content;
+}
+.output-badge-active {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+.output-badge-inactive {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.output-badge-disabled,
+.output-badge-disconnected {
+  border-color: var(--border);
+}
+
+.player-volume {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.6rem;
+}
+.player-volume input[type="range"] {
+  width: 100%;
+  min-width: 140px;
+}
+.player-volume-pct {
+  font-variant-numeric: tabular-nums;
+  min-width: 4ch;
+  text-align: right;
 }
 
 .player-queue,
@@ -1520,6 +1569,96 @@ kbd,
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+/* --- controls footer + diagnostics view (full-page) --- */
+
+.controls-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.4rem 0.2rem 0;
+}
+.controls-footer a {
+  text-decoration: none;
+}
+.diagnostics-view {
+  flex: 1;
+  padding: 1rem 1.5rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+}
+.diagnostics-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.diagnostics-view-header h1 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+/* --- diagnostics panel (Settings) --- */
+
+.diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.diagnostics-summary {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.4rem 0.8rem;
+}
+.diagnostics-summary li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  background: var(--surface-2);
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.diagnostics-summary strong.ok {
+  color: var(--ok);
+}
+.diagnostics-summary strong.danger {
+  color: var(--danger);
+}
+.diagnostics-channels {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.diagnostics-channels th,
+.diagnostics-channels td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.diagnostics-channels th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.diagnostics-src {
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 /* --- soundboard editor --- */

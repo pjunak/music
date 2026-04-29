@@ -24,7 +24,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, OptionalUser
 from app.core.config import get_settings
 from app.library import index as library_index
 from app.modes import loader as modes_loader
@@ -142,7 +142,7 @@ def _count_files_recursive(folder: Path) -> int:
 
 @router.get("/file")
 def get_sfx_file(
-    _: CurrentUser,
+    _: OptionalUser,
     path: str = Query(..., description="Path relative to SFX_LIBRARY_DIR"),
 ) -> FileResponse:
     """Stream a single SFX asset.
