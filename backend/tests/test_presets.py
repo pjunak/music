@@ -118,3 +118,96 @@ def test_reload_prunes_stale_active_ids(auth_client: TestClient) -> None:
         temp_path.unlink(missing_ok=True)
         auth_client.put("/api/presets/active", json={"preset_ids": []})
         auth_client.post("/api/presets/reload")
+
+
+# --- scaffolding ---------------------------------------------------------
+
+
+def test_create_preset_writes_yaml(auth_client: TestClient) -> None:
+    r = auth_client.post(
+        "/api/presets",
+        json={
+            "id": "newp",
+            "name": "Brand New",
+            "description": "test",
+            "effects": [{"type": "lowpass", "frequency": 800}],
+        },
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["id"] == "newp"
+    assert body["effects"][0]["type"] == "lowpass"
+
+    presets_dir = Path(os.environ["PRESETS_DIR"])
+    assert (presets_dir / "newp.yaml").is_file()
+
+    listed = {p["id"] for p in auth_client.get("/api/presets").json()}
+    assert "newp" in listed
+
+
+def test_create_preset_rolls_back_on_unknown_effect_type(
+    auth_client: TestClient,
+) -> None:
+    r = auth_client.post(
+        "/api/presets",
+        json={
+            "id": "badp",
+            "name": "Bad",
+            "effects": [{"type": "nonsense"}],
+        },
+    )
+    assert r.status_code == 400
+    presets_dir = Path(os.environ["PRESETS_DIR"])
+    # File rolled back so the operator can fix and retry.
+    assert not (presets_dir / "badp.yaml").exists()
+
+
+def test_create_preset_rejects_invalid_id(auth_client: TestClient) -> None:
+    for bad in ["With Space", "../escape", "UPPER"]:
+        r = auth_client.post("/api/presets", json={"id": bad, "name": "X"})
+        assert r.status_code == 400, bad
+
+
+def test_create_preset_conflict(auth_client: TestClient) -> None:
+    auth_client.post("/api/presets", json={"id": "dupp", "name": "First"})
+    r = auth_client.post("/api/presets", json={"id": "dupp", "name": "Second"})
+    assert r.status_code == 409
+
+
+def test_update_preset_replaces_effects(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/presets",
+        json={
+            "id": "updp",
+            "name": "U",
+            "effects": [{"type": "lowpass", "frequency": 800}],
+        },
+    )
+    r = auth_client.put(
+        "/api/presets/updp",
+        json={"effects": [{"type": "highpass", "frequency": 200}]},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["effects"][0]["type"] == "highpass"
+
+
+def test_delete_preset_removes_file_and_prunes_active(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/presets",
+        json={
+            "id": "delp",
+            "name": "Doomed",
+            "effects": [{"type": "lowpass", "frequency": 800}],
+        },
+    )
+    auth_client.put("/api/presets/active", json={"preset_ids": ["cave", "delp"]})
+
+    r = auth_client.delete("/api/presets/delp")
+    assert r.status_code == 204
+
+    presets_dir = Path(os.environ["PRESETS_DIR"])
+    assert not (presets_dir / "delp.yaml").exists()
+
+    active = auth_client.get("/api/presets/active").json()
+    assert "delp" not in active["preset_ids"]

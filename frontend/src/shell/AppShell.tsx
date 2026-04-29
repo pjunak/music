@@ -10,7 +10,10 @@ import { useSfxHotkeys } from "@/core/useSfxHotkeys";
 import { wsClient } from "@/core/ws";
 import { ControlsView } from "@/views/ControlsView";
 import { LibraryView } from "@/views/LibraryView";
+import { ModesView } from "@/views/ModesView";
 import { PlayerView } from "@/views/PlayerView";
+import { PlaylistsView } from "@/views/PlaylistsView";
+import { PresetsView } from "@/views/PresetsView";
 import { SettingsView } from "@/views/SettingsView";
 
 import { Header } from "./Header";
@@ -41,6 +44,9 @@ export default function AppShell() {
         <Routes>
           <Route index element={<PlayerView />} />
           <Route path="library" element={<LibraryView />} />
+          <Route path="playlists" element={<PlaylistsView />} />
+          <Route path="modes" element={<ModesView />} />
+          <Route path="presets" element={<PresetsView />} />
           <Route path="controls" element={<ControlsView />} />
           <Route path="settings" element={<SettingsView />} />
         </Routes>

@@ -120,3 +120,101 @@ def test_reload_surfaces_broken_manifests(auth_client: TestClient) -> None:
 
         shutil.rmtree(bad_dir)
         auth_client.post("/api/modes/reload")
+
+
+# --- scaffolding ---------------------------------------------------------
+
+
+def test_create_mode_scaffolds_dir_and_manifest(auth_client: TestClient) -> None:
+    r = auth_client.post(
+        "/api/modes", json={"id": "newmode", "name": "Brand New"}
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["id"] == "newmode"
+    assert body["name"] == "Brand New"
+
+    modes_dir = Path(os.environ["MODES_DIR"])
+    assert (modes_dir / "newmode" / "manifest.yaml").is_file()
+    assert (modes_dir / "newmode" / "soundboards").is_dir()
+    assert (modes_dir / "newmode" / "scenes").is_dir()
+
+    listed = {m["id"] for m in auth_client.get("/api/modes").json()}
+    assert "newmode" in listed
+
+
+def test_create_mode_rejects_invalid_id(auth_client: TestClient) -> None:
+    for bad in ["With Space", "../escape", "UPPER", "-leadingdash"]:
+        r = auth_client.post("/api/modes", json={"id": bad, "name": "X"})
+        assert r.status_code == 400, bad
+
+
+def test_create_mode_conflict(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes", json={"id": "conflict", "name": "First"})
+    r = auth_client.post("/api/modes", json={"id": "conflict", "name": "Second"})
+    assert r.status_code == 409
+
+
+def test_delete_mode_removes_dir(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes", json={"id": "doomed", "name": "Bye"})
+    r = auth_client.delete("/api/modes/doomed")
+    assert r.status_code == 204
+    modes_dir = Path(os.environ["MODES_DIR"])
+    assert not (modes_dir / "doomed").exists()
+    listed = {m["id"] for m in auth_client.get("/api/modes").json()}
+    assert "doomed" not in listed
+
+
+def test_delete_unknown_mode_404(auth_client: TestClient) -> None:
+    assert auth_client.delete("/api/modes/never-existed").status_code == 404
+
+
+def test_create_soundboard_writes_yaml(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes", json={"id": "sbtest", "name": "SB Host"})
+    r = auth_client.post(
+        "/api/modes/sbtest/soundboards", json={"id": "tavern", "name": "Tavern"}
+    )
+    assert r.status_code == 201
+    assert r.json()["id"] == "tavern"
+
+    modes_dir = Path(os.environ["MODES_DIR"])
+    assert (modes_dir / "sbtest" / "soundboards" / "tavern.yaml").is_file()
+
+    detail = auth_client.get("/api/modes/sbtest").json()
+    assert "tavern" in detail["soundboards"]
+
+
+def test_delete_soundboard(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes", json={"id": "sbdel", "name": "SB Del"})
+    auth_client.post("/api/modes/sbdel/soundboards", json={"id": "x"})
+    r = auth_client.delete("/api/modes/sbdel/soundboards/x")
+    assert r.status_code == 204
+    detail = auth_client.get("/api/modes/sbdel").json()
+    assert "x" not in detail["soundboards"]
+
+
+def test_create_scene(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes", json={"id": "scenetest", "name": "Scene Host"})
+    r = auth_client.post(
+        "/api/modes/scenetest/scenes",
+        json={"id": "tavern", "name": "Stonehill Inn", "description": "Quiet"},
+    )
+    assert r.status_code == 201
+
+    modes_dir = Path(os.environ["MODES_DIR"])
+    assert (modes_dir / "scenetest" / "scenes" / "tavern.yaml").is_file()
+
+    detail = auth_client.get("/api/modes/scenetest").json()
+    assert "tavern" in detail["scenes"]
+
+
+def test_delete_scene(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes", json={"id": "scenedel", "name": "Scene Del"})
+    auth_client.post(
+        "/api/modes/scenedel/scenes", json={"id": "x", "name": "X"}
+    )
+    r = auth_client.delete("/api/modes/scenedel/scenes/x")
+    assert r.status_code == 204
+    detail = auth_client.get("/api/modes/scenedel").json()
+    assert "x" not in detail["scenes"]
+

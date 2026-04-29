@@ -754,28 +754,90 @@ kbd,
   text-overflow: ellipsis;
 }
 
-/* --- controls view --- */
+/* --- controls view (full-bleed) --- */
 
 .controls-view {
   flex: 1;
-  padding: 1.25rem;
-  max-width: 1200px;
+  padding: 0.75rem;
   width: 100%;
-  margin: 0 auto;
   overflow-y: auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.controls-strip {
+  display: grid;
+  grid-template-columns: minmax(180px, auto) 1fr minmax(220px, 320px);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.controls-strip-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.controls-strip-label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.controls-strip select {
+  min-width: 12ch;
+}
+.output-picker-options.inline {
+  flex-direction: row;
+  gap: 0.7rem;
+  flex-wrap: wrap;
 }
 .controls-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(280px, 1.1fr);
-  gap: 1rem;
-  align-items: start;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: minmax(200px, auto);
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
 }
-.controls-col {
+.controls-grid .controls-section {
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  min-width: 0;
+}
+.controls-grid .controls-section.span-tall {
+  grid-row: span 2;
+}
+.controls-grid .controls-section > h3 {
+  flex-shrink: 0;
+}
+.controls-grid .controls-section > :not(h3) {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.quick-playlist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.quick-playlist-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 .controls-section {
   background: var(--surface);
@@ -1106,6 +1168,407 @@ kbd,
   gap: 0.3rem;
 }
 
+/* --- folder tree --- */
+
+.folder-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+.tree-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.15rem 0.25rem 0.15rem 0.4rem;
+  border-radius: 4px;
+  transition: background var(--transition);
+}
+.tree-row.tree-root {
+  font-weight: 600;
+}
+.tree-row.selected {
+  background: var(--accent-soft);
+}
+.tree-row:hover:not(.selected) {
+  background: var(--surface-2);
+}
+.tree-toggle {
+  width: 1.4rem;
+  text-align: center;
+  padding: 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.tree-label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.2rem 0.3rem;
+  text-align: left;
+  width: 100%;
+  min-width: 0;
+}
+.tree-icon {
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+.tree-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-badge {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- library tab additions: music/sfx toggle, sfx file list, drop accept --- */
+
+.library-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.library-root-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.library-root-toggle button {
+  border-color: transparent;
+  background: transparent;
+}
+.library-root-toggle button[aria-selected="true"] {
+  background: var(--accent);
+  color: #0a0a0a;
+  font-weight: 600;
+}
+
+.folder-header {
+  padding: 0.3rem 0.1rem;
+}
+.folder-actions {
+  display: flex;
+  gap: 0.3rem;
+  padding-top: 0.6rem;
+  margin-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.folder-actions button {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.4rem;
+}
+
+.sfx-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.sfx-file-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: grab;
+}
+.sfx-file-row:active {
+  cursor: grabbing;
+}
+.sfx-file-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.sfx-file-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.library-body-search {
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- playlists / modes / presets shared two-pane shell --- */
+
+.playlists-view,
+.modes-view {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  overflow: hidden;
+  min-height: 0;
+}
+.playlists-pane,
+.modes-pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.8rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+.playlists-pane h2,
+.modes-pane h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+}
+.playlists-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.playlists-filter {
+  margin-bottom: 0.4rem;
+}
+.playlists-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.playlist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.playlist-list-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  transition: background var(--transition);
+}
+.playlist-list-item.active {
+  background: var(--accent-soft);
+}
+.playlist-list-item:hover:not(.active) {
+  background: var(--surface-2);
+}
+.playlist-list-item .playlist-list-item-meta {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.playlist-list-item .playlist-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.playlist-list-item button:last-child {
+  margin-right: 0.5rem;
+}
+.playlist-list-item .empty {
+  padding: 0.6rem;
+}
+
+.empty-detail {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  text-align: center;
+}
+
+.playlist-detail,
+.mode-detail,
+.preset-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.playlist-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+.playlist-detail-header h2 {
+  margin: 0;
+}
+.playlist-detail-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.playlist-meta-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.playlist-meta-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.5rem;
+}
+.playlist-meta-fields label,
+.playlist-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.playlist-form {
+  max-width: 480px;
+}
+
+.track-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.track-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.track-picker-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.3rem 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.track-picker-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.track-picker-meta strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- modes admin --- */
+
+.subresource-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.subresource-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.subresource-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.simple-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.simple-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* --- presets effect editor --- */
+
+.effect-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.effect-row {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.effect-row > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.effect-row-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+.effect-params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.4rem;
+}
+.effect-params label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.effect-add {
+  display: flex;
+  gap: 0.4rem;
+}
+.effect-add select {
+  flex: 1;
+}
+
 /* --- library empty state --- */
 
 .library-empty {
@@ -1413,6 +1876,18 @@ kbd,
 @media (max-width: 900px) {
   .controls-grid {
     grid-template-columns: 1fr;
+  }
+  .controls-grid .controls-section.span-tall {
+    grid-row: auto;
+  }
+  .controls-strip {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
+  .playlists-view,
+  .modes-view {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 280px) 1fr;
   }
   .player-stage {
     grid-template-columns: 1fr;

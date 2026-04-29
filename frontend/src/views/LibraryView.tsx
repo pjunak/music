@@ -1,525 +1,825 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { ChangeEvent, DragEvent, FormEvent } from "react";
 
-import { libraryApi } from "@/core/api";
-import type { LibrarySortKey, SearchResponse, SortOrder } from "@/core/api";
-import { usePlayerStore, selectActiveTrackId } from "@/core/playerStore";
-import { toast } from "@/core/toast";
-import type { FolderEntry, Track } from "@/core/types";
-import { wsClient } from "@/core/ws";
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { FolderTree } from "@/components/FolderTree";
+import type { TreeFolder } from "@/components/FolderTree";
 import { MetadataEditor } from "@/components/MetadataEditor";
-import { MoveDialog } from "@/components/MoveDialog";
-import { UploadDropZone } from "@/components/UploadDropZone";
+import { libraryApi, sfxApi } from "@/core/api";
+import type { SfxFile } from "@/core/api";
+import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
+import { toast } from "@/core/toast";
+import type { Track } from "@/core/types";
+import { wsClient } from "@/core/ws";
 
-const PAGE_SIZE = 100;
-type Mode = "browse" | "search";
+type Root = "music" | "sfx";
 
-interface ColumnDef {
-  key: LibrarySortKey;
-  label: string;
-  render: (t: Track) => string | number | null | undefined;
-  className?: string;
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
-
-const COLUMNS: ColumnDef[] = [
-  { key: "title", label: "Title", render: (t) => t.title || t.path },
-  { key: "artist", label: "Artist", render: (t) => t.artist },
-  { key: "album", label: "Album", render: (t) => t.album },
-  { key: "year", label: "Year", render: (t) => t.year, className: "col-num" },
-  { key: "track_no", label: "#", render: (t) => t.track_no, className: "col-num" },
-  {
-    key: "length_s",
-    label: "Length",
-    render: (t) => formatDuration(t.length_s),
-    className: "col-num",
-  },
-];
 
 function formatDuration(seconds: number): string {
   if (!seconds || seconds <= 0) return "—";
   const total = Math.floor(seconds);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
 }
 
 export function LibraryView() {
-  const [mode, setMode] = useState<Mode>("browse");
-  const [folder, setFolder] = useState<string>("");
-  const [folderTracks, setFolderTracks] = useState<Track[]>([]);
-  const [folderChildren, setFolderChildren] = useState<FolderEntry[]>([]);
-  const [breadcrumbs, setBreadcrumbs] = useState<string[]>([]);
-
+  const [root, setRoot] = useState<Root>("music");
+  const [path, setPath] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [showSearch, setShowSearch] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<LibrarySortKey>("artist");
-  const [order, setOrder] = useState<SortOrder>("asc");
-  const [offset, setOffset] = useState(0);
-  const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
 
+  return (
+    <div className="library-view">
+      <header className="library-toolbar">
+        <div className="library-root-toggle" role="tablist" aria-label="Library root">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={root === "music"}
+            className={root === "music" ? "btn-primary" : ""}
+            onClick={() => {
+              setRoot("music");
+              setPath("");
+              setShowSearch(false);
+            }}
+          >
+            🎵 Music
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={root === "sfx"}
+            className={root === "sfx" ? "btn-primary" : ""}
+            onClick={() => {
+              setRoot("sfx");
+              setPath("");
+              setShowSearch(false);
+            }}
+          >
+            ⚡ SFX
+          </button>
+        </div>
+        {root === "music" ? (
+          <button
+            type="button"
+            onClick={() => setShowSearch((v) => !v)}
+            className={showSearch ? "btn-primary" : ""}
+          >
+            🔍 Search
+          </button>
+        ) : null}
+        <RescanButton root={root} onComplete={() => setRefreshKey((k) => k + 1)} />
+      </header>
+
+      {root === "music" && showSearch ? (
+        <SearchBar
+          value={pendingQuery}
+          onChange={setPendingQuery}
+          onSubmit={(v) => {
+            setQuery(v);
+          }}
+          query={query}
+          onClear={() => {
+            setPendingQuery("");
+            setQuery("");
+          }}
+        />
+      ) : null}
+
+      {root === "music" && query ? (
+        <MusicSearchResults query={query} refreshKey={refreshKey} />
+      ) : root === "music" ? (
+        <MusicBrowser
+          path={path}
+          onPathChange={setPath}
+          refreshKey={refreshKey}
+          onRefresh={() => setRefreshKey((k) => k + 1)}
+        />
+      ) : (
+        <SfxBrowser
+          path={path}
+          onPathChange={setPath}
+          refreshKey={refreshKey}
+          onRefresh={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- shared bits ---------------------------------------------------------
+
+function RescanButton({
+  root,
+  onComplete,
+}: {
+  root: Root;
+  onComplete: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (root === "sfx") {
+    // SFX doesn't have an index — refreshing the tree is enough.
+    return (
+      <button type="button" onClick={onComplete} disabled={busy}>
+        ↻ Refresh
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const r = await libraryApi.rescan();
+          const parts: string[] = [];
+          if (r.added) parts.push(`+${r.added} added`);
+          if (r.updated) parts.push(`${r.updated} updated`);
+          if (r.removed) parts.push(`-${r.removed} removed`);
+          toast.success("Rescan complete", parts.join(", ") || "No changes.");
+          onComplete();
+        } catch (e) {
+          toast.error("Rescan failed", e instanceof Error ? e.message : undefined);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {busy ? "Rescanning…" : "↻ Rescan"}
+    </button>
+  );
+}
+
+function SearchBar({
+  value,
+  onChange,
+  onSubmit,
+  query,
+  onClear,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: (v: string) => void;
+  query: string;
+  onClear: () => void;
+}) {
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    onSubmit(value);
+  }
+  return (
+    <form className="library-search" onSubmit={handleSubmit}>
+      <input
+        type="search"
+        autoFocus
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search title / artist / album / path"
+      />
+      <button type="submit">Search</button>
+      {query !== "" ? (
+        <button type="button" onClick={onClear}>
+          Clear
+        </button>
+      ) : null}
+    </form>
+  );
+}
+
+// --- MUSIC ---------------------------------------------------------------
+
+function MusicSearchResults({
+  query,
+  refreshKey,
+}: {
+  query: string;
+  refreshKey: number;
+}) {
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Track | null>(null);
-  const [moving, setMoving] = useState<Track | null>(null);
-  const [knownFolders, setKnownFolders] = useState<string[]>([]);
-
   const activeTrackId = usePlayerStore(selectActiveTrackId);
 
-  // --- data loading ------------------------------------------------------
-
-  const loadFolder = useCallback(async (path: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await libraryApi.tree(path);
-      setFolderTracks(res.tracks);
-      setFolderChildren(res.folders);
-      setBreadcrumbs(res.path === "" ? [] : res.path.split("/"));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
-      setFolderTracks([]);
-      setFolderChildren([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const runSearch = useCallback(
-    async (q: string, opts: { sort: LibrarySortKey; order: SortOrder; offset: number }) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await libraryApi.search({
-          q,
-          limit: PAGE_SIZE,
-          offset: opts.offset,
-          sort: opts.sort,
-          order: opts.order,
-        });
-        setSearchResponse(res);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "search failed");
-        setSearchResponse(null);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (mode === "browse") {
-      void loadFolder(folder);
-    } else {
-      void runSearch(query, { sort, order, offset });
-    }
-  }, [mode, folder, query, sort, order, offset, loadFolder, runSearch]);
-
-  // Walk the tree on mount once to build the folder dropdown for MoveDialog.
   useEffect(() => {
     let cancelled = false;
-    async function walk(path: string, acc: string[]) {
-      const res = await libraryApi.tree(path);
-      for (const f of res.folders) {
-        acc.push(f.path);
-        await walk(f.path, acc);
-      }
-    }
-    const collected: string[] = [];
-    void walk("", collected).then(() => {
-      if (!cancelled) setKnownFolders(collected);
-    });
+    setLoading(true);
+    void libraryApi
+      .search({ q: query, limit: 200, sort: "artist", order: "asc" })
+      .then((r) => {
+        if (!cancelled) setTracks(r.tracks);
+      })
+      .catch(() => {
+        if (!cancelled) setTracks([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
+  }, [query, refreshKey]);
+
+  return (
+    <div className="library-body library-body-search">
+      <div className="library-main">
+        <p className="muted small">
+          {loading
+            ? "Searching…"
+            : `${tracks.length} match${tracks.length === 1 ? "" : "es"}`}
+        </p>
+        <TrackTable tracks={tracks} activeTrackId={activeTrackId} onChanged={() => undefined} />
+      </div>
+    </div>
+  );
+}
+
+function MusicBrowser({
+  path,
+  onPathChange,
+  refreshKey,
+  onRefresh,
+}: {
+  path: string;
+  onPathChange: (p: string) => void;
+  refreshKey: number;
+  onRefresh: () => void;
+}) {
+  const activeTrackId = usePlayerStore(selectActiveTrackId);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    void libraryApi
+      .tree(path)
+      .then((r) => {
+        if (!cancelled) setTracks(r.tracks);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "load failed");
+          setTracks([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, refreshKey]);
+
+  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
+    const r = await libraryApi.tree(p);
+    return r.folders.map((f) => ({
+      name: f.name,
+      path: f.path,
+      badge: f.track_count > 0 ? f.track_count : null,
+    }));
   }, []);
 
-  // --- handlers ----------------------------------------------------------
-
-  function onSubmitSearch(e: FormEvent) {
-    e.preventDefault();
-    setMode("search");
-    setOffset(0);
-    setQuery(pendingQuery);
-  }
-
-  function clearSearch() {
-    setPendingQuery("");
-    setQuery("");
-    setOffset(0);
-    setMode("browse");
-  }
-
-  function onClickSort(key: LibrarySortKey) {
-    if (sort === key) setOrder(order === "asc" ? "desc" : "asc");
-    else {
-      setSort(key);
-      setOrder("asc");
+  async function onDropOnFolder(folderPath: string, payload: unknown) {
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      (payload as { kind?: unknown }).kind !== "music-track"
+    )
+      return;
+    const id = (payload as { id?: number }).id;
+    if (typeof id !== "number") return;
+    try {
+      await libraryApi.moveTrack(id, folderPath);
+      toast.success("Track moved");
+      onRefresh();
+    } catch (e) {
+      toast.error("Move failed", e instanceof Error ? e.message : undefined);
     }
-    setOffset(0);
   }
 
-  function navigateTo(path: string) {
-    setMode("browse");
-    setFolder(path);
+  return (
+    <div className="library-body">
+      <aside className="library-sidebar">
+        <FolderTree
+          rootLabel="All music"
+          selectedPath={path}
+          onSelect={onPathChange}
+          loadChildren={loadChildren}
+          refreshKey={refreshKey}
+          onDropOnFolder={onDropOnFolder}
+        />
+        <FolderActions
+          root="music"
+          selectedPath={path}
+          onChanged={() => {
+            onRefresh();
+            // After a delete the selected path may have vanished — fall
+            // back to root so the right pane doesn't 404.
+          }}
+          onPathReset={() => onPathChange("")}
+        />
+      </aside>
+      <section className="library-main">
+        <FolderHeader path={path} root="music" />
+        <UploadDrop
+          root="music"
+          dest={path}
+          onUploaded={onRefresh}
+        />
+        {error !== null ? <p className="error small">{error}</p> : null}
+        <TrackTable
+          tracks={tracks}
+          activeTrackId={activeTrackId}
+          onChanged={onRefresh}
+          draggable
+        />
+      </section>
+    </div>
+  );
+}
+
+// --- SFX -----------------------------------------------------------------
+
+function SfxBrowser({
+  path,
+  onPathChange,
+  refreshKey,
+  onRefresh,
+}: {
+  path: string;
+  onPathChange: (p: string) => void;
+  refreshKey: number;
+  onRefresh: () => void;
+}) {
+  const [files, setFiles] = useState<SfxFile[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    void sfxApi
+      .tree(path)
+      .then((r) => {
+        if (!cancelled) setFiles(r.files);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "load failed");
+          setFiles([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, refreshKey]);
+
+  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
+    const r = await sfxApi.tree(p);
+    return r.folders.map((f) => ({
+      name: f.name,
+      path: f.path,
+      badge: f.file_count > 0 ? f.file_count : null,
+    }));
+  }, []);
+
+  async function onDropOnFolder(folderPath: string, payload: unknown) {
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      (payload as { kind?: unknown }).kind !== "sfx-file"
+    )
+      return;
+    const filePath = (payload as { path?: string }).path;
+    if (typeof filePath !== "string") return;
+    try {
+      await sfxApi.moveFile(filePath, folderPath);
+      toast.success("SFX moved");
+      onRefresh();
+    } catch (e) {
+      toast.error("Move failed", e instanceof Error ? e.message : undefined);
+    }
   }
 
-  function navigateUp() {
-    if (breadcrumbs.length === 0) return;
-    navigateTo(breadcrumbs.slice(0, -1).join("/"));
-  }
-
-  function play(track: Track) {
-    wsClient.send({ type: "ambient_play_track", track_id: track.id });
-  }
-
-  function enqueue(track: Track) {
-    wsClient.send({ type: "ambient_enqueue", track_id: track.id });
-  }
-
-  function fireAsInterrupt(track: Track) {
-    wsClient.send({ type: "fire_interrupt_track", track_id: track.id });
-  }
-
-  function playFolder() {
-    if (folderTracks.length === 0) return;
-    const ids = folderTracks.map((t) => t.id);
-    wsClient.send({ type: "ambient_set_queue", track_ids: ids.slice(1) });
-    wsClient.send({ type: "ambient_play_track", track_id: ids[0] });
-  }
-
-  async function deleteTrack(track: Track) {
+  async function onDelete(file: SfxFile) {
     const ok = await confirmDialog({
-      title: "Delete track?",
-      body: `${track.path} will be permanently removed from disk. This can't be undone.`,
-      confirmLabel: "Delete",
-      cancelLabel: "Keep",
+      title: "Delete SFX file?",
+      body: `${file.path} will be removed from disk.`,
       tone: "danger",
+      confirmLabel: "Delete",
     });
     if (!ok) return;
     try {
-      await libraryApi.deleteTrack(track.id);
-      toast.success("Deleted", track.path);
-      if (mode === "browse") void loadFolder(folder);
-      else void runSearch(query, { sort, order, offset });
+      await sfxApi.deleteFile(file.path);
+      toast.success("Deleted", file.path);
+      onRefresh();
     } catch (e) {
       toast.error("Delete failed", e instanceof Error ? e.message : undefined);
     }
   }
 
-  async function rescan() {
-    setLoading(true);
-    try {
-      const result = await libraryApi.rescan();
-      const parts: string[] = [];
-      if (result.added) parts.push(`+${result.added} added`);
-      if (result.updated) parts.push(`${result.updated} updated`);
-      if (result.removed) parts.push(`-${result.removed} removed`);
-      toast.success(
-        "Rescan complete",
-        parts.length === 0 ? "No changes." : parts.join(", "),
+  function preview(file: SfxFile) {
+    if (!file.referenced) {
+      toast.warn(
+        "Preview unavailable",
+        "Server only streams SFX referenced by a soundboard. Add it to a soundboard first.",
       );
-      if (mode === "browse") await loadFolder(folder);
-      else await runSearch(query, { sort, order, offset });
+      return;
+    }
+    const url = sfxApi.fileUrl(file.path);
+    new Audio(url).play().catch(() => {
+      toast.error("Preview failed", "Browser refused to play the file.");
+    });
+  }
+
+  return (
+    <div className="library-body">
+      <aside className="library-sidebar">
+        <FolderTree
+          rootLabel="All SFX"
+          selectedPath={path}
+          onSelect={onPathChange}
+          loadChildren={loadChildren}
+          refreshKey={refreshKey}
+          onDropOnFolder={onDropOnFolder}
+        />
+        <FolderActions
+          root="sfx"
+          selectedPath={path}
+          onChanged={onRefresh}
+          onPathReset={() => onPathChange("")}
+        />
+      </aside>
+      <section className="library-main">
+        <FolderHeader path={path} root="sfx" />
+        <UploadDrop
+          root="sfx"
+          dest={path}
+          onUploaded={onRefresh}
+        />
+        {error !== null ? <p className="error small">{error}</p> : null}
+        {files.length === 0 ? (
+          <p className="muted small">
+            No SFX files in this folder yet. Drop some above, or pick a different folder.
+          </p>
+        ) : (
+          <ul className="sfx-file-list">
+            {files.map((f) => (
+              <li
+                key={f.path}
+                className="sfx-file-row"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(
+                    "application/json",
+                    JSON.stringify({ kind: "sfx-file", path: f.path }),
+                  );
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+              >
+                <span className="sfx-file-name">{f.name}</span>
+                {f.referenced ? (
+                  <span className="badge badge-ok">referenced</span>
+                ) : (
+                  <span className="muted small">unreferenced</span>
+                )}
+                <span className="muted small">{formatSize(f.size_bytes)}</span>
+                <div className="sfx-file-actions">
+                  <button onClick={() => preview(f)} title="Preview">
+                    ▶
+                  </button>
+                  <button
+                    className="btn-danger"
+                    onClick={() => void onDelete(f)}
+                    title="Delete"
+                  >
+                    🗑
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// --- shared sub-components ----------------------------------------------
+
+function FolderHeader({ path, root }: { path: string; root: Root }) {
+  const crumbs = path === "" ? [] : path.split("/");
+  return (
+    <div className="folder-header">
+      <span className="muted small">
+        {root === "music" ? "🎵" : "⚡"} /{crumbs.length > 0 ? `${crumbs.join(" / ")}` : ""}
+      </span>
+    </div>
+  );
+}
+
+function FolderActions({
+  root,
+  selectedPath,
+  onChanged,
+  onPathReset,
+}: {
+  root: Root;
+  selectedPath: string;
+  onChanged: () => void;
+  onPathReset: () => void;
+}) {
+  async function newFolder() {
+    const name = window.prompt(
+      `New folder under "${selectedPath || "(root)"}":`,
+      "",
+    );
+    if (!name) return;
+    const target = selectedPath ? `${selectedPath}/${name}` : name;
+    try {
+      if (root === "music") await libraryApi.createFolder(target);
+      else await sfxApi.createFolder(target);
+      toast.success("Folder created", target);
+      onChanged();
     } catch (e) {
-      toast.error("Rescan failed", e instanceof Error ? e.message : undefined);
-    } finally {
-      setLoading(false);
+      toast.error("Create failed", e instanceof Error ? e.message : undefined);
     }
   }
 
-  // --- rendering ---------------------------------------------------------
+  async function renameFolder() {
+    if (!selectedPath) {
+      toast.info("Pick a folder first");
+      return;
+    }
+    const next = window.prompt("New folder path:", selectedPath);
+    if (!next || next === selectedPath) return;
+    try {
+      if (root === "music") await libraryApi.renameFolder(selectedPath, next);
+      else await sfxApi.renameFolder(selectedPath, next);
+      toast.success("Folder renamed", next);
+      onChanged();
+      onPathReset();
+    } catch (e) {
+      toast.error("Rename failed", e instanceof Error ? e.message : undefined);
+    }
+  }
 
-  const tracksToShow: Track[] =
-    mode === "search" ? searchResponse?.tracks ?? [] : folderTracks;
-
-  const headerCells = useMemo(
-    () =>
-      COLUMNS.map((col) => {
-        const sortable = mode === "search";
-        const active = sort === col.key;
-        const indicator = sortable && active ? (order === "asc" ? "▲" : "▼") : "";
-        return (
-          <th
-            key={col.key}
-            className={`${sortable ? "sortable" : ""} ${col.className ?? ""} ${
-              active ? "sort-active" : ""
-            }`}
-            onClick={sortable ? () => onClickSort(col.key) : undefined}
-            scope="col"
-          >
-            <span>{col.label}</span>
-            <span className="sort-indicator">{indicator}</span>
-          </th>
-        );
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, sort, order],
-  );
-
-  const total = mode === "search" ? searchResponse?.total ?? 0 : folderTracks.length;
-  const showingFrom = mode === "search" ? (total === 0 ? 0 : offset + 1) : 1;
-  const showingTo =
-    mode === "search"
-      ? Math.min(offset + tracksToShow.length, total)
-      : tracksToShow.length;
-  const canPrev = mode === "search" && offset > 0;
-  const canNext =
-    mode === "search" &&
-    searchResponse !== null &&
-    offset + searchResponse.tracks.length < searchResponse.total;
+  async function deleteFolder() {
+    if (!selectedPath) {
+      toast.info("Pick a folder first");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: `Delete "${selectedPath}"?`,
+      body:
+        "If the folder isn't empty, everything inside it will be removed too. This can't be undone.",
+      confirmLabel: "Delete recursively",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      if (root === "music")
+        await libraryApi.deleteFolder(selectedPath, true);
+      else await sfxApi.deleteFolder(selectedPath, true);
+      toast.success("Folder deleted", selectedPath);
+      onChanged();
+      onPathReset();
+    } catch (e) {
+      toast.error("Delete failed", e instanceof Error ? e.message : undefined);
+    }
+  }
 
   return (
-    <div className="library-view">
-      <UploadDropZone
-        defaultDest={mode === "browse" && folder !== "" ? folder : "Uploads"}
-        onUploaded={(_tracks, _destination) => {
-          if (mode === "browse") void loadFolder(folder);
-          else void runSearch(query, { sort, order, offset });
-        }}
-      />
-      <header className="library-toolbar">
-        <form onSubmit={onSubmitSearch} className="library-search">
-          <input
-            type="search"
-            value={pendingQuery}
-            onChange={(e) => setPendingQuery(e.target.value)}
-            placeholder="Search title / artist / album / path"
-          />
-          <button type="submit" disabled={loading}>
-            Search
-          </button>
-          {mode === "search" ? (
-            <button type="button" onClick={clearSearch}>
-              Browse
-            </button>
-          ) : null}
-          <button type="button" onClick={() => void rescan()} disabled={loading} title="Rescan MUSIC_DIR for changes">
-            Rescan
-          </button>
-        </form>
+    <div className="folder-actions">
+      <button type="button" onClick={() => void newFolder()}>
+        + Folder
+      </button>
+      <button
+        type="button"
+        onClick={() => void renameFolder()}
+        disabled={!selectedPath}
+        title="Rename / move the selected folder"
+      >
+        ✎ Rename
+      </button>
+      <button
+        type="button"
+        className="btn-danger"
+        onClick={() => void deleteFolder()}
+        disabled={!selectedPath}
+      >
+        🗑 Delete
+      </button>
+    </div>
+  );
+}
 
-        {error !== null ? <p className="error small">{error}</p> : null}
-      </header>
+function UploadDrop({
+  root,
+  dest,
+  onUploaded,
+}: {
+  root: Root;
+  dest: string;
+  onUploaded: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(
+    null,
+  );
+  const [dragOver, setDragOver] = useState(false);
 
-      <div className="library-body">
-        <aside className="library-sidebar">
-          <h3 className="muted small">Folders</h3>
-          <div className="library-folder-list">
-            <button
-              type="button"
-              className={`library-folder ${
-                mode === "browse" && breadcrumbs.length === 0 ? "active" : ""
-              }`}
-              onClick={() => navigateTo("")}
-            >
-              <span>↑ /</span>
-              <span className="muted small">all</span>
-            </button>
-            {mode === "browse" && breadcrumbs.length > 0 ? (
-              <button type="button" className="library-folder" onClick={navigateUp}>
-                <span>← up</span>
-              </button>
-            ) : null}
-            {folderChildren.map((f) => (
-              <button
-                key={f.path}
-                type="button"
-                className="library-folder"
-                onClick={() => navigateTo(f.path)}
-              >
-                <span>📁 {f.name}</span>
-                <span className="muted small">{f.track_count}</span>
-              </button>
-            ))}
+  async function send(files: File[]) {
+    if (files.length === 0) return;
+    setBusy(true);
+    setProgress({ loaded: 0, total: 0 });
+    try {
+      if (root === "music") {
+        const result = await libraryApi.upload(files, dest, (loaded, total) =>
+          setProgress({ loaded, total }),
+        );
+        toast.success(
+          `Uploaded ${result.saved.length}`,
+          `→ ${result.destination || "(root)"}`,
+        );
+      } else {
+        const result = await sfxApi.upload(files, dest, (loaded, total) =>
+          setProgress({ loaded, total }),
+        );
+        toast.success(
+          `Uploaded ${result.saved.length}`,
+          `→ ${result.destination || "(root)"}`,
+        );
+      }
+      onUploaded();
+    } catch (e) {
+      toast.error("Upload failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  function onDrop(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    setDragOver(false);
+    void send(Array.from(e.dataTransfer.files));
+  }
+  function onPick(e: ChangeEvent<HTMLInputElement>) {
+    void send(Array.from(e.target.files ?? []));
+    e.target.value = "";
+  }
+
+  return (
+    <label
+      className={`drop-zone${dragOver ? " drop-zone-active" : ""}${
+        busy ? " drop-zone-uploading" : ""
+      }`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+      }}
+      onDrop={onDrop}
+    >
+      <input type="file" multiple accept="audio/*" onChange={onPick} hidden />
+      {busy && progress !== null ? (
+        <div className="upload-progress">
+          <div className="upload-progress-label">
+            Uploading — {formatSize(progress.loaded)} / {formatSize(progress.total)}
           </div>
-        </aside>
+          <progress
+            value={progress.total > 0 ? progress.loaded / progress.total : 0}
+            max={1}
+          />
+        </div>
+      ) : (
+        <span>
+          Drop audio here or click to upload to{" "}
+          <strong>{dest === "" ? "(root)" : dest}</strong>
+        </span>
+      )}
+    </label>
+  );
+}
 
-        <section className="library-main">
-          {mode === "browse" ? (
-            <div className="library-meta">
-              <span className="muted small">
-                {breadcrumbs.length === 0 ? "/" : breadcrumbs.join(" / ")} —{" "}
-                {tracksToShow.length} track
-                {tracksToShow.length === 1 ? "" : "s"}
-              </span>
-              <button type="button" onClick={playFolder} disabled={tracksToShow.length === 0}>
-                ▶ Play folder
-              </button>
-            </div>
-          ) : (
-            <div className="library-meta">
-              {loading ? (
-                <span className="muted small">Loading…</span>
-              ) : (
-                <span className="muted small">
-                  {total === 0 ? "No matches." : `${showingFrom}–${showingTo} of ${total}`}
-                </span>
-              )}
-              <div className="library-pager">
-                <button
-                  type="button"
-                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                  disabled={!canPrev || loading}
-                >
-                  ← Prev
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOffset(offset + PAGE_SIZE)}
-                  disabled={!canNext || loading}
-                >
-                  Next →
-                </button>
-              </div>
-            </div>
-          )}
+function TrackTable({
+  tracks,
+  activeTrackId,
+  onChanged,
+  draggable,
+}: {
+  tracks: Track[];
+  activeTrackId: number | null;
+  onChanged: () => void;
+  draggable?: boolean;
+}) {
+  const [editing, setEditing] = useState<Track | null>(null);
 
-          {tracksToShow.length > 0 ? (
-            <div className="track-table-wrap">
-              <table className="track-table">
-                <thead>
-                  <tr>
-                    {headerCells}
-                    <th className="col-actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {tracksToShow.map((t) => {
-                    const isPlaying = activeTrackId === t.id;
-                    return (
-                      <tr
-                        key={t.id}
-                        className={`track-row ${isPlaying ? "playing" : ""}`}
-                        onDoubleClick={() => play(t)}
-                      >
-                        {COLUMNS.map((col) => {
-                          const v = col.render(t);
-                          const display =
-                            v === null || v === undefined || v === "" ? "—" : v;
-                          const isMuted = display === "—";
-                          return (
-                            <td
-                              key={col.key}
-                              className={`${col.className ?? ""} ${
-                                isMuted ? "muted" : ""
-                              }`}
-                            >
-                              {display}
-                            </td>
-                          );
-                        })}
-                        <td className="col-actions">
-                          <button onClick={() => play(t)} title="Play now">
-                            ▶
-                          </button>
-                          <button onClick={() => enqueue(t)} title="Queue">
-                            ＋
-                          </button>
-                          <button onClick={() => fireAsInterrupt(t)} title="Fire as interrupt">
-                            ⚡
-                          </button>
-                          <button onClick={() => setEditing(t)} title="Edit metadata">
-                            ✎
-                          </button>
-                          <button onClick={() => setMoving(t)} title="Move / rename">
-                            ↪
-                          </button>
-                          <button
-                            className="btn-danger"
-                            onClick={() => void deleteTrack(t)}
-                            title="Delete from disk"
-                          >
-                            🗑
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : !loading ? (
-            <div className="library-empty">
-              {mode === "browse" ? (
-                <>
-                  <h3>Nothing in this folder</h3>
-                  <p className="muted small">
-                    Drop files into the upload area at the top — or pick a
-                    different folder on the left. Files added directly via SFTP
-                    appear after a <button
-                      type="button"
-                      className="btn-ghost inline"
-                      onClick={() => void rescan()}
-                    >
-                      Rescan
-                    </button>.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <h3>No tracks match "{query}"</h3>
-                  <p className="muted small">
-                    Search runs against title, artist, album, and path. Press{" "}
-                    <kbd>/</kbd> to focus the search box.
-                  </p>
-                </>
-              )}
-            </div>
-          ) : null}
-        </section>
+  if (tracks.length === 0) {
+    return <p className="muted small">No tracks here yet.</p>;
+  }
+
+  function play(t: Track) {
+    wsClient.send({ type: "ambient_play_track", track_id: t.id });
+  }
+  function enqueue(t: Track) {
+    wsClient.send({ type: "ambient_enqueue", track_id: t.id });
+  }
+  async function deleteTrack(t: Track) {
+    const ok = await confirmDialog({
+      title: "Delete track?",
+      body: `${t.path} will be permanently removed from disk.`,
+      tone: "danger",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+    try {
+      await libraryApi.deleteTrack(t.id);
+      toast.success("Deleted");
+      onChanged();
+    } catch (e) {
+      toast.error("Delete failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  return (
+    <>
+      <div className="track-table-wrap">
+        <table className="track-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Artist</th>
+              <th>Album</th>
+              <th className="col-num">Year</th>
+              <th className="col-num">Length</th>
+              <th className="col-actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {tracks.map((t) => (
+              <tr
+                key={t.id}
+                className={`track-row ${activeTrackId === t.id ? "playing" : ""}`}
+                onDoubleClick={() => play(t)}
+                draggable={draggable}
+                onDragStart={
+                  draggable
+                    ? (e) => {
+                        e.dataTransfer.setData(
+                          "application/json",
+                          JSON.stringify({ kind: "music-track", id: t.id }),
+                        );
+                        e.dataTransfer.effectAllowed = "move";
+                      }
+                    : undefined
+                }
+              >
+                <td title={t.path}>{t.title || t.path}</td>
+                <td>{t.artist || <span className="muted">—</span>}</td>
+                <td>{t.album || <span className="muted">—</span>}</td>
+                <td className="col-num">{t.year ?? <span className="muted">—</span>}</td>
+                <td className="col-num">{formatDuration(t.length_s)}</td>
+                <td className="col-actions">
+                  <button onClick={() => play(t)} title="Play">
+                    ▶
+                  </button>
+                  <button onClick={() => enqueue(t)} title="Queue">
+                    ＋
+                  </button>
+                  <button onClick={() => setEditing(t)} title="Edit metadata">
+                    ✎
+                  </button>
+                  <button
+                    className="btn-danger"
+                    onClick={() => void deleteTrack(t)}
+                    title="Delete"
+                  >
+                    🗑
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-
       {editing !== null ? (
         <MetadataEditor
           track={editing}
           onClose={() => setEditing(null)}
-          onSaved={(updated) => {
-            // refresh the relevant track in-place
-            if (mode === "browse") {
-              setFolderTracks((rows) =>
-                rows.map((r) => (r.id === updated.id ? updated : r)),
-              );
-            } else {
-              setSearchResponse((res) =>
-                res === null
-                  ? res
-                  : {
-                      ...res,
-                      tracks: res.tracks.map((r) =>
-                        r.id === updated.id ? updated : r,
-                      ),
-                    },
-              );
-            }
+          onSaved={() => {
+            setEditing(null);
+            onChanged();
           }}
         />
       ) : null}
-
-      {moving !== null ? (
-        <MoveDialog
-          track={moving}
-          knownFolders={knownFolders}
-          onClose={() => setMoving(null)}
-          onMoved={(updated) => {
-            // After a move, the track may no longer be in the current folder
-            // view — easier to re-fetch.
-            if (mode === "browse") void loadFolder(folder);
-            else
-              setSearchResponse((res) =>
-                res === null
-                  ? res
-                  : {
-                      ...res,
-                      tracks: res.tracks.map((r) =>
-                        r.id === updated.id ? updated : r,
-                      ),
-                    },
-              );
-          }}
-        />
-      ) : null}
-    </div>
+    </>
   );
 }

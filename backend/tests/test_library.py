@@ -313,5 +313,100 @@ def test_delete_removes_file_and_row(auth_client: TestClient) -> None:
     assert auth_client.get(f"/api/library/tracks/{track_id}").status_code == 404
 
 
+# --- folder ops ----------------------------------------------------------
+
+
+def test_create_folder(auth_client: TestClient) -> None:
+    r = auth_client.post("/api/library/folders", json={"path": "NewFolder"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["path"] == "NewFolder"
+    assert body["track_count"] == 0
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "NewFolder").is_dir()
+
+
+def test_create_nested_folder(auth_client: TestClient) -> None:
+    r = auth_client.post(
+        "/api/library/folders", json={"path": "Parent/Child/Grandchild"}
+    )
+    assert r.status_code == 201
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "Parent" / "Child" / "Grandchild").is_dir()
+
+
+def test_create_folder_rejects_traversal(auth_client: TestClient) -> None:
+    r = auth_client.post("/api/library/folders", json={"path": "../escape"})
+    assert r.status_code in (400, 422)
+
+
+def test_delete_folder_empty(auth_client: TestClient) -> None:
+    auth_client.post("/api/library/folders", json={"path": "ToDelete"})
+    r = auth_client.delete("/api/library/folders", params={"path": "ToDelete"})
+    assert r.status_code == 200
+    assert r.json()["removed_tracks"] == 0
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert not (music_dir / "ToDelete").exists()
+
+
+def test_delete_folder_non_empty_refuses_without_recursive(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("a.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "FullFolder"},
+    )
+    r = auth_client.delete("/api/library/folders", params={"path": "FullFolder"})
+    assert r.status_code == 400
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "FullFolder").is_dir()
+
+
+def test_delete_folder_recursive_removes_tracks(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("a.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "WipeMe"},
+    )
+    r = auth_client.delete(
+        "/api/library/folders",
+        params={"path": "WipeMe", "recursive": "true"},
+    )
+    assert r.status_code == 200
+    assert r.json()["removed_tracks"] >= 1
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert not (music_dir / "WipeMe").exists()
+
+
+def test_rename_folder_updates_index(auth_client: TestClient) -> None:
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("song.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "OldName"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+
+    r = auth_client.post(
+        "/api/library/folders/rename", json={"src": "OldName", "dst": "NewName"}
+    )
+    assert r.status_code == 200
+    assert r.json()["path"] == "NewName"
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert not (music_dir / "OldName").exists()
+    assert (music_dir / "NewName" / "song.wav").is_file()
+
+    track = auth_client.get(f"/api/library/tracks/{track_id}").json()
+    assert track["path"] == "NewName/song.wav"
+
+
+def test_rename_folder_conflict(auth_client: TestClient) -> None:
+    auth_client.post("/api/library/folders", json={"path": "ExistsA"})
+    auth_client.post("/api/library/folders", json={"path": "ExistsB"})
+    r = auth_client.post(
+        "/api/library/folders/rename", json={"src": "ExistsA", "dst": "ExistsB"}
+    )
+    assert r.status_code == 409
+
+
 # Quiet pyflakes about io being imported for potential future test helpers.
 _ = io

@@ -234,6 +234,167 @@ export const libraryApi = {
   deleteTrack: (id: number) => api.delete<void>(`/api/library/tracks/${id}`),
   coverUrl: (id: number) => `${BASE}/api/library/tracks/${id}/cover`,
   streamUrl: (id: number) => `${BASE}/api/library/tracks/${id}/stream`,
+  createFolder: (path: string) =>
+    api.post<{ name: string; path: string; track_count: number }>(
+      "/api/library/folders",
+      { path },
+    ),
+  deleteFolder: (path: string, recursive: boolean) => {
+    const qs = new URLSearchParams({ path, recursive: String(recursive) });
+    return api.delete<{ removed_tracks: number }>(
+      `/api/library/folders?${qs.toString()}`,
+    );
+  },
+  renameFolder: (src: string, dst: string) =>
+    api.post<{ name: string; path: string; track_count: number }>(
+      "/api/library/folders/rename",
+      { src, dst },
+    ),
+};
+
+// --- SFX ---------------------------------------------------------------
+
+export interface SfxFile {
+  name: string;
+  path: string;
+  size_bytes: number;
+  modified_at: string;
+  referenced: boolean;
+}
+
+export interface SfxFolder {
+  name: string;
+  path: string;
+  file_count: number;
+}
+
+export interface SfxTreeResponse {
+  path: string;
+  folders: SfxFolder[];
+  files: SfxFile[];
+}
+
+export interface SfxUploadResult {
+  saved: SfxFile[];
+  destination: string;
+}
+
+export const sfxApi = {
+  tree: (path = "") =>
+    api.get<SfxTreeResponse>(
+      path ? `/api/sfx/tree?path=${encodeURIComponent(path)}` : "/api/sfx/tree",
+    ),
+  upload: (
+    files: File[],
+    dest: string,
+    onProgress?: (loaded: number, total: number) => void,
+  ): Promise<SfxUploadResult> => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f, f.name);
+    return new Promise<SfxUploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const path = `/api/sfx/upload?dest=${encodeURIComponent(dest)}`;
+      xhr.open("POST", `${BASE}${path}`);
+      xhr.withCredentials = true;
+      xhr.responseType = "text";
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
+      };
+      xhr.onerror = () => reject(new Error("network error during upload"));
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as SfxUploadResult);
+          } catch {
+            reject(new Error("upload succeeded but response wasn't JSON"));
+          }
+          return;
+        }
+        let detail = `${xhr.status}: ${xhr.statusText}`;
+        try {
+          const body = JSON.parse(xhr.responseText) as { detail?: unknown };
+          if (body && typeof body.detail === "string") detail = body.detail;
+        } catch {
+          if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
+        }
+        reject(new ApiError(xhr.status, detail));
+      };
+      xhr.send(form);
+    });
+  },
+  moveFile: (src: string, dstFolder: string, newFilename?: string) =>
+    api.post<SfxFile>("/api/sfx/move", {
+      src,
+      dst_folder: dstFolder,
+      new_filename: newFilename,
+    }),
+  deleteFile: (path: string) =>
+    api.delete<void>(`/api/sfx/files?path=${encodeURIComponent(path)}`),
+  createFolder: (path: string) =>
+    api.post<SfxFolder>("/api/sfx/folders", { path }),
+  deleteFolder: (path: string, recursive: boolean) => {
+    const qs = new URLSearchParams({ path, recursive: String(recursive) });
+    return api.delete<{ deleted: boolean }>(`/api/sfx/folders?${qs.toString()}`);
+  },
+  renameFolder: (src: string, dst: string) =>
+    api.post<SfxFolder>("/api/sfx/folders/rename", { src, dst }),
+  fileUrl: (path: string) =>
+    `${BASE}/api/sfx/file?path=${encodeURIComponent(path)}`,
+};
+
+// --- modes scaffolding -------------------------------------------------
+
+export const modesAdminApi = {
+  create: (id: string, name: string) =>
+    api.post<ModeSummary>("/api/modes", { id, name }),
+  delete: (id: string) =>
+    api.delete<void>(`/api/modes/${encodeURIComponent(id)}`),
+  reload: () =>
+    api.post<{ loaded: string[]; errors: Record<string, string> }>(
+      "/api/modes/reload",
+    ),
+  createSoundboard: (modeId: string, payload: { id: string; name?: string }) =>
+    api.post<unknown>(
+      `/api/modes/${encodeURIComponent(modeId)}/soundboards`,
+      payload,
+    ),
+  deleteSoundboard: (modeId: string, soundboardId: string) =>
+    api.delete<void>(
+      `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}`,
+    ),
+  createScene: (
+    modeId: string,
+    payload: { id: string; name: string; description?: string },
+  ) =>
+    api.post<unknown>(
+      `/api/modes/${encodeURIComponent(modeId)}/scenes`,
+      payload,
+    ),
+  deleteScene: (modeId: string, sceneId: string) =>
+    api.delete<void>(
+      `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
+    ),
+};
+
+// --- presets scaffolding -----------------------------------------------
+
+export const presetsAdminApi = {
+  create: (payload: {
+    id: string;
+    name: string;
+    description?: string;
+    effects: PresetEffect[];
+  }) => api.post<PresetManifest>("/api/presets", payload),
+  update: (
+    id: string,
+    payload: { name?: string; description?: string; effects?: PresetEffect[] },
+  ) => api.put<PresetManifest>(`/api/presets/${encodeURIComponent(id)}`, payload),
+  delete: (id: string) =>
+    api.delete<void>(`/api/presets/${encodeURIComponent(id)}`),
+  reload: () =>
+    api.post<{ loaded: string[]; errors: Record<string, string> }>(
+      "/api/presets/reload",
+    ),
 };
 
 // Re-export types we already had so callers don't need to dig in /core/types.

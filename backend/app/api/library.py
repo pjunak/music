@@ -101,6 +101,19 @@ class TrackMoveRequest(BaseModel):
     new_filename: str | None = Field(None, description="If set, also rename the file")
 
 
+class FolderCreateRequest(BaseModel):
+    path: str = Field(min_length=1, description="Folder path relative to MUSIC_DIR")
+
+
+class FolderRenameRequest(BaseModel):
+    src: str = Field(min_length=1, description="Source folder path relative to MUSIC_DIR")
+    dst: str = Field(min_length=1, description="Destination folder path relative to MUSIC_DIR")
+
+
+class FolderDeleteResult(BaseModel):
+    removed_tracks: int
+
+
 # --- helpers --------------------------------------------------------------
 
 
@@ -353,3 +366,54 @@ def rescan(_: CurrentUser, db: DbSession) -> RescanResult:
         removed=summary.removed,
         unchanged=summary.unchanged,
     )
+
+
+# --- folder ops -----------------------------------------------------------
+
+
+@router.post(
+    "/folders", status_code=status.HTTP_201_CREATED, response_model=FolderOut
+)
+def create_folder(
+    payload: FolderCreateRequest, _: CurrentUser, db: DbSession
+) -> FolderOut:
+    try:
+        abs_path = library_index.ensure_folder(payload.path)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    rel = library_index.to_relative(abs_path)
+    return FolderOut(name=abs_path.name, path=rel, track_count=0)
+
+
+@router.delete("/folders", response_model=FolderDeleteResult)
+def delete_folder(
+    _: CurrentUser,
+    db: DbSession,
+    path: str = Query(..., description="Folder path relative to MUSIC_DIR"),
+    recursive: bool = Query(
+        False, description="Delete contents too. Otherwise refuses non-empty folders."
+    ),
+) -> FolderDeleteResult:
+    try:
+        removed = library_index.delete_folder(db, path, recursive=recursive)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    return FolderDeleteResult(removed_tracks=removed)
+
+
+@router.post("/folders/rename", response_model=FolderOut)
+def rename_folder(
+    payload: FolderRenameRequest, _: CurrentUser, db: DbSession
+) -> FolderOut:
+    try:
+        library_index.rename_folder(db, payload.src, payload.dst)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except FileExistsError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    new_abs = library_index.to_absolute(payload.dst.strip("/"))
+    return FolderOut(name=new_abs.name, path=payload.dst.strip("/"), track_count=0)

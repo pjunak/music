@@ -552,16 +552,113 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
     return (folders, tracks)
 
 
-def ensure_folder(rel_path: str) -> Path:
-    """mkdir -p inside MUSIC_DIR. Returns absolute path."""
-    root = music_root()
+def ensure_folder(rel_path: str, root: Path | None = None) -> Path:
+    """mkdir -p inside the given root (defaults to MUSIC_DIR). Returns
+    the absolute path of the resulting directory."""
+    base = root if root is not None else music_root()
     rel_clean = rel_path.strip("/").replace("\\", "/")
     if not rel_clean:
-        return root
-    target = (root / rel_clean).resolve()
-    target.relative_to(root)
+        return base
+    target = (base / rel_clean).resolve()
+    target.relative_to(base)
     target.mkdir(parents=True, exist_ok=True)
     return target
+
+
+def delete_folder(
+    db: Session | None,
+    rel_path: str,
+    *,
+    recursive: bool,
+    root: Path | None = None,
+) -> int:
+    """Delete a folder and (when `recursive`) everything in it.
+
+    For the music root, also deletes any `tracks` rows whose path lives
+    inside this folder; returns how many rows were dropped (callers can
+    surface that in the UI). Pass `db=None` for non-indexed roots (SFX).
+    """
+    import shutil as _shutil
+
+    base = root if root is not None else music_root()
+    rel_clean = rel_path.strip("/").replace("\\", "/")
+    if not rel_clean:
+        raise ValueError("refusing to delete the root directory")
+    target = (base / rel_clean).resolve()
+    target.relative_to(base)
+    if not target.exists():
+        raise FileNotFoundError(f"folder not found: {rel_clean}")
+    if not target.is_dir():
+        raise ValueError(f"not a folder: {rel_clean}")
+
+    if not recursive and any(target.iterdir()):
+        raise ValueError("folder is not empty (pass recursive=true to force)")
+
+    removed_rows = 0
+    if db is not None:
+        prefix = f"{rel_clean}/"
+        rows = db.scalars(
+            select(Track).where(
+                (Track.path == rel_clean) | (Track.path.like(f"{prefix}%"))
+            )
+        ).all()
+        for row in rows:
+            db.delete(row)
+            removed_rows += 1
+
+    if recursive:
+        _shutil.rmtree(target)
+    else:
+        target.rmdir()
+
+    if db is not None and removed_rows > 0:
+        db.commit()
+    return removed_rows
+
+
+def rename_folder(
+    db: Session | None,
+    src_rel: str,
+    dst_rel: str,
+    root: Path | None = None,
+) -> int:
+    """Rename / move a folder. For the music root, also rewrites every
+    `tracks.path` whose value lives under the renamed folder; returns the
+    number of rewritten rows. Pass `db=None` for non-indexed roots (SFX)."""
+    import shutil as _shutil
+
+    base = root if root is not None else music_root()
+    src_clean = src_rel.strip("/").replace("\\", "/")
+    dst_clean = dst_rel.strip("/").replace("\\", "/")
+    if not src_clean or not dst_clean:
+        raise ValueError("source and destination must be non-empty paths")
+
+    src_abs = (base / src_clean).resolve()
+    dst_abs = (base / dst_clean).resolve()
+    src_abs.relative_to(base)
+    dst_abs.relative_to(base)
+    if not src_abs.is_dir():
+        raise FileNotFoundError(f"source folder not found: {src_clean}")
+    if dst_abs.exists():
+        raise FileExistsError(f"destination already exists: {dst_clean}")
+
+    dst_abs.parent.mkdir(parents=True, exist_ok=True)
+    _shutil.move(str(src_abs), str(dst_abs))
+
+    rewritten = 0
+    if db is not None:
+        prefix = f"{src_clean}/"
+        rows = db.scalars(
+            select(Track).where(
+                (Track.path == src_clean) | (Track.path.like(f"{prefix}%"))
+            )
+        ).all()
+        for row in rows:
+            row.path = dst_clean + row.path[len(src_clean):]
+            rewritten += 1
+        if rewritten > 0:
+            db.commit()
+    return rewritten
 
 
 def cover_art_for(track: Track) -> tuple[bytes, str] | None:
@@ -629,6 +726,7 @@ __all__ = [
     "FolderEntry",
     "ScanSummary",
     "cover_art_for",
+    "delete_folder",
     "ensure_folder",
     "is_audio_file",
     "list_folder",
@@ -636,6 +734,7 @@ __all__ = [
     "music_root",
     "relative_audio_files_in",
     "remove_path",
+    "rename_folder",
     "safe_join",
     "scan_full",
     "scan_paths",

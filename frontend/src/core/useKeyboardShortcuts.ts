@@ -83,9 +83,21 @@ export function useKeyboardShortcuts(): void {
           return;
         case "3":
           e.preventDefault();
-          navigate("/controls");
+          navigate("/playlists");
           return;
         case "4":
+          e.preventDefault();
+          navigate("/modes");
+          return;
+        case "5":
+          e.preventDefault();
+          navigate("/presets");
+          return;
+        case "6":
+          e.preventDefault();
+          navigate("/controls");
+          return;
+        case "7":
           e.preventDefault();
           navigate("/settings");
           return;
