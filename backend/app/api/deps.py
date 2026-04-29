@@ -18,12 +18,19 @@ def _resolve_user(
     if not session_cookie:
         return None
     session = db.get(AuthSession, session_cookie)
-    if session is None or session.expires_at <= datetime.now(UTC):
+    if session is None:
+        return None
+    now = datetime.now(UTC)
+    if session.expires_at <= now:
+        # Opportunistic cleanup: an expired row is worthless and the table
+        # would otherwise grow unbounded for a long-lived install.
+        db.delete(session)
+        db.commit()
         return None
     user = db.get(User, session.user_id)
     if user is None:
         return None
-    session.last_seen = datetime.now(UTC)
+    session.last_seen = now
     db.commit()
     return user
 

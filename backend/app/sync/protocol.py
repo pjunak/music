@@ -255,6 +255,18 @@ class InterruptState(BaseModel):
     fade_out_ms: int = 0
 
 
+class ScenePreviousState(BaseModel):
+    """Snapshot of the fields a scene activation overwrote, captured so
+    `deactivate_scene` can restore them. Only populated for fields the
+    scene actually changed — a scene with no `ambient` block leaves
+    `ambient` here as None and ambient state is left alone on deactivate.
+    """
+
+    ambient: AmbientState | None = None
+    crossfade_ms: int | None = None
+    active_preset_ids: list[str] | None = None
+
+
 class PlayerState(BaseModel):
     """Canonical playback state. The server is the sole writer."""
 
@@ -271,6 +283,7 @@ class PlayerState(BaseModel):
     crossfade_type: str = "linear"
 
     active_scene_id: str | None = None
+    pre_scene_state: ScenePreviousState | None = None
 
     ambient: AmbientState = Field(default_factory=AmbientState)
     interrupt: InterruptState | None = None

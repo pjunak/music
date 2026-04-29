@@ -15,7 +15,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import case, func, nullsfirst, nullslast, or_, select
+from sqlalchemy.sql import ColumnElement
 
 from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.library import index as library_index
@@ -117,22 +118,32 @@ class FolderDeleteResult(BaseModel):
 # --- helpers --------------------------------------------------------------
 
 
-def _sort_key(track: Track, key: SortKey) -> tuple:
-    """Normalised sort key. None values land at the end without TypeErrors."""
-    value = getattr(track, key)
-    if isinstance(value, str):
-        normalized = value.lower().strip()
-        if key in ("title", "album", "artist", "album_artist"):
-            for article in ("the ", "a ", "an "):
-                if normalized.startswith(article):
-                    normalized = normalized[len(article):]
-                    break
-        return (0, normalized)
-    if value is None:
-        return (1, 0)
-    if isinstance(value, datetime):
-        return (0, value.timestamp())
-    return (0, value)
+_STRING_SORT_KEYS: frozenset[SortKey] = frozenset(
+    {"title", "artist", "album", "album_artist", "path"}
+)
+_ARTICLE_STRIP_KEYS: frozenset[SortKey] = frozenset(
+    {"title", "artist", "album", "album_artist"}
+)
+
+
+def _sort_expression(key: SortKey) -> ColumnElement:
+    """Column expression used for ORDER BY.
+
+    String columns are lowercased+trimmed so sorting is case-insensitive.
+    Title/artist/album/album_artist additionally drop a leading "the ",
+    "a ", or "an " article so "The Doors" sorts under "doors"."""
+    column = getattr(Track, key)
+    if key in _STRING_SORT_KEYS:
+        normalized = func.lower(func.trim(column))
+        if key in _ARTICLE_STRIP_KEYS:
+            return case(
+                (normalized.like("the %"), func.substr(normalized, 5)),
+                (normalized.like("an %"), func.substr(normalized, 4)),
+                (normalized.like("a %"), func.substr(normalized, 3)),
+                else_=normalized,
+            )
+        return normalized
+    return column
 
 
 def _track_or_404(db: DbSession, track_id: int) -> Track:
@@ -173,22 +184,31 @@ def search(
     sort: Annotated[SortKey, Query(description="Sort key")] = "artist",
     order: Annotated[SortOrder, Query(description="Sort direction")] = "asc",
 ) -> SearchResponse:
-    rows = db.scalars(select(Track)).all()
+    stmt = select(Track)
+    count_stmt = select(func.count()).select_from(Track)
     if q:
-        needle = q.lower()
-        rows = [
-            t
-            for t in rows
-            if needle in t.title.lower()
-            or needle in t.artist.lower()
-            or needle in t.album.lower()
-            or needle in t.path.lower()
-        ]
-    rows.sort(key=lambda t: _sort_key(t, sort), reverse=(order == "desc"))
-    page = rows[offset : offset + limit]
+        needle = f"%{q.lower()}%"
+        haystack = or_(
+            func.lower(Track.title).like(needle),
+            func.lower(Track.artist).like(needle),
+            func.lower(Track.album).like(needle),
+            func.lower(Track.path).like(needle),
+        )
+        stmt = stmt.where(haystack)
+        count_stmt = count_stmt.where(haystack)
+
+    sort_expr = _sort_expression(sort)
+    directional = sort_expr.desc() if order == "desc" else sort_expr.asc()
+    # Match prior behaviour: ascending pushes nulls to the end, descending
+    # pulls them to the front. Tiebreak on id for deterministic pagination.
+    ordered = nullsfirst(directional) if order == "desc" else nullslast(directional)
+    stmt = stmt.order_by(ordered, Track.id.asc()).limit(limit).offset(offset)
+
+    total = db.scalar(count_stmt) or 0
+    rows = db.scalars(stmt).all()
     return SearchResponse(
-        tracks=[TrackOut.model_validate(t) for t in page],
-        total=len(rows),
+        tracks=[TrackOut.model_validate(t) for t in rows],
+        total=total,
         limit=limit,
         offset=offset,
         sort=sort,

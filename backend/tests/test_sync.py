@@ -387,6 +387,99 @@ def test_state_load_prunes_dangling_track_ids(
     assert snap.active_output_device_ids == []
 
 
+def test_state_load_prunes_dangling_pre_scene_snapshot(
+    auth_client: TestClient,
+    seeded_track_id: int,
+) -> None:
+    """The scene-revert snapshot stores a captured ambient lane. Track
+    rows referenced there can disappear too — same dangling-ref hazard as
+    the live ambient field, so the loader must prune both in lockstep."""
+    from app.core.db import SessionLocal
+    from app.domain import playback_state as playback_state_domain
+    from app.sync.state import StateMachine
+
+    with SessionLocal() as db:
+        playback_state_domain.update_state(
+            db,
+            pre_scene_state={
+                "ambient": {
+                    "current_track_id": 999_001,
+                    "queue": [seeded_track_id, 999_002],
+                    "history": [999_003],
+                    "position_ms": 12000,
+                    "loop": "off",
+                },
+                "crossfade_ms": 1500,
+                "active_preset_ids": ["cave", "phantom-preset"],
+            },
+        )
+
+    machine = StateMachine()
+    import asyncio
+
+    asyncio.run(machine.load(SessionLocal))
+    snap = asyncio.run(machine.snapshot())
+    assert snap.pre_scene_state is not None
+    assert snap.pre_scene_state.ambient is not None
+    assert snap.pre_scene_state.ambient.current_track_id is None
+    assert snap.pre_scene_state.ambient.queue == [seeded_track_id]
+    assert snap.pre_scene_state.ambient.history == []
+    assert snap.pre_scene_state.crossfade_ms == 1500
+    assert "phantom-preset" not in snap.pre_scene_state.active_preset_ids
+    assert "cave" in snap.pre_scene_state.active_preset_ids
+
+
+def test_state_load_after_track_deletion_clears_active_track(
+    auth_client: TestClient, client: TestClient
+) -> None:
+    """Regression for the audio-playback bug: a track playing in ambient
+    that gets deleted via the library API would leave a stale id behind
+    in playback_state. On the next state load (server restart), the audio
+    engine would fetch its stream URL and surface as SRC_NOT_SUPPORTED.
+    The load-time prune defends against that."""
+    import asyncio
+    import io
+    import struct
+
+    from app.core.db import SessionLocal
+    from app.sync.state import StateMachine
+
+    def _wav() -> bytes:
+        sr = 8000
+        pcm = b"\x00\x00" * 4000
+        h = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE"
+        h += b"fmt " + struct.pack("<I", 16)
+        h += struct.pack("<H", 1) + struct.pack("<H", 1)
+        h += struct.pack("<I", sr) + struct.pack("<I", sr * 2)
+        h += struct.pack("<H", 2) + struct.pack("<H", 16)
+        h += b"data" + struct.pack("<I", len(pcm))
+        return h + pcm
+
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("doomed-playback.wav", _wav(), "audio/wav"))],
+        params={"dest": "DoomedPlay"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+
+    # Start playing it via WS so the persisted state references it.
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_track", "track_id": track_id})
+        ws.receive_json()
+
+    # User deletes the file from the library while we're "off".
+    delete_resp = auth_client.delete(f"/api/library/tracks/{track_id}")
+    assert delete_resp.status_code == 204
+
+    # Reload as if the server just restarted.
+    machine = StateMachine()
+    asyncio.run(machine.load(SessionLocal))
+    snap = asyncio.run(machine.snapshot())
+    assert snap.ambient.current_track_id is None
+    _ = io  # keep import for potential future test growth
+
+
 def test_remove_active_output_mutator() -> None:
     """Unit-test the mutator the WS disconnect path uses to prune stale
     device ids. (A full WS-disconnect integration test had timing issues
@@ -1212,7 +1305,7 @@ def test_activate_scene_composite_apply(
         assert scene_event["scene"]["presets"] == ["radio-vintage"]
 
 
-def test_deactivate_scene_clears_active_scene_id_and_emits_event(
+def test_deactivate_scene_reverts_overwritten_state_and_emits_event(
     auth_client, client: TestClient, extra_seeded_track_ids: list[int]
 ) -> None:
     _make_tavern_playlist(auth_client, extra_seeded_track_ids)
@@ -1228,15 +1321,76 @@ def test_deactivate_scene_clears_active_scene_id_and_emits_event(
         ws.send_json({"type": "deactivate_scene"})
         state_changed = ws.receive_json()
         assert state_changed["type"] == "state_changed"
-        assert state_changed["state"]["active_scene_id"] is None
-        # State that the scene applied (presets, ambient, crossfade) sticks —
-        # only the marker is cleared.
-        assert state_changed["state"]["active_preset_ids"] == ["radio-vintage"]
-        assert state_changed["state"]["crossfade_ms"] == 2500
+        s = state_changed["state"]
+        assert s["active_scene_id"] is None
+        # Fields the scene overwrote (presets, ambient, crossfade) revert
+        # to the values captured at activation time.
+        assert s["active_preset_ids"] == []
+        assert s["crossfade_ms"] == 0
+        assert s["ambient"]["current_track_id"] is None
+        assert s["pre_scene_state"] is None
 
         deact_event = ws.receive_json()
         assert deact_event["type"] == "scene_deactivated"
         assert deact_event["scene_id"] == "tavern"
+
+
+def test_deactivate_scene_preserves_unrelated_state(
+    auth_client, client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    """User changes that happen *after* a scene activates (e.g. setting
+    volume, picking a different soundboard) are not reverted on
+    deactivation — only the fields the scene itself overwrote are."""
+    _make_tavern_playlist(auth_client, extra_seeded_track_ids)
+
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
+        ws.receive_json()
+        ws.receive_json()
+        ws.send_json({"type": "set_volume", "volume": 0.31})
+        ws.receive_json()
+        ws.send_json({"type": "set_active_soundboard", "soundboard_id": "tavern"})
+        ws.receive_json()
+
+        ws.send_json({"type": "deactivate_scene"})
+        s = ws.receive_json()["state"]
+        assert s["volume"] == 0.31
+        assert s["active_soundboard_id"] == "tavern"
+
+
+def test_chained_scene_deactivate_unwinds_to_original(
+    auth_client, client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    """Activating a second scene while one is already active must not
+    overwrite the original snapshot — deactivating goes back to the
+    state before the *first* scene, not the intermediate one."""
+    _make_tavern_playlist(auth_client, extra_seeded_track_ids)
+
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_presets", "preset_ids": ["cave"]})
+        ws.receive_json()
+        ws.send_json({"type": "set_crossfade", "crossfade_ms": 500})
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+
+        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
+        ws.receive_json()
+        ws.receive_json()
+        # Re-activating the same scene replaces the active scene marker
+        # but the snapshot from the first activation is preserved.
+        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
+        ws.receive_json()
+        ws.receive_json()
+
+        ws.send_json({"type": "deactivate_scene"})
+        s = ws.receive_json()["state"]
+        assert s["active_preset_ids"] == ["cave"]
+        assert s["crossfade_ms"] == 500
 
 
 def test_deactivate_scene_noop_when_none_active(client: TestClient) -> None:

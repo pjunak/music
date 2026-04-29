@@ -2,11 +2,13 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import delete
 from starlette.exceptions import HTTPException
 
 from app.api import auth, health, library, modes, playlists, presets, sfx
@@ -14,6 +16,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.library import index as library_index
 from app.models import Base
+from app.models.auth_session import AuthSession
 from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
 from app.sync import router as sync_router
@@ -86,6 +89,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         library_index.scan_full(db)
     except Exception:
         logger.exception("startup library scan failed; continuing")
+    try:
+        # Sweep expired auth sessions on boot. Resolve-time cleanup handles
+        # the steady state, but a long downtime can leave stale rows nobody
+        # ever revisits.
+        result = db.execute(
+            delete(AuthSession).where(AuthSession.expires_at <= datetime.now(UTC))
+        )
+        db.commit()
+        if result.rowcount:
+            logger.info("pruned %d expired auth session(s) on boot", result.rowcount)
+    except Exception:
+        logger.exception("startup auth session sweep failed; continuing")
+        db.rollback()
     finally:
         db.close()
     await sync_state.machine.load(SessionLocal)
