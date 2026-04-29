@@ -47,6 +47,30 @@ def _configure_logging(level: str) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     _configure_logging(settings.log_level)
+
+    # Resolved storage paths up front. Surface them at INFO so a misconfigured
+    # mount (e.g. MUSIC_DIR pointing at a path inside the writable layer
+    # instead of a bind mount) is obvious in the container logs — we got
+    # bitten once by uploads silently landing in the ephemeral layer and
+    # vanishing on the next rebuild.
+    music_dir = settings.music_dir.resolve()
+    sfx_dir = settings.sfx_library_dir.resolve()
+    logger.info("MUSIC_DIR=%s", music_dir)
+    logger.info("SFX_LIBRARY_DIR=%s", sfx_dir)
+    if "MUSIC_DIR" not in os.environ:
+        logger.warning(
+            "MUSIC_DIR is unset — using default %s. In a container this is "
+            "almost certainly the writable layer; uploads will be lost on "
+            "rebuild. Set MUSIC_DIR to a bind-mounted path.",
+            music_dir,
+        )
+    if "SFX_LIBRARY_DIR" not in os.environ:
+        logger.warning(
+            "SFX_LIBRARY_DIR is unset — using default %s. Same caveat as "
+            "MUSIC_DIR: must be bind-mounted to persist.",
+            sfx_dir,
+        )
+
     # No alembic — solo-deployed app where regenerable data dominates.
     # `create_all` is idempotent (skips existing tables), so first boot
     # creates everything and subsequent boots are a no-op. When the schema
