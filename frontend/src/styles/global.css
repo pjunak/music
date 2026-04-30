@@ -428,6 +428,19 @@ kbd,
   font-size: 1.1rem;
 }
 
+.player-device-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  width: fit-content;
+}
+.player-device-name input {
+  font-size: 0.9rem;
+  padding: 0.25rem 0.55rem;
+  width: 14em;
+}
+
 .output-badge {
   display: flex;
   align-items: center;

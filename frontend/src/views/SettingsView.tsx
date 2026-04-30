@@ -1,7 +1,5 @@
-import { useState } from "react";
-
 import { useAuthStore } from "@/core/auth";
-import { defaultDeviceName, useUiStore } from "@/core/uiStore";
+import { useUiStore } from "@/core/uiStore";
 import type { Capability } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
@@ -24,27 +22,11 @@ export function SettingsView() {
   const hidePlayerArt = useUiStore((s) => s.hidePlayerArt);
   const setHidePlayerArt = useUiStore((s) => s.setHidePlayerArt);
 
-  const deviceName = useUiStore((s) => s.deviceName);
-  const setDeviceName = useUiStore((s) => s.setDeviceName);
-
   const capabilities = useUiStore((s) => s.capabilities);
   const setCapabilities = useUiStore((s) => s.setCapabilities);
 
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-
-  // Local mirror so the input is responsive while you type; commit on blur
-  // or Enter so we don't spam register actions per keystroke.
-  const [localName, setLocalName] = useState(deviceName ?? "");
-
-  function commitName() {
-    const trimmed = localName.trim();
-    const next = trimmed === "" ? null : trimmed;
-    if (next !== deviceName) {
-      setDeviceName(next);
-      wsClient.sendRegister();
-    }
-  }
 
   function toggleCap(cap: Capability) {
     const next = capabilities.includes(cap)
@@ -74,22 +56,9 @@ export function SettingsView() {
 
       <section className="controls-section">
         <h3>This device</h3>
-        <label className="settings-field">
-          <span>Device name</span>
-          <input
-            type="text"
-            value={localName}
-            placeholder={defaultDeviceName()}
-            onChange={(e) => setLocalName(e.target.value)}
-            onBlur={commitName}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-            }}
-          />
-        </label>
         <p className="muted small">
-          Shown in the Outputs picker so you can tell devices apart. Empty =
-          auto ({defaultDeviceName()}).
+          Rename this device on the <strong>Player</strong> tab — the field
+          there is reachable to guest sessions too.
         </p>
 
         <div className="settings-caps">
