@@ -65,7 +65,7 @@ dmypy.json
 .env.*
 !.env.example
 
-# Databases (Beets' library.db + our app.db are both runtime state)
+# Databases (app.db is runtime state)
 *.db
 *.sqlite
 *.sqlite3
@@ -75,12 +75,8 @@ dmypy.json
 
 # Media / runtime content (never commit user music or uploaded files).
 # Anchored to repo root so we don't shadow code dirs like backend/app/library/.
-/incoming/
-/library/
-/uploads/
-/media/
 /music/
-modes/*/soundboard/files/
+/sfx/
 modes/*/cache/
 
 # Testing & Coverage
@@ -108,8 +104,3 @@ CLAUDE.local.md
 
 # Internal planning / spec docs — local-only, not for the public repo.
 docs/
-
-# VS code
-.vscode/settings.json
-.vscode
-.vscode/*

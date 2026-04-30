@@ -330,7 +330,9 @@ class SceneActivated(BaseModel):
 class SceneDeactivated(BaseModel):
     """A previously-active scene ended. Listeners should stop any side
     effects they started for that scene (looping SFX, persistent lights,
-    etc.). State changes from the scene aren't auto-reverted."""
+    etc.). PlayerState fields the scene overwrote (ambient / crossfade_ms /
+    active_preset_ids) are auto-reverted server-side via `pre_scene_state`
+    and reach clients in the accompanying `state_changed`."""
 
     type: Literal["scene_deactivated"] = "scene_deactivated"
     scene_id: str

@@ -31,8 +31,29 @@ interface UiStore {
 
 export function defaultDeviceName(): string {
   if (typeof navigator === "undefined") return "Browser";
-  if (/Mobile|Android|iPhone/i.test(navigator.userAgent)) return "Phone";
-  return "Browser";
+  const ua = navigator.userAgent;
+
+  let platform: string;
+  if (/iPhone/i.test(ua)) platform = "iPhone";
+  else if (/iPad/i.test(ua)) platform = "iPad";
+  else if (/Android/i.test(ua))
+    platform = /Mobile/i.test(ua) ? "Android phone" : "Android tablet";
+  else if (/Windows/i.test(ua)) platform = "Windows PC";
+  else if (/Macintosh|Mac OS X/i.test(ua)) platform = "Mac";
+  else if (/Linux|X11/i.test(ua)) platform = "Linux";
+  else platform = "Browser";
+
+  // Order matters: Edge/Opera both contain "Chrome" in their UA, so they
+  // have to be checked first. Safari's UA contains the bare word but never
+  // "Chrome" or "Chromium".
+  let browser: string | null = null;
+  if (/Edg\//i.test(ua)) browser = "Edge";
+  else if (/OPR\/|Opera\//i.test(ua)) browser = "Opera";
+  else if (/Firefox\/|FxiOS\//i.test(ua)) browser = "Firefox";
+  else if (/Chrome\//i.test(ua) && !/Chromium/i.test(ua)) browser = "Chrome";
+  else if (/Safari\//i.test(ua)) browser = "Safari";
+
+  return browser !== null ? `${platform} · ${browser}` : platform;
 }
 
 export const useUiStore = create<UiStore>()(

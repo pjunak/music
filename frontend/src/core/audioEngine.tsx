@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
+import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
 import { useUiStore } from "@/core/uiStore";
@@ -139,11 +140,14 @@ export function AudioEngine() {
   // Auto-claim active output: first state snapshot we see with no active
   // outputs and our device having `audio_output` capability triggers a
   // self-claim, so playing actually produces audio without the operator
-  // having to dive into Controls.
+  // having to dive into Controls. Guest connections can't mutate state, so
+  // we skip — the Player tab's "Play on this device" button drives
+  // forceLocalPlayback for them instead.
   useEffect(() => {
     let claimed = false;
     const unsub = usePlayerStore.subscribe((s) => {
       if (claimed || s.state === null || s.myDeviceId === null) return;
+      if (useAuthStore.getState().status !== "authenticated") return;
       const me = s.state.connected_devices.find(
         (d) => d.device_id === s.myDeviceId,
       );

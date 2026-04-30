@@ -14,7 +14,6 @@ A mode bundle:
           tavern.yaml
           ambush.yaml
           ...
-        playlists/             # optional — smart playlist default defs
 
 Modes are validated with Pydantic at load time. Bad files don't crash the
 running app; errors are captured per folder so one broken manifest

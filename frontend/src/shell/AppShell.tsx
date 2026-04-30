@@ -36,6 +36,11 @@ export default function AppShell() {
   const authStatus = useAuthStore((s) => s.status);
   const isGuest = authStatus !== "authenticated";
 
+  // The WS captures cookies at upgrade time, so a sign-in/out that changes
+  // the session cookie has no effect on an already-open socket — the server
+  // keeps treating it as whatever tier it was on connect. Re-running this
+  // effect when `authStatus` flips closes the old socket and opens a new
+  // one, forcing a fresh handshake with the now-current cookie.
   useEffect(() => {
     const unsubMsg = wsClient.subscribe(applyMessage);
     const unsubStatus = wsClient.onStatus(setStatus);
@@ -53,7 +58,7 @@ export default function AppShell() {
       unsubErr();
       wsClient.disconnect();
     };
-  }, [applyMessage, setStatus]);
+  }, [applyMessage, setStatus, authStatus]);
 
   useKeyboardShortcuts();
   useSfxHotkeys();
