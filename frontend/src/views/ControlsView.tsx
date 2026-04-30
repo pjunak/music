@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 
+import { IconButton } from "@/components/IconButton";
+import { PlayIcon } from "@/components/icons";
+import { VolumeControl } from "@/components/VolumeControl";
 import { modesApi, playlistsApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import type { ModeSummary, PlaylistMeta } from "@/core/types";
@@ -153,19 +156,12 @@ function OutputToggles() {
 function VolumeSlider() {
   const volume = usePlayerStore((s) => s.state?.volume ?? 1.0);
   return (
-    <label className="volume-slider">
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.01}
-        value={volume}
-        onChange={(e) =>
-          wsClient.send({ type: "set_volume", volume: parseFloat(e.target.value) })
-        }
-      />
-      <span className="muted small">{Math.round(volume * 100)}%</span>
-    </label>
+    <VolumeControl
+      value={volume}
+      onChange={(next) => wsClient.send({ type: "set_volume", volume: next })}
+      label="Master volume"
+      showIcon={false}
+    />
   );
 }
 
@@ -204,18 +200,17 @@ function QuickPlaylists() {
             {p.category ? `${p.category} · ` : ""}
             {p.mode_id ?? "global"}
           </span>
-          <button
-            type="button"
-            className="btn-primary"
+          <IconButton
+            label="Play this playlist now"
+            icon={<PlayIcon />}
+            variant="primary"
             onClick={() =>
               wsClient.send({
                 type: "ambient_play_playlist",
                 playlist_id: p.id,
               })
             }
-          >
-            ▶
-          </button>
+          />
         </li>
       ))}
     </ul>

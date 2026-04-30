@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { IconButton } from "@/components/IconButton";
+import { EditIcon, LightningIcon, TrashIcon } from "@/components/icons";
 import { SceneEditor } from "@/components/SceneEditor";
 import { SoundboardEditor } from "@/components/SoundboardEditor";
 import { modesAdminApi, modesApi, playlistsApi } from "@/core/api";
@@ -134,7 +137,10 @@ export function ModesView() {
           />
         ) : (
           <div className="empty-detail">
-            <p className="muted">Select a mode on the left, or click <strong>+ New</strong>.</p>
+            <EmptyState title="No mode selected">
+              Pick one from the list, or click <strong>+ New</strong> to scaffold
+              a fresh mode under <code>MODES_DIR</code>.
+            </EmptyState>
           </div>
         )}
       </div>
@@ -274,9 +280,14 @@ function ModeDetailPane({
           </p>
         </div>
         <div className="playlist-detail-actions">
-          <button type="button" className="btn-danger" onClick={() => void deleteMode()}>
-            🗑 Delete mode
-          </button>
+          <IconButton
+            label="Delete mode"
+            icon={<TrashIcon />}
+            variant="danger"
+            onClick={() => void deleteMode()}
+          >
+            Delete mode
+          </IconButton>
         </div>
       </header>
 
@@ -463,19 +474,26 @@ function InterruptTemplatesEditor({
                   ) : null}
                 </span>
                 <span className="simple-list-actions">
-                  <button type="button" onClick={() => void fire(it)} title="Fire now">
-                    ⚡ Fire
-                  </button>
-                  <button type="button" onClick={() => setEditingIdx(idx)}>
-                    ✎ Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-danger"
-                    onClick={() => void remove(idx)}
+                  <IconButton
+                    label="Fire now"
+                    icon={<LightningIcon />}
+                    onClick={() => void fire(it)}
                   >
-                    🗑
-                  </button>
+                    Fire
+                  </IconButton>
+                  <IconButton
+                    label="Edit interrupt template"
+                    icon={<EditIcon />}
+                    onClick={() => setEditingIdx(idx)}
+                  >
+                    Edit
+                  </IconButton>
+                  <IconButton
+                    label="Delete interrupt template"
+                    icon={<TrashIcon />}
+                    variant="danger"
+                    onClick={() => void remove(idx)}
+                  />
                 </span>
               </li>
             ),
@@ -734,17 +752,20 @@ function SubresourceList({
               <span>{itemId}</span>
               <span className="simple-list-actions">
                 {onEdit ? (
-                  <button type="button" onClick={() => onEdit(itemId)}>
-                    ✎ Edit
-                  </button>
+                  <IconButton
+                    label="Edit"
+                    icon={<EditIcon />}
+                    onClick={() => onEdit(itemId)}
+                  >
+                    Edit
+                  </IconButton>
                 ) : null}
-                <button
-                  type="button"
-                  className="btn-danger"
+                <IconButton
+                  label="Delete"
+                  icon={<TrashIcon />}
+                  variant="danger"
                   onClick={() => void remove(itemId)}
-                >
-                  🗑
-                </button>
+                />
               </span>
             </li>
           ))}

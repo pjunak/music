@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { IconButton } from "@/components/IconButton";
+import { TrashIcon, XIcon } from "@/components/icons";
 import { modesAdminApi, modesApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
 import { toast } from "@/core/toast";
@@ -182,14 +184,14 @@ export function SoundboardEditor({ modeId, soundboardId, onBack }: Props) {
                   <h3>{cat.name}</h3>
                   <span className="muted small">id: {cat.id}</span>
                 </div>
-                <button
-                  type="button"
-                  className="btn-danger"
+                <IconButton
+                  label="Remove category and all its items"
+                  icon={<TrashIcon />}
+                  variant="danger"
                   onClick={() => void removeCategory(cat.id)}
-                  title="Remove category and all its items"
                 >
-                  🗑 Category
-                </button>
+                  Category
+                </IconButton>
               </header>
 
               <ItemList
@@ -298,9 +300,12 @@ function ItemRow({
         >
           Save
         </button>
-        <button type="button" className="btn-danger" onClick={() => void onDelete()}>
-          ✕
-        </button>
+        <IconButton
+          label="Delete this item"
+          icon={<XIcon />}
+          variant="danger"
+          onClick={() => void onDelete()}
+        />
       </div>
     </li>
   );

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/EmptyState";
+import { VolumeControl } from "@/components/VolumeControl";
 import { modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeDetail } from "@/core/types";
@@ -40,9 +42,9 @@ export function SoundboardSection() {
 
   if (activeModeId === null) {
     return (
-      <p className="muted small">
+      <EmptyState>
         Pick a mode first — soundboards are defined per mode.
-      </p>
+      </EmptyState>
     );
   }
   if (error !== null) return <p className="error small">{error}</p>;
@@ -51,9 +53,10 @@ export function SoundboardSection() {
   const soundboards = Object.values(mode.soundboards);
   if (soundboards.length === 0) {
     return (
-      <p className="muted small">
-        Mode <code>{activeModeId}</code> has no soundboards.
-      </p>
+      <EmptyState>
+        Mode <code>{activeModeId}</code> has no soundboards — add one from the
+        Modes tab.
+      </EmptyState>
     );
   }
 
@@ -89,18 +92,13 @@ export function SoundboardSection() {
             ))}
           </select>
         </label>
-        <label className="volume-slider">
-          <span className="muted small">SFX volume</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={sfxVolume}
-            onChange={(e) => setSfxVolume(parseFloat(e.target.value))}
-          />
-          <span className="small">{Math.round(sfxVolume * 100)}%</span>
-        </label>
+        <VolumeControl
+          value={sfxVolume}
+          onChange={setSfxVolume}
+          label="SFX volume"
+          showIcon={false}
+          prefix="SFX volume"
+        />
       </div>
 
       {active === null ? (

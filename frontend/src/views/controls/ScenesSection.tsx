@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/EmptyState";
 import { modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeDetail } from "@/core/types";
@@ -36,7 +37,9 @@ export function ScenesSection() {
   }, [activeModeId]);
 
   if (activeModeId === null) {
-    return <p className="muted small">Pick a mode to use scenes.</p>;
+    return (
+      <EmptyState>Pick a mode in the strip above to use its scenes.</EmptyState>
+    );
   }
   if (error !== null) return <p className="error small">{error}</p>;
   if (mode === null) return <p className="muted small">Loading…</p>;
@@ -44,9 +47,10 @@ export function ScenesSection() {
   const scenes = Object.values(mode.scenes);
   if (scenes.length === 0) {
     return (
-      <p className="muted small">
-        Mode <code>{activeModeId}</code> has no scenes defined.
-      </p>
+      <EmptyState>
+        Mode <code>{activeModeId}</code> has no scenes — add one from the
+        Modes tab or drop YAML into <code>MODES_DIR/{activeModeId}/scenes/</code>.
+      </EmptyState>
     );
   }
 

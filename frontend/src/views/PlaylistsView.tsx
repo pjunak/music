@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { IconButton } from "@/components/IconButton";
+import { PlayIcon, TrashIcon, XIcon } from "@/components/icons";
 import { api, libraryApi, modesApi, playlistsApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
@@ -94,18 +97,16 @@ export function PlaylistsView() {
                       {p.mode_id ? p.mode_id : "global"}
                     </span>
                   </button>
-                  <button
-                    type="button"
+                  <IconButton
+                    label="Play this playlist now"
+                    icon={<PlayIcon />}
                     onClick={() =>
                       wsClient.send({
                         type: "ambient_play_playlist",
                         playlist_id: p.id,
                       })
                     }
-                    title="Play this playlist now"
-                  >
-                    ▶
-                  </button>
+                  />
                 </li>
               );
             })
@@ -136,7 +137,10 @@ export function PlaylistsView() {
           />
         ) : (
           <div className="empty-detail">
-            <p className="muted">Select a playlist on the left, or click <strong>+ New</strong>.</p>
+            <EmptyState title="No playlist selected">
+              Pick one from the list, or click <strong>+ New</strong> to start
+              a fresh playlist.
+            </EmptyState>
           </div>
         )}
       </div>
@@ -297,8 +301,9 @@ function PlaylistDetail({
           </p>
         </div>
         <div className="playlist-detail-actions">
-          <button
-            type="button"
+          <IconButton
+            label="Play this playlist"
+            icon={<PlayIcon />}
             onClick={() =>
               wsClient.send({
                 type: "ambient_play_playlist",
@@ -306,11 +311,16 @@ function PlaylistDetail({
               })
             }
           >
-            ▶ Play
-          </button>
-          <button type="button" className="btn-danger" onClick={() => void deletePlaylist()}>
-            🗑 Delete
-          </button>
+            Play
+          </IconButton>
+          <IconButton
+            label="Delete this playlist"
+            icon={<TrashIcon />}
+            variant="danger"
+            onClick={() => void deletePlaylist()}
+          >
+            Delete
+          </IconButton>
         </div>
       </header>
 
@@ -340,21 +350,19 @@ function PlaylistDetail({
                     {t?.artist ? <span className="muted small">{t.artist}</span> : null}
                   </div>
                   <div className="playlist-track-actions">
-                    <button
+                    <IconButton
+                      label="Play this track"
+                      icon={<PlayIcon />}
                       onClick={() =>
                         wsClient.send({ type: "ambient_play_track", track_id: row.track_id })
                       }
-                      title="Play"
-                    >
-                      ▶
-                    </button>
-                    <button
-                      className="btn-danger"
+                    />
+                    <IconButton
+                      label="Remove from playlist"
+                      icon={<XIcon />}
+                      variant="danger"
                       onClick={() => void removeAt(row.position)}
-                      title="Remove from playlist"
-                    >
-                      ✕
-                    </button>
+                    />
                   </div>
                 </li>
               );

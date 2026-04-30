@@ -6,6 +6,7 @@
   --accent: #6aa6ff;
   --accent-strong: #9bc2ff;
   --accent-soft: rgba(106, 166, 255, 0.12);
+  --accent-tint: rgba(106, 166, 255, 0.07); /* subtler accent wash for "playing" rows + drop zones */
   --danger: #ff6b6b;
   --danger-soft: rgba(255, 107, 107, 0.12);
   --warn: #d2a64a;
@@ -110,6 +111,70 @@ button.btn-ghost {
 button.btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: var(--border);
+}
+
+/* --- shared building blocks ------------------------------------------ */
+
+/* Icon-with-label button — used wherever a button's visible content is
+ * an icon (or icon + short text). The component sets title + aria-label
+ * from a single `label` prop. Padding/sizing comes from the surrounding
+ * context (`.col-actions button`, etc.); this rule only handles layout. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
+  line-height: 1;
+}
+.icon-button-glyph {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: 1.05em;
+}
+
+/* Empty-state placeholder — centred body for "no items yet" surfaces. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+.empty-state-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.empty-state-body {
+  max-width: 44ch;
+  line-height: 1.5;
+}
+.empty-state-action {
+  margin-top: 0.4rem;
+}
+
+/* Volume row — wrapper for the slider, icon, and percent readout. The
+ * inner <input class="volume-slider"> is styled separately in the
+ * "now-playing bar" section so it can paint a level fill cross-browser. */
+.volume-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.volume-row input[type="range"] {
+  flex: 1;
+}
+.volume-row-icon {
+  font-size: 1.05em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.volume-row-pct {
+  min-width: 4ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 input[type="text"],
@@ -652,7 +717,7 @@ kbd,
   background: rgba(255, 255, 255, 0.04);
 }
 .track-table tr.track-row.playing {
-  background: rgba(106, 166, 255, 0.07);
+  background: var(--accent-tint);
 }
 .track-table tr.track-row.playing td:first-child {
   border-left: 2px solid var(--accent);
@@ -705,7 +770,7 @@ kbd,
 }
 .drop-zone-active {
   border-color: var(--accent);
-  background: rgba(106, 166, 255, 0.06);
+  background: var(--accent-tint);
   color: var(--accent-strong);
 }
 .drop-zone-uploading {
@@ -889,14 +954,6 @@ kbd,
 .mode-picker select {
   width: 100%;
 }
-.volume-slider {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.volume-slider input[type="range"] {
-  flex: 1;
-}
 .output-picker-options {
   display: flex;
   flex-direction: column;
@@ -986,7 +1043,7 @@ kbd,
   background: rgba(255, 255, 255, 0.03);
 }
 .playlist-track.playing {
-  background: rgba(106, 166, 255, 0.07);
+  background: var(--accent-tint);
   border-left: 2px solid var(--accent);
   padding-left: calc(0.4rem - 2px);
 }
@@ -1084,7 +1141,11 @@ kbd,
 }
 .scene-button.active {
   border-color: var(--accent);
-  background: rgba(106, 166, 255, 0.08);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.scene-button.active .scene-name {
+  color: var(--accent-strong);
 }
 .scene-name {
   font-weight: 600;
@@ -1108,13 +1169,14 @@ kbd,
   flex-direction: column;
   gap: 0.2rem;
 }
-.soundboard-toolbar .volume-slider {
+.soundboard-toolbar .volume-row {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
 }
-.soundboard-toolbar .volume-slider input[type="range"] {
+.soundboard-toolbar .volume-row input[type="range"] {
   width: 140px;
+  flex: 0 0 auto;
 }
 .soundboard-categories {
   display: flex;
@@ -1122,9 +1184,14 @@ kbd,
   gap: 0.7rem;
 }
 .soundboard-category h4 {
-  margin: 0 0 0.3rem;
-  font-size: 0.85rem;
+  margin: 0 0 0.4rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--accent);
+  font-size: 0.78rem;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
 }
 .soundboard-grid {
   display: grid;
@@ -1211,7 +1278,7 @@ kbd,
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.1rem;
-  padding: 0.15rem 0.25rem 0.15rem 0.4rem;
+  padding: 0.25rem 0.4rem 0.25rem 0.5rem;
   border-radius: 4px;
   transition: background var(--transition);
 }
@@ -1225,10 +1292,13 @@ kbd,
   background: var(--surface-2);
 }
 .tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 1.4rem;
-  text-align: center;
-  padding: 0 0.2rem;
-  font-size: 0.85rem;
+  height: 1.4rem;
+  padding: 0;
+  font-size: 0.9rem;
   color: var(--muted);
 }
 .tree-label {
@@ -1236,14 +1306,16 @@ kbd,
   grid-template-columns: auto 1fr auto;
   gap: 0.4rem;
   align-items: center;
-  padding: 0.2rem 0.3rem;
+  padding: 0.25rem 0.3rem;
   text-align: left;
   width: 100%;
   min-width: 0;
 }
 .tree-icon {
+  display: inline-flex;
+  align-items: center;
   font-size: 0.95rem;
-  opacity: 0.85;
+  color: var(--muted);
 }
 .tree-name {
   white-space: nowrap;
@@ -1556,7 +1628,7 @@ kbd,
 .controls-footer {
   display: flex;
   justify-content: flex-end;
-  padding: 0.4rem 0.2rem 0;
+  padding: 0.4rem 0 0;
 }
 .controls-footer a {
   text-decoration: none;
@@ -1974,15 +2046,23 @@ kbd,
   align-items: center;
   gap: 0.4rem;
 }
+/* Square buttons with flex-centering (the inherited asymmetric padding
+ * from the global `button` rule + plain text-align would leave glyphs
+ * subtly off-centre at fixed dimensions). */
 .now-playing-controls button {
-  font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 2.4rem;
-  text-align: center;
+  height: 2.4rem;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
 }
 .now-playing-controls .now-playing-play {
-  font-size: 1.35rem;
   width: 2.9rem;
   height: 2.9rem;
+  font-size: 1.35rem;
   border-radius: 999px;
   background: var(--accent);
   color: #0a0a0a;
@@ -1993,45 +2073,71 @@ kbd,
   background: var(--accent-strong);
   color: #0a0a0a;
 }
+/* Footer volume row — wraps <VolumeControl/>; only adds layout overrides
+ * specific to the footer (right-align, smaller font on the percent). */
 .now-playing-volume {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   justify-content: flex-end;
-  font-variant-numeric: tabular-nums;
   font-size: 0.8rem;
-  color: var(--muted);
 }
-.now-playing-volume-pct {
-  min-width: 4ch;
-  text-align: right;
+.now-playing-track-interrupt {
+  color: var(--warn);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
 }
 /* Volume slider — visually distinct from the scrub bar (native range,
- *  short width, smaller knob) so you don't mistake one for the other. */
-.volume-slider {
+ *  short width, smaller knob) so you don't mistake one for the other.
+ *  Painted level fill matches the seek bar's "played vs unplayed" cue:
+ *  Firefox uses ::-moz-range-progress natively; webkit needs a gradient
+ *  driven by the inline `--volume-pct` custom property. The selector is
+ *  qualified to <input> so it doesn't bleed onto wrapper elements that
+ *  share the class by accident. */
+input.volume-slider {
   -webkit-appearance: none;
   appearance: none;
   width: clamp(110px, 14vw, 180px);
   height: 4px;
-  background: var(--border-strong);
+  background: transparent;
   border-radius: 2px;
   outline: none;
 }
-.volume-slider:focus-visible {
+input.volume-slider:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-.volume-slider::-webkit-slider-thumb {
+input.volume-slider::-moz-range-track {
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 2px;
+  border: 0;
+}
+input.volume-slider::-moz-range-progress {
+  height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+input.volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  border: 0;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--volume-pct, 100%),
+    var(--border-strong) var(--volume-pct, 100%) 100%
+  );
+}
+input.volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 12px;
   height: 12px;
+  margin-top: -4px;
   border-radius: 50%;
   background: var(--fg);
   cursor: pointer;
   border: 0;
 }
-.volume-slider::-moz-range-thumb {
+input.volume-slider::-moz-range-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -2435,7 +2541,7 @@ kbd,
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
-  .volume-slider {
+  input.volume-slider {
     width: 100%;
   }
 

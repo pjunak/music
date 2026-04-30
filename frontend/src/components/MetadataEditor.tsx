@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { IconButton } from "@/components/IconButton";
+import { XIcon } from "@/components/icons";
 import { libraryApi } from "@/core/api";
 import type { MetadataUpdate } from "@/core/api";
 import type { Track } from "@/core/types";
@@ -72,9 +74,7 @@ export function MetadataEditor({ track, onClose, onSaved }: Props) {
       >
         <header className="modal-header">
           <h2>Edit metadata</h2>
-          <button type="button" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <IconButton label="Close" icon={<XIcon />} onClick={onClose} className="modal-close" />
         </header>
         <form onSubmit={onSubmit} className="metadata-form">
           <p className="muted small metadata-path">{track.path}</p>

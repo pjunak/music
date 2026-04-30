@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
+import { IconButton } from "@/components/IconButton";
+import { XIcon } from "@/components/icons";
 import { modesAdminApi, modesApi, playlistsApi, presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
 import { toast } from "@/core/toast";
@@ -328,13 +330,12 @@ function SceneEditorForm({
                   }
                   title="Volume 0–1"
                 />
-                <button
-                  type="button"
-                  className="btn-danger"
+                <IconButton
+                  label="Remove looping SFX"
+                  icon={<XIcon />}
+                  variant="danger"
                   onClick={() => removeLoopingSfx(idx)}
-                >
-                  ✕
-                </button>
+                />
               </li>
             ))}
           </ul>

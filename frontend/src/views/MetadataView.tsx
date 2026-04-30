@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
+import { IconButton } from "@/components/IconButton";
+import { EditIcon } from "@/components/icons";
 import { MetadataEditor } from "@/components/MetadataEditor";
 import { libraryApi } from "@/core/api";
 import type { LibrarySortKey, MetadataUpdate, SortOrder } from "@/core/api";
@@ -179,13 +181,11 @@ export function MetadataView() {
                       {t.year ?? <span className="muted">—</span>}
                     </td>
                     <td className="col-actions">
-                      <button
-                        type="button"
+                      <IconButton
+                        label="Edit this track"
+                        icon={<EditIcon />}
                         onClick={() => setEditing(t)}
-                        title="Edit this track"
-                      >
-                        ✎
-                      </button>
+                      />
                     </td>
                   </tr>
                 );

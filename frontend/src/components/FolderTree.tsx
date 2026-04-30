@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FolderClosedIcon,
+  FolderOpenIcon,
+} from "./icons";
+
 /** Generic folder-tree component, root-agnostic.
  *
  *  The host (LibraryView) supplies a `loadChildren(path)` function that
@@ -147,7 +154,7 @@ export function FolderTree({
             onClick={() => toggle(folder.path)}
             aria-label={expanded ? "Collapse" : "Expand"}
           >
-            {expanded ? "▾" : "▸"}
+            {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
           </button>
           <button
             type="button"
@@ -155,8 +162,8 @@ export function FolderTree({
             onClick={() => onSelect(folder.path)}
             title={folder.path}
           >
-            <span className="tree-icon" aria-hidden="true">
-              📁
+            <span className="tree-icon">
+              {expanded ? <FolderOpenIcon /> : <FolderClosedIcon />}
             </span>
             <span className="tree-name">{folder.name}</span>
             {folder.badge !== undefined && folder.badge !== null ? (
@@ -198,14 +205,16 @@ export function FolderTree({
         className={`tree-row tree-root${rootIsSelected ? " selected" : ""}`}
         {...dropProps("")}
       >
-        <span className="tree-toggle muted">▾</span>
+        <span className="tree-toggle muted" aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
         <button
           type="button"
           className="tree-label btn-ghost"
           onClick={() => onSelect("")}
         >
-          <span className="tree-icon" aria-hidden="true">
-            📂
+          <span className="tree-icon">
+            <FolderOpenIcon />
           </span>
           <span className="tree-name">{rootLabel}</span>
         </button>

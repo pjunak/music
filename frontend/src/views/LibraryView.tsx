@@ -4,6 +4,14 @@ import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
+import { IconButton } from "@/components/IconButton";
+import {
+  EditIcon,
+  LightningIcon,
+  PlayIcon,
+  PlusIcon,
+  TrashIcon,
+} from "@/components/icons";
 import { MetadataEditor } from "@/components/MetadataEditor";
 import { libraryApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
@@ -489,16 +497,13 @@ function SfxBrowser({
                 )}
                 <span className="muted small">{formatSize(f.size_bytes)}</span>
                 <div className="sfx-file-actions">
-                  <button onClick={() => preview(f)} title="Preview">
-                    ▶
-                  </button>
-                  <button
-                    className="btn-danger"
+                  <IconButton label="Preview SFX" icon={<PlayIcon />} onClick={() => preview(f)} />
+                  <IconButton
+                    label="Delete SFX file"
+                    icon={<TrashIcon />}
+                    variant="danger"
                     onClick={() => void onDelete(f)}
-                    title="Delete"
-                  >
-                    🗑
-                  </button>
+                  />
                 </div>
               </li>
             ))}
@@ -595,25 +600,30 @@ function FolderActions({
 
   return (
     <div className="folder-actions">
-      <button type="button" onClick={() => void newFolder()}>
-        + Folder
-      </button>
-      <button
-        type="button"
+      <IconButton
+        label="New folder"
+        icon={<PlusIcon />}
+        onClick={() => void newFolder()}
+      >
+        Folder
+      </IconButton>
+      <IconButton
+        label="Rename / move the selected folder"
+        icon={<EditIcon />}
         onClick={() => void renameFolder()}
         disabled={!selectedPath}
-        title="Rename / move the selected folder"
       >
-        ✎ Rename
-      </button>
-      <button
-        type="button"
-        className="btn-danger"
+        Rename
+      </IconButton>
+      <IconButton
+        label="Delete the selected folder"
+        icon={<TrashIcon />}
+        variant="danger"
         onClick={() => void deleteFolder()}
         disabled={!selectedPath}
       >
-        🗑 Delete
-      </button>
+        Delete
+      </IconButton>
     </div>
   );
 }
@@ -799,28 +809,28 @@ function TrackTable({
                 <td className="col-num">{t.year ?? <span className="muted">—</span>}</td>
                 <td className="col-num">{formatDuration(t.length_s)}</td>
                 <td className="col-actions">
-                  <button onClick={() => play(t)} title="Play">
-                    ▶
-                  </button>
-                  <button onClick={() => enqueue(t)} title="Queue">
-                    ＋
-                  </button>
-                  <button
+                  <IconButton label="Play" icon={<PlayIcon />} onClick={() => play(t)} />
+                  <IconButton
+                    label="Add to queue"
+                    icon={<PlusIcon />}
+                    onClick={() => enqueue(t)}
+                  />
+                  <IconButton
+                    label="Fire as interrupt (overrides ambient until done, then resumes)"
+                    icon={<LightningIcon />}
                     onClick={() => fireInterrupt(t)}
-                    title="Fire as interrupt (overrides ambient until done, then resumes)"
-                  >
-                    ⚡
-                  </button>
-                  <button onClick={() => setEditing(t)} title="Edit metadata">
-                    ✎
-                  </button>
-                  <button
-                    className="btn-danger"
+                  />
+                  <IconButton
+                    label="Edit metadata"
+                    icon={<EditIcon />}
+                    onClick={() => setEditing(t)}
+                  />
+                  <IconButton
+                    label="Delete track"
+                    icon={<TrashIcon />}
+                    variant="danger"
                     onClick={() => void deleteTrack(t)}
-                    title="Delete"
-                  >
-                    🗑
-                  </button>
+                  />
                 </td>
               </tr>
             ))}

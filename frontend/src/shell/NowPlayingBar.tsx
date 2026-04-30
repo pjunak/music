@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent, MouseEvent } from "react";
+import type { MouseEvent } from "react";
 
+import { IconButton } from "@/components/IconButton";
+import {
+  LightningIcon,
+  PauseIcon,
+  PlayIcon,
+  SkipNextIcon,
+  SkipPrevIcon,
+} from "@/components/icons";
+import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
 import {
   selectAmbientPositionMs,
@@ -104,8 +113,8 @@ export function NowPlayingBar() {
     }
   }
 
-  function onVolumeChange(e: ChangeEvent<HTMLInputElement>) {
-    wsClient.send({ type: "set_volume", volume: parseFloat(e.target.value) });
+  function onVolumeChange(next: number) {
+    wsClient.send({ type: "set_volume", volume: next });
   }
 
   const seekable = totalMs > 0;
@@ -118,10 +127,16 @@ export function NowPlayingBar() {
           {track !== null ? (
             <>
               <strong>{trackTitle(track) || "(untitled)"}</strong>
-              <span className="muted small">
+              <span className="muted small now-playing-track-meta">
                 {track.artist || "(unknown)"}
                 {track.album ? ` · ${track.album}` : ""}
-                {interruptId !== null ? "  ·  ⚡ interrupt" : ""}
+                {interruptId !== null ? (
+                  <span className="now-playing-track-interrupt">
+                    {" · "}
+                    <LightningIcon />
+                    {" interrupt"}
+                  </span>
+                ) : null}
               </span>
             </>
           ) : (
@@ -130,45 +145,39 @@ export function NowPlayingBar() {
         </div>
 
         <div className="now-playing-controls">
-          <button onClick={prev} title="Previous (←)" aria-label="Previous">⏮</button>
+          <IconButton
+            label="Previous (←)"
+            icon={<SkipPrevIcon />}
+            onClick={prev}
+          />
           {isPlaying ? (
-            <button
+            <IconButton
+              label="Pause (Space)"
+              icon={<PauseIcon />}
               onClick={pause}
-              title="Pause (Space)"
-              aria-label="Pause"
               className="now-playing-play"
-            >
-              ⏸
-            </button>
+            />
           ) : (
-            <button
+            <IconButton
+              label="Play (Space)"
+              icon={<PlayIcon />}
               onClick={play}
-              title="Play (Space)"
-              aria-label="Play"
               className="now-playing-play"
-            >
-              ▶
-            </button>
+            />
           )}
-          <button onClick={next} title="Next (→)" aria-label="Next">⏭</button>
+          <IconButton
+            label="Next (→)"
+            icon={<SkipNextIcon />}
+            onClick={next}
+          />
         </div>
 
-        <label className="now-playing-volume" title="Volume">
-          <span aria-hidden="true">🔉</span>
-          <input
-            className="volume-slider"
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={volume}
-            onChange={onVolumeChange}
-            aria-label="Master volume"
-          />
-          <span className="now-playing-volume-pct">
-            {Math.round(volume * 100)}%
-          </span>
-        </label>
+        <VolumeControl
+          value={volume}
+          onChange={onVolumeChange}
+          label="Master volume"
+          className="now-playing-volume"
+        />
       </div>
 
       <div className="now-playing-scrub">

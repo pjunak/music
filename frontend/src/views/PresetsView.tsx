@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { IconButton } from "@/components/IconButton";
+import { ArrowDownIcon, ArrowUpIcon, TrashIcon, XIcon } from "@/components/icons";
 import { presetsAdminApi, presetsApi } from "@/core/api";
 import type { PresetEffect, PresetManifest } from "@/core/api";
 import { toast } from "@/core/toast";
@@ -60,7 +63,11 @@ export function PresetsView() {
         </p>
         <ul className="playlist-list">
           {presets.length === 0 ? (
-            <li className="muted small empty">No presets yet.</li>
+            <li className="muted small empty">
+              No presets yet — click <strong>+ New</strong> to create one,
+              or drop YAML into <code>PRESETS_DIR</code> and POST{" "}
+              <code>/api/presets/reload</code>.
+            </li>
           ) : (
             presets.map((p) => (
               <li
@@ -109,7 +116,10 @@ export function PresetsView() {
           />
         ) : (
           <div className="empty-detail">
-            <p className="muted">Select a preset, or click <strong>+ New</strong>.</p>
+            <EmptyState title="No preset selected">
+              Pick one from the list, or click <strong>+ New</strong> to build
+              a fresh effect chain.
+            </EmptyState>
           </div>
         )}
       </div>
@@ -133,6 +143,7 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
     () => preset?.effects.map((e) => ({ ...e })) ?? [],
   );
   const [busy, setBusy] = useState(false);
+  const [pendingEffectType, setPendingEffectType] = useState("");
 
   useEffect(() => {
     if (mode === "edit" && preset) {
@@ -227,13 +238,14 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
         <h2>{mode === "create" ? "New preset" : preset?.name}</h2>
         {mode === "edit" ? (
           <div className="playlist-detail-actions">
-            <button
-              type="button"
-              className="btn-danger"
+            <IconButton
+              label="Delete preset"
+              icon={<TrashIcon />}
+              variant="danger"
               onClick={() => void deletePreset()}
             >
-              🗑 Delete
-            </button>
+              Delete
+            </IconButton>
           </div>
         ) : null}
       </header>
@@ -280,30 +292,24 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
                 <header>
                   <strong>{eff.type}</strong>
                   <div className="effect-row-actions">
-                    <button
-                      type="button"
+                    <IconButton
+                      label="Move effect up"
+                      icon={<ArrowUpIcon />}
                       onClick={() => moveEffect(idx, -1)}
                       disabled={idx === 0}
-                      title="Move up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
+                    />
+                    <IconButton
+                      label="Move effect down"
+                      icon={<ArrowDownIcon />}
                       onClick={() => moveEffect(idx, 1)}
                       disabled={idx === effects.length - 1}
-                      title="Move down"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-danger"
+                    />
+                    <IconButton
+                      label="Remove effect"
+                      icon={<XIcon />}
+                      variant="danger"
                       onClick={() => removeEffect(idx)}
-                      title="Remove"
-                    >
-                      ✕
-                    </button>
+                    />
                   </div>
                 </header>
                 <div className="effect-params">
@@ -325,13 +331,15 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
         )}
         <div className="effect-add">
           <select
-            defaultValue=""
+            value={pendingEffectType}
             onChange={(e) => {
-              if (e.target.value) {
-                addEffect(e.target.value);
-                e.target.value = "";
+              const next = e.target.value;
+              if (next) {
+                addEffect(next);
+                setPendingEffectType("");
               }
             }}
+            aria-label="Add effect to chain"
           >
             <option value="" disabled>
               + Add effect…
