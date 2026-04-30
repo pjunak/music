@@ -65,6 +65,9 @@ export interface Track {
   bpm: number | null;
   size_bytes: number;
   added_at: string;
+  // User-entered, DB-only labels — see backend/app/models/track.py.
+  display_title: string;
+  origin: string;
 }
 
 // Compact track summary returned in playlist listings.

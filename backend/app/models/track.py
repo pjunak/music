@@ -31,6 +31,15 @@ class Track(Base):
     length_s: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # User-entered, DB-only fields. Decoupled from the on-disk tags so the
+    # operator can label tracks without touching ID3 (and without losing
+    # those labels when a tag-rich file is re-tagged or replaced upstream).
+    # `display_title` overrides `title` for UI rendering when set.
+    # `origin` is free-form provenance — game/film/album name beyond what
+    # ID3 cleanly expresses (e.g. "Skyrim", "The Witcher 3").
+    display_title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    origin: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     mtime: Mapped[int] = mapped_column(Integer, nullable=False)
     added_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, nullable=False)

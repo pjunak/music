@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { libraryApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
+import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
@@ -55,7 +56,7 @@ export function InterruptSection() {
       <div className="interrupt-active">
         <div className="interrupt-meta">
           <span className="track-title">
-            {track?.title || track?.path || `Track ${interrupt.current_track_id}`}
+            {trackTitle(track) || `Track ${interrupt.current_track_id}`}
           </span>
           <span className="muted small">
             {track?.artist || ""}

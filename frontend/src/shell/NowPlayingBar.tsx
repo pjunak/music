@@ -6,6 +6,7 @@ import {
   selectAmbientPositionMs,
   usePlayerStore,
 } from "@/core/playerStore";
+import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
@@ -116,7 +117,7 @@ export function NowPlayingBar() {
         <div className="now-playing-track">
           {track !== null ? (
             <>
-              <strong>{track.title || "(untitled)"}</strong>
+              <strong>{trackTitle(track) || "(untitled)"}</strong>
               <span className="muted small">
                 {track.artist || "(unknown)"}
                 {track.album ? ` · ${track.album}` : ""}

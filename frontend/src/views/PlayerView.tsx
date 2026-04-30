@@ -7,6 +7,7 @@ import {
   selectIsMyOutput,
   usePlayerStore,
 } from "@/core/playerStore";
+import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { defaultDeviceName, useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
@@ -139,10 +140,11 @@ export function PlayerView() {
               <span className="badge">⏸ Paused</span>
             )}
           </p>
-          <h1 className="player-title">{track.title || track.path}</h1>
+          <h1 className="player-title">{trackTitle(track)}</h1>
           <p className="player-artist">
             {track.artist || "(unknown artist)"}
             {track.album ? ` — ${track.album}` : ""}
+            {track.origin ? ` · from ${track.origin}` : ""}
           </p>
 
           {queueTracks.length > 0 ? (
@@ -151,7 +153,7 @@ export function PlayerView() {
               <ol>
                 {queueTracks.map((t) => (
                   <li key={t.id}>
-                    <span className="track-title">{t.title || t.path}</span>
+                    <span className="track-title">{trackTitle(t)}</span>
                     {t.artist ? (
                       <span className="muted small"> · {t.artist}</span>
                     ) : null}
@@ -172,7 +174,7 @@ export function PlayerView() {
               <ol>
                 {historyTracks.map((t) => (
                   <li key={t.id} className="muted small">
-                    {t.title || t.path}
+                    {trackTitle(t)}
                     {t.artist ? ` · ${t.artist}` : ""}
                   </li>
                 ))}

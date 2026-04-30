@@ -2180,6 +2180,165 @@ kbd,
   margin: 0;
   word-break: break-all;
 }
+.metadata-fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.metadata-fieldset legend {
+  padding: 0 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* --- Metadata tab: bulk-edit surface ---------------------------------- */
+
+.metadata-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1;
+  min-height: 0;
+}
+.metadata-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.metadata-search {
+  display: flex;
+  gap: 0.4rem;
+  flex: 1 1 320px;
+}
+.metadata-search input {
+  flex: 1;
+}
+.metadata-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.metadata-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 0.8rem;
+  flex: 1;
+  min-height: 0;
+}
+.metadata-main {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.metadata-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.metadata-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+.metadata-table th,
+.metadata-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 18ch;
+}
+.metadata-table th.col-check,
+.metadata-table td.col-check {
+  width: 2rem;
+  max-width: 2rem;
+}
+.metadata-table td.col-num {
+  text-align: right;
+}
+.metadata-table tr.metadata-row {
+  cursor: pointer;
+}
+.metadata-table tr.metadata-row:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.04));
+}
+.metadata-table tr.metadata-row.selected {
+  background: var(--accent-soft);
+}
+.metadata-table td.col-actions {
+  width: 2.5rem;
+  text-align: right;
+}
+.metadata-empty {
+  text-align: center;
+  padding: 2rem;
+}
+
+.metadata-aside {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.8rem;
+  overflow: auto;
+}
+.bulk-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.bulk-edit h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+}
+.bulk-edit hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.4rem 0;
+}
+.bulk-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 0.5rem;
+  row-gap: 0.2rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 4px;
+}
+.bulk-row > input[type="checkbox"] {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+.bulk-row .bulk-row-label {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.bulk-row > input[type="text"],
+.bulk-row > input[type="number"] {
+  grid-column: 2;
+  grid-row: 2;
+  width: 100%;
+}
+.bulk-row .bulk-row-hint {
+  grid-column: 2;
+  grid-row: 3;
+}
+.bulk-row.bulk-row-armed {
+  background: var(--accent-soft);
+}
+.bulk-apply {
+  margin-top: 0.6rem;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -2258,6 +2417,10 @@ kbd,
   }
   .upload-dropzone {
     grid-template-columns: 1fr;
+  }
+  .metadata-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
   }
 
   .controls-view {

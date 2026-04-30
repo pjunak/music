@@ -48,6 +48,45 @@ def _configure_logging(level: str) -> None:
     )
 
 
+# Columns that were added to existing tables after the table's first
+# release. `Base.metadata.create_all()` only creates *missing* tables — it
+# never touches an existing table's columns. Listing additive changes here
+# lets the lifespan ALTER them in idempotently, sparing the operator a full
+# `app.db` wipe (which would erase users / playlists). Type changes, drops,
+# and renames still require a wipe.
+_ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
+    ("tracks", "display_title", "VARCHAR(512) NOT NULL DEFAULT ''"),
+    ("tracks", "origin", "VARCHAR(512) NOT NULL DEFAULT ''"),
+]
+
+
+def _apply_additive_columns() -> None:
+    """ALTER TABLE … ADD COLUMN for any entry in `_ADDITIVE_COLUMNS` whose
+    column doesn't yet exist. SQLite-only; on other dialects this is a noop
+    (we don't deploy to anything else, but the guard keeps tests / dev runs
+    against alternate DBs from blowing up)."""
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as conn:
+        for table_name, col_name, col_def in _ADDITIVE_COLUMNS:
+            existing = {
+                row[1]
+                for row in conn.exec_driver_sql(
+                    f"PRAGMA table_info({table_name})"
+                ).fetchall()
+            }
+            if not existing:
+                # Table doesn't exist yet — `create_all` will build it
+                # with the new column already present.
+                continue
+            if col_name in existing:
+                continue
+            conn.exec_driver_sql(
+                f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}"
+            )
+            logger.info("schema: added %s.%s", table_name, col_name)
+
+
 def _seed_if_empty(target: Path, seed: Path | None, label: str) -> None:
     """Copy `seed` into `target` only when `target` is missing or empty.
 
@@ -128,6 +167,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # changes incompatibly, the operator wipes app.db and re-creates the
     # auth user via `music-cli create-user`.
     Base.metadata.create_all(bind=engine)
+    _apply_additive_columns()
     modes_loader.load_all()
     presets_loader.load_all()
     # Walk the music dir on boot so search/tree work immediately. A noop on

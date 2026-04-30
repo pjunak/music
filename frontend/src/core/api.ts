@@ -168,6 +168,14 @@ export interface MetadataUpdate {
   track_no?: number | null;
   year?: number | null;
   genre?: string;
+  // DB-only fields — not written to the file's tags. See backend.
+  display_title?: string;
+  origin?: string;
+}
+
+export interface BulkMetadataUpdate {
+  track_ids: number[];
+  updates: MetadataUpdate;
 }
 
 export const libraryApi = {
@@ -229,6 +237,8 @@ export const libraryApi = {
   rescan: () => api.post<RescanResult>("/api/library/rescan"),
   updateMetadata: (id: number, payload: MetadataUpdate) =>
     api.patch<Track>(`/api/library/tracks/${id}/metadata`, payload),
+  updateBulkMetadata: (payload: BulkMetadataUpdate) =>
+    api.patch<Track[]>("/api/library/tracks/bulk-metadata", payload),
   moveTrack: (id: number, destination: string, newFilename?: string) =>
     api.post<Track>(`/api/library/tracks/${id}/move`, {
       destination,

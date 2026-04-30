@@ -9,6 +9,7 @@ import { libraryApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
+import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
@@ -740,7 +741,7 @@ function TrackTable({
       fade_in_ms: 500,
       fade_out_ms: 500,
     });
-    toast.info("Interrupt fired", t.title || t.path);
+    toast.info("Interrupt fired", trackTitle(t));
   }
   async function deleteTrack(t: Track) {
     const ok = await confirmDialog({
@@ -792,7 +793,7 @@ function TrackTable({
                     : undefined
                 }
               >
-                <td title={t.path}>{t.title || t.path}</td>
+                <td title={t.path}>{trackTitle(t)}</td>
                 <td>{t.artist || <span className="muted">—</span>}</td>
                 <td>{t.album || <span className="muted">—</span>}</td>
                 <td className="col-num">{t.year ?? <span className="muted">—</span>}</td>

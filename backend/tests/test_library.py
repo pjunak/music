@@ -258,6 +258,131 @@ def test_metadata_edit_404_for_unknown_track(auth_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_display_title_persists_independent_of_filename(auth_client: TestClient) -> None:
+    """`display_title` is a DB-only override — set it once, then move the
+    file or re-tag it; the value sticks because it never round-trips through
+    ID3 or the filename."""
+    files = [("files", ("first-name.wav", _silent_wav(), "audio/wav"))]
+    upload = auth_client.post(
+        "/api/library/upload", files=files, params={"dest": "Display"}
+    ).json()
+    track_id = upload["saved"][0]["id"]
+
+    r = auth_client.patch(
+        f"/api/library/tracks/{track_id}/metadata",
+        json={"display_title": "Battle Theme A"},
+    )
+    assert r.status_code == 200
+    assert r.json()["display_title"] == "Battle Theme A"
+    # Tag-derived title untouched.
+    assert r.json()["title"] == "first-name"
+
+    # Move + rename the file. The display_title must survive — the row id
+    # is stable because index.update_path rewires it on rename.
+    moved = auth_client.post(
+        f"/api/library/tracks/{track_id}/move",
+        json={"destination": "DisplayMoved", "new_filename": "renamed.wav"},
+    ).json()
+    assert moved["display_title"] == "Battle Theme A"
+
+
+def test_origin_field_round_trips(auth_client: TestClient) -> None:
+    files = [("files", ("origin-test.wav", _silent_wav(), "audio/wav"))]
+    upload = auth_client.post(
+        "/api/library/upload", files=files, params={"dest": "Origins"}
+    ).json()
+    track_id = upload["saved"][0]["id"]
+
+    r = auth_client.patch(
+        f"/api/library/tracks/{track_id}/metadata",
+        json={"origin": "Skyrim"},
+    )
+    assert r.status_code == 200
+    assert r.json()["origin"] == "Skyrim"
+
+    fresh = auth_client.get(f"/api/library/tracks/{track_id}").json()
+    assert fresh["origin"] == "Skyrim"
+
+
+def test_search_matches_origin(auth_client: TestClient) -> None:
+    files = [("files", ("orig-search.wav", _silent_wav(), "audio/wav"))]
+    upload = auth_client.post(
+        "/api/library/upload", files=files, params={"dest": "OriginSearch"}
+    ).json()
+    track_id = upload["saved"][0]["id"]
+    auth_client.patch(
+        f"/api/library/tracks/{track_id}/metadata",
+        json={"origin": "Hollow Knight OST"},
+    )
+
+    r = auth_client.get("/api/library/search", params={"q": "hollow knight"})
+    assert r.status_code == 200
+    ids = {t["id"] for t in r.json()["tracks"]}
+    assert track_id in ids
+
+
+def test_bulk_metadata_sets_artist_across_selection(auth_client: TestClient) -> None:
+    ids: list[int] = []
+    for n in range(3):
+        files = [("files", (f"bulk-{n}.wav", _silent_wav(), "audio/wav"))]
+        upload = auth_client.post(
+            "/api/library/upload", files=files, params={"dest": "BulkArtist"}
+        ).json()
+        ids.append(upload["saved"][0]["id"])
+
+    r = auth_client.patch(
+        "/api/library/tracks/bulk-metadata",
+        json={
+            "track_ids": ids,
+            "updates": {"artist": "John Williams", "origin": "Star Wars"},
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 3
+    for row in body:
+        assert row["artist"] == "John Williams"
+        assert row["origin"] == "Star Wars"
+
+    # Verify each survives a re-fetch (origin is DB-only; artist is ID3 +
+    # mirrored). This proves the write-and-rescan path didn't blow either
+    # of them away.
+    for tid in ids:
+        fresh = auth_client.get(f"/api/library/tracks/{tid}").json()
+        assert fresh["artist"] == "John Williams"
+        assert fresh["origin"] == "Star Wars"
+
+
+def test_bulk_metadata_rejects_empty_track_ids(auth_client: TestClient) -> None:
+    r = auth_client.patch(
+        "/api/library/tracks/bulk-metadata",
+        json={"track_ids": [], "updates": {"artist": "x"}},
+    )
+    assert r.status_code == 422
+
+
+def test_bulk_metadata_rejects_empty_updates(auth_client: TestClient) -> None:
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("bm-empty.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "BulkEmpty"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+    r = auth_client.patch(
+        "/api/library/tracks/bulk-metadata",
+        json={"track_ids": [track_id], "updates": {}},
+    )
+    assert r.status_code == 400
+
+
+def test_bulk_metadata_404_when_no_ids_match(auth_client: TestClient) -> None:
+    r = auth_client.patch(
+        "/api/library/tracks/bulk-metadata",
+        json={"track_ids": [9999991, 9999992], "updates": {"artist": "x"}},
+    )
+    assert r.status_code == 404
+
+
 def test_track_move_renames_and_relocates(auth_client: TestClient) -> None:
     files = [("files", ("movable.wav", _silent_wav(), "audio/wav"))]
     upload = auth_client.post(

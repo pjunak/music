@@ -51,6 +51,11 @@ class TrackOut(BaseModel):
     size_bytes: int
     added_at: datetime
 
+    # User-entered, DB-only fields. Independent of ID3 — survive file moves
+    # and tag rewrites because they're not derived from disk.
+    display_title: str
+    origin: str
+
     model_config = {"from_attributes": True}
 
 
@@ -88,6 +93,10 @@ class RescanResult(BaseModel):
 
 
 class TrackMetadataUpdate(BaseModel):
+    """Mixed bag: tag-backed fields are written to the file's ID3/Vorbis
+    tags AND mirrored in the DB. DB-only fields (`display_title`, `origin`)
+    are written only to the row — the file on disk is left alone."""
+
     title: str | None = Field(None, max_length=512)
     artist: str | None = Field(None, max_length=512)
     album_artist: str | None = Field(None, max_length=512)
@@ -95,6 +104,25 @@ class TrackMetadataUpdate(BaseModel):
     track_no: int | None = Field(None, ge=0, le=9999)
     year: int | None = Field(None, ge=0, le=9999)
     genre: str | None = Field(None, max_length=128)
+    display_title: str | None = Field(None, max_length=512)
+    origin: str | None = Field(None, max_length=512)
+
+
+class BulkMetadataUpdate(BaseModel):
+    """Apply the same field set to many tracks. Empty / unset fields are
+    skipped — only fields the caller explicitly sets are touched. To clear
+    a field across a selection, send the empty string explicitly."""
+
+    track_ids: list[int] = Field(min_length=1, max_length=1000)
+    updates: TrackMetadataUpdate
+
+
+# Fields that round-trip through ID3 / Vorbis tags. Anything outside this
+# set is treated as DB-only.
+_TAG_BACKED_FIELDS: frozenset[str] = frozenset(
+    {"title", "artist", "album_artist", "album", "track_no", "year", "genre"}
+)
+_DB_ONLY_FIELDS: frozenset[str] = frozenset({"display_title", "origin"})
 
 
 class TrackMoveRequest(BaseModel):
@@ -190,8 +218,10 @@ def search(
         needle = f"%{q.lower()}%"
         haystack = or_(
             func.lower(Track.title).like(needle),
+            func.lower(Track.display_title).like(needle),
             func.lower(Track.artist).like(needle),
             func.lower(Track.album).like(needle),
+            func.lower(Track.origin).like(needle),
             func.lower(Track.path).like(needle),
         )
         stmt = stmt.where(haystack)
@@ -248,6 +278,67 @@ def track_cover(track_id: int, _: OptionalUser, db: DbSession) -> Response:
 # --- file-manager actions -------------------------------------------------
 
 
+@router.patch("/tracks/bulk-metadata", response_model=list[TrackOut])
+def update_metadata_bulk(
+    payload: BulkMetadataUpdate,
+    _: CurrentUser,
+    db: DbSession,
+) -> list[TrackOut]:
+    """Apply the same metadata update across many tracks at once.
+
+    Tag-backed fields are written to each file's tags (and a re-scan picks
+    them back up); DB-only fields (`display_title`, `origin`) are set
+    directly on the row. Files that no longer exist on disk are skipped
+    silently — their row remains, but tag-backed fields aren't touched.
+    DB-only fields apply unconditionally since they don't read from disk.
+    """
+    fields = payload.updates.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no fields to update",
+        )
+    tag_fields = {k: v for k, v in fields.items() if k in _TAG_BACKED_FIELDS}
+    db_only_fields = {k: v for k, v in fields.items() if k in _DB_ONLY_FIELDS}
+
+    tracks = list(
+        db.scalars(select(Track).where(Track.id.in_(payload.track_ids))).all()
+    )
+    if not tracks:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no tracks matched the supplied ids",
+        )
+
+    if tag_fields:
+        rescan_paths: list[Path] = []
+        for track in tracks:
+            abs_path = library_index.to_absolute(track.path)
+            if not abs_path.is_file():
+                # File vanished out from under us. Skip rather than abort —
+                # bulk operations should be best-effort across the selection.
+                continue
+            try:
+                library_index.write_tags(abs_path, tag_fields)
+            except ValueError:
+                # Format we can't write tags for (rare). Skip silently;
+                # the row's DB-only fields below still apply.
+                continue
+            rescan_paths.append(abs_path)
+        if rescan_paths:
+            library_index.scan_paths(db, rescan_paths)
+
+    if db_only_fields:
+        for track in tracks:
+            for key, value in db_only_fields.items():
+                setattr(track, key, value if value is not None else "")
+        db.commit()
+
+    for track in tracks:
+        db.refresh(track)
+    return [TrackOut.model_validate(t) for t in tracks]
+
+
 @router.patch("/tracks/{track_id}/metadata", response_model=TrackOut)
 def update_metadata(
     track_id: int,
@@ -255,23 +346,38 @@ def update_metadata(
     _: CurrentUser,
     db: DbSession,
 ) -> TrackOut:
-    """Edit ID3-style tags on the underlying file, then re-index the row.
-    Only fields that were explicitly set in the request are written."""
+    """Edit metadata for a single track. Tag-backed fields go to the
+    underlying file's tags (and the row is re-indexed from disk); DB-only
+    fields are written straight to the row. Only fields explicitly set in
+    the request are touched."""
     track = _track_or_404(db, track_id)
     abs_path = library_index.to_absolute(track.path)
-    if not abs_path.is_file():
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="track file missing")
 
     fields = payload.model_dump(exclude_unset=True)
     if not fields:
         return TrackOut.model_validate(track)
 
-    try:
-        library_index.write_tags(abs_path, fields)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    tag_fields = {k: v for k, v in fields.items() if k in _TAG_BACKED_FIELDS}
+    db_only_fields = {k: v for k, v in fields.items() if k in _DB_ONLY_FIELDS}
 
-    library_index.scan_paths(db, [abs_path])
+    if tag_fields:
+        if not abs_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE, detail="track file missing"
+            )
+        try:
+            library_index.write_tags(abs_path, tag_fields)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+            ) from e
+        library_index.scan_paths(db, [abs_path])
+
+    if db_only_fields:
+        for key, value in db_only_fields.items():
+            setattr(track, key, value if value is not None else "")
+        db.commit()
+
     db.refresh(track)
     return TrackOut.model_validate(track)
 

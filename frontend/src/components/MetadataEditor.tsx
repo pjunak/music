@@ -13,6 +13,8 @@ interface Props {
 
 export function MetadataEditor({ track, onClose, onSaved }: Props) {
   const [title, setTitle] = useState(track.title);
+  const [displayTitle, setDisplayTitle] = useState(track.display_title);
+  const [origin, setOrigin] = useState(track.origin);
   const [artist, setArtist] = useState(track.artist);
   const [albumArtist, setAlbumArtist] = useState(track.album_artist);
   const [album, setAlbum] = useState(track.album);
@@ -47,6 +49,8 @@ export function MetadataEditor({ track, onClose, onSaved }: Props) {
         track_no: trackNo === "" ? null : Number(trackNo),
         year: year === "" ? null : Number(year),
         genre,
+        display_title: displayTitle,
+        origin,
       };
       const updated = await libraryApi.updateMetadata(track.id, payload);
       onSaved(updated);
@@ -75,49 +79,72 @@ export function MetadataEditor({ track, onClose, onSaved }: Props) {
         <form onSubmit={onSubmit} className="metadata-form">
           <p className="muted small metadata-path">{track.path}</p>
 
-          <label>
-            <span>Title</span>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label>
-            <span>Artist</span>
-            <input value={artist} onChange={(e) => setArtist(e.target.value)} />
-          </label>
-          <label>
-            <span>Album artist</span>
-            <input
-              value={albumArtist}
-              onChange={(e) => setAlbumArtist(e.target.value)}
-            />
-          </label>
-          <label>
-            <span>Album</span>
-            <input value={album} onChange={(e) => setAlbum(e.target.value)} />
-          </label>
-          <div className="metadata-row">
+          <fieldset className="metadata-fieldset">
+            <legend>Display (DB-only — not written to file tags)</legend>
             <label>
-              <span>Track #</span>
+              <span>Display title</span>
               <input
-                type="number"
-                min={0}
-                value={trackNo}
-                onChange={(e) => setTrackNo(e.target.value)}
+                value={displayTitle}
+                onChange={(e) => setDisplayTitle(e.target.value)}
+                placeholder="Overrides the tag-derived title in lists"
               />
             </label>
             <label>
-              <span>Year</span>
+              <span>Origin</span>
               <input
-                type="number"
-                min={0}
-                value={year}
-                onChange={(e) => setYear(e.target.value)}
+                value={origin}
+                onChange={(e) => setOrigin(e.target.value)}
+                placeholder="e.g. Skyrim, Hollow Knight, The Witcher 3"
               />
             </label>
-          </div>
-          <label>
-            <span>Genre</span>
-            <input value={genre} onChange={(e) => setGenre(e.target.value)} />
-          </label>
+          </fieldset>
+
+          <fieldset className="metadata-fieldset">
+            <legend>Tags (written back to the file)</legend>
+            <label>
+              <span>Title</span>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            </label>
+            <label>
+              <span>Artist</span>
+              <input value={artist} onChange={(e) => setArtist(e.target.value)} />
+            </label>
+            <label>
+              <span>Album artist</span>
+              <input
+                value={albumArtist}
+                onChange={(e) => setAlbumArtist(e.target.value)}
+              />
+            </label>
+            <label>
+              <span>Album</span>
+              <input value={album} onChange={(e) => setAlbum(e.target.value)} />
+            </label>
+            <div className="metadata-row">
+              <label>
+                <span>Track #</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={trackNo}
+                  onChange={(e) => setTrackNo(e.target.value)}
+                />
+              </label>
+              <label>
+                <span>Year</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={year}
+                  onChange={(e) => setYear(e.target.value)}
+                />
+              </label>
+            </div>
+            <label>
+              <span>Genre</span>
+              <input value={genre} onChange={(e) => setGenre(e.target.value)} />
+            </label>
+          </fieldset>
 
           {error !== null ? <p className="error small">{error}</p> : null}
 

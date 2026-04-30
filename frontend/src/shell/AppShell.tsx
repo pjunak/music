@@ -13,6 +13,7 @@ import { wsClient } from "@/core/ws";
 import { ControlsView } from "@/views/ControlsView";
 import { DiagnosticsView } from "@/views/DiagnosticsView";
 import { LibraryView } from "@/views/LibraryView";
+import { MetadataView } from "@/views/MetadataView";
 import { ModesView } from "@/views/ModesView";
 import { PlayerView } from "@/views/PlayerView";
 import { PlaylistsView } from "@/views/PlaylistsView";
@@ -75,6 +76,14 @@ export default function AppShell() {
             element={
               <RequireAuth>
                 <LibraryView />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="metadata"
+            element={
+              <RequireAuth>
+                <MetadataView />
               </RequireAuth>
             }
           />

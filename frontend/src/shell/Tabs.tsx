@@ -9,6 +9,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { to: "/", label: "Player", end: true },
   { to: "/library", label: "Library" },
+  { to: "/metadata", label: "Metadata" },
   { to: "/playlists", label: "Playlists" },
   { to: "/modes", label: "Modes" },
   { to: "/presets", label: "Presets" },

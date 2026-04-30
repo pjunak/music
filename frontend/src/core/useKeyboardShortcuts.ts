@@ -21,7 +21,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *  - ← / → : prev / next track
  *  - L : cycle ambient loop mode
  *  - / : focus the library search box
- *  - 1–4 : switch tabs (Player, Library, Controls, Settings)
+ *  - 1–8 : switch tabs in tab order (Player, Library, Metadata, Playlists,
+ *          Modes, Presets, Controls, Settings)
  *  - Esc : already handled per-modal
  *
  *  All shortcuts no-op when the user is typing (input, textarea, etc.) so
@@ -83,21 +84,25 @@ export function useKeyboardShortcuts(): void {
           return;
         case "3":
           e.preventDefault();
-          navigate("/playlists");
+          navigate("/metadata");
           return;
         case "4":
           e.preventDefault();
-          navigate("/modes");
+          navigate("/playlists");
           return;
         case "5":
           e.preventDefault();
-          navigate("/presets");
+          navigate("/modes");
           return;
         case "6":
           e.preventDefault();
-          navigate("/controls");
+          navigate("/presets");
           return;
         case "7":
+          e.preventDefault();
+          navigate("/controls");
+          return;
+        case "8":
           e.preventDefault();
           navigate("/settings");
           return;

@@ -5,6 +5,7 @@ import { confirmDialog } from "@/components/ConfirmDialog";
 import { api, libraryApi, modesApi, playlistsApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
+import { trackTitle } from "@/core/trackDisplay";
 import type { ModeSummary, PlaylistMeta, Track, TrackInPlaylist } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
@@ -262,7 +263,7 @@ function PlaylistDetail({
     try {
       await playlistsApi.addTrack(playlist.id, track.id);
       await refreshTracks();
-      toast.success("Added", track.title || track.path);
+      toast.success("Added", trackTitle(track));
     } catch (e) {
       toast.error("Add failed", e instanceof Error ? e.message : undefined);
     }
@@ -334,7 +335,7 @@ function PlaylistDetail({
                   <span className="playlist-track-pos muted small">{row.position + 1}</span>
                   <div className="playlist-track-meta">
                     <span className="playlist-track-title">
-                      {t?.title || t?.path || `Track ${row.track_id}`}
+                      {trackTitle(t) || `Track ${row.track_id}`}
                     </span>
                     {t?.artist ? <span className="muted small">{t.artist}</span> : null}
                   </div>
@@ -502,7 +503,7 @@ function TrackPicker({
         {filtered.map((t) => (
           <li key={t.id}>
             <span className="track-picker-meta">
-              <strong>{t.title || t.path}</strong>
+              <strong>{trackTitle(t)}</strong>
               {t.artist ? <span className="muted small">{t.artist}</span> : null}
             </span>
             <button type="button" onClick={() => onPick(t)}>
