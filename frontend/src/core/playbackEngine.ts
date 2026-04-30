@@ -347,6 +347,8 @@ export class PlaybackEngine {
     const newAmbientId = state.ambient.current_track_id ?? null;
     const newInterruptId = state.interrupt?.current_track_id ?? null;
     const newIsPlaying = state.is_playing;
+    const prevAmbientId = this.lastAmbientId;
+    const prevInterruptId = this.lastInterruptId;
 
     if (state.interrupt) {
       this.lastInterruptFadeOut = state.interrupt.fade_out_ms ?? 0;
@@ -383,8 +385,34 @@ export class PlaybackEngine {
       }
     }
 
+    // Seek detection. The server doesn't broadcast on routine
+    // position_reports (those are persisted with broadcast=False), so any
+    // state_changed that arrives with the same track id but a position
+    // far from the element's currentTime came from a deliberate jump
+    // (operator clicked the seek bar, /loop seek action, etc.). Snap the
+    // element to match. Threshold is generous enough to swallow normal
+    // playback drift between report intervals.
+    if (newInterruptId !== null && newInterruptId === prevInterruptId && state.interrupt) {
+      this.maybeSeek(this.interrupt?.el ?? null, state.interrupt.position_ms);
+    } else if (
+      newInterruptId === null &&
+      newAmbientId !== null &&
+      newAmbientId === prevAmbientId
+    ) {
+      this.maybeSeek(this.currentChannel()?.el ?? null, state.ambient.position_ms);
+    }
+
     this.lastIsPlaying = newIsPlaying;
     this.scheduleReports();
+  }
+
+  private maybeSeek(el: HTMLAudioElement | null, targetMs: number): void {
+    if (el === null) return;
+    if (!Number.isFinite(el.currentTime)) return;
+    const elapsedMs = el.currentTime * 1000;
+    if (Math.abs(targetMs - elapsedMs) > 1500) {
+      el.currentTime = Math.max(0, targetMs / 1000);
+    }
   }
 
   // ----- SFX ---------------------------------------------------------

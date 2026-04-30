@@ -175,7 +175,12 @@ button.btn-ghost:hover:not(:disabled) {
   color: var(--muted);
   flex-shrink: 0;
 }
+/* Fixed-width readout — must be `inline-block` (or wider) for min-width
+ * to apply; an inline <span> would shrink with the digit count and yank
+ * the slider sideways when 100% drops to 99%. tabular-nums on top so
+ * 1, 0, 9 are all the same width within the box. */
 .volume-row-pct {
+  display: inline-block;
   min-width: 4ch;
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -2336,7 +2341,11 @@ input.volume-slider::-moz-range-thumb {
 .metadata-form input {
   font-size: 1rem;
 }
-.metadata-row {
+/* Two-up form-field row inside the per-track metadata edit modal.
+ * Selector is scoped to the form so it doesn't bleed onto <tr class="metadata-row">
+ * in the Metadata tab's bulk-edit table — the unscoped rule turned every
+ * track row into a 2-column grid, which is why cells looked stacked. */
+.metadata-form .metadata-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.6rem;
