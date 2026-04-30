@@ -53,23 +53,39 @@ COPY backend/app ./app
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
-# Modes + presets are read by the backend at startup. Bake them into the
-# image at /modes and /presets (the .env points MODES_DIR / PRESETS_DIR here).
-COPY modes /modes
-COPY presets /presets
+# Modes + presets ship as read-only seeds at /seeds/{modes,presets}. On boot
+# the backend copies them into MODES_DIR / PRESETS_DIR only when those
+# directories are empty, so user edits made in a bind-mounted volume survive
+# image rebuilds.
+COPY modes /seeds/modes
+COPY presets /seeds/presets
 
 # Built frontend SPA from stage 1.
 COPY --from=frontend-builder /frontend/dist /app/static
 
 # Non-root runtime user. UID 1000 lines up with the typical first-user UID
-# on the host so bind-mounted dirs (/opt/stacks/music/{data,incoming,library})
-# can be chown'd to match.
+# on the host so bind-mounted dirs can be chown'd to match.
+#
+# `/data` is the recommended mount point: bind-mount it from the host to
+# persist music/, sfx/, modes/, presets/, and app.db across image rebuilds.
+# Subdirs are created by the app on first boot if missing — see lifespan.
 RUN groupadd -r music && \
     useradd -r -g music -u 1000 -d /app -s /sbin/nologin music && \
-    mkdir -p /app/data /app/incoming /app/library && \
-    chown -R music:music /app
+    mkdir -p /app/data /app/incoming /app/library /data && \
+    chown -R music:music /app /data /seeds
 
 USER music
+
+# Default storage paths under /data so a single bind-mount persists every
+# stateful directory the app uses. Operators can override per-dir if they
+# need separate volumes (e.g. NAS-backed music, fast-disk DB).
+ENV MUSIC_DIR=/data/music \
+    SFX_LIBRARY_DIR=/data/sfx \
+    MODES_DIR=/data/modes \
+    PRESETS_DIR=/data/presets \
+    MODES_SEED_DIR=/seeds/modes \
+    PRESETS_SEED_DIR=/seeds/presets \
+    DATABASE_URL=sqlite:////data/app.db
 
 EXPOSE 8000
 

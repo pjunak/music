@@ -20,6 +20,13 @@ interface UiStore {
    *  registered capabilities on the next register call. */
   capabilities: Capability[];
   setCapabilities: (caps: Capability[]) => void;
+
+  /** Local-only override that forces the playback engine to treat this
+   *  device as an active output regardless of `active_output_device_ids`.
+   *  Lets guests (who can't mutate server state) still hear audio on this
+   *  tab — used by the Player tab's "Play on this device" toggle. */
+  forceLocalPlayback: boolean;
+  setForceLocalPlayback: (v: boolean) => void;
 }
 
 export function defaultDeviceName(): string {
@@ -37,6 +44,8 @@ export const useUiStore = create<UiStore>()(
       setDeviceName: (name) => set({ deviceName: name }),
       capabilities: ["controls", "audio_output"],
       setCapabilities: (caps) => set({ capabilities: caps }),
+      forceLocalPlayback: false,
+      setForceLocalPlayback: (v) => set({ forceLocalPlayback: v }),
     }),
     { name: "music-ui" },
   ),

@@ -1,8 +1,10 @@
 import logging
 import os
+import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +48,37 @@ def _configure_logging(level: str) -> None:
     )
 
 
+def _seed_if_empty(target: Path, seed: Path | None, label: str) -> None:
+    """Copy `seed` into `target` only when `target` is missing or empty.
+
+    Idempotent: a populated `target` is left strictly alone. This is the
+    contract that lets operators bind-mount a host volume at `target`,
+    keep their edits across image rebuilds, and still get the bundled
+    defaults on a fresh first boot."""
+    target.mkdir(parents=True, exist_ok=True)
+    if seed is None:
+        return
+    if not seed.is_dir():
+        logger.warning("%s seed dir %s does not exist; skipping seed", label, seed)
+        return
+    if any(target.iterdir()):
+        return  # already populated — never wipe operator edits
+    for entry in seed.iterdir():
+        dest = target / entry.name
+        try:
+            if entry.is_dir():
+                shutil.copytree(entry, dest)
+            else:
+                shutil.copy2(entry, dest)
+        except OSError:
+            logger.exception(
+                "failed to seed %s from %s — continuing with what we copied",
+                dest,
+                entry,
+            )
+    logger.info("seeded empty %s from %s", label, seed)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
@@ -58,8 +91,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # vanishing on the next rebuild.
     music_dir = settings.music_dir.resolve()
     sfx_dir = settings.sfx_library_dir.resolve()
+    modes_dir = settings.modes_dir.resolve()
+    presets_dir = settings.presets_dir.resolve()
     logger.info("MUSIC_DIR=%s", music_dir)
     logger.info("SFX_LIBRARY_DIR=%s", sfx_dir)
+    logger.info("MODES_DIR=%s", modes_dir)
+    logger.info("PRESETS_DIR=%s", presets_dir)
+
+    # Idempotent base-structure init. The lifespan only ever creates
+    # missing dirs and (optionally) seeds initially-empty modes/presets;
+    # once anything's in there, we don't touch the contents on subsequent
+    # boots. Operator changes survive image rebuilds as long as these
+    # paths are bind-mounted.
+    music_dir.mkdir(parents=True, exist_ok=True)
+    sfx_dir.mkdir(parents=True, exist_ok=True)
+    _seed_if_empty(modes_dir, settings.modes_seed_dir, "modes")
+    _seed_if_empty(presets_dir, settings.presets_seed_dir, "presets")
+
     if "MUSIC_DIR" not in os.environ:
         logger.warning(
             "MUSIC_DIR is unset — using default %s. In a container this is "

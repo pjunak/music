@@ -237,7 +237,21 @@ def create_mode(payload: CreateModeRequest, _: CurrentUser) -> ModeSummary:
 @router.delete("/{mode_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_mode(mode_id: str, _: CurrentUser) -> None:
     mode_dir = _mode_dir_or_404(mode_id)
-    shutil.rmtree(mode_dir)
+    try:
+        shutil.rmtree(mode_dir)
+    except PermissionError as e:
+        # The most common cause is MODES_DIR pointing at an image-baked path
+        # owned by root while uvicorn runs as the `music` user. Surface the
+        # full mode dir so the operator knows which permissions to fix
+        # rather than seeing a bare "manifest.yaml" error.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                f"permission denied removing {mode_dir}: {e}. "
+                "Ensure MODES_DIR is on a bind-mounted volume writable by "
+                "the runtime user (uid 1000)."
+            ),
+        ) from e
     modes_loader.load_all()
 
 

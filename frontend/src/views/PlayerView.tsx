@@ -1,24 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, MouseEvent } from "react";
+import { useEffect, useState } from "react";
 
 import { libraryApi } from "@/core/api";
+import { useAuthStore } from "@/core/auth";
 import {
   selectActiveTrackId,
-  selectAmbientPositionMs,
   selectIsMyOutput,
   usePlayerStore,
 } from "@/core/playerStore";
 import type { Track } from "@/core/types";
 import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
-
-function formatClock(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "0:00";
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 export function PlayerView() {
   const trackId = usePlayerStore(selectActiveTrackId);
@@ -31,7 +22,6 @@ export function PlayerView() {
   // until React error #185 fires.
   const queueIds = usePlayerStore((s) => s.state?.ambient.queue);
   const historyIds = usePlayerStore((s) => s.state?.ambient.history);
-  const positionMs = usePlayerStore(selectAmbientPositionMs);
   // Stable string keys derived from the id arrays — re-runs the fetch
   // effects only when the ids that matter actually change, not on every
   // unrelated state_changed broadcast.
@@ -43,7 +33,6 @@ export function PlayerView() {
   const [coverFailed, setCoverFailed] = useState(false);
   const [queueTracks, setQueueTracks] = useState<Track[]>([]);
   const [historyTracks, setHistoryTracks] = useState<Track[]>([]);
-  const seekRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (trackId === null) {
@@ -101,28 +90,6 @@ export function PlayerView() {
     };
   }, [historyKey]);
 
-  // Tick once per 500ms while playing so the position display advances.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!isPlaying || interruptActive) return;
-    const t = window.setInterval(() => setTick((n) => n + 1), 500);
-    return () => window.clearInterval(t);
-  }, [isPlaying, interruptActive]);
-
-  const totalMs = useMemo(
-    () => (track !== null ? Math.round(track.length_s * 1000) : 0),
-    [track],
-  );
-  const seekable = totalMs > 0;
-  const fraction = seekable ? Math.min(1, positionMs / totalMs) : 0;
-
-  function onSeek(e: MouseEvent<HTMLDivElement>) {
-    if (!seekable || seekRef.current === null) return;
-    const rect = seekRef.current.getBoundingClientRect();
-    const f = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    wsClient.send({ type: "ambient_seek", position_ms: Math.round(f * totalMs) });
-  }
-
   if (hidePlayerArt) {
     // Blackout mode for a room display: no art, no chrome. The persistent
     // NowPlayingBar at the bottom still gives controls if needed.
@@ -141,7 +108,6 @@ export function PlayerView() {
           Open <strong>Library</strong> and press ▶ on a track, or pick a
           playlist from <strong>Controls</strong>.
         </p>
-        <PlayerVolume />
       </div>
     );
   }
@@ -176,30 +142,6 @@ export function PlayerView() {
             {track.artist || "(unknown artist)"}
             {track.album ? ` — ${track.album}` : ""}
           </p>
-
-          <div className="player-seek-row">
-            <span className="player-clock">{formatClock(positionMs)}</span>
-            <div
-              ref={seekRef}
-              className={`seek-bar large${seekable ? "" : " seek-bar-disabled"}`}
-              onClick={seekable ? onSeek : undefined}
-              role={seekable ? "slider" : undefined}
-              aria-valuemin={0}
-              aria-valuemax={totalMs}
-              aria-valuenow={Math.min(positionMs, totalMs)}
-              tabIndex={seekable ? 0 : -1}
-            >
-              <div
-                className="seek-bar-fill"
-                style={{ width: `${(fraction * 100).toFixed(2)}%` }}
-              />
-            </div>
-            <span className="player-clock">
-              {seekable ? formatClock(totalMs) : "—"}
-            </span>
-          </div>
-
-          <PlayerVolume />
 
           {queueTracks.length > 0 ? (
             <section className="player-queue">
@@ -242,10 +184,13 @@ export function PlayerView() {
 }
 
 /** Always-visible "is this device the speaker?" indicator at the top of
- *  the Player view. Green pill when yes, neutral pill with a one-click
- *  "Make this device the speaker" button when no. Useful on a TV bookmark
- *  where the operator opens the page and isn't sure if it's actually
- *  going to play audio. */
+ *  the Player view.
+ *
+ *  - Logged-in user: claim/release via the server (set_active_outputs).
+ *  - Guest (no login): a local-only "Play here" toggle flips the playback
+ *    engine into "treat me as an output" mode, since guests can't mutate
+ *    server state. Other clients won't see this device in the Outputs
+ *    picker — the audio is purely local. */
 function OutputBadge() {
   const isMyOutput = usePlayerStore(selectIsMyOutput);
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
@@ -255,6 +200,10 @@ function OutputBadge() {
   const me = usePlayerStore((s) =>
     s.state?.connected_devices.find((d) => d.device_id === s.myDeviceId) ?? null,
   );
+  const authStatus = useAuthStore((s) => s.status);
+  const isGuest = authStatus !== "authenticated";
+  const forceLocal = useUiStore((s) => s.forceLocalPlayback);
+  const setForceLocal = useUiStore((s) => s.setForceLocalPlayback);
 
   function claim() {
     if (myDeviceId === null) return;
@@ -274,6 +223,41 @@ function OutputBadge() {
     return (
       <div className="output-badge output-badge-disconnected">
         <span className="badge">⏳ Connecting…</span>
+      </div>
+    );
+  }
+
+  // Guest: server won't accept set_active_outputs from us, so flip the
+  // local-only playback flag instead. The audio engine respects it the
+  // same way it respects the server's active_output_device_ids.
+  if (isGuest) {
+    if (forceLocal) {
+      return (
+        <div className="output-badge output-badge-active">
+          <span className="badge badge-ok">🔊 Playing on this device (local)</span>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setForceLocal(false)}
+          >
+            Stop playing here
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="output-badge output-badge-inactive">
+        <span className="badge badge-warn">🔇 Not playing here</span>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setForceLocal(true)}
+        >
+          Play on this device
+        </button>
+        <span className="muted small">
+          Local-only — sign in to share this device with the operator.
+        </span>
       </div>
     );
   }
@@ -307,32 +291,5 @@ function OutputBadge() {
         Play on this device
       </button>
     </div>
-  );
-}
-
-/** Volume slider on the Player tab. Mirrors the master volume from
- *  PlayerState; sending `set_volume` updates the server, which broadcasts
- *  back to all clients (including this one). */
-function PlayerVolume() {
-  const volume = usePlayerStore((s) => s.state?.volume ?? 1.0);
-  function onChange(e: ChangeEvent<HTMLInputElement>) {
-    wsClient.send({ type: "set_volume", volume: parseFloat(e.target.value) });
-  }
-  return (
-    <label className="player-volume">
-      <span className="muted small">Volume</span>
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.01}
-        value={volume}
-        onChange={onChange}
-        aria-label="Master volume"
-      />
-      <span className="muted small player-volume-pct">
-        {Math.round(volume * 100)}%
-      </span>
-    </label>
   );
 }

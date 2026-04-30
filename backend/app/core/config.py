@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     modes_dir: Path = Path("../modes")
     presets_dir: Path = Path("../presets")
 
+    # Read-only seed directories. When `modes_dir` or `presets_dir` is
+    # missing/empty on startup, the contents of the corresponding seed dir
+    # are copied across so a fresh deploy with a blank bind-mount picks up
+    # the bundled defaults. Subsequent boots (where the dirs already have
+    # content) leave the operator's edits alone.
+    modes_seed_dir: Path | None = None
+    presets_seed_dir: Path | None = None
+
     allowed_origins: str = "http://localhost:5173"
     session_cookie_secure: bool = False
     session_cookie_domain: str | None = None

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { ChangeEvent, MouseEvent } from "react";
 
 import { libraryApi } from "@/core/api";
 import {
@@ -17,12 +17,25 @@ function formatTime(ms: number): string {
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
+/** Persistent footer.
+ *
+ *  Three rows on the inside, but visually a single bar:
+ *    1. Track meta (title / artist) on the left, transport buttons centred,
+ *       volume on the right.
+ *    2. A wide, easy-to-grab scrub bar with elapsed/total clocks bracketing
+ *       it. The scrub bar is the headline interactive element here — taller
+ *       than the inline volume slider so the two read as different controls.
+ *
+ *  Since this bar is mounted on every route, every shortcut path through
+ *  the app has playback / volume / seek without having to leave the
+ *  current view. */
 export function NowPlayingBar() {
   const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
   const currentId = usePlayerStore((s) => s.state?.ambient.current_track_id ?? null);
   const interruptId = usePlayerStore(
     (s) => s.state?.interrupt?.current_track_id ?? null,
   );
+  const volume = usePlayerStore((s) => s.state?.volume ?? 1);
 
   const [track, setTrack] = useState<Track | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
@@ -90,39 +103,78 @@ export function NowPlayingBar() {
     }
   }
 
+  function onVolumeChange(e: ChangeEvent<HTMLInputElement>) {
+    wsClient.send({ type: "set_volume", volume: parseFloat(e.target.value) });
+  }
+
   const seekable = totalMs > 0;
   const fraction = seekable ? Math.min(1, positionMs / totalMs) : 0;
 
   return (
     <footer className="now-playing">
-      <div className="now-playing-track">
-        {track !== null ? (
-          <>
-            <strong>{track.title || "(untitled)"}</strong>
-            <span className="muted small">
-              {track.artist || "(unknown)"}
-              {track.album ? ` · ${track.album}` : ""}
-              {interruptId !== null ? "  ·  ⚡ interrupt" : ""}
-            </span>
-          </>
-        ) : (
-          <span className="muted">Nothing playing</span>
-        )}
+      <div className="now-playing-top">
+        <div className="now-playing-track">
+          {track !== null ? (
+            <>
+              <strong>{track.title || "(untitled)"}</strong>
+              <span className="muted small">
+                {track.artist || "(unknown)"}
+                {track.album ? ` · ${track.album}` : ""}
+                {interruptId !== null ? "  ·  ⚡ interrupt" : ""}
+              </span>
+            </>
+          ) : (
+            <span className="muted">Nothing playing</span>
+          )}
+        </div>
+
+        <div className="now-playing-controls">
+          <button onClick={prev} title="Previous (←)" aria-label="Previous">⏮</button>
+          {isPlaying ? (
+            <button
+              onClick={pause}
+              title="Pause (Space)"
+              aria-label="Pause"
+              className="now-playing-play"
+            >
+              ⏸
+            </button>
+          ) : (
+            <button
+              onClick={play}
+              title="Play (Space)"
+              aria-label="Play"
+              className="now-playing-play"
+            >
+              ▶
+            </button>
+          )}
+          <button onClick={next} title="Next (→)" aria-label="Next">⏭</button>
+        </div>
+
+        <label className="now-playing-volume" title="Volume">
+          <span aria-hidden="true">🔉</span>
+          <input
+            className="volume-slider"
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={volume}
+            onChange={onVolumeChange}
+            aria-label="Master volume"
+          />
+          <span className="now-playing-volume-pct">
+            {Math.round(volume * 100)}%
+          </span>
+        </label>
       </div>
-      <div className="now-playing-controls">
-        <button onClick={prev} title="Previous">⏮</button>
-        {isPlaying ? (
-          <button onClick={pause} title="Pause">⏸</button>
-        ) : (
-          <button onClick={play} title="Play">▶</button>
-        )}
-        <button onClick={next} title="Next">⏭</button>
-      </div>
-      <div className="now-playing-position">
-        <span>{formatTime(positionMs)}</span>
+
+      <div className="now-playing-scrub">
+        <span className="now-playing-clock">{formatTime(positionMs)}</span>
         <div
           ref={progressRef}
-          className={`seek-bar${seekable ? "" : " seek-bar-disabled"}`}
+          className={`seek-bar seek-bar-large${seekable ? "" : " seek-bar-disabled"}`}
           onClick={seekable ? onSeek : undefined}
           role={seekable ? "slider" : undefined}
           aria-label={seekable ? "Seek" : undefined}
@@ -136,8 +188,15 @@ export function NowPlayingBar() {
             className="seek-bar-fill"
             style={{ width: `${(fraction * 100).toFixed(2)}%` }}
           />
+          <div
+            className="seek-bar-thumb"
+            style={{ left: `${(fraction * 100).toFixed(2)}%` }}
+            aria-hidden="true"
+          />
         </div>
-        <span>{seekable ? formatTime(totalMs) : "—"}</span>
+        <span className="now-playing-clock">
+          {seekable ? formatTime(totalMs) : "—"}
+        </span>
       </div>
     </footer>
   );

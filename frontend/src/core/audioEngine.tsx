@@ -4,7 +4,18 @@ import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
+import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
+
+
+/** True when this device should produce audio locally — either it's in the
+ *  server's active outputs, or the user flipped the local override (guest
+ *  fallback). */
+function isThisDevicePlaying(): boolean {
+  const player = usePlayerStore.getState();
+  if (selectIsMyOutput(player)) return true;
+  return useUiStore.getState().forceLocalPlayback;
+}
 
 /** Mounts the three hidden `<audio>` elements (two ambient for crossfade,
  *  one interrupt) and forwards player state + WS events to the engine.
@@ -47,14 +58,23 @@ export function AudioEngine() {
     };
   }, []);
 
-  // Drive the engine from PlayerState.
+  // Drive the engine from PlayerState. We re-apply on either side of the
+  // "is this my output" check changing — the server-side flag from
+  // PlayerState OR the local force-playback toggle (guest path).
   useEffect(() => {
-    const unsub = usePlayerStore.subscribe((s) => {
+    const apply = () => {
+      const s = usePlayerStore.getState();
       if (s.state === null) return;
-      const isMine = selectIsMyOutput(s);
-      playbackEngine.applyState(s.state, isMine);
+      playbackEngine.applyState(s.state, isThisDevicePlaying());
+    };
+    const unsubPlayer = usePlayerStore.subscribe(apply);
+    const unsubUi = useUiStore.subscribe((s, prev) => {
+      if (s.forceLocalPlayback !== prev.forceLocalPlayback) apply();
     });
-    return unsub;
+    return () => {
+      unsubPlayer();
+      unsubUi();
+    };
   }, []);
 
   // Active presets → effect chain. Cache full manifests indexed by id so
@@ -85,16 +105,24 @@ export function AudioEngine() {
     }
 
     let lastSig = "";
-    const unsub = usePlayerStore.subscribe((s) => {
+    const recompute = () => {
+      const s = usePlayerStore.getState();
       if (s.state === null) return;
-      isMine = selectIsMyOutput(s);
+      isMine = isThisDevicePlaying();
       const ids = s.state.active_preset_ids;
       const sig = `${isMine ? "1" : "0"}|${ids.join(",")}`;
       if (sig === lastSig) return;
       lastSig = sig;
       void syncPresets(ids);
+    };
+    const unsubPlayer = usePlayerStore.subscribe(recompute);
+    const unsubUi = useUiStore.subscribe((s, prev) => {
+      if (s.forceLocalPlayback !== prev.forceLocalPlayback) recompute();
     });
-    return unsub;
+    return () => {
+      unsubPlayer();
+      unsubUi();
+    };
   }, []);
 
   // SFX: fire-and-forget transient audio elements per `sfx_fired` event.
