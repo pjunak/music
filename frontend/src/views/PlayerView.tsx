@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { libraryApi } from "@/core/api";
-import { useAuthStore } from "@/core/auth";
-import {
-  selectActiveTrackId,
-  selectIsMyOutput,
-  usePlayerStore,
-} from "@/core/playerStore";
+import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { defaultDeviceName, useUiStore } from "@/core/uiStore";
@@ -101,7 +96,6 @@ export function PlayerView() {
     return (
       <div className="player-view player-view-empty">
         <DeviceNameField />
-        <OutputBadge />
         <div className="player-empty-art" aria-hidden="true">
           ♪
         </div>
@@ -117,7 +111,6 @@ export function PlayerView() {
   return (
     <div className="player-view player-view-active">
       <DeviceNameField />
-      <OutputBadge />
       <div className="player-stage">
         <div className="player-art player-art-large">
           {!coverFailed ? (
@@ -219,116 +212,5 @@ function DeviceNameField() {
         }}
       />
     </label>
-  );
-}
-
-/** Always-visible "is this device the speaker?" indicator at the top of
- *  the Player view.
- *
- *  - Logged-in user: claim/release via the server (set_active_outputs).
- *  - Guest (no login): a local-only "Play here" toggle flips the playback
- *    engine into "treat me as an output" mode, since guests can't mutate
- *    server state. Other clients won't see this device in the Outputs
- *    picker — the audio is purely local. */
-function OutputBadge() {
-  const isMyOutput = usePlayerStore(selectIsMyOutput);
-  const myDeviceId = usePlayerStore((s) => s.myDeviceId);
-  const activeIds = usePlayerStore(
-    (s) => s.state?.active_output_device_ids,
-  );
-  const me = usePlayerStore((s) =>
-    s.state?.connected_devices.find((d) => d.device_id === s.myDeviceId) ?? null,
-  );
-  const authStatus = useAuthStore((s) => s.status);
-  const isGuest = authStatus !== "authenticated";
-  const forceLocal = useUiStore((s) => s.forceLocalPlayback);
-  const setForceLocal = useUiStore((s) => s.setForceLocalPlayback);
-
-  function claim() {
-    if (myDeviceId === null) return;
-    const next = activeIds === undefined ? [myDeviceId] : [...activeIds, myDeviceId];
-    wsClient.send({ type: "set_active_outputs", device_ids: next });
-  }
-
-  function release() {
-    if (myDeviceId === null || activeIds === undefined) return;
-    wsClient.send({
-      type: "set_active_outputs",
-      device_ids: activeIds.filter((d) => d !== myDeviceId),
-    });
-  }
-
-  if (myDeviceId === null) {
-    return (
-      <div className="output-badge output-badge-disconnected">
-        <span className="badge">⏳ Connecting…</span>
-      </div>
-    );
-  }
-
-  // Guest: server won't accept set_active_outputs from us, so flip the
-  // local-only playback flag instead. The audio engine respects it the
-  // same way it respects the server's active_output_device_ids.
-  if (isGuest) {
-    if (forceLocal) {
-      return (
-        <div className="output-badge output-badge-active">
-          <span className="badge badge-ok">🔊 Playing on this device (local)</span>
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => setForceLocal(false)}
-          >
-            Stop playing here
-          </button>
-        </div>
-      );
-    }
-    return (
-      <div className="output-badge output-badge-inactive">
-        <span className="badge badge-warn">🔇 Not playing here</span>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => setForceLocal(true)}
-        >
-          Play on this device
-        </button>
-        <span className="muted small">
-          Local-only — sign in to share this device with the operator.
-        </span>
-      </div>
-    );
-  }
-
-  if (me === null || !me.capabilities.includes("audio_output")) {
-    return (
-      <div className="output-badge output-badge-disabled">
-        <span className="badge">🔇 This device isn't an audio output</span>
-        <span className="muted small">
-          Enable in Settings → This device → Audio output
-        </span>
-      </div>
-    );
-  }
-
-  if (isMyOutput) {
-    return (
-      <div className="output-badge output-badge-active">
-        <span className="badge badge-ok">🔊 Playing on this device</span>
-        <button type="button" className="btn-ghost" onClick={release}>
-          Stop playing here
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="output-badge output-badge-inactive">
-      <span className="badge badge-warn">🔇 Not playing here</span>
-      <button type="button" className="btn-primary" onClick={claim}>
-        Play on this device
-      </button>
-    </div>
   );
 }

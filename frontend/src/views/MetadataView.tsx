@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
+import { FolderTree } from "@/components/FolderTree";
+import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
 import { EditIcon } from "@/components/icons";
 import { MetadataEditor } from "@/components/MetadataEditor";
@@ -12,6 +14,38 @@ import type { Track } from "@/core/types";
 
 const PAGE_SIZE = 200;
 
+/** Client-side sort for folder-mode results (the tree() endpoint returns
+ *  the folder's tracks in whatever order the index walked them, so we sort
+ *  here to match the search() endpoint's behaviour). */
+function sortTracks(tracks: Track[], sort: LibrarySortKey, order: SortOrder): Track[] {
+  const dir = order === "asc" ? 1 : -1;
+  const get = (t: Track): string | number => {
+    switch (sort) {
+      case "artist":
+        return (t.artist ?? "").toLowerCase();
+      case "album":
+        return (t.album ?? "").toLowerCase();
+      case "title":
+        return (t.title || trackTitle(t)).toLowerCase();
+      case "path":
+        return t.path.toLowerCase();
+      case "year":
+        return t.year ?? -Infinity;
+      case "added_at":
+        return t.added_at ?? "";
+      default:
+        return "";
+    }
+  };
+  return [...tracks].sort((a, b) => {
+    const av = get(a);
+    const bv = get(b);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+}
+
 /** Bulk metadata management. Standalone tab so the operator can sweep
  *  many tracks at once (set Origin = "Skyrim" on a folder's worth of files,
  *  retag artists, etc.) without juggling per-track modals.
@@ -20,6 +54,10 @@ const PAGE_SIZE = 200;
  *  bulk-edit panel that posts to PATCH /api/library/tracks/bulk-metadata.
  *  Per-track ✎ button still opens the same modal as the Library tab. */
 export function MetadataView() {
+  // Two browse modes: folder (default) and search. Active query overrides
+  // the folder selection — clearing the search drops back to the chosen
+  // folder. The track list updates in step.
+  const [folderPath, setFolderPath] = useState("");
   const [query, setQuery] = useState("");
   const [pendingQuery, setPendingQuery] = useState("");
   const [sort, setSort] = useState<LibrarySortKey>("artist");
@@ -31,12 +69,23 @@ export function MetadataView() {
   const [editing, setEditing] = useState<Track | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Reload search whenever the query, sort, or refresh tick changes.
+  const inSearchMode = query !== "";
+
+  // Reload tracks when the inputs change. Search mode hits /api/library/search
+  // (server-side sort, paginated). Folder mode hits /api/library/tree to get
+  // the immediate tracks for that folder, sorted client-side.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void libraryApi
-      .search({ q: query, limit: PAGE_SIZE, sort, order })
+    const fetcher = inSearchMode
+      ? libraryApi
+          .search({ q: query, limit: PAGE_SIZE, sort, order })
+          .then((r) => ({ tracks: r.tracks, total: r.total }))
+      : libraryApi.tree(folderPath).then((r) => ({
+          tracks: sortTracks(r.tracks, sort, order),
+          total: r.tracks.length,
+        }));
+    void fetcher
       .then((r) => {
         if (cancelled) return;
         setTracks(r.tracks);
@@ -48,7 +97,10 @@ export function MetadataView() {
       })
       .catch((e: unknown) => {
         if (!cancelled) {
-          toast.error("Search failed", e instanceof Error ? e.message : undefined);
+          toast.error(
+            inSearchMode ? "Search failed" : "Folder load failed",
+            e instanceof Error ? e.message : undefined,
+          );
           setTracks([]);
           setTotal(0);
         }
@@ -59,7 +111,27 @@ export function MetadataView() {
     return () => {
       cancelled = true;
     };
-  }, [query, sort, order, refreshKey]);
+  }, [inSearchMode, query, sort, order, folderPath, refreshKey]);
+
+  const loadFolderChildren = useCallback(
+    async (p: string): Promise<TreeFolder[]> => {
+      const r = await libraryApi.tree(p);
+      return r.folders.map((f) => ({
+        name: f.name,
+        path: f.path,
+        badge: f.track_count > 0 ? f.track_count : null,
+      }));
+    },
+    [],
+  );
+
+  function selectFolder(path: string) {
+    // Picking a folder cancels any active search — they're mutually exclusive
+    // since a search is already a global filter.
+    setQuery("");
+    setPendingQuery("");
+    setFolderPath(path);
+  }
 
   function submitQuery(e: FormEvent) {
     e.preventDefault();
@@ -120,11 +192,22 @@ export function MetadataView() {
         <span className="muted small">
           {loading
             ? "Loading…"
-            : `${tracks.length} shown · ${total} total · ${selected.size} selected`}
+            : inSearchMode
+              ? `${tracks.length} shown · ${total} total · ${selected.size} selected`
+              : `${tracks.length} in folder · ${selected.size} selected`}
         </span>
       </header>
 
       <div className="metadata-body">
+        <aside className="metadata-tree">
+          <h3 className="metadata-tree-heading">Folder</h3>
+          <FolderTree
+            rootLabel="All music"
+            selectedPath={inSearchMode ? "" : folderPath}
+            onSelect={selectFolder}
+            loadChildren={loadFolderChildren}
+          />
+        </aside>
         <section className="metadata-main">
           <table className="metadata-table">
             <thead>
@@ -193,8 +276,11 @@ export function MetadataView() {
               {tracks.length === 0 && !loading ? (
                 <tr>
                   <td colSpan={8} className="muted small metadata-empty">
-                    No tracks match. Adjust the search or upload some files via the
-                    Library tab.
+                    {inSearchMode
+                      ? "No tracks match. Try a different search."
+                      : folderPath === ""
+                        ? "No tracks at the music root. Pick a subfolder, or upload via the Library tab."
+                        : "This folder has no tracks at its top level. Pick a subfolder."}
                   </td>
                 </tr>
               ) : null}

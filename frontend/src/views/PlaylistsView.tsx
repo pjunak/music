@@ -4,7 +4,13 @@ import type { FormEvent } from "react";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
-import { PlayIcon, TrashIcon, XIcon } from "@/components/icons";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  PlayIcon,
+  TrashIcon,
+  XIcon,
+} from "@/components/icons";
 import { api, libraryApi, modesApi, playlistsApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
@@ -263,6 +269,15 @@ function PlaylistDetail({
     }
   }
 
+  async function moveTo(position: number, toPosition: number) {
+    try {
+      await playlistsApi.moveTrack(playlist.id, position, toPosition);
+      await refreshTracks();
+    } catch (e) {
+      toast.error("Reorder failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
   async function addTrack(track: Track) {
     try {
       await playlistsApi.addTrack(playlist.id, track.id);
@@ -350,6 +365,18 @@ function PlaylistDetail({
                     {t?.artist ? <span className="muted small">{t.artist}</span> : null}
                   </div>
                   <div className="playlist-track-actions">
+                    <IconButton
+                      label="Move up"
+                      icon={<ArrowUpIcon />}
+                      onClick={() => void moveTo(row.position, row.position - 1)}
+                      disabled={row.position === 0}
+                    />
+                    <IconButton
+                      label="Move down"
+                      icon={<ArrowDownIcon />}
+                      onClick={() => void moveTo(row.position, row.position + 1)}
+                      disabled={row.position === tracks.length - 1}
+                    />
                     <IconButton
                       label="Play this track"
                       icon={<PlayIcon />}

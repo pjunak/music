@@ -19,6 +19,7 @@ import { PlayerView } from "@/views/PlayerView";
 import { PlaylistsView } from "@/views/PlaylistsView";
 import { PresetsView } from "@/views/PresetsView";
 import { SettingsView } from "@/views/SettingsView";
+import { SoundboardsView } from "@/views/SoundboardsView";
 
 import { Header } from "./Header";
 import { NowPlayingBar } from "./NowPlayingBar";
@@ -92,6 +93,14 @@ export default function AppShell() {
             element={
               <RequireAuth>
                 <PlaylistsView />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="soundboards"
+            element={
+              <RequireAuth>
+                <SoundboardsView />
               </RequireAuth>
             }
           />

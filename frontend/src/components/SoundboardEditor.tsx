@@ -13,12 +13,20 @@ interface Props {
   modeId: string;
   soundboardId: string;
   onBack: () => void;
+  /** Label for the back link — varies by host (Modes tab says "Back to
+   *  mode", Soundboards tab says "All soundboards"). */
+  backLabel?: string;
 }
 
 /** Edit a single soundboard's categories and items. Loads the latest copy
  *  from `modesApi.get(modeId)`, applies edits via the admin endpoints, and
  *  re-renders from the response of each mutation. */
-export function SoundboardEditor({ modeId, soundboardId, onBack }: Props) {
+export function SoundboardEditor({
+  modeId,
+  soundboardId,
+  onBack,
+  backLabel = "Back to mode",
+}: Props) {
   const [soundboard, setSoundboard] = useState<SoundboardManifest | null>(null);
   const [sfxFiles, setSfxFiles] = useState<SfxFile[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +164,7 @@ export function SoundboardEditor({ modeId, soundboardId, onBack }: Props) {
             className="btn-ghost back-link"
             onClick={onBack}
           >
-            ← Back to mode
+            ← {backLabel}
           </button>
           <h2>Soundboard: {soundboard.name ?? soundboard.id}</h2>
           <p className="muted small">

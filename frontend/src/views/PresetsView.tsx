@@ -47,7 +47,7 @@ export function PresetsView() {
     <div className="modes-view">
       <div className="modes-pane modes-list-pane">
         <header className="playlists-header">
-          <h2>Presets</h2>
+          <h2>EQ Presets</h2>
           <button
             type="button"
             className="btn-primary"

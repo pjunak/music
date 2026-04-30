@@ -117,6 +117,10 @@ export const playlistsApi = {
     }),
   removeTrack: (playlistId: number, position: number) =>
     api.delete<void>(`/api/playlists/${playlistId}/tracks/${position}`),
+  moveTrack: (playlistId: number, position: number, toPosition: number) =>
+    api.patch<void>(`/api/playlists/${playlistId}/tracks/${position}`, {
+      to_position: toPosition,
+    }),
 };
 
 export type LibrarySortKey =

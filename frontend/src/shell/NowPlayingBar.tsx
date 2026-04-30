@@ -9,6 +9,7 @@ import {
   SkipNextIcon,
   SkipPrevIcon,
 } from "@/components/icons";
+import { OutputToggle } from "@/components/OutputToggle";
 import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
 import {
@@ -119,29 +120,37 @@ export function NowPlayingBar() {
 
   const seekable = totalMs > 0;
   const fraction = seekable ? Math.min(1, positionMs / totalMs) : 0;
+  // Disable transport when there's literally nothing loaded — otherwise
+  // pressing play sets is_playing=true server-side and the position
+  // counter starts ticking against an empty track, looking like
+  // playback when nothing's actually queued.
+  const hasTrack = displayId !== null;
 
   return (
     <footer className="now-playing">
       <div className="now-playing-top">
-        <div className="now-playing-track">
-          {track !== null ? (
-            <>
-              <strong>{trackTitle(track) || "(untitled)"}</strong>
-              <span className="muted small now-playing-track-meta">
-                {track.artist || "(unknown)"}
-                {track.album ? ` · ${track.album}` : ""}
-                {interruptId !== null ? (
-                  <span className="now-playing-track-interrupt">
-                    {" · "}
-                    <LightningIcon />
-                    {" interrupt"}
-                  </span>
-                ) : null}
-              </span>
-            </>
-          ) : (
-            <span className="muted">Nothing playing</span>
-          )}
+        <div className="now-playing-left">
+          <OutputToggle />
+          <div className="now-playing-track">
+            {track !== null ? (
+              <>
+                <strong>{trackTitle(track) || "(untitled)"}</strong>
+                <span className="muted small now-playing-track-meta">
+                  {track.artist || "(unknown)"}
+                  {track.album ? ` · ${track.album}` : ""}
+                  {interruptId !== null ? (
+                    <span className="now-playing-track-interrupt">
+                      {" · "}
+                      <LightningIcon />
+                      {" interrupt"}
+                    </span>
+                  ) : null}
+                </span>
+              </>
+            ) : (
+              <span className="muted">Nothing playing</span>
+            )}
+          </div>
         </div>
 
         <div className="now-playing-controls">
@@ -149,6 +158,7 @@ export function NowPlayingBar() {
             label="Previous (←)"
             icon={<SkipPrevIcon />}
             onClick={prev}
+            disabled={!hasTrack}
           />
           {isPlaying ? (
             <IconButton
@@ -156,6 +166,7 @@ export function NowPlayingBar() {
               icon={<PauseIcon />}
               onClick={pause}
               className="now-playing-play"
+              disabled={!hasTrack}
             />
           ) : (
             <IconButton
@@ -163,12 +174,14 @@ export function NowPlayingBar() {
               icon={<PlayIcon />}
               onClick={play}
               className="now-playing-play"
+              disabled={!hasTrack}
             />
           )}
           <IconButton
             label="Next (→)"
             icon={<SkipNextIcon />}
             onClick={next}
+            disabled={!hasTrack}
           />
         </div>
 

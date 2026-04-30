@@ -11,8 +11,9 @@ const TABS: TabDef[] = [
   { to: "/library", label: "Library" },
   { to: "/metadata", label: "Metadata" },
   { to: "/playlists", label: "Playlists" },
+  { to: "/soundboards", label: "Soundboards" },
   { to: "/modes", label: "Modes" },
-  { to: "/presets", label: "Presets" },
+  { to: "/presets", label: "EQ Presets" },
   { to: "/controls", label: "Controls" },
   { to: "/settings", label: "Settings" },
 ];

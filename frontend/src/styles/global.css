@@ -163,8 +163,12 @@ button.btn-ghost:hover:not(:disabled) {
   align-items: center;
   gap: 0.5rem;
 }
+/* Cap the slider's width even inside flex containers — keeps it from
+ * stretching across full strips and prevents it from reading like a
+ * second progress bar. Soundboard overrides this with its own width. */
 .volume-row input[type="range"] {
-  flex: 1;
+  flex: 0 1 auto;
+  width: clamp(100px, 12vw, 140px);
 }
 .volume-row-icon {
   font-size: 1.05em;
@@ -2031,10 +2035,17 @@ kbd,
   gap: 1rem;
   align-items: center;
 }
+.now-playing-left {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
 .now-playing-track {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1 1 auto;
 }
 .now-playing-track strong {
   white-space: nowrap;
@@ -2073,6 +2084,51 @@ kbd,
   background: var(--accent-strong);
   color: #0a0a0a;
 }
+/* Compact "is this device an audio output?" pill, sits on the far left
+ * of the footer. Three states: idle (muted, non-interactive), off (idle
+ * default button look, click to claim), on (accent fill, click to release).
+ * Designed to read as a pill / chip, not a transport control. */
+.output-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition),
+    color var(--transition);
+}
+.output-toggle-icon {
+  flex-shrink: 0;
+  font-size: 1em;
+}
+.output-toggle-on {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.output-toggle-on:hover {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+}
+.output-toggle-off:hover {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.output-toggle-idle {
+  cursor: default;
+}
+.output-toggle-idle .output-toggle-label {
+  font-size: 0.8rem;
+}
+
 /* Footer volume row — wraps <VolumeControl/>; only adds layout overrides
  * specific to the footer (right-align, smaller font on the percent). */
 .now-playing-volume {
@@ -2085,62 +2141,65 @@ kbd,
   align-items: center;
   gap: 0.15em;
 }
-/* Volume slider — visually distinct from the scrub bar (native range,
- *  short width, smaller knob) so you don't mistake one for the other.
- *  Painted level fill matches the seek bar's "played vs unplayed" cue:
- *  Firefox uses ::-moz-range-progress natively; webkit needs a gradient
- *  driven by the inline `--volume-pct` custom property. The selector is
- *  qualified to <input> so it doesn't bleed onto wrapper elements that
- *  share the class by accident. */
+/* Volume slider — deliberately visually different from the scrub bar:
+ *  - Monochrome white-on-dark fill (vs the accent-blue progress bar),
+ *    so the eye doesn't read it as a second timeline.
+ *  - Thin 3px track + small square thumb that reads as a "level meter"
+ *    rather than a draggable transport.
+ *  - Width capped via .volume-row above so it can't grow into bar shape.
+ *
+ *  Painted fill is cross-browser: Firefox via native ::-moz-range-progress;
+ *  webkit via a gradient driven by the inline `--volume-pct` custom
+ *  property. Selector is qualified to <input> so it doesn't bleed onto
+ *  wrapper labels sharing the class. */
 input.volume-slider {
   -webkit-appearance: none;
   appearance: none;
-  width: clamp(110px, 14vw, 180px);
-  height: 4px;
+  height: 3px;
   background: transparent;
-  border-radius: 2px;
+  border-radius: 1px;
   outline: none;
 }
 input.volume-slider:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 3px;
+  outline-offset: 4px;
 }
 input.volume-slider::-moz-range-track {
-  height: 4px;
+  height: 3px;
   background: var(--border-strong);
-  border-radius: 2px;
+  border-radius: 1px;
   border: 0;
 }
 input.volume-slider::-moz-range-progress {
-  height: 4px;
-  background: var(--accent);
-  border-radius: 2px;
+  height: 3px;
+  background: var(--fg);
+  border-radius: 1px;
 }
 input.volume-slider::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 2px;
+  height: 3px;
+  border-radius: 1px;
   border: 0;
   background: linear-gradient(
     to right,
-    var(--accent) 0 var(--volume-pct, 100%),
+    var(--fg) 0 var(--volume-pct, 100%),
     var(--border-strong) var(--volume-pct, 100%) 100%
   );
 }
 input.volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -4px;
-  border-radius: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -3.5px;
+  border-radius: 2px;
   background: var(--fg);
   cursor: pointer;
   border: 0;
 }
 input.volume-slider::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
   background: var(--fg);
   cursor: pointer;
   border: 0;
@@ -2310,6 +2369,7 @@ input.volume-slider::-moz-range-thumb {
   gap: 0.6rem;
   flex: 1;
   min-height: 0;
+  padding: 0.75rem;
 }
 .metadata-toolbar {
   display: flex;
@@ -2330,17 +2390,42 @@ input.volume-slider::-moz-range-thumb {
   align-items: center;
   gap: 0.3rem;
 }
+/* Three-column body: folder tree | track table | bulk-edit aside.
+ * Each pane gets `min-height: 0` + scrolls internally so the page
+ * never grows past its viewport — the table and tree both need to
+ * be independently scrollable. */
 .metadata-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 0.8rem;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(280px, 320px);
+  gap: 0.75rem;
   flex: 1;
   min-height: 0;
+}
+.metadata-tree {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.metadata-tree-heading {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
 }
 .metadata-main {
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-height: 0;
 }
 .metadata-table {
   width: 100%;
@@ -2391,9 +2476,11 @@ input.volume-slider::-moz-range-thumb {
 
 .metadata-aside {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
+  background: var(--surface);
   padding: 0.8rem;
   overflow: auto;
+  min-height: 0;
 }
 .bulk-edit {
   display: flex;
@@ -2526,7 +2613,10 @@ input.volume-slider::-moz-range-thumb {
   }
   .metadata-body {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr auto;
+    grid-template-rows: minmax(140px, 200px) 1fr auto;
+  }
+  .metadata-tree {
+    max-height: 200px;
   }
 
   .controls-view {
@@ -2541,8 +2631,9 @@ input.volume-slider::-moz-range-thumb {
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
-  input.volume-slider {
+  .volume-row input[type="range"] {
     width: 100%;
+    flex: 1 1 auto;
   }
 
   .player-title {

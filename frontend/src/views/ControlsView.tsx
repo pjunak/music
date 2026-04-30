@@ -40,7 +40,7 @@ export function ControlsView() {
           <InterruptSection />
         </section>
         <section className="controls-section">
-          <h3>Presets</h3>
+          <h3>EQ Presets</h3>
           <PresetsSection />
         </section>
         <section className="controls-section">
