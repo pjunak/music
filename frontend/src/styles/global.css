@@ -175,13 +175,18 @@ button.btn-ghost:hover:not(:disabled) {
   color: var(--muted);
   flex-shrink: 0;
 }
-/* Fixed-width readout — must be `inline-block` (or wider) for min-width
- * to apply; an inline <span> would shrink with the digit count and yank
- * the slider sideways when 100% drops to 99%. tabular-nums on top so
- * 1, 0, 9 are all the same width within the box. */
+/* Fixed-width readout — has to:
+ *   1. be `inline-block` so width takes effect (inline ignores it),
+ *   2. use `width: 5ch` (NOT just min-width — at the footer's font size
+ *      "100%" actually renders wider than 4ch in proportional sans, so
+ *      min-width:4ch let the box grow at 100% and shrink at 99%, yanking
+ *      the slider sideways via flex-end packing in `.now-playing-volume`),
+ *   3. be `flex: 0 0 auto` so a flex parent can't shrink it,
+ *   4. have `tabular-nums` so 0, 1, 9 are the same width inside the box. */
 .volume-row-pct {
   display: inline-block;
-  min-width: 4ch;
+  width: 5ch;
+  flex: 0 0 auto;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -320,11 +325,6 @@ kbd,
   padding: 0.5rem 1rem;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
-}
-.app-header h1 {
-  margin: 0;
-  font-size: 1.05rem;
-  letter-spacing: 0.02em;
 }
 .app-header-left,
 .app-header-right {
@@ -502,17 +502,31 @@ kbd,
   font-size: 1.1rem;
 }
 
-.player-device-name {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
-  width: fit-content;
-}
-.player-device-name input {
-  font-size: 0.9rem;
+/* This-device name input — sits in the top-left of the app header where
+ *  a static "Music" title used to live. No visible legend by design; the
+ *  placeholder ("Living-room TV" etc.) and hover tooltip carry the
+ *  meaning. Sized to look like part of the header chrome rather than a
+ *  prompt-y form field. */
+.device-name-field {
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   padding: 0.25rem 0.55rem;
   width: 14em;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg);
+  border-radius: var(--radius);
+}
+.device-name-field::placeholder {
+  color: var(--muted);
+  font-weight: 500;
+}
+.device-name-field:hover,
+.device-name-field:focus {
+  background: var(--bg);
+  border-color: var(--border);
+  outline: none;
 }
 
 .output-badge {
@@ -2040,10 +2054,11 @@ kbd,
   gap: 1rem;
   align-items: center;
 }
-.now-playing-left {
+.now-playing-right {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+  justify-content: flex-end;
   min-width: 0;
 }
 .now-playing-track {
@@ -2089,10 +2104,14 @@ kbd,
   background: var(--accent-strong);
   color: #0a0a0a;
 }
-/* Compact "is this device an audio output?" pill, sits on the far left
- * of the footer. Three states: idle (muted, non-interactive), off (idle
- * default button look, click to claim), on (accent fill, click to release).
- * Designed to read as a pill / chip, not a transport control. */
+/* "Is this device an audio output?" pill — sits next to the volume slider
+ * on the right side of the footer.
+ *
+ * State colour rules — designed so the operator can read the pill across
+ * the room:
+ *   - ON (currently outputting):    green border + green-soft bg
+ *   - OFF (could output, isn't):    red  border + red-soft   bg  (clearly says "audio is muted")
+ *   - Idle (no capability / connecting): muted gray, non-interactive */
 .output-toggle {
   display: inline-flex;
   align-items: center;
@@ -2119,16 +2138,24 @@ kbd,
   border-color: var(--ok);
   color: var(--ok);
 }
-.output-toggle-on:hover {
+.output-toggle-on:hover:not(:disabled) {
   background: var(--ok-soft);
   border-color: var(--ok);
 }
-.output-toggle-off:hover {
-  border-color: var(--accent);
-  background: var(--surface-2);
+.output-toggle-off {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.output-toggle-off:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
 }
 .output-toggle-idle {
   cursor: default;
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted);
 }
 .output-toggle-idle .output-toggle-label {
   font-size: 0.8rem;
@@ -2591,8 +2618,9 @@ input.volume-slider::-moz-range-thumb {
     flex-wrap: wrap;
     padding: 0.5rem 0.7rem;
   }
-  .app-header h1 {
-    font-size: 0.95rem;
+  .device-name-field {
+    width: 10em;
+    font-size: 0.85rem;
   }
   .tabs {
     order: 3;

@@ -129,28 +129,25 @@ export function NowPlayingBar() {
   return (
     <footer className="now-playing">
       <div className="now-playing-top">
-        <div className="now-playing-left">
-          <OutputToggle />
-          <div className="now-playing-track">
-            {track !== null ? (
-              <>
-                <strong>{trackTitle(track) || "(untitled)"}</strong>
-                <span className="muted small now-playing-track-meta">
-                  {track.artist || "(unknown)"}
-                  {track.album ? ` · ${track.album}` : ""}
-                  {interruptId !== null ? (
-                    <span className="now-playing-track-interrupt">
-                      {" · "}
-                      <LightningIcon />
-                      {" interrupt"}
-                    </span>
-                  ) : null}
-                </span>
-              </>
-            ) : (
-              <span className="muted">Nothing playing</span>
-            )}
-          </div>
+        <div className="now-playing-track">
+          {track !== null ? (
+            <>
+              <strong>{trackTitle(track) || "(untitled)"}</strong>
+              <span className="muted small now-playing-track-meta">
+                {track.artist || "(unknown)"}
+                {track.album ? ` · ${track.album}` : ""}
+                {interruptId !== null ? (
+                  <span className="now-playing-track-interrupt">
+                    {" · "}
+                    <LightningIcon />
+                    {" interrupt"}
+                  </span>
+                ) : null}
+              </span>
+            </>
+          ) : (
+            <span className="muted">Nothing playing</span>
+          )}
         </div>
 
         <div className="now-playing-controls">
@@ -185,12 +182,15 @@ export function NowPlayingBar() {
           />
         </div>
 
-        <VolumeControl
-          value={volume}
-          onChange={onVolumeChange}
-          label="Master volume"
-          className="now-playing-volume"
-        />
+        <div className="now-playing-right">
+          <OutputToggle />
+          <VolumeControl
+            value={volume}
+            onChange={onVolumeChange}
+            label="Master volume"
+            className="now-playing-volume"
+          />
+        </div>
       </div>
 
       <div className="now-playing-scrub">

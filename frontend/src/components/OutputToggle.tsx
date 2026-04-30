@@ -52,15 +52,15 @@ export function OutputToggle() {
         onClick={() => setForceLocal(!active)}
         title={
           active
-            ? "Stop playing on this device (local)"
-            : "Play on this device (local — sign in to share with the operator)"
+            ? "Audio output is ON for this device (local-only). Click to silence."
+            : "Audio output is OFF for this device. Click to play locally (sign in to share with the operator)."
         }
         aria-label={active ? "Stop playing here" : "Play on this device"}
         aria-pressed={active}
       >
         <VolumeIcon className="output-toggle-icon" />
         <span className="output-toggle-label">
-          {active ? "Playing here · local" : "Play here"}
+          {active ? "Output ON · local" : "Output OFF"}
         </span>
       </button>
     );
@@ -97,13 +97,17 @@ export function OutputToggle() {
       type="button"
       className={`output-toggle ${isMyOutput ? "output-toggle-on" : "output-toggle-off"}`}
       onClick={toggle}
-      title={isMyOutput ? "Stop playing on this device" : "Play on this device"}
+      title={
+        isMyOutput
+          ? "Audio output is ON for this device. Click to silence."
+          : "Audio output is OFF for this device. Click to enable."
+      }
       aria-label={isMyOutput ? "Stop playing here" : "Play on this device"}
       aria-pressed={isMyOutput}
     >
       <VolumeIcon className="output-toggle-icon" />
       <span className="output-toggle-label">
-        {isMyOutput ? "Playing here" : "Play here"}
+        {isMyOutput ? "Output ON" : "Output OFF"}
       </span>
     </button>
   );

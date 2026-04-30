@@ -326,6 +326,7 @@ export class PlaybackEngine {
   // ----- main state apply ---------------------------------------------
 
   applyState(state: PlayerState, isMyOutput: boolean): void {
+    const wasMyOutput = this.isMyOutput;
     this.isMyOutput = isMyOutput;
     this.crossfadeMs = state.crossfade_ms ?? 0;
     const t = state.crossfade_type;
@@ -337,7 +338,12 @@ export class PlaybackEngine {
     }
 
     if (!isMyOutput) {
-      this.silenceAll();
+      // Only do the heavy teardown on the actual ON → OFF transition.
+      // (`silenceAll` is idempotent but `releaseOutput` calls `el.load()`
+      // which is best avoided in the steady state.)
+      if (wasMyOutput) {
+        this.releaseOutput();
+      }
       this.lastAmbientId = null;
       this.lastInterruptId = null;
       this.lastIsPlaying = false;
@@ -412,6 +418,31 @@ export class PlaybackEngine {
     const elapsedMs = el.currentTime * 1000;
     if (Math.abs(targetMs - elapsedMs) > 1500) {
       el.currentTime = Math.max(0, targetMs / 1000);
+    }
+  }
+
+  /** Surrender the active-output role: pause every channel and tear the
+   * src off each <audio> so it stops audibly *and* so a subsequent re-claim
+   * triggers a fresh load. Without the unload, a simple `pause()` would
+   * leave the element with its old src — when we toggle back on, the
+   * `loadInto` short-circuit (`src.endsWith(url)`) skips reload and
+   * `safePlay` resumes from the same paused position, which manifests as
+   * "toggle does nothing until refresh". */
+  private releaseOutput(): void {
+    this.pauseAmbient();
+    if (this.ambientA?.el) {
+      this.ambientA.el.removeAttribute("src");
+      this.ambientA.el.load();
+    }
+    if (this.ambientB?.el) {
+      this.ambientB.el.removeAttribute("src");
+      this.ambientB.el.load();
+    }
+    if (this.interrupt) {
+      this.interrupt.el.pause();
+      this.interrupt.el.removeAttribute("src");
+      this.interrupt.el.load();
+      this.interrupt.gainNode.gain.value = 0;
     }
   }
 
@@ -606,13 +637,6 @@ export class PlaybackEngine {
     window.requestAnimationFrame(tick);
   }
 
-  private silenceAll(): void {
-    this.pauseAmbient();
-    if (this.interrupt) {
-      this.interrupt.el.pause();
-      this.interrupt.gainNode.gain.value = 0;
-    }
-  }
 
   /** play() wrapper that ensures the AudioContext is running before
    *  attempting playback, surfaces autoplay errors via toast, and is safe

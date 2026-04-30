@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { DeviceNameField } from "@/components/DeviceNameField";
 import { modesApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { usePlayerStore } from "@/core/playerStore";
@@ -30,7 +31,7 @@ export function Header() {
   return (
     <header className="app-header">
       <div className="app-header-left">
-        <h1>Music</h1>
+        <DeviceNameField />
         <span className={`ws-status ws-status-${wsStatus}`}>{wsStatus}</span>
       </div>
       {/* Guests see only the Player route. Hiding the tab strip prevents

@@ -4,8 +4,7 @@ import { libraryApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
-import { defaultDeviceName, useUiStore } from "@/core/uiStore";
-import { wsClient } from "@/core/ws";
+import { useUiStore } from "@/core/uiStore";
 
 export function PlayerView() {
   const trackId = usePlayerStore(selectActiveTrackId);
@@ -95,7 +94,6 @@ export function PlayerView() {
   if (track === null) {
     return (
       <div className="player-view player-view-empty">
-        <DeviceNameField />
         <div className="player-empty-art" aria-hidden="true">
           ♪
         </div>
@@ -110,7 +108,6 @@ export function PlayerView() {
 
   return (
     <div className="player-view player-view-active">
-      <DeviceNameField />
       <div className="player-stage">
         <div className="player-art player-art-large">
           {!coverFailed ? (
@@ -180,37 +177,3 @@ export function PlayerView() {
   );
 }
 
-/** Editable device-name field. Lives on the Player tab so guests (who
- *  can't reach Settings) can still name their session — the WS endpoint
- *  accepts `register` from guest connections, so re-sending after a rename
- *  updates the name shown to the operator in the Outputs picker. */
-function DeviceNameField() {
-  const deviceName = useUiStore((s) => s.deviceName);
-  const setDeviceName = useUiStore((s) => s.setDeviceName);
-  const [localName, setLocalName] = useState(deviceName ?? "");
-
-  function commit() {
-    const trimmed = localName.trim();
-    const next = trimmed === "" ? null : trimmed;
-    if (next !== deviceName) {
-      setDeviceName(next);
-      wsClient.sendRegister();
-    }
-  }
-
-  return (
-    <label className="player-device-name">
-      <span className="muted small">This device</span>
-      <input
-        type="text"
-        value={localName}
-        placeholder={defaultDeviceName()}
-        onChange={(e) => setLocalName(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-        }}
-      />
-    </label>
-  );
-}
