@@ -148,6 +148,30 @@ class TrackMoveRequest(BaseModel):
     new_filename: str | None = Field(None, description="If set, also rename the file")
 
 
+class BulkMoveRequest(BaseModel):
+    track_ids: list[int] = Field(min_length=1, max_length=1000)
+    destination: str = Field(description="Folder path relative to MUSIC_DIR; '' for root")
+
+
+class BulkActionSkip(BaseModel):
+    track_id: int
+    reason: str
+
+
+class BulkMoveResult(BaseModel):
+    moved: list[TrackOut]
+    skipped: list[BulkActionSkip]
+
+
+class BulkDeleteRequest(BaseModel):
+    track_ids: list[int] = Field(min_length=1, max_length=1000)
+
+
+class BulkDeleteResult(BaseModel):
+    deleted_ids: list[int]
+    skipped: list[BulkActionSkip]
+
+
 class FolderCreateRequest(BaseModel):
     path: str = Field(min_length=1, description="Folder path relative to MUSIC_DIR")
 
@@ -489,6 +513,98 @@ def delete_track(track_id: int, _: CurrentUser, db: DbSession) -> None:
         abs_path.unlink()
     db.delete(track)
     db.commit()
+
+
+@router.post("/tracks/bulk-move", response_model=BulkMoveResult)
+def bulk_move_tracks(
+    payload: BulkMoveRequest,
+    _: CurrentUser,
+    db: DbSession,
+) -> BulkMoveResult:
+    """Move many tracks to one destination folder, keeping their original
+    filenames. Per-track failures (missing source, name collision, etc.) are
+    collected into `skipped` so the operator sees exactly what didn't move,
+    rather than the whole batch aborting on the first issue."""
+    try:
+        dest_dir = library_index.ensure_folder(payload.destination)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+
+    moved: list[TrackOut] = []
+    skipped: list[BulkActionSkip] = []
+    for track_id in payload.track_ids:
+        track = db.get(Track, track_id)
+        if track is None:
+            skipped.append(BulkActionSkip(track_id=track_id, reason="not found"))
+            continue
+        src = library_index.to_absolute(track.path)
+        if not src.is_file():
+            skipped.append(
+                BulkActionSkip(track_id=track_id, reason="source file missing")
+            )
+            continue
+        target = library_index.safe_join(payload.destination, src.name)
+        if target == src:
+            moved.append(TrackOut.model_validate(track))
+            continue
+        if target.exists():
+            skipped.append(
+                BulkActionSkip(
+                    track_id=track_id,
+                    reason=f"a file already exists at {dest_dir.name}/{src.name}",
+                )
+            )
+            continue
+        shutil.move(str(src), str(target))
+        new_rel = library_index.to_relative(target)
+        try:
+            library_index.update_path(db, track.path, new_rel)
+        except Exception as e:
+            with contextlib.suppress(Exception):
+                shutil.move(str(target), str(src))
+            skipped.append(
+                BulkActionSkip(track_id=track_id, reason=f"index update failed: {e}")
+            )
+            continue
+        db.refresh(track)
+        moved.append(TrackOut.model_validate(track))
+
+    return BulkMoveResult(moved=moved, skipped=skipped)
+
+
+@router.post("/tracks/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_tracks(
+    payload: BulkDeleteRequest,
+    _: CurrentUser,
+    db: DbSession,
+) -> BulkDeleteResult:
+    """Delete many tracks at once. A missing file isn't fatal — the row is
+    still dropped from the index so the operator can clean up dangling rows
+    after manually removing files. Playlist items cascade via FK."""
+    deleted_ids: list[int] = []
+    skipped: list[BulkActionSkip] = []
+    for track_id in payload.track_ids:
+        track = db.get(Track, track_id)
+        if track is None:
+            skipped.append(BulkActionSkip(track_id=track_id, reason="not found"))
+            continue
+        abs_path = library_index.to_absolute(track.path)
+        if abs_path.is_file():
+            try:
+                abs_path.unlink()
+            except OSError as e:
+                skipped.append(
+                    BulkActionSkip(
+                        track_id=track_id, reason=f"file unlink failed: {e}"
+                    )
+                )
+                continue
+        db.delete(track)
+        deleted_ids.append(track_id)
+    db.commit()
+    return BulkDeleteResult(deleted_ids=deleted_ids, skipped=skipped)
 
 
 # --- upload + rescan ------------------------------------------------------

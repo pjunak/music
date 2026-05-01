@@ -384,6 +384,59 @@ def test_bulk_metadata_404_when_no_ids_match(auth_client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_bulk_metadata_partial_failure_when_file_deleted(
+    auth_client: TestClient,
+) -> None:
+    """If a file vanishes between selection and apply, the response should
+    surface that track in `skipped` with a reason — not silently drop it.
+    Exercises the per-track failure path added when bulk-metadata moved
+    from `list[TrackOut]` to `{updated, skipped}`."""
+    ids: list[int] = []
+    paths: list[str] = []
+    for n in range(3):
+        upload = auth_client.post(
+            "/api/library/upload",
+            files=[("files", (f"partial-{n}.wav", _silent_wav(), "audio/wav"))],
+            params={"dest": "BulkPartial"},
+        ).json()
+        saved = upload["saved"][0]
+        ids.append(saved["id"])
+        paths.append(saved["path"])
+
+    # Yank the second file from disk before the bulk update runs. The row
+    # stays in the DB so it's still in the selection.
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    (music_dir / paths[1]).unlink()
+
+    r = auth_client.patch(
+        "/api/library/tracks/bulk-metadata",
+        json={
+            "track_ids": ids,
+            "updates": {"artist": "Hans Zimmer", "origin": "Inception"},
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+
+    # The two surviving files take the change; the deleted one is skipped
+    # with a useful reason. DB-only fields (origin) still apply across the
+    # whole selection — that's the documented "best-effort" semantic.
+    updated_ids = {row["id"] for row in body["updated"]}
+    assert updated_ids == set(ids)  # origin applied to all 3
+    skipped = body["skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["track_id"] == ids[1]
+    assert "missing" in skipped[0]["reason"].lower()
+
+    # The two surviving files have BOTH artist (tag-backed) and origin
+    # (DB-only). The deleted-file row only got origin (tag write skipped).
+    for tid, p in zip(ids, paths, strict=True):
+        fresh = auth_client.get(f"/api/library/tracks/{tid}").json()
+        assert fresh["origin"] == "Inception"
+        if (music_dir / p).is_file():
+            assert fresh["artist"] == "Hans Zimmer"
+
+
 def test_track_move_renames_and_relocates(auth_client: TestClient) -> None:
     files = [("files", ("movable.wav", _silent_wav(), "audio/wav"))]
     upload = auth_client.post(
@@ -436,6 +489,110 @@ def test_delete_removes_file_and_row(auth_client: TestClient) -> None:
     r = auth_client.delete(f"/api/library/tracks/{track_id}")
     assert r.status_code == 204
     assert not (music_dir / "Doomed" / "doomed.wav").exists()
+    assert auth_client.get(f"/api/library/tracks/{track_id}").status_code == 404
+
+
+def test_bulk_move_relocates_tracks(auth_client: TestClient) -> None:
+    ids: list[int] = []
+    for n in range(3):
+        upload = auth_client.post(
+            "/api/library/upload",
+            files=[("files", (f"bm-{n}.wav", _silent_wav(), "audio/wav"))],
+            params={"dest": "BulkMoveSrc"},
+        ).json()
+        ids.append(upload["saved"][0]["id"])
+
+    r = auth_client.post(
+        "/api/library/tracks/bulk-move",
+        json={"track_ids": ids, "destination": "BulkMoveDst"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["skipped"] == []
+    assert len(body["moved"]) == 3
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    for n in range(3):
+        assert (music_dir / "BulkMoveDst" / f"bm-{n}.wav").is_file()
+        assert not (music_dir / "BulkMoveSrc" / f"bm-{n}.wav").exists()
+
+
+def test_bulk_move_skips_collisions(auth_client: TestClient) -> None:
+    """When a destination file already exists, that single track is skipped
+    with a reason while the rest still move."""
+    src_id = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("collide.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "MoveSrcA"},
+    ).json()["saved"][0]["id"]
+    # Pre-place a same-named file at the destination.
+    auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("collide.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "MoveDstA"},
+    )
+    other_id = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("solo.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "MoveSrcA"},
+    ).json()["saved"][0]["id"]
+
+    r = auth_client.post(
+        "/api/library/tracks/bulk-move",
+        json={"track_ids": [src_id, other_id], "destination": "MoveDstA"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["moved"]) == 1
+    assert body["moved"][0]["id"] == other_id
+    assert len(body["skipped"]) == 1
+    assert body["skipped"][0]["track_id"] == src_id
+    assert "exists" in body["skipped"][0]["reason"]
+
+
+def test_bulk_delete_removes_files_and_rows(auth_client: TestClient) -> None:
+    ids: list[int] = []
+    for n in range(3):
+        upload = auth_client.post(
+            "/api/library/upload",
+            files=[("files", (f"bd-{n}.wav", _silent_wav(), "audio/wav"))],
+            params={"dest": "BulkDelete"},
+        ).json()
+        ids.append(upload["saved"][0]["id"])
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    r = auth_client.post(
+        "/api/library/tracks/bulk-delete",
+        json={"track_ids": ids},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["skipped"] == []
+    assert sorted(body["deleted_ids"]) == sorted(ids)
+    for n in range(3):
+        assert not (music_dir / "BulkDelete" / f"bd-{n}.wav").exists()
+    for tid in ids:
+        assert auth_client.get(f"/api/library/tracks/{tid}").status_code == 404
+
+
+def test_bulk_delete_handles_missing_file(auth_client: TestClient) -> None:
+    """A missing file isn't fatal — the row still goes so the operator can
+    sweep dangling rows after deleting files outside the app."""
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("ghost.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "Ghosts"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    (music_dir / "Ghosts" / "ghost.wav").unlink()
+
+    r = auth_client.post(
+        "/api/library/tracks/bulk-delete",
+        json={"track_ids": [track_id]},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert track_id in body["deleted_ids"]
     assert auth_client.get(f"/api/library/tracks/{track_id}").status_code == 404
 
 

@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.7
 #
 # Multi-stage build for the music app (FastAPI backend + React/Vite SPA).
-#   Stage 1 — node: build the React/Vite frontend → dist/
-#   Stage 2 — python: install backend, copy dist/ as /app/static, run uvicorn
+#   Stage 1 — frontend-builder: build the React/Vite frontend → dist/
+#   Stage 2 — backend-builder:  compile any cffi/native wheels into /wheels
+#   Stage 3 — runtime:          slim image, no compilers, just installs
+#                               from the wheelhouse + copies static assets
 # The backend serves both /api/* (FastAPI routers) and / (the SPA via
 # SpaStaticFiles) at the same origin, so VITE_API_BASE_URL is empty.
 
@@ -27,31 +29,50 @@ RUN npm run build
 # Output: /frontend/dist
 
 # ============================================================================
-# Stage 2: python runtime
+# Stage 2: backend wheel builder
 # ============================================================================
-FROM python:3.11-slim AS runtime
+# Has the C toolchain + libffi-dev needed to compile argon2-cffi (and any
+# future cffi-backed wheel that doesn't ship a manylinux build for slim).
+# Output is just the wheels; the runtime stage stays compiler-free.
+FROM python:3.11-slim AS backend-builder
 
-# OS deps:
-#   build-essential + libffi-dev — for any wheels that need to compile (argon2-cffi etc.)
-#   ca-certificates              — TLS for any outbound HTTPS calls
-# Note: ffmpeg used to be here for beets; mutagen reads tags from file
-# headers directly so we don't need it. Add back if/when we ship the
-# auto-format-conversion feature listed in docs/FUTURE.md.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libffi-dev \
+        && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+COPY backend/pyproject.toml ./
+COPY backend/app ./app
+
+# Build wheels for everything declared in pyproject.toml (transitively)
+# plus the project itself, into /wheels. The runtime stage installs from
+# this directory only — no network, no compiler.
+RUN pip install --no-cache-dir --upgrade pip wheel && \
+    pip wheel --no-cache-dir --wheel-dir /wheels .
+
+# ============================================================================
+# Stage 3: python runtime
+# ============================================================================
+FROM python:3.11-slim AS runtime
+
+# Only runtime deps. ca-certificates for outbound TLS; that's it.
+# (build-essential + libffi-dev are in the builder stage above; they
+# don't ship in this image.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Backend source + install. The pyproject.toml's setuptools.packages.find
-# picks up the `app` package directly from cwd, so we install with `pip
-# install .` after copying both the manifest and the source.
-COPY backend/pyproject.toml ./
-COPY backend/app ./app
+# Install from the pre-built wheelhouse — no compiler, no network access
+# needed. The wheelhouse contains every transitive dep + the music-backend
+# wheel itself.
+COPY --from=backend-builder /wheels /wheels
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir --no-index --find-links=/wheels music-backend && \
+    rm -rf /wheels
 
 # Modes + presets ship as read-only seeds at /seeds/{modes,presets}. On boot
 # the backend copies them into MODES_DIR / PRESETS_DIR only when those

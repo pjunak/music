@@ -213,3 +213,66 @@ def test_playlist_deletion_cascades_items(
         db_session.scalar(select(PlaylistItem).where(PlaylistItem.playlist_id == pid))
         is None
     )
+
+
+# --- export -----------------------------------------------------------------
+
+
+def test_export_m3u_lists_track_paths(
+    auth_client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    pid = auth_client.post(
+        "/api/playlists", json={"name": "Export Demo / Combat"}
+    ).json()["id"]
+    for tid in [seeded_track_id, *extra_seeded_track_ids]:
+        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": tid})
+
+    r = auth_client.get(f"/api/playlists/{pid}/export", params={"format": "m3u"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/vnd.apple.mpegurl")
+    disposition = r.headers["content-disposition"]
+    assert ".m3u8" in disposition
+    # Filename was sanitised — no spaces or slashes leaked through.
+    assert "/" not in disposition.split("filename=")[1]
+
+    body = r.text
+    assert body.startswith("#EXTM3U")
+    assert "#PLAYLIST:Export Demo / Combat" in body
+    # Each track shows up as #EXTINF + relative path.
+    assert "Demo/test-song.wav" in body
+    assert body.count("#EXTINF:") == 4
+
+
+def test_export_json_includes_metadata(
+    auth_client: TestClient, seeded_track_id: int
+) -> None:
+    pid = auth_client.post(
+        "/api/playlists", json={"name": "JSON Test"}
+    ).json()["id"]
+    auth_client.post(
+        f"/api/playlists/{pid}/tracks", json={"track_id": seeded_track_id}
+    )
+
+    r = auth_client.get(f"/api/playlists/{pid}/export", params={"format": "json"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    body = r.json()
+    assert body["playlist"]["name"] == "JSON Test"
+    assert len(body["tracks"]) == 1
+    assert body["tracks"][0]["path"] == "Demo/test-song.wav"
+
+
+def test_export_unknown_format_rejected(
+    auth_client: TestClient, seeded_track_id: int
+) -> None:
+    pid = auth_client.post("/api/playlists", json={"name": "X"}).json()["id"]
+    auth_client.post(
+        f"/api/playlists/{pid}/tracks", json={"track_id": seeded_track_id}
+    )
+    r = auth_client.get(f"/api/playlists/{pid}/export", params={"format": "xml"})
+    assert r.status_code == 422
+
+
+def test_export_requires_auth(client: TestClient) -> None:
+    r = client.get("/api/playlists/1/export")
+    assert r.status_code == 401

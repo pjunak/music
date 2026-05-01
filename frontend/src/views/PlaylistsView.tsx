@@ -359,6 +359,18 @@ function PlaylistDetail({
           >
             Play
           </IconButton>
+          <a
+            href={playlistsApi.exportUrl(playlist.id, "m3u")}
+            title="Download as M3U (relative paths under MUSIC_DIR — drop alongside your music tree)"
+          >
+            Export M3U
+          </a>
+          <a
+            href={playlistsApi.exportUrl(playlist.id, "json")}
+            title="Download as JSON (structured: includes per-track metadata)"
+          >
+            Export JSON
+          </a>
           <IconButton
             label="Delete this playlist"
             icon={<TrashIcon />}

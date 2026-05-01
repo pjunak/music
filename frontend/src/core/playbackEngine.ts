@@ -132,7 +132,13 @@ export class PlaybackEngine {
   /** Splitter feeding both ambient channels into the head of the effect
    *  chain. Created once when the AudioContext is built. */
   private effectChainHead: GainNode | null = null;
-  /** Master ambient gain node — drives master volume and is the chain's
+  /** Duck-control gain between the effect chain tail and `ambientMaster`.
+   *  Stays at 1.0 in normal playback; ramps down to a partial level when
+   *  an interrupt fires with `duck_to` set, so ambient music continues
+   *  quietly under the interrupt instead of pausing. Master volume stays
+   *  on `ambientMaster` so duck and master volume don't interfere. */
+  private ambientDuck: GainNode | null = null;
+  /** Master ambient gain node — drives master volume and is the graph's
    *  terminal node before `destination`. */
   private ambientMaster: GainNode | null = null;
   /** Master interrupt gain node — bypasses the effect chain. */
@@ -148,6 +154,14 @@ export class PlaybackEngine {
   private lastVolume = 1.0;
   private lastInterruptFadeOut = 0;
   private lastPresetSignature = "";
+  /** When non-null, an interrupt is currently ducking ambient (rather
+   *  than pausing it). Records the target level so the un-duck path
+   *  knows whether it has work to do on interrupt-end. */
+  private currentDuckTo: number | null = null;
+  /** Cancellation token for the most recently scheduled duck/un-duck rAF
+   *  ramp. Bumped before each new ramp so an in-flight one drops on the
+   *  floor rather than fighting the new target. */
+  private duckRampToken = 0;
 
   private isMyOutput = false;
 
@@ -251,12 +265,15 @@ export class PlaybackEngine {
     this.ambientMaster = ctx.createGain();
     this.interruptMaster = ctx.createGain();
     this.effectChainHead = ctx.createGain();
+    this.ambientDuck = ctx.createGain();
     this.ambientMaster.gain.value = clamp01(this.lastVolume);
     this.interruptMaster.gain.value = clamp01(this.lastVolume);
+    this.ambientDuck.gain.value = 1;
     this.ambientMaster.connect(ctx.destination);
     this.interruptMaster.connect(ctx.destination);
-    // No effects yet — passthrough head → ambient master.
-    this.effectChainHead.connect(this.ambientMaster);
+    this.ambientDuck.connect(this.ambientMaster);
+    // No effects yet — passthrough head → duck → master.
+    this.effectChainHead.connect(this.ambientDuck);
     ctx.addEventListener("statechange", () => {
       if (ctx.state === "suspended") {
         console.info("[playbackEngine] AudioContext suspended");
@@ -269,7 +286,12 @@ export class PlaybackEngine {
 
   setPresets(presets: PresetManifest[]): void {
     const ctx = this.audioContext;
-    if (ctx === null || this.effectChainHead === null || this.ambientMaster === null) {
+    if (
+      ctx === null ||
+      this.effectChainHead === null ||
+      this.ambientDuck === null ||
+      this.ambientMaster === null
+    ) {
       return; // Web Audio not available or not wired yet — no-op.
     }
     // Cheap fingerprint so we can skip rebuilds when the active presets
@@ -280,11 +302,10 @@ export class PlaybackEngine {
     if (signature === this.lastPresetSignature) return;
     this.lastPresetSignature = signature;
 
-    // Tear down the current chain.
+    // Tear down the current chain. We rebuild the head→…→duck path here;
+    // duck→master and master→destination are stable, no need to touch.
     this.disposeEffects();
     this.effectChainHead.disconnect();
-    this.ambientMaster.disconnect();
-    this.ambientMaster.connect(ctx.destination);
 
     // Flatten preset chains in declaration order — preset[0].effects then
     // preset[1].effects, etc. Skip unsupported effects; warn once per type.
@@ -296,8 +317,8 @@ export class PlaybackEngine {
     }
 
     if (flat.length === 0) {
-      // Empty chain — passthrough.
-      this.effectChainHead.connect(this.ambientMaster);
+      // Empty chain — passthrough head → duck.
+      this.effectChainHead.connect(this.ambientDuck);
       return;
     }
 
@@ -309,7 +330,7 @@ export class PlaybackEngine {
       upstream = built.output;
       this.installedEffects.push(built);
     }
-    upstream.connect(this.ambientMaster);
+    upstream.connect(this.ambientDuck);
   }
 
   private disposeEffects(): void {
@@ -369,12 +390,29 @@ export class PlaybackEngine {
     if (newInterruptId !== this.lastInterruptId) {
       if (newInterruptId !== null) {
         const fadeIn = state.interrupt?.fade_in_ms ?? 0;
+        const duckTo = state.interrupt?.duck_to ?? null;
         this.startInterrupt(newInterruptId, fadeIn);
-        this.pauseAmbient();
+        if (duckTo !== null) {
+          // Cinematic mode: keep ambient playing, just lower its volume.
+          this.duckAmbient(duckTo, fadeIn);
+          this.currentDuckTo = duckTo;
+        } else {
+          // Legacy mode: ambient pauses for the duration of the interrupt.
+          this.pauseAmbient();
+          this.currentDuckTo = null;
+        }
       } else if (this.lastInterruptFadeOut > 0) {
         this.fadeOutInterrupt(this.lastInterruptFadeOut);
+        if (this.currentDuckTo !== null) {
+          this.unduckAmbient(this.lastInterruptFadeOut);
+          this.currentDuckTo = null;
+        }
       } else {
         this.stopInterrupt();
+        if (this.currentDuckTo !== null) {
+          this.unduckAmbient(0);
+          this.currentDuckTo = null;
+        }
       }
       this.lastInterruptId = newInterruptId;
     }
@@ -427,6 +465,40 @@ export class PlaybackEngine {
     }
   }
 
+  /** Ramp the ambient duck gain to `toLevel` over `ms`. `toLevel` of 0.3
+   * means ambient plays at 30% during an interrupt — combined with master
+   * volume, you get a cinematic "background music" feel rather than a
+   * hard pause. */
+  private duckAmbient(toLevel: number, ms: number): void {
+    this.rampDuck(clamp01(toLevel), ms);
+  }
+
+  /** Counterpart to `duckAmbient` — ramp back to 1.0 (no attenuation)
+   * over `ms`. Called on interrupt-end if we were ducking. */
+  private unduckAmbient(ms: number): void {
+    this.rampDuck(1, ms);
+  }
+
+  private rampDuck(toLevel: number, ms: number): void {
+    if (this.ambientDuck === null) return;
+    const node = this.ambientDuck;
+    this.duckRampToken += 1;
+    const myToken = this.duckRampToken;
+    const from = node.gain.value;
+    if (ms <= 0) {
+      node.gain.value = toLevel;
+      return;
+    }
+    const start = performance.now();
+    const tick = (now: number) => {
+      if (myToken !== this.duckRampToken) return;
+      const t = Math.min(1, (now - start) / ms);
+      node.gain.value = from + (toLevel - from) * t;
+      if (t < 1) window.requestAnimationFrame(tick);
+    };
+    window.requestAnimationFrame(tick);
+  }
+
   /** Surrender the active-output role: pause every channel and tear the
    * src off each <audio> so it stops audibly *and* so a subsequent re-claim
    * triggers a fresh load. Without the unload, a simple `pause()` would
@@ -453,6 +525,11 @@ export class PlaybackEngine {
       this.interrupt.loadedUrl = null;
       this.interrupt.gainNode.gain.value = 0;
     }
+    // Cancel any in-flight duck ramp and reset the duck gain so a
+    // subsequent re-claim doesn't start with ambient at 30%.
+    this.duckRampToken += 1;
+    if (this.ambientDuck !== null) this.ambientDuck.gain.value = 1;
+    this.currentDuckTo = null;
   }
 
   // ----- SFX ---------------------------------------------------------

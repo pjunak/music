@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 
+import { confirmDialog } from "@/components/confirmDialog";
 import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
@@ -68,6 +69,8 @@ export function MetadataView() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [editing, setEditing] = useState<Track | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [movePickerOpen, setMovePickerOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const inSearchMode = query !== "";
 
@@ -162,6 +165,64 @@ export function MetadataView() {
     setRefreshKey((k) => k + 1);
   }, []);
 
+  const selectionIds = useMemo(() => [...selected], [selected]);
+
+  function reportBulkSkips(skipped: { track_id: number; reason: string }[]) {
+    if (skipped.length === 0) return;
+    const sample = skipped
+      .slice(0, 3)
+      .map((s) => `#${s.track_id}: ${s.reason}`)
+      .join("\n");
+    const more = skipped.length > 3 ? `\n…and ${skipped.length - 3} more` : "";
+    toast.warn("Some tracks were skipped", `${sample}${more}`);
+  }
+
+  async function bulkMove(destination: string) {
+    if (selectionIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const r = await libraryApi.bulkMove(selectionIds, destination);
+      toast.success(
+        `Moved ${r.moved.length} of ${selectionIds.length} track${selectionIds.length === 1 ? "" : "s"}`,
+      );
+      reportBulkSkips(r.skipped);
+      setSelected(new Set());
+      setMovePickerOpen(false);
+      refresh();
+    } catch (e) {
+      toast.error("Bulk move failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function bulkDelete() {
+    if (selectionIds.length === 0) return;
+    const ok = await confirmDialog({
+      title: "Delete selected tracks?",
+      body:
+        `Permanently delete ${selectionIds.length} track${selectionIds.length === 1 ? "" : "s"} ` +
+        "from disk and the library? Playlist references will be removed too.",
+      tone: "danger",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+    setBulkBusy(true);
+    try {
+      const r = await libraryApi.bulkDelete(selectionIds);
+      toast.success(
+        `Deleted ${r.deleted_ids.length} track${r.deleted_ids.length === 1 ? "" : "s"}`,
+      );
+      reportBulkSkips(r.skipped);
+      setSelected(new Set());
+      refresh();
+    } catch (e) {
+      toast.error("Bulk delete failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   return (
     <div className="metadata-view">
       <header className="metadata-toolbar">
@@ -196,6 +257,33 @@ export function MetadataView() {
               ? `${tracks.length} shown · ${total} total · ${selected.size} selected`
               : `${tracks.length} in folder · ${selected.size} selected`}
         </span>
+        <div className="metadata-bulk-actions">
+          <button
+            type="button"
+            disabled={selected.size === 0 || bulkBusy}
+            onClick={() => setMovePickerOpen(true)}
+            title={
+              selected.size === 0
+                ? "Select tracks first"
+                : `Move ${selected.size} track${selected.size === 1 ? "" : "s"} to another folder`
+            }
+          >
+            Move…
+          </button>
+          <button
+            type="button"
+            className="btn-danger"
+            disabled={selected.size === 0 || bulkBusy}
+            onClick={() => void bulkDelete()}
+            title={
+              selected.size === 0
+                ? "Select tracks first"
+                : `Delete ${selected.size} track${selected.size === 1 ? "" : "s"}`
+            }
+          >
+            Delete…
+          </button>
+        </div>
       </header>
 
       <div className="metadata-body">
@@ -309,6 +397,84 @@ export function MetadataView() {
           }}
         />
       ) : null}
+
+      {movePickerOpen ? (
+        <BulkMovePicker
+          count={selected.size}
+          onCancel={() => setMovePickerOpen(false)}
+          onConfirm={(dest) => void bulkMove(dest)}
+          busy={bulkBusy}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Modal that picks a destination folder for the bulk-move action. Reuses
+ *  the same FolderTree used in the main view so the operator's mental model
+ *  matches: same widget, same lazy loading, same root-vs-subfolder semantics. */
+function BulkMovePicker({
+  count,
+  onCancel,
+  onConfirm,
+  busy,
+}: {
+  count: number;
+  onCancel: () => void;
+  onConfirm: (dest: string) => void;
+  busy: boolean;
+}) {
+  const [dest, setDest] = useState("");
+  const loadChildren = useCallback(
+    async (p: string): Promise<TreeFolder[]> => {
+      const r = await libraryApi.tree(p);
+      return r.folders.map((f) => ({
+        name: f.name,
+        path: f.path,
+        badge: f.track_count > 0 ? f.track_count : null,
+      }));
+    },
+    [],
+  );
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div className="modal" role="dialog" aria-label="Move tracks to folder">
+        <h2>
+          Move {count} track{count === 1 ? "" : "s"}
+        </h2>
+        <p className="muted small">
+          Pick the destination folder under MUSIC_DIR. Files keep their
+          original names; collisions are skipped per-track.
+        </p>
+        <div className="metadata-tree">
+          <FolderTree
+            rootLabel="(music root)"
+            selectedPath={dest}
+            onSelect={setDest}
+            loadChildren={loadChildren}
+          />
+        </div>
+        <div className="modal-actions">
+          <button type="button" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => onConfirm(dest)}
+            disabled={busy}
+          >
+            {busy
+              ? "Moving…"
+              : `Move to ${dest === "" ? "(root)" : dest}`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

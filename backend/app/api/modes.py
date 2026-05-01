@@ -379,6 +379,11 @@ class SceneUpdate(BaseModel):
     )
     presets: list[str] | None = Field(None, max_length=32)
     looping_sfx: list[SceneLoopingSfx] | None = None
+    volume: float | None = Field(None, ge=0.0, le=1.0)
+    clear_volume: bool = Field(
+        False,
+        description="When true, removes the volume override. Takes precedence over `volume`.",
+    )
 
 
 def _load_scene_yaml(mode_id: str, scene_id: str) -> tuple[Path, dict]:
@@ -456,6 +461,10 @@ def update_scene(
             ]
         else:
             scene.pop("looping_sfx", None)
+    if payload.clear_volume:
+        scene.pop("volume", None)
+    elif "volume" in fields and payload.volume is not None:
+        scene["volume"] = payload.volume
 
     return _save_scene_yaml(path, scene, mode_id, scene_id)
 
@@ -623,6 +632,7 @@ class InterruptTemplateCreate(BaseModel):
     fade_in_ms: int = Field(0, ge=0, le=10000)
     fade_out_ms: int = Field(0, ge=0, le=10000)
     return_to_ambient: bool = True
+    duck_to: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class InterruptTemplateUpdate(BaseModel):
@@ -632,6 +642,7 @@ class InterruptTemplateUpdate(BaseModel):
     fade_in_ms: int | None = Field(None, ge=0, le=10000)
     fade_out_ms: int | None = Field(None, ge=0, le=10000)
     return_to_ambient: bool | None = None
+    duck_to: float | None = Field(None, ge=0.0, le=1.0)
 
 
 def _load_manifest_yaml(mode_id: str) -> tuple[Path, dict]:
@@ -705,6 +716,8 @@ def add_interrupt_template(
         new_entry["fade_out_ms"] = payload.fade_out_ms
     if not payload.return_to_ambient:
         new_entry["return_to_ambient"] = False
+    if payload.duck_to is not None:
+        new_entry["duck_to"] = payload.duck_to
     interrupts.append(new_entry)
     reloaded = _save_manifest_yaml(path, manifest, mode_id)
     return reloaded.interrupts

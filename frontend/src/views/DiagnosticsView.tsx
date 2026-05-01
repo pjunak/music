@@ -1,7 +1,23 @@
 import { useEffect, useState } from "react";
 
+import { diagnosticsApi } from "@/core/api";
+import type { DiagnosticsResponse } from "@/core/api";
+import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
+
+/** Fixed reference for "never". Avoids "Invalid Date" rendering when a
+ *  loader / scan hasn't run since boot. */
+const NEVER = "(never)";
+
+function formatAgo(unixSeconds: number | null): string {
+  if (unixSeconds === null) return NEVER;
+  const ageS = Date.now() / 1000 - unixSeconds;
+  if (ageS < 60) return `${Math.round(ageS)}s ago`;
+  if (ageS < 3600) return `${Math.round(ageS / 60)}m ago`;
+  if (ageS < 86400) return `${Math.round(ageS / 3600)}h ago`;
+  return `${Math.round(ageS / 86400)}d ago`;
+}
 
 /** Full-page diagnostics. Same data as the Settings → Diagnostics card,
  *  but exposed at /diagnostics so the operator can open it in a new tab
@@ -24,6 +40,31 @@ export function DiagnosticsView() {
   const connectedDevices = usePlayerStore(
     (s) => s.state?.connected_devices ?? [],
   );
+  const authStatus = useAuthStore((s) => s.status);
+
+  // Server-side snapshot — polled every 5s while the page is open.
+  // Auth-gated: guests see the read-only client-state sections only.
+  const [serverDx, setServerDx] = useState<DiagnosticsResponse | null>(null);
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+    let cancelled = false;
+    const fetchDx = () => {
+      void diagnosticsApi
+        .get()
+        .then((r) => {
+          if (!cancelled) setServerDx(r);
+        })
+        .catch(() => {
+          /* keep last-good rendering */
+        });
+    };
+    fetchDx();
+    const t = window.setInterval(fetchDx, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [authStatus]);
 
   const diagnostics = playbackEngine.getDiagnostics();
 
@@ -73,6 +114,88 @@ export function DiagnosticsView() {
           </li>
         </ul>
       </section>
+
+      {serverDx !== null ? (
+        <section className="surface-card">
+          <h3>Server</h3>
+          <ul className="diagnostics-summary">
+            <li>
+              <span className="muted small">Indexed tracks</span>
+              <strong>{serverDx.track_count}</strong>
+            </li>
+            <li>
+              <span className="muted small">Last full scan</span>
+              <strong>{formatAgo(serverDx.last_scan_at)}</strong>
+            </li>
+            <li>
+              <span className="muted small">State revision</span>
+              <code>{serverDx.state_revision}</code>
+            </li>
+            <li>
+              <span className="muted small">Connected devices (server)</span>
+              <strong>{serverDx.connected_device_count}</strong>
+            </li>
+            <li>
+              <span className="muted small">Modes loaded</span>
+              <strong>{serverDx.modes.loaded_ids.length}</strong>
+            </li>
+            <li>
+              <span className="muted small">Mode load errors</span>
+              <strong
+                className={
+                  Object.keys(serverDx.modes.errors).length > 0
+                    ? "danger"
+                    : "ok"
+                }
+              >
+                {Object.keys(serverDx.modes.errors).length}
+              </strong>
+            </li>
+            <li>
+              <span className="muted small">EQ presets loaded</span>
+              <strong>{serverDx.presets.loaded_ids.length}</strong>
+            </li>
+            <li>
+              <span className="muted small">Preset load errors</span>
+              <strong
+                className={
+                  Object.keys(serverDx.presets.errors).length > 0
+                    ? "danger"
+                    : "ok"
+                }
+              >
+                {Object.keys(serverDx.presets.errors).length}
+              </strong>
+            </li>
+          </ul>
+          {Object.keys(serverDx.modes.errors).length > 0 ? (
+            <details>
+              <summary>Mode load errors</summary>
+              <ul className="diagnostics-summary">
+                {Object.entries(serverDx.modes.errors).map(([id, err]) => (
+                  <li key={id}>
+                    <span className="muted small">{id}</span>
+                    <code className="error small">{err}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          {Object.keys(serverDx.presets.errors).length > 0 ? (
+            <details>
+              <summary>Preset load errors</summary>
+              <ul className="diagnostics-summary">
+                {Object.entries(serverDx.presets.errors).map(([id, err]) => (
+                  <li key={id}>
+                    <span className="muted small">{id}</span>
+                    <code className="error small">{err}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="surface-card">
         <h3>Connected devices ({connectedDevices.length})</h3>

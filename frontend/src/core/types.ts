@@ -18,6 +18,10 @@ export interface InterruptState {
   return_to_ambient: boolean;
   fade_in_ms: number;
   fade_out_ms: number;
+  /** When non-null (0..1), ambient music keeps playing at this volume
+   *  multiplier during the interrupt instead of pausing. Drives the
+   *  cinematic "duck under voiceover" effect. */
+  duck_to: number | null;
 }
 
 export interface PositionReport {
@@ -124,6 +128,9 @@ export interface SceneSpec {
   ambient?: { playlist?: string; crossfade_ms?: number } | null;
   presets?: string[];
   looping_sfx?: SceneLoopingSfx[];
+  /** Optional master-volume override for the duration of the scene.
+   *  Captured into pre_scene_state so deactivate restores the prior value. */
+  volume?: number | null;
   // lights, external — opaque from the frontend's perspective for now.
   [key: string]: unknown;
 }
@@ -135,6 +142,8 @@ export interface InterruptSpec {
   fade_in_ms?: number;
   fade_out_ms?: number;
   return_to_ambient?: boolean;
+  /** Ambient duck level during the interrupt (0..1). Null = pause. */
+  duck_to?: number | null;
 }
 
 export interface ModeDetail extends ModeSummary {
@@ -203,6 +212,7 @@ export type WsAction =
       return_to_ambient?: boolean;
       fade_in_ms?: number;
       fade_out_ms?: number;
+      duck_to?: number | null;
     }
   | {
       type: "fire_interrupt_playlist";
@@ -210,6 +220,7 @@ export type WsAction =
       return_to_ambient?: boolean;
       fade_in_ms?: number;
       fade_out_ms?: number;
+      duck_to?: number | null;
     }
   | { type: "interrupt_skip_next" }
   | { type: "interrupt_seek"; position_ms: number }

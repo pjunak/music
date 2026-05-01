@@ -181,3 +181,74 @@ def test_logout_invalidates_all_sessions_for_user(client: TestClient) -> None:
     # Both sessions invalidated.
     assert a.get("/api/auth/me").status_code == 401
     assert b.get("/api/auth/me").status_code == 401
+
+
+# --- /api/auth/sessions -----------------------------------------------------
+
+
+def test_list_sessions_marks_current(client: TestClient) -> None:
+    _ensure_user()
+    a = TestClient(client.app)
+    a.post(
+        "/api/auth/login",
+        json={"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    b = TestClient(client.app)
+    b.post(
+        "/api/auth/login",
+        json={"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    r = a.get("/api/auth/sessions")
+    assert r.status_code == 200
+    rows = r.json()
+    assert len(rows) == 2
+    current = [row for row in rows if row["is_current"]]
+    assert len(current) == 1
+    # Token prefix exposed but not the full secret.
+    a_cookie = a.cookies.get("music_session")
+    assert a_cookie is not None
+    assert current[0]["token_prefix"] == a_cookie[:12]
+    assert len(current[0]["token_prefix"]) == 12
+
+
+def test_revoke_session_drops_other_session(client: TestClient) -> None:
+    _ensure_user()
+    a = TestClient(client.app)
+    a.post(
+        "/api/auth/login",
+        json={"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    b = TestClient(client.app)
+    b.post(
+        "/api/auth/login",
+        json={"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    rows = a.get("/api/auth/sessions").json()
+    other = next(row for row in rows if not row["is_current"])
+    r = a.delete(f"/api/auth/sessions/{other['token_prefix']}")
+    assert r.status_code == 204
+    # Revoked session can no longer authenticate; the surviving one still does.
+    assert b.get("/api/auth/me").status_code == 401
+    assert a.get("/api/auth/me").status_code == 200
+
+
+def test_revoke_session_rejects_short_prefix(client: TestClient) -> None:
+    _ensure_user()
+    a = TestClient(client.app)
+    a.post(
+        "/api/auth/login",
+        json={"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    r = a.delete("/api/auth/sessions/abc")
+    assert r.status_code == 400
+
+
+def test_revoke_session_rejects_unknown_prefix(client: TestClient) -> None:
+    _ensure_user()
+    a = TestClient(client.app)
+    a.post(
+        "/api/auth/login",
+        json={"username": TEST_USERNAME, "password": TEST_PASSWORD},
+    )
+    r = a.delete("/api/auth/sessions/00000000abcd")
+    assert r.status_code == 404

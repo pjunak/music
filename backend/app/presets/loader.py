@@ -12,6 +12,7 @@ unknown type on load is an error so typos don't ship quietly.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -70,6 +71,14 @@ class LoadResult:
 _presets: dict[str, PresetManifest] = {}
 _lock = Lock()
 
+_last_load_result: LoadResult | None = None
+_last_load_at: float | None = None
+
+
+def last_load() -> tuple[LoadResult | None, float | None]:
+    """Returns (result, unix_timestamp) for the most recent `load_all`."""
+    return (_last_load_result, _last_load_at)
+
 
 def _load_one(path: Path) -> PresetManifest:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -106,11 +115,15 @@ def load_all() -> LoadResult:
         _presets.clear()
         _presets.update(result.loaded)
 
+    global _last_load_result, _last_load_at
+    _last_load_result = result
+    _last_load_at = time.time()
+
     logger.info(
         "loaded %d preset(s): %s%s",
         len(result.loaded),
         ", ".join(result.loaded) or "<none>",
-        f" — {len(result.errors)} error(s)" if result.errors else "",
+        f" - {len(result.errors)} error(s)" if result.errors else "",
     )
     return result
 

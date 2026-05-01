@@ -184,6 +184,39 @@ export function SoundboardEditor({
           "doors", "ambience") to start grouping SFX.
         </p>
       ) : (
+        <>
+          {(() => {
+            // Hotkey conflict detection. The runtime
+            // (`useSfxHotkeys`) silently picks the last-registered item
+            // when two share a key, which makes "why did pressing 5
+            // play the wrong thing?" basically un-debuggable. Surface
+            // the duplicates here at edit time so the operator can fix
+            // it before live use.
+            const hotkeyCounts = new Map<string, number>();
+            for (const cat of soundboard.categories) {
+              for (const it of cat.items) {
+                if (!it.hotkey) continue;
+                hotkeyCounts.set(
+                  it.hotkey,
+                  (hotkeyCounts.get(it.hotkey) ?? 0) + 1,
+                );
+              }
+            }
+            const conflictKeys = new Set(
+              Array.from(hotkeyCounts.entries())
+                .filter(([, n]) => n > 1)
+                .map(([k]) => k),
+            );
+            if (conflictKeys.size === 0) return null;
+            return (
+              <p className="error small">
+                ⚠ Hotkey conflict: {Array.from(conflictKeys).map((k) => `"${k}"`).join(", ")}
+                {" "}
+                {conflictKeys.size === 1 ? "is" : "are"} bound to multiple items.
+                Only the last-registered item will fire when pressed.
+              </p>
+            );
+          })()}
         <ul className="soundboard-categories">
           {soundboard.categories.map((cat) => (
             <li key={cat.id} className="soundboard-category">
@@ -204,6 +237,7 @@ export function SoundboardEditor({
 
               <ItemList
                 items={cat.items}
+                conflictHotkeys={collectConflictHotkeys(soundboard)}
                 onUpdate={(idx, p) => updateItem(cat.id, idx, p)}
                 onDelete={(idx) => deleteItem(cat.id, idx)}
               />
@@ -215,8 +249,26 @@ export function SoundboardEditor({
             </li>
           ))}
         </ul>
+        </>
       )}
     </div>
+  );
+}
+
+/** Compute the set of hotkeys assigned to more than one item across the
+ *  whole soundboard. Used for the conflict banner + the per-row warning. */
+function collectConflictHotkeys(sb: SoundboardManifest): Set<string> {
+  const counts = new Map<string, number>();
+  for (const cat of sb.categories) {
+    for (const it of cat.items) {
+      if (!it.hotkey) continue;
+      counts.set(it.hotkey, (counts.get(it.hotkey) ?? 0) + 1);
+    }
+  }
+  return new Set(
+    Array.from(counts.entries())
+      .filter(([, n]) => n > 1)
+      .map(([k]) => k),
   );
 }
 
@@ -228,10 +280,12 @@ interface AddItemPayload {
 
 function ItemList({
   items,
+  conflictHotkeys,
   onUpdate,
   onDelete,
 }: {
   items: SoundboardManifest["categories"][number]["items"];
+  conflictHotkeys: Set<string>;
   onUpdate: (
     idx: number,
     payload: { name?: string; hotkey?: string },
@@ -247,6 +301,9 @@ function ItemList({
         <ItemRow
           key={`${item.file}-${idx}`}
           item={item}
+          hasHotkeyConflict={
+            item.hotkey ? conflictHotkeys.has(item.hotkey) : false
+          }
           onSave={(payload) => onUpdate(idx, payload)}
           onDelete={() => onDelete(idx)}
         />
@@ -257,10 +314,12 @@ function ItemList({
 
 function ItemRow({
   item,
+  hasHotkeyConflict,
   onSave,
   onDelete,
 }: {
   item: SoundboardManifest["categories"][number]["items"][number];
+  hasHotkeyConflict: boolean;
   onSave: (payload: { name?: string; hotkey?: string }) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -292,12 +351,16 @@ function ItemRow({
         placeholder="Display name"
       />
       <input
-        className="soundboard-item-hotkey"
+        className={`soundboard-item-hotkey${hasHotkeyConflict ? " has-conflict" : ""}`}
         value={hotkey}
         onChange={(e) => setHotkey(e.target.value.slice(0, 1))}
         maxLength={1}
         placeholder="key"
-        title="Single-character keyboard hotkey, fired from anywhere when this soundboard is active"
+        title={
+          hasHotkeyConflict
+            ? "This hotkey is bound to another item too - only the last-registered one will fire."
+            : "Single-character keyboard hotkey, fired from anywhere when this soundboard is active"
+        }
       />
       <div className="soundboard-item-actions">
         <button

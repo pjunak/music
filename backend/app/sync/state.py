@@ -558,6 +558,7 @@ def fire_interrupt_track(
     return_to_ambient: bool,
     fade_in_ms: int,
     fade_out_ms: int,
+    duck_to: float | None = None,
 ) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         new_interrupt = InterruptState(
@@ -567,6 +568,7 @@ def fire_interrupt_track(
             return_to_ambient=return_to_ambient,
             fade_in_ms=fade_in_ms,
             fade_out_ms=fade_out_ms,
+            duck_to=duck_to,
         )
         return state.model_copy(update={"interrupt": new_interrupt, "is_playing": True})
 
@@ -578,6 +580,7 @@ def fire_interrupt_playlist(
     return_to_ambient: bool,
     fade_in_ms: int,
     fade_out_ms: int,
+    duck_to: float | None = None,
 ) -> Any:
     """Load a pre-resolved track list as an interrupt; first becomes current."""
 
@@ -591,6 +594,7 @@ def fire_interrupt_playlist(
             return_to_ambient=return_to_ambient,
             fade_in_ms=fade_in_ms,
             fade_out_ms=fade_out_ms,
+            duck_to=duck_to,
         )
         return state.model_copy(update={"interrupt": new_interrupt, "is_playing": True})
 
@@ -662,15 +666,16 @@ def activate_scene(
     ambient_track_ids: list[int] | None,
     crossfade_ms: int | None,
     presets: list[str] | None,
+    volume: float | None = None,
 ) -> Any:
-    """Composite mutator. Applies whichever of ambient/crossfade/presets
+    """Composite mutator. Applies whichever of ambient/crossfade/presets/volume
     the scene defined, plus stamps active_scene_id, in a single update so
     clients see one state_changed broadcast for the whole transition.
 
     Captures the prior values of any field the scene overwrites into
     `pre_scene_state` so `deactivate_scene` can restore them. If a scene
     is already active when this fires, the existing snapshot is preserved
-    — deactivating then unwinds back to the *first* scene's pre-state,
+    - deactivating then unwinds back to the *first* scene's pre-state,
     not the intermediate one."""
 
     def _mut(state: PlayerState) -> PlayerState:
@@ -688,6 +693,10 @@ def activate_scene(
         if crossfade_ms is not None:
             update["crossfade_ms"] = crossfade_ms
             snapshot_kwargs["crossfade_ms"] = state.crossfade_ms
+
+        if volume is not None:
+            update["volume"] = volume
+            snapshot_kwargs["volume"] = state.volume
 
         if ambient_track_ids:
             new_ambient = AmbientState(
@@ -726,6 +735,8 @@ def deactivate_scene() -> Any:
                 update["active_preset_ids"] = list(snap.active_preset_ids)
             if snap.crossfade_ms is not None:
                 update["crossfade_ms"] = snap.crossfade_ms
+            if snap.volume is not None:
+                update["volume"] = snap.volume
             if snap.ambient is not None:
                 update["ambient"] = snap.ambient.model_copy(deep=True)
         return state.model_copy(update=update)

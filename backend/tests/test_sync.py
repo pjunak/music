@@ -86,6 +86,61 @@ def test_ws_accepts_guest_connection_read_only(client: TestClient) -> None:
         assert "guest" in err["detail"].lower()
 
 
+def test_ws_session_expiry_mid_connection_downgrades_to_guest(
+    client: TestClient,
+) -> None:
+    """Cookie that's valid at WS upgrade but expires mid-connection should
+    cause the next mutation to be rejected with a "session expired" error.
+    Without this, a long-lived tab whose cookie expired could keep
+    mutating state indefinitely."""
+    import time
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.core.db import SessionLocal
+    from app.models.auth_session import AuthSession
+
+    _login(client)
+    token = client.cookies.get("music_session")
+    assert token is not None
+
+    # Shorten the freshly-minted session's expiry to 0.5s from now. At
+    # WS-upgrade time, `_authenticate` captures this expiry into a
+    # connection-local variable. The per-action check compares
+    # `datetime.now(UTC)` against the captured value — sleeping past
+    # the boundary exercises that path.
+    soon = datetime.now(UTC) + timedelta(milliseconds=500)
+    with SessionLocal() as db:
+        db.execute(
+            update(AuthSession)
+            .where(AuthSession.token == token)
+            .values(expires_at=soon)
+        )
+        db.commit()
+
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()  # snapshot — connection authenticated normally
+
+        # Wait past the captured expiry. 0.8s leaves plenty of margin
+        # over the 0.5s deadline without inflating the suite runtime.
+        time.sleep(0.8)
+
+        # First mutation after expiry: should hit the new per-action
+        # re-check and surface "session expired".
+        ws.send_json({"type": "set_volume", "volume": 0.5})
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert "expired" in err["detail"].lower()
+
+        # Subsequent mutations take the standard guest-rejection path —
+        # the connection is now downgraded for the rest of its life.
+        ws.send_json({"type": "set_volume", "volume": 0.7})
+        err2 = ws.receive_json()
+        assert err2["type"] == "error"
+        assert "guest" in err2["detail"].lower()
+
+
 def test_ws_guest_can_register_to_appear_in_outputs(client: TestClient) -> None:
     """Register is the one mutation a guest is allowed — so a logged-out
     Player tab on a TV can show up in the operator's Outputs picker."""

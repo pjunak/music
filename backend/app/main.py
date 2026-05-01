@@ -13,7 +13,17 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete
 from starlette.exceptions import HTTPException
 
-from app.api import auth, health, library, modes, playlists, presets, sfx
+from app.api import (
+    admin,
+    auth,
+    diagnostics,
+    health,
+    library,
+    modes,
+    playlists,
+    presets,
+    sfx,
+)
 from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.library import index as library_index
@@ -231,6 +241,8 @@ def create_app() -> FastAPI:
     app.include_router(playlists.router)
     app.include_router(presets.router)
     app.include_router(sfx.router)
+    app.include_router(diagnostics.router)
+    app.include_router(admin.router)
     app.include_router(sync_router.router)
 
     # Mount the built frontend SPA last so API routes win. Falls back to

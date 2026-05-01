@@ -38,9 +38,19 @@ logger = logging.getLogger(__name__)
 # Serialises any index-write operation (full scan, incremental scan_paths
 # from uploads). Without this, two concurrent scans race the DB:
 # `scan_full` snapshots `existing` early, walks the disk, then deletes
-# everything not seen — if a parallel `scan_paths` adds a row in between,
+# everything not seen - if a parallel `scan_paths` adds a row in between,
 # the full scan's "delete unseen" step removes it again.
 _scan_lock = threading.Lock()
+
+# Wall-clock timestamp of the last scan_full completion. Read by the
+# diagnostics endpoint so the operator can see how stale the index is.
+_last_scan_at: float | None = None
+
+
+def last_scan_at() -> float | None:
+    """Returns the unix timestamp of the most recent successful full scan,
+    or None if no full scan has run since startup."""
+    return _last_scan_at
 
 
 # Audio extensions we'll consider when walking the tree. Lower-case match.
@@ -343,6 +353,8 @@ def scan_full(db: Session) -> ScanSummary:
 
         db.commit()
         elapsed = time.monotonic() - started
+        global _last_scan_at
+        _last_scan_at = time.time()
         logger.info(
             "scan: +%d ~%d -%d (%d unchanged) in %.2fs",
             summary.added,
@@ -747,6 +759,7 @@ __all__ = [
     "delete_folder",
     "ensure_folder",
     "is_audio_file",
+    "last_scan_at",
     "list_folder",
     "metadata_for",
     "music_root",

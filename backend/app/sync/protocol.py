@@ -125,6 +125,9 @@ class SetCrossfadeAction(_Action):
 
 class FireInterruptTrackAction(_Action):
     type: Literal["fire_interrupt_track"]
+    # See InterruptState.duck_to. Optional override per fire — falls back
+    # to the template / current-state default when None (= ambient pauses).
+    duck_to: float | None = Field(None, ge=0.0, le=1.0)
     track_id: int
     return_to_ambient: bool = True
     fade_in_ms: int = Field(0, ge=0, le=10000)
@@ -137,6 +140,7 @@ class FireInterruptPlaylistAction(_Action):
     return_to_ambient: bool = True
     fade_in_ms: int = Field(0, ge=0, le=10000)
     fade_out_ms: int = Field(0, ge=0, le=10000)
+    duck_to: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class InterruptSkipNextAction(_Action):
@@ -245,6 +249,12 @@ class InterruptState(BaseModel):
     or explicit cancel. On completion, behavior depends on
     `return_to_ambient`: true → ambient takes back over from its preserved
     position; false → playback stops.
+
+    `duck_to` controls how ambient behaves *during* the interrupt:
+    - `None` (default): ambient pauses - full cut, position frozen.
+    - `0.0`..`1.0`: ambient keeps playing at this volume multiplier
+      (relative to the master), creating a cinematic duck. Same fade
+      durations as the interrupt's fade_in/out drive the ramp.
     """
 
     current_track_id: int
@@ -253,6 +263,7 @@ class InterruptState(BaseModel):
     return_to_ambient: bool = True
     fade_in_ms: int = 0
     fade_out_ms: int = 0
+    duck_to: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class ScenePreviousState(BaseModel):
@@ -265,6 +276,7 @@ class ScenePreviousState(BaseModel):
     ambient: AmbientState | None = None
     crossfade_ms: int | None = None
     active_preset_ids: list[str] | None = None
+    volume: float | None = None
 
 
 class PlayerState(BaseModel):

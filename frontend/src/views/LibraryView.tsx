@@ -19,6 +19,7 @@ import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
+import { useDebouncedValue } from "@/core/useDebouncedValue";
 import { wsClient } from "@/core/ws";
 
 type Root = "music" | "sfx";
@@ -43,6 +44,15 @@ export function LibraryView() {
   const [showSearch, setShowSearch] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
   const [query, setQuery] = useState("");
+
+  // Search-as-you-type: debounce keystrokes and auto-submit the result.
+  // Hitting Enter / clicking Search short-circuits via setQuery(value) in
+  // the form handler — that's still wired so power-users get instant
+  // feedback when they want it.
+  const debouncedPending = useDebouncedValue(pendingQuery, 250);
+  useEffect(() => {
+    if (debouncedPending !== query) setQuery(debouncedPending);
+  }, [debouncedPending, query]);
 
   return (
     <div className="library-view">

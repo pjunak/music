@@ -41,6 +41,30 @@ export function PresetsView() {
     void refresh();
   }, [refresh]);
 
+  async function reloadPresets() {
+    try {
+      const result = await presetsAdminApi.reload();
+      const loaded = result.loaded.length;
+      const errs = Object.entries(result.errors);
+      if (errs.length === 0) {
+        toast.success(`Reloaded ${loaded} preset${loaded === 1 ? "" : "s"}`);
+      } else {
+        const sample = errs
+          .slice(0, 3)
+          .map(([id, err]) => `${id}: ${err}`)
+          .join("\n");
+        const more = errs.length > 3 ? `\n…and ${errs.length - 3} more` : "";
+        toast.warn(
+          `Reloaded ${loaded}, ${errs.length} error${errs.length === 1 ? "" : "s"}`,
+          `${sample}${more}`,
+        );
+      }
+      await refresh();
+    } catch (e) {
+      toast.error("Reload failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
   const selected = presets.find((p) => p.id === selectedId) ?? null;
 
   return (
@@ -48,13 +72,22 @@ export function PresetsView() {
       <div className="two-pane-pane presets-list-pane">
         <header className="playlists-header">
           <h2>EQ Presets</h2>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => setCreating(true)}
-          >
-            + New
-          </button>
+          <span className="header-actions">
+            <button
+              type="button"
+              onClick={() => void reloadPresets()}
+              title="Re-read every preset YAML from disk and report parse errors"
+            >
+              Reload
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => setCreating(true)}
+            >
+              + New
+            </button>
+          </span>
         </header>
         <p className="muted small">
           Audio effect chains. The frontend audio engine applies them to the

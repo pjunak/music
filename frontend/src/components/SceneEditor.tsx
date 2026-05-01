@@ -2,16 +2,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 import { IconButton } from "@/components/IconButton";
-import { XIcon } from "@/components/icons";
+import { LightningIcon, XIcon } from "@/components/icons";
+import { VolumeControl } from "@/components/VolumeControl";
 import { modesAdminApi, modesApi, playlistsApi, presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
+import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import type {
   ModeDetail,
   PlaylistMeta,
   SceneLoopingSfx,
   SceneSpec,
+  SoundboardManifest,
 } from "@/core/types";
+import { wsClient } from "@/core/ws";
 
 interface Props {
   modeId: string;
@@ -32,12 +36,16 @@ export function SceneEditor({ modeId, sceneId, onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [presets, setPresets] = useState<PresetManifest[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistMeta[]>([]);
+  const [soundboards, setSoundboards] = useState<Record<string, SoundboardManifest>>(
+    {},
+  );
 
   const refresh = useCallback(async () => {
     try {
       const detail: ModeDetail = await modesApi.get(modeId);
       const s = detail.scenes[sceneId] ?? null;
       setScene(s);
+      setSoundboards(detail.soundboards);
       setError(s === null ? `Scene "${sceneId}" not found.` : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "load failed");
@@ -78,6 +86,7 @@ export function SceneEditor({ modeId, sceneId, onBack }: Props) {
       scene={scene}
       presets={presets}
       playlists={playlists}
+      soundboards={soundboards}
       onBack={onBack}
       onSaved={(updated) => setScene(updated)}
     />
@@ -90,6 +99,7 @@ function SceneEditorForm({
   scene,
   presets,
   playlists,
+  soundboards,
   onBack,
   onSaved,
 }: {
@@ -97,6 +107,7 @@ function SceneEditorForm({
   scene: SceneSpec;
   presets: PresetManifest[];
   playlists: PlaylistMeta[];
+  soundboards: Record<string, SoundboardManifest>;
   onBack: () => void;
   onSaved: (s: SceneSpec) => void;
 }) {
@@ -114,6 +125,12 @@ function SceneEditorForm({
   const [loopingSfx, setLoopingSfx] = useState<SceneLoopingSfx[]>(
     () => (scene.looping_sfx ?? []).map((s) => ({ ...s })),
   );
+  const [overrideVolume, setOverrideVolume] = useState<boolean>(
+    typeof scene.volume === "number",
+  );
+  const [volume, setVolume] = useState<number>(
+    typeof scene.volume === "number" ? scene.volume : 1,
+  );
   const [busy, setBusy] = useState(false);
 
   // Re-sync local form when the parent's scene prop is replaced (after save).
@@ -124,6 +141,8 @@ function SceneEditorForm({
     setAmbientCrossfadeMs(scene.ambient?.crossfade_ms ?? 0);
     setActivePresets(scene.presets ?? []);
     setLoopingSfx((scene.looping_sfx ?? []).map((s) => ({ ...s })));
+    setOverrideVolume(typeof scene.volume === "number");
+    setVolume(typeof scene.volume === "number" ? scene.volume : 1);
   }, [scene]);
 
   const playlistOptions = useMemo(
@@ -182,6 +201,11 @@ function SceneEditorForm({
       } else {
         payload.clear_ambient = true;
       }
+      if (overrideVolume) {
+        payload.volume = volume;
+      } else {
+        payload.clear_volume = true;
+      }
       const updated = await modesAdminApi.updateScene(modeId, scene.id, payload);
       toast.success("Scene saved");
       onSaved(updated);
@@ -203,6 +227,7 @@ function SceneEditorForm({
           </p>
         </div>
         <div className="playlist-detail-actions">
+          <SceneActivateButton modeId={modeId} sceneId={scene.id} />
           <button type="button" onClick={onBack}>
             ← Back to mode
           </button>
@@ -268,6 +293,29 @@ function SceneEditorForm({
       </section>
 
       <section>
+        <h3>Master volume override</h3>
+        <p className="muted small">
+          Pin the master volume while the scene is active. Deactivating restores
+          the previous volume. Leave off to keep whatever the operator was at.
+        </p>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={overrideVolume}
+            onChange={(e) => setOverrideVolume(e.target.checked)}
+          />
+          <span>Override master volume</span>
+        </label>
+        {overrideVolume ? (
+          <VolumeControl
+            value={volume}
+            onChange={setVolume}
+            label="Scene master volume"
+          />
+        ) : null}
+      </section>
+
+      <section>
         <h3>Active presets</h3>
         {presets.length === 0 ? (
           <p className="muted small">No presets installed yet.</p>
@@ -302,41 +350,13 @@ function SceneEditorForm({
         ) : (
           <ul className="simple-list">
             {loopingSfx.map((s, idx) => (
-              <li key={idx} className="looping-sfx-row">
-                <input
-                  value={s.soundboard}
-                  onChange={(e) =>
-                    updateLoopingSfx(idx, { soundboard: e.target.value })
-                  }
-                  placeholder="soundboard id"
-                />
-                <input
-                  value={s.item}
-                  onChange={(e) =>
-                    updateLoopingSfx(idx, { item: e.target.value })
-                  }
-                  placeholder="item path (e.g. dnd/torch.ogg)"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={s.volume ?? 1}
-                  onChange={(e) =>
-                    updateLoopingSfx(idx, {
-                      volume: parseFloat(e.target.value),
-                    })
-                  }
-                  title="Volume 0–1"
-                />
-                <IconButton
-                  label="Remove looping SFX"
-                  icon={<XIcon />}
-                  variant="danger"
-                  onClick={() => removeLoopingSfx(idx)}
-                />
-              </li>
+              <LoopingSfxRow
+                key={idx}
+                row={s}
+                soundboards={soundboards}
+                onChange={(patch) => updateLoopingSfx(idx, patch)}
+                onRemove={() => removeLoopingSfx(idx)}
+              />
             ))}
           </ul>
         )}
@@ -354,5 +374,153 @@ function SceneEditorForm({
         </button>
       </div>
     </form>
+  );
+}
+
+/** One row in the looping-SFX list. Cascading dropdowns: pick a soundboard
+ *  in this mode, then pick an item from that soundboard. The item dropdown
+ *  is grouped by category so a "doors / wooden-creak" structure stays
+ *  navigable when a soundboard has many items. The text-fallback path
+ *  (legacy: row carries a soundboard/item not in the loaded mode) keeps
+ *  the value visible + editable so a hand-edited YAML doesn't get silently
+ *  blanked when the editor opens. */
+function LoopingSfxRow({
+  row,
+  soundboards,
+  onChange,
+  onRemove,
+}: {
+  row: SceneLoopingSfx;
+  soundboards: Record<string, SoundboardManifest>;
+  onChange: (patch: Partial<SceneLoopingSfx>) => void;
+  onRemove: () => void;
+}) {
+  const soundboardEntries = Object.values(soundboards);
+  const selected = row.soundboard ? soundboards[row.soundboard] : undefined;
+  const isLegacySoundboard =
+    row.soundboard !== "" && selected === undefined;
+  const isLegacyItem =
+    row.item !== "" &&
+    selected !== undefined &&
+    !selected.categories.some((c) => c.items.some((it) => it.file === row.item));
+
+  return (
+    <li className="looping-sfx-row">
+      {isLegacySoundboard ? (
+        <input
+          value={row.soundboard}
+          onChange={(e) => onChange({ soundboard: e.target.value })}
+          title="This soundboard isn't in the loaded mode — edit as text."
+        />
+      ) : (
+        <select
+          value={row.soundboard}
+          onChange={(e) =>
+            onChange({ soundboard: e.target.value, item: "" })
+          }
+          aria-label="Soundboard"
+        >
+          <option value="">— soundboard —</option>
+          {soundboardEntries.map((sb) => (
+            <option key={sb.id} value={sb.id}>
+              {sb.name ?? sb.id}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {selected === undefined || isLegacyItem ? (
+        <input
+          value={row.item}
+          onChange={(e) => onChange({ item: e.target.value })}
+          placeholder="item path (e.g. dnd/torch.ogg)"
+          disabled={!row.soundboard}
+        />
+      ) : (
+        <select
+          value={row.item}
+          onChange={(e) => onChange({ item: e.target.value })}
+          aria-label="Item"
+        >
+          <option value="">— item —</option>
+          {selected.categories.map((cat) => (
+            <optgroup key={cat.id} label={cat.name}>
+              {cat.items.map((it) => (
+                <option key={it.file} value={it.file}>
+                  {it.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      )}
+
+      <VolumeControl
+        value={row.volume ?? 1}
+        onChange={(v) => onChange({ volume: v })}
+        label="Looping SFX volume"
+        showIcon={false}
+      />
+
+      <IconButton
+        label="Remove looping SFX"
+        icon={<XIcon />}
+        variant="danger"
+        onClick={onRemove}
+      />
+    </li>
+  );
+}
+
+/** "Try this scene" button — fires `activate_scene` so the operator hears
+ *  the scene's audio (ambient + presets + looping SFX) without leaving the
+ *  editor. Toggles to "Stop" when this scene is the currently-active one,
+ *  so the same button serves both directions. Deliberately *not* a
+ *  separate "preview" path — it's a real activation that the rest of the
+ *  app sees. True transient preview (state stays unchanged) is on the
+ *  roadmap; until then, hitting Stop instantly snaps back to whatever
+ *  was active before. */
+function SceneActivateButton({
+  modeId,
+  sceneId,
+}: {
+  modeId: string;
+  sceneId: string;
+}) {
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
+  const activeSceneId = usePlayerStore((s) => s.state?.active_scene_id ?? null);
+  const isThisActive = activeModeId === modeId && activeSceneId === sceneId;
+
+  function trigger() {
+    if (isThisActive) {
+      wsClient.send({ type: "deactivate_scene" });
+    } else {
+      // Make sure we're activating the scene under its parent mode, not
+      // whichever mode is currently active. Switching mode happens
+      // server-side via SetActiveMode; we only fire it if needed.
+      if (activeModeId !== modeId) {
+        wsClient.send({ type: "set_active_mode", mode_id: modeId });
+      }
+      wsClient.send({ type: "activate_scene", scene_id: sceneId });
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={isThisActive ? "btn-danger" : ""}
+      onClick={trigger}
+      title={
+        isThisActive
+          ? "Stop this scene and revert to the previous state"
+          : "Activate this scene to hear it. Hit again to stop."
+      }
+    >
+      {isThisActive ? "■ Stop scene" : (
+        <>
+          <LightningIcon /> Try scene
+        </>
+      )}
+    </button>
   );
 }

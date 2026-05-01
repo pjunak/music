@@ -1465,6 +1465,13 @@ kbd,
   gap: 0.5rem;
   margin-bottom: 0.4rem;
 }
+/* Group of right-side buttons in a list-pane header (e.g. Reload + New).
+ * Lets us put two or three buttons side-by-side without each view
+ * inventing its own div. */
+.header-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+}
 .playlists-filter {
   margin-bottom: 0.4rem;
 }
@@ -1698,6 +1705,19 @@ kbd,
   border-radius: var(--radius);
 }
 
+/* Scene editor's looping-SFX row: cascading soundboard/item dropdowns
+ * + an inline VolumeControl + a remove button. Allow the two selects to
+ * shrink (default flex item min-width is the content size — long item
+ * names would otherwise blow the layout out). */
+.looping-sfx-row > select,
+.looping-sfx-row > input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.looping-sfx-row > .volume-row {
+  flex: 0 0 auto;
+}
+
 /* --- controls footer + diagnostics view (full-page) --- */
 
 .controls-footer {
@@ -1861,6 +1881,14 @@ kbd,
 .soundboard-item-hotkey {
   text-align: center;
   width: 4ch;
+}
+/* Visual cue for the conflict-detection in SoundboardEditor: red ring +
+ * danger-coloured text so the operator can spot duplicate bindings at a
+ * glance. The accompanying banner above the categories explains *why*. */
+.soundboard-item-hotkey.has-conflict {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 .soundboard-item-actions {
   display: flex;
@@ -2194,6 +2222,24 @@ kbd,
   background: var(--ok-soft);
   border-color: var(--ok);
 }
+/* Armed state: a click while audio output is ON has primed the toggle.
+ * Flip the colour from green to warn so the operator knows the next
+ * click will silence them. The 2-second auto-reset timer ticks down via
+ * a CSS animation so they can see how long they have left. */
+.output-toggle-on.output-toggle-armed {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+  animation: output-toggle-arm-decay 2s linear forwards;
+}
+@keyframes output-toggle-arm-decay {
+  from {
+    box-shadow: 0 0 0 2px var(--warn-soft);
+  }
+  to {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 .output-toggle-off {
   background: var(--danger-soft);
   border-color: var(--danger);
@@ -2477,6 +2523,11 @@ input.volume-slider::-moz-range-thumb {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+}
+.metadata-bulk-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-left: auto;
 }
 /* Three-column body: folder tree | track table | bulk-edit aside.
  * Each pane gets `min-height: 0` + scrolls internally so the page

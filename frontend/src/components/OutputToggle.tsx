@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import {
@@ -40,6 +42,21 @@ export function OutputToggle() {
   const authStatus = useAuthStore((s) => s.status);
   const isGuest = authStatus !== "authenticated";
   const forceLocal = useUiStore((s) => s.forceLocalPlayback);
+
+  // Hooks declared up here (before any conditional returns) so React's
+  // rules-of-hooks invariant holds across the connecting / guest /
+  // no-capability branches below. The `armed` confirm-to-silence state
+  // is only meaningful in the authenticated branch but it costs nothing
+  // to keep the hook called in every render.
+  const [armed, setArmed] = useState(false);
+  const armTimeoutRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (armTimeoutRef.current !== null) {
+        window.clearTimeout(armTimeoutRef.current);
+      }
+    };
+  }, []);
   const setForceLocal = useUiStore((s) => s.setForceLocalPlayback);
 
   if (myDeviceId === null) {
@@ -97,7 +114,17 @@ export function OutputToggle() {
     );
   }
 
-  function toggle() {
+  // Confirm-to-silence guard. Stopping audio mid-session is the
+  // expensive mistake; turning it on is harmless. So:
+  //   - OFF → ON: single click, no friction.
+  //   - ON → OFF: first click arms the button (label flips to "Click
+  //     again to stop", warn-coloured ring), second click within 2s
+  //     actually silences. Out-of-window clicks reset the arm.
+  //
+  // Works the same for keyboard (Enter twice on the focused button) and
+  // mouse, no `onPointerDown`/`onPointerUp` complexity needed.
+
+  function commitToggle() {
     if (myDeviceId === null) return;
     const nextIds = isMyOutput
       ? (activeIds ?? []).filter((d) => d !== myDeviceId)
@@ -123,23 +150,64 @@ export function OutputToggle() {
     wsClient.send({ type: "set_active_outputs", device_ids: nextIds });
   }
 
+  function clearArm() {
+    if (armTimeoutRef.current !== null) {
+      window.clearTimeout(armTimeoutRef.current);
+      armTimeoutRef.current = null;
+    }
+    setArmed(false);
+  }
+
+  function onClick() {
+    if (myDeviceId === null) return;
+    if (!isMyOutput) {
+      // Going ON — no confirmation, the operator wants audio.
+      commitToggle();
+      return;
+    }
+    if (armed) {
+      // Second click of the arm-then-confirm sequence.
+      clearArm();
+      commitToggle();
+      return;
+    }
+    // First click on an active output — arm it. A second click within
+    // 2s commits; otherwise the arm self-resets.
+    setArmed(true);
+    armTimeoutRef.current = window.setTimeout(() => {
+      armTimeoutRef.current = null;
+      setArmed(false);
+    }, 2000);
+  }
+
+  const stateClass = isMyOutput
+    ? armed
+      ? "output-toggle-on output-toggle-armed"
+      : "output-toggle-on"
+    : "output-toggle-off";
+  const label = isMyOutput
+    ? armed
+      ? "Click again to stop"
+      : "Output ON"
+    : "Output OFF";
+  const tooltip = isMyOutput
+    ? armed
+      ? "Click again within 2s to silence this device."
+      : "Audio output is ON. Click once to arm; click again to silence."
+    : "Audio output is OFF for this device. Click to enable.";
+
   return (
     <button
       type="button"
-      className={`output-toggle ${isMyOutput ? "output-toggle-on" : "output-toggle-off"}`}
-      onClick={toggle}
-      title={
-        isMyOutput
-          ? "Audio output is ON for this device. Click to silence."
-          : "Audio output is OFF for this device. Click to enable."
-      }
+      className={`output-toggle ${stateClass}`}
+      onClick={onClick}
+      onBlur={clearArm}
+      title={tooltip}
       aria-label={isMyOutput ? "Stop playing here" : "Play on this device"}
       aria-pressed={isMyOutput}
     >
       <VolumeIcon className="output-toggle-icon" />
-      <span className="output-toggle-label">
-        {isMyOutput ? "Output ON" : "Output OFF"}
-      </span>
+      <span className="output-toggle-label">{label}</span>
     </button>
   );
 }

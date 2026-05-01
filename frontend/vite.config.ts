@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { fileURLToPath, URL } from "node:url";
 
 import react from "@vitejs/plugin-react";
@@ -19,5 +20,13 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  test: {
+    // jsdom + RTL — components mount into a fake DOM rather than spinning
+    // up a real browser, so the suite stays fast (sub-second per test).
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+    css: false, // no need to parse global.css for unit tests
   },
 });

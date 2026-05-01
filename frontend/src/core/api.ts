@@ -81,6 +81,22 @@ export const modesApi = {
   get: (id: string) => api.get<ModeDetail>(`/api/modes/${encodeURIComponent(id)}`),
 };
 
+export interface ActiveSession {
+  token_prefix: string;
+  created_at: string;
+  expires_at: string;
+  last_seen: string;
+  is_current: boolean;
+}
+
+export const authApi = {
+  listSessions: () => api.get<ActiveSession[]>("/api/auth/sessions"),
+  revokeSession: (tokenPrefix: string) =>
+    api.delete<void>(
+      `/api/auth/sessions/${encodeURIComponent(tokenPrefix)}`,
+    ),
+};
+
 export interface PresetEffect {
   type: string;
   [key: string]: unknown;
@@ -121,6 +137,8 @@ export const playlistsApi = {
     api.patch<void>(`/api/playlists/${playlistId}/tracks/${position}`, {
       to_position: toPosition,
     }),
+  exportUrl: (playlistId: number, format: "m3u" | "json") =>
+    `${BASE}/api/playlists/${playlistId}/export?format=${format}`,
 };
 
 export type LibrarySortKey =
@@ -192,6 +210,21 @@ export interface BulkMetadataResult {
   skipped: BulkMetadataSkip[];
 }
 
+export interface BulkActionSkip {
+  track_id: number;
+  reason: string;
+}
+
+export interface BulkMoveResult {
+  moved: Track[];
+  skipped: BulkActionSkip[];
+}
+
+export interface BulkDeleteResult {
+  deleted_ids: number[];
+  skipped: BulkActionSkip[];
+}
+
 export const libraryApi = {
   getTrack: (id: number) => api.get<Track>(`/api/library/tracks/${id}`),
   search: (params: SearchParams = {}) => {
@@ -259,6 +292,15 @@ export const libraryApi = {
       new_filename: newFilename,
     }),
   deleteTrack: (id: number) => api.delete<void>(`/api/library/tracks/${id}`),
+  bulkMove: (trackIds: number[], destination: string) =>
+    api.post<BulkMoveResult>("/api/library/tracks/bulk-move", {
+      track_ids: trackIds,
+      destination,
+    }),
+  bulkDelete: (trackIds: number[]) =>
+    api.post<BulkDeleteResult>("/api/library/tracks/bulk-delete", {
+      track_ids: trackIds,
+    }),
   coverUrl: (id: number) => `${BASE}/api/library/tracks/${id}/cover`,
   streamUrl: (id: number) => `${BASE}/api/library/tracks/${id}/stream`,
   createFolder: (path: string) =>
@@ -412,6 +454,8 @@ export const modesAdminApi = {
       clear_ambient?: boolean;
       presets?: string[];
       looping_sfx?: SceneLoopingSfx[];
+      volume?: number;
+      clear_volume?: boolean;
     },
   ) =>
     api.patch<SceneSpec>(
@@ -484,6 +528,7 @@ export const modesAdminApi = {
       fade_in_ms?: number;
       fade_out_ms?: number;
       return_to_ambient?: boolean;
+      duck_to?: number | null;
     },
   ) =>
     api.post<InterruptSpec[]>(
@@ -500,6 +545,7 @@ export const modesAdminApi = {
       fade_in_ms: number;
       fade_out_ms: number;
       return_to_ambient: boolean;
+      duck_to: number | null;
     }>,
   ) =>
     api.patch<InterruptSpec[]>(
@@ -531,6 +577,29 @@ export const presetsAdminApi = {
     api.post<{ loaded: string[]; errors: Record<string, string> }>(
       "/api/presets/reload",
     ),
+};
+
+// Diagnostics — server-side operational snapshot. Read by the
+// Diagnostics tab so the operator can see what's happening (track
+// count, last rescan, mode/preset load errors, connected devices)
+// without SSH'ing into the host.
+export interface LoaderStatus {
+  last_load_at: number | null;
+  loaded_ids: string[];
+  errors: Record<string, string>;
+}
+
+export interface DiagnosticsResponse {
+  track_count: number;
+  last_scan_at: number | null;
+  modes: LoaderStatus;
+  presets: LoaderStatus;
+  connected_device_count: number;
+  state_revision: number;
+}
+
+export const diagnosticsApi = {
+  get: () => api.get<DiagnosticsResponse>("/api/diagnostics"),
 };
 
 // Re-export types we already had so callers don't need to dig in /core/types.

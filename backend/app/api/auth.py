@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -75,3 +76,83 @@ def logout(response: Response, user: CurrentUser, db: DbSession) -> None:
 @router.get("/me", response_model=UserInfo)
 def me(user: CurrentUser) -> UserInfo:
     return UserInfo(id=user.id, username=user.username)
+
+
+# Session prefix length used to uniquely identify a session row in the API
+# without exposing the full token. With 96-char hex tokens, 12 chars is more
+# than enough to avoid collisions for a single user's session set.
+_SESSION_PREFIX_LEN = 12
+
+
+class ActiveSession(BaseModel):
+    token_prefix: str
+    created_at: datetime
+    expires_at: datetime
+    last_seen: datetime
+    is_current: bool
+
+
+@router.get("/sessions", response_model=list[ActiveSession])
+def list_sessions(
+    user: CurrentUser,
+    db: DbSession,
+    session_cookie: Annotated[str | None, Cookie(alias="music_session")] = None,
+) -> list[ActiveSession]:
+    """Active sessions for the current user, newest first. Used by the
+    Settings → Active sessions panel so the operator can see what's logged
+    in (e.g. forgotten browser tabs on a TV) and revoke individual ones."""
+    rows = (
+        db.query(AuthSession)
+        .filter(AuthSession.user_id == user.id)
+        .order_by(AuthSession.last_seen.desc())
+        .all()
+    )
+    out: list[ActiveSession] = []
+    for s in rows:
+        out.append(
+            ActiveSession(
+                token_prefix=s.token[:_SESSION_PREFIX_LEN],
+                created_at=s.created_at,
+                expires_at=s.expires_at,
+                last_seen=s.last_seen,
+                is_current=session_cookie is not None and s.token == session_cookie,
+            )
+        )
+    return out
+
+
+@router.delete(
+    "/sessions/{token_prefix}", status_code=status.HTTP_204_NO_CONTENT
+)
+def revoke_session(
+    token_prefix: str,
+    user: CurrentUser,
+    db: DbSession,
+) -> None:
+    """Revoke a single session by its token prefix. Refuses to act if the
+    prefix matches more than one row to avoid revoking the wrong one."""
+    if len(token_prefix) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="token prefix too short",
+        )
+    matches = (
+        db.query(AuthSession)
+        .filter(
+            AuthSession.user_id == user.id,
+            AuthSession.token.startswith(token_prefix),
+        )
+        .all()
+    )
+    if not matches:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no matching session",
+        )
+    if len(matches) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="prefix matches multiple sessions; pass a longer prefix",
+        )
+    db.delete(matches[0])
+    db.commit()

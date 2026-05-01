@@ -7,6 +7,7 @@ import { IconButton } from "@/components/IconButton";
 import { EditIcon, LightningIcon, TrashIcon } from "@/components/icons";
 import { SceneEditor } from "@/components/SceneEditor";
 import { SoundboardEditor } from "@/components/SoundboardEditor";
+import { VolumeControl } from "@/components/VolumeControl";
 import { modesAdminApi, modesApi, playlistsApi } from "@/core/api";
 import { toast } from "@/core/toast";
 import type { InterruptSpec, ModeDetail, ModeSummary } from "@/core/types";
@@ -51,18 +52,51 @@ export function ModesView() {
     void refresh();
   }, [refresh]);
 
+  async function reloadModes() {
+    try {
+      const result = await modesAdminApi.reload();
+      const loaded = result.loaded.length;
+      const errs = Object.entries(result.errors);
+      if (errs.length === 0) {
+        toast.success(`Reloaded ${loaded} mode${loaded === 1 ? "" : "s"}`);
+      } else {
+        const sample = errs
+          .slice(0, 3)
+          .map(([id, err]) => `${id}: ${err}`)
+          .join("\n");
+        const more = errs.length > 3 ? `\n…and ${errs.length - 3} more` : "";
+        toast.warn(
+          `Reloaded ${loaded}, ${errs.length} error${errs.length === 1 ? "" : "s"}`,
+          `${sample}${more}`,
+        );
+      }
+      await refresh();
+    } catch (e) {
+      toast.error("Reload failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
   return (
     <div className="two-pane-view modes-view">
       <div className="two-pane-pane modes-list-pane">
         <header className="playlists-header">
           <h2>Modes</h2>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => setCreating(true)}
-          >
-            + New
-          </button>
+          <span className="header-actions">
+            <button
+              type="button"
+              onClick={() => void reloadModes()}
+              title="Re-read every mode YAML from disk and report parse errors"
+            >
+              Reload
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => setCreating(true)}
+            >
+              + New
+            </button>
+          </span>
         </header>
         <p className="muted small">
           Modes live as YAML on disk under <code>MODES_DIR</code>. The UI lets
@@ -383,6 +417,7 @@ function InterruptTemplatesEditor({
           return_to_ambient: spec.return_to_ambient ?? true,
           fade_in_ms: spec.fade_in_ms ?? 0,
           fade_out_ms: spec.fade_out_ms ?? 0,
+          duck_to: spec.duck_to ?? null,
         });
         toast.info("Interrupt fired", spec.name);
       } catch (e) {
@@ -472,6 +507,12 @@ function InterruptTemplatesEditor({
                   {it.return_to_ambient === false ? (
                     <span className="muted small"> · stops on end</span>
                   ) : null}
+                  {typeof it.duck_to === "number" ? (
+                    <span className="muted small">
+                      {" "}
+                      · ducks ambient to {Math.round(it.duck_to * 100)}%
+                    </span>
+                  ) : null}
                 </span>
                 <span className="simple-list-actions">
                   <IconButton
@@ -534,18 +575,30 @@ function InterruptTemplateForm({
   const [returnToAmbient, setReturnToAmbient] = useState(
     initial?.return_to_ambient ?? true,
   );
+  // Duck ambient under interrupt (cinematic) vs pause it (legacy default).
+  // `duck_to` is null/undefined for the legacy path; a number 0..1 picks
+  // the level. We split the boolean from the slider so the operator can
+  // toggle without losing the previously-chosen level.
+  const [duckEnabled, setDuckEnabled] = useState(
+    initial?.duck_to !== undefined && initial?.duck_to !== null,
+  );
+  const [duckLevel, setDuckLevel] = useState(
+    typeof initial?.duck_to === "number" ? initial.duck_to : 0.3,
+  );
   const [busy, setBusy] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
+      const duckTo = duckEnabled ? duckLevel : null;
       if (mode === "create") {
         const payload: Parameters<typeof modesAdminApi.addInterrupt>[1] = {
           name: name.trim(),
           fade_in_ms: fadeInMs,
           fade_out_ms: fadeOutMs,
           return_to_ambient: returnToAmbient,
+          duck_to: duckTo,
         };
         if (source === "playlist") payload.playlist = playlist.trim();
         else payload.soundboard_item = soundboardItem.trim();
@@ -559,6 +612,7 @@ function InterruptTemplateForm({
           fade_in_ms: fadeInMs,
           fade_out_ms: fadeOutMs,
           return_to_ambient: returnToAmbient,
+          duck_to: duckTo,
           playlist: source === "playlist" ? playlist.trim() : null,
           soundboard_item:
             source === "soundboard_item" ? soundboardItem.trim() : null,
@@ -645,6 +699,27 @@ function InterruptTemplateForm({
           />
           <span>Resume ambient when this interrupt ends</span>
         </label>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={duckEnabled}
+            onChange={(e) => setDuckEnabled(e.target.checked)}
+          />
+          <span>
+            Duck ambient under the interrupt (cinematic) instead of pausing
+          </span>
+        </label>
+        {duckEnabled ? (
+          <label>
+            <span className="muted small">Duck level (lower = quieter)</span>
+            <VolumeControl
+              value={duckLevel}
+              onChange={setDuckLevel}
+              label="Duck level"
+              showIcon={false}
+            />
+          </label>
+        ) : null}
       </div>
       <div className="modal-actions">
         <button type="button" onClick={onClose} disabled={busy}>

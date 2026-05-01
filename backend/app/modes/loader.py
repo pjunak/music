@@ -22,6 +22,7 @@ doesn't take down the rest.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -42,6 +43,10 @@ class InterruptSpec(BaseModel):
     fade_in_ms: int = 0
     fade_out_ms: int = 0
     return_to_ambient: bool = True
+    # When set (0.0..1.0), ambient music continues at this volume during the
+    # interrupt instead of pausing - produces a cinematic duck. Leave None
+    # for the legacy "ambient pauses" behaviour.
+    duck_to: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class IntegrationsSpec(BaseModel):
@@ -80,6 +85,9 @@ class SceneSpec(BaseModel):
     lights: dict[str, Any] | None = None
     external: list[dict[str, Any]] = Field(default_factory=list)
     presets: list[str] = Field(default_factory=list)
+    # Optional master-volume override for the duration of the scene. Captured
+    # into pre_scene_state so deactivate restores the prior value.
+    volume: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ModeManifest(BaseModel):
@@ -107,6 +115,17 @@ class LoadResult:
 
 _modes: dict[str, ModeManifest] = {}
 _lock = Lock()
+
+# Cached metadata about the most recent load_all run, surfaced via
+# `last_load()` to the diagnostics endpoint. Lets the operator see what
+# loaded vs what errored without having to call /api/modes/reload.
+_last_load_result: LoadResult | None = None
+_last_load_at: float | None = None
+
+
+def last_load() -> tuple[LoadResult | None, float | None]:
+    """Returns (result, unix_timestamp) for the most recent `load_all`."""
+    return (_last_load_result, _last_load_at)
 
 
 def _load_yaml_dir(dir_path: Path) -> list[tuple[str, dict]]:
@@ -192,11 +211,15 @@ def load_all() -> LoadResult:
         _modes.clear()
         _modes.update(result.loaded)
 
+    global _last_load_result, _last_load_at
+    _last_load_result = result
+    _last_load_at = time.time()
+
     logger.info(
         "loaded %d mode(s): %s%s",
         len(result.loaded),
         ", ".join(result.loaded) or "<none>",
-        f" — {len(result.errors)} error(s)" if result.errors else "",
+        f" - {len(result.errors)} error(s)" if result.errors else "",
     )
     return result
 

@@ -1,6 +1,10 @@
+import json
+import re
 from datetime import datetime
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -229,3 +233,103 @@ def move_track(
         playlists_domain.move_track(db, pl, position, payload.to_position)
     except playlists_domain.PositionOutOfRange as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+# --- export -----------------------------------------------------------------
+
+
+_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitise a playlist name into something safe for Content-Disposition.
+    Strict ASCII subset since Content-Disposition's quoted-string is finicky
+    with non-ASCII; the operator can rename after download if needed."""
+    cleaned = _FILENAME_SAFE_RE.sub("_", name).strip("._")
+    return cleaned or "playlist"
+
+
+def _build_m3u(name: str, items: list[TrackInPlaylist]) -> str:
+    """Extended M3U with per-track #EXTINF lines. Paths are relative to
+    MUSIC_DIR — the operator drops this file alongside the music tree (or
+    at the tree root) and it just works in any player that understands M3U.
+
+    `m3u8` (UTF-8) is the modern variant; we always emit UTF-8 so the
+    extension is `.m3u8`."""
+    lines = ["#EXTM3U", f"#PLAYLIST:{name}"]
+    for it in items:
+        if it.track is None:
+            # Underlying file is gone. Leave a comment so the operator sees
+            # the gap when reading the file manually, but don't emit the
+            # path (most players will warn on a missing file).
+            lines.append(f"# missing track #{it.track_id}")
+            continue
+        length = max(0, int(round(it.track.length_s)))
+        artist = it.track.artist or ""
+        title = it.track.title or it.track.path.rsplit("/", 1)[-1]
+        # `,` is the EXTINF separator; an artist or title with a comma
+        # confuses some parsers. Replace with a hyphen rather than escape.
+        display = f"{artist} - {title}".replace("\n", " ")
+        lines.append(f"#EXTINF:{length},{display}")
+        lines.append(it.track.path)
+    return "\n".join(lines) + "\n"
+
+
+def _build_json(playlist: Playlist, items: list[TrackInPlaylist]) -> str:
+    """Structured JSON dump intended for round-tripping (re-import later)
+    or external tools. Includes the full track row so an importer can
+    reconstruct without hitting the library's row-id (which is local)."""
+    payload = {
+        "playlist": {
+            "name": playlist.name,
+            "mode_id": playlist.mode_id,
+            "category": playlist.category,
+            "created_at": playlist.created_at.isoformat()
+            if isinstance(playlist.created_at, datetime)
+            else str(playlist.created_at),
+        },
+        "tracks": [
+            {
+                "position": it.position,
+                "path": it.track.path if it.track else None,
+                "title": it.track.title if it.track else None,
+                "artist": it.track.artist if it.track else None,
+                "album": it.track.album if it.track else None,
+                "length_s": it.track.length_s if it.track else None,
+            }
+            for it in items
+        ],
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+@router.get("/{playlist_id}/export")
+def export_playlist(
+    playlist_id: int,
+    _: CurrentUser,
+    db: DbSession,
+    format: Annotated[Literal["m3u", "json"], Query()] = "m3u",
+) -> Response:
+    """Download the playlist as M3U (default; for VLC, foobar2000, etc.) or
+    JSON (structured, includes track metadata for re-import). M3U paths are
+    relative to MUSIC_DIR — drop the file at MUSIC_DIR's root to import."""
+    pl = _get_playlist(db, playlist_id)
+    items = _enrich_items(db, pl)
+    safe_name = _safe_filename(pl.name)
+    if format == "m3u":
+        body = _build_m3u(pl.name, items)
+        return Response(
+            content=body,
+            media_type="application/vnd.apple.mpegurl",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}.m3u8"',
+            },
+        )
+    body = _build_json(pl, items)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.json"',
+        },
+    )
