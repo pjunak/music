@@ -160,6 +160,7 @@ export function FolderTree({
             type="button"
             className="tree-label btn-ghost"
             onClick={() => onSelect(folder.path)}
+            onDoubleClick={() => toggle(folder.path)}
             title={folder.path}
           >
             <span className="tree-icon">

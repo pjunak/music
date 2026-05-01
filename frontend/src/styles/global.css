@@ -1569,22 +1569,49 @@ kbd,
   max-width: 480px;
 }
 
-.track-picker {
+/* Reusable track browser — folder tree + track list with drag/click
+ * picking. Used wherever the UI needs to surface library tracks for
+ * adding to a playlist (or future pickers); see <TrackBrowser/>. */
+.track-browser {
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+}
+.track-browser-search {
+  display: flex;
   gap: 0.4rem;
 }
-.track-picker-list {
+.track-browser-search input {
+  flex: 1;
+}
+.track-browser-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 0.6rem;
+  max-height: 360px;
+  min-height: 180px;
+}
+.track-browser-tree {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem;
+  overflow-y: auto;
+}
+.track-browser-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  max-height: 280px;
   overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem;
 }
-.track-picker-list li {
+.track-browser-row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.5rem;
@@ -1593,16 +1620,39 @@ kbd,
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  cursor: grab;
 }
-.track-picker-meta {
+.track-browser-row:active {
+  cursor: grabbing;
+}
+.track-browser-row[draggable="false"] {
+  cursor: default;
+}
+.track-browser-meta {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-.track-picker-meta strong {
+.track-browser-title {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
+}
+.track-browser-empty {
+  padding: 0.6rem 0.5rem;
+}
+
+/* Playlist track list as a drop target for tracks dragged from the
+ * <TrackBrowser/> below. The `.playlist-tracks-droptarget` class is
+ * added/removed in JS during dragover/dragleave so we get a visible
+ * cue without setting up dragenter/dragleave counting (which is fragile
+ * across nested children). */
+.playlist-tracks-section.playlist-tracks-droptarget {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+  background: var(--accent-tint);
 }
 
 /* --- modes admin --- */

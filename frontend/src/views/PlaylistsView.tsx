@@ -11,6 +11,7 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import { TrackBrowser } from "@/components/TrackBrowser";
 import { api, libraryApi, modesApi, playlistsApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
@@ -279,12 +280,42 @@ function PlaylistDetail({
   }
 
   async function addTrack(track: Track) {
+    return addTrackById(track.id, trackTitle(track));
+  }
+
+  // Internal — both the click-add path and the drop-target path land here.
+  // Title is optional (drop payload may not carry it); when missing we
+  // fetch the track to get a label for the toast.
+  async function addTrackById(id: number, title?: string) {
     try {
-      await playlistsApi.addTrack(playlist.id, track.id);
+      await playlistsApi.addTrack(playlist.id, id);
       await refreshTracks();
-      toast.success("Added", trackTitle(track));
+      const label = title ?? (await libraryApi.getTrack(id).then(trackTitle).catch(() => null));
+      toast.success("Added", label ?? `Track ${id}`);
     } catch (e) {
       toast.error("Add failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  function handleTrackDrop(e: React.DragEvent<HTMLElement>) {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData("application/json");
+    if (!raw) return;
+    try {
+      const payload = JSON.parse(raw) as {
+        kind?: string;
+        id?: number;
+        title?: string;
+      };
+      if (payload.kind === "playlist-track" && typeof payload.id === "number") {
+        // Skip if already in the playlist — the TrackBrowser hides these
+        // already, but a stale drag from before the latest fetch could
+        // still arrive.
+        if (tracks.some((r) => r.track_id === payload.id)) return;
+        void addTrackById(payload.id, payload.title);
+      }
+    } catch {
+      /* malformed payload — ignore */
     }
   }
 
@@ -341,12 +372,31 @@ function PlaylistDetail({
 
       <PlaylistMetaEditor playlist={playlist} modes={modes} onSaved={onChanged} />
 
-      <section>
+      <section
+        className="playlist-tracks-section"
+        onDragOver={(e) => {
+          // Only react if the drag carries our payload — anything else
+          // (browser-native file drag etc.) we ignore.
+          if (!e.dataTransfer.types.includes("application/json")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          (e.currentTarget as HTMLElement).classList.add("playlist-tracks-droptarget");
+        }}
+        onDragLeave={(e) => {
+          (e.currentTarget as HTMLElement).classList.remove("playlist-tracks-droptarget");
+        }}
+        onDrop={(e) => {
+          (e.currentTarget as HTMLElement).classList.remove("playlist-tracks-droptarget");
+          handleTrackDrop(e);
+        }}
+      >
         <h3>Tracks ({tracks.length})</h3>
         {loading ? (
           <p className="muted small">Loading…</p>
         ) : tracks.length === 0 ? (
-          <p className="muted small">No tracks yet. Use the search below to add some.</p>
+          <p className="muted small">
+            No tracks yet. Drag from the browser below or click <strong>+</strong>.
+          </p>
         ) : (
           <ol className="playlist-track-list">
             {tracks.map((row) => {
@@ -400,7 +450,18 @@ function PlaylistDetail({
 
       <section>
         <h3>Add tracks</h3>
-        <TrackPicker onPick={addTrack} excludeIds={tracks.map((r) => r.track_id)} />
+        <p className="muted small">
+          Click <strong>+</strong> on a row, or drag a track up into the list above.
+        </p>
+        <TrackBrowser
+          onPickTrack={addTrack}
+          dragPayload={(t) => ({
+            kind: "playlist-track",
+            id: t.id,
+            title: trackTitle(t),
+          })}
+          excludeIds={tracks.map((r) => r.track_id)}
+        />
       </section>
     </div>
   );
@@ -483,70 +544,3 @@ function PlaylistMetaEditor({
   );
 }
 
-function TrackPicker({
-  onPick,
-  excludeIds,
-}: {
-  onPick: (t: Track) => void;
-  excludeIds: number[];
-}) {
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<Track[]>([]);
-  const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    if (q.trim() === "") {
-      setResults([]);
-      return;
-    }
-    let cancelled = false;
-    setSearching(true);
-    const t = window.setTimeout(() => {
-      void libraryApi
-        .search({ q, limit: 30, sort: "artist", order: "asc" })
-        .then((r) => {
-          if (!cancelled) setResults(r.tracks);
-        })
-        .catch(() => {
-          if (!cancelled) setResults([]);
-        })
-        .finally(() => {
-          if (!cancelled) setSearching(false);
-        });
-    }, 200);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-    };
-  }, [q]);
-
-  const exclude = new Set(excludeIds);
-  const filtered = results.filter((t) => !exclude.has(t.id));
-
-  return (
-    <div className="track-picker">
-      <input
-        type="search"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Search the library…"
-      />
-      {q && filtered.length === 0 ? (
-        <p className="muted small">{searching ? "Searching…" : "No matches."}</p>
-      ) : null}
-      <ul className="track-picker-list">
-        {filtered.map((t) => (
-          <li key={t.id}>
-            <span className="track-picker-meta">
-              <strong>{trackTitle(t)}</strong>
-              {t.artist ? <span className="muted small">{t.artist}</span> : null}
-            </span>
-            <button type="button" onClick={() => onPick(t)}>
-              + Add
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
