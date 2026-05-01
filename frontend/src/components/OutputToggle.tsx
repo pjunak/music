@@ -1,4 +1,5 @@
 import { useAuthStore } from "@/core/auth";
+import { playbackEngine } from "@/core/playbackEngine";
 import {
   selectIsMyOutput,
   usePlayerStore,
@@ -20,7 +21,14 @@ import { VolumeIcon } from "./icons";
  *    - User without `audio_output` capability: muted hint, opens Settings
  *      isn't reachable from here — so we just say so and leave it.
  *    - Otherwise: a clickable pill that toggles between
- *      "Playing here" (active) and "Play here" (idle). */
+ *      "Playing here" (active) and "Play here" (idle).
+ *
+ *  Optimistic update: in addition to sending the WS / flipping the UI flag,
+ *  we tell `playbackEngine.applyState` directly with the optimistic new
+ *  isMyOutput value. Without this the engine only reacts when the WS
+ *  broadcast comes back through the store subscription, and the operator
+ *  perceives a "click does nothing until refresh" lag. The subsequent
+ *  state_changed broadcast re-applies idempotently. */
 
 export function OutputToggle() {
   const isMyOutput = usePlayerStore(selectIsMyOutput);
@@ -45,11 +53,22 @@ export function OutputToggle() {
 
   if (isGuest) {
     const active = forceLocal;
+    function toggleGuest() {
+      const next = !active;
+      setForceLocal(next);
+      // Optimistic: tell the engine right away so audio reacts before
+      // the UI-store subscription roundtrip.
+      playbackEngine.unlock();
+      const player = usePlayerStore.getState();
+      if (player.state !== null) {
+        playbackEngine.applyState(player.state, next);
+      }
+    }
     return (
       <button
         type="button"
         className={`output-toggle ${active ? "output-toggle-on" : "output-toggle-off"}`}
-        onClick={() => setForceLocal(!active)}
+        onClick={toggleGuest}
         title={
           active
             ? "Audio output is ON for this device (local-only). Click to silence."
@@ -80,16 +99,28 @@ export function OutputToggle() {
 
   function toggle() {
     if (myDeviceId === null) return;
-    if (isMyOutput) {
-      if (activeIds === undefined) return;
-      wsClient.send({
-        type: "set_active_outputs",
-        device_ids: activeIds.filter((d) => d !== myDeviceId),
-      });
-    } else {
-      const next = activeIds === undefined ? [myDeviceId] : [...activeIds, myDeviceId];
-      wsClient.send({ type: "set_active_outputs", device_ids: next });
+    const nextIds = isMyOutput
+      ? (activeIds ?? []).filter((d) => d !== myDeviceId)
+      : activeIds === undefined
+        ? [myDeviceId]
+        : [...activeIds, myDeviceId];
+    const willBeMyOutput = nextIds.includes(myDeviceId);
+
+    // Optimistic: drive the engine directly off the new value so the
+    // audio reacts on the click event, not after the WS roundtrip. The
+    // subsequent state_changed broadcast re-applies the same state via
+    // the store subscription — applyState is idempotent so the second
+    // call is a no-op.
+    playbackEngine.unlock();
+    const player = usePlayerStore.getState();
+    if (player.state !== null) {
+      playbackEngine.applyState(
+        { ...player.state, active_output_device_ids: nextIds },
+        willBeMyOutput,
+      );
     }
+
+    wsClient.send({ type: "set_active_outputs", device_ids: nextIds });
   }
 
   return (
