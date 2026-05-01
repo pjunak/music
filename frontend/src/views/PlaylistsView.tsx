@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { confirmDialog } from "@/components/ConfirmDialog";
+import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
 import {
@@ -50,8 +50,8 @@ export function PlaylistsView() {
   }, [refresh]);
 
   return (
-    <div className="playlists-view">
-      <div className="playlists-pane playlists-list-pane">
+    <div className="two-pane-view playlists-view">
+      <div className="two-pane-pane playlists-list-pane">
         <header className="playlists-header">
           <h2>Playlists</h2>
           <button
@@ -121,7 +121,7 @@ export function PlaylistsView() {
         </ul>
       </div>
 
-      <div className="playlists-pane playlists-detail-pane">
+      <div className="two-pane-pane playlists-detail-pane">
         {creating ? (
           <CreatePlaylistForm
             modes={modes}
@@ -380,13 +380,13 @@ function PlaylistDetail({
           if (!e.dataTransfer.types.includes("application/json")) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
-          (e.currentTarget as HTMLElement).classList.add("playlist-tracks-droptarget");
+          e.currentTarget.classList.add("playlist-tracks-droptarget");
         }}
         onDragLeave={(e) => {
-          (e.currentTarget as HTMLElement).classList.remove("playlist-tracks-droptarget");
+          e.currentTarget.classList.remove("playlist-tracks-droptarget");
         }}
         onDrop={(e) => {
-          (e.currentTarget as HTMLElement).classList.remove("playlist-tracks-droptarget");
+          e.currentTarget.classList.remove("playlist-tracks-droptarget");
           handleTrackDrop(e);
         }}
       >

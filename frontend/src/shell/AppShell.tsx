@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
-import { ConfirmDialogHost } from "@/components/ConfirmDialog";
+import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
 import { Toaster } from "@/components/Toaster";
 import { useAuthStore } from "@/core/auth";
 import { AudioEngine } from "@/core/audioEngine";

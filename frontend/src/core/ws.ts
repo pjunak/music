@@ -1,5 +1,6 @@
 import type { WsAction, WsMessage } from "@/core/types";
 import { defaultDeviceName, useUiStore } from "@/core/uiStore";
+import { validateWsMessage } from "@/core/wsValidate";
 
 type Listener = (msg: WsMessage) => void;
 type StatusListener = (status: WsStatus) => void;
@@ -86,10 +87,23 @@ class WsClient {
     };
 
     ws.onmessage = (event) => {
-      let msg: WsMessage;
+      let raw: unknown;
       try {
-        msg = JSON.parse(event.data) as WsMessage;
-      } catch {
+        raw = JSON.parse(event.data);
+      } catch (err) {
+        // Malformed JSON. Log once so protocol-drift bugs are loud,
+        // but don't tear down the connection.
+        console.warn("[ws] failed to parse frame", err, event.data);
+        return;
+      }
+      const msg = validateWsMessage(raw);
+      if (msg === null) {
+        // Server sent a frame the frontend doesn't recognise. This is
+        // either a contract drift between backend and frontend, or
+        // (more likely) a reverse proxy injecting an HTML error page
+        // that happened to start with `{`. Either way, dropping is
+        // safer than letting downstream listeners hit undefined.
+        console.warn("[ws] rejected frame: shape doesn't match WsMessage", raw);
         return;
       }
       this.listeners.forEach((l) => {

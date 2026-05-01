@@ -339,8 +339,9 @@ def test_bulk_metadata_sets_artist_across_selection(auth_client: TestClient) -> 
     )
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 3
-    for row in body:
+    assert body["skipped"] == []
+    assert len(body["updated"]) == 3
+    for row in body["updated"]:
         assert row["artist"] == "John Williams"
         assert row["origin"] == "Star Wars"
 

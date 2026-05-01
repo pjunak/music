@@ -38,7 +38,7 @@ export function SettingsView() {
 
   return (
     <div className="settings-view">
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>Display</h3>
         <label className="autotag-toggle">
           <input
@@ -54,7 +54,7 @@ export function SettingsView() {
         </p>
       </section>
 
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>This device</h3>
         <p className="muted small">
           Rename this device on the <strong>Player</strong> tab — the field
@@ -81,7 +81,7 @@ export function SettingsView() {
         </div>
       </section>
 
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>Account</h3>
         <p className="muted small">
           Signed in as <strong>{user?.username ?? "(unknown)"}</strong>.
@@ -93,7 +93,7 @@ export function SettingsView() {
         </div>
       </section>
 
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>Diagnostics</h3>
         <p className="muted small">
           For debugging "no audio" or "device not showing up" issues. Opens in

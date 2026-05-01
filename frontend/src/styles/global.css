@@ -920,19 +920,19 @@ kbd,
   flex: 1;
   min-height: 0;
 }
-.controls-grid .controls-section {
+.controls-grid .surface-card {
   min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
-.controls-grid .controls-section.span-tall {
+.controls-grid .surface-card.span-tall {
   grid-row: span 2;
 }
-.controls-grid .controls-section > h3 {
+.controls-grid .surface-card > h3 {
   flex-shrink: 0;
 }
-.controls-grid .controls-section > :not(h3) {
+.controls-grid .surface-card > :not(h3) {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
@@ -956,7 +956,12 @@ kbd,
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.controls-section {
+/* Generic "surface card with section heading" — used by every panel-shaped
+ * UI (Controls grid items, Settings sections, Diagnostics sections).
+ * Renamed from `.controls-section` so non-Controls views don't depend on
+ * a Controls-specific name (and so future Controls-grid layout changes
+ * can't accidentally break Settings/Diagnostics). */
+.surface-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -965,7 +970,7 @@ kbd,
   flex-direction: column;
   gap: 0.5rem;
 }
-.controls-section h3 {
+.surface-card h3 {
   margin: 0 0 0.3rem;
   font-size: 0.85rem;
   font-weight: 600;
@@ -1430,10 +1435,9 @@ kbd,
   min-height: 0;
 }
 
-/* --- playlists / modes / presets shared two-pane shell --- */
+/* --- shared two-pane shell (Playlists / Modes / Presets / Soundboards) --- */
 
-.playlists-view,
-.modes-view {
+.two-pane-view {
   flex: 1;
   display: grid;
   grid-template-columns: minmax(260px, 360px) 1fr;
@@ -1442,8 +1446,7 @@ kbd,
   overflow: hidden;
   min-height: 0;
 }
-.playlists-pane,
-.modes-pane {
+.two-pane-pane {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1451,8 +1454,7 @@ kbd,
   overflow-y: auto;
   min-height: 0;
 }
-.playlists-pane h2,
-.modes-pane h2 {
+.two-pane-pane h2 {
   margin: 0 0 0.3rem;
   font-size: 1rem;
 }
@@ -2637,15 +2639,14 @@ input.volume-slider::-moz-range-thumb {
   .controls-grid {
     grid-template-columns: 1fr;
   }
-  .controls-grid .controls-section.span-tall {
+  .controls-grid .surface-card.span-tall {
     grid-row: auto;
   }
   .controls-strip {
     grid-template-columns: 1fr;
     gap: 0.4rem;
   }
-  .playlists-view,
-  .modes-view {
+  .two-pane-view {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(160px, 280px) 1fr;
   }

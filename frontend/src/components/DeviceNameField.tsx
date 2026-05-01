@@ -37,7 +37,7 @@ export function DeviceNameField() {
       onChange={(e) => setLocalName(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+        if (e.key === "Enter") e.currentTarget.blur();
       }}
       title="This device's name in the operator's outputs picker. Edit and press Enter (or click away) to apply."
       aria-label="This device's name"

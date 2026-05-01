@@ -27,9 +27,15 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ status: "authenticated", user });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
+        // Definitive "not signed in" — clear the session.
         set({ status: "anonymous", user: null });
       } else {
-        set({ status: "anonymous", user: null });
+        // Network error / 5xx / non-JSON — server told us nothing
+        // useful about auth state. Don't tear down the local session:
+        // if we were authenticated, stay so until a real 401 arrives.
+        // (Without this, a brief WiFi blip used to log the user out
+        // of the SPA on the next /api/auth/me call.)
+        console.warn("[auth] refresh failed (non-401, keeping current state)", err);
       }
     }
   },

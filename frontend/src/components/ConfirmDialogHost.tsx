@@ -1,53 +1,9 @@
 import { useEffect } from "react";
-import { create } from "zustand";
 
-interface ConfirmRequest {
-  title: string;
-  body?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  /** "danger" for destructive actions; styles the confirm button red. */
-  tone?: "danger" | "primary";
-  resolve: (ok: boolean) => void;
-}
+import { useConfirmStore } from "./confirmDialog";
 
-interface ConfirmStore {
-  current: ConfirmRequest | null;
-  open: (req: Omit<ConfirmRequest, "resolve">) => Promise<boolean>;
-  resolve: (ok: boolean) => void;
-}
-
-const useConfirmStore = create<ConfirmStore>()((set, get) => ({
-  current: null,
-  open: (req) =>
-    new Promise<boolean>((resolve) => {
-      // If a confirm is already open, queue behaviour: reject the previous one.
-      const prev = get().current;
-      if (prev) prev.resolve(false);
-      set({ current: { ...req, resolve } });
-    }),
-  resolve: (ok) => {
-    const cur = get().current;
-    if (cur) {
-      cur.resolve(ok);
-      set({ current: null });
-    }
-  },
-}));
-
-/** Promise-based confirm that pops a styled modal. Use this everywhere
- *  instead of `window.confirm` so the look matches the app and we can trap
- *  focus / keyboard correctly. */
-export function confirmDialog(req: {
-  title: string;
-  body?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  tone?: "danger" | "primary";
-}): Promise<boolean> {
-  return useConfirmStore.getState().open(req);
-}
-
+/** Renders the open confirm dialog (if any). Mounts once at the AppShell
+ *  level — the open API itself is `confirmDialog()` from `./confirmDialog`. */
 export function ConfirmDialogHost() {
   const current = useConfirmStore((s) => s.current);
   const resolve = useConfirmStore((s) => s.resolve);

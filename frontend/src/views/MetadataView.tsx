@@ -396,9 +396,23 @@ function BulkEditPanel({
         track_ids: ids,
         updates,
       });
-      toast.success(
-        `Updated ${result.length} track${result.length === 1 ? "" : "s"}`,
-      );
+      const updated = result.updated.length;
+      const skipped = result.skipped.length;
+      if (skipped === 0) {
+        toast.success(`Updated ${updated} track${updated === 1 ? "" : "s"}`);
+      } else {
+        // Surface the first few reasons; the operator can dig further if
+        // there are many — usually they're all the same cause anyway.
+        const sample = result.skipped
+          .slice(0, 3)
+          .map((s) => `#${s.track_id}: ${s.reason}`)
+          .join("\n");
+        const more = skipped > 3 ? `\n…and ${skipped - 3} more` : "";
+        toast.warn(
+          `Updated ${updated}, skipped ${skipped}`,
+          `${sample}${more}`,
+        );
+      }
       onApplied();
     } catch (e) {
       toast.error("Bulk update failed", e instanceof Error ? e.message : undefined);

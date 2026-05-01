@@ -48,7 +48,7 @@ export function DiagnosticsView() {
         </button>
       </header>
 
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>Connection</h3>
         <ul className="diagnostics-summary">
           <li>
@@ -74,7 +74,7 @@ export function DiagnosticsView() {
         </ul>
       </section>
 
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>Connected devices ({connectedDevices.length})</h3>
         {connectedDevices.length === 0 ? (
           <p className="muted small">(none yet)</p>
@@ -106,7 +106,7 @@ export function DiagnosticsView() {
         )}
       </section>
 
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>Engine state</h3>
         <ul className="diagnostics-summary">
           <li>
@@ -140,7 +140,7 @@ export function DiagnosticsView() {
         </ul>
       </section>
 
-      <section className="controls-section">
+      <section className="surface-card">
         <h3>Channels</h3>
         <table className="diagnostics-channels">
           <thead>

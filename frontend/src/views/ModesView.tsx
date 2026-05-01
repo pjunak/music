@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { confirmDialog } from "@/components/ConfirmDialog";
+import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
 import { EditIcon, LightningIcon, TrashIcon } from "@/components/icons";
@@ -52,8 +52,8 @@ export function ModesView() {
   }, [refresh]);
 
   return (
-    <div className="modes-view">
-      <div className="modes-pane modes-list-pane">
+    <div className="two-pane-view modes-view">
+      <div className="two-pane-pane modes-list-pane">
         <header className="playlists-header">
           <h2>Modes</h2>
           <button
@@ -98,7 +98,7 @@ export function ModesView() {
         </ul>
       </div>
 
-      <div className="modes-pane modes-detail-pane">
+      <div className="two-pane-pane modes-detail-pane">
         {creating ? (
           <CreateModeForm
             onClose={() => setCreating(false)}

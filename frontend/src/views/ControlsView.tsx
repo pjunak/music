@@ -23,27 +23,27 @@ export function ControlsView() {
     <div className="controls-view">
       <ContextStrip />
       <div className="controls-grid">
-        <section className="controls-section span-tall">
+        <section className="surface-card span-tall">
           <h3>Scenes</h3>
           <ScenesSection />
         </section>
-        <section className="controls-section span-tall">
+        <section className="surface-card span-tall">
           <h3>Soundboard</h3>
           <SoundboardSection />
         </section>
-        <section className="controls-section">
+        <section className="surface-card">
           <h3>Transport</h3>
           <TransportSection />
         </section>
-        <section className="controls-section">
+        <section className="surface-card">
           <h3>Interrupt</h3>
           <InterruptSection />
         </section>
-        <section className="controls-section">
+        <section className="surface-card">
           <h3>EQ Presets</h3>
           <PresetsSection />
         </section>
-        <section className="controls-section">
+        <section className="surface-card">
           <h3>Quick-play playlists</h3>
           <QuickPlaylists />
         </section>

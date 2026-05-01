@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { confirmDialog } from "@/components/ConfirmDialog";
+import { confirmDialog } from "@/components/confirmDialog";
 import { IconButton } from "@/components/IconButton";
 import { TrashIcon, XIcon } from "@/components/icons";
 import { modesAdminApi, modesApi, sfxApi } from "@/core/api";

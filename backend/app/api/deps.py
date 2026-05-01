@@ -9,6 +9,8 @@ from app.core.db import get_db
 from app.models.auth_session import AuthSession
 from app.models.user import User
 
+_LAST_SEEN_THROTTLE_SECONDS = 60
+
 
 def _resolve_user(
     db: Session, session_cookie: str | None
@@ -30,8 +32,12 @@ def _resolve_user(
     user = db.get(User, session.user_id)
     if user is None:
         return None
-    session.last_seen = now
-    db.commit()
+    # Throttle the last_seen write so we don't issue a DB commit on every
+    # authenticated request — page loads can fan out to dozens (cover art,
+    # track metadata) and writing on each was the dominant DB activity.
+    if (now - session.last_seen).total_seconds() > _LAST_SEEN_THROTTLE_SECONDS:
+        session.last_seen = now
+        db.commit()
     return user
 
 

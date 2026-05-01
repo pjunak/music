@@ -182,6 +182,16 @@ export interface BulkMetadataUpdate {
   updates: MetadataUpdate;
 }
 
+export interface BulkMetadataSkip {
+  track_id: number;
+  reason: string;
+}
+
+export interface BulkMetadataResult {
+  updated: Track[];
+  skipped: BulkMetadataSkip[];
+}
+
 export const libraryApi = {
   getTrack: (id: number) => api.get<Track>(`/api/library/tracks/${id}`),
   search: (params: SearchParams = {}) => {
@@ -242,7 +252,7 @@ export const libraryApi = {
   updateMetadata: (id: number, payload: MetadataUpdate) =>
     api.patch<Track>(`/api/library/tracks/${id}/metadata`, payload),
   updateBulkMetadata: (payload: BulkMetadataUpdate) =>
-    api.patch<Track[]>("/api/library/tracks/bulk-metadata", payload),
+    api.patch<BulkMetadataResult>("/api/library/tracks/bulk-metadata", payload),
   moveTrack: (id: number, destination: string, newFilename?: string) =>
     api.post<Track>(`/api/library/tracks/${id}/move`, {
       destination,

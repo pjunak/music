@@ -5,6 +5,7 @@ import { VolumeControl } from "@/components/VolumeControl";
 import { modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeDetail } from "@/core/types";
+import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
 export function SoundboardSection() {
@@ -15,7 +16,8 @@ export function SoundboardSection() {
 
   const [mode, setMode] = useState<ModeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sfxVolume, setSfxVolume] = useState(0.8);
+  const sfxVolume = useUiStore((s) => s.sfxVolume);
+  const setSfxVolume = useUiStore((s) => s.setSfxVolume);
 
   useEffect(() => {
     setError(null);

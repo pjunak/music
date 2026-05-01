@@ -70,17 +70,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _authenticate(websocket: WebSocket) -> User | None:
-    """Validate the session cookie. Returns the user on success, None otherwise."""
+async def _authenticate(
+    websocket: WebSocket,
+) -> tuple[User | None, datetime | None]:
+    """Validate the session cookie. Returns (user, session_expires_at) on
+    success, (None, None) for missing / invalid / expired cookies. The
+    expiry timestamp is captured so the dispatch loop can re-check it
+    mid-connection without an extra DB roundtrip."""
     cookie = websocket.cookies.get(get_settings().session_cookie_name)
     if not cookie:
-        return None
+        return (None, None)
     db = SessionLocal()
     try:
         session = db.get(AuthSession, cookie)
         if session is None or session.expires_at <= datetime.now(UTC):
-            return None
-        return db.get(User, session.user_id)
+            return (None, None)
+        return (db.get(User, session.user_id), session.expires_at)
     finally:
         db.close()
 
@@ -486,7 +491,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     # (TV bookmark) can act as an audio output, but any mutating action
     # they send is rejected. Keeps internet-exposed deployments from
     # giving anonymous viewers control over playback.
-    user = await _authenticate(websocket)
+    user, session_expires_at = await _authenticate(websocket)
     is_guest = user is None
 
     await websocket.accept()
@@ -513,6 +518,24 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 await _send_error(websocket, f"invalid action: {e.errors()[0]['msg']}")
                 continue
 
+            # Re-check session expiry on each action — the cookie that
+            # was valid at WS upgrade may have expired since (long-lived
+            # tabs, especially). Once expired, downgrade the connection
+            # to guest mode so the next mutation surfaces the same
+            # "guest cannot mutate" error path.
+            if (
+                not is_guest
+                and session_expires_at is not None
+                and datetime.now(UTC) >= session_expires_at
+            ):
+                is_guest = True
+                session_expires_at = None
+                await _send_error(
+                    websocket, "session expired — please sign in again"
+                )
+                # Fall through so the action gets the standard guest rejection
+                # below (or, for register, succeeds).
+
             # Guests can register themselves (so the device shows up as a
             # potential audio_output) but nothing else.
             if is_guest and not isinstance(action, RegisterAction):
@@ -523,9 +546,15 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
             try:
                 await _dispatch(action, device.device_id, websocket)
-            except Exception:
+            except Exception as e:
+                # Single-user home server — surface the exception type +
+                # message in the error frame so the operator sees the
+                # actual cause via the toast layer instead of "internal
+                # error" with a stack trace only in the server log.
                 logger.exception("dispatch failed for action %r", action)
-                await _send_error(websocket, "internal error")
+                await _send_error(
+                    websocket, f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+                )
     finally:
         manager.remove(device.device_id)
         registry.remove(device.device_id)

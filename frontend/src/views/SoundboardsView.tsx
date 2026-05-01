@@ -94,8 +94,8 @@ export function SoundboardsView() {
   }
 
   return (
-    <div className="playlists-view">
-      <div className="playlists-pane playlists-list-pane">
+    <div className="two-pane-view soundboards-view">
+      <div className="two-pane-pane soundboards-list-pane">
         <header className="playlists-header">
           <h2>Soundboards</h2>
           <span className="muted small">{boards.length}</span>
@@ -141,7 +141,7 @@ export function SoundboardsView() {
         </ul>
       </div>
 
-      <div className="playlists-pane playlists-detail-pane">
+      <div className="two-pane-pane soundboards-detail-pane">
         {selected !== null ? (
           <SoundboardEditor
             key={`${selected.modeId}/${selected.boardId}`}

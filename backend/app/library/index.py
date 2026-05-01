@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import threading
 import time
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -33,6 +34,13 @@ from app.core.config import get_settings
 from app.models.track import Track
 
 logger = logging.getLogger(__name__)
+
+# Serialises any index-write operation (full scan, incremental scan_paths
+# from uploads). Without this, two concurrent scans race the DB:
+# `scan_full` snapshots `existing` early, walks the disk, then deletes
+# everything not seen — if a parallel `scan_paths` adds a row in between,
+# the full scan's "delete unseen" step removes it again.
+_scan_lock = threading.Lock()
 
 
 # Audio extensions we'll consider when walking the tree. Lower-case match.
@@ -258,32 +266,14 @@ def _walk(root: Path) -> Iterator[Path]:
             yield entry
 
 
-def _build_track(path: Path, root: Path) -> Track:
-    rel = to_relative(path, root)
+def _meta_dict(path: Path, root: Path) -> dict[str, Any]:
+    """Build the field dict that both `_build_track` (insert) and
+    `_refresh_track` (update) populate. Single source of truth for which
+    columns are maintained from disk — adding a new tag-derived column
+    means changing one place, not two."""
     stat = path.stat()
     meta = metadata_for(path, root)
-    return Track(
-        path=rel,
-        title=meta["title"],
-        artist=meta["artist"],
-        album_artist=meta["album_artist"] or meta["artist"],
-        album=meta["album"],
-        track_no=meta["track_no"],
-        disc_no=meta["disc_no"],
-        year=meta["year"],
-        genre=meta["genre"],
-        length_s=meta["length_s"],
-        bpm=meta["bpm"],
-        size_bytes=stat.st_size,
-        mtime=int(stat.st_mtime),
-    )
-
-
-def _refresh_track(track: Track, path: Path, root: Path) -> bool:
-    """Re-read tags into an existing row. Returns True if anything changed."""
-    stat = path.stat()
-    meta = metadata_for(path, root)
-    new = {
+    return {
         "title": meta["title"],
         "artist": meta["artist"],
         "album_artist": meta["album_artist"] or meta["artist"],
@@ -297,8 +287,16 @@ def _refresh_track(track: Track, path: Path, root: Path) -> bool:
         "size_bytes": stat.st_size,
         "mtime": int(stat.st_mtime),
     }
+
+
+def _build_track(path: Path, root: Path) -> Track:
+    return Track(path=to_relative(path, root), **_meta_dict(path, root))
+
+
+def _refresh_track(track: Track, path: Path, root: Path) -> bool:
+    """Re-read tags into an existing row. Returns True if anything changed."""
     changed = False
-    for key, value in new.items():
+    for key, value in _meta_dict(path, root).items():
         if getattr(track, key) != value:
             setattr(track, key, value)
             changed = True
@@ -308,74 +306,83 @@ def _refresh_track(track: Track, path: Path, root: Path) -> bool:
 def scan_full(db: Session) -> ScanSummary:
     """Walk MUSIC_DIR end-to-end. Inserts new rows, updates rows whose
     mtime/size changed on disk, and deletes rows whose paths no longer
-    exist."""
-    summary = ScanSummary()
-    root = music_root()
+    exist. Serialised with `_scan_lock` so a parallel upload-triggered
+    `scan_paths` can't race the "delete unseen" tail of this function."""
+    with _scan_lock:
+        summary = ScanSummary()
+        root = music_root()
 
-    existing: dict[str, Track] = {
-        t.path: t for t in db.scalars(select(Track)).all()
-    }
-    seen: set[str] = set()
-    started = time.monotonic()
+        existing: dict[str, Track] = {
+            t.path: t for t in db.scalars(select(Track)).all()
+        }
+        seen: set[str] = set()
+        started = time.monotonic()
 
-    for absolute in _walk(root):
-        rel = to_relative(absolute, root)
-        seen.add(rel)
-        track = existing.get(rel)
-        if track is None:
-            db.add(_build_track(absolute, root))
-            summary.added += 1
-            continue
-        stat = absolute.stat()
-        if track.size_bytes != stat.st_size or track.mtime != int(stat.st_mtime):
-            if _refresh_track(track, absolute, root):
-                summary.updated += 1
+        for absolute in _walk(root):
+            rel = to_relative(absolute, root)
+            seen.add(rel)
+            track = existing.get(rel)
+            if track is None:
+                db.add(_build_track(absolute, root))
+                summary.added += 1
+                continue
+            stat = absolute.stat()
+            if track.size_bytes != stat.st_size or track.mtime != int(stat.st_mtime):
+                if _refresh_track(track, absolute, root):
+                    summary.updated += 1
+                else:
+                    summary.unchanged += 1
             else:
                 summary.unchanged += 1
-        else:
-            summary.unchanged += 1
 
-    # Anything in the DB not seen on disk got removed.
-    for rel, track in existing.items():
-        if rel not in seen:
-            db.delete(track)
-            summary.removed += 1
+        # Anything in the DB not seen on disk got removed.
+        for rel, track in existing.items():
+            if rel not in seen:
+                db.delete(track)
+                summary.removed += 1
 
-    db.commit()
-    elapsed = time.monotonic() - started
-    logger.info(
-        "scan: +%d ~%d -%d (%d unchanged) in %.2fs",
-        summary.added,
-        summary.updated,
-        summary.removed,
-        summary.unchanged,
-        elapsed,
-    )
-    return summary
+        db.commit()
+        elapsed = time.monotonic() - started
+        logger.info(
+            "scan: +%d ~%d -%d (%d unchanged) in %.2fs",
+            summary.added,
+            summary.updated,
+            summary.removed,
+            summary.unchanged,
+            elapsed,
+        )
+        return summary
 
 
 def scan_paths(db: Session, paths: Iterable[Path]) -> list[Track]:
     """Index/refresh a specific set of paths (e.g. just-uploaded files).
 
     Returns the resulting Track rows in the same order as input. Skips
-    non-audio files silently. Caller commits."""
-    root = music_root()
-    out: list[Track] = []
-    for absolute in paths:
-        if not is_audio_file(absolute):
-            continue
-        rel = to_relative(absolute, root)
-        existing = db.scalar(select(Track).where(Track.path == rel))
-        if existing is None:
-            track = _build_track(absolute, root)
-            db.add(track)
-            db.flush()
-            out.append(track)
-        else:
-            _refresh_track(existing, absolute, root)
-            out.append(existing)
-    db.commit()
-    return out
+    non-audio files silently. Caller commits.
+
+    Shares `_scan_lock` with `scan_full` — a parallel full scan that's
+    snapshotting `existing` rows mustn't race a fresh insert here, or
+    the new row will get pruned as "unseen on disk" (it was added after
+    the snapshot) when the full scan finishes. The lock is short-held
+    in this function (per-file flushes are fast)."""
+    with _scan_lock:
+        root = music_root()
+        out: list[Track] = []
+        for absolute in paths:
+            if not is_audio_file(absolute):
+                continue
+            rel = to_relative(absolute, root)
+            existing = db.scalar(select(Track).where(Track.path == rel))
+            if existing is None:
+                track = _build_track(absolute, root)
+                db.add(track)
+                db.flush()
+                out.append(track)
+            else:
+                _refresh_track(existing, absolute, root)
+                out.append(existing)
+        db.commit()
+        return out
 
 
 def remove_path(db: Session, rel: str) -> bool:
@@ -540,15 +547,26 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
         )
         folders.append(FolderEntry(name=child.name, path=sub_rel, track_count=count))
 
-    prefix = f"{rel_clean}/" if rel_clean else ""
-    tracks: list[Track] = []
-    for t in db.scalars(select(Track).order_by(Track.path)).all():
-        if not t.path.startswith(prefix):
-            continue
-        # Direct children only — no '/' after the prefix.
-        if "/" in t.path[len(prefix) :]:
-            continue
-        tracks.append(t)
+    # Direct children only. "Skyrim/foo.mp3" is a child of Skyrim;
+    # "Skyrim/sub/bar.mp3" isn't. Encoded as two LIKE clauses so SQLite
+    # filters server-side instead of dragging every row into Python on
+    # every folder browse.
+    if rel_clean:
+        prefix = f"{rel_clean}/"
+        tracks_query = (
+            select(Track)
+            .where(Track.path.like(f"{prefix}%"))
+            .where(~Track.path.like(f"{prefix}%/%"))
+            .order_by(Track.path)
+        )
+    else:
+        # Root listing: top-level files have no slash in their relative path.
+        tracks_query = (
+            select(Track)
+            .where(~Track.path.like("%/%"))
+            .order_by(Track.path)
+        )
+    tracks = list(db.scalars(tracks_query).all())
     return (folders, tracks)
 
 

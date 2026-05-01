@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 
-import { confirmDialog } from "@/components/ConfirmDialog";
+import { confirmDialog } from "@/components/confirmDialog";
 import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
@@ -249,6 +249,64 @@ function MusicSearchResults({
   );
 }
 
+/** Shell shared by the Music and SFX browsers — folder tree + folder
+ *  actions on the left, header + upload + error + caller-supplied content
+ *  on the right. The rest of the browser-specific behaviour (which API to
+ *  hit, what to render in the right pane) is the caller's responsibility,
+ *  but the layout shape is defined exactly once. */
+function LibraryShell({
+  rootLabel,
+  rootKind,
+  selectedPath,
+  onPathChange,
+  refreshKey,
+  loadChildren,
+  onDropOnFolder,
+  onRefresh,
+  onPathReset,
+  error,
+  children,
+}: {
+  rootLabel: string;
+  rootKind: Root;
+  selectedPath: string;
+  onPathChange: (p: string) => void;
+  refreshKey: number;
+  loadChildren: (path: string) => Promise<TreeFolder[]>;
+  onDropOnFolder?: (folderPath: string, payload: unknown) => void;
+  onRefresh: () => void;
+  onPathReset: () => void;
+  error: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="library-body">
+      <aside className="library-sidebar">
+        <FolderTree
+          rootLabel={rootLabel}
+          selectedPath={selectedPath}
+          onSelect={onPathChange}
+          loadChildren={loadChildren}
+          {...(refreshKey !== undefined ? { refreshKey } : {})}
+          {...(onDropOnFolder !== undefined ? { onDropOnFolder } : {})}
+        />
+        <FolderActions
+          root={rootKind}
+          selectedPath={selectedPath}
+          onChanged={onRefresh}
+          onPathReset={onPathReset}
+        />
+      </aside>
+      <section className="library-main">
+        <FolderHeader path={selectedPath} root={rootKind} />
+        <UploadDrop root={rootKind} dest={selectedPath} onUploaded={onRefresh} />
+        {error !== null ? <p className="error small">{error}</p> : null}
+        {children}
+      </section>
+    </div>
+  );
+}
+
 function MusicBrowser({
   path,
   onPathChange,
@@ -311,43 +369,25 @@ function MusicBrowser({
   }
 
   return (
-    <div className="library-body">
-      <aside className="library-sidebar">
-        <FolderTree
-          rootLabel="All music"
-          selectedPath={path}
-          onSelect={onPathChange}
-          loadChildren={loadChildren}
-          refreshKey={refreshKey}
-          onDropOnFolder={onDropOnFolder}
-        />
-        <FolderActions
-          root="music"
-          selectedPath={path}
-          onChanged={() => {
-            onRefresh();
-            // After a delete the selected path may have vanished — fall
-            // back to root so the right pane doesn't 404.
-          }}
-          onPathReset={() => onPathChange("")}
-        />
-      </aside>
-      <section className="library-main">
-        <FolderHeader path={path} root="music" />
-        <UploadDrop
-          root="music"
-          dest={path}
-          onUploaded={onRefresh}
-        />
-        {error !== null ? <p className="error small">{error}</p> : null}
-        <TrackTable
-          tracks={tracks}
-          activeTrackId={activeTrackId}
-          onChanged={onRefresh}
-          draggable
-        />
-      </section>
-    </div>
+    <LibraryShell
+      rootLabel="All music"
+      rootKind="music"
+      selectedPath={path}
+      onPathChange={onPathChange}
+      refreshKey={refreshKey}
+      loadChildren={loadChildren}
+      onDropOnFolder={onDropOnFolder}
+      onRefresh={onRefresh}
+      onPathReset={() => onPathChange("")}
+      error={error}
+    >
+      <TrackTable
+        tracks={tracks}
+        activeTrackId={activeTrackId}
+        onChanged={onRefresh}
+        draggable
+      />
+    </LibraryShell>
   );
 }
 
@@ -445,32 +485,19 @@ function SfxBrowser({
   }
 
   return (
-    <div className="library-body">
-      <aside className="library-sidebar">
-        <FolderTree
-          rootLabel="All SFX"
-          selectedPath={path}
-          onSelect={onPathChange}
-          loadChildren={loadChildren}
-          refreshKey={refreshKey}
-          onDropOnFolder={onDropOnFolder}
-        />
-        <FolderActions
-          root="sfx"
-          selectedPath={path}
-          onChanged={onRefresh}
-          onPathReset={() => onPathChange("")}
-        />
-      </aside>
-      <section className="library-main">
-        <FolderHeader path={path} root="sfx" />
-        <UploadDrop
-          root="sfx"
-          dest={path}
-          onUploaded={onRefresh}
-        />
-        {error !== null ? <p className="error small">{error}</p> : null}
-        {files.length === 0 ? (
+    <LibraryShell
+      rootLabel="All SFX"
+      rootKind="sfx"
+      selectedPath={path}
+      onPathChange={onPathChange}
+      refreshKey={refreshKey}
+      loadChildren={loadChildren}
+      onDropOnFolder={onDropOnFolder}
+      onRefresh={onRefresh}
+      onPathReset={() => onPathChange("")}
+      error={error}
+    >
+      {files.length === 0 ? (
           <p className="muted small">
             No SFX files in this folder yet. Drop some above, or pick a different folder.
           </p>
@@ -509,8 +536,7 @@ function SfxBrowser({
             ))}
           </ul>
         )}
-      </section>
-    </div>
+    </LibraryShell>
   );
 }
 

@@ -18,6 +18,7 @@ import {
 } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
+import { useTickWhile } from "@/core/useTickWhile";
 import { wsClient } from "@/core/ws";
 
 function formatTime(ms: number): string {
@@ -72,17 +73,10 @@ export function NowPlayingBar() {
     };
   }, [displayId]);
 
-  // Tick the position display so it advances visually while playing.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!isPlaying) return;
-    const interval = window.setInterval(() => {
-      setTick((t) => t + 1);
-    }, 500);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [isPlaying]);
+  // Force re-renders twice a second while playing so the dead-reckoned
+  // ambient position (computed from `stateReceivedAt` in the player
+  // store) advances visually without requiring a server-side update.
+  useTickWhile(isPlaying, 500);
 
   const positionMs = usePlayerStore(selectAmbientPositionMs);
   const totalMs = track !== null ? Math.round(track.length_s * 1000) : 0;

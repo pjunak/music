@@ -6,6 +6,7 @@ references tracks by `id` minted in this index.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 from datetime import datetime
@@ -115,6 +116,23 @@ class BulkMetadataUpdate(BaseModel):
 
     track_ids: list[int] = Field(min_length=1, max_length=1000)
     updates: TrackMetadataUpdate
+
+
+class BulkMetadataSkip(BaseModel):
+    """One row in the per-track skip list returned by bulk update."""
+
+    track_id: int
+    reason: str
+
+
+class BulkMetadataResult(BaseModel):
+    """Bulk-update result. `updated` is the rows that took the change;
+    `skipped` is the per-track failures (file missing, format we can't
+    write tags for, …) so the operator sees which tracks didn't apply
+    instead of silently swallowing the discrepancy."""
+
+    updated: list[TrackOut]
+    skipped: list[BulkMetadataSkip]
 
 
 # Fields that round-trip through ID3 / Vorbis tags. Anything outside this
@@ -278,19 +296,20 @@ def track_cover(track_id: int, _: OptionalUser, db: DbSession) -> Response:
 # --- file-manager actions -------------------------------------------------
 
 
-@router.patch("/tracks/bulk-metadata", response_model=list[TrackOut])
+@router.patch("/tracks/bulk-metadata", response_model=BulkMetadataResult)
 def update_metadata_bulk(
     payload: BulkMetadataUpdate,
     _: CurrentUser,
     db: DbSession,
-) -> list[TrackOut]:
+) -> BulkMetadataResult:
     """Apply the same metadata update across many tracks at once.
 
     Tag-backed fields are written to each file's tags (and a re-scan picks
     them back up); DB-only fields (`display_title`, `origin`) are set
-    directly on the row. Files that no longer exist on disk are skipped
-    silently — their row remains, but tag-backed fields aren't touched.
-    DB-only fields apply unconditionally since they don't read from disk.
+    directly on the row. Files that no longer exist on disk OR can't be
+    written are reported in `skipped` with a reason — the operator sees
+    exactly which tracks didn't take the change. DB-only fields apply
+    unconditionally since they don't read from disk.
     """
     fields = payload.updates.model_dump(exclude_unset=True)
     if not fields:
@@ -310,19 +329,37 @@ def update_metadata_bulk(
             detail="no tracks matched the supplied ids",
         )
 
+    skipped: list[BulkMetadataSkip] = []
+    tag_failed_ids: set[int] = set()
     if tag_fields:
         rescan_paths: list[Path] = []
         for track in tracks:
             abs_path = library_index.to_absolute(track.path)
             if not abs_path.is_file():
-                # File vanished out from under us. Skip rather than abort —
-                # bulk operations should be best-effort across the selection.
+                skipped.append(
+                    BulkMetadataSkip(track_id=track.id, reason="file missing on disk")
+                )
+                tag_failed_ids.add(track.id)
                 continue
             try:
                 library_index.write_tags(abs_path, tag_fields)
-            except ValueError:
-                # Format we can't write tags for (rare). Skip silently;
-                # the row's DB-only fields below still apply.
+            except ValueError as e:
+                skipped.append(
+                    BulkMetadataSkip(
+                        track_id=track.id,
+                        reason=f"unsupported format: {e}",
+                    )
+                )
+                tag_failed_ids.add(track.id)
+                continue
+            except Exception as e:
+                skipped.append(
+                    BulkMetadataSkip(
+                        track_id=track.id,
+                        reason=f"tag write failed: {e}",
+                    )
+                )
+                tag_failed_ids.add(track.id)
                 continue
             rescan_paths.append(abs_path)
         if rescan_paths:
@@ -336,7 +373,16 @@ def update_metadata_bulk(
 
     for track in tracks:
         db.refresh(track)
-    return [TrackOut.model_validate(t) for t in tracks]
+    # A track is "updated" only if every applicable field actually applied.
+    # A tag-write failure with no DB-only fields → fully skipped, not in
+    # `updated`. With DB-only fields too, the row partly took the update;
+    # we still surface that mixed case via `skipped`.
+    updated = [
+        TrackOut.model_validate(t)
+        for t in tracks
+        if t.id not in tag_failed_ids or db_only_fields
+    ]
+    return BulkMetadataResult(updated=updated, skipped=skipped)
 
 
 @router.patch("/tracks/{track_id}/metadata", response_model=TrackOut)
@@ -390,8 +436,10 @@ def move_track_file(
     db: DbSession,
 ) -> TrackOut:
     """Move the file to another folder under MUSIC_DIR, optionally with a new
-    filename. Both the disk move and the index update happen atomically from
-    the caller's point of view (we move first; if that succeeds, we update)."""
+    filename. The disk move and the index update are kept consistent: if the
+    DB update raises after the file is moved, we attempt to move the file
+    back before surfacing the error so the index and the filesystem don't
+    drift."""
     track = _track_or_404(db, track_id)
     src = library_index.to_absolute(track.path)
     if not src.is_file():
@@ -414,7 +462,19 @@ def move_track_file(
 
     shutil.move(str(src), str(target))
     new_rel = library_index.to_relative(target)
-    library_index.update_path(db, track.path, new_rel)
+    try:
+        library_index.update_path(db, track.path, new_rel)
+    except Exception as e:
+        # DB write failed — the file already moved. Try to put it back so
+        # filesystem and index stay aligned. If the rollback also fails the
+        # caller gets the underlying error and the operator will need to
+        # rescan; we don't try to be cleverer than that.
+        with contextlib.suppress(Exception):
+            shutil.move(str(target), str(src))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"index update failed after move: {e}",
+        ) from e
     db.refresh(track)
     return TrackOut.model_validate(track)
 
@@ -475,9 +535,23 @@ async def upload(
                     target = candidate
                     break
                 n += 1
-        with target.open("wb") as out:
-            while chunk := await upload_file.read(_UPLOAD_CHUNK):
-                out.write(chunk)
+        # Stream into a sibling .partial file, then atomic-rename to the
+        # real path. If the upload is interrupted (network drop, server
+        # restart), only the .partial is left behind — never a truncated
+        # file at the real path that the indexer would pick up with bogus
+        # tags. The .partial extension is outside AUDIO_EXTENSIONS so even
+        # an orphaned one won't be indexed.
+        partial = target.with_name(f".{target.name}.partial")
+        try:
+            with partial.open("wb") as out:
+                while chunk := await upload_file.read(_UPLOAD_CHUNK):
+                    out.write(chunk)
+            partial.replace(target)
+        except Exception:
+            if partial.exists():
+                with contextlib.suppress(OSError):
+                    partial.unlink()
+            raise
         written.append(target)
 
     indexed = library_index.scan_paths(db, written)

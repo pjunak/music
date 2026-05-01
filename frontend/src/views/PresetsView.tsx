@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { confirmDialog } from "@/components/ConfirmDialog";
+import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
 import { ArrowDownIcon, ArrowUpIcon, TrashIcon, XIcon } from "@/components/icons";
@@ -44,8 +44,8 @@ export function PresetsView() {
   const selected = presets.find((p) => p.id === selectedId) ?? null;
 
   return (
-    <div className="modes-view">
-      <div className="modes-pane modes-list-pane">
+    <div className="two-pane-view presets-view">
+      <div className="two-pane-pane presets-list-pane">
         <header className="playlists-header">
           <h2>EQ Presets</h2>
           <button
@@ -90,7 +90,7 @@ export function PresetsView() {
         </ul>
       </div>
 
-      <div className="modes-pane modes-detail-pane">
+      <div className="two-pane-pane presets-detail-pane">
         {creating ? (
           <PresetForm
             mode="create"

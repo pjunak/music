@@ -27,6 +27,12 @@ interface UiStore {
    *  tab — used by the Player tab's "Play on this device" toggle. */
   forceLocalPlayback: boolean;
   setForceLocalPlayback: (v: boolean) => void;
+
+  /** SFX volume (0–1) for the live Soundboard panel — preserved across
+   *  tab switches so the operator doesn't reset to the default every
+   *  time they leave Controls. Per-device, not synced server-side. */
+  sfxVolume: number;
+  setSfxVolume: (v: number) => void;
 }
 
 export function defaultDeviceName(): string {
@@ -67,6 +73,8 @@ export const useUiStore = create<UiStore>()(
       setCapabilities: (caps) => set({ capabilities: caps }),
       forceLocalPlayback: false,
       setForceLocalPlayback: (v) => set({ forceLocalPlayback: v }),
+      sfxVolume: 0.8,
+      setSfxVolume: (v) => set({ sfxVolume: Math.max(0, Math.min(1, v)) }),
     }),
     { name: "music-ui" },
   ),

@@ -54,6 +54,11 @@ interface AmbientChannel {
   source: MediaElementAudioSourceNode;
   /** Token used to cancel in-flight rAF ramps when superseded. */
   rampToken: number;
+  /** Last URL the channel was loaded with. Tracked explicitly because
+   *  `el.src` can be normalised by the browser (resolved against the
+   *  document base, query params re-ordered, etc.), so an `endsWith`
+   *  comparison is fragile. */
+  loadedUrl: string | null;
 }
 
 interface InterruptChannel {
@@ -61,6 +66,7 @@ interface InterruptChannel {
   gainNode: GainNode;
   source: MediaElementAudioSourceNode;
   rampToken: number;
+  loadedUrl: string | null;
 }
 
 interface BuiltEffect {
@@ -180,8 +186,8 @@ export class PlaybackEngine {
       gainA.connect(this.effectChainHead);
       gainB.connect(this.effectChainHead);
     }
-    this.ambientA = { el: a, gainNode: gainA, source: sourceA, rampToken: 0 };
-    this.ambientB = { el: b, gainNode: gainB, source: sourceB, rampToken: 0 };
+    this.ambientA = { el: a, gainNode: gainA, source: sourceA, rampToken: 0, loadedUrl: null };
+    this.ambientB = { el: b, gainNode: gainB, source: sourceB, rampToken: 0, loadedUrl: null };
     a.addEventListener("ended", this.handleAmbientEnded);
     b.addEventListener("ended", this.handleAmbientEnded);
     attachErrorLogger("ambientA", a);
@@ -199,7 +205,7 @@ export class PlaybackEngine {
     if (this.interruptMaster !== null) {
       gainNode.connect(this.interruptMaster);
     }
-    this.interrupt = { el, gainNode, source, rampToken: 0 };
+    this.interrupt = { el, gainNode, source, rampToken: 0, loadedUrl: null };
     el.addEventListener("ended", this.handleInterruptEnded);
     attachErrorLogger("interrupt", el);
   }
@@ -433,15 +439,18 @@ export class PlaybackEngine {
     if (this.ambientA?.el) {
       this.ambientA.el.removeAttribute("src");
       this.ambientA.el.load();
+      this.ambientA.loadedUrl = null;
     }
     if (this.ambientB?.el) {
       this.ambientB.el.removeAttribute("src");
       this.ambientB.el.load();
+      this.ambientB.loadedUrl = null;
     }
     if (this.interrupt) {
       this.interrupt.el.pause();
       this.interrupt.el.removeAttribute("src");
       this.interrupt.el.load();
+      this.interrupt.loadedUrl = null;
       this.interrupt.gainNode.gain.value = 0;
     }
   }
@@ -484,9 +493,10 @@ export class PlaybackEngine {
 
   private loadInto(ch: AmbientChannel, streamUrl: string): void {
     ch.el.pause();
-    if (!ch.el.src.endsWith(streamUrl)) {
+    if (ch.loadedUrl !== streamUrl) {
       ch.el.src = streamUrl;
       ch.el.load();
+      ch.loadedUrl = streamUrl;
     }
   }
 
@@ -526,10 +536,16 @@ export class PlaybackEngine {
 
   private stopAmbient(): void {
     this.pauseAmbient();
-    if (this.ambientA?.el) this.ambientA.el.removeAttribute("src");
-    if (this.ambientB?.el) this.ambientB.el.removeAttribute("src");
-    this.ambientA?.el.load();
-    this.ambientB?.el.load();
+    if (this.ambientA?.el) {
+      this.ambientA.el.removeAttribute("src");
+      this.ambientA.el.load();
+      this.ambientA.loadedUrl = null;
+    }
+    if (this.ambientB?.el) {
+      this.ambientB.el.removeAttribute("src");
+      this.ambientB.el.load();
+      this.ambientB.loadedUrl = null;
+    }
   }
 
   private setGainNow(ch: AmbientChannel, value: number): void {
@@ -580,9 +596,10 @@ export class PlaybackEngine {
   private startInterrupt(trackId: number, fadeInMs: number): void {
     if (!this.interrupt) return;
     const url = `/api/library/tracks/${trackId}/stream`;
-    if (!this.interrupt.el.src.endsWith(url)) {
+    if (this.interrupt.loadedUrl !== url) {
       this.interrupt.el.src = url;
       this.interrupt.el.load();
+      this.interrupt.loadedUrl = url;
     }
     this.rampInterrupt(0, 1, fadeInMs);
     this.safePlay("interrupt", this.interrupt.el);
@@ -599,6 +616,7 @@ export class PlaybackEngine {
       this.interrupt.el.pause();
       this.interrupt.el.removeAttribute("src");
       this.interrupt.el.load();
+      this.interrupt.loadedUrl = null;
       this.interrupt.gainNode.gain.value = 0;
     }
     if (this.lastIsPlaying) {

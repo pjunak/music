@@ -5,6 +5,7 @@ import type { PresetManifest } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
+import { toast } from "@/core/toast";
 import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
@@ -43,17 +44,20 @@ export function AudioEngine() {
   }, []);
 
   // First user gesture unlocks the AudioContext. Required before any audio
-  // can reach the speakers under modern browser autoplay policies. We hook
-  // both pointer and key events so any path through the UI works, and
-  // remove the listeners after the first hit.
+  // can reach the speakers under modern browser autoplay policies.
+  // `once: true` auto-removes after the first fire, so we don't even need
+  // a cleanup path for the (very common) "user clicked once and we're
+  // done" case. `capture: true` so we beat any handler that calls
+  // stopPropagation (defence in depth — none currently does).
   useEffect(() => {
     const onGesture = () => {
       playbackEngine.unlock();
     };
-    const opts: AddEventListenerOptions = { once: false, capture: true };
+    const opts: AddEventListenerOptions = { once: true, capture: true };
     window.addEventListener("pointerdown", onGesture, opts);
     window.addEventListener("keydown", onGesture, opts);
     return () => {
+      // Idempotent if the listener already self-removed via once: true.
       window.removeEventListener("pointerdown", onGesture, opts);
       window.removeEventListener("keydown", onGesture, opts);
     };
@@ -86,6 +90,7 @@ export function AudioEngine() {
     const cache = new Map<string, PresetManifest>();
     let isMine = false;
 
+    let toastedError = false;
     async function syncPresets(activeIds: string[]): Promise<void> {
       const missing = activeIds.filter((id) => !cache.has(id));
       if (missing.length > 0) {
@@ -93,7 +98,18 @@ export function AudioEngine() {
           const all = await presetsApi.list();
           cache.clear();
           for (const m of all) cache.set(m.id, m);
+          toastedError = false;
         } catch (err) {
+          // Surface once per consecutive failure run so the operator
+          // notices that the active preset chain stopped tracking
+          // server changes (otherwise this only ended up in console).
+          if (!toastedError) {
+            toast.error(
+              "Failed to load EQ presets",
+              err instanceof Error ? err.message : undefined,
+            );
+            toastedError = true;
+          }
           console.warn("[AudioEngine] failed to load presets", err);
         }
       }
@@ -145,7 +161,16 @@ export function AudioEngine() {
   // forceLocalPlayback for them instead.
   useEffect(() => {
     let claimed = false;
+    let lastDeviceId: string | null = null;
     const unsub = usePlayerStore.subscribe((s) => {
+      // Reset the auto-claim latch on device-id changes (sign-out / sign-in
+      // reconnects the WS with a fresh device id). Without this, signing
+      // back in inherits the previous session's `claimed=true` and the
+      // user has to claim manually.
+      if (s.myDeviceId !== lastDeviceId) {
+        claimed = false;
+        lastDeviceId = s.myDeviceId;
+      }
       if (claimed || s.state === null || s.myDeviceId === null) return;
       if (useAuthStore.getState().status !== "authenticated") return;
       const me = s.state.connected_devices.find(
