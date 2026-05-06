@@ -113,6 +113,35 @@ button.btn-ghost:hover:not(:disabled) {
   border-color: var(--border);
 }
 
+/* Anchor styled as a button — used wherever an <a> opens a different tab
+ * but should read as a primary action (e.g. diagnostics in Settings).
+ * Same visual weight as a <button>, but no role coercion needed. */
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  font-weight: 500;
+  text-decoration: none;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition),
+    color var(--transition);
+  min-height: 36px;
+}
+.btn-link:hover {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.btn-link-external {
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
 /* --- shared building blocks ------------------------------------------ */
 
 /* Icon-with-label button — used wherever a button's visible content is
@@ -387,6 +416,80 @@ kbd,
   background: var(--surface);
 }
 
+/* Mobile tabs menu — only visible at narrow widths (see media query at
+ * the bottom of this file). The trigger is a hamburger + the active tab
+ * label so the user can read where they are without opening the menu;
+ * the menu drops below the trigger as an absolute-positioned panel. */
+.tabs-mobile {
+  display: none;
+  position: relative;
+  flex: 1;
+  justify-content: flex-start;
+}
+.tabs-mobile-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  font-weight: 500;
+  font-size: 0.95rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  min-height: 36px;
+}
+.tabs-mobile-burger {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 16px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.tabs-mobile-burger span {
+  display: block;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+}
+.tabs-mobile-label {
+  color: var(--accent-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12ch;
+}
+.tabs-mobile-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 0.3rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+.tabs-mobile-item {
+  display: block;
+  padding: 0.55rem 0.8rem;
+  text-decoration: none;
+  color: var(--fg);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+.tabs-mobile-item:hover {
+  background: var(--surface);
+}
+.tabs-mobile-item-active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
 .ws-status {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -395,6 +498,17 @@ kbd,
   border-radius: var(--radius);
   letter-spacing: 0.05em;
   color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.ws-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
 }
 .ws-status-connected {
   border-color: var(--ok);
@@ -2684,7 +2798,19 @@ input.volume-slider::-moz-range-thumb {
   font-weight: 600;
 }
 
-/* --- responsive: phone / narrow widths -------------------------------- */
+/* --- responsive: phone / narrow widths --------------------------------
+ *
+ * Three breakpoints, each layered on the next:
+ *   ≤900px  — tablet & landscape phones. Stack Controls grid, two-pane
+ *             views collapse into a single column, Player art shrinks.
+ *   ≤700px  — mobile portrait. Header swaps tabs strip for a hamburger,
+ *             NowPlayingBar reflows into 2 rows, two-pane views show
+ *             list-OR-detail (the inactive pane hides), tables hide
+ *             columns we can live without on a phone.
+ *   ≤480px  — narrow phones. Last-mile tweaks: tighter padding, smaller
+ *             type, even more aggressive column hiding.
+ *
+ * Every change is reversible — wider widths get the desktop layout. */
 
 @media (max-width: 900px) {
   .controls-grid {
@@ -2713,76 +2839,390 @@ input.volume-slider::-moz-range-thumb {
   .player-meta {
     text-align: left;
   }
+  /* Bulk-edit aside hides on narrower screens — multi-select-then-bulk
+   * needs more space than a phone has. Falls back to per-row edit. */
+  .metadata-body {
+    grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  }
+  .metadata-aside {
+    display: none;
+  }
 }
 
 @media (max-width: 700px) {
+  /* Header: device name compact, tabs hide → hamburger shows.
+   * The hamburger trigger sits inline with the device-name input + ws
+   * status pill; the right-hand context badge wraps below if active. */
   .app-header {
     flex-wrap: wrap;
+    gap: 0.5rem;
     padding: 0.5rem 0.7rem;
   }
+  .app-header-left {
+    gap: 0.4rem;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
   .device-name-field {
-    width: 10em;
-    font-size: 0.85rem;
+    width: 9em;
+    font-size: 0.9rem;
+  }
+  .ws-status-text {
+    /* The pill keeps its colour, but the noisy "connected/disconnected"
+     * text drops on phones — the dot carries the meaning. */
+    display: none;
+  }
+  .ws-status {
+    padding: 0.2rem 0.35rem;
   }
   .tabs {
-    order: 3;
-    width: 100%;
-    justify-content: flex-start;
-    overflow-x: auto;
+    display: none;
+  }
+  .tabs-mobile {
+    display: flex;
   }
   .app-header-right {
     margin-left: auto;
+    gap: 0.4rem;
   }
   .context-badge {
     font-size: 0.78rem;
+    padding: 0.15rem 0.4rem;
   }
 
+  /* Player view: tighter padding, smaller title so long names don't push
+   * the queue/history below the fold. */
+  .player-view {
+    padding: 1rem 0.9rem;
+  }
+  .player-title {
+    font-size: 1.4rem;
+  }
+  .player-artist {
+    font-size: 1rem;
+  }
+
+  /* Library view: stack tree above the track list; a one-handed user
+   * clicks a folder, scrolls the tracks. The folder tree caps at 35vh so
+   * a deep tree doesn't push the actual content offscreen. */
   .library-view {
-    padding: 0.7rem;
+    padding: 0.6rem;
+    gap: 0.5rem;
   }
   .library-body {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
   }
   .library-sidebar {
-    max-height: 200px;
+    max-height: 35vh;
+  }
+  .library-toolbar {
+    gap: 0.4rem;
   }
   .upload-dropzone {
     grid-template-columns: 1fr;
   }
+  .drop-zone {
+    padding: 0.6rem 0.8rem;
+    font-size: 0.9rem;
+  }
+
+  /* Library track table — drop the columns a phone-sized screen can't
+   * read meaningfully. Title + actions stay; the rest hides. */
+  .track-table {
+    font-size: 0.88rem;
+  }
+  .track-table th:nth-child(2),
+  .track-table td:nth-child(2),
+  .track-table th:nth-child(3),
+  .track-table td:nth-child(3),
+  .track-table th:nth-child(4),
+  .track-table td:nth-child(4) {
+    display: none;
+  }
+  .track-table td.col-actions button {
+    padding: 0.25rem 0.4rem;
+  }
+
+  /* Metadata: stack folder tree above the track table; bulk aside is
+   * hidden at this width (per-track edit still works). */
+  .metadata-view {
+    padding: 0.6rem;
+  }
   .metadata-body {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 200px) 1fr auto;
+    grid-template-rows: minmax(140px, 30vh) 1fr;
   }
   .metadata-tree {
-    max-height: 200px;
+    max-height: 30vh;
+  }
+  .metadata-toolbar {
+    gap: 0.4rem;
+  }
+  .metadata-search {
+    flex: 1 1 100%;
+  }
+  .metadata-bulk-actions {
+    margin-left: 0;
+  }
+  /* Metadata table — drop the bulky tag columns on mobile; keep
+   * checkbox, display title, and the per-row edit button. */
+  .metadata-table th:nth-child(3),
+  .metadata-table td:nth-child(3),
+  .metadata-table th:nth-child(4),
+  .metadata-table td:nth-child(4),
+  .metadata-table th:nth-child(5),
+  .metadata-table td:nth-child(5),
+  .metadata-table th:nth-child(7),
+  .metadata-table td:nth-child(7) {
+    display: none;
   }
 
+  /* Two-pane shells (Playlists, Modes, Soundboards, EQ Presets):
+   *   - List pane caps at ~40vh so the detail pane stays in view.
+   *   - Detail pane is the action target; both scroll independently.
+   *
+   * We keep both panes mounted (rather than hiding one based on
+   * "selected" state) — the implicit ">" on a list item is the affordance
+   * for "tap to view detail", and showing the placeholder beneath
+   * communicates "pick something" without route-level state. */
+  .two-pane-view {
+    grid-template-rows: minmax(120px, 38vh) 1fr;
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+  .two-pane-pane {
+    padding: 0.55rem 0.6rem;
+  }
+
+  /* Playlist detail: actions wrap so they don't overflow horizontally. */
+  .playlist-detail-header {
+    flex-wrap: wrap;
+  }
+  .playlist-detail-actions {
+    width: 100%;
+  }
+
+  /* Controls: tighter padding, output picker scrolls if the operator has
+   * a lot of devices. */
   .controls-view {
-    padding: 0.7rem;
+    padding: 0.6rem;
+    gap: 0.6rem;
+  }
+  .surface-card {
+    padding: 0.7rem 0.8rem;
+  }
+  .output-picker-options.inline {
+    max-width: 100%;
+  }
+
+  /* NowPlayingBar — three stacked rows on mobile:
+   *   Row 1: track meta (title + artist + interrupt indicator)
+   *   Row 2: transport controls, centred — fat tap targets
+   *   Row 3: output toggle + volume slider, slider expands to fill
+   *
+   * Each child of .now-playing-top is explicitly placed by grid-row,
+   * which is what makes the rearrangement work — without the explicit
+   * placement the auto-flow algorithm would still treat the three
+   * children as occupying one column each in the order they appear. */
+  .now-playing {
+    padding: 0.4rem 0.6rem 0.55rem;
+    gap: 0.35rem;
   }
   .now-playing-top {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
     row-gap: 0.4rem;
   }
-  .now-playing-volume {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
+  .now-playing-track {
+    grid-row: 1;
+    grid-column: 1;
+    text-align: left;
   }
-  .volume-row input[type="range"] {
+  .now-playing-track strong {
+    font-size: 0.95rem;
+  }
+  .now-playing-track-meta {
+    font-size: 0.78rem;
+  }
+  .now-playing-controls {
+    grid-row: 2;
+    grid-column: 1;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+  /* Larger transport hit-targets on phones: ~44px is the platform
+   * touch-target floor, and the play button stays larger than the
+   * skip buttons so the operator can find it without looking. */
+  .now-playing-controls button {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+  .now-playing-controls .now-playing-play {
+    width: 3.1rem;
+    height: 3.1rem;
+  }
+  .now-playing-right {
+    grid-row: 3;
+    grid-column: 1;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+  /* Compact output toggle on mobile — colour-only pill, no "Output ON"
+   * text. The dot + colour already carry the meaning, and dropping the
+   * label leaves room for the volume slider to actually be wide enough
+   * to use one-handed. */
+  .output-toggle .output-toggle-label {
+    display: none;
+  }
+  .output-toggle {
+    padding: 0.4rem 0.55rem;
+    min-height: 2.4rem;
+    flex: 0 0 auto;
+  }
+  .now-playing-volume {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+  /* All volume / range inputs go full-width on mobile so they're easy
+   * to drag with a thumb (the desktop clamp is too narrow to hit). */
+  .volume-row input[type="range"],
+  .transport-row > input[type="range"] {
     width: 100%;
     flex: 1 1 auto;
+    min-width: 0;
+  }
+  .now-playing-scrub {
+    gap: 0.5rem;
+  }
+  .seek-bar-large {
+    height: 14px;
+    border-radius: 7px;
+  }
+  .seek-bar-large .seek-bar-thumb {
+    width: 22px;
+    height: 22px;
   }
 
-  .player-title {
-    font-size: 1.5rem;
+  /* Settings + Diagnostics: tighter padding, single-column for the
+   * connection / engine summary cards. */
+  .settings-view,
+  .diagnostics-view {
+    padding: 0.8rem;
+  }
+  .diagnostics-summary {
+    grid-template-columns: 1fr;
+  }
+  /* Engine state and channels tables — let them scroll horizontally
+   * inside their card rather than blowing out the layout. */
+  .diagnostics-channels {
+    display: block;
+    overflow-x: auto;
   }
 
+  /* Soundboards / scenes grids — tighter cell minimums so 2 columns fit. */
+  .scenes-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+  .soundboard-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+  .sfx-button {
+    padding: 0.55rem 0.6rem;
+  }
+
+  /* Soundboard editor item rows have a 4-column grid that doesn't fit
+   * on a phone — stack to single-column with the actions row trailing. */
+  .soundboard-item,
+  .soundboard-add-item {
+    grid-template-columns: 1fr;
+  }
+
+  /* Folder actions — squeeze the New / Rename / Delete row. The buttons
+   * already use `flex: 1`, so just shrink padding/text. */
+  .folder-actions button {
+    font-size: 0.78rem;
+    padding: 0.3rem 0.3rem;
+  }
+
+  /* Toaster sits above the (now taller) NowPlayingBar — bump the offset
+   * so it doesn't slide under the volume slider. The mobile bar stacks
+   * track meta + transport + output+volume + scrub, ~11rem tall. */
   .toaster {
-    left: 0.5rem;
-    right: 0.5rem;
-    bottom: 7rem;
+    left: 0.4rem;
+    right: 0.4rem;
+    bottom: 12rem;
     max-width: none;
+  }
+
+  /* Modal sizing — give it a bit of breathing room from the screen
+   * edges and let the body scroll when long forms (metadata editor,
+   * scene editor) wouldn't fit. */
+  .modal {
+    width: calc(100% - 1rem);
+    max-height: calc(100vh - 1.5rem);
+  }
+  .metadata-form .metadata-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Last-mile mobile: even tighter typography so long titles fit. */
+  .app-header {
+    padding: 0.4rem 0.5rem;
+  }
+  .device-name-field {
+    max-width: 8em;
+  }
+  .player-view {
+    padding: 0.7rem 0.6rem;
+  }
+  .player-title {
+    font-size: 1.25rem;
+  }
+  .player-art-large {
+    max-width: min(80vw, 280px);
+  }
+
+  /* NowPlayingBar — drop the album in the meta line; track + artist is
+   * enough for a phone width. */
+  .now-playing-track-meta {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .now-playing-clock {
+    font-size: 0.72rem;
+  }
+
+  /* Tab menu trigger — keep the active label visible but tighten the
+   * surrounding spacing. */
+  .tabs-mobile-trigger {
+    padding: 0.35rem 0.55rem;
+  }
+  .tabs-mobile-label {
+    max-width: 9ch;
+  }
+}
+
+/* --- coarse pointer (touch) tweaks ----------------------------------- */
+/* Independent of viewport width — fires on touch phones, tablets,
+ * touch-only kiosks. Bumps tap targets where pointing precision is low.
+ * Keeps wide-monitor desktop tablets close to mouse density. */
+@media (pointer: coarse) {
+  .icon-button,
+  button,
+  .btn-link,
+  .tab,
+  .tabs-mobile-item {
+    min-height: 36px;
+  }
+  /* Action-cell buttons in tables get a bit of padding so a fat finger
+   * doesn't hit two rows at once. */
+  .track-table td.col-actions button,
+  .col-actions button {
+    padding: 0.35rem 0.45rem;
   }
 }

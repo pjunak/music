@@ -115,8 +115,12 @@ export function SettingsView() {
             href="/diagnostics"
             target="_blank"
             rel="noopener noreferrer"
+            className="btn-link"
+            role="button"
           >
-            🔧 Open diagnostics in new tab
+            <span aria-hidden="true">🔧</span>
+            Open diagnostics
+            <span aria-hidden="true" className="btn-link-external">↗</span>
           </a>
         </div>
       </section>

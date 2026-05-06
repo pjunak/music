@@ -32,7 +32,13 @@ export function Header() {
     <header className="app-header">
       <div className="app-header-left">
         <DeviceNameField />
-        <span className={`ws-status ws-status-${wsStatus}`}>{wsStatus}</span>
+        <span
+          className={`ws-status ws-status-${wsStatus}`}
+          title={`WebSocket: ${wsStatus}`}
+        >
+          <span className="ws-status-dot" aria-hidden="true" />
+          <span className="ws-status-text">{wsStatus}</span>
+        </span>
       </div>
       {/* Guests see only the Player route. Hiding the tab strip prevents
           confusion where clicking "Library" just bounces them to /login. */}
