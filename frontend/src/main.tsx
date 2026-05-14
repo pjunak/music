@@ -8,10 +8,14 @@ import "@/styles/global.css";
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("root element not found");
 
-ReactDOM.createRoot(rootElement).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </React.StrictMode>,
-);
+// ?tv forces the legacy fallback player (tv-mode.js) to take over #root so
+// the same URL can be used for in-browser testing of the TV mode.
+if (!new URLSearchParams(window.location.search).has("tv")) {
+  ReactDOM.createRoot(rootElement).render(
+    <React.StrictMode>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </React.StrictMode>,
+  );
+}
