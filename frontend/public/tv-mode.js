@@ -115,30 +115,147 @@
   function renderPlayer() {
     var r = rootEl();
     clearNode(r);
-    r.style.cssText = PAGE_STYLE;
-    var wrap = el("div", "padding:60px 40px;");
-    var status = el("div", "font-size:18px;color:#888;margin-bottom:32px;height:24px;", "connecting...");
-    var title = el("h1", "font-size:56px;margin:0 0 16px 0;word-wrap:break-word;line-height:1.2;", "-");
-    var artist = el("h2", "font-size:32px;margin:0 0 32px 0;color:#bbb;font-weight:normal;", "");
-    var playing = el("div", "font-size:24px;color:#4caf50;height:32px;", "paused");
+    // Re-style root as a flex container that centers the now-playing
+    // card vertically. Viewport units keep everything legible on any TV
+    // resolution from 720p to 4K.
+    r.style.cssText =
+      "background:#0a0a0a;color:#fff;font-family:Arial,sans-serif;" +
+      "position:fixed;top:0;left:0;right:0;bottom:0;overflow:hidden;" +
+      "display:-webkit-box;display:-webkit-flex;display:flex;" +
+      "-webkit-box-orient:vertical;-webkit-box-direction:normal;" +
+      "-webkit-flex-direction:column;flex-direction:column;" +
+      "-webkit-box-align:center;-webkit-align-items:center;align-items:center;" +
+      "-webkit-box-pack:center;-webkit-justify-content:center;justify-content:center;" +
+      "padding:4vh 4vw;-webkit-box-sizing:border-box;box-sizing:border-box;";
+
+    // Album art — square, ~36vh, soft drop shadow. The <img> sits on
+    // top of a fallback "♪" glyph; onload/onerror swap their visibility
+    // so a missing cover degrades to a tasteful placeholder instead of
+    // a broken-image icon.
+    var artWrap = el("div",
+      "width:36vh;height:36vh;margin-bottom:4vh;" +
+      "background:#1a1a1a;border-radius:1.2vh;overflow:hidden;" +
+      "display:-webkit-box;display:-webkit-flex;display:flex;" +
+      "-webkit-box-align:center;-webkit-align-items:center;align-items:center;" +
+      "-webkit-box-pack:center;-webkit-justify-content:center;justify-content:center;" +
+      "position:relative;" +
+      "-webkit-box-shadow:0 0.8vh 3vh rgba(0,0,0,0.5);" +
+      "box-shadow:0 0.8vh 3vh rgba(0,0,0,0.5);");
+
+    var artFallback = el("div",
+      "font-size:12vh;color:#333;line-height:1;", "♪");
+    var artImg = document.createElement("img");
+    artImg.style.cssText =
+      "width:100%;height:100%;-o-object-fit:cover;object-fit:cover;" +
+      "display:none;position:absolute;top:0;left:0;";
+    artImg.onload = function () {
+      artImg.style.display = "block";
+      artFallback.style.display = "none";
+    };
+    artImg.onerror = function () {
+      artImg.style.display = "none";
+      artFallback.style.display = "";
+    };
+    artWrap.appendChild(artFallback);
+    artWrap.appendChild(artImg);
+
+    var title = el("h1",
+      "font-size:5vh;margin:0 0 1.5vh 0;color:#fff;font-weight:600;" +
+      "max-width:90vw;text-align:center;line-height:1.2;" +
+      "word-wrap:break-word;-ms-word-break:break-all;word-break:break-word;",
+      "—");
+
+    var artist = el("h2",
+      "font-size:3.2vh;margin:0 0 0.8vh 0;color:#bbb;font-weight:normal;" +
+      "max-width:90vw;text-align:center;",
+      "");
+
+    var album = el("h3",
+      "font-size:2.4vh;margin:0 0 4vh 0;color:#666;font-weight:normal;" +
+      "max-width:90vw;text-align:center;",
+      "");
+
+    // Timeline row: current time · progress bar (fills middle) · total
+    var timelineRow = el("div",
+      "display:-webkit-box;display:-webkit-flex;display:flex;" +
+      "-webkit-box-align:center;-webkit-align-items:center;align-items:center;" +
+      "width:60vw;");
+    var timeStyle =
+      "font-size:2vh;color:#888;min-width:7ch;" +
+      "font-variant-numeric:tabular-nums;-moz-font-feature-settings:'tnum';" +
+      "-webkit-font-feature-settings:'tnum';font-feature-settings:'tnum';";
+    var timeCurrent = el("div", timeStyle + "text-align:right;padding-right:1.5vh;", "0:00");
+    var timeTotal = el("div", timeStyle + "text-align:left;padding-left:1.5vh;", "0:00");
+    var progressOuter = el("div",
+      "-webkit-box-flex:1;-webkit-flex:1;flex:1;" +
+      "height:0.6vh;background:#222;border-radius:0.3vh;overflow:hidden;");
+    var progressFill = el("div",
+      "width:0%;height:100%;background:#4caf50;" +
+      "-webkit-transition:width 0.2s linear;transition:width 0.2s linear;");
+    progressOuter.appendChild(progressFill);
+    timelineRow.appendChild(timeCurrent);
+    timelineRow.appendChild(progressOuter);
+    timelineRow.appendChild(timeTotal);
+
+    r.appendChild(artWrap);
+    r.appendChild(title);
+    r.appendChild(artist);
+    r.appendChild(album);
+    r.appendChild(timelineRow);
+
+    // Footer: device name · status · play icon. Pinned to the bottom so
+    // the now-playing card stays centered regardless of footer content.
     var footer = el("div",
-      "position:fixed;bottom:20px;left:0;right:0;font-size:14px;color:#444;",
-      "TV speaker mode — controlled from another device");
-    wrap.appendChild(status);
-    wrap.appendChild(title);
-    wrap.appendChild(artist);
-    wrap.appendChild(playing);
-    r.appendChild(wrap);
+      "position:fixed;bottom:2.5vh;left:0;right:0;" +
+      "display:-webkit-box;display:-webkit-flex;display:flex;" +
+      "-webkit-box-pack:center;-webkit-justify-content:center;justify-content:center;" +
+      "-webkit-box-align:center;-webkit-align-items:center;align-items:center;" +
+      "font-size:1.8vh;color:#666;");
+    var deviceName = el("span", "color:#888;", "");
+    var sep1 = el("span", "padding:0 1.2vh;color:#333;", "·");
+    var status = el("span", "color:#888;", "connecting...");
+    var sep2 = el("span", "padding:0 1.2vh;color:#333;", "·");
+    var playingIcon = el("span", "color:#666;", "⏸");
+    footer.appendChild(deviceName);
+    footer.appendChild(sep1);
+    footer.appendChild(status);
+    footer.appendChild(sep2);
+    footer.appendChild(playingIcon);
     r.appendChild(footer);
+
     return {
       setStatus: function (text, color) {
         setText(status, text);
         status.style.color = color || "#888";
       },
-      setTitle: function (text) { setText(title, text || "-"); },
+      setTitle: function (text) { setText(title, text || "—"); },
       setArtist: function (text) { setText(artist, text || ""); },
+      setAlbum: function (text) { setText(album, text || ""); },
+      setAlbumArt: function (url) {
+        if (url) {
+          // Set src last — onload/onerror swap visibility once the
+          // browser has resolved the image (cached or 404'd).
+          artImg.src = url;
+        } else {
+          artImg.style.display = "none";
+          artImg.src = "";
+          artFallback.style.display = "";
+        }
+      },
+      setProgress: function (currentMs, totalMs) {
+        var c = currentMs || 0;
+        var t = totalMs || 0;
+        setText(timeCurrent, formatTime(c));
+        setText(timeTotal, formatTime(t));
+        var pct = t > 0 ? Math.min(100, Math.max(0, (c / t) * 100)) : 0;
+        progressFill.style.width = pct + "%";
+      },
+      setDeviceName: function (name) { setText(deviceName, name || ""); },
       setPlaying: function (isPlaying) {
-        setText(playing, isPlaying ? "▶ playing" : "⏸ paused");
+        // U+25B6 ▶  /  U+23F8 ⏸ — works on legacy fonts that don't
+        // have the larger play-circle codepoints.
+        setText(playingIcon, isPlaying ? "▶" : "⏸");
+        playingIcon.style.color = isPlaying ? "#4caf50" : "#666";
       }
     };
   }
@@ -478,6 +595,48 @@
     return out;
   }
 
+  function getQueryParam(key) {
+    var search = window.location.search || "";
+    if (search.charAt(0) === "?") search = search.substring(1);
+    var pairs = search.split("&");
+    for (var i = 0; i < pairs.length; i++) {
+      var kv = pairs[i].split("=");
+      if (kv[0] === key) {
+        try { return decodeURIComponent((kv[1] || "").replace(/\+/g, " ")); }
+        catch (e) { return kv[1] || ""; }
+      }
+    }
+    return null;
+  }
+
+  // Device name resolution:
+  //   1. ?name=... URL param (one-time setup — also persists to localStorage)
+  //   2. localStorage from a previous visit
+  //   3. generated default "Old TV (xxxxx)" — randomized each load
+  // Bookmark `https://music.example/?tv&name=Living%20Room` once to claim
+  // a stable label that survives subsequent reloads.
+  function getDeviceName() {
+    var fromUrl = getQueryParam("name");
+    if (fromUrl) {
+      try { window.localStorage && localStorage.setItem("tv-mode.name", fromUrl); }
+      catch (e) {}
+      return fromUrl;
+    }
+    try {
+      var stored = window.localStorage && localStorage.getItem("tv-mode.name");
+      if (stored) return stored;
+    } catch (e) {}
+    return "Old TV (" + makeShortId() + ")";
+  }
+
+  function formatTime(ms) {
+    if (!ms || ms < 0 || isNaN(ms)) return "0:00";
+    var totalSec = Math.floor(ms / 1000);
+    var min = Math.floor(totalSec / 60);
+    var sec = totalSec % 60;
+    return min + ":" + (sec < 10 ? "0" : "") + sec;
+  }
+
   function start() {
     var crossfadeOk = supportsFractionalVolume();
     try { console.log("[tv-mode] crossfade supported:", crossfadeOk); } catch (e) {}
@@ -487,7 +646,8 @@
 
     var lastTrackId = null;
     var lastIsPlaying = false;
-    var deviceLabel = "Old TV (" + makeShortId() + ")";
+    var deviceLabel = getDeviceName();
+    ui.setDeviceName(deviceLabel);
     // Server-assigned device id. Captured from the first state_snapshot
     // when connected via WebSocket; stays null in polling mode (no
     // registration possible). isThisDeviceActive() treats null as
@@ -495,6 +655,13 @@
     // speaker — the only mode where it can do anything useful, since
     // pollers can't appear in active_output_device_ids.
     var myDeviceId = null;
+    // Timeline state. Server pushes position_ms in every state broadcast
+    // (~every 2 s); we interpolate between pushes locally so the
+    // progress bar moves smoothly. currentTrackLengthMs comes from
+    // /api/library/tracks/<id> via fetchTrack on each track change.
+    var currentTrackLengthMs = 0;
+    var serverPositionMs = 0;
+    var serverPositionTimestamp = nowMs();
 
     function isThisDeviceActive(state) {
       if (myDeviceId === null) return true;
@@ -519,22 +686,36 @@
       var crossfadeMs = state.crossfade_ms || 0;
 
       engine.setVolume(vol);
+      // Capture latest server position for the progress interpolator
+      // (runs on its own 250 ms timer below).
+      serverPositionMs = posMs;
+      serverPositionTimestamp = nowMs();
 
       if (trackId !== lastTrackId) {
         if (trackId == null) {
           engine.clear();
-          ui.setTitle("-");
+          ui.setTitle("");
           ui.setArtist("");
+          ui.setAlbum("");
+          ui.setAlbumArt(null);
+          currentTrackLengthMs = 0;
         } else {
           engine.swap(trackId, crossfadeMs, isPlaying);
           ui.setTitle("Track " + trackId);
           ui.setArtist("");
+          ui.setAlbum("");
+          // Backend serves /cover with the right MIME or 404s — the
+            // <img> onerror handler falls back to the placeholder glyph.
+          ui.setAlbumArt("/api/library/tracks/" + trackId + "/cover");
+          currentTrackLengthMs = 0;
           fetchTrack(trackId, function (err, t) {
             if (err || !t) return;
             ui.setTitle(t.display_title || t.title || ("Track " + trackId));
-            var line = t.artist || "";
-            if (t.album) line = line ? (line + " — " + t.album) : t.album;
-            ui.setArtist(line);
+            ui.setArtist(t.artist || "");
+            ui.setAlbum(t.album || "");
+            if (typeof t.length_s === "number" && t.length_s > 0) {
+              currentTrackLengthMs = Math.floor(t.length_s * 1000);
+            }
           });
         }
         lastTrackId = trackId;
@@ -548,6 +729,27 @@
       }
       ui.setPlaying(isPlaying);
     }
+
+    // Progress bar interpolator. Server pushes position only on state
+    // changes (~every 2 s + at every mutation), so the timeline would
+    // otherwise jump in 2 s steps. Between pushes we extrapolate from
+    // the last server position using elapsed wall-clock time, clipped
+    // to the track length. Runs at 4 Hz — visually smooth, negligible
+    // CPU even on a 2015 TV browser.
+    setInterval(function () {
+      if (!lastTrackId) {
+        ui.setProgress(0, 0);
+        return;
+      }
+      var displayMs = serverPositionMs;
+      if (lastIsPlaying) {
+        displayMs += (nowMs() - serverPositionTimestamp);
+      }
+      if (currentTrackLengthMs > 0 && displayMs > currentTrackLengthMs) {
+        displayMs = currentTrackLengthMs;
+      }
+      ui.setProgress(displayMs, currentTrackLengthMs);
+    }, 250);
 
     var wsScheme = (window.location.protocol === "https:") ? "wss://" : "ws://";
     var wsUrl = wsScheme + window.location.host + "/api/ws";
@@ -602,15 +804,40 @@
 
   // ---- Bootstrap --------------------------------------------------------
 
-  whenReady(function () {
-    var delay = forced() ? 0 : 500;
-    setTimeout(function () {
-      if (!forced() && reactMounted()) return;
-      if (typeof WebSocket === "undefined") {
-        renderUnsupported("WebSocket support is required.");
+  // ES modules were added to Chrome v61, Firefox 60, Safari 11. Browsers
+  // missing this support can't load the SPA's module entry script and
+  // need tv-mode immediately, with no wait. Modern browsers get up to
+  // 4 s to mount React before tv-mode concludes the SPA is broken and
+  // takes over — fixes the F5 false-positive where a slow page reload
+  // got kidnapped after 500 ms.
+  function browserSupportsEsModules() {
+    try { return "noModule" in document.createElement("script"); }
+    catch (e) { return false; }
+  }
+
+  function activateTvMode() {
+    if (typeof WebSocket === "undefined") {
+      renderUnsupported("WebSocket support is required.");
+      return;
+    }
+    renderStartScreen(function () { start(); });
+  }
+
+  function pollForSpa(timeoutMs) {
+    var startTime = nowMs();
+    (function tick() {
+      if (reactMounted()) return;            // SPA is up, stay out of the way
+      if (nowMs() - startTime >= timeoutMs) {
+        activateTvMode();
         return;
       }
-      renderStartScreen(function () { start(); });
-    }, delay);
+      setTimeout(tick, 100);
+    })();
+  }
+
+  whenReady(function () {
+    if (forced())                       { activateTvMode(); return; }
+    if (!browserSupportsEsModules())    { activateTvMode(); return; }
+    pollForSpa(4000);
   });
 })();
