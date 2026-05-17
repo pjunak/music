@@ -488,13 +488,33 @@
     var lastTrackId = null;
     var lastIsPlaying = false;
     var deviceLabel = "Old TV (" + makeShortId() + ")";
+    // Server-assigned device id. Captured from the first state_snapshot
+    // when connected via WebSocket; stays null in polling mode (no
+    // registration possible). isThisDeviceActive() treats null as
+    // "always play" so the polling fallback keeps acting as a passive
+    // speaker — the only mode where it can do anything useful, since
+    // pollers can't appear in active_output_device_ids.
+    var myDeviceId = null;
+
+    function isThisDeviceActive(state) {
+      if (myDeviceId === null) return true;
+      var outputs = state.active_output_device_ids || [];
+      for (var i = 0; i < outputs.length; i++) {
+        if (outputs[i] === myDeviceId) return true;
+      }
+      return false;
+    }
 
     function applyState(state) {
       if (!state) return;
       var amb = state.ambient || {};
       var trackId = (amb.current_track_id == null) ? null : amb.current_track_id;
       var posMs = amb.position_ms || 0;
-      var isPlaying = !!state.is_playing;
+      // Gate playback on this device being a selected output (when
+      // registered). The TV otherwise behaves as a passive subscriber
+      // that wouldn't show up in the controller UI's output picker —
+      // see audio_output capability in the WS register call below.
+      var isPlaying = !!state.is_playing && isThisDeviceActive(state);
       var vol = (typeof state.volume === "number") ? state.volume : 1;
       var crossfadeMs = state.crossfade_ms || 0;
 
@@ -537,6 +557,12 @@
     // page), switch to polling /api/sync/state. The 150ms delay lets the
     // operator see the "switching..." status transition on the TV screen.
     function startPolling() {
+      // Drop the WS-assigned device id — polling can't keep a registered
+      // device alive, so the server has already pruned it. Clearing this
+      // makes isThisDeviceActive() fall back to "always play" (passive
+      // speaker mode), the only behaviour that's useful when we can't
+      // be selected as an output.
+      myDeviceId = null;
       ui.setStatus("WebSocket blocked — switching to HTTP polling...", "#ffb74d");
       setTimeout(function () {
         makePollingClient({
@@ -552,11 +578,21 @@
     makeWsClient(wsUrl, {
       onStatus: ui.setStatus,
       onOpen: function (send) {
-        send({ type: "register", name: deviceLabel, capabilities: [] });
+        // Advertise audio_output so the controller's UI lists this TV
+        // in its output picker. Without it the device registers but is
+        // invisible in the picker, and the user can't toggle it.
+        send({ type: "register", name: deviceLabel, capabilities: ["audio_output"] });
       },
       onMessage: function (msg) {
         if (!msg || !msg.type) return;
-        if (msg.type === "state_snapshot" || msg.type === "state_changed") {
+        if (msg.type === "state_snapshot") {
+          // Server's assigned id for this connection — used by
+          // isThisDeviceActive() to check active_output_device_ids.
+          if (typeof msg.your_device_id === "string") {
+            myDeviceId = msg.your_device_id;
+          }
+          applyState(msg.state);
+        } else if (msg.type === "state_changed") {
           applyState(msg.state);
         }
       },
