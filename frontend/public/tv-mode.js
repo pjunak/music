@@ -293,20 +293,35 @@
     var ws = null;
     var backoff = 1000;
     var stopped = false;
+    // Attempts since the last successful onopen (or since startup). Reset
+    // to 0 every time a connection opens. When it crosses GIVE_UP_AFTER
+    // without ever opening, WS is declared dead for this session and
+    // handlers.onGiveUp() fires so the caller can switch to a fallback
+    // (HTTP polling). 2 attempts is enough signal on a TV with a
+    // permanent WS-vs-cert quirk; flipping early is harmless because the
+    // polling fallback works in every scenario, including transient
+    // network blips during reconnection.
+    var consecutiveAttemptsWithoutOpen = 0;
+    var GIVE_UP_AFTER = 2;
 
     function connect() {
       if (stopped) return;
-      handlers.onStatus("connecting...", "#888");
+      consecutiveAttemptsWithoutOpen += 1;
+      handlers.onStatus(
+        "connecting via WebSocket... (attempt " + consecutiveAttemptsWithoutOpen + ")",
+        "#888"
+      );
       try {
         ws = new WebSocket(url);
       } catch (e) {
-        handlers.onStatus("connection failed", "#ff7373");
-        scheduleReconnect();
+        handlers.onStatus("WebSocket constructor failed", "#ff7373");
+        scheduleReconnectOrGiveUp();
         return;
       }
       ws.onopen = function () {
+        consecutiveAttemptsWithoutOpen = 0;
         backoff = 1000;
-        handlers.onStatus("connected", "#4caf50");
+        handlers.onStatus("connected via WebSocket", "#4caf50");
         handlers.onOpen(send);
       };
       ws.onmessage = function (event) {
@@ -318,15 +333,22 @@
       ws.onerror = function () { /* onclose drives reconnect */ };
       ws.onclose = function () {
         ws = null;
-        if (!stopped) {
-          handlers.onStatus("disconnected — retrying", "#ff7373");
-          scheduleReconnect();
-        }
+        if (stopped) return;
+        scheduleReconnectOrGiveUp();
       };
     }
 
-    function scheduleReconnect() {
+    function scheduleReconnectOrGiveUp() {
       if (stopped) return;
+      if (consecutiveAttemptsWithoutOpen >= GIVE_UP_AFTER) {
+        stopped = true;
+        if (typeof handlers.onGiveUp === "function") handlers.onGiveUp();
+        return;
+      }
+      handlers.onStatus(
+        "WebSocket disconnected — retrying (attempt " + (consecutiveAttemptsWithoutOpen + 1) + ")",
+        "#ff7373"
+      );
       var wait = backoff;
       backoff = Math.min(backoff * 2, 30000);
       setTimeout(connect, wait);
@@ -345,6 +367,104 @@
 
     connect();
     return { send: send, close: close };
+  }
+
+  // ---- HTTP polling client (WebSocket fallback) -------------------------
+  //
+  // Fallback for browsers that loaded the page over HTTPS but can't open
+  // a wss:// WebSocket — the classic case is an old smart-TV browser that
+  // honors the user's "proceed anyway" cert exception for the HTML page
+  // and its subresources but re-validates the cert independently for
+  // WebSocket handshakes and silently rejects it. Plain XHR inherits the
+  // page-level exception and works, so we poll the same PlayerState that
+  // the WS would have pushed as state_snapshot / state_changed.
+  //
+  // Read-only: a polling TV doesn't register as a device. tv-mode audio
+  // is driven entirely by state.ambient, which is global, so playback
+  // works without device registration. The TV simply won't appear in the
+  // controller's output list — acceptable trade-off for an emergency
+  // fallback path.
+
+  function makePollingClient(handlers) {
+    var stopped = false;
+    var pollTimer = null;
+    var statusTimer = null;
+    var lastSuccessAt = 0;
+    var errorCount = 0;
+    var inFlight = false;
+    var hardFailed = false;
+    var POLL_INTERVAL_MS = 2000;
+    var ERROR_THRESHOLD = 3;
+
+    function poll() {
+      if (stopped || inFlight) return;
+      inFlight = true;
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/api/sync/state", true);
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState !== 4) return;
+          inFlight = false;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            var state = null;
+            try { state = JSON.parse(xhr.responseText); }
+            catch (e) { registerError(); return; }
+            lastSuccessAt = nowMs();
+            errorCount = 0;
+            hardFailed = false;
+            try { handlers.onState(state); } catch (e) {}
+          } else {
+            registerError();
+          }
+        };
+        xhr.send(null);
+      } catch (e) {
+        inFlight = false;
+        registerError();
+      }
+    }
+
+    function registerError() {
+      errorCount += 1;
+      if (errorCount >= ERROR_THRESHOLD && !hardFailed) {
+        hardFailed = true;
+        if (typeof handlers.onHardFailure === "function") handlers.onHardFailure();
+      }
+    }
+
+    function updateStatus() {
+      if (stopped || hardFailed) return;
+      if (lastSuccessAt === 0) {
+        handlers.onStatus("polling — first sync...", "#ffb74d");
+        return;
+      }
+      var since = nowMs() - lastSuccessAt;
+      if (since < 3000) {
+        handlers.onStatus("polling (every 2s)", "#4caf50");
+      } else if (since < 15000) {
+        handlers.onStatus(
+          "polling — last sync " + Math.floor(since / 1000) + "s ago",
+          "#ffb74d"
+        );
+      } else {
+        handlers.onStatus(
+          "polling — last sync " + Math.floor(since / 1000) + "s ago",
+          "#ff7373"
+        );
+      }
+    }
+
+    function close() {
+      stopped = true;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+    }
+
+    poll(); // kick off immediately so the user sees data within ~1s
+    pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+    statusTimer = setInterval(updateStatus, 1000);
+
+    return { close: close };
   }
 
   // ---- Main orchestration -----------------------------------------------
@@ -411,6 +531,24 @@
 
     var wsScheme = (window.location.protocol === "https:") ? "wss://" : "ws://";
     var wsUrl = wsScheme + window.location.host + "/api/ws";
+
+    // Fallback path: when makeWsClient gives up (e.g. the TV browser
+    // refuses the wss:// cert even though the user accepted it for the
+    // page), switch to polling /api/sync/state. The 150ms delay lets the
+    // operator see the "switching..." status transition on the TV screen.
+    function startPolling() {
+      ui.setStatus("WebSocket blocked — switching to HTTP polling...", "#ffb74d");
+      setTimeout(function () {
+        makePollingClient({
+          onState: applyState,
+          onStatus: ui.setStatus,
+          onHardFailure: function () {
+            ui.setStatus("Cannot reach server — check network / cert", "#ff7373");
+          }
+        });
+      }, 150);
+    }
+
     makeWsClient(wsUrl, {
       onStatus: ui.setStatus,
       onOpen: function (send) {
@@ -421,7 +559,8 @@
         if (msg.type === "state_snapshot" || msg.type === "state_changed") {
           applyState(msg.state);
         }
-      }
+      },
+      onGiveUp: startPolling
     });
   }
 

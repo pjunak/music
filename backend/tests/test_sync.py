@@ -1503,3 +1503,56 @@ def test_fire_sfx_broadcasts_to_audio_output_devices(client: TestClient) -> None
         next_msg = controller.receive_json()
         assert next_msg["type"] == "state_changed"
         assert next_msg["state"]["volume"] == 0.42
+
+
+# --- HTTP polling fallback (/api/sync/state) -------------------------------
+
+
+def test_http_state_returns_snapshot_for_guest(client: TestClient) -> None:
+    """The HTTP fallback mirrors the WS endpoint's guest-friendly auth
+    contract — a logged-out TV bookmark can read state and play whatever
+    the controller queued up. This is the whole point of the endpoint:
+    smart-TV browsers that can't establish a wss:// handshake (cert
+    re-validation refuses the user's page-level exception) hit this via
+    XHR instead. Symmetry with `test_ws_accepts_guest_connection_read_only`."""
+    response = client.get("/api/sync/state")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    # Same shape as the WS state_snapshot.state — schema_revision and
+    # the volume default prove we got a real PlayerState, not an error
+    # page rewritten to JSON.
+    assert "revision" in payload
+    assert "volume" in payload
+    assert "ambient" in payload
+
+
+def test_http_state_returns_snapshot_for_authed_user(client: TestClient) -> None:
+    """Same endpoint, with a session cookie. Should return the same shape
+    as the guest path — OptionalUser doesn't distinguish in the response."""
+    _login(client)
+    response = client.get("/api/sync/state")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert "revision" in payload
+    assert "ambient" in payload
+
+
+def test_http_state_reflects_ws_mutations(
+    client: TestClient, seeded_track_id: int
+) -> None:
+    """The HTTP endpoint reads the same in-memory StateMachine the WS
+    writes to, so a mutation pushed over WS is immediately visible via
+    GET /api/sync/state. This is what makes the polling fallback work:
+    the TV polls every 2s and sees state changes driven by the controller
+    on another device."""
+    with _ws_authed(client) as ws:
+        ws.receive_json()  # initial snapshot
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
+        ws.receive_json()  # state_changed broadcast
+
+        # Read via HTTP — should see the same current_track_id.
+        response = client.get("/api/sync/state")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ambient"]["current_track_id"] == seeded_track_id
+        assert payload["is_playing"] is True

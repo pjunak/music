@@ -23,6 +23,7 @@ from app.api import (
     playlists,
     presets,
     sfx,
+    sync,
 )
 from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
@@ -243,6 +244,7 @@ def create_app() -> FastAPI:
     app.include_router(sfx.router)
     app.include_router(diagnostics.router)
     app.include_router(admin.router)
+    app.include_router(sync.router)
     app.include_router(sync_router.router)
 
     # Mount the built frontend SPA last so API routes win. Falls back to
