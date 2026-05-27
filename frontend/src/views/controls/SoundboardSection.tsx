@@ -104,9 +104,12 @@ export function SoundboardSection() {
       </div>
 
       {active === null ? (
-        <p className="muted small">Select a soundboard above to see its items.</p>
+        <EmptyState>Pick a soundboard above to see its items.</EmptyState>
       ) : active.categories.length === 0 ? (
-        <p className="muted small">Soundboard <code>{active.id}</code> has no items.</p>
+        <EmptyState>
+          Soundboard <code>{active.id}</code> has no items yet. Add some from{" "}
+          <strong>Authoring → Soundboards</strong>.
+        </EmptyState>
       ) : (
         <div className="soundboard-categories">
           {active.categories.map((cat) => (

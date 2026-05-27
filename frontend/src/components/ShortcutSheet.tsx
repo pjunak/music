@@ -25,15 +25,10 @@ const GLOBAL: Shortcut[] = [
 ];
 
 const TABS: Shortcut[] = [
-  { keys: ["1"], label: "Player" },
-  { keys: ["2"], label: "Library" },
-  { keys: ["3"], label: "Metadata" },
-  { keys: ["4"], label: "Playlists" },
-  { keys: ["5"], label: "Soundboards" },
-  { keys: ["6"], label: "Modes" },
-  { keys: ["7"], label: "EQ Presets" },
-  { keys: ["8"], label: "Controls" },
-  { keys: ["9"], label: "Settings" },
+  { keys: ["1"], label: "Console" },
+  { keys: ["2"], label: "Library (Files / Tags)" },
+  { keys: ["3"], label: "Authoring (Playlists / Soundboards / Modes / Presets)" },
+  { keys: ["4"], label: "Settings" },
 ];
 
 /** Sheet listing every keyboard shortcut the operator can hit.
@@ -115,7 +110,7 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
                 {activeModeId === null
                   ? "Pick a mode to see SFX hotkeys."
                   : activeSoundboardId === null
-                    ? "Pick a soundboard from the Controls tab to see its hotkeys."
+                    ? "Pick a soundboard from the Console tab to see its hotkeys."
                     : "Active soundboard has no SFX with hotkeys."}
               </p>
             ) : (

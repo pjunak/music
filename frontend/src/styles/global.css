@@ -376,6 +376,50 @@ kbd,
   font-size: 0.85rem;
   white-space: nowrap;
 }
+
+/* Header mode picker — replaces the old static context-badge with a real
+ * <select>, so the operator can switch modes from any tab. Styled to read
+ * as part of the header chrome (rounded pill) rather than a prompt-y form
+ * control. Scene name (when active) rides next to it as read-only status. */
+.header-mode-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.header-mode-picker > select {
+  font: inherit;
+  padding: 0.1rem 0.3rem;
+  min-width: 8ch;
+  max-width: 16ch;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--accent-strong);
+  font-weight: 600;
+  /* Native dropdown arrow on Win/Linux looks heavy here; let the chrome
+   * carry the affordance instead. Keep it on macOS where the system
+   * arrow blends with the system control style. */
+}
+.header-mode-picker > select:hover {
+  border-color: var(--border-strong);
+}
+.header-mode-picker > select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.header-scene-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.header-scene-label strong {
+  color: var(--accent-strong);
+}
 .tabs-placeholder {
   flex: 1;
 }
@@ -546,6 +590,59 @@ kbd,
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* --- section-nav (Library / Authoring sub-tabs) ---------------------- */
+
+/* Two-level IA: top tabs are pills in the header (Console / Library /
+ * Authoring / Settings), sub-tabs are an underline strip rendered as the
+ * first row of the section's main area. The visual difference is
+ * deliberate — pill at the top, underline below — so the operator reads
+ * them as nested, not as a second parallel nav. */
+.section-nav-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.section-nav {
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.3rem 1rem 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.section-nav::-webkit-scrollbar {
+  display: none;
+}
+.section-nav-tab {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 0.5rem 0.9rem;
+  font-weight: 500;
+  font-size: 0.9rem;
+  border-bottom: 2px solid transparent;
+  /* Overlap the strip's bottom border so the active-tab underline sits
+   * flush with the divider line rather than floating above it. */
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color var(--transition), border-color var(--transition);
+}
+.section-nav-tab:hover {
+  color: var(--fg);
+}
+.section-nav-tab-active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
+}
+.section-nav-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* --- player view --- */
@@ -869,6 +966,20 @@ kbd,
 .track-table tr.track-row:hover {
   background: rgba(255, 255, 255, 0.04);
 }
+/* Draggable track rows: extend the playing-row stripe pattern to a softer
+ * version on hover so the operator can tell at a glance which rows accept
+ * drag-to-folder. Avoids the "drag-drop is invisible until you grab"
+ * complaint from the original critique. */
+.track-table tr.track-row[draggable="true"] {
+  cursor: grab;
+}
+.track-table tr.track-row[draggable="true"]:active {
+  cursor: grabbing;
+}
+.track-table tr.track-row[draggable="true"]:hover td:first-child {
+  border-left: 2px solid var(--accent-soft);
+  padding-left: calc(0.6rem - 2px);
+}
 .track-table tr.track-row.playing {
   background: var(--accent-tint);
 }
@@ -1013,29 +1124,42 @@ kbd,
   flex-direction: column;
   gap: 0.75rem;
 }
-.controls-strip {
-  display: grid;
-  grid-template-columns: minmax(180px, auto) 1fr minmax(220px, 320px);
-  gap: 1rem;
+/* First-run welcome on Console: only renders when no tracks are indexed
+ * yet. Visually a `.surface-card` with the action button right there —
+ * shortens the first-time setup loop from "Console → empty grid → why is
+ * this empty? → maybe Library?" to a single click. */
+.first-run-welcome {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.first-run-welcome h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+}
+.first-run-welcome p {
+  margin: 0 0 0.6rem;
+}
+
+/* Slim "which devices are outputting audio" bar above the Console grid.
+ * Replaces the old controls-strip (which also carried mode + master volume
+ * — both moved out: mode to the header, master volume already in the
+ * NowPlayingBar). What's left is the multi-device picker, which is still
+ * a live concern (fanning audio out to multiple TVs mid-session). */
+.outputs-bar {
+  display: flex;
   align-items: center;
-  padding: 0.6rem 1rem;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.9rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.controls-strip-section {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.controls-strip-label {
+.outputs-bar-label {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.7rem;
   color: var(--muted);
-}
-.controls-strip select {
-  min-width: 12ch;
 }
 .output-picker-options.inline {
   flex-direction: row;
@@ -1542,6 +1666,26 @@ kbd,
   flex-direction: column;
   gap: 0.25rem;
 }
+/* Draggable list rows (SFX library, TrackBrowser): make the affordance
+ * visible *before* the user starts dragging, since the existing cursor
+ * change is the only hint and easy to miss. On hover, an accent stripe
+ * appears on the left edge — non-disruptive, but communicates "this row
+ * is movable". The `[draggable]` attribute selector keeps explicitly-
+ * disabled rows (rare; track-browser sets draggable="false" when no
+ * payload generator is supplied) from advertising movability they don't
+ * actually have. */
+[draggable="true"].sfx-file-row,
+[draggable="true"].track-browser-row {
+  border-left-width: 3px;
+  padding-left: calc(0.6rem - 2px);
+  border-left-color: var(--border);
+  transition: border-left-color var(--transition);
+}
+[draggable="true"].sfx-file-row:hover,
+[draggable="true"].track-browser-row:hover {
+  border-left-color: var(--accent);
+}
+
 .sfx-file-row {
   display: grid;
   grid-template-columns: 1fr auto auto auto;
@@ -2949,9 +3093,11 @@ input.volume-slider::-moz-range-thumb {
   .controls-grid .surface-card.span-tall {
     grid-row: auto;
   }
-  .controls-strip {
-    grid-template-columns: 1fr;
-    gap: 0.4rem;
+  /* Outputs bar wraps naturally via flex, but tighten padding on narrow
+   * screens so the surface-card grid below gets more vertical room. */
+  .outputs-bar {
+    padding: 0.4rem 0.6rem;
+    gap: 0.5rem;
   }
   .two-pane-view {
     grid-template-columns: 1fr;
@@ -2980,6 +3126,19 @@ input.volume-slider::-moz-range-thumb {
 }
 
 @media (max-width: 700px) {
+  /* Section-nav sub-tabs at narrow widths: tighter padding so the 4
+   * Authoring sub-tabs (Playlists / Soundboards / Modes / Presets) come
+   * closer to fitting in the strip without forcing horizontal scroll.
+   * Falls back to horizontal scroll cleanly when they still overflow. */
+  .section-nav {
+    padding: 0.3rem 0.6rem 0;
+    gap: 0.1rem;
+  }
+  .section-nav-tab {
+    padding: 0.45rem 0.6rem;
+    font-size: 0.85rem;
+  }
+
   /* Header: device name compact, tabs hide → hamburger shows.
    * The hamburger trigger sits inline with the device-name input + ws
    * status pill; the right-hand context badge wraps below if active. */
@@ -3019,9 +3178,23 @@ input.volume-slider::-moz-range-thumb {
     font-size: 0.78rem;
     padding: 0.15rem 0.4rem;
   }
+  /* Mode picker on mobile: drop the "mode" label and the scene rider so
+   * the select itself fits in a tight header without pushing other items
+   * to a second row. The select's current value still shows the active
+   * mode at a glance; switching scenes is a Console-tab action anyway. */
+  .header-mode-picker > .muted.small,
+  .header-mode-picker .header-scene-label {
+    display: none;
+  }
+  .header-mode-picker {
+    padding: 0.1rem 0.4rem;
+  }
+  .header-mode-picker > select {
+    max-width: 10ch;
+  }
 
-  /* Player view: tighter padding, smaller title so long names don't push
-   * the queue/history below the fold. */
+  /* TV (was Player) view: tighter padding, smaller title so long names
+   * don't push the queue/history below the fold. */
   .player-view {
     padding: 1rem 0.9rem;
   }
@@ -3357,7 +3530,9 @@ input.volume-slider::-moz-range-thumb {
   .preset-chip,
   .loop-toggle,
   .library-root-toggle button,
-  .header-help {
+  .header-help,
+  .section-nav-tab,
+  .breadcrumb-link {
     min-height: 44px;
   }
   /* Header help button keeps its circular shape but grows to a real touch

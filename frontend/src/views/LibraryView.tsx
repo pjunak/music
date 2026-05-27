@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { EmptyState } from "@/components/EmptyState";
 import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
@@ -511,9 +512,10 @@ function SfxBrowser({
       error={error}
     >
       {files.length === 0 ? (
-          <p className="muted small">
-            No SFX files in this folder yet. Drop some above, or pick a different folder.
-          </p>
+          <EmptyState title="No SFX files in this folder">
+            Drop audio files into the zone above, or pick a different folder
+            from the tree on the left.
+          </EmptyState>
         ) : (
           <ul className="sfx-file-list">
             {files.map((f) => (
@@ -786,7 +788,12 @@ function TrackTable({
   const [editing, setEditing] = useState<Track | null>(null);
 
   if (tracks.length === 0) {
-    return <p className="muted small">No tracks here yet.</p>;
+    return (
+      <EmptyState title="No tracks in this folder">
+        Drop audio files into the zone above, or pick a different folder
+        from the tree on the left.
+      </EmptyState>
+    );
   }
 
   function play(t: Track) {

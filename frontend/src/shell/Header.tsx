@@ -8,6 +8,7 @@ import { useAuthStore } from "@/core/auth";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeSummary } from "@/core/types";
 import { useUiTransient } from "@/core/uiTransient";
+import { wsClient } from "@/core/ws";
 
 import { Tabs } from "./Tabs";
 
@@ -28,8 +29,14 @@ export function Header() {
     modesApi.list().then(setModes).catch(() => setModes([]));
   }, [isGuest]);
 
-  const activeMode = modes.find((m) => m.id === activeModeId) ?? null;
   const openShortcutSheet = useUiTransient((s) => s.setShortcutSheetOpen);
+
+  function changeMode(modeId: string) {
+    wsClient.send({
+      type: "set_active_mode",
+      mode_id: modeId === "" ? null : modeId,
+    });
+  }
 
   return (
     <header className="app-header">
@@ -43,24 +50,37 @@ export function Header() {
           <span className="ws-status-text">{wsStatus}</span>
         </span>
       </div>
-      {/* Guests see only the Player route. Hiding the tab strip prevents
+      {/* Guests see only the TV route. Hiding the tab strip prevents
           confusion where clicking "Library" just bounces them to /login. */}
       {isGuest ? <span className="tabs-placeholder" /> : <Tabs />}
       <div className="app-header-right">
-        {activeModeId !== null ? (
-          <span className="context-badge" title="Active mode / scene">
+        {/* Mode picker: lives in the header so it's reachable from any
+            tab without jumping to Console. Read-only scene name follows
+            (scenes are picked from the Console's Scenes card). Authed-only
+            because /api/modes 401s for guests; guests never need to pick a
+            mode anyway since they're on the read-only TV view. */}
+        {!isGuest ? (
+          <label className="header-mode-picker" title="Active mode">
             <span className="muted small">mode</span>
-            <strong>
-              {activeMode?.name ?? activeModeId}
-            </strong>
+            <select
+              value={activeModeId ?? ""}
+              onChange={(e) => changeMode(e.target.value)}
+              aria-label="Active mode"
+            >
+              <option value="">— none —</option>
+              {modes.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
             {activeSceneId !== null ? (
-              <>
-                <span className="muted small">·</span>
-                <span className="muted small">scene</span>
+              <span className="header-scene-label" title="Active scene">
+                <span className="muted small">· scene</span>
                 <strong>{activeSceneId}</strong>
-              </>
+              </span>
             ) : null}
-          </span>
+          </label>
         ) : null}
         <button
           type="button"

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/EmptyState";
 import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
@@ -39,7 +40,11 @@ export function PresetsSection() {
 
   if (error !== null) return <p className="error small">{error}</p>;
   if (presets.length === 0) {
-    return <p className="muted small">No presets installed under PRESETS_DIR.</p>;
+    return (
+      <EmptyState>
+        No presets installed. Add one from <strong>Authoring → Presets</strong>.
+      </EmptyState>
+    );
   }
 
   return (

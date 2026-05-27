@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 import { IconButton } from "@/components/IconButton";
 import {
@@ -94,17 +94,54 @@ export function NowPlayingBar() {
     wsClient.send({ type: "ambient_skip_prev" });
   }
 
+  function seekTo(ms: number) {
+    const clamped = Math.max(0, Math.min(totalMs, Math.round(ms)));
+    if (interruptId !== null) {
+      wsClient.send({ type: "interrupt_seek", position_ms: clamped });
+    } else {
+      wsClient.send({ type: "ambient_seek", position_ms: clamped });
+    }
+  }
+
   function onSeek(e: MouseEvent<HTMLDivElement>) {
     if (totalMs <= 0) return;
     const el = progressRef.current;
     if (el === null) return;
     const rect = el.getBoundingClientRect();
     const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const seekMs = Math.round(fraction * totalMs);
-    if (interruptId !== null) {
-      wsClient.send({ type: "interrupt_seek", position_ms: seekMs });
-    } else {
-      wsClient.send({ type: "ambient_seek", position_ms: seekMs });
+    seekTo(fraction * totalMs);
+  }
+
+  /** Keyboard handler for the seek bar when it has focus. Mirrors the
+   *  HTML5 range-slider conventions:
+   *    ←/→         : ±5s
+   *    Shift+←/→   : ±30s
+   *    Home / End  : jump to start / end
+   *
+   *  Important: e.preventDefault() blocks the global ←/→ shortcut from
+   *  ALSO firing prev/next, but only for React's synthetic dispatch.
+   *  The native window-level keydown listener in useKeyboardShortcuts is
+   *  separately guarded by the role="slider" check in isInteractiveTarget. */
+  function onSeekKey(e: KeyboardEvent<HTMLDivElement>) {
+    if (totalMs <= 0) return;
+    const big = e.shiftKey ? 30000 : 5000;
+    switch (e.key) {
+      case "ArrowLeft":
+        e.preventDefault();
+        seekTo(positionMs - big);
+        return;
+      case "ArrowRight":
+        e.preventDefault();
+        seekTo(positionMs + big);
+        return;
+      case "Home":
+        e.preventDefault();
+        seekTo(0);
+        return;
+      case "End":
+        e.preventDefault();
+        seekTo(totalMs);
+        return;
     }
   }
 
@@ -193,13 +230,14 @@ export function NowPlayingBar() {
           ref={progressRef}
           className={`seek-bar seek-bar-large${seekable ? "" : " seek-bar-disabled"}`}
           onClick={seekable ? onSeek : undefined}
+          onKeyDown={seekable ? onSeekKey : undefined}
           role={seekable ? "slider" : undefined}
           aria-label={seekable ? "Seek" : undefined}
           aria-valuemin={0}
           aria-valuemax={totalMs}
           aria-valuenow={Math.min(positionMs, totalMs)}
           tabIndex={seekable ? 0 : -1}
-          title={seekable ? "Click to seek" : undefined}
+          title={seekable ? "Click to seek; arrow keys when focused (Shift = 30s)" : undefined}
         >
           <div
             className="seek-bar-fill"
