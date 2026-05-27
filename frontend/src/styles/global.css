@@ -383,6 +383,22 @@ kbd,
   text-decoration: none;
   font-size: 0.9rem;
 }
+/* Header "?" button — quiet by default so it doesn't compete with the
+ * tabs / mode badge, but discoverable on hover. */
+.header-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--muted);
+  font-size: 1.15rem;
+  border-radius: 999px;
+}
+.header-help:hover:not(:disabled) {
+  color: var(--fg);
+}
 .context-badge strong {
   font-weight: 600;
   color: var(--accent-strong);
@@ -1443,6 +1459,13 @@ kbd,
   font-size: 0.9rem;
   color: var(--muted);
 }
+/* Leaf folder spacer — same width as the chevron so labels line up across
+ * siblings. Non-interactive (no border, no hover state). */
+.tree-toggle-spacer {
+  background: transparent;
+  border: none;
+  pointer-events: none;
+}
 .tree-label {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1922,17 +1945,104 @@ kbd,
   color: var(--muted);
 }
 
+/* --- shortcut sheet (Header "?" / Shift+/) ---------------------------- */
+
+.shortcut-sheet {
+  width: min(560px, 100%);
+}
+.shortcut-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.shortcut-section h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.shortcut-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(6ch, auto) 1fr;
+  gap: 0.3rem 0.7rem;
+  align-items: center;
+}
+.shortcut-row {
+  display: contents;
+}
+.shortcut-row dt {
+  display: inline-flex;
+  gap: 0.2rem;
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+.shortcut-row dd {
+  margin: 0;
+}
+
+/* --- breadcrumb (Modes editors and elsewhere) ------------------------ */
+
+.breadcrumb {
+  font-size: 0.85rem;
+  margin: 0 0 0.6rem;
+  min-height: 1.6em;
+}
+.breadcrumb ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem 0.3rem;
+}
+.breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.breadcrumb-link {
+  padding: 0.1rem 0.35rem;
+  font-size: inherit;
+  color: var(--accent);
+  background: transparent;
+  border-color: transparent;
+}
+.breadcrumb-link:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: transparent;
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+.breadcrumb-text {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  max-width: 24ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+.breadcrumb-current {
+  color: var(--fg);
+  font-weight: 500;
+}
+.breadcrumb-sep {
+  color: var(--muted);
+  font-size: 0.9em;
+  user-select: none;
+}
+
 /* --- soundboard editor --- */
 
 .soundboard-editor {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
-}
-.back-link {
-  align-self: flex-start;
-  font-size: 0.85rem;
-  margin-bottom: 0.3rem;
 }
 .soundboard-categories {
   list-style: none;
@@ -2186,6 +2296,21 @@ kbd,
 .modal-body p {
   margin: 0;
 }
+.modal-body > * + * {
+  margin-top: 0.7rem;
+}
+
+/* Input-dialog body: label + text input stacked, error message slot. The
+ * dialog itself reuses .modal / .modal-header / .modal-actions; this rule
+ * only handles the field's internal layout. */
+.input-dialog .input-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.input-dialog .input-dialog-field input {
+  font-size: 1rem;
+}
 
 /* --- settings view --- */
 
@@ -2303,9 +2428,13 @@ kbd,
  *
  * State colour rules — designed so the operator can read the pill across
  * the room:
- *   - ON (currently outputting):    green border + green-soft bg
- *   - OFF (could output, isn't):    red  border + red-soft   bg  (clearly says "audio is muted")
- *   - Idle (no capability / connecting): muted gray, non-interactive */
+ *   - ON (currently outputting):    green border + green-soft bg (action signal)
+ *   - OFF (could output, isn't):    neutral surface — a valid resting state, not an error
+ *   - Idle (no capability / connecting): same neutral, but non-interactive (no hover)
+ *
+ * Red is reserved for the "armed" state (clicked-once-while-on, will silence on
+ * the next click) — true caution, where the colour change actually means
+ * something. */
 .output-toggle {
   display: inline-flex;
   align-items: center;
@@ -2337,31 +2466,32 @@ kbd,
   border-color: var(--ok);
 }
 /* Armed state: a click while audio output is ON has primed the toggle.
- * Flip the colour from green to warn so the operator knows the next
- * click will silence them. The 2-second auto-reset timer ticks down via
- * a CSS animation so they can see how long they have left. */
+ * Flip to danger-red so the operator knows the next click will silence
+ * them. The 2-second auto-reset timer ticks down via a CSS animation so
+ * they can see how long they have left. */
 .output-toggle-on.output-toggle-armed {
-  background: var(--warn-soft);
-  border-color: var(--warn);
-  color: var(--warn);
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
   animation: output-toggle-arm-decay 2s linear forwards;
 }
 @keyframes output-toggle-arm-decay {
   from {
-    box-shadow: 0 0 0 2px var(--warn-soft);
+    box-shadow: 0 0 0 2px var(--danger-soft);
   }
   to {
     box-shadow: 0 0 0 0 transparent;
   }
 }
 .output-toggle-off {
-  background: var(--danger-soft);
-  border-color: var(--danger);
-  color: var(--danger);
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--muted);
 }
 .output-toggle-off:hover:not(:disabled) {
-  background: var(--danger-soft);
-  border-color: var(--danger);
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--fg);
 }
 .output-toggle-idle {
   cursor: default;
@@ -3210,19 +3340,57 @@ input.volume-slider::-moz-range-thumb {
 /* --- coarse pointer (touch) tweaks ----------------------------------- */
 /* Independent of viewport width — fires on touch phones, tablets,
  * touch-only kiosks. Bumps tap targets where pointing precision is low.
- * Keeps wide-monitor desktop tablets close to mouse density. */
+ * Keeps wide-monitor desktop tablets close to mouse density.
+ *
+ * 44px is the platform recommendation (Apple HIG, Material). Some
+ * action-cell buttons in dense tables stay below 44px (28px+) on purpose:
+ * the cell padding under coarse pointer gives a wider effective hit
+ * region without making the table grow vertically by 50%. */
 @media (pointer: coarse) {
   .icon-button,
   button,
   .btn-link,
   .tab,
-  .tabs-mobile-item {
+  .tabs-mobile-item,
+  .tabs-mobile-trigger,
+  .output-toggle,
+  .preset-chip,
+  .loop-toggle,
+  .library-root-toggle button,
+  .header-help {
+    min-height: 44px;
+  }
+  /* Header help button keeps its circular shape but grows to a real touch
+   * target. Width matches min-height so it doesn't flatten into an oval. */
+  .header-help {
+    min-width: 44px;
+  }
+  /* Action-cell buttons in tables stay a touch denser — the row hover
+   * region carries them. Padding bumped so a fat finger doesn't hit two
+   * rows at once. */
+  .track-table td.col-actions button,
+  .metadata-table td.col-actions button,
+  .col-actions button {
+    min-height: 36px;
+    padding: 0.4rem 0.5rem;
+  }
+  /* Folder-tree rows: the chevron + label are both interactive — give
+   * them enough height that a thumb can hit them without overlapping the
+   * row above or below. */
+  .tree-toggle,
+  .tree-label {
     min-height: 36px;
   }
-  /* Action-cell buttons in tables get a bit of padding so a fat finger
-   * doesn't hit two rows at once. */
-  .track-table td.col-actions button,
-  .col-actions button {
-    padding: 0.35rem 0.45rem;
+  /* Soundboard cells: these are fire-on-press during play, can't be tiny. */
+  .sfx-button,
+  .scene-button {
+    min-height: 52px;
+  }
+  /* Checkboxes / radios in dense forms — enlarge the actual control so
+   * the label-wrap stays the hit-target on a touch device. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 18px;
+    height: 18px;
   }
 }

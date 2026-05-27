@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { usePlayerStore } from "@/core/playerStore";
+import { useUiTransient } from "@/core/uiTransient";
 import { wsClient } from "@/core/ws";
 
 /** Returns true if the event originated in a place where shortcuts should
@@ -21,6 +22,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *  - ← / → : prev / next track
  *  - L : cycle ambient loop mode
  *  - / : focus the library search box
+ *  - ? (Shift+/) : open the keyboard-shortcut sheet
  *  - 1–9 : switch tabs in tab order (Player, Library, Metadata, Playlists,
  *          Soundboards, Modes, Presets, Controls, Settings)
  *  - Esc : already handled per-modal
@@ -73,6 +75,13 @@ export function useKeyboardShortcuts(): void {
               window.setTimeout(() => el.focus(), 0);
             }
           }
+          return;
+        case "?":
+          // Shift+/ on US layouts. Other layouts will route through
+          // `e.key === "?"` too since the key value carries the produced
+          // character, not the physical position.
+          e.preventDefault();
+          useUiTransient.getState().setShortcutSheetOpen(true);
           return;
         case "1":
           e.preventDefault();

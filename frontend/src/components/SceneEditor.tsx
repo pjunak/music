@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
+import { Breadcrumb } from "@/components/Breadcrumb";
+import type { BreadcrumbItem } from "@/components/Breadcrumb";
 import { IconButton } from "@/components/IconButton";
 import { LightningIcon, XIcon } from "@/components/icons";
 import { VolumeControl } from "@/components/VolumeControl";
@@ -20,7 +22,9 @@ import { wsClient } from "@/core/ws";
 interface Props {
   modeId: string;
   sceneId: string;
-  onBack: () => void;
+  /** Breadcrumb supplied by the host; the editor doesn't append to it. See
+   *  SoundboardEditor for the same pattern. */
+  breadcrumb: BreadcrumbItem[];
 }
 
 /** Edit a scene's contents: name/description, ambient (playlist + crossfade),
@@ -31,7 +35,7 @@ interface Props {
  *  Loads the latest copy via `modesApi.get(modeId)`, persists changes via the
  *  PATCH endpoint, and re-renders from the server response so backend-side
  *  cleanups (empty blocks dropped, etc.) show up immediately. */
-export function SceneEditor({ modeId, sceneId, onBack }: Props) {
+export function SceneEditor({ modeId, sceneId, breadcrumb }: Props) {
   const [scene, setScene] = useState<SceneSpec | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [presets, setPresets] = useState<PresetManifest[]>([]);
@@ -69,16 +73,19 @@ export function SceneEditor({ modeId, sceneId, onBack }: Props) {
 
   if (error !== null) {
     return (
-      <div className="empty-detail">
+      <div className="scene-editor-empty">
+        <Breadcrumb items={breadcrumb} />
         <p className="error small">{error}</p>
-        <button type="button" onClick={onBack}>
-          ← Back to mode
-        </button>
       </div>
     );
   }
   if (scene === null) {
-    return <p className="muted small">Loading…</p>;
+    return (
+      <div className="scene-editor-empty">
+        <Breadcrumb items={breadcrumb} />
+        <p className="muted small">Loading…</p>
+      </div>
+    );
   }
   return (
     <SceneEditorForm
@@ -87,7 +94,7 @@ export function SceneEditor({ modeId, sceneId, onBack }: Props) {
       presets={presets}
       playlists={playlists}
       soundboards={soundboards}
-      onBack={onBack}
+      breadcrumb={breadcrumb}
       onSaved={(updated) => setScene(updated)}
     />
   );
@@ -100,7 +107,7 @@ function SceneEditorForm({
   presets,
   playlists,
   soundboards,
-  onBack,
+  breadcrumb,
   onSaved,
 }: {
   modeId: string;
@@ -108,7 +115,7 @@ function SceneEditorForm({
   presets: PresetManifest[];
   playlists: PlaylistMeta[];
   soundboards: Record<string, SoundboardManifest>;
-  onBack: () => void;
+  breadcrumb: BreadcrumbItem[];
   onSaved: (s: SceneSpec) => void;
 }) {
   const [name, setName] = useState(scene.name);
@@ -218,6 +225,7 @@ function SceneEditorForm({
 
   return (
     <form onSubmit={submit} className="scene-editor">
+      <Breadcrumb items={breadcrumb} />
       <header className="playlist-detail-header">
         <div>
           <h2>Scene · {scene.id}</h2>
@@ -228,9 +236,6 @@ function SceneEditorForm({
         </div>
         <div className="playlist-detail-actions">
           <SceneActivateButton modeId={modeId} sceneId={scene.id} />
-          <button type="button" onClick={onBack}>
-            ← Back to mode
-          </button>
         </div>
       </header>
 
@@ -366,9 +371,9 @@ function SceneEditorForm({
       </section>
 
       <div className="modal-actions">
-        <button type="button" onClick={onBack} disabled={busy}>
-          Cancel
-        </button>
+        {/* Cancel removed — leaving via the breadcrumb has the same effect
+            (unsaved local form state is discarded), so the extra button was
+            redundant. Save is still here as the explicit commit. */}
         <button type="submit" className="btn-primary" disabled={busy}>
           {busy ? "Saving…" : "Save changes"}
         </button>

@@ -80,6 +80,7 @@ class SfxFolderOut(BaseModel):
     name: str
     path: str
     file_count: int
+    has_children: bool
 
 
 class SfxTreeResponse(BaseModel):
@@ -221,11 +222,13 @@ def list_tree(
     files: list[SfxFileOut] = []
     for entry in sorted(abs_dir.iterdir(), key=lambda p: p.name.lower()):
         if entry.is_dir():
+            has_children = any(grandchild.is_dir() for grandchild in entry.iterdir())
             folders.append(
                 SfxFolderOut(
                     name=entry.name,
                     path=library_index.to_relative(entry, root),
                     file_count=_count_files_recursive(entry),
+                    has_children=has_children,
                 )
             )
         elif entry.suffix.lower() in _SFX_EXTENSIONS:
@@ -339,7 +342,9 @@ def create_folder(payload: FolderCreateRequest, _: CurrentUser) -> SfxFolderOut:
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     rel = library_index.to_relative(abs_path, root)
-    return SfxFolderOut(name=abs_path.name, path=rel, file_count=0)
+    return SfxFolderOut(
+        name=abs_path.name, path=rel, file_count=0, has_children=False
+    )
 
 
 @router.delete("/folders", response_model=FolderDeleteResult)
@@ -369,8 +374,13 @@ def rename_folder(payload: FolderRenameRequest, _: CurrentUser) -> SfxFolderOut:
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     new_abs = (root / payload.dst.strip("/")).resolve()
+    has_children = (
+        new_abs.is_dir()
+        and any(grandchild.is_dir() for grandchild in new_abs.iterdir())
+    )
     return SfxFolderOut(
         name=new_abs.name,
         path=payload.dst.strip("/"),
         file_count=_count_files_recursive(new_abs) if new_abs.is_dir() else 0,
+        has_children=has_children,
     )

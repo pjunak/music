@@ -146,13 +146,33 @@ export function ModesView() {
           <SoundboardEditor
             modeId={editingSoundboard.modeId}
             soundboardId={editingSoundboard.soundboardId}
-            onBack={() => setEditingSoundboard(null)}
+            breadcrumb={[
+              { label: "Modes", onClick: () => setSelectedId(null) },
+              {
+                label:
+                  modes.find((m) => m.id === editingSoundboard.modeId)?.name ??
+                  editingSoundboard.modeId,
+                onClick: () => setEditingSoundboard(null),
+              },
+              { label: "Soundboards" },
+              { label: editingSoundboard.soundboardId },
+            ]}
           />
         ) : editingScene !== null ? (
           <SceneEditor
             modeId={editingScene.modeId}
             sceneId={editingScene.sceneId}
-            onBack={() => setEditingScene(null)}
+            breadcrumb={[
+              { label: "Modes", onClick: () => setSelectedId(null) },
+              {
+                label:
+                  modes.find((m) => m.id === editingScene.modeId)?.name ??
+                  editingScene.modeId,
+                onClick: () => setEditingScene(null),
+              },
+              { label: "Scenes" },
+              { label: editingScene.sceneId },
+            ]}
           />
         ) : selectedId !== null ? (
           <ModeDetailPane

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { Breadcrumb } from "@/components/Breadcrumb";
+import type { BreadcrumbItem } from "@/components/Breadcrumb";
 import { confirmDialog } from "@/components/confirmDialog";
 import { IconButton } from "@/components/IconButton";
 import { TrashIcon, XIcon } from "@/components/icons";
+import { inputDialog } from "@/components/inputDialog";
 import { modesAdminApi, modesApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
 import { toast } from "@/core/toast";
@@ -12,10 +15,11 @@ import type { SoundboardManifest } from "@/core/types";
 interface Props {
   modeId: string;
   soundboardId: string;
-  onBack: () => void;
-  /** Label for the back link — varies by host (Modes tab says "Back to
-   *  mode", Soundboards tab says "All soundboards"). */
-  backLabel?: string;
+  /** Breadcrumb supplied by the host so it can express the ancestor chain
+   *  in its own terms (Modes tab uses "Modes › ModeName › Soundboards ›
+   *  Item"; Soundboards tab uses "Soundboards › Item"). The editor itself
+   *  appends nothing — the leaf label is the host's responsibility too. */
+  breadcrumb: BreadcrumbItem[];
 }
 
 /** Edit a single soundboard's categories and items. Loads the latest copy
@@ -24,8 +28,7 @@ interface Props {
 export function SoundboardEditor({
   modeId,
   soundboardId,
-  onBack,
-  backLabel = "Back to mode",
+  breadcrumb,
 }: Props) {
   const [soundboard, setSoundboard] = useState<SoundboardManifest | null>(null);
   const [sfxFiles, setSfxFiles] = useState<SfxFile[]>([]);
@@ -58,14 +61,30 @@ export function SoundboardEditor({
   }, []);
 
   async function addCategory() {
-    const id = window.prompt("Category id (slug, e.g. doors):", "");
-    if (!id) return;
-    const name = window.prompt("Category display name:", id);
-    if (!name) return;
+    const id = await inputDialog({
+      title: "New category",
+      label: "Category id (slug)",
+      placeholder: "doors",
+      pattern: "[a-z0-9][a-z0-9_-]*",
+      patternHint: "lowercase letters/digits with optional - or _, starting with a letter or digit",
+      confirmLabel: "Next",
+      validate: (v) =>
+        /^[a-z0-9][a-z0-9_-]*$/.test(v) ? null : "Lowercase slug only (letters, digits, - _).",
+    });
+    if (id === null) return;
+    const name = await inputDialog({
+      title: "Category name",
+      label: "Display name",
+      initial: id,
+      placeholder: id,
+      confirmLabel: "Add",
+      trim: false,
+    });
+    if (name === null) return;
     try {
       const updated = await modesAdminApi.addCategory(modeId, soundboardId, {
-        id: id.trim(),
-        name: name.trim(),
+        id,
+        name: name.trim() || id,
       });
       setSoundboard(updated as SoundboardManifest);
       toast.success("Category added", id);
@@ -143,9 +162,7 @@ export function SoundboardEditor({
   if (error !== null) {
     return (
       <div className="soundboard-editor">
-        <button type="button" className="btn-ghost back-link" onClick={onBack}>
-          ← Back to mode
-        </button>
+        <Breadcrumb items={breadcrumb} />
         <p className="error small">{error}</p>
       </div>
     );
@@ -157,15 +174,9 @@ export function SoundboardEditor({
 
   return (
     <div className="soundboard-editor">
+      <Breadcrumb items={breadcrumb} />
       <header className="playlist-detail-header">
         <div>
-          <button
-            type="button"
-            className="btn-ghost back-link"
-            onClick={onBack}
-          >
-            ← {backLabel}
-          </button>
           <h2>Soundboard: {soundboard.name ?? soundboard.id}</h2>
           <p className="muted small">
             id: <code>{soundboard.id}</code> · mode <code>{modeId}</code>

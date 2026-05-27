@@ -64,6 +64,7 @@ class FolderOut(BaseModel):
     name: str
     path: str
     track_count: int
+    has_children: bool
 
 
 class TreeResponse(BaseModel):
@@ -238,7 +239,13 @@ def get_tree(
     return TreeResponse(
         path=path.strip("/"),
         folders=[
-            FolderOut(name=f.name, path=f.path, track_count=f.track_count) for f in folders
+            FolderOut(
+                name=f.name,
+                path=f.path,
+                track_count=f.track_count,
+                has_children=f.has_children,
+            )
+            for f in folders
         ],
         tracks=[TrackOut.model_validate(t) for t in tracks],
     )
@@ -703,7 +710,8 @@ def create_folder(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     rel = library_index.to_relative(abs_path)
-    return FolderOut(name=abs_path.name, path=rel, track_count=0)
+    # Newly created — empty by definition.
+    return FolderOut(name=abs_path.name, path=rel, track_count=0, has_children=False)
 
 
 @router.delete("/folders", response_model=FolderDeleteResult)
@@ -737,4 +745,13 @@ def rename_folder(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     new_abs = library_index.to_absolute(payload.dst.strip("/"))
-    return FolderOut(name=new_abs.name, path=payload.dst.strip("/"), track_count=0)
+    has_children = (
+        new_abs.is_dir()
+        and any(grandchild.is_dir() for grandchild in new_abs.iterdir())
+    )
+    return FolderOut(
+        name=new_abs.name,
+        path=payload.dst.strip("/"),
+        track_count=0,
+        has_children=has_children,
+    )

@@ -175,6 +175,9 @@ export interface FolderEntry {
   name: string;
   path: string;
   track_count: number;
+  /** True iff this folder has at least one subfolder. Used by the tree UI
+   *  to hide the expand toggle on leaf folders. */
+  has_children: boolean;
 }
 
 export interface TreeResponse {

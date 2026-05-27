@@ -1,0 +1,170 @@
+import { useEffect, useState } from "react";
+
+import { modesApi } from "@/core/api";
+import { useAuthStore } from "@/core/auth";
+import { usePlayerStore } from "@/core/playerStore";
+import type { SoundboardManifest } from "@/core/types";
+
+import { XIcon } from "./icons";
+
+/** Single keyboard-shortcut row: keys + what they do. */
+interface Shortcut {
+  /** Sequence of key glyphs to display. Each rendered as a <kbd>. */
+  keys: string[];
+  label: string;
+}
+
+const GLOBAL: Shortcut[] = [
+  { keys: ["Space"], label: "Play / pause" },
+  { keys: ["←"], label: "Previous track" },
+  { keys: ["→"], label: "Next track" },
+  { keys: ["L"], label: "Cycle loop mode (off → queue → track)" },
+  { keys: ["/"], label: "Focus library search" },
+  { keys: ["Esc"], label: "Close the open modal" },
+  { keys: ["?"], label: "Show this sheet" },
+];
+
+const TABS: Shortcut[] = [
+  { keys: ["1"], label: "Player" },
+  { keys: ["2"], label: "Library" },
+  { keys: ["3"], label: "Metadata" },
+  { keys: ["4"], label: "Playlists" },
+  { keys: ["5"], label: "Soundboards" },
+  { keys: ["6"], label: "Modes" },
+  { keys: ["7"], label: "EQ Presets" },
+  { keys: ["8"], label: "Controls" },
+  { keys: ["9"], label: "Settings" },
+];
+
+/** Sheet listing every keyboard shortcut the operator can hit.
+ *
+ *  Opens from the Header "?" button or by pressing Shift+/ on the keyboard.
+ *  SFX hotkeys come from the active mode's currently-selected soundboard so
+ *  the list reflects what's actually live; an empty list shows a hint
+ *  pointing at the Soundboard panel. */
+export function ShortcutSheet({ onClose }: { onClose: () => void }) {
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
+  const activeSoundboardId = usePlayerStore(
+    (s) => s.state?.active_soundboard_id ?? null,
+  );
+  const isAuthed = useAuthStore((s) => s.status === "authenticated");
+  const [soundboard, setSoundboard] = useState<SoundboardManifest | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Pull the active soundboard if one's set. Skipped for guests since
+  // modes/<id> requires auth.
+  useEffect(() => {
+    if (!isAuthed || activeModeId === null || activeSoundboardId === null) {
+      setSoundboard(null);
+      return;
+    }
+    let cancelled = false;
+    void modesApi
+      .get(activeModeId)
+      .then((d) => {
+        if (!cancelled) setSoundboard(d.soundboards[activeSoundboardId] ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setSoundboard(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthed, activeModeId, activeSoundboardId]);
+
+  const sfxShortcuts: Shortcut[] = [];
+  if (soundboard !== null) {
+    for (const cat of soundboard.categories) {
+      for (const item of cat.items) {
+        if (item.hotkey) {
+          sfxShortcuts.push({ keys: [item.hotkey], label: `${item.name} (${cat.name})` });
+        }
+      }
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div
+        className="modal shortcut-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <header className="modal-header">
+          <h2>Keyboard shortcuts</h2>
+          <button type="button" onClick={onClose} aria-label="Close">
+            <XIcon />
+          </button>
+        </header>
+        <div className="modal-body shortcut-sheet-body">
+          <ShortcutSection title="Global" shortcuts={GLOBAL} />
+          <ShortcutSection title="Tabs" shortcuts={TABS} />
+          <section className="shortcut-section">
+            <h3>SFX hotkeys</h3>
+            {sfxShortcuts.length === 0 ? (
+              <p className="muted small">
+                {activeModeId === null
+                  ? "Pick a mode to see SFX hotkeys."
+                  : activeSoundboardId === null
+                    ? "Pick a soundboard from the Controls tab to see its hotkeys."
+                    : "Active soundboard has no SFX with hotkeys."}
+              </p>
+            ) : (
+              <dl className="shortcut-list">
+                {sfxShortcuts.map((s, idx) => (
+                  <div key={idx} className="shortcut-row">
+                    <dt>
+                      {s.keys.map((k) => (
+                        <kbd key={k} className="kbd">
+                          {k}
+                        </kbd>
+                      ))}
+                    </dt>
+                    <dd>{s.label}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShortcutSection({
+  title,
+  shortcuts,
+}: {
+  title: string;
+  shortcuts: Shortcut[];
+}) {
+  return (
+    <section className="shortcut-section">
+      <h3>{title}</h3>
+      <dl className="shortcut-list">
+        {shortcuts.map((s, idx) => (
+          <div key={idx} className="shortcut-row">
+            <dt>
+              {s.keys.map((k) => (
+                <kbd key={k} className="kbd">
+                  {k}
+                </kbd>
+              ))}
+            </dt>
+            <dd>{s.label}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}

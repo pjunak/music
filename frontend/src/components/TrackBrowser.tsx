@@ -97,6 +97,7 @@ export function TrackBrowser({
         name: f.name,
         path: f.path,
         badge: f.track_count > 0 ? f.track_count : null,
+        hasChildren: f.has_children,
       }));
     },
     [],

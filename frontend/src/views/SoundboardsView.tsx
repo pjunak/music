@@ -147,11 +147,23 @@ export function SoundboardsView() {
             key={`${selected.modeId}/${selected.boardId}`}
             modeId={selected.modeId}
             soundboardId={selected.boardId}
-            onBack={() => {
-              setSelected(null);
-              bumpRefresh();
-            }}
-            backLabel="All soundboards"
+            breadcrumb={[
+              {
+                label: "All soundboards",
+                onClick: () => {
+                  setSelected(null);
+                  bumpRefresh();
+                },
+              },
+              {
+                label:
+                  boards.find(
+                    (b) =>
+                      b.modeId === selected.modeId && b.boardId === selected.boardId,
+                  )?.modeName ?? selected.modeId,
+              },
+              { label: selected.boardId },
+            ]}
           />
         ) : (
           <div className="empty-detail">

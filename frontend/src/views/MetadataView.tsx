@@ -123,6 +123,7 @@ export function MetadataView() {
         name: f.name,
         path: f.path,
         badge: f.track_count > 0 ? f.track_count : null,
+        hasChildren: f.has_children,
       }));
     },
     [],
@@ -432,6 +433,7 @@ function BulkMovePicker({
         name: f.name,
         path: f.path,
         badge: f.track_count > 0 ? f.track_count : null,
+        hasChildren: f.has_children,
       }));
     },
     [],

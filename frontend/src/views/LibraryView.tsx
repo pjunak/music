@@ -12,6 +12,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from "@/components/icons";
+import { inputDialog } from "@/components/inputDialog";
 import { MetadataEditor } from "@/components/MetadataEditor";
 import { libraryApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
@@ -357,6 +358,7 @@ function MusicBrowser({
       name: f.name,
       path: f.path,
       badge: f.track_count > 0 ? f.track_count : null,
+      hasChildren: f.has_children,
     }));
   }, []);
 
@@ -442,6 +444,7 @@ function SfxBrowser({
       name: f.name,
       path: f.path,
       badge: f.file_count > 0 ? f.file_count : null,
+      hasChildren: f.has_children,
     }));
   }, []);
 
@@ -575,11 +578,18 @@ function FolderActions({
   onPathReset: () => void;
 }) {
   async function newFolder() {
-    const name = window.prompt(
-      `New folder under "${selectedPath || "(root)"}":`,
-      "",
-    );
-    if (!name) return;
+    const name = await inputDialog({
+      title: "New folder",
+      body: `Will be created under ${selectedPath ? `"${selectedPath}"` : "the root"}.`,
+      label: "Folder name",
+      placeholder: "e.g. Skyrim",
+      confirmLabel: "Create",
+      // Reject path separators — operators create *one* folder at a time;
+      // multi-level paths are unintuitive in a single-shot prompt.
+      validate: (v) =>
+        v.includes("/") || v.includes("\\") ? "No slashes — pick a nested folder, then create inside it." : null,
+    });
+    if (name === null) return;
     const target = selectedPath ? `${selectedPath}/${name}` : name;
     try {
       if (root === "music") await libraryApi.createFolder(target);
@@ -596,8 +606,14 @@ function FolderActions({
       toast.info("Pick a folder first");
       return;
     }
-    const next = window.prompt("New folder path:", selectedPath);
-    if (!next || next === selectedPath) return;
+    const next = await inputDialog({
+      title: "Rename or move folder",
+      body: `Current path: ${selectedPath}. Use slashes to nest under a different parent.`,
+      label: "New path",
+      initial: selectedPath,
+      confirmLabel: "Rename",
+    });
+    if (next === null || next === selectedPath) return;
     try {
       if (root === "music") await libraryApi.renameFolder(selectedPath, next);
       else await sfxApi.renameFolder(selectedPath, next);

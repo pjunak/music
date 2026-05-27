@@ -525,11 +525,14 @@ def _apply_easy(tag_dict: Any, fields: dict[str, Any]) -> None:
 @dataclass
 class FolderEntry:
     """A directory immediately under some folder. Track count is recursive
-    (includes subfolders) so the tree gives a useful at-a-glance density."""
+    (includes subfolders) so the tree gives a useful at-a-glance density.
+    `has_children` lets the tree UI hide the expand-toggle on leaf folders
+    so empty subdir-less folders don't pretend they can be expanded."""
 
     name: str
     path: str  # canonical relative path, forward slashes
     track_count: int
+    has_children: bool
 
 
 def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], list[Track]]:
@@ -557,7 +560,15 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
             )
             or 0
         )
-        folders.append(FolderEntry(name=child.name, path=sub_rel, track_count=count))
+        has_children = any(grandchild.is_dir() for grandchild in child.iterdir())
+        folders.append(
+            FolderEntry(
+                name=child.name,
+                path=sub_rel,
+                track_count=count,
+                has_children=has_children,
+            )
+        )
 
     # Direct children only. "Skyrim/foo.mp3" is a child of Skyrim;
     # "Skyrim/sub/bar.mp3" isn't. Encoded as two LIKE clauses so SQLite

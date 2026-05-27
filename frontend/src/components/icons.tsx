@@ -180,3 +180,16 @@ export function VolumeIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function HelpIcon(props: IconProps) {
+  // Circle + a question-mark glyph. Stroke style matches the rest of the
+  // outline icons so it slots into the header alongside ws-status without
+  // visually jumping out.
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="12" cy="12" r="9" {...stroke} />
+      <path d="M9.5 9a2.5 2.5 0 015 0c0 1.5-1.5 2-2 3v0.5" {...stroke} />
+      <circle cx="12" cy="17" r="0.5" fill="currentColor" />
+    </svg>
+  );
+}

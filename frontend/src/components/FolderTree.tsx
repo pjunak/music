@@ -25,6 +25,11 @@ export interface TreeFolder {
   path: string;
   /** Whatever count makes sense to show next to the folder name. */
   badge?: number | string | null;
+  /** False = this folder has no subfolders; the row renders without an
+   *  expand chevron so leaves don't pretend to be expandable. Defaults to
+   *  true when omitted (a host that doesn't know yet errs on showing the
+   *  toggle — collapsing into "(empty)" still works). */
+  hasChildren?: boolean;
 }
 
 interface NodeState {
@@ -141,26 +146,37 @@ export function FolderTree({
     const node = state[folder.path];
     const expanded = node?.expanded ?? false;
     const isSelected = selectedPath === folder.path;
+    // A folder is a leaf when the host has explicitly told us so. If the
+    // host doesn't know (legacy / undefined), keep the toggle visible so
+    // we don't accidentally hide a real subtree.
+    const isLeaf = folder.hasChildren === false;
     return (
       <div key={folder.path}>
         <div
-          className={`tree-row${isSelected ? " selected" : ""}`}
+          className={`tree-row${isSelected ? " selected" : ""}${isLeaf ? " tree-row-leaf" : ""}`}
           style={{ paddingLeft: `${depth * 0.9 + 0.4}rem` }}
           {...dropProps(folder.path)}
         >
-          <button
-            type="button"
-            className="tree-toggle btn-ghost"
-            onClick={() => toggle(folder.path)}
-            aria-label={expanded ? "Collapse" : "Expand"}
-          >
-            {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
-          </button>
+          {isLeaf ? (
+            // Spacer keeps the folder name aligned with sibling rows that
+            // do show a chevron. aria-hidden so screen readers don't see
+            // a phantom control.
+            <span className="tree-toggle tree-toggle-spacer" aria-hidden="true" />
+          ) : (
+            <button
+              type="button"
+              className="tree-toggle btn-ghost"
+              onClick={() => toggle(folder.path)}
+              aria-label={expanded ? "Collapse" : "Expand"}
+            >
+              {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+            </button>
+          )}
           <button
             type="button"
             className="tree-label btn-ghost"
             onClick={() => onSelect(folder.path)}
-            onDoubleClick={() => toggle(folder.path)}
+            onDoubleClick={() => (isLeaf ? undefined : toggle(folder.path))}
             title={folder.path}
           >
             <span className="tree-icon">
@@ -172,7 +188,7 @@ export function FolderTree({
             ) : null}
           </button>
         </div>
-        {expanded && node?.loaded ? (
+        {expanded && node?.loaded && !isLeaf ? (
           <div className="tree-children">
             {node.error !== null ? (
               <p

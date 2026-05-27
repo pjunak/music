@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { DeviceNameField } from "@/components/DeviceNameField";
+import { HelpIcon } from "@/components/icons";
 import { modesApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeSummary } from "@/core/types";
+import { useUiTransient } from "@/core/uiTransient";
 
 import { Tabs } from "./Tabs";
 
@@ -27,6 +29,7 @@ export function Header() {
   }, [isGuest]);
 
   const activeMode = modes.find((m) => m.id === activeModeId) ?? null;
+  const openShortcutSheet = useUiTransient((s) => s.setShortcutSheetOpen);
 
   return (
     <header className="app-header">
@@ -59,6 +62,15 @@ export function Header() {
             ) : null}
           </span>
         ) : null}
+        <button
+          type="button"
+          className="header-help btn-ghost"
+          onClick={() => openShortcutSheet(true)}
+          title="Keyboard shortcuts (?)"
+          aria-label="Show keyboard shortcuts"
+        >
+          <HelpIcon />
+        </button>
         {isGuest ? (
           <Link to="/login" className="btn-ghost guest-signin-link">
             Sign in

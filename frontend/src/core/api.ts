@@ -304,7 +304,7 @@ export const libraryApi = {
   coverUrl: (id: number) => `${BASE}/api/library/tracks/${id}/cover`,
   streamUrl: (id: number) => `${BASE}/api/library/tracks/${id}/stream`,
   createFolder: (path: string) =>
-    api.post<{ name: string; path: string; track_count: number }>(
+    api.post<{ name: string; path: string; track_count: number; has_children: boolean }>(
       "/api/library/folders",
       { path },
     ),
@@ -315,7 +315,7 @@ export const libraryApi = {
     );
   },
   renameFolder: (src: string, dst: string) =>
-    api.post<{ name: string; path: string; track_count: number }>(
+    api.post<{ name: string; path: string; track_count: number; has_children: boolean }>(
       "/api/library/folders/rename",
       { src, dst },
     ),
@@ -335,6 +335,7 @@ export interface SfxFolder {
   name: string;
   path: string;
   file_count: number;
+  has_children: boolean;
 }
 
 export interface SfxTreeResponse {

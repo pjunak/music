@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
+import { InputDialogHost } from "@/components/InputDialogHost";
+import { ShortcutSheet } from "@/components/ShortcutSheet";
 import { Toaster } from "@/components/Toaster";
 import { useAuthStore } from "@/core/auth";
 import { AudioEngine } from "@/core/audioEngine";
@@ -9,6 +11,7 @@ import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import { useKeyboardShortcuts } from "@/core/useKeyboardShortcuts";
 import { useSfxHotkeys } from "@/core/useSfxHotkeys";
+import { useUiTransient } from "@/core/uiTransient";
 import { wsClient } from "@/core/ws";
 import { ControlsView } from "@/views/ControlsView";
 import { DiagnosticsView } from "@/views/DiagnosticsView";
@@ -64,6 +67,9 @@ export default function AppShell() {
 
   useKeyboardShortcuts();
   useSfxHotkeys();
+
+  const shortcutSheetOpen = useUiTransient((s) => s.shortcutSheetOpen);
+  const setShortcutSheetOpen = useUiTransient((s) => s.setShortcutSheetOpen);
 
   return (
     <div className={`shell${isGuest ? " shell-guest" : ""}`}>
@@ -143,6 +149,10 @@ export default function AppShell() {
       <AudioEngine />
       <Toaster />
       <ConfirmDialogHost />
+      <InputDialogHost />
+      {shortcutSheetOpen ? (
+        <ShortcutSheet onClose={() => setShortcutSheetOpen(false)} />
+      ) : null}
     </div>
   );
 }
