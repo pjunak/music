@@ -76,13 +76,17 @@ export function useKeyboardShortcuts(): void {
         case "/":
           e.preventDefault();
           {
-            const el = document.querySelector<HTMLInputElement>(
-              ".library-search input[type=search]",
-            );
-            if (el) {
-              navigate("/library");
-              window.setTimeout(() => el.focus(), 0);
-            }
+            // Selector targets the library toolbar's always-visible search
+            // input. We navigate first (in case the user is on a different
+            // tab) and focus on the next tick, after the route render.
+            navigate("/library/files");
+            window.setTimeout(() => {
+              const el = document.querySelector<HTMLInputElement>(
+                ".library-toolbar-search input[type=search]",
+              );
+              el?.focus();
+              el?.select();
+            }, 0);
           }
           return;
         case "?":

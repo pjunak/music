@@ -14,6 +14,15 @@ import {
  *  works against either the music index or the SFX filesystem with the
  *  same UI.
  *
+ *  Interaction model:
+ *  - Click a folder row → selects AND expands it (saves the "two clicks
+ *    to dive in" tax the original chevron+label split used to demand).
+ *  - Click the chevron explicitly → toggle expanded without changing
+ *    selection. Used to collapse a subtree without leaving the current
+ *    folder.
+ *  - No root row: the implicit root is "everywhere in this library". The
+ *    host's path breadcrumb is responsible for navigating back to it.
+ *
  *  Drag-and-drop:
  *  - Folders are drop targets when `onDropOnFolder` is supplied.
  *  - Drop payloads are JSON; the host decides what shape they carry
@@ -40,8 +49,6 @@ interface NodeState {
 }
 
 interface Props {
-  /** Root label shown for the empty-path entry (e.g. "All music"). */
-  rootLabel: string;
   /** Selected folder path; "" is root. */
   selectedPath: string;
   /** Called when a folder is clicked. */
@@ -52,15 +59,19 @@ interface Props {
   refreshKey?: number | string;
   /** Optional drop handler — when set, folder rows accept drops. */
   onDropOnFolder?: (folderPath: string, payload: unknown) => void;
+  /** Optional "drop here = move to root" payload handler. Renders an
+   *  invisible drop strip at the top of the tree so the operator can move
+   *  things back to the library root without a visible root row. */
+  rootDropLabel?: string;
 }
 
 export function FolderTree({
-  rootLabel,
   selectedPath,
   onSelect,
   loadChildren,
   refreshKey,
   onDropOnFolder,
+  rootDropLabel,
 }: Props) {
   const [state, setState] = useState<Record<string, NodeState>>({});
   const [rootChildren, setRootChildren] = useState<TreeFolder[] | null>(null);
@@ -166,7 +177,14 @@ export function FolderTree({
             <button
               type="button"
               className="tree-toggle btn-ghost"
-              onClick={() => toggle(folder.path)}
+              // stopPropagation so a chevron click doesn't also trigger
+              // the row's select-and-expand handler — chevron is the
+              // operator's escape hatch for "I just want to collapse,
+              // not change selection".
+              onClick={(e) => {
+                e.stopPropagation();
+                toggle(folder.path);
+              }}
               aria-label={expanded ? "Collapse" : "Expand"}
             >
               {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
@@ -175,8 +193,16 @@ export function FolderTree({
           <button
             type="button"
             className="tree-label btn-ghost"
-            onClick={() => onSelect(folder.path)}
-            onDoubleClick={() => (isLeaf ? undefined : toggle(folder.path))}
+            onClick={() => {
+              onSelect(folder.path);
+              // Single click = dive in. If the folder has children and
+              // isn't already expanded, also expand it so the operator
+              // sees what's underneath without a second click. Leaves
+              // skip this branch (nothing to expand).
+              if (!isLeaf && !expanded) {
+                void ensureLoaded(folder.path);
+              }
+            }}
             title={folder.path}
           >
             <span className="tree-icon">
@@ -213,36 +239,31 @@ export function FolderTree({
     );
   };
 
-  const rootIsSelected = selectedPath === "";
   const rootChildrenView = useMemo(() => rootChildren ?? [], [rootChildren]);
 
   return (
     <div className="folder-tree">
-      <div
-        className={`tree-row tree-root${rootIsSelected ? " selected" : ""}`}
-        {...dropProps("")}
-      >
-        <span className="tree-toggle muted" aria-hidden="true">
-          <ChevronDownIcon />
-        </span>
-        <button
-          type="button"
-          className="tree-label btn-ghost"
-          onClick={() => onSelect("")}
-        >
-          <span className="tree-icon">
-            <FolderOpenIcon />
-          </span>
-          <span className="tree-name">{rootLabel}</span>
-        </button>
-      </div>
+      {/* The root row used to be an explicit "All music" / "All SFX" entry
+          and the chevron showed as decoration. The label was redundant
+          (the tab itself is "Library"), and reserving a click slot for
+          "go to root" was wasted real estate — selecting nothing at all
+          IS the root state, and the host's breadcrumb path makes that
+          explicit. We keep an invisible drop strip at the top, though, so
+          a drag-to-root operation is still possible. */}
+      {onDropOnFolder !== undefined ? (
+        <div
+          className={`tree-row-root-drop${selectedPath === "" ? " selected" : ""}`}
+          aria-label={rootDropLabel ?? "Drop to move to root"}
+          {...dropProps("")}
+        />
+      ) : null}
       {rootError !== null ? (
         <p className="error small" style={{ padding: "0.4rem" }}>
           {rootError}
         </p>
       ) : null}
       <div className="tree-children">
-        {rootChildrenView.map((c) => renderRow(c, 1))}
+        {rootChildrenView.map((c) => renderRow(c, 0))}
       </div>
     </div>
   );

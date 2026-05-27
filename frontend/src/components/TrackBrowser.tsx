@@ -148,7 +148,6 @@ export function TrackBrowser({
       <div className="track-browser-body">
         <aside className="track-browser-tree">
           <FolderTree
-            rootLabel="All music"
             selectedPath={inSearchMode ? "" : folderPath}
             onSelect={selectFolder}
             loadChildren={loadFolderChildren}

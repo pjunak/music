@@ -12,6 +12,7 @@ import {
 import { OutputToggle } from "@/components/OutputToggle";
 import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
+import { useAuthStore } from "@/core/auth";
 import {
   selectAmbientPositionMs,
   usePlayerStore,
@@ -48,6 +49,7 @@ export function NowPlayingBar() {
     (s) => s.state?.interrupt?.current_track_id ?? null,
   );
   const volume = usePlayerStore((s) => s.state?.volume ?? 1);
+  const isGuest = useAuthStore((s) => s.status !== "authenticated");
 
   const [track, setTrack] = useState<Track | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
@@ -220,6 +222,8 @@ export function NowPlayingBar() {
             onChange={onVolumeChange}
             label="Master volume"
             className="now-playing-volume"
+            readOnly={isGuest}
+            readOnlyTitle="Master volume — sign in to change"
           />
         </div>
       </div>

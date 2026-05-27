@@ -92,7 +92,7 @@ export function Header() {
           <HelpIcon />
         </button>
         {isGuest ? (
-          <Link to="/login" className="btn-ghost guest-signin-link">
+          <Link to="/login" className="btn-link guest-signin-link">
             Sign in
           </Link>
         ) : null}

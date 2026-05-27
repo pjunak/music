@@ -192,6 +192,16 @@ button.btn-ghost:hover:not(:disabled) {
   align-items: center;
   gap: 0.5rem;
 }
+/* Read-only volume display (e.g. master volume shown to guests who can't
+ * mutate server state). Cursor stays default; the slider thumb dims so
+ * the lock state is visually obvious. */
+.volume-row-readonly {
+  cursor: default;
+}
+.volume-row-readonly input.volume-slider {
+  cursor: default;
+  opacity: 0.7;
+}
 /* Cap the slider's width even inside flex containers — keeps it from
  * stretching across full strips and prevents it from reading like a
  * second progress bar. Soundboard overrides this with its own width. */
@@ -396,14 +406,15 @@ kbd,
   font: inherit;
   padding: 0.1rem 0.3rem;
   min-width: 8ch;
-  max-width: 16ch;
+  /* Wide enough to show real-world mode names ("Dungeons & Dragons",
+   * "Cyberpunk Megalopolis") without truncating to "Dungeons & Dr…".
+   * The header has plenty of horizontal room on desktop; the narrow-
+   * width mobile override below tightens this when space is scarce. */
+  max-width: 28ch;
   background: transparent;
   border: 1px solid transparent;
   color: var(--accent-strong);
   font-weight: 600;
-  /* Native dropdown arrow on Win/Linux looks heavy here; let the chrome
-   * carry the affordance instead. Keep it on macOS where the system
-   * arrow blends with the system control style. */
 }
 .header-mode-picker > select:hover {
   border-color: var(--border-strong);
@@ -423,8 +434,12 @@ kbd,
 .tabs-placeholder {
   flex: 1;
 }
+/* Sign-in link in the header (guest only). Uses .btn-link to inherit the
+ * neutral pill-button look so it reads as an interactive control, not
+ * default-underlined text. The tighter padding distinguishes it from
+ * primary CTAs elsewhere — it's a quiet header affordance. */
 .guest-signin-link {
-  text-decoration: none;
+  padding: 0.3rem 0.7rem;
   font-size: 0.9rem;
 }
 /* Header "?" button — quiet by default so it doesn't compete with the
@@ -820,18 +835,6 @@ kbd,
   padding: 1rem;
   min-height: 0;
 }
-.library-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-.library-search {
-  display: flex;
-  gap: 0.5rem;
-}
-.library-search input {
-  flex: 1;
-}
 .library-body {
   display: grid;
   grid-template-columns: minmax(180px, 240px) 1fr;
@@ -1014,18 +1017,20 @@ kbd,
   letter-spacing: 0;
 }
 
+/* Upload drop zone. Slim by default so it doesn't crowd the file table —
+ * the operator's primary attention should be on the file list, not the
+ * upload affordance. Dragging files over it grows the visible target via
+ * the `drop-zone-active` modifier (border + tinted bg make it clear where
+ * to land the drop). */
 .drop-zone {
   border: 1px dashed var(--border);
   border-radius: var(--radius);
-  padding: 1rem;
+  padding: 0.55rem 0.9rem;
   text-align: center;
   color: var(--muted);
   cursor: pointer;
-  transition: border-color 80ms ease, background 80ms ease;
-}
-.drop-zone.large {
-  padding: 3rem 1rem;
-  font-size: 1.05rem;
+  font-size: 0.9rem;
+  transition: border-color 80ms ease, background 80ms ease, padding 80ms ease;
 }
 .drop-zone:hover,
 .drop-zone:focus-visible {
@@ -1036,6 +1041,7 @@ kbd,
   border-color: var(--accent);
   background: var(--accent-tint);
   color: var(--accent-strong);
+  padding: 1.2rem 0.9rem;
 }
 .drop-zone-uploading {
   cursor: progress;
@@ -1564,11 +1570,27 @@ kbd,
   border-radius: 4px;
   transition: background var(--transition);
 }
-.tree-row.tree-root {
-  font-weight: 600;
-}
 .tree-row.selected {
   background: var(--accent-soft);
+}
+/* Invisible drop strip at the top of the tree — keeps the move-to-root
+ * drag affordance after we removed the explicit "All music" / "All SFX"
+ * root row. The strip is normally a thin transparent slice; on drag-over
+ * it lights up to advertise itself. Without this, dragging a track to
+ * root would have nowhere to drop. */
+.tree-row-root-drop {
+  height: 0.6rem;
+  margin-bottom: 0.2rem;
+  border-radius: var(--radius);
+  border: 1px dashed transparent;
+  transition: border-color var(--transition), background var(--transition);
+}
+.tree-row-root-drop.selected,
+.tree-row-root-drop:hover {
+  border-color: var(--border-strong);
+}
+.tree-row-root-drop:hover {
+  background: var(--surface-2);
 }
 .tree-row:hover:not(.selected) {
   background: var(--surface-2);
@@ -1617,11 +1639,56 @@ kbd,
 
 /* --- library tab additions: music/sfx toggle, sfx file list, drop accept --- */
 
+/* Library toolbar — Music/SFX root toggle, search input (music only),
+ * Rescan / Refresh button. Single horizontal row, items wrap to a second
+ * row only when the viewport gets too narrow to fit. Centred vertically
+ * so the rectangular pill toggle and the search input visually line up. */
 .library-toolbar {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+.library-toolbar-search {
+  display: flex;
+  align-items: center;
+  flex: 1 1 200px;
+  min-width: 0;
+  gap: 0.3rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 0.5rem;
+}
+.library-toolbar-search:focus-within {
+  border-color: var(--accent);
+}
+.library-toolbar-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0;
+  min-width: 0;
+}
+.library-toolbar-search input:focus {
+  outline: none;
+}
+.library-toolbar-search-icon {
+  color: var(--muted);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.library-toolbar-search-clear {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0 0.2rem;
+  font-size: 0.85rem;
+}
+.library-toolbar-search-clear:hover {
+  color: var(--fg);
+  background: transparent;
 }
 .library-root-toggle {
   display: inline-flex;
@@ -3190,7 +3257,7 @@ input.volume-slider::-moz-range-thumb {
     padding: 0.1rem 0.4rem;
   }
   .header-mode-picker > select {
-    max-width: 10ch;
+    max-width: 16ch;
   }
 
   /* TV (was Player) view: tighter padding, smaller title so long names

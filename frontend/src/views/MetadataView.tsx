@@ -291,7 +291,6 @@ export function MetadataView() {
         <aside className="metadata-tree">
           <h3 className="metadata-tree-heading">Folder</h3>
           <FolderTree
-            rootLabel="All music"
             selectedPath={inSearchMode ? "" : folderPath}
             onSelect={selectFolder}
             loadChildren={loadFolderChildren}
@@ -455,7 +454,6 @@ function BulkMovePicker({
         </p>
         <div className="metadata-tree">
           <FolderTree
-            rootLabel="(music root)"
             selectedPath={dest}
             onSelect={setDest}
             loadChildren={loadChildren}

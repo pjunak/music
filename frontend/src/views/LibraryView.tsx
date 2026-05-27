@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ChangeEvent, DragEvent, FormEvent } from "react";
+import type { ChangeEvent, DragEvent } from "react";
 
+import { Breadcrumb } from "@/components/Breadcrumb";
+import type { BreadcrumbItem } from "@/components/Breadcrumb";
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { FolderTree } from "@/components/FolderTree";
@@ -43,18 +45,29 @@ export function LibraryView() {
   const [root, setRoot] = useState<Root>("music");
   const [path, setPath] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showSearch, setShowSearch] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
   const [query, setQuery] = useState("");
 
   // Search-as-you-type: debounce keystrokes and auto-submit the result.
-  // Hitting Enter / clicking Search short-circuits via setQuery(value) in
-  // the form handler — that's still wired so power-users get instant
-  // feedback when they want it.
+  // The input is always visible in the toolbar (music mode only), so the
+  // user never has to click "search" first. A non-empty `query` switches
+  // the body from folder-browser to search results; clearing the input
+  // drops back to the folder browser at the previously-selected path.
   const debouncedPending = useDebouncedValue(pendingQuery, 250);
   useEffect(() => {
     if (debouncedPending !== query) setQuery(debouncedPending);
   }, [debouncedPending, query]);
+
+  function clearSearch() {
+    setPendingQuery("");
+    setQuery("");
+  }
+
+  function selectRoot(next: Root) {
+    setRoot(next);
+    setPath("");
+    clearSearch();
+  }
 
   return (
     <div className="library-view">
@@ -65,11 +78,7 @@ export function LibraryView() {
             role="tab"
             aria-selected={root === "music"}
             className={root === "music" ? "btn-primary" : ""}
-            onClick={() => {
-              setRoot("music");
-              setPath("");
-              setShowSearch(false);
-            }}
+            onClick={() => selectRoot("music")}
           >
             🎵 Music
           </button>
@@ -78,41 +87,38 @@ export function LibraryView() {
             role="tab"
             aria-selected={root === "sfx"}
             className={root === "sfx" ? "btn-primary" : ""}
-            onClick={() => {
-              setRoot("sfx");
-              setPath("");
-              setShowSearch(false);
-            }}
+            onClick={() => selectRoot("sfx")}
           >
             ⚡ SFX
           </button>
         </div>
         {root === "music" ? (
-          <button
-            type="button"
-            onClick={() => setShowSearch((v) => !v)}
-            className={showSearch ? "btn-primary" : ""}
-          >
-            🔍 Search
-          </button>
+          <div className="library-toolbar-search">
+            <span className="library-toolbar-search-icon" aria-hidden="true">
+              🔍
+            </span>
+            <input
+              type="search"
+              value={pendingQuery}
+              onChange={(e) => setPendingQuery(e.target.value)}
+              placeholder="Search title / artist / album / path"
+              aria-label="Search music library"
+            />
+            {pendingQuery !== "" ? (
+              <button
+                type="button"
+                className="library-toolbar-search-clear"
+                onClick={clearSearch}
+                aria-label="Clear search"
+                title="Clear"
+              >
+                ✕
+              </button>
+            ) : null}
+          </div>
         ) : null}
         <RescanButton root={root} onComplete={() => setRefreshKey((k) => k + 1)} />
       </header>
-
-      {root === "music" && showSearch ? (
-        <SearchBar
-          value={pendingQuery}
-          onChange={setPendingQuery}
-          onSubmit={(v) => {
-            setQuery(v);
-          }}
-          query={query}
-          onClear={() => {
-            setPendingQuery("");
-            setQuery("");
-          }}
-        />
-      ) : null}
 
       {root === "music" && query ? (
         <MusicSearchResults query={query} refreshKey={refreshKey} />
@@ -179,42 +185,6 @@ function RescanButton({
   );
 }
 
-function SearchBar({
-  value,
-  onChange,
-  onSubmit,
-  query,
-  onClear,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSubmit: (v: string) => void;
-  query: string;
-  onClear: () => void;
-}) {
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    onSubmit(value);
-  }
-  return (
-    <form className="library-search" onSubmit={handleSubmit}>
-      <input
-        type="search"
-        autoFocus
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Search title / artist / album / path"
-      />
-      <button type="submit">Search</button>
-      {query !== "" ? (
-        <button type="button" onClick={onClear}>
-          Clear
-        </button>
-      ) : null}
-    </form>
-  );
-}
-
 // --- MUSIC ---------------------------------------------------------------
 
 function MusicSearchResults({
@@ -267,7 +237,6 @@ function MusicSearchResults({
  *  hit, what to render in the right pane) is the caller's responsibility,
  *  but the layout shape is defined exactly once. */
 function LibraryShell({
-  rootLabel,
   rootKind,
   selectedPath,
   onPathChange,
@@ -279,7 +248,6 @@ function LibraryShell({
   error,
   children,
 }: {
-  rootLabel: string;
   rootKind: Root;
   selectedPath: string;
   onPathChange: (p: string) => void;
@@ -295,7 +263,6 @@ function LibraryShell({
     <div className="library-body">
       <aside className="library-sidebar">
         <FolderTree
-          rootLabel={rootLabel}
           selectedPath={selectedPath}
           onSelect={onPathChange}
           loadChildren={loadChildren}
@@ -310,7 +277,11 @@ function LibraryShell({
         />
       </aside>
       <section className="library-main">
-        <FolderHeader path={selectedPath} root={rootKind} />
+        <FolderHeader
+          path={selectedPath}
+          root={rootKind}
+          onPathSelect={onPathChange}
+        />
         <UploadDrop root={rootKind} dest={selectedPath} onUploaded={onRefresh} />
         {error !== null ? <p className="error small">{error}</p> : null}
         {children}
@@ -383,7 +354,6 @@ function MusicBrowser({
 
   return (
     <LibraryShell
-      rootLabel="All music"
       rootKind="music"
       selectedPath={path}
       onPathChange={onPathChange}
@@ -500,7 +470,6 @@ function SfxBrowser({
 
   return (
     <LibraryShell
-      rootLabel="All SFX"
       rootKind="sfx"
       selectedPath={path}
       onPathChange={onPathChange}
@@ -557,13 +526,38 @@ function SfxBrowser({
 
 // --- shared sub-components ----------------------------------------------
 
-function FolderHeader({ path, root }: { path: string; root: Root }) {
-  const crumbs = path === "" ? [] : path.split("/");
+function FolderHeader({
+  path,
+  root,
+  onPathSelect,
+}: {
+  path: string;
+  root: Root;
+  onPathSelect: (p: string) => void;
+}) {
+  const segments = path === "" ? [] : path.split("/");
+  // Root segment is always present; subsequent segments are the path
+  // pieces. The Breadcrumb component renders the last item as static
+  // "you are here" automatically — so even though we attach onClick to
+  // the deepest item, it won't fire.
+  const items: BreadcrumbItem[] = [
+    {
+      label: root === "music" ? "🎵 Music" : "⚡ SFX",
+      onClick: () => onPathSelect(""),
+      title: root === "music" ? "Go to music root" : "Go to SFX root",
+    },
+    ...segments.map((name, i) => {
+      const segmentPath = segments.slice(0, i + 1).join("/");
+      return {
+        label: name,
+        onClick: () => onPathSelect(segmentPath),
+        title: segmentPath,
+      };
+    }),
+  ];
   return (
     <div className="folder-header">
-      <span className="muted small">
-        {root === "music" ? "🎵" : "⚡"} /{crumbs.length > 0 ? `${crumbs.join(" / ")}` : ""}
-      </span>
+      <Breadcrumb items={items} />
     </div>
   );
 }
