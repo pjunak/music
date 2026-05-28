@@ -59,10 +59,6 @@ interface Props {
   refreshKey?: number | string;
   /** Optional drop handler — when set, folder rows accept drops. */
   onDropOnFolder?: (folderPath: string, payload: unknown) => void;
-  /** Optional "drop here = move to root" payload handler. Renders an
-   *  invisible drop strip at the top of the tree so the operator can move
-   *  things back to the library root without a visible root row. */
-  rootDropLabel?: string;
 }
 
 export function FolderTree({
@@ -71,7 +67,6 @@ export function FolderTree({
   loadChildren,
   refreshKey,
   onDropOnFolder,
-  rootDropLabel,
 }: Props) {
   const [state, setState] = useState<Record<string, NodeState>>({});
   const [rootChildren, setRootChildren] = useState<TreeFolder[] | null>(null);
@@ -243,20 +238,11 @@ export function FolderTree({
 
   return (
     <div className="folder-tree">
-      {/* The root row used to be an explicit "All music" / "All SFX" entry
-          and the chevron showed as decoration. The label was redundant
-          (the tab itself is "Library"), and reserving a click slot for
-          "go to root" was wasted real estate — selecting nothing at all
-          IS the root state, and the host's breadcrumb path makes that
-          explicit. We keep an invisible drop strip at the top, though, so
-          a drag-to-root operation is still possible. */}
-      {onDropOnFolder !== undefined ? (
-        <div
-          className={`tree-row-root-drop${selectedPath === "" ? " selected" : ""}`}
-          aria-label={rootDropLabel ?? "Drop to move to root"}
-          {...dropProps("")}
-        />
-      ) : null}
+      {/* No explicit root row: the old "All music" / "All SFX" entry was
+          redundant (the tab is already "Library") and selecting nothing at
+          all IS the root state — the host's breadcrumb path makes that
+          explicit. Move-to-root via drag isn't offered here; the Tags
+          tab's Move… modal (with a root option) covers that rare case. */}
       {rootError !== null ? (
         <p className="error small" style={{ padding: "0.4rem" }}>
           {rootError}

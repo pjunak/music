@@ -1573,25 +1573,6 @@ kbd,
 .tree-row.selected {
   background: var(--accent-soft);
 }
-/* Invisible drop strip at the top of the tree — keeps the move-to-root
- * drag affordance after we removed the explicit "All music" / "All SFX"
- * root row. The strip is normally a thin transparent slice; on drag-over
- * it lights up to advertise itself. Without this, dragging a track to
- * root would have nowhere to drop. */
-.tree-row-root-drop {
-  height: 0.6rem;
-  margin-bottom: 0.2rem;
-  border-radius: var(--radius);
-  border: 1px dashed transparent;
-  transition: border-color var(--transition), background var(--transition);
-}
-.tree-row-root-drop.selected,
-.tree-row-root-drop:hover {
-  border-color: var(--border-strong);
-}
-.tree-row-root-drop:hover {
-  background: var(--surface-2);
-}
 .tree-row:hover:not(.selected) {
   background: var(--surface-2);
 }
