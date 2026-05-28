@@ -62,6 +62,12 @@ export function selectIsMyOutput(s: PlayerStore): boolean {
  *  received. When paused, returns whatever the server last said. */
 export function selectAmbientPositionMs(s: PlayerStore): number {
   if (s.state === null) return 0;
+  // No ambient track loaded → there is no position to report. Without this
+  // guard the clock dead-reckons from a stale position_ms whenever the
+  // server reports is_playing=true with an empty ambient lane (a playlist
+  // that ran off the end, a deleted track pruned on boot), which is what
+  // made "Nothing playing" tick upward.
+  if (s.state.ambient.current_track_id === null) return 0;
   const base = s.state.ambient.position_ms;
   if (!s.state.is_playing || s.state.interrupt !== null) return base;
   const elapsed = Date.now() - s.stateReceivedAt;

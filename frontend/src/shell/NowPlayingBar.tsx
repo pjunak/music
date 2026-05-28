@@ -56,6 +56,7 @@ export function NowPlayingBar() {
 
   // Fetch metadata for whatever's currently playing (interrupt wins).
   const displayId = interruptId ?? currentId;
+  const hasTrack = displayId !== null;
   useEffect(() => {
     if (displayId === null) {
       setTrack(null);
@@ -78,7 +79,10 @@ export function NowPlayingBar() {
   // Force re-renders twice a second while playing so the dead-reckoned
   // ambient position (computed from `stateReceivedAt` in the player
   // store) advances visually without requiring a server-side update.
-  useTickWhile(isPlaying, 500);
+  // Gated on hasTrack too: with no track loaded there's nothing to
+  // advance, and ticking would just spin the render loop for a clock
+  // that should read 0:00.
+  useTickWhile(isPlaying && hasTrack, 500);
 
   const positionMs = usePlayerStore(selectAmbientPositionMs);
   const totalMs = track !== null ? Math.round(track.length_s * 1000) : 0;
@@ -153,11 +157,10 @@ export function NowPlayingBar() {
 
   const seekable = totalMs > 0;
   const fraction = seekable ? Math.min(1, positionMs / totalMs) : 0;
-  // Disable transport when there's literally nothing loaded — otherwise
-  // pressing play sets is_playing=true server-side and the position
-  // counter starts ticking against an empty track, looking like
+  // `hasTrack` (computed above) disables transport when nothing's loaded —
+  // otherwise pressing play sets is_playing=true server-side and the
+  // position counter starts ticking against an empty track, looking like
   // playback when nothing's actually queued.
-  const hasTrack = displayId !== null;
 
   return (
     <footer className="now-playing">

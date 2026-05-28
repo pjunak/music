@@ -701,6 +701,10 @@ def test_ambient_skip_next_at_end_of_queue_loop_off(
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
         assert amb["current_track_id"] is None
+        assert amb["position_ms"] == 0
+        # Running off the end of the queue stops playback — otherwise
+        # clients dead-reckon the position clock against an empty lane.
+        assert msg["state"]["is_playing"] is False
 
 
 def test_ambient_skip_next_loop_track_replays(

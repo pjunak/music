@@ -19,6 +19,13 @@ import { inputDialog } from "@/components/inputDialog";
 import { MetadataEditor } from "@/components/MetadataEditor";
 import { libraryApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
+import {
+  collectEntries,
+  entriesFromItems,
+  groupByParent,
+  isAudioFile,
+} from "@/core/dropTraversal";
+import type { CollectedFile } from "@/core/dropTraversal";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
@@ -282,7 +289,12 @@ function LibraryShell({
           root={rootKind}
           onPathSelect={onPathChange}
         />
-        <UploadDrop root={rootKind} dest={selectedPath} onUploaded={onRefresh} />
+        <UploadDrop
+          root={rootKind}
+          dest={selectedPath}
+          onUploaded={onRefresh}
+          onNavigate={onPathChange}
+        />
         {error !== null ? <p className="error small">{error}</p> : null}
         {children}
       </section>
@@ -680,10 +692,16 @@ function UploadDrop({
   root,
   dest,
   onUploaded,
+  onNavigate,
 }: {
   root: Root;
   dest: string;
   onUploaded: () => void;
+  /** Navigate the browser to a folder path. Used after a folder drop so
+   *  the operator lands inside the folder they just uploaded — otherwise
+   *  the files vanish into a collapsed subfolder and it looks like the
+   *  upload did nothing. */
+  onNavigate: (path: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(
@@ -691,45 +709,143 @@ function UploadDrop({
   );
   const [dragOver, setDragOver] = useState(false);
 
-  async function send(files: File[]) {
-    if (files.length === 0) return;
+  /** Build a single destination path under MUSIC_DIR / SFX_LIBRARY_DIR by
+   *  joining the currently-selected folder with a relative sub-path that
+   *  came from a dropped folder's structure. Empty sub-path means the
+   *  drop's destination is just the current dest unchanged. */
+  function joinDest(subPath: string): string {
+    if (subPath === "") return dest;
+    return dest === "" ? subPath : `${dest}/${subPath}`;
+  }
+
+  /** Run uploads for a list of collected files. Files at the same relative
+   *  parent dir are uploaded together (single multipart request per dir);
+   *  multiple parent dirs are uploaded sequentially so the progress bar
+   *  reads as one monotonic operation across the whole drop.
+   *
+   *  Note: parallel uploads would be faster but make progress reporting
+   *  fiddly and add server load. For a single-user home server with an
+   *  occasional album drop, sequential is the right trade. */
+  async function sendCollected(collected: CollectedFile[]) {
+    if (collected.length === 0) {
+      toast.warn(
+        "Nothing to upload",
+        "Drop contained no audio files (we accept mp3, flac, ogg, opus, m4a, aac, wav, wma).",
+      );
+      return;
+    }
     setBusy(true);
-    setProgress({ loaded: 0, total: 0 });
-    try {
-      if (root === "music") {
-        const result = await libraryApi.upload(files, dest, (loaded, total) =>
-          setProgress({ loaded, total }),
-        );
-        toast.success(
-          `Uploaded ${result.saved.length}`,
-          `→ ${result.destination || "(root)"}`,
-        );
-      } else {
-        const result = await sfxApi.upload(files, dest, (loaded, total) =>
-          setProgress({ loaded, total }),
-        );
-        toast.success(
-          `Uploaded ${result.saved.length}`,
-          `→ ${result.destination || "(root)"}`,
-        );
+    const totalBytes = collected.reduce((sum, c) => sum + c.file.size, 0);
+    setProgress({ loaded: 0, total: totalBytes });
+
+    const groups = groupByParent(collected);
+    let baseLoaded = 0;
+    let savedTotal = 0;
+
+    // First top-level subfolder created by this drop (the first path
+    // segment of any non-empty group key). Used to navigate the operator
+    // into their freshly-uploaded folder afterwards. Null = drop was loose
+    // files only, so we stay put (they appear in the current track table).
+    let firstSubfolder: string | null = null;
+    for (const subDir of groups.keys()) {
+      if (subDir !== "") {
+        firstSubfolder = subDir.split("/")[0] ?? null;
+        break;
       }
+    }
+
+    try {
+      for (const [subDir, files] of groups) {
+        const groupDest = joinDest(subDir);
+        const groupBytes = files.reduce((s, f) => s + f.size, 0);
+        // libraryApi.upload reports (loaded, total) for that one group; we
+        // re-base it against the cumulative drop total so the progress bar
+        // moves monotonically across the whole multi-folder upload.
+        const onGroupProgress = (loaded: number) => {
+          setProgress({ loaded: baseLoaded + loaded, total: totalBytes });
+        };
+        if (root === "music") {
+          const r = await libraryApi.upload(files, groupDest, onGroupProgress);
+          savedTotal += r.saved.length;
+        } else {
+          const r = await sfxApi.upload(files, groupDest, onGroupProgress);
+          savedTotal += r.saved.length;
+        }
+        baseLoaded += groupBytes;
+      }
+      const folderCount = groups.size;
+      const detail =
+        folderCount > 1
+          ? `across ${folderCount} folders under "${dest || "(root)"}"`
+          : `→ ${dest || "(root)"}`;
+      toast.success(`Uploaded ${savedTotal}`, detail);
+      // Always refresh (re-reads the index/tree so new folders + tracks
+      // show up). For a folder drop, also navigate INTO the uploaded
+      // folder so the result is immediately visible instead of hiding in
+      // a collapsed subfolder — that's what made it look like "nothing
+      // happened". Loose-file drops stay put; the files appear in the
+      // current track table directly.
       onUploaded();
+      if (firstSubfolder !== null) {
+        onNavigate(joinDest(firstSubfolder));
+      }
     } catch (e) {
-      toast.error("Upload failed", e instanceof Error ? e.message : undefined);
+      // Partial uploads happen — some files may have landed before the
+      // failing request. Tell the operator both numbers so they know
+      // whether to retry from scratch or just re-drop the missing folder.
+      toast.error(
+        "Upload failed",
+        `${savedTotal} saved before error: ${e instanceof Error ? e.message : "unknown"}`,
+      );
     } finally {
       setBusy(false);
       setProgress(null);
     }
   }
 
+  // NOTE: this handler is intentionally NOT async. The DataTransfer and
+  // the FileSystemEntry objects it yields are only valid during the
+  // synchronous part of the drop event — the moment we `await`, the
+  // browser (Firefox especially) neuters them and directory reads come
+  // back empty. So we capture both the entry handles and the flat file
+  // list synchronously here, then hand them to the async walker.
   function onDrop(e: DragEvent<HTMLLabelElement>) {
     e.preventDefault();
     setDragOver(false);
-    void send(Array.from(e.dataTransfer.files));
+    const entries = entriesFromItems(e.dataTransfer.items);
+    const flatFiles = Array.from(e.dataTransfer.files);
+    void processDrop(entries, flatFiles);
+  }
+
+  async function processDrop(entries: FileSystemEntry[], flatFiles: File[]) {
+    // Prefer the entry walk (handles folders). Fall back to the flat file
+    // list — captured synchronously above — when the entry API gave us
+    // nothing (older browsers, programmatic drops, or a drop that somehow
+    // produced no usable entries).
+    let collected: CollectedFile[] = [];
+    if (entries.length > 0) {
+      try {
+        collected = await collectEntries(entries);
+      } catch {
+        collected = [];
+      }
+    }
+    if (collected.length === 0) {
+      collected = flatFiles
+        .filter((f) => isAudioFile(f.name))
+        .map((file) => ({ relativePath: file.name, file }));
+    }
+    await sendCollected(collected);
   }
   function onPick(e: ChangeEvent<HTMLInputElement>) {
-    void send(Array.from(e.target.files ?? []));
+    // The file picker honours accept="audio/*" as a hint but the user can
+    // still flip to "all files" — filter here so non-audio picks aren't
+    // silently sent and stored as unindexed clutter.
+    const collected: CollectedFile[] = Array.from(e.target.files ?? [])
+      .filter((f) => isAudioFile(f.name))
+      .map((file) => ({ relativePath: file.name, file }));
     e.target.value = "";
+    void sendCollected(collected);
   }
 
   return (
@@ -760,7 +876,7 @@ function UploadDrop({
         </div>
       ) : (
         <span>
-          Drop audio here or click to upload to{" "}
+          Drop audio files or folders here, or click to upload to{" "}
           <strong>{dest === "" ? "(root)" : dest}</strong>
         </span>
       )}

@@ -223,6 +223,19 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
     # client reconnects.
     out["active_output_device_ids"] = []
 
+    # Can't be "playing" with nothing loaded. If pruning emptied both lanes
+    # (deleted current track, no interrupt), force is_playing=false so
+    # clients don't dead-reckon a position clock against a phantom track on
+    # the next boot. Catches every "playing nothing" path, not just the
+    # ones we know about.
+    ambient_after = out.get("ambient") or {}
+    interrupt_after = out.get("interrupt")
+    nothing_loaded = (
+        ambient_after.get("current_track_id") is None and interrupt_after is None
+    )
+    if nothing_loaded and out.get("is_playing"):
+        out["is_playing"] = False
+
     return out
 
 
@@ -446,12 +459,16 @@ def ambient_skip_next() -> Any:
                 ),
             )
 
-        # Loop off, end of queue: clear current, become idle.
-        return _replace_ambient(
-            state,
-            amb.model_copy(
-                update={"current_track_id": None, "position_ms": 0}
-            ),
+        # Loop off, end of queue: clear current AND stop. Leaving
+        # is_playing=true here is what let clients dead-reckon the position
+        # clock upward against an empty lane ("Nothing playing" ticking up).
+        return state.model_copy(
+            update={
+                "ambient": amb.model_copy(
+                    update={"current_track_id": None, "position_ms": 0}
+                ),
+                "is_playing": False,
+            }
         )
 
     return _mut
