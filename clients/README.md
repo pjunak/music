@@ -41,14 +41,19 @@ Both return the **same** `PlayerState` shape. Both are reachable **without authe
 1. Connect to `ws(s)://<host>/api/ws` (`wss` if the site is `https`).
 2. The server immediately sends a **`state_snapshot`**:
    ```json
-   { "type": "state_snapshot", "your_device_id": "dev-AbC123", "state": { ...PlayerState } }
+   { "type": "state_snapshot", "your_device_id": "", "state": { ...PlayerState } }
    ```
-   Keep `your_device_id` — it's how you recognise yourself in `active_output_device_ids`.
-3. Send a **`register`** so you appear in the operator's Console "Outputs" picker and
-   (with `audio_output`) receive SFX events:
+   `your_device_id` is empty by design (the snapshot precedes `register`). **You** own your
+   identity: mint a stable `client_id` once and persist it (a UUID in a dotfile). That string
+   is how you recognise yourself in `active_output_device_ids`.
+3. Send a **`register`** with your stable `client_id` so you appear in the operator's device
+   list and can be designated as an output:
    ```json
-   { "type": "register", "name": "Living-room speaker", "capabilities": ["audio_output"] }
+   { "type": "register", "name": "Living-room speaker", "client_id": "headless-7f3c…" }
    ```
+   The operator must then mark you as an **audio output** in Settings → Devices (output is
+   fully manual — nothing auto-designates). Once designated, that sticks to your `client_id`
+   across restarts. Only designated outputs receive SFX events and may report position.
 4. From then on the server pushes a **`state_changed`** on every change:
    ```json
    { "type": "state_changed", "state": { ...PlayerState } }
@@ -78,7 +83,7 @@ ping/pong is enough). Reconnect on close and repeat from step 2.
 active track  = interrupt ? interrupt.current_track_id : ambient.current_track_id
 playing       = interrupt ? true : is_playing
 position      = interrupt ? interrupt.position_ms : ambient.position_ms
-am I "on"?    = (your_device_id is in active_output_device_ids)   ← server/Console-driven
+am I "on"?    = (your client_id is in active_output_device_ids)   ← server/Console-driven
                 OR a local on/off you control yourself             ← see "On/off" below
 ```
 
@@ -99,7 +104,8 @@ jumps.
 
 ## SFX events
 
-If you registered with `audio_output`, the server also pushes fire-and-forget sound effects:
+If the operator has designated you as an audio output, the server also pushes fire-and-forget
+sound effects:
 ```json
 { "type": "sfx_fired", "soundboard_id": "tavern", "item_path": "dnd/door.ogg", "volume": 0.8 }
 ```
@@ -111,16 +117,19 @@ the music. These are **not** part of `PlayerState` — they're transient, so jus
 The whole output protocol works **as a guest** — no cookie, no token. A guest socket can:
 
 - receive `state_snapshot` / `state_changed` / `sfx_fired`,
-- `register` (so it shows up as a device and can be toggled from the Console),
+- `register` with a stable `client_id` (so it shows up in the operator's device list and can
+  be designated + toggled from the Console),
 - stream tracks, covers, metadata, and referenced SFX.
 
 A guest **cannot** mutate server state. For an output that's exactly right — you *follow*
 state, you don't drive it. The narrow consequences:
 
-- **On/off via the Console doesn't persist.** Each reconnect mints a fresh `your_device_id`,
-  so if you rely on the operator toggling you on in the Console, you'll need re-toggling after
-  a reboot. **Recommendation: keep a *local* on/off** (default on) so the box just plays — see
-  the reference client's `--respect-console` flag for the opposite behaviour.
+- **Your *designation* persists; your live *on/off* does not.** Because you keep a stable
+  `client_id`, the operator only has to mark you as an output once — that sticks across
+  reboots. But activation is fully manual by design: the server clears `active_output_device_ids`
+  when you disconnect and never auto-resumes, so after a reboot the operator re-toggles you on
+  in the Console. **Recommendation: keep a *local* on/off** (default on) so the box just plays
+  regardless — see the reference client's `--respect-console` flag for the opposite behaviour.
 - **No position reporting back to the server.** Playback is fine (you follow `position_ms`);
   only the server's *authoritative* scrub position won't be corrected by you. For ambient
   background this is unnoticeable.
@@ -170,8 +179,12 @@ that's the browser *engine* feature; this is the simple output.)
     const m = JSON.parse(e.data);
     if (m.type === "state_snapshot") {
       state = m.state;
+      // Stable identity, persisted so the operator's output designation sticks.
+      const clientId = localStorage.getItem("embed-client-id")
+        ?? (localStorage.setItem("embed-client-id", crypto.randomUUID()),
+            localStorage.getItem("embed-client-id"));
       ws.send(JSON.stringify(
-        { type: "register", name: "Web embed", capabilities: ["audio_output"] }));
+        { type: "register", name: "Web embed", client_id: clientId }));
       apply();
     } else if (m.type === "state_changed") { state = m.state; apply(); }
   };
@@ -201,8 +214,8 @@ Or watch the live socket with [`websocat`](https://github.com/vi/websocat):
 
 ```sh
 websocat wss://music.example/api/ws
-# → {"type":"state_snapshot","your_device_id":"dev-…","state":{…}}
-# then paste:  {"type":"register","name":"cli","capabilities":["audio_output"]}
+# → {"type":"state_snapshot","your_device_id":"","state":{…}}
+# then paste:  {"type":"register","name":"cli","client_id":"cli-pick-a-stable-string"}
 ```
 
 The [reference Python client](headless/) is Recipe B done properly (reconnect, seek

@@ -207,7 +207,7 @@ export function DiagnosticsView() {
               <tr>
                 <th>Device id</th>
                 <th>Name</th>
-                <th>Capabilities</th>
+                <th>Designated output?</th>
                 <th>Active output?</th>
                 <th>Me?</th>
               </tr>
@@ -219,7 +219,7 @@ export function DiagnosticsView() {
                     <code>{d.device_id}</code>
                   </td>
                   <td>{d.name}</td>
-                  <td>{d.capabilities.join(", ") || "(none)"}</td>
+                  <td>{d.is_output ? "yes" : "no"}</td>
                   <td>{activeOutputs.includes(d.device_id) ? "yes" : "no"}</td>
                   <td>{d.device_id === myDeviceId ? "yes" : "—"}</td>
                 </tr>

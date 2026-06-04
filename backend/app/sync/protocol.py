@@ -21,9 +21,10 @@ class RegisterAction(_Action):
     name: str = Field(min_length=1, max_length=128)
     # Stable per-install identity the client mints once (localStorage). It's
     # what makes an audio-output designation stick to a physical device across
-    # reconnects. Validated as an opaque token, not a strict UUID, so the
-    # documented headless-output protocol (clients/README.md) stays open.
-    client_id: str = Field(min_length=8, max_length=64)
+    # reconnects. Validated only as a non-empty opaque token (not a strict
+    # UUID / length) so the documented headless-output protocol
+    # (clients/README.md) stays open to any stable string.
+    client_id: str = Field(min_length=1, max_length=64)
     # Accepted for wire-compat with older clients but ignored — output
     # eligibility now lives in the persistent device registry (`is_output`),
     # not in a self-asserted capability.

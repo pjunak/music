@@ -28,6 +28,7 @@ from app.api import (
 )
 from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
+from app.devices.store import device_store
 from app.library import index as library_index
 from app.models import Base
 from app.models.auth_session import AuthSession
@@ -148,6 +149,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("SFX_LIBRARY_DIR=%s", sfx_dir)
     logger.info("MODES_DIR=%s", modes_dir)
     logger.info("PRESETS_DIR=%s", presets_dir)
+    logger.info("DEVICES_FILE=%s", settings.devices_file.resolve())
 
     # Idempotent base-structure init. The lifespan only ever creates
     # missing dirs and (optionally) seeds initially-empty modes/presets;
@@ -180,6 +182,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # auth user via `music-cli create-user`.
     Base.metadata.create_all(bind=engine)
     _apply_additive_columns()
+    device_store.load()
     modes_loader.load_all()
     presets_loader.load_all()
     # Walk the music dir on boot so search/tree work immediately. A noop on

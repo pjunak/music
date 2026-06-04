@@ -1,6 +1,7 @@
 import type {
   FolderEntry,
   InterruptSpec,
+  KnownDevice,
   ModeDetail,
   ModeSummary,
   PlaylistMeta,
@@ -111,6 +112,15 @@ export interface PresetManifest {
 
 export const presetsApi = {
   list: () => api.get<PresetManifest[]>("/api/presets"),
+};
+
+export const devicesApi = {
+  list: () => api.get<KnownDevice[]>("/api/devices"),
+  /** Remember a device (or update its name / output designation). */
+  save: (clientId: string, payload: { name: string; is_output: boolean }) =>
+    api.put<KnownDevice>(`/api/devices/${encodeURIComponent(clientId)}`, payload),
+  remove: (clientId: string) =>
+    api.delete<void>(`/api/devices/${encodeURIComponent(clientId)}`),
 };
 
 export const playlistsApi = {

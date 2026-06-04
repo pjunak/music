@@ -106,6 +106,7 @@ ENV MUSIC_DIR=/data/music \
     PRESETS_DIR=/data/presets \
     MODES_SEED_DIR=/seeds/modes \
     PRESETS_SEED_DIR=/seeds/presets \
+    DEVICES_FILE=/data/devices.json \
     DATABASE_URL=sqlite:////data/app.db
 
 EXPOSE 8000

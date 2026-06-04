@@ -32,16 +32,13 @@ def _register(ws, name: str = "device", client_id: str = "client-1") -> None:
 
 
 def _designate(client_id: str, value: bool = True) -> None:
-    """Mark a device as a designated audio output straight in the DB + live
-    registry cache, bypassing the HTTP API so no extra broadcast lands on the
-    test sockets. Mirrors what the operator's device list does."""
-    from app.core.db import SessionLocal
-    from app.domain import known_devices as known_devices_domain
+    """Remember a device as a designated audio output straight in the file
+    store + live registry cache, bypassing the HTTP API so no extra broadcast
+    lands on the test sockets. Mirrors what the operator's device list does."""
+    from app.devices.store import device_store
     from app.sync.devices import registry
 
-    with SessionLocal() as db:
-        known_devices_domain.upsert_seen(db, client_id, "")
-        known_devices_domain.set_is_output(db, client_id, value)
+    device_store.put(client_id, client_id, value)
     registry.refresh_is_output(client_id, value)
 
 
@@ -359,21 +356,23 @@ def test_set_active_outputs_does_not_re_validate_existing_ids(
         assert "b-client" in msg["state"]["active_output_device_ids"]
 
 
-def test_register_auto_creates_known_device_row(client: TestClient) -> None:
-    """Connecting auto-creates the persistent row so the device is visible in
-    the operator's list — but with is_output=False (no output authority until
-    explicitly granted)."""
+def test_register_does_not_auto_save_device(client: TestClient) -> None:
+    """Connecting must NOT add a device to the saved list — remembering a
+    device is a manual operator action. It appears live in connected_devices
+    but the persistent registry stays empty until explicitly saved."""
     _login(client)
     with client.websocket_connect("/api/ws") as ws:
         ws.receive_json()
         _register(ws, "Living Room TV", "tv-client")
-        ws.receive_json()
-
+        msg = ws.receive_json()
+        # Appears live...
+        assert any(
+            d["client_id"] == "tv-client"
+            for d in msg["state"]["connected_devices"]
+        )
+        # ...but is not in the persistent saved list.
         rows = client.get("/api/devices").json()
-        entry = next(r for r in rows if r["client_id"] == "tv-client")
-        assert entry["name"] == "Living Room TV"
-        assert entry["is_output"] is False
-        assert entry["connected"] is True
+        assert all(r["client_id"] != "tv-client" for r in rows)
 
 
 def test_refresh_does_not_reactivate_output(client: TestClient) -> None:

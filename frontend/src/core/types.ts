@@ -33,9 +33,24 @@ export interface PositionReport {
 }
 
 export interface DeviceInfo {
+  /** Same value as `client_id` (the stable identity) — kept so existing
+   *  code that keys on `device_id` keeps working. */
   device_id: string;
+  client_id: string;
   name: string;
+  /** Whether this device is a designated audio output (persistent registry). */
+  is_output: boolean;
   capabilities: string[];
+}
+
+/** A remembered device from the operator's persistent registry
+ *  (`GET /api/devices`). */
+export interface KnownDevice {
+  client_id: string;
+  name: string;
+  is_output: boolean;
+  connected: boolean;
+  added_at: string | null;
 }
 
 export interface PlayerState {
@@ -191,7 +206,7 @@ export interface TreeResponse {
 // --- WebSocket actions (client → server) ---------------------------------
 
 export type WsAction =
-  | { type: "register"; name: string; capabilities: string[] }
+  | { type: "register"; name: string; client_id: string }
   | { type: "set_volume"; volume: number }
   | { type: "pause" }
   | { type: "resume" }

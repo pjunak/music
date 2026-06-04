@@ -119,9 +119,9 @@ function OutputsBar() {
   const devices = state?.connected_devices ?? [];
   const activeIds = state?.active_output_device_ids ?? [];
 
-  const audioOutputs = devices.filter((d) =>
-    d.capabilities.includes("audio_output"),
-  );
+  // Only devices the operator has designated as outputs (Settings → Devices)
+  // and that are currently connected can be activated here.
+  const audioOutputs = devices.filter((d) => d.is_output);
 
   function toggle(deviceId: string) {
     const next = activeIds.includes(deviceId)
@@ -135,8 +135,8 @@ function OutputsBar() {
       <span className="outputs-bar-label">Outputs</span>
       {audioOutputs.length === 0 ? (
         <span className="muted small">
-          No audio-output devices connected. Open this page on a TV / speaker
-          tab and enable Audio output in Settings.
+          No output devices connected. Open this page on a TV / speaker tab,
+          then mark it as an audio output in Settings → Devices.
         </span>
       ) : (
         <div className="output-picker-options inline">

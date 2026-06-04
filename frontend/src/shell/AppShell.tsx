@@ -50,7 +50,7 @@ export default function AppShell() {
   useEffect(() => {
     const unsubMsg = wsClient.subscribe(applyMessage);
     const unsubStatus = wsClient.onStatus(setStatus);
-    // Surface server-side errors (e.g. "device not registered with audio_output",
+    // Surface server-side errors (e.g. "device(s) not designated as outputs",
     // rejected actions, "guest cannot mutate") via the toast layer.
     const unsubErr = wsClient.subscribe((msg) => {
       if (msg.type === "error") {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { PlayerState, WsMessage } from "@/core/types";
+import { useUiStore } from "@/core/uiStore";
 import type { WsStatus } from "@/core/ws";
 
 interface PlayerStore {
@@ -24,9 +25,13 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
 
   applyMessage: (msg) => {
     if (msg.type === "state_snapshot") {
+      // Identity is the client's own stable client_id (the server sends an
+      // empty your_device_id — register arrives after the snapshot). This is
+      // the same value carried in `connected_devices[].device_id` and
+      // `active_output_device_ids`, so `selectIsMyOutput` matches correctly.
       set({
         state: msg.state,
-        myDeviceId: msg.your_device_id,
+        myDeviceId: useUiStore.getState().clientId,
         stateReceivedAt: Date.now(),
       });
     } else if (msg.type === "state_changed") {

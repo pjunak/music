@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.domain import known_devices as known_devices_domain
+from app.devices.store import device_store
 from app.domain import playlists as playlists_domain
 from app.models.auth_session import AuthSession
 from app.models.playlist import Playlist
@@ -171,20 +171,13 @@ async def _apply_and_broadcast(mutator: Any) -> None:
 async def _h_register(
     action: RegisterAction, device_id: str, _ws: WebSocket
 ) -> None:
-    # `device_id` here is the ephemeral connection id. Persist/refresh the
-    # stable device row (never touching its is_output), then cache the current
-    # designation onto this live connection. Auto-creating the row with
-    # is_output=False is what lets a brand-new device appear in the operator's
-    # list while having no output authority until explicitly granted.
-    def _work() -> bool:
-        db = SessionLocal()
-        try:
-            row = known_devices_domain.upsert_seen(db, action.client_id, action.name)
-            return row.is_output
-        finally:
-            db.close()
-
-    is_output = await run_in_threadpool(_work)
+    # `device_id` here is the ephemeral connection id. Registering does NOT add
+    # the device to the persistent list — that's a manual operator action. We
+    # only look up whether this client_id is *already* a remembered output and
+    # cache that onto the live connection. An unremembered device connects with
+    # is_output=False and simply appears in `connected_devices` for the
+    # operator to optionally save.
+    is_output = device_store.is_output(action.client_id)
     registry.bind(
         device_id,
         client_id=action.client_id,
@@ -248,14 +241,7 @@ async def _h_set_active_outputs(
     already_active = set(current_state.active_output_device_ids)
     new_ids = [d for d in action.device_ids if d not in already_active]
     if new_ids:
-        def _work() -> set[str]:
-            db = SessionLocal()
-            try:
-                return known_devices_domain.output_client_ids(db)
-            finally:
-                db.close()
-
-        designated = await run_in_threadpool(_work)
+        designated = device_store.output_client_ids()
         bad = [d for d in new_ids if d not in designated]
         if bad:
             await _send_error(

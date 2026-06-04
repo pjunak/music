@@ -7,7 +7,9 @@ mpv. No login, no server changes — it connects as a guest (see ../README.md
 for the protocol).
 
 What it does:
-  - connects to ws(s)://<server>/api/ws, registers as an `audio_output` device,
+  - connects to ws(s)://<server>/api/ws, registers with a stable `client_id`
+    (persisted), so the operator can designate this device as an audio output
+    once and have it stick across restarts,
   - on every state change, plays the active track (interrupt lane wins over
     ambient) at the reported position, pausing/seeking to match the server,
   - plays fire-and-forget SFX (`sfx_fired`) layered over the music,
@@ -23,9 +25,13 @@ leave-it-on-a-shelf appliance.
 Config is via environment variables (or the matching CLI flags):
   MUSIC_SERVER_URL   required, e.g. http://192.168.1.50:8000 or https://music.example
   MUSIC_OUTPUT_NAME  device name shown in the Console (default: hostname)
+  MUSIC_CLIENT_ID    stable identity (default: generated + persisted to a dotfile)
   MUSIC_CONTROL_PORT if set, serve the LAN control endpoint on this port
   MUSIC_START_ON     "0" to boot muted (default boots playing)
   MUSIC_VOLUME       initial local volume 0..1 (default 1.0)
+
+The operator must mark this device as an audio output in Settings → Devices
+before it can play (output is fully manual — see ../README.md).
 
 Dependencies: `websocket-client` and `python-mpv` (libmpv). See requirements.txt.
 """
@@ -38,7 +44,9 @@ import socket
 import threading
 import urllib.parse
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 try:
@@ -139,6 +147,7 @@ class Reconciler:
         server_url: str,
         player: MpvPlayer,
         *,
+        client_id: str,
         respect_console: bool,
         local_on: bool,
         local_volume: float,
@@ -146,10 +155,12 @@ class Reconciler:
         self.server_url = server_url.rstrip("/")
         self.player = player
         self.respect_console = respect_console
+        # Our stable identity — what the server keys active outputs on. The
+        # snapshot's your_device_id is empty now, so we use this directly.
+        self._client_id = client_id
 
         self._lock = threading.Lock()
         self._state: dict[str, Any] | None = None
-        self._device_id: str | None = None
         self._loaded_url: str | None = None
         self._meta_cache: dict[int, dict[str, Any]] = {}
 
@@ -158,9 +169,8 @@ class Reconciler:
 
     # -- inputs ------------------------------------------------------------- #
 
-    def on_snapshot(self, device_id: str, state: dict[str, Any]) -> None:
+    def on_snapshot(self, state: dict[str, Any]) -> None:
         with self._lock:
-            self._device_id = device_id
             self._state = state
         self._reconcile()
 
@@ -185,7 +195,7 @@ class Reconciler:
     def _reconcile(self) -> None:
         with self._lock:
             state = self._state
-            device_id = self._device_id
+            client_id = self._client_id
             local_on = self.local_on
             volume = self.local_volume
         if state is None:
@@ -205,8 +215,8 @@ class Reconciler:
         # "Am I on?" — local switch by default; honour the server's active set
         # only when asked to (--respect-console).
         on = local_on
-        if self.respect_console and device_id is not None:
-            on = on and device_id in (state.get("active_output_device_ids") or [])
+        if self.respect_console:
+            on = on and client_id in (state.get("active_output_device_ids") or [])
 
         self.player.set_volume(volume)
 
@@ -294,6 +304,7 @@ def ws_url_for(server_url: str) -> str:
 def run_ws(
     server_url: str,
     name: str,
+    client_id: str,
     reconciler: Reconciler,
     sfx: SfxPlayer | None,
 ) -> None:
@@ -301,7 +312,7 @@ def run_ws(
 
     def on_open(ws: websocket.WebSocketApp) -> None:
         ws.send(json.dumps(
-            {"type": "register", "name": name, "capabilities": ["audio_output"]}
+            {"type": "register", "name": name, "client_id": client_id}
         ))
         print(f"[ws] connected to {url}, registered as {name!r}", flush=True)
 
@@ -312,7 +323,7 @@ def run_ws(
             return
         kind = msg.get("type")
         if kind == "state_snapshot":
-            reconciler.on_snapshot(msg.get("your_device_id"), msg.get("state") or {})
+            reconciler.on_snapshot(msg.get("state") or {})
         elif kind == "state_changed":
             reconciler.on_state(msg.get("state") or {})
         elif kind == "sfx_fired" and sfx is not None:
@@ -416,6 +427,34 @@ def start_control_server(port: int, reconciler: Reconciler) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def load_or_create_client_id(explicit: str | None) -> str:
+    """Resolve this appliance's stable identity. Precedence: --client-id /
+    MUSIC_CLIENT_ID, else a generated id persisted to a dotfile so the
+    operator's output designation sticks across restarts. Falls back to an
+    ephemeral id if the dotfile can't be written."""
+    if explicit:
+        return explicit
+    state_dir = Path(
+        os.environ.get("MUSIC_STATE_DIR")
+        or (Path.home() / ".config" / "music-output")
+    )
+    path = state_dir / "client-id"
+    try:
+        if path.is_file():
+            existing = path.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+    except OSError:
+        pass
+    new_id = f"headless-{uuid.uuid4()}"
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(new_id, encoding="utf-8")
+    except OSError:
+        pass  # ephemeral for this run — still works, just won't be remembered
+    return new_id
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Headless audio output for the music player.")
     p.add_argument(
@@ -427,6 +466,11 @@ def parse_args() -> argparse.Namespace:
         "--name",
         default=os.environ.get("MUSIC_OUTPUT_NAME") or socket.gethostname(),
         help="device name shown in the Console (env MUSIC_OUTPUT_NAME)",
+    )
+    p.add_argument(
+        "--client-id",
+        default=os.environ.get("MUSIC_CLIENT_ID"),
+        help="stable identity (env MUSIC_CLIENT_ID; default: persisted dotfile)",
     )
     p.add_argument(
         "--control-port",
@@ -467,11 +511,13 @@ def main() -> int:
     if not args.server:
         raise SystemExit("error: --server (or MUSIC_SERVER_URL) is required")
 
+    client_id = load_or_create_client_id(args.client_id)
     player = MpvPlayer()
     sfx = None if args.no_sfx else SfxPlayer()
     reconciler = Reconciler(
         args.server,
         player,
+        client_id=client_id,
         respect_console=args.respect_console,
         local_on=not args.start_off,
         local_volume=args.volume,
@@ -487,7 +533,7 @@ def main() -> int:
         flush=True,
     )
     try:
-        run_ws(args.server, args.name, reconciler, sfx)
+        run_ws(args.server, args.name, client_id, reconciler, sfx)
     except KeyboardInterrupt:
         print("\n[output] bye", flush=True)
     return 0

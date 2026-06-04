@@ -20,8 +20,8 @@ import { VolumeIcon } from "./icons";
  *
  *  States we render:
  *    - Connecting: muted "Connecting…" pill, no action.
- *    - User without `audio_output` capability: muted hint, opens Settings
- *      isn't reachable from here — so we just say so and leave it.
+ *    - Device not designated as an output: muted "Not an output" hint — the
+ *      operator marks it in Settings → Devices first (output is fully manual).
  *    - Otherwise: a clickable pill that toggles between
  *      "Playing here" (active) and "Play here" (idle).
  *
@@ -102,11 +102,11 @@ export function OutputToggle() {
     );
   }
 
-  if (me === null || !me.capabilities.includes("audio_output")) {
+  if (me === null || !me.is_output) {
     return (
       <span
         className="output-toggle output-toggle-idle"
-        title="Enable Audio output in Settings → This device"
+        title="Mark this device as an audio output in Settings → Devices to play here"
       >
         <VolumeIcon className="output-toggle-icon" />
         <span className="output-toggle-label muted">Not an output</span>

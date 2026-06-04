@@ -28,9 +28,11 @@ sudo pip3 install -r requirements.txt        # or: pip3 install --user websocket
 MUSIC_SERVER_URL=http://192.168.1.50:8000 python3 /opt/music-output/music_output.py
 ```
 
-You should see it connect and register; start playback from the player and audio comes out
-of this box. It also shows up in the player Console's **Outputs** picker as the name you gave
-it (default: the hostname).
+You should see it connect and register. It shows up in **Settings → Devices** under the name
+you gave it (default: the hostname). Mark it as an **audio output** there once — that
+designation sticks to this box across restarts (it persists a stable `client_id`). Then start
+playback and audio comes out of this box; it also appears in the Console's **Outputs** picker
+to switch on/off mid-session.
 
 ## Run it forever (systemd)
 

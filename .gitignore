@@ -73,6 +73,10 @@ dmypy.json
 *.db-wal
 *.db-shm
 
+# Remembered-devices registry (runtime state, lives in the data volume)
+devices.json
+.devices.json.tmp
+
 # Media / runtime content (never commit user music or uploaded files).
 # Anchored to repo root so we don't shadow code dirs like backend/app/library/.
 /music/

@@ -55,15 +55,15 @@ class WsClient {
     return false;
   }
 
-  /** Re-send the `register` action with whatever the UI store currently
-   *  reports for device name + capabilities. Idempotent on the server —
-   *  replaces the prior registration for this connection. */
+  /** Re-send the `register` action with this browser's stable client_id and
+   *  current device name. Idempotent on the server — re-binds the stable
+   *  identity to this connection. */
   sendRegister(): void {
-    const { deviceName, capabilities } = useUiStore.getState();
+    const { deviceName, clientId } = useUiStore.getState();
     this.send({
       type: "register",
       name: deviceName ?? defaultDeviceName(),
-      capabilities,
+      client_id: clientId,
     });
   }
 

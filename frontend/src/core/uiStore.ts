@@ -3,7 +3,21 @@ import { persist } from "zustand/middleware";
 
 export type TabKey = "player" | "library" | "controls" | "settings";
 
-export type Capability = "controls" | "audio_output";
+/** Stable per-install identity. Generated once and persisted, so the server
+ *  can recognise this browser across refreshes/restarts and the operator's
+ *  audio-output designation sticks to it. Falls back to a non-crypto id in
+ *  non-secure contexts (e.g. an old TV reached over plain http on a LAN),
+ *  where `crypto.randomUUID` is unavailable. */
+function generateClientId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch {
+    /* fall through to the non-crypto path */
+  }
+  return `cid-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
 
 interface UiStore {
   /** Hide the cover art on the Player tab. The DM may want a black screen
@@ -16,15 +30,15 @@ interface UiStore {
   deviceName: string | null;
   setDeviceName: (name: string | null) => void;
 
-  /** Capabilities this tab announces. Default: both. Toggling changes the
-   *  registered capabilities on the next register call. */
-  capabilities: Capability[];
-  setCapabilities: (caps: Capability[]) => void;
+  /** Stable identity sent in every `register`. Persisted; never changes for
+   *  this browser once generated. */
+  clientId: string;
 
-  /** Local-only override that forces the playback engine to treat this
-   *  device as an active output regardless of `active_output_device_ids`.
-   *  Lets guests (who can't mutate server state) still hear audio on this
-   *  tab — used by the Player tab's "Play on this device" toggle. */
+  /** Local-only override that forces the playback engine to treat this device
+   *  as an active output regardless of `active_output_device_ids`. Lets a
+   *  guest (who can't mutate server state) hear audio on this tab. Deliberately
+   *  NOT persisted — output is fully manual, so a refresh never auto-resumes
+   *  local playback. */
   forceLocalPlayback: boolean;
   setForceLocalPlayback: (v: boolean) => void;
 
@@ -69,13 +83,33 @@ export const useUiStore = create<UiStore>()(
       setHidePlayerArt: (v) => set({ hidePlayerArt: v }),
       deviceName: null,
       setDeviceName: (name) => set({ deviceName: name }),
-      capabilities: ["controls", "audio_output"],
-      setCapabilities: (caps) => set({ capabilities: caps }),
+      clientId: generateClientId(),
       forceLocalPlayback: false,
       setForceLocalPlayback: (v) => set({ forceLocalPlayback: v }),
       sfxVolume: 0.8,
       setSfxVolume: (v) => set({ sfxVolume: Math.max(0, Math.min(1, v)) }),
     }),
-    { name: "music-ui" },
+    {
+      name: "music-ui",
+      version: 1,
+      // Only persist durable prefs. `forceLocalPlayback` is intentionally
+      // omitted so it's session-only (no auto-resume on refresh).
+      partialize: (s) => ({
+        hidePlayerArt: s.hidePlayerArt,
+        deviceName: s.deviceName,
+        clientId: s.clientId,
+        sfxVolume: s.sfxVolume,
+      }),
+      migrate: (persisted) => {
+        // v0 → v1: drop the old self-asserted `capabilities` (output is now a
+        // server-side designation) and any persisted `forceLocalPlayback`
+        // (now session-only). Anything left merges over the defaults, so a
+        // missing clientId is backfilled by the initializer.
+        const p = { ...(persisted as Record<string, unknown> | null) };
+        delete p.capabilities;
+        delete p.forceLocalPlayback;
+        return p as unknown as UiStore;
+      },
+    },
   ),
 );

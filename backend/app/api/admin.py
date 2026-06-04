@@ -5,6 +5,7 @@ The "persistent state worth caring about" (per CLAUDE.md) is:
   - `app.db`: auth users, playlists, DB-only metadata (display_title, origin)
   - `MODES_DIR`: mode bundles (manifests, soundboards, scenes)
   - `PRESETS_DIR`: audio-effect preset YAMLs
+  - `DEVICES_FILE`: the remembered-devices list + output designations
 
 Music + SFX libraries are *not* included — they're large media managed out-of-
 band via SFTP/rsync, and a full backup roundtrip through HTTP is the wrong
@@ -88,6 +89,12 @@ def _build_tarball() -> bytes:
             if not src.is_dir():
                 continue
             tar.add(src, arcname=label, recursive=True)
+
+        # The remembered-devices list — a standalone JSON file, included so a
+        # restore brings back output designations along with everything else.
+        devices_file = settings.devices_file.resolve()
+        if devices_file.is_file():
+            tar.add(devices_file, arcname=devices_file.name, recursive=False)
 
     return buf.getvalue()
 

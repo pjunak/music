@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 
 import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
-import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
@@ -155,42 +154,11 @@ export function AudioEngine() {
     return unsub;
   }, []);
 
-  // Auto-claim active output: first state snapshot we see with no active
-  // outputs and our device having `audio_output` capability triggers a
-  // self-claim, so playing actually produces audio without the operator
-  // having to dive into Controls. Guest connections can't mutate state, so
-  // we skip — the Player tab's "Play on this device" button drives
-  // forceLocalPlayback for them instead.
-  useEffect(() => {
-    let claimed = false;
-    let lastDeviceId: string | null = null;
-    const unsub = usePlayerStore.subscribe((s) => {
-      // Reset the auto-claim latch on device-id changes (sign-out / sign-in
-      // reconnects the WS with a fresh device id). Without this, signing
-      // back in inherits the previous session's `claimed=true` and the
-      // user has to claim manually.
-      if (s.myDeviceId !== lastDeviceId) {
-        claimed = false;
-        lastDeviceId = s.myDeviceId;
-      }
-      if (claimed || s.state === null || s.myDeviceId === null) return;
-      if (useAuthStore.getState().status !== "authenticated") return;
-      const me = s.state.connected_devices.find(
-        (d) => d.device_id === s.myDeviceId,
-      );
-      if (!me || !me.capabilities.includes("audio_output")) return;
-      if (s.state.active_output_device_ids.length > 0) {
-        if (s.state.active_output_device_ids.includes(s.myDeviceId)) claimed = true;
-        return;
-      }
-      claimed = true;
-      wsClient.send({
-        type: "set_active_outputs",
-        device_ids: [s.myDeviceId],
-      });
-    });
-    return unsub;
-  }, []);
+  // NB: there is intentionally NO auto-claim of the active-output slot. Output
+  // is fully manual — a device becomes a speaker only when the operator
+  // designates it (Settings → Devices) and activates it (footer / Console
+  // picker). This is what stops a signed-in tab from spontaneously playing
+  // audio out loud on refresh. See `app.devices.store` + OutputToggle.
 
   return (
     <>
