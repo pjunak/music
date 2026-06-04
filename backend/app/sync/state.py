@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from typing import Any
 
@@ -28,6 +29,7 @@ from app.sync.protocol import (
     PlayerState,
     PositionReport,
     ScenePreviousState,
+    ShuffleMode,
 )
 
 logger = logging.getLogger(__name__)
@@ -421,12 +423,15 @@ def ambient_skip_next() -> Any:
             return _replace_ambient(state, amb.model_copy(update={"position_ms": 0}))
 
         if amb.queue:
-            # Normal advance.
+            # Normal advance. Shuffle (random/weighted) pulls a random entry
+            # instead of the head; "off" keeps deterministic queue order.
+            # Weighting is TODO — "weighted" draws uniformly for now.
             new_history = list(amb.history)
             if amb.current_track_id is not None:
                 new_history.append(amb.current_track_id)
-            new_current = amb.queue[0]
-            new_queue = amb.queue[1:]
+            pick = random.randrange(len(amb.queue)) if amb.shuffle != "off" else 0
+            new_current = amb.queue[pick]
+            new_queue = [t for i, t in enumerate(amb.queue) if i != pick]
             return _replace_ambient(
                 state,
                 amb.model_copy(
@@ -523,6 +528,17 @@ def ambient_set_loop(mode: LoopMode) -> Any:
         if state.ambient.loop == mode:
             return state
         return _replace_ambient(state, state.ambient.model_copy(update={"loop": mode}))
+
+    return _mut
+
+
+def ambient_set_shuffle(mode: ShuffleMode) -> Any:
+    def _mut(state: PlayerState) -> PlayerState:
+        if state.ambient.shuffle == mode:
+            return state
+        return _replace_ambient(
+            state, state.ambient.model_copy(update={"shuffle": mode})
+        )
 
     return _mut
 

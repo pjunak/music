@@ -43,10 +43,16 @@ class WsClient {
     this.setStatus("disconnected");
   }
 
-  send(action: WsAction): void {
+  /** Send an action. Returns whether it actually went out — `false` when the
+   *  socket is absent or mid-(re)connect, so callers that need to know the
+   *  server received it (e.g. position reports gating seek detection) can
+   *  react instead of assuming success. */
+  send(action: WsAction): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(action));
+      return true;
     }
+    return false;
   }
 
   /** Re-send the `register` action with whatever the UI store currently

@@ -67,7 +67,9 @@ export function useKeyboardShortcuts(): void {
         case "l":
         case "L": {
           if (state === null) return;
-          const order = ["off", "queue", "track"] as const;
+          // off → single (track) → whole queue, matching the footer's
+          // repeat-cycle button order.
+          const order = ["off", "track", "queue"] as const;
           const idx = order.indexOf(state.ambient.loop);
           const next = order[(idx + 1) % order.length];
           wsClient.send({ type: "ambient_set_loop", loop: next });

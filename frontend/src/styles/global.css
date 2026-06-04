@@ -2615,6 +2615,36 @@ kbd,
   background: var(--accent-strong);
   color: #0a0a0a;
 }
+/* Repeat / shuffle mode-cycle controls flanking the transport buttons.
+ * "off" reads quiet (muted glyph); an engaged mode lights the accent — and
+ * that accent stays lit in the read-only (host / guest) <span> variant too,
+ * so the current mode is always legible even when it can't be changed. */
+.now-playing-controls .mode-cycle {
+  width: 2.4rem;
+  height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.now-playing-controls .mode-cycle:hover:not(.mode-cycle-readonly) {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.now-playing-controls .mode-cycle-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.now-playing-controls .mode-cycle-readonly {
+  cursor: default;
+}
 /* "Is this device an audio output?" pill — sits next to the volume slider
  * on the right side of the footer.
  *
@@ -3406,6 +3436,10 @@ input.volume-slider::-moz-range-thumb {
    * touch-target floor, and the play button stays larger than the
    * skip buttons so the operator can find it without looking. */
   .now-playing-controls button {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+  .now-playing-controls .mode-cycle {
     width: 2.6rem;
     height: 2.6rem;
   }

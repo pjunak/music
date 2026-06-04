@@ -750,6 +750,38 @@ def test_ambient_skip_next_loop_queue_wraps(
         assert amb["history"] == []
 
 
+def test_ambient_set_shuffle_broadcasts(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": "random"})
+        msg = ws.receive_json()
+        assert msg["state"]["ambient"]["shuffle"] == "random"
+
+
+def test_ambient_shuffle_advances_to_a_queue_member(
+    client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    a, b, c = extra_seeded_track_ids
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_queue", "track_ids": [a, b, c]})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": "random"})
+        ws.receive_json()
+
+        ws.send_json({"type": "ambient_skip_next"})
+        msg = ws.receive_json()
+        amb = msg["state"]["ambient"]
+        # The picked track comes from the queue (any of the three), the other
+        # two remain, and the previous current lands in history.
+        assert amb["current_track_id"] in {a, b, c}
+        assert sorted([*amb["queue"], amb["current_track_id"]]) == sorted([a, b, c])
+        assert amb["history"] == [seeded_track_id]
+        assert amb["position_ms"] == 0
+
+
 def test_ambient_skip_prev_with_history(
     client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
 ) -> None:

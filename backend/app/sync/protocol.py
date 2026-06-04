@@ -92,6 +92,13 @@ class AmbientSetLoopAction(_Action):
     loop: Literal["off", "queue", "track"]
 
 
+class AmbientSetShuffleAction(_Action):
+    type: Literal["ambient_set_shuffle"]
+    # "weighted" picks randomly too for now — the weighting (by play count /
+    # recency) is the to-be-implemented refinement, not a separate behaviour.
+    shuffle: Literal["off", "random", "weighted"]
+
+
 class AmbientStopAction(_Action):
     type: Literal["ambient_stop"]
 
@@ -188,6 +195,7 @@ Action = Annotated[
     | AmbientSkipPrevAction
     | AmbientSeekAction
     | AmbientSetLoopAction
+    | AmbientSetShuffleAction
     | AmbientStopAction
     | AmbientPlayPlaylistAction
     | SetActiveSoundboardAction
@@ -223,6 +231,7 @@ class PositionReport(BaseModel):
 
 
 LoopMode = Literal["off", "queue", "track"]
+ShuffleMode = Literal["off", "random", "weighted"]
 
 
 class AmbientState(BaseModel):
@@ -234,6 +243,11 @@ class AmbientState(BaseModel):
     While an interrupt is active, `position_ms` is *not* updated (position
     reports go to the interrupt lane), so it preserves the resume point
     automatically.
+
+    `shuffle` controls how `skip_next` picks the next track: "off" advances
+    sequentially (queue head); "random"/"weighted" pull a random queue entry.
+    Weighting is not yet implemented — "weighted" currently behaves as uniform
+    random, so the control is usable without the algorithm landing first.
     """
 
     current_track_id: int | None = None
@@ -241,6 +255,7 @@ class AmbientState(BaseModel):
     history: list[int] = Field(default_factory=list)
     position_ms: int = 0
     loop: LoopMode = "off"
+    shuffle: ShuffleMode = "off"
 
 
 class InterruptState(BaseModel):

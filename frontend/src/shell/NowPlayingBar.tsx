@@ -6,9 +6,15 @@ import {
   LightningIcon,
   PauseIcon,
   PlayIcon,
+  RepeatIcon,
+  RepeatOneIcon,
+  ShuffleIcon,
+  ShuffleWeightedIcon,
   SkipNextIcon,
   SkipPrevIcon,
 } from "@/components/icons";
+import type { ModeOption } from "@/components/ModeCycleButton";
+import { ModeCycleButton } from "@/components/ModeCycleButton";
 import { OutputToggle } from "@/components/OutputToggle";
 import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
@@ -18,7 +24,7 @@ import {
   usePlayerStore,
 } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
-import type { Track } from "@/core/types";
+import type { LoopMode, ShuffleMode, Track } from "@/core/types";
 import { useTickWhile } from "@/core/useTickWhile";
 import { wsClient } from "@/core/ws";
 
@@ -29,6 +35,54 @@ function formatTime(ms: number): string {
   const sec = totalSec % 60;
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
+
+// Repeat cycle: off → single (current track) → whole queue. Mirrors the
+// `L` keyboard shortcut's order.
+const REPEAT_OPTIONS: ModeOption<LoopMode>[] = [
+  {
+    value: "off",
+    icon: <RepeatIcon />,
+    active: false,
+    legend: "Repeat off — click to repeat the current track",
+  },
+  {
+    value: "track",
+    icon: <RepeatOneIcon />,
+    active: true,
+    legend: "Repeating current track — click to repeat the whole queue",
+  },
+  {
+    value: "queue",
+    icon: <RepeatIcon />,
+    active: true,
+    legend: "Repeating the whole queue — click to turn repeat off",
+  },
+];
+
+// Shuffle cycle: off → random → weighted. Weighted draws uniformly for now
+// (the weighting algorithm is still to be implemented), hence the "planned"
+// note in its legend.
+const SHUFFLE_OPTIONS: ModeOption<ShuffleMode>[] = [
+  {
+    value: "off",
+    icon: <ShuffleIcon />,
+    active: false,
+    legend: "Shuffle off — click for random order",
+  },
+  {
+    value: "random",
+    icon: <ShuffleIcon />,
+    active: true,
+    legend: "Shuffle: random — click for weighted random",
+  },
+  {
+    value: "weighted",
+    icon: <ShuffleWeightedIcon />,
+    active: true,
+    legend:
+      "Shuffle: weighted random (planned — equal weights for now) — click to turn shuffle off",
+  },
+];
 
 /** Persistent footer.
  *
@@ -49,6 +103,8 @@ export function NowPlayingBar() {
     (s) => s.state?.interrupt?.current_track_id ?? null,
   );
   const volume = usePlayerStore((s) => s.state?.volume ?? 1);
+  const loop = usePlayerStore((s) => s.state?.ambient.loop ?? "off");
+  const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? "off");
   const isGuest = useAuthStore((s) => s.status !== "authenticated");
 
   const [track, setTrack] = useState<Track | null>(null);
@@ -98,6 +154,12 @@ export function NowPlayingBar() {
   }
   function prev() {
     wsClient.send({ type: "ambient_skip_prev" });
+  }
+  function setRepeat(mode: LoopMode) {
+    wsClient.send({ type: "ambient_set_loop", loop: mode });
+  }
+  function setShuffle(mode: ShuffleMode) {
+    wsClient.send({ type: "ambient_set_shuffle", shuffle: mode });
   }
 
   function seekTo(ms: number) {
@@ -187,6 +249,13 @@ export function NowPlayingBar() {
         </div>
 
         <div className="now-playing-controls">
+          <ModeCycleButton
+            options={SHUFFLE_OPTIONS}
+            current={shuffle}
+            onCycle={setShuffle}
+            readOnly={isGuest}
+            readOnlyHint="sign in to change"
+          />
           <IconButton
             label="Previous (←)"
             icon={<SkipPrevIcon />}
@@ -215,6 +284,13 @@ export function NowPlayingBar() {
             icon={<SkipNextIcon />}
             onClick={next}
             disabled={!hasTrack}
+          />
+          <ModeCycleButton
+            options={REPEAT_OPTIONS}
+            current={loop}
+            onCycle={setRepeat}
+            readOnly={isGuest}
+            readOnlyHint="sign in to change"
           />
         </div>
 

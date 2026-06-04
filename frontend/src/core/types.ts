@@ -2,6 +2,7 @@
 // Source of truth for the contract: backend/app/sync/protocol.py.
 
 export type LoopMode = "off" | "queue" | "track";
+export type ShuffleMode = "off" | "random" | "weighted";
 
 export interface AmbientState {
   current_track_id: number | null;
@@ -9,6 +10,7 @@ export interface AmbientState {
   history: number[];
   position_ms: number;
   loop: LoopMode;
+  shuffle: ShuffleMode;
 }
 
 export interface InterruptState {
@@ -204,6 +206,7 @@ export type WsAction =
   | { type: "ambient_skip_prev" }
   | { type: "ambient_seek"; position_ms: number }
   | { type: "ambient_set_loop"; loop: LoopMode }
+  | { type: "ambient_set_shuffle"; shuffle: ShuffleMode }
   | { type: "ambient_stop" }
   | { type: "ambient_play_playlist"; playlist_id: number; start_index?: number }
   | { type: "set_active_soundboard"; soundboard_id: string | null }

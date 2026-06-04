@@ -170,6 +170,61 @@ export function ChevronDownIcon(props: IconProps) {
   );
 }
 
+export function RepeatIcon(props: IconProps) {
+  // Two-thirds loop with arrowheads at the breaks — the universal "repeat"
+  // glyph. Used for both "off" (muted) and "repeat queue" (accent) states;
+  // the colour + legend carry which one is active.
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M17 2l4 4-4 4" {...stroke} />
+      <path d="M3 11V9a4 4 0 014-4h14" {...stroke} />
+      <path d="M7 22l-4-4 4-4" {...stroke} />
+      <path d="M21 13v2a4 4 0 01-4 4H3" {...stroke} />
+    </svg>
+  );
+}
+
+export function RepeatOneIcon(props: IconProps) {
+  // Repeat loop with a "1" in the middle — repeat the current track only.
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M17 2l4 4-4 4" {...stroke} />
+      <path d="M3 11V9a4 4 0 014-4h14" {...stroke} />
+      <path d="M7 22l-4-4 4-4" {...stroke} />
+      <path d="M21 13v2a4 4 0 01-4 4H3" {...stroke} />
+      <path d="M11 9.5l1.5-1V15" {...stroke} />
+    </svg>
+  );
+}
+
+export function ShuffleIcon(props: IconProps) {
+  // Crossing arrows — the universal "shuffle" glyph.
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M16 3h5v5" {...stroke} />
+      <path d="M4 20L21 3" {...stroke} />
+      <path d="M21 16v5h-5" {...stroke} />
+      <path d="M15 15l6 6" {...stroke} />
+      <path d="M4 4l5 5" {...stroke} />
+    </svg>
+  );
+}
+
+export function ShuffleWeightedIcon(props: IconProps) {
+  // Shuffle arrows with a filled centre dot — "loaded"/weighted random,
+  // distinct from plain shuffle at a glance.
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M16 3h5v5" {...stroke} />
+      <path d="M4 20L21 3" {...stroke} />
+      <path d="M21 16v5h-5" {...stroke} />
+      <path d="M15 15l6 6" {...stroke} />
+      <path d="M4 4l5 5" {...stroke} />
+      <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function VolumeIcon(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>

@@ -38,6 +38,7 @@ from app.sync.protocol import (
     AmbientSeekAction,
     AmbientSetLoopAction,
     AmbientSetQueueAction,
+    AmbientSetShuffleAction,
     AmbientSkipNextAction,
     AmbientSkipPrevAction,
     AmbientStopAction,
@@ -287,6 +288,12 @@ async def _h_ambient_set_loop(
     action: AmbientSetLoopAction, _device_id: str, _ws: WebSocket
 ) -> None:
     await _apply_and_broadcast(state_module.ambient_set_loop(action.loop))
+
+
+async def _h_ambient_set_shuffle(
+    action: AmbientSetShuffleAction, _device_id: str, _ws: WebSocket
+) -> None:
+    await _apply_and_broadcast(state_module.ambient_set_shuffle(action.shuffle))
 
 
 async def _h_ambient_stop(
@@ -573,6 +580,7 @@ _DISPATCH: dict[type, Any] = {
     AmbientSkipPrevAction: _h_ambient_skip_prev,
     AmbientSeekAction: _h_ambient_seek,
     AmbientSetLoopAction: _h_ambient_set_loop,
+    AmbientSetShuffleAction: _h_ambient_set_shuffle,
     AmbientStopAction: _h_ambient_stop,
     AmbientPlayPlaylistAction: _h_ambient_play_playlist,
     SetActiveSoundboardAction: _h_set_active_soundboard,

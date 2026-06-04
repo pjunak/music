@@ -35,6 +35,8 @@ export function AudioEngine() {
     playbackEngine.setHandlers({
       onSkipNext: () => wsClient.send({ type: "ambient_skip_next" }),
       onInterruptSkipNext: () => wsClient.send({ type: "interrupt_skip_next" }),
+      // Returns whether the report reached the server — the engine uses that
+      // to gate its seek-detection baseline.
       onPositionReport: (ms) =>
         wsClient.send({ type: "position_report", position_ms: ms }),
     });
