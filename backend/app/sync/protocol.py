@@ -19,6 +19,14 @@ class _Action(BaseModel):
 class RegisterAction(_Action):
     type: Literal["register"]
     name: str = Field(min_length=1, max_length=128)
+    # Stable per-install identity the client mints once (localStorage). It's
+    # what makes an audio-output designation stick to a physical device across
+    # reconnects. Validated as an opaque token, not a strict UUID, so the
+    # documented headless-output protocol (clients/README.md) stays open.
+    client_id: str = Field(min_length=8, max_length=64)
+    # Accepted for wire-compat with older clients but ignored — output
+    # eligibility now lives in the persistent device registry (`is_output`),
+    # not in a self-asserted capability.
     capabilities: list[str] = Field(default_factory=list)
 
 
@@ -219,9 +227,17 @@ action_adapter: TypeAdapter[Action] = TypeAdapter(Action)
 
 
 class DeviceInfo(BaseModel):
+    """A currently-connected device. `device_id` carries the stable `client_id`
+    (they're the same value now) so existing clients that key on `device_id`
+    keep working unchanged. `is_output` reflects the persistent registry
+    designation; `capabilities` is retained as an always-empty field purely so
+    the wire shape doesn't change for the structural client-side guard."""
+
     device_id: str
+    client_id: str
     name: str
-    capabilities: list[str]
+    is_output: bool = False
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class PositionReport(BaseModel):
@@ -322,7 +338,12 @@ class PlayerState(BaseModel):
 
 class StateSnapshot(BaseModel):
     type: Literal["state_snapshot"] = "state_snapshot"
-    your_device_id: str
+    # Empty by design: the snapshot is sent *before* the client's `register`
+    # arrives, so the server doesn't yet know its client_id. The client knows
+    # its own stable client_id (localStorage) and self-assigns `myDeviceId`
+    # from that — see frontend playerStore. Kept as a (possibly empty) string
+    # so the structural WS guard's type check is satisfied without change.
+    your_device_id: str = ""
     state: PlayerState
 
 

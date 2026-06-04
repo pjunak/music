@@ -220,9 +220,11 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
             ]
         out["pre_scene_state"] = snap
 
-    # Wipe active outputs: device ids are per-connection so every restart
-    # leaves the previous list stale. Auto-claim re-establishes once a
-    # client reconnects.
+    # Wipe active outputs on boot. Activation is fully manual — there is no
+    # auto-claim and no auto-resume across a restart. The persistent output
+    # *designation* lives in the known_devices table and is untouched; the
+    # operator re-activates a designated device when they want sound. (The
+    # client_ids here would otherwise be a stale snapshot of who was live.)
     out["active_output_device_ids"] = []
 
     # Can't be "playing" with nothing loaded. If pruning emptied both lanes

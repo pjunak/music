@@ -39,19 +39,19 @@ class ConnectionManager:
             return
         await self._send_to_each(self._sockets.keys(), message)
 
-    async def broadcast_to_capability(self, capability: str, message: dict) -> None:
-        """Send `message` only to devices currently registered with
-        `capability`. Used for fire-and-forget audio events (SFX) that only
-        the playback devices need to act on — controller-only clients
-        ignore them."""
+    async def broadcast_to_outputs(self, message: dict) -> None:
+        """Send `message` only to connections whose device is a designated
+        audio output. Used for fire-and-forget audio events (SFX) that only
+        the playback devices need to act on — controller-only clients ignore
+        them."""
         if not self._sockets:
             return
         from app.sync.devices import registry
 
         targets = [
-            device_id
-            for device_id in self._sockets
-            if registry.has_capability(device_id, capability)
+            connection_id
+            for connection_id in self._sockets
+            if registry.is_output_connection(connection_id)
         ]
         await self._send_to_each(targets, message)
 

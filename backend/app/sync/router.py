@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.domain import known_devices as known_devices_domain
 from app.domain import playlists as playlists_domain
 from app.models.auth_session import AuthSession
 from app.models.playlist import Playlist
@@ -170,7 +171,26 @@ async def _apply_and_broadcast(mutator: Any) -> None:
 async def _h_register(
     action: RegisterAction, device_id: str, _ws: WebSocket
 ) -> None:
-    registry.update(device_id, name=action.name, capabilities=action.capabilities)
+    # `device_id` here is the ephemeral connection id. Persist/refresh the
+    # stable device row (never touching its is_output), then cache the current
+    # designation onto this live connection. Auto-creating the row with
+    # is_output=False is what lets a brand-new device appear in the operator's
+    # list while having no output authority until explicitly granted.
+    def _work() -> bool:
+        db = SessionLocal()
+        try:
+            row = known_devices_domain.upsert_seen(db, action.client_id, action.name)
+            return row.is_output
+        finally:
+            db.close()
+
+    is_output = await run_in_threadpool(_work)
+    registry.bind(
+        device_id,
+        client_id=action.client_id,
+        name=action.name,
+        is_output=is_output,
+    )
     new_state = await state_module.machine.snapshot()
     await manager.broadcast_state(new_state)
 
@@ -178,11 +198,16 @@ async def _h_register(
 async def _h_position_report(
     action: PositionReportAction, device_id: str, websocket: WebSocket
 ) -> None:
-    if not registry.has_capability(device_id, "audio_output"):
-        await _send_error(websocket, "only audio_output devices may report position")
+    if not registry.is_output_connection(device_id):
+        await _send_error(
+            websocket, "only designated output devices may report position"
+        )
         return
+    # Stamp telemetry under the stable client_id (informational only — surfaced
+    # in Diagnostics), falling back to the connection id if somehow unbound.
+    client_id = registry.client_id_for(device_id) or device_id
     await state_module.machine.apply(
-        state_module.report_position(device_id, action.position_ms),
+        state_module.report_position(client_id, action.position_ms),
         SessionLocal,
         broadcast=False,
     )
@@ -214,20 +239,29 @@ async def _h_set_active_mode(
 async def _h_set_active_outputs(
     action: SetActiveOutputsAction, _device_id: str, websocket: WebSocket
 ) -> None:
-    # Only validate device ids being **added** by this action. Existing
-    # ids in active_output_device_ids may be stale references to devices
-    # that disconnected long ago (e.g. left over in playback_state across
-    # server restarts) — re-validating them would block every toggle
-    # attempt for the user.
+    # `device_ids` are stable client_ids. Only validate ids being **added** by
+    # this action against the persistent output designation — existing ids may
+    # be stale references (left over across restarts) and re-validating them
+    # would block every toggle. Validating against the persisted `is_output`
+    # (not liveness) lets the operator pre-arm a TV that's currently asleep.
     current_state = await state_module.machine.snapshot()
     already_active = set(current_state.active_output_device_ids)
     new_ids = [d for d in action.device_ids if d not in already_active]
-    bad = [d for d in new_ids if not registry.has_capability(d, "audio_output")]
-    if bad:
-        await _send_error(
-            websocket, f"device(s) not registered with audio_output: {bad}"
-        )
-        return
+    if new_ids:
+        def _work() -> set[str]:
+            db = SessionLocal()
+            try:
+                return known_devices_domain.output_client_ids(db)
+            finally:
+                db.close()
+
+        designated = await run_in_threadpool(_work)
+        bad = [d for d in new_ids if d not in designated]
+        if bad:
+            await _send_error(
+                websocket, f"device(s) not designated as outputs: {bad}"
+            )
+            return
     await _apply_and_broadcast(state_module.set_active_outputs(action.device_ids))
 
 
@@ -551,9 +585,7 @@ async def _h_fire_sfx(
         item_path=action.item_path,
         volume=action.volume,
     )
-    await manager.broadcast_to_capability(
-        "audio_output", event.model_dump(mode="json")
-    )
+    await manager.broadcast_to_outputs(event.model_dump(mode="json"))
 
 
 # --- dispatch registry ----------------------------------------------------
@@ -622,10 +654,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
 
     device = registry.add()
-    manager.add(device.device_id, websocket)
+    manager.add(device.connection_id, websocket)
 
+    # The snapshot goes out before the client's `register` (which carries the
+    # client_id), so the server can't name the device here. The client knows
+    # its own stable client_id and self-assigns identity — your_device_id stays
+    # empty (see StateSnapshot).
     snapshot_state = await state_module.machine.snapshot()
-    await _send(websocket, StateSnapshot(your_device_id=device.device_id, state=snapshot_state))
+    await _send(websocket, StateSnapshot(state=snapshot_state))
 
     try:
         while True:
@@ -661,8 +697,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 # Fall through so the action gets the standard guest rejection
                 # below (or, for register, succeeds).
 
-            # Guests can register themselves (so the device shows up as a
-            # potential audio_output) but nothing else.
+            # Guests can register themselves (so the device appears in the
+            # operator's device list and can be designated as an output) but
+            # nothing else.
             if is_guest and not isinstance(action, RegisterAction):
                 await _send_error(
                     websocket, "guest sessions cannot mutate state — please sign in"
@@ -670,7 +707,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 continue
 
             try:
-                await _dispatch(action, device.device_id, websocket)
+                await _dispatch(action, device.connection_id, websocket)
             except Exception as e:
                 # Single-user home server — surface the exception type +
                 # message in the error frame so the operator sees the
@@ -681,15 +718,21 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     websocket, f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
                 )
     finally:
-        manager.remove(device.device_id)
-        registry.remove(device.device_id)
-        # Prune the disconnecting device from active_output_device_ids so
-        # the operator's next session doesn't inherit a stale reference
-        # that blocks toggle attempts (see set_active_outputs validation).
-        with contextlib.suppress(Exception):
-            await commit_and_broadcast(
-                state_module.remove_active_output(device.device_id)
-            )
+        client_id = registry.client_id_for(device.connection_id)
+        manager.remove(device.connection_id)
+        registry.remove(device.connection_id)
+        # Prune the disconnecting device from active_output_device_ids — but
+        # only when its *last* tab closes. Closing one tab of a device that has
+        # another output tab open shouldn't silence it. The persistent
+        # is_output designation is untouched; on reconnect the device sits
+        # inactive (fully-manual: no auto-resume) until re-activated.
+        if client_id is not None and not registry.has_other_connection(
+            client_id, device.connection_id
+        ):
+            with contextlib.suppress(Exception):
+                await commit_and_broadcast(
+                    state_module.remove_active_output(client_id)
+                )
         with contextlib.suppress(Exception):
             new_state = await state_module.machine.snapshot()
             await manager.broadcast_state(new_state)

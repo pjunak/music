@@ -217,6 +217,29 @@ def extra_seeded_track_ids() -> list[int]:
     return ids
 
 
+def reset_sync_singletons() -> None:
+    """Reset the process-wide sync singletons (state machine, device registry,
+    connection manager) plus the persisted playback row and the known_devices
+    table, so designations/devices from a prior test don't leak. Shared by the
+    autouse fixtures in test_sync and test_devices."""
+    from app.core.db import SessionLocal
+    from app.models.known_device import KnownDevice
+    from app.models.playback_state import PlaybackState
+    from app.sync.connection import manager
+    from app.sync.devices import registry
+    from app.sync.state import machine
+
+    machine.reset_for_tests()
+    registry.reset_for_tests()
+    manager.reset_for_tests()
+    with SessionLocal() as db:
+        row = db.get(PlaybackState, 1)
+        if row is not None:
+            row.state_json = {}
+        db.query(KnownDevice).delete()
+        db.commit()
+
+
 @pytest.fixture
 def auth_client(client: TestClient) -> TestClient:
     from sqlalchemy import select

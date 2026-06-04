@@ -15,29 +15,34 @@ from fastapi.testclient import TestClient
 @pytest.fixture(autouse=True)
 def _reset_sync_state():
     """The state machine, device registry, and connection manager are
-    process-wide singletons; reset them between sync tests so leftovers
-    from a prior test don't (a) cause writes that match prior values to
-    no-op into a hung receive_json or (b) carry stale device entries into
-    the next test's snapshot."""
-    from app.core.db import SessionLocal
-    from app.models.playback_state import PlaybackState
-    from app.sync.connection import manager
-    from app.sync.devices import registry
-    from app.sync.state import machine
+    process-wide singletons; reset them (plus the known_devices table)
+    between sync tests so leftovers from a prior test don't (a) cause writes
+    that match prior values to no-op into a hung receive_json or (b) carry
+    stale device entries / output designations into the next test."""
+    from tests.conftest import reset_sync_singletons
 
-    def _reset() -> None:
-        machine.reset_for_tests()
-        registry.reset_for_tests()
-        manager.reset_for_tests()
-        with SessionLocal() as db:
-            row = db.get(PlaybackState, 1)
-            if row is not None:
-                row.state_json = {}
-                db.commit()
-
-    _reset()
+    reset_sync_singletons()
     yield
-    _reset()
+    reset_sync_singletons()
+
+
+def _register(ws, name: str = "device", client_id: str = "client-1") -> None:
+    """Send a register action. Identity now flows through `client_id`."""
+    ws.send_json({"type": "register", "name": name, "client_id": client_id})
+
+
+def _designate(client_id: str, value: bool = True) -> None:
+    """Mark a device as a designated audio output straight in the DB + live
+    registry cache, bypassing the HTTP API so no extra broadcast lands on the
+    test sockets. Mirrors what the operator's device list does."""
+    from app.core.db import SessionLocal
+    from app.domain import known_devices as known_devices_domain
+    from app.sync.devices import registry
+
+    with SessionLocal() as db:
+        known_devices_domain.upsert_seen(db, client_id, "")
+        known_devices_domain.set_is_output(db, client_id, value)
+    registry.refresh_is_output(client_id, value)
 
 
 def _login(client: TestClient) -> None:
@@ -146,13 +151,7 @@ def test_ws_guest_can_register_to_appear_in_outputs(client: TestClient) -> None:
     Player tab on a TV can show up in the operator's Outputs picker."""
     with client.websocket_connect("/api/ws") as guest:
         guest.receive_json()  # snapshot
-        guest.send_json(
-            {
-                "type": "register",
-                "name": "TV",
-                "capabilities": ["audio_output"],
-            }
-        )
+        _register(guest, "TV", "tv-client")
         # Register is broadcast as a state_changed; receive it.
         msg = guest.receive_json()
         assert msg["type"] == "state_changed"
@@ -164,8 +163,11 @@ def test_ws_accepts_with_cookie_and_sends_snapshot(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         msg = ws.receive_json()
         assert msg["type"] == "state_snapshot"
+        # Identity now comes from the client's own persistent client_id, so the
+        # server leaves your_device_id empty in the snapshot (sent before
+        # register).
         assert "your_device_id" in msg
-        assert msg["your_device_id"].startswith("dev-")
+        assert msg["your_device_id"] == ""
         state = msg["state"]
         assert "revision" in state
         assert state["is_playing"] is False
@@ -182,9 +184,7 @@ def test_register_appears_in_state_for_other_clients(client: TestClient) -> None
         a.receive_json()  # snapshot for A
         b.receive_json()  # snapshot for B
 
-        a.send_json(
-            {"type": "register", "name": "Laptop", "capabilities": ["controls"]}
-        )
+        _register(a, "Laptop", "laptop-1")
 
         # Both A and B should see a state_changed reflecting A's registration.
         msg_a = a.receive_json()
@@ -193,7 +193,9 @@ def test_register_appears_in_state_for_other_clients(client: TestClient) -> None
             assert msg["type"] == "state_changed"
             devices = msg["state"]["connected_devices"]
             assert any(
-                d["name"] == "Laptop" and "controls" in d["capabilities"]
+                d["name"] == "Laptop"
+                and d["client_id"] == "laptop-1"
+                and d["is_output"] is False
                 for d in devices
             )
 
@@ -283,107 +285,139 @@ def test_set_active_outputs_rejects_unregistered_device(client: TestClient) -> N
         assert msg["type"] == "error"
 
 
-def test_set_active_outputs_rejects_device_without_audio_output(
+def test_set_active_outputs_rejects_device_without_output_designation(
     client: TestClient,
 ) -> None:
+    """A registered-but-not-designated device cannot be activated. This is the
+    core anti-bug rule: output eligibility is a manual designation, never
+    inferred from merely being connected."""
     _login(client)
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
-        snap_a = a.receive_json()
+        a.receive_json()
         b.receive_json()
-        # A registers as controls-only, no audio_output capability.
-        a.send_json(
-            {"type": "register", "name": "A", "capabilities": ["controls"]}
-        )
+        _register(a, "A", "a-client")  # connected, but NOT designated
         a.receive_json()  # state_changed
         b.receive_json()  # state_changed (reg propagates)
 
-        b.send_json(
-            {
-                "type": "set_active_outputs",
-                "device_ids": [snap_a["your_device_id"]],
-            }
-        )
+        b.send_json({"type": "set_active_outputs", "device_ids": ["a-client"]})
         msg = b.receive_json()
         assert msg["type"] == "error"
+        assert "designated" in msg["detail"]
 
 
-def test_set_active_outputs_accepts_audio_output_device(client: TestClient) -> None:
+def test_set_active_outputs_accepts_designated_output_device(client: TestClient) -> None:
     _login(client)
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
-        snap_a = a.receive_json()
-        b.receive_json()
-        a.send_json(
-            {"type": "register", "name": "TV", "capabilities": ["audio_output"]}
-        )
         a.receive_json()
         b.receive_json()
+        _register(a, "TV", "tv-client")
+        a.receive_json()
+        b.receive_json()
+        _designate("tv-client")
 
-        b.send_json(
-            {
-                "type": "set_active_outputs",
-                "device_ids": [snap_a["your_device_id"]],
-            }
-        )
+        b.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
         # Both A and B receive the state_changed.
         msg_a = a.receive_json()
         msg_b = b.receive_json()
         for msg in (msg_a, msg_b):
             assert msg["type"] == "state_changed"
-            assert msg["state"]["active_output_device_ids"] == [snap_a["your_device_id"]]
+            assert msg["state"]["active_output_device_ids"] == ["tv-client"]
 
 
 def test_set_active_outputs_does_not_re_validate_existing_ids(
     client: TestClient,
 ) -> None:
-    """Stale device ids that are already in active_output_device_ids must
-    not block the operator's next toggle. We only validate ids being
-    *added* to the list."""
+    """Ids already in active_output_device_ids must not block the operator's
+    next toggle, even if they're no longer designated. We only validate ids
+    being *added* to the list."""
     _login(client)
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
-        snap_a = a.receive_json()
-        b.receive_json()
-        a.send_json(
-            {"type": "register", "name": "A", "capabilities": ["audio_output"]}
-        )
         a.receive_json()
         b.receive_json()
-        b.send_json(
-            {"type": "register", "name": "B", "capabilities": ["audio_output"]}
-        )
+        _register(a, "A", "a-client")
         a.receive_json()
         b.receive_json()
+        _register(b, "B", "b-client")
+        a.receive_json()
+        b.receive_json()
+        _designate("a-client")
+        _designate("b-client")
 
         # Set A as the only active output.
-        b.send_json(
-            {"type": "set_active_outputs", "device_ids": [snap_a["your_device_id"]]}
-        )
+        b.send_json({"type": "set_active_outputs", "device_ids": ["a-client"]})
         a.receive_json()
         b.receive_json()
 
-    # `a` socket closes; its device id is now stale in active_output_device_ids
-    # (the disconnect-prune state_changed will land on `b` before this block ends).
-    # `b` then logs in fresh and tries to add itself — the request will include
-    # both the stale id (from current state) and the new id (b). The server must
-    # not reject because of the stale one.
-
-    with client.websocket_connect("/api/ws") as fresh:
-        snap_fresh = fresh.receive_json()
-        fresh.send_json(
-            {"type": "register", "name": "Fresh", "capabilities": ["audio_output"]}
+        # A loses its designation but stays in the active list — now a stale
+        # entry. Adding B must not re-validate (and thus reject on) A.
+        _designate("a-client", False)
+        b.send_json(
+            {"type": "set_active_outputs", "device_ids": ["a-client", "b-client"]}
         )
-        fresh.receive_json()
-        # Whatever's already in active_output_device_ids stays; we just add ourselves.
-        existing = list(snap_fresh["state"]["active_output_device_ids"])
-        fresh.send_json(
-            {
-                "type": "set_active_outputs",
-                "device_ids": [*existing, snap_fresh["your_device_id"]],
-            }
-        )
-        # Either we get a state_changed (success) — but never an error.
-        msg = fresh.receive_json()
+        msg = b.receive_json()
         assert msg["type"] == "state_changed"
-        assert snap_fresh["your_device_id"] in msg["state"]["active_output_device_ids"]
+        assert "b-client" in msg["state"]["active_output_device_ids"]
+
+
+def test_register_auto_creates_known_device_row(client: TestClient) -> None:
+    """Connecting auto-creates the persistent row so the device is visible in
+    the operator's list — but with is_output=False (no output authority until
+    explicitly granted)."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        _register(ws, "Living Room TV", "tv-client")
+        ws.receive_json()
+
+        rows = client.get("/api/devices").json()
+        entry = next(r for r in rows if r["client_id"] == "tv-client")
+        assert entry["name"] == "Living Room TV"
+        assert entry["is_output"] is False
+        assert entry["connected"] is True
+
+
+def test_refresh_does_not_reactivate_output(client: TestClient) -> None:
+    """THE regression. A designated + active output that reconnects (a refresh)
+    must NOT auto-resume as a live output — activation is fully manual. The
+    designation persists; the activation does not."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        _register(ws, "TV", "tv-client")
+        ws.receive_json()
+        _designate("tv-client")
+        ws.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
+        assert ws.receive_json()["state"]["active_output_device_ids"] == ["tv-client"]
+    # Socket closed → its last tab is gone → pruned from active outputs.
+
+    # Reconnect with the SAME client_id (i.e. a page refresh on that device).
+    with client.websocket_connect("/api/ws") as ws2:
+        snap = ws2.receive_json()
+        assert "tv-client" not in snap["state"]["active_output_device_ids"]
+        _register(ws2, "TV", "tv-client")
+        msg = ws2.receive_json()
+        # Still not active: nothing auto-claimed despite the persistent
+        # is_output designation surviving.
+        assert "tv-client" not in msg["state"]["active_output_device_ids"]
+
+
+def test_two_tabs_same_client_id_single_device_entry(client: TestClient) -> None:
+    """Two tabs of one browser share a client_id and collapse to a single
+    device entry in connected_devices."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
+        a.receive_json()
+        b.receive_json()
+        _register(a, "TV", "tv-client")
+        a.receive_json()
+        b.receive_json()
+        _register(b, "TV", "tv-client")
+        msg = a.receive_json()
+        b.receive_json()
+        tv_entries = [
+            d for d in msg["state"]["connected_devices"] if d["client_id"] == "tv-client"
+        ]
+        assert len(tv_entries) == 1
 
 
 def test_state_load_prunes_dangling_track_ids(
@@ -555,12 +589,10 @@ def test_remove_active_output_mutator() -> None:
 # --- position reports -------------------------------------------------------
 
 
-def test_position_report_requires_audio_output(client: TestClient) -> None:
+def test_position_report_requires_output_designation(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json(
-            {"type": "register", "name": "Phone", "capabilities": ["controls"]}
-        )
+        _register(ws, "Phone", "phone-1")  # not designated as an output
         ws.receive_json()  # state_changed for register
 
         ws.send_json({"type": "position_report", "position_ms": 1000})
@@ -573,11 +605,10 @@ def test_position_report_does_not_broadcast(client: TestClient) -> None:
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
         a.receive_json()
         b.receive_json()
-        a.send_json(
-            {"type": "register", "name": "TV", "capabilities": ["audio_output"]}
-        )
+        _register(a, "TV", "tv-client")
         a.receive_json()
         b.receive_json()
+        _designate("tv-client")
 
         a.send_json({"type": "position_report", "position_ms": 5000})
         # No state_changed should arrive on B as a result. We verify by sending
@@ -1020,9 +1051,10 @@ def test_position_report_stamps_ambient_position(
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
         a.receive_json()
         b.receive_json()
-        a.send_json({"type": "register", "name": "TV", "capabilities": ["audio_output"]})
+        _register(a, "TV", "tv-client")
         a.receive_json()
         b.receive_json()
+        _designate("tv-client")
 
         b.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         a.receive_json()
@@ -1234,8 +1266,9 @@ def test_position_report_stamps_interrupt_when_active(
     interrupt_id = extra_seeded_track_ids[0]
     with _ws_authed(client) as ws:
         ws.receive_json()  # snapshot
-        ws.send_json({"type": "register", "name": "TV", "capabilities": ["audio_output"]})
+        _register(ws, "TV", "tv-client")
         ws.receive_json()
+        _designate("tv-client")
 
         ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         ws.receive_json()
@@ -1494,8 +1527,8 @@ def test_deactivate_scene_noop_when_none_active(client: TestClient) -> None:
         assert msg["state"]["volume"] == 0.333
 
 
-def test_fire_sfx_broadcasts_to_audio_output_devices(client: TestClient) -> None:
-    """Fire-and-forget: the SFX event reaches audio_output devices but the
+def test_fire_sfx_broadcasts_to_designated_outputs(client: TestClient) -> None:
+    """Fire-and-forget: the SFX event reaches designated output devices but the
     sender (controller) does not get the event echoed back."""
     _login(client)
     with client.websocket_connect("/api/ws") as controller, client.websocket_connect(
@@ -1503,16 +1536,13 @@ def test_fire_sfx_broadcasts_to_audio_output_devices(client: TestClient) -> None
     ) as output:
         controller.receive_json()  # snapshot
         output.receive_json()  # snapshot
-        controller.send_json(
-            {"type": "register", "name": "Phone", "capabilities": ["controls"]}
-        )
+        _register(controller, "Phone", "phone-1")  # not an output
         controller.receive_json()  # state_changed (register)
         output.receive_json()
-        output.send_json(
-            {"type": "register", "name": "TV", "capabilities": ["audio_output"]}
-        )
+        _register(output, "TV", "tv-client")
         controller.receive_json()
         output.receive_json()
+        _designate("tv-client")
 
         controller.send_json({"type": "set_active_mode", "mode_id": "dnd"})
         controller.receive_json()  # state_changed

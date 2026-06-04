@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException
 from app.api import (
     admin,
     auth,
+    devices,
     diagnostics,
     health,
     library,
@@ -242,6 +243,7 @@ def create_app() -> FastAPI:
     app.include_router(playlists.router)
     app.include_router(presets.router)
     app.include_router(sfx.router)
+    app.include_router(devices.router)
     app.include_router(diagnostics.router)
     app.include_router(admin.router)
     app.include_router(sync.router)
