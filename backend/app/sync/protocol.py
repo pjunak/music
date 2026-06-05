@@ -231,14 +231,12 @@ class DeviceInfo(BaseModel):
     """A currently-connected device. `device_id` carries the stable `client_id`
     (they're the same value now) so existing clients that key on `device_id`
     keep working unchanged. `is_output` reflects the persistent registry
-    designation; `capabilities` is retained as an always-empty field purely so
-    the wire shape doesn't change for the structural client-side guard."""
+    designation."""
 
     device_id: str
     client_id: str
     name: str
     is_output: bool = False
-    capabilities: list[str] = Field(default_factory=list)
 
 
 class PositionReport(BaseModel):

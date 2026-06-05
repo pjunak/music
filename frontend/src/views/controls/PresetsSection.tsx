@@ -3,17 +3,13 @@ import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
-import { usePlayerStore } from "@/core/playerStore";
+import { usePlayerArray } from "@/core/playerStore";
 import { wsClient } from "@/core/ws";
 
 export function PresetsSection() {
-  // NB: the selector must return a STABLE reference. `s.state?.x ?? []` inside
-  // the selector mints a fresh [] on every call whenever state is null (WS
-  // still connecting on a cold load) — zustand's useSyncExternalStore then sees
-  // an ever-changing snapshot and loops until "Maximum update depth exceeded"
-  // (React #185), which unmounts the app and lets the tv-mode.js fallback take
-  // over. Return the raw ref (or undefined) from the selector; default OUTSIDE.
-  const activeIds = usePlayerStore((s) => s.state?.active_preset_ids) ?? [];
+  // Stable selector via the helper — never mints a fresh [] when state is null
+  // (which would loop useSyncExternalStore to React #185 on a cold load).
+  const activeIds = usePlayerArray((s) => s.state?.active_preset_ids);
   const [presets, setPresets] = useState<PresetManifest[]>([]);
   const [error, setError] = useState<string | null>(null);
 

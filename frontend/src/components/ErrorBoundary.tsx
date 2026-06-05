@@ -12,13 +12,13 @@ interface State {
 }
 
 /** Catches render-time crashes so a single bad component can't blank the whole
- *  app. This matters here beyond the usual reasons: `index.html` ships a legacy
- *  `tv-mode.js` that claims `#root` whenever React hasn't populated it within
- *  500 ms. So an uncaught render error doesn't just white-screen — it unmounts
- *  the tree, `#root` goes empty, and the TV fallback silently takes over,
- *  which *looks* like the app "redirected to TV mode". Keeping a fallback
- *  mounted here means `#root` is never empty, so that masquerade can't happen
- *  and the operator gets a real, recoverable error instead. */
+ *  app — the operator gets a real, recoverable error card instead of an empty
+ *  `#root`. (Historically an empty `#root` was worse than a blank screen: the
+ *  legacy `tv-mode.js` fallback claimed it on a 500 ms timer, so a render crash
+ *  *looked* like the app "redirected to TV mode." That vector is now closed at
+ *  the source — tv-mode.js ships as `<script nomodule>`, so it never loads on a
+ *  module-capable browser and can't race React — but keeping `#root` populated
+ *  on a crash is still the right behaviour, so this stays.) */
 export class ErrorBoundary extends Component<Props, State> {
   override state: State = { error: null };
 

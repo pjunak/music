@@ -4,7 +4,7 @@ import { diagnosticsApi } from "@/core/api";
 import type { DiagnosticsResponse } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
-import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
+import { selectIsMyOutput, usePlayerArray, usePlayerStore } from "@/core/playerStore";
 
 /** Fixed reference for "never". Avoids "Invalid Date" rendering when a
  *  loader / scan hasn't run since boot. */
@@ -33,14 +33,11 @@ export function DiagnosticsView() {
   const wsStatus = usePlayerStore((s) => s.wsStatus);
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
   const isMyOutput = usePlayerStore(selectIsMyOutput);
-  // Default OUTSIDE these selectors — `?? []` inside mints a fresh array each
-  // call while state is null, looping useSyncExternalStore (React #185). (The
-  // `?? null` below is fine: null is a stable primitive.)
-  const activeOutputs =
-    usePlayerStore((s) => s.state?.active_output_device_ids) ?? [];
+  // Stable array selectors via the helper (a fresh `?? []` inside would loop
+  // useSyncExternalStore — React #185). `?? null` below is fine: a primitive.
+  const activeOutputs = usePlayerArray((s) => s.state?.active_output_device_ids);
   const masterVolumeFromState = usePlayerStore((s) => s.state?.volume ?? null);
-  const connectedDevices =
-    usePlayerStore((s) => s.state?.connected_devices) ?? [];
+  const connectedDevices = usePlayerArray((s) => s.state?.connected_devices);
   const authStatus = useAuthStore((s) => s.status);
 
   // Server-side snapshot — polled every 5s while the page is open.

@@ -5,7 +5,7 @@ import { inputDialog } from "@/components/inputDialog";
 import { authApi, devicesApi } from "@/core/api";
 import type { ActiveSession } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
-import { usePlayerStore } from "@/core/playerStore";
+import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import type { KnownDevice } from "@/core/types";
 import { useUiStore } from "@/core/uiStore";
@@ -87,9 +87,7 @@ function DevicesPanel() {
   const [saved, setSaved] = useState<KnownDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Default OUTSIDE the selector — `?? []` inside returns a fresh array on
-  // every call while state is null, looping useSyncExternalStore (React #185).
-  const connectedDevices = usePlayerStore((s) => s.state?.connected_devices) ?? [];
+  const connectedDevices = usePlayerArray((s) => s.state?.connected_devices);
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
 
   const refresh = useCallback(async () => {

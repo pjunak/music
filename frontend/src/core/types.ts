@@ -40,7 +40,6 @@ export interface DeviceInfo {
   name: string;
   /** Whether this device is a designated audio output (persistent registry). */
   is_output: boolean;
-  capabilities: string[];
 }
 
 /** A remembered device from the operator's persistent registry

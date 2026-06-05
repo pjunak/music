@@ -54,8 +54,9 @@ export function Header() {
           <span className="ws-status-text">{wsStatus}</span>
         </span>
       </div>
-      {/* Guests see only the TV route. Hiding the tab strip prevents
-          confusion where clicking "Library" just bounces them to /login. */}
+      {/* The authoring tabs are operator-only; hiding the strip keeps guests on
+          the TV surface (a protected route they hit directly just shows the
+          in-place sign-in gate). */}
       {isGuest ? <span className="tabs-placeholder" /> : <Tabs />}
       <div className="app-header-right">
         {/* Mode picker: lives in the header so it's reachable from any

@@ -4,6 +4,8 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+import stableStoreSelector from "./eslint-rules/stable-store-selector.js";
+
 export default tseslint.config(
   { ignores: ["dist", "node_modules", ".vite", "*.config.js"] },
   {
@@ -16,11 +18,14 @@ export default tseslint.config(
     plugins: {
       "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
+      // Local rule: forbid the React #185 unstable-selector footgun.
+      local: { rules: { "stable-store-selector": stableStoreSelector } },
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/consistent-type-imports": "error",
+      "local/stable-store-selector": "error",
     },
   },
 );

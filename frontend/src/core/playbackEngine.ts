@@ -255,6 +255,18 @@ export class PlaybackEngine {
       console.warn("[playbackEngine] AudioContext unavailable; ambient muted");
       return;
     }
+    // Idempotent re-entry. React StrictMode (dev) double-invokes the mounting
+    // effect with the SAME <audio> elements; `createMediaElementSource` throws
+    // if called twice on one element ("already connected"). Reuse the existing
+    // source nodes and just re-attach the "ended" listeners destroy() detached
+    // (addEventListener dedupes the stable bound ref). In production this method
+    // runs once (ambientA is null here), so the guard is inert and the live
+    // audio graph is built exactly as before.
+    if (this.ambientA?.el === a && this.ambientB?.el === b) {
+      a.addEventListener("ended", this.handleAmbientEnded);
+      b.addEventListener("ended", this.handleAmbientEnded);
+      return;
+    }
     // Browsers ignore `audio.volume` once a MediaElementAudioSourceNode is
     // attached on Firefox in some setups; we explicitly drive volume via
     // GainNodes from here on. Keep element volume at 1.0.
@@ -283,6 +295,11 @@ export class PlaybackEngine {
   setInterruptElement(el: HTMLAudioElement): void {
     const ctx = this.ensureAudioContext();
     if (ctx === null) return;
+    // Idempotent re-entry — see setAmbientElements. Inert in production.
+    if (this.interrupt?.el === el) {
+      el.addEventListener("ended", this.handleInterruptEnded);
+      return;
+    }
     el.volume = 1;
     const source = ctx.createMediaElementSource(el);
     const gainNode = ctx.createGain();

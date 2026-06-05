@@ -84,3 +84,21 @@ export function selectActiveTrackId(s: PlayerStore): number | null {
   if (s.state === null) return null;
   return s.state.interrupt?.current_track_id ?? s.state.ambient.current_track_id ?? null;
 }
+
+/** Shared stable empty array — one reference, reused, so the `?? []` default in
+ *  `usePlayerArray` never mints a fresh array (which would loop the store). */
+const EMPTY_ARRAY: readonly never[] = [];
+
+/** Stable-selector helper for array slices of `PlayerState`. Returns the
+ *  selected array, or a SHARED empty array when it's nullish (e.g. before the
+ *  first snapshot arrives) — so the `?? []` default lives OUTSIDE the selector
+ *  and can't loop `useSyncExternalStore` to React #185.
+ *
+ *  Prefer this over `usePlayerStore((s) => s.state?.x ?? [])`, which mints a
+ *  fresh `[]` on every call and is forbidden by the `local/stable-store-selector`
+ *  ESLint rule. */
+export function usePlayerArray<T>(
+  selector: (s: PlayerStore) => readonly T[] | undefined,
+): readonly T[] {
+  return usePlayerStore(selector) ?? EMPTY_ARRAY;
+}
