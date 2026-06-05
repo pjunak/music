@@ -1,29 +1,36 @@
 import { useEffect, useRef, useState } from "react";
 
+import { devicesApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import {
   selectIsMyOutput,
   usePlayerStore,
 } from "@/core/playerStore";
-import { useUiStore } from "@/core/uiStore";
+import { toast } from "@/core/toast";
+import { defaultDeviceName, useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
 import { VolumeIcon } from "./icons";
 
 /** Compact "is this device an audio output?" toggle for the NowPlayingBar.
  *
- *  Same logic as the larger badge that used to live on the Player view:
- *  - Logged-in user → claim / release via `set_active_outputs`.
+ *  - Logged-in user → activate / deactivate this device via `set_active_outputs`.
+ *    If this device isn't a designated output yet, the *first* enable also
+ *    designates it (`PUT /api/devices/{clientId}` with `is_output: true`). That
+ *    designation IS the manual operator action the output model requires — we
+ *    just let the operator perform it from their own footer toggle instead of
+ *    forcing a detour to Settings → Devices. It still never happens implicitly
+ *    (it takes this click), and because activation is session-only, a later
+ *    refresh shows the device designated-but-OFF rather than auto-playing.
  *  - Guest → flip the local-only `forceLocalPlayback` UI flag instead, since
  *    the server won't accept output-membership changes from guest sockets.
  *
  *  States we render:
  *    - Connecting: muted "Connecting…" pill, no action.
- *    - Device not designated as an output: muted "Not an output" hint — the
- *      operator marks it in Settings → Devices first (output is fully manual).
- *    - Otherwise: a clickable pill that toggles between
- *      "Playing here" (active) and "Play here" (idle).
+ *    - Authed + OFF: a clickable "Output OFF" pill (enables, self-designating
+ *      on first use).
+ *    - Authed + ON: "Output ON", arm-to-silence on the way back off.
  *
  *  Optimistic update: in addition to sending the WS / flipping the UI flag,
  *  we tell `playbackEngine.applyState` directly with the optimistic new
@@ -35,20 +42,24 @@ import { VolumeIcon } from "./icons";
 export function OutputToggle() {
   const isMyOutput = usePlayerStore(selectIsMyOutput);
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
-  const activeIds = usePlayerStore((s) => s.state?.active_output_device_ids);
   const me = usePlayerStore((s) =>
     s.state?.connected_devices.find((d) => d.device_id === s.myDeviceId) ?? null,
   );
   const authStatus = useAuthStore((s) => s.status);
   const isGuest = authStatus !== "authenticated";
   const forceLocal = useUiStore((s) => s.forceLocalPlayback);
+  const clientId = useUiStore((s) => s.clientId);
+  const deviceName = useUiStore((s) => s.deviceName);
 
   // Hooks declared up here (before any conditional returns) so React's
-  // rules-of-hooks invariant holds across the connecting / guest /
-  // no-capability branches below. The `armed` confirm-to-silence state
-  // is only meaningful in the authenticated branch but it costs nothing
-  // to keep the hook called in every render.
+  // rules-of-hooks invariant holds across the connecting / guest / authed
+  // branches below. The `armed` confirm-to-silence and `busy` states are
+  // only meaningful in the authenticated branch but it costs nothing to
+  // keep the hooks called in every render.
   const [armed, setArmed] = useState(false);
+  // True while the self-designate PUT is in flight, so a double-click can't
+  // fire two designations / activations.
+  const [busy, setBusy] = useState(false);
   const armTimeoutRef = useRef<number | null>(null);
   useEffect(() => {
     return () => {
@@ -102,17 +113,7 @@ export function OutputToggle() {
     );
   }
 
-  if (me === null || !me.is_output) {
-    return (
-      <span
-        className="output-toggle output-toggle-idle"
-        title="Mark this device as an audio output in Settings → Devices to play here"
-      >
-        <VolumeIcon className="output-toggle-icon" />
-        <span className="output-toggle-label muted">Not an output</span>
-      </span>
-    );
-  }
+  const designated = me?.is_output ?? false;
 
   // Confirm-to-silence guard. Stopping audio mid-session is the
   // expensive mistake; turning it on is harmless. So:
@@ -126,12 +127,16 @@ export function OutputToggle() {
 
   function commitToggle() {
     if (myDeviceId === null) return;
-    const nextIds = isMyOutput
-      ? (activeIds ?? []).filter((d) => d !== myDeviceId)
-      : activeIds === undefined
-        ? [myDeviceId]
-        : [...activeIds, myDeviceId];
-    const willBeMyOutput = nextIds.includes(myDeviceId);
+    // Derive the next list from the LIVE store, not the render-time closure:
+    // `set_active_outputs` replaces the whole list, and the async self-designate
+    // PUT (plus any concurrent change) can land between render and click — using
+    // a stale snapshot here would clobber it. `includes` also dedupes the add.
+    const player = usePlayerStore.getState();
+    const current = player.state?.active_output_device_ids ?? [];
+    const mine = current.includes(myDeviceId);
+    const nextIds = mine
+      ? current.filter((d) => d !== myDeviceId)
+      : [...current, myDeviceId];
 
     // Optimistic: drive the engine directly off the new value so the
     // audio reacts on the click event, not after the WS roundtrip. The
@@ -139,15 +144,45 @@ export function OutputToggle() {
     // the store subscription — applyState is idempotent so the second
     // call is a no-op.
     playbackEngine.unlock();
-    const player = usePlayerStore.getState();
     if (player.state !== null) {
       playbackEngine.applyState(
         { ...player.state, active_output_device_ids: nextIds },
-        willBeMyOutput,
+        !mine,
       );
     }
 
     wsClient.send({ type: "set_active_outputs", device_ids: nextIds });
+  }
+
+  /** Enable this device as an output. If it isn't a designated output yet,
+   *  designate it first (the explicit, manual operator action the model
+   *  requires) — then activate. Designation persists; activation does not. */
+  async function enableOutput() {
+    if (myDeviceId === null || busy) return;
+    if (!designated) {
+      setBusy(true);
+      try {
+        await devicesApi.save(clientId, {
+          name: deviceName ?? defaultDeviceName(),
+          is_output: true,
+        });
+        // First-enable only: surface the persistent side-effect (this device is
+        // now in the registry) so designating isn't a silent, invisible change.
+        toast.success(
+          "This device is now an audio output",
+          "Manage or remove it in Settings → Devices.",
+        );
+      } catch (err) {
+        toast.error(
+          "Couldn't set this device as an output",
+          err instanceof Error ? err.message : undefined,
+        );
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+    commitToggle();
   }
 
   function clearArm() {
@@ -161,8 +196,9 @@ export function OutputToggle() {
   function onClick() {
     if (myDeviceId === null) return;
     if (!isMyOutput) {
-      // Going ON — no confirmation, the operator wants audio.
-      commitToggle();
+      // Going ON — no confirmation, the operator wants audio. Self-designates
+      // this device first if it isn't a designated output yet.
+      void enableOutput();
       return;
     }
     if (armed) {
@@ -189,12 +225,16 @@ export function OutputToggle() {
     ? armed
       ? "Click again to stop"
       : "Output ON"
-    : "Output OFF";
+    : busy
+      ? "Enabling…"
+      : "Output OFF";
   const tooltip = isMyOutput
     ? armed
       ? "Click again within 2s to silence this device."
       : "Audio output is ON. Click once to arm; click again to silence."
-    : "Audio output is OFF for this device. Click to enable.";
+    : designated
+      ? "Audio output is OFF for this device. Click to enable."
+      : "Click to make this device an audio output and play here.";
 
   return (
     <button
@@ -202,6 +242,7 @@ export function OutputToggle() {
       className={`output-toggle ${stateClass}`}
       onClick={onClick}
       onBlur={clearArm}
+      disabled={busy}
       title={tooltip}
       aria-label={isMyOutput ? "Stop playing here" : "Play on this device"}
       aria-pressed={isMyOutput}

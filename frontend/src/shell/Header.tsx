@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 
 import { DeviceNameField } from "@/components/DeviceNameField";
 import { HelpIcon } from "@/components/icons";
@@ -18,6 +17,10 @@ export function Header() {
   const activeSceneId = usePlayerStore((s) => s.state?.active_scene_id ?? null);
   const authStatus = useAuthStore((s) => s.status);
   const isGuest = authStatus !== "authenticated";
+  // Only offer "Sign in" once we *know* the viewer is anonymous — during the
+  // brief "unknown" boot window we show nothing rather than flashing the
+  // button at an operator who's already signed in.
+  const isAnonymous = authStatus === "anonymous";
 
   const [modes, setModes] = useState<ModeSummary[]>([]);
   useEffect(() => {
@@ -30,6 +33,7 @@ export function Header() {
   }, [isGuest]);
 
   const openShortcutSheet = useUiTransient((s) => s.setShortcutSheetOpen);
+  const setLoginOpen = useUiTransient((s) => s.setLoginOpen);
 
   function changeMode(modeId: string) {
     wsClient.send({
@@ -91,10 +95,14 @@ export function Header() {
         >
           <HelpIcon />
         </button>
-        {isGuest ? (
-          <Link to="/login" className="btn-link guest-signin-link">
+        {isAnonymous ? (
+          <button
+            type="button"
+            className="btn-link guest-signin-link"
+            onClick={() => setLoginOpen(true)}
+          >
             Sign in
-          </Link>
+          </button>
         ) : null}
       </div>
     </header>

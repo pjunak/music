@@ -306,46 +306,71 @@ kbd,
   color: var(--error);
 }
 
-/* --- login --- */
+/* --- login modal + inline route gating --- */
 
-.centered {
-  min-height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 2rem;
-}
-
-.login {
+/* Inline status panel shown in the main content area while a protected route
+ * resolves (spinner) or when a guest hits it (sign-in gate). Lives INSIDE the
+ * shell, so the header + now-playing bar stay on screen — no full-screen
+ * "black" block while /api/auth/me is in flight. */
+.route-status {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
-  width: 100%;
-  max-width: 320px;
-  padding: 1.5rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 2rem;
+  text-align: center;
 }
-.login h1 {
-  margin: 0 0 0.5rem;
-  font-size: 1.3rem;
+.route-status h2 {
+  margin: 0;
+  font-size: 1.2rem;
 }
-.login label {
+.route-status p {
+  margin: 0;
+  max-width: 32ch;
+}
+.login-gate .btn-primary,
+.error-boundary .btn-primary {
+  margin-top: 0.3rem;
+}
+.error-boundary h2 {
+  color: var(--danger);
+}
+
+.spinner {
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* Login overlay — reuses .modal / .modal-header / .modal-body / .modal-actions
+ * (see InputDialogHost). This only sizes the form and stacks its fields. */
+.login-modal {
+  width: min(360px, 100%);
+}
+.login-field {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  font-size: 0.85rem;
-  color: var(--muted);
 }
-.login button {
-  background: var(--accent);
-  color: #0a0a0a;
-  border-color: transparent;
-  font-weight: 600;
-}
-.login button:disabled {
-  opacity: 0.6;
-  cursor: progress;
+.login-field input {
+  font-size: 1rem;
+  padding: 0.5rem 0.6rem;
 }
 
 /* --- shell + header + tabs --- */

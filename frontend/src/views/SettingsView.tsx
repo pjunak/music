@@ -87,7 +87,9 @@ function DevicesPanel() {
   const [saved, setSaved] = useState<KnownDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const connectedDevices = usePlayerStore((s) => s.state?.connected_devices ?? []);
+  // Default OUTSIDE the selector — `?? []` inside returns a fresh array on
+  // every call while state is null, looping useSyncExternalStore (React #185).
+  const connectedDevices = usePlayerStore((s) => s.state?.connected_devices) ?? [];
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
 
   const refresh = useCallback(async () => {

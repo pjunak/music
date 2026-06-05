@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { InputDialogHost } from "@/components/InputDialogHost";
 import { ShortcutSheet } from "@/components/ShortcutSheet";
 import { Toaster } from "@/components/Toaster";
@@ -25,28 +26,29 @@ import { SettingsView } from "@/views/SettingsView";
 import { SoundboardsView } from "@/views/SoundboardsView";
 
 import { Header } from "./Header";
+import { indexTarget } from "./indexTarget";
+import { LoginModal } from "./LoginModal";
 import { NowPlayingBar } from "./NowPlayingBar";
+import { LoginRedirect, Protected, RouteSpinner } from "./routeGuards";
 import { SectionNav } from "./SectionNav";
-
-/** Wrap the authoring tabs so guests get bounced to /login instead of
- *  silently failing on every API call. */
-function RequireAuth({ children }: { children: React.ReactNode }) {
-  const status = useAuthStore((s) => s.status);
-  if (status !== "authenticated") return <Navigate to="/login" replace />;
-  return <>{children}</>;
-}
 
 export default function AppShell() {
   const applyMessage = usePlayerStore((s) => s.applyMessage);
   const setStatus = usePlayerStore((s) => s.setStatus);
   const authStatus = useAuthStore((s) => s.status);
-  const isGuest = authStatus !== "authenticated";
+  const isAuthed = authStatus === "authenticated";
+  // Guest styling only when we *know* the viewer is anonymous — not during the
+  // brief "unknown" boot window (otherwise an authed reload flashes the guest
+  // shell before snapping back).
+  const isAnonymous = authStatus === "anonymous";
 
-  // The WS captures cookies at upgrade time, so a sign-in/out that changes
-  // the session cookie has no effect on an already-open socket — the server
-  // keeps treating it as whatever tier it was on connect. Re-running this
-  // effect when `authStatus` flips closes the old socket and opens a new
-  // one, forcing a fresh handshake with the now-current cookie.
+  // The WS captures cookies at upgrade time, so a sign-in/out that changes the
+  // session cookie has no effect on an already-open socket — the server keeps
+  // treating it as whatever tier it was on connect. Re-running this effect when
+  // the *authenticated* boolean flips (login / logout) closes the old socket
+  // and opens a new one, forcing a fresh handshake with the now-current cookie.
+  // Keying on the boolean (not the 3-valued status) means a guest's
+  // unknown→anonymous resolution doesn't trigger a pointless reconnect.
   useEffect(() => {
     const unsubMsg = wsClient.subscribe(applyMessage);
     const unsubStatus = wsClient.onStatus(setStatus);
@@ -64,7 +66,7 @@ export default function AppShell() {
       unsubErr();
       wsClient.disconnect();
     };
-  }, [applyMessage, setStatus, authStatus]);
+  }, [applyMessage, setStatus, isAuthed]);
 
   useKeyboardShortcuts();
   useSfxHotkeys();
@@ -72,21 +74,37 @@ export default function AppShell() {
   const shortcutSheetOpen = useUiTransient((s) => s.shortcutSheetOpen);
   const setShortcutSheetOpen = useUiTransient((s) => s.setShortcutSheetOpen);
 
+  // What the bare `/` index renders, by auth status (decision in the
+  // unit-tested `indexTarget`; this just maps it to the matching element).
+  const idx = indexTarget(authStatus);
+  const indexElement =
+    idx === "console" ? (
+      <Navigate to="/console" replace />
+    ) : idx === "tv" ? (
+      <PlayerView />
+    ) : (
+      <RouteSpinner />
+    );
+
   return (
-    <div className={`shell${isGuest ? " shell-guest" : ""}`}>
+    <div className={`shell${isAnonymous ? " shell-guest" : ""}`}>
       <Header />
       <main className="app-main">
+        {/* A crash in one view shows a recoverable error card in the main area
+            while the Header / NowPlayingBar / AudioEngine stay mounted — so a
+            buggy panel can't kill the whole session (or the music). */}
+        <ErrorBoundary>
         <Routes>
           {/* `/` is the TV view for guests (the bookmark-on-a-room-display
               use case). For authed users it redirects to /console — the bare
               URL should land the operator on their workspace, not the
-              read-only display surface. */}
-          <Route
-            index
-            element={
-              isGuest ? <PlayerView /> : <Navigate to="/console" replace />
-            }
-          />
+              read-only display surface. While auth is still resolving we show
+              a spinner rather than flashing TV at someone who turns out to be
+              the operator. */}
+          <Route index element={indexElement} />
+          {/* `/login` is no longer a page — sign-in is a modal. Keep the path
+              working for old bookmarks by opening the modal and bouncing to /. */}
+          <Route path="login" element={<LoginRedirect />} />
           {/* `/tv` is the canonical TV view, reachable by everyone — handy
               when an authed operator wants to preview what their room
               display looks like without losing their session. `/` is the
@@ -96,9 +114,9 @@ export default function AppShell() {
           <Route
             path="console"
             element={
-              <RequireAuth>
+              <Protected>
                 <ControlsView />
-              </RequireAuth>
+              </Protected>
             }
           />
           {/* Library group — file management on the left, tag editing on
@@ -106,7 +124,7 @@ export default function AppShell() {
           <Route
             path="library"
             element={
-              <RequireAuth>
+              <Protected>
                 <SectionNav
                   ariaLabel="Library sections"
                   items={[
@@ -114,7 +132,7 @@ export default function AppShell() {
                     { to: "tags", label: "Tags" },
                   ]}
                 />
-              </RequireAuth>
+              </Protected>
             }
           >
             <Route index element={<Navigate to="files" replace />} />
@@ -126,7 +144,7 @@ export default function AppShell() {
           <Route
             path="authoring"
             element={
-              <RequireAuth>
+              <Protected>
                 <SectionNav
                   ariaLabel="Authoring sections"
                   items={[
@@ -136,7 +154,7 @@ export default function AppShell() {
                     { to: "presets", label: "Presets" },
                   ]}
                 />
-              </RequireAuth>
+              </Protected>
             }
           >
             <Route index element={<Navigate to="playlists" replace />} />
@@ -171,17 +189,19 @@ export default function AppShell() {
           <Route
             path="settings"
             element={
-              <RequireAuth>
+              <Protected>
                 <SettingsView />
-              </RequireAuth>
+              </Protected>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ErrorBoundary>
       </main>
       <NowPlayingBar />
       <AudioEngine />
       <Toaster />
+      <LoginModal />
       <ConfirmDialogHost />
       <InputDialogHost />
       {shortcutSheetOpen ? (

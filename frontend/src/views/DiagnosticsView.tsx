@@ -33,13 +33,14 @@ export function DiagnosticsView() {
   const wsStatus = usePlayerStore((s) => s.wsStatus);
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
   const isMyOutput = usePlayerStore(selectIsMyOutput);
-  const activeOutputs = usePlayerStore(
-    (s) => s.state?.active_output_device_ids ?? [],
-  );
+  // Default OUTSIDE these selectors — `?? []` inside mints a fresh array each
+  // call while state is null, looping useSyncExternalStore (React #185). (The
+  // `?? null` below is fine: null is a stable primitive.)
+  const activeOutputs =
+    usePlayerStore((s) => s.state?.active_output_device_ids) ?? [];
   const masterVolumeFromState = usePlayerStore((s) => s.state?.volume ?? null);
-  const connectedDevices = usePlayerStore(
-    (s) => s.state?.connected_devices ?? [],
-  );
+  const connectedDevices =
+    usePlayerStore((s) => s.state?.connected_devices) ?? [];
   const authStatus = useAuthStore((s) => s.status);
 
   // Server-side snapshot — polled every 5s while the page is open.
