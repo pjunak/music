@@ -17,7 +17,6 @@ import { wsClient } from "@/core/ws";
 import { ControlsView } from "@/views/ControlsView";
 import { DiagnosticsView } from "@/views/DiagnosticsView";
 import { LibraryView } from "@/views/LibraryView";
-import { MetadataView } from "@/views/MetadataView";
 import { ModesView } from "@/views/ModesView";
 import { PlayerView } from "@/views/PlayerView";
 import { PlaylistsView } from "@/views/PlaylistsView";
@@ -119,26 +118,19 @@ export default function AppShell() {
               </Protected>
             }
           />
-          {/* Library group — file management on the left, tag editing on
-              the right. Sub-tab strip lives in SectionNav. */}
+          {/* Library is one screen now — wide folder tree + Name/File list +
+              a tag inspector that edits the selection. The old Files/Tags
+              split is gone; redirect its sub-paths for bookmarks. */}
           <Route
             path="library"
             element={
               <Protected>
-                <SectionNav
-                  ariaLabel="Library sections"
-                  items={[
-                    { to: "files", label: "Files" },
-                    { to: "tags", label: "Tags" },
-                  ]}
-                />
+                <LibraryView />
               </Protected>
             }
-          >
-            <Route index element={<Navigate to="files" replace />} />
-            <Route path="files" element={<LibraryView />} />
-            <Route path="tags" element={<MetadataView />} />
-          </Route>
+          />
+          <Route path="library/files" element={<Navigate to="/library" replace />} />
+          <Route path="library/tags" element={<Navigate to="/library" replace />} />
           {/* Authoring group — everything you set up *before* a session:
               playlists, mode bundles, soundboards, audio-effect presets. */}
           <Route
@@ -168,7 +160,7 @@ export default function AppShell() {
           <Route path="controls" element={<Navigate to="/console" replace />} />
           <Route
             path="metadata"
-            element={<Navigate to="/library/tags" replace />}
+            element={<Navigate to="/library" replace />}
           />
           <Route
             path="playlists"

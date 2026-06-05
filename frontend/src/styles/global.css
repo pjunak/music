@@ -924,6 +924,166 @@ kbd,
   gap: 0.3rem;
 }
 
+/* --- unified Library: wide folder tree + Name/File list + tag inspector --- */
+
+.music-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(300px, 360px);
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+.music-workspace.no-tree {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+}
+.library-inspector {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+/* selection action bar above the list */
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.selection-bar-count {
+  font-size: 0.85rem;
+  color: var(--accent-strong);
+  margin-right: auto;
+}
+.selection-bar button {
+  font-size: 0.85rem;
+  padding: 0.25rem 0.7rem;
+}
+
+/* track list: checkbox column, selected rows, file basename cell */
+.track-table th.col-check,
+.track-table td.col-check {
+  width: 2.2rem;
+  text-align: center;
+  padding-left: 0.4rem;
+  padding-right: 0;
+}
+.track-table tr.track-row.selected {
+  background: var(--accent-soft);
+}
+.track-table td.track-file {
+  font-size: 0.82rem;
+}
+
+/* the tag inspector panel */
+.tag-inspector {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.tag-inspector h3 {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+.tag-inspector-empty p {
+  padding: 0.2rem 0.7rem 0.7rem;
+}
+.tag-inspector-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.insp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.insp-group-head {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3rem;
+}
+.insp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.insp-field-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.insp-field input {
+  width: 100%;
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+}
+.insp-field.changed input {
+  border-color: var(--accent);
+}
+.insp-field-hint {
+  font-size: 0.72rem;
+}
+.tag-inspector-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+/* folder-picker modal: cap the embedded tree height */
+.folder-picker-tree {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+/* responsive: drop the inspector below the list, then stack the tree */
+@media (max-width: 1100px) {
+  .music-workspace {
+    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .music-workspace.no-tree {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .music-workspace .library-inspector {
+    grid-column: 1 / -1;
+    max-height: 42vh;
+  }
+}
+@media (max-width: 700px) {
+  .music-workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .music-workspace .library-sidebar {
+    max-height: 32vh;
+  }
+}
+
 .track-table-wrap {
   overflow: auto;
   border: 1px solid var(--border);
@@ -1718,17 +1878,16 @@ kbd,
   padding: 0.3rem 0.1rem;
 }
 .folder-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.3rem;
   padding-top: 0.6rem;
   margin-top: 0.4rem;
   border-top: 1px solid var(--border);
-  flex-wrap: wrap;
 }
 .folder-actions button {
-  flex: 1;
   font-size: 0.85rem;
-  padding: 0.3rem 0.4rem;
+  padding: 0.35rem 0.4rem;
 }
 
 .sfx-file-list {
@@ -3009,182 +3168,6 @@ input.volume-slider::-moz-range-thumb {
   letter-spacing: 0.04em;
 }
 
-/* --- Metadata tab: bulk-edit surface ---------------------------------- */
-
-.metadata-view {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  flex: 1;
-  min-height: 0;
-  padding: 0.75rem;
-}
-.metadata-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: center;
-}
-.metadata-search {
-  display: flex;
-  gap: 0.4rem;
-  flex: 1 1 320px;
-}
-.metadata-search input {
-  flex: 1;
-}
-.metadata-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-.metadata-bulk-actions {
-  display: inline-flex;
-  gap: 0.4rem;
-  margin-left: auto;
-}
-/* Three-column body: folder tree | track table | bulk-edit aside.
- * Each pane gets `min-height: 0` + scrolls internally so the page
- * never grows past its viewport — the table and tree both need to
- * be independently scrollable. */
-.metadata-body {
-  display: grid;
-  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(280px, 320px);
-  gap: 0.75rem;
-  flex: 1;
-  min-height: 0;
-}
-.metadata-tree {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.6rem;
-  overflow-y: auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-.metadata-tree-heading {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-.metadata-main {
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  min-height: 0;
-}
-.metadata-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-.metadata-table thead {
-  position: sticky;
-  top: 0;
-  background: var(--surface);
-  z-index: 1;
-}
-.metadata-table th,
-.metadata-table td {
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 18ch;
-}
-.metadata-table th.col-check,
-.metadata-table td.col-check {
-  width: 2rem;
-  max-width: 2rem;
-}
-.metadata-table td.col-num {
-  text-align: right;
-}
-.metadata-table tr.metadata-row {
-  cursor: pointer;
-}
-.metadata-table tr.metadata-row:hover {
-  background: var(--surface-hover, rgba(255, 255, 255, 0.04));
-}
-.metadata-table tr.metadata-row.selected {
-  background: var(--accent-soft);
-}
-.metadata-table td.col-actions {
-  width: 2.5rem;
-  text-align: right;
-}
-.metadata-empty {
-  text-align: center;
-  padding: 2rem;
-}
-
-.metadata-aside {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: 0.8rem;
-  overflow: auto;
-  min-height: 0;
-}
-.bulk-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.bulk-edit h2 {
-  margin: 0 0 0.2rem;
-  font-size: 1.05rem;
-}
-.bulk-edit hr {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 0.4rem 0;
-}
-.bulk-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  column-gap: 0.5rem;
-  row-gap: 0.2rem;
-  padding: 0.3rem 0.4rem;
-  border-radius: 4px;
-}
-.bulk-row > input[type="checkbox"] {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-  align-self: center;
-}
-.bulk-row .bulk-row-label {
-  grid-column: 2;
-  grid-row: 1;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-.bulk-row > input[type="text"],
-.bulk-row > input[type="number"] {
-  grid-column: 2;
-  grid-row: 2;
-  width: 100%;
-}
-.bulk-row .bulk-row-hint {
-  grid-column: 2;
-  grid-row: 3;
-}
-.bulk-row.bulk-row-armed {
-  background: var(--accent-soft);
-}
-.bulk-apply {
-  margin-top: 0.6rem;
-}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -3240,14 +3223,6 @@ input.volume-slider::-moz-range-thumb {
   }
   .player-meta {
     text-align: left;
-  }
-  /* Bulk-edit aside hides on narrower screens — multi-select-then-bulk
-   * needs more space than a phone has. Falls back to per-row edit. */
-  .metadata-body {
-    grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
-  }
-  .metadata-aside {
-    display: none;
   }
 }
 
@@ -3371,40 +3346,6 @@ input.volume-slider::-moz-range-thumb {
   }
   .track-table td.col-actions button {
     padding: 0.25rem 0.4rem;
-  }
-
-  /* Metadata: stack folder tree above the track table; bulk aside is
-   * hidden at this width (per-track edit still works). */
-  .metadata-view {
-    padding: 0.6rem;
-  }
-  .metadata-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 30vh) 1fr;
-  }
-  .metadata-tree {
-    max-height: 30vh;
-  }
-  .metadata-toolbar {
-    gap: 0.4rem;
-  }
-  .metadata-search {
-    flex: 1 1 100%;
-  }
-  .metadata-bulk-actions {
-    margin-left: 0;
-  }
-  /* Metadata table — drop the bulky tag columns on mobile; keep
-   * checkbox, display title, and the per-row edit button. */
-  .metadata-table th:nth-child(3),
-  .metadata-table td:nth-child(3),
-  .metadata-table th:nth-child(4),
-  .metadata-table td:nth-child(4),
-  .metadata-table th:nth-child(5),
-  .metadata-table td:nth-child(5),
-  .metadata-table th:nth-child(7),
-  .metadata-table td:nth-child(7) {
-    display: none;
   }
 
   /* Two-pane shells (Playlists, Modes, Soundboards, EQ Presets):
@@ -3674,7 +3615,6 @@ input.volume-slider::-moz-range-thumb {
    * region carries them. Padding bumped so a fat finger doesn't hit two
    * rows at once. */
   .track-table td.col-actions button,
-  .metadata-table td.col-actions button,
   .col-actions button {
     min-height: 36px;
     padding: 0.4rem 0.5rem;

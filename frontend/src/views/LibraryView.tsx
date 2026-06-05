@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ChangeEvent, DragEvent, MouseEvent } from "react";
 
 import { Breadcrumb } from "@/components/Breadcrumb";
 import type { BreadcrumbItem } from "@/components/Breadcrumb";
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
+import { FolderPickerModal } from "@/components/FolderPickerModal";
 import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
 import {
-  EditIcon,
   LightningIcon,
   PlayIcon,
   PlusIcon,
   TrashIcon,
 } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
-import { MetadataEditor } from "@/components/MetadataEditor";
+import { TagInspector } from "@/components/TagInspector";
 import { libraryApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
 import {
@@ -127,12 +127,11 @@ export function LibraryView() {
         <RescanButton root={root} onComplete={() => setRefreshKey((k) => k + 1)} />
       </header>
 
-      {root === "music" && query ? (
-        <MusicSearchResults query={query} refreshKey={refreshKey} />
-      ) : root === "music" ? (
-        <MusicBrowser
+      {root === "music" ? (
+        <MusicWorkspace
           path={path}
           onPathChange={setPath}
+          query={query}
           refreshKey={refreshKey}
           onRefresh={() => setRefreshKey((k) => k + 1)}
         />
@@ -194,27 +193,52 @@ function RescanButton({
 
 // --- MUSIC ---------------------------------------------------------------
 
-function MusicSearchResults({
+/** The unified music screen: wide folder tree (browse mode) + a multi-select
+ *  Name/File track list + a right-hand TagInspector that edits the selection.
+ *  Search and browse share the same list + inspector; search just drops the
+ *  tree + upload zone (a search is already a global filter). */
+function MusicWorkspace({
+  path,
+  onPathChange,
   query,
   refreshKey,
+  onRefresh,
 }: {
+  path: string;
+  onPathChange: (p: string) => void;
   query: string;
   refreshKey: number;
+  onRefresh: () => void;
 }) {
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [loading, setLoading] = useState(false);
   const activeTrackId = usePlayerStore(selectActiveTrackId);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const searching = query !== "";
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void libraryApi
-      .search({ q: query, limit: 200, sort: "artist", order: "asc" })
-      .then((r) => {
-        if (!cancelled) setTracks(r.tracks);
+    setError(null);
+    const fetcher = searching
+      ? libraryApi
+          .search({ q: query, limit: 200, sort: "artist", order: "asc" })
+          .then((r) => r.tracks)
+      : libraryApi.tree(path).then((r) => r.tracks);
+    void fetcher
+      .then((ts) => {
+        if (cancelled) return;
+        setTracks(ts);
+        // Prune selected ids that fell out of the now-visible set.
+        const visible = new Set(ts.map((t) => t.id));
+        setSelected((prev) => new Set([...prev].filter((id) => visible.has(id))));
       })
-      .catch(() => {
-        if (!cancelled) setTracks([]);
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "load failed");
+          setTracks([]);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -222,18 +246,102 @@ function MusicSearchResults({
     return () => {
       cancelled = true;
     };
-  }, [query, refreshKey]);
+  }, [searching, query, path, refreshKey]);
+
+  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
+    const r = await libraryApi.tree(p);
+    return r.folders.map((f) => ({
+      name: f.name,
+      path: f.path,
+      badge: f.track_count > 0 ? f.track_count : null,
+      hasChildren: f.has_children,
+    }));
+  }, []);
+
+  async function onDropOnFolder(folderPath: string, payload: unknown) {
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      (payload as { kind?: unknown }).kind !== "music-track"
+    )
+      return;
+    const id = (payload as { id?: number }).id;
+    if (typeof id !== "number") return;
+    try {
+      await libraryApi.moveTrack(id, folderPath);
+      toast.success("Track moved");
+      onRefresh();
+    } catch (e) {
+      toast.error("Move failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  const selectedTracks = useMemo(
+    () => tracks.filter((t) => selected.has(t.id)),
+    [tracks, selected],
+  );
 
   return (
-    <div className="library-body library-body-search">
-      <div className="library-main">
-        <p className="muted small">
-          {loading
-            ? "Searching…"
-            : `${tracks.length} match${tracks.length === 1 ? "" : "es"}`}
-        </p>
-        <TrackTable tracks={tracks} activeTrackId={activeTrackId} onChanged={() => undefined} />
-      </div>
+    <div className={`music-workspace${searching ? " no-tree" : ""}`}>
+      {!searching ? (
+        <aside className="library-sidebar">
+          <FolderTree
+            selectedPath={path}
+            onSelect={onPathChange}
+            loadChildren={loadChildren}
+            refreshKey={refreshKey}
+            onDropOnFolder={onDropOnFolder}
+          />
+          <FolderActions
+            root="music"
+            selectedPath={path}
+            onChanged={onRefresh}
+            onPathReset={() => onPathChange("")}
+          />
+        </aside>
+      ) : null}
+      <section className="library-main">
+        {searching ? (
+          <div className="folder-header">
+            <span className="muted small">
+              {loading
+                ? "Searching…"
+                : `${tracks.length} match${tracks.length === 1 ? "" : "es"} for “${query}”`}
+            </span>
+          </div>
+        ) : (
+          <>
+            <FolderHeader path={path} root="music" onPathSelect={onPathChange} />
+            <UploadDrop
+              root="music"
+              dest={path}
+              onUploaded={onRefresh}
+              onNavigate={onPathChange}
+            />
+          </>
+        )}
+        {error !== null ? <p className="error small">{error}</p> : null}
+        <SelectionToolbar
+          selected={selected}
+          total={tracks.length}
+          onClear={() => setSelected(new Set())}
+          onChanged={() => {
+            setSelected(new Set());
+            onRefresh();
+          }}
+        />
+        <MusicTrackList
+          tracks={tracks}
+          activeTrackId={activeTrackId}
+          selected={selected}
+          onSelectionChange={setSelected}
+          draggable={!searching}
+          onChanged={onRefresh}
+        />
+      </section>
+      <aside className="library-inspector">
+        <TagInspector selectedTracks={selectedTracks} onSaved={onRefresh} />
+      </aside>
     </div>
   );
 }
@@ -299,90 +407,6 @@ function LibraryShell({
         {children}
       </section>
     </div>
-  );
-}
-
-function MusicBrowser({
-  path,
-  onPathChange,
-  refreshKey,
-  onRefresh,
-}: {
-  path: string;
-  onPathChange: (p: string) => void;
-  refreshKey: number;
-  onRefresh: () => void;
-}) {
-  const activeTrackId = usePlayerStore(selectActiveTrackId);
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    void libraryApi
-      .tree(path)
-      .then((r) => {
-        if (!cancelled) setTracks(r.tracks);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "load failed");
-          setTracks([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, refreshKey]);
-
-  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
-    const r = await libraryApi.tree(p);
-    return r.folders.map((f) => ({
-      name: f.name,
-      path: f.path,
-      badge: f.track_count > 0 ? f.track_count : null,
-      hasChildren: f.has_children,
-    }));
-  }, []);
-
-  async function onDropOnFolder(folderPath: string, payload: unknown) {
-    if (
-      !payload ||
-      typeof payload !== "object" ||
-      (payload as { kind?: unknown }).kind !== "music-track"
-    )
-      return;
-    const id = (payload as { id?: number }).id;
-    if (typeof id !== "number") return;
-    try {
-      await libraryApi.moveTrack(id, folderPath);
-      toast.success("Track moved");
-      onRefresh();
-    } catch (e) {
-      toast.error("Move failed", e instanceof Error ? e.message : undefined);
-    }
-  }
-
-  return (
-    <LibraryShell
-      rootKind="music"
-      selectedPath={path}
-      onPathChange={onPathChange}
-      refreshKey={refreshKey}
-      loadChildren={loadChildren}
-      onDropOnFolder={onDropOnFolder}
-      onRefresh={onRefresh}
-      onPathReset={() => onPathChange("")}
-      error={error}
-    >
-      <TrackTable
-        tracks={tracks}
-        activeTrackId={activeTrackId}
-        onChanged={onRefresh}
-        draggable
-      />
-    </LibraryShell>
   );
 }
 
@@ -585,6 +609,31 @@ function FolderActions({
   onChanged: () => void;
   onPathReset: () => void;
 }) {
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
+
+  const loadChildren = useCallback(
+    async (p: string): Promise<TreeFolder[]> => {
+      if (root === "music") {
+        const r = await libraryApi.tree(p);
+        return r.folders.map((f) => ({
+          name: f.name,
+          path: f.path,
+          badge: f.track_count > 0 ? f.track_count : null,
+          hasChildren: f.has_children,
+        }));
+      }
+      const r = await sfxApi.tree(p);
+      return r.folders.map((f) => ({
+        name: f.name,
+        path: f.path,
+        badge: f.file_count > 0 ? f.file_count : null,
+        hasChildren: f.has_children,
+      }));
+    },
+    [root],
+  );
+
   async function newFolder() {
     const name = await inputDialog({
       title: "New folder",
@@ -614,22 +663,51 @@ function FolderActions({
       toast.info("Pick a folder first");
       return;
     }
-    const next = await inputDialog({
-      title: "Rename or move folder",
-      body: `Current path: ${selectedPath}. Use slashes to nest under a different parent.`,
-      label: "New path",
-      initial: selectedPath,
+    const parent = selectedPath.split("/").slice(0, -1).join("/");
+    const current = selectedPath.split("/").pop() ?? selectedPath;
+    const name = await inputDialog({
+      title: "Rename folder",
+      body: `Renaming "${selectedPath}". Use Move… to change its parent.`,
+      label: "New name",
+      initial: current,
       confirmLabel: "Rename",
+      validate: (v) =>
+        v.includes("/") || v.includes("\\")
+          ? "No slashes — use Move… to change the parent folder."
+          : null,
     });
-    if (next === null || next === selectedPath) return;
+    if (name === null || name === current) return;
+    const target = parent ? `${parent}/${name}` : name;
     try {
-      if (root === "music") await libraryApi.renameFolder(selectedPath, next);
-      else await sfxApi.renameFolder(selectedPath, next);
-      toast.success("Folder renamed", next);
+      if (root === "music") await libraryApi.renameFolder(selectedPath, target);
+      else await sfxApi.renameFolder(selectedPath, target);
+      toast.success("Folder renamed", target);
       onChanged();
       onPathReset();
     } catch (e) {
       toast.error("Rename failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  async function moveFolder(destParent: string) {
+    const name = selectedPath.split("/").pop() ?? selectedPath;
+    const target = destParent === "" ? name : `${destParent}/${name}`;
+    if (target === selectedPath) {
+      setMoveOpen(false);
+      return;
+    }
+    setMoveBusy(true);
+    try {
+      if (root === "music") await libraryApi.renameFolder(selectedPath, target);
+      else await sfxApi.renameFolder(selectedPath, target);
+      toast.success("Folder moved", target);
+      setMoveOpen(false);
+      onChanged();
+      onPathReset();
+    } catch (e) {
+      toast.error("Move failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setMoveBusy(false);
     }
   }
 
@@ -659,32 +737,55 @@ function FolderActions({
   }
 
   return (
-    <div className="folder-actions">
-      <IconButton
-        label="New folder"
-        icon={<PlusIcon />}
-        onClick={() => void newFolder()}
-      >
-        Folder
-      </IconButton>
-      <IconButton
-        label="Rename / move the selected folder"
-        icon={<EditIcon />}
-        onClick={() => void renameFolder()}
-        disabled={!selectedPath}
-      >
-        Rename
-      </IconButton>
-      <IconButton
-        label="Delete the selected folder"
-        icon={<TrashIcon />}
-        variant="danger"
-        onClick={() => void deleteFolder()}
-        disabled={!selectedPath}
-      >
-        Delete
-      </IconButton>
-    </div>
+    <>
+      <div className="folder-actions">
+        <button type="button" onClick={() => void newFolder()} title="Create a folder">
+          ＋ New
+        </button>
+        <button
+          type="button"
+          onClick={() => void renameFolder()}
+          disabled={!selectedPath}
+          title="Rename the selected folder"
+        >
+          ✎ Rename
+        </button>
+        <button
+          type="button"
+          onClick={() => setMoveOpen(true)}
+          disabled={!selectedPath}
+          title="Move the selected folder (and everything in it) into another folder"
+        >
+          ↪ Move…
+        </button>
+        <button
+          type="button"
+          className="btn-danger"
+          onClick={() => void deleteFolder()}
+          disabled={!selectedPath}
+          title="Delete the selected folder and everything in it"
+        >
+          🗑 Delete
+        </button>
+      </div>
+      {moveOpen ? (
+        <FolderPickerModal
+          title={`Move "${selectedPath}"`}
+          body="Pick the destination parent folder. The folder and everything inside it moves together."
+          loadChildren={loadChildren}
+          busy={moveBusy}
+          disableDest={(dest) =>
+            dest === selectedPath || dest.startsWith(`${selectedPath}/`)
+              ? "Can't move a folder into itself or one of its subfolders."
+              : dest === selectedPath.split("/").slice(0, -1).join("/")
+                ? "The folder is already here."
+                : null
+          }
+          onCancel={() => setMoveOpen(false)}
+          onConfirm={(dest) => void moveFolder(dest)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -884,26 +985,172 @@ function UploadDrop({
   );
 }
 
-function TrackTable({
+function basename(p: string): string {
+  return p.split("/").pop() || p;
+}
+
+/** Selection action bar above the track list — bulk move / delete of the
+ *  ticked rows. Tag editing lives in the inspector, not here. Renders nothing
+ *  until something is selected. */
+function SelectionToolbar({
+  selected,
+  total,
+  onClear,
+  onChanged,
+}: {
+  selected: Set<number>;
+  total: number;
+  onClear: () => void;
+  onChanged: () => void;
+}) {
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
+    const r = await libraryApi.tree(p);
+    return r.folders.map((f) => ({
+      name: f.name,
+      path: f.path,
+      badge: f.track_count > 0 ? f.track_count : null,
+      hasChildren: f.has_children,
+    }));
+  }, []);
+
+  const ids = [...selected];
+
+  function reportSkips(skipped: { track_id: number; reason: string }[]) {
+    if (skipped.length === 0) return;
+    const sample = skipped
+      .slice(0, 3)
+      .map((s) => `#${s.track_id}: ${s.reason}`)
+      .join("\n");
+    const more = skipped.length > 3 ? `\n…and ${skipped.length - 3} more` : "";
+    toast.warn("Some tracks were skipped", `${sample}${more}`);
+  }
+
+  async function doMove(dest: string) {
+    setBusy(true);
+    try {
+      const r = await libraryApi.bulkMove(ids, dest);
+      toast.success(
+        `Moved ${r.moved.length} of ${ids.length} track${ids.length === 1 ? "" : "s"}`,
+      );
+      reportSkips(r.skipped);
+      setMoveOpen(false);
+      onChanged();
+    } catch (e) {
+      toast.error("Move failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doDelete() {
+    const ok = await confirmDialog({
+      title: "Delete selected tracks?",
+      body:
+        `Permanently delete ${ids.length} track${ids.length === 1 ? "" : "s"} from disk ` +
+        "and the library? Playlist references will be removed too.",
+      tone: "danger",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await libraryApi.bulkDelete(ids);
+      toast.success(
+        `Deleted ${r.deleted_ids.length} track${r.deleted_ids.length === 1 ? "" : "s"}`,
+      );
+      reportSkips(r.skipped);
+      onChanged();
+    } catch (e) {
+      toast.error("Delete failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (ids.length === 0) return null;
+
+  return (
+    <>
+      <div className="selection-bar">
+        <span className="selection-bar-count">
+          {ids.length} of {total} selected
+        </span>
+        <button type="button" disabled={busy} onClick={() => setMoveOpen(true)}>
+          Move…
+        </button>
+        <button
+          type="button"
+          className="btn-danger"
+          disabled={busy}
+          onClick={() => void doDelete()}
+        >
+          Delete
+        </button>
+        <button type="button" className="btn-ghost" onClick={onClear}>
+          Clear
+        </button>
+      </div>
+      {moveOpen ? (
+        <FolderPickerModal
+          title={`Move ${ids.length} track${ids.length === 1 ? "" : "s"}`}
+          body="Pick the destination folder under MUSIC_DIR. Files keep their names; collisions are skipped per-track."
+          confirmVerb="Move"
+          loadChildren={loadChildren}
+          busy={busy}
+          onCancel={() => setMoveOpen(false)}
+          onConfirm={(dest) => void doMove(dest)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** Multi-select track list — the list half of the unified Library. Columns are
+ *  just Name (display) + File (basename) + Length; the rich tag fields live in
+ *  the inspector. Plain row-click focuses one row in the inspector; the
+ *  checkboxes (or Ctrl/Cmd-click) build a multi-selection. */
+function MusicTrackList({
   tracks,
   activeTrackId,
-  onChanged,
+  selected,
+  onSelectionChange,
   draggable,
+  onChanged,
 }: {
   tracks: Track[];
   activeTrackId: number | null;
-  onChanged: () => void;
+  selected: Set<number>;
+  onSelectionChange: (next: Set<number>) => void;
   draggable?: boolean;
+  onChanged: () => void;
 }) {
-  const [editing, setEditing] = useState<Track | null>(null);
-
   if (tracks.length === 0) {
     return (
-      <EmptyState title="No tracks in this folder">
-        Drop audio files into the zone above, or pick a different folder
-        from the tree on the left.
+      <EmptyState title="No tracks here">
+        Drop audio files into the zone above, or pick a different folder from
+        the tree on the left.
       </EmptyState>
     );
+  }
+
+  const allSelected = tracks.every((t) => selected.has(t.id));
+
+  function toggleAll() {
+    onSelectionChange(allSelected ? new Set() : new Set(tracks.map((t) => t.id)));
+  }
+  function toggleOne(id: number) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onSelectionChange(next);
+  }
+  function onRowClick(e: MouseEvent<HTMLTableRowElement>, id: number) {
+    const target = e.target as HTMLElement;
+    if (target.closest(".col-actions") || target.closest(".col-check")) return;
+    if (e.ctrlKey || e.metaKey) toggleOne(id);
+    else onSelectionChange(new Set([id])); // plain click focuses one row
   }
 
   function play(t: Track) {
@@ -940,24 +1187,34 @@ function TrackTable({
   }
 
   return (
-    <>
-      <div className="track-table-wrap">
-        <table className="track-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Artist</th>
-              <th>Album</th>
-              <th className="col-num">Year</th>
-              <th className="col-num">Length</th>
-              <th className="col-actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {tracks.map((t) => (
+    <div className="track-table-wrap">
+      <table className="track-table">
+        <thead>
+          <tr>
+            <th className="col-check">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                aria-label="Select all"
+              />
+            </th>
+            <th>Name</th>
+            <th>File</th>
+            <th className="col-num">Length</th>
+            <th className="col-actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {tracks.map((t) => {
+            const isSel = selected.has(t.id);
+            return (
               <tr
                 key={t.id}
-                className={`track-row ${activeTrackId === t.id ? "playing" : ""}`}
+                className={`track-row${isSel ? " selected" : ""}${
+                  activeTrackId === t.id ? " playing" : ""
+                }`}
+                onClick={(e) => onRowClick(e, t.id)}
                 onDoubleClick={() => play(t)}
                 draggable={draggable}
                 onDragStart={
@@ -972,10 +1229,16 @@ function TrackTable({
                     : undefined
                 }
               >
+                <td className="col-check">
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onChange={() => toggleOne(t.id)}
+                    aria-label={`Select ${trackTitle(t)}`}
+                  />
+                </td>
                 <td title={t.path}>{trackTitle(t)}</td>
-                <td>{t.artist || <span className="muted">—</span>}</td>
-                <td>{t.album || <span className="muted">—</span>}</td>
-                <td className="col-num">{t.year ?? <span className="muted">—</span>}</td>
+                <td className="track-file muted">{basename(t.path)}</td>
                 <td className="col-num">{formatDuration(t.length_s)}</td>
                 <td className="col-actions">
                   <IconButton label="Play" icon={<PlayIcon />} onClick={() => play(t)} />
@@ -990,11 +1253,6 @@ function TrackTable({
                     onClick={() => fireInterrupt(t)}
                   />
                   <IconButton
-                    label="Edit metadata"
-                    icon={<EditIcon />}
-                    onClick={() => setEditing(t)}
-                  />
-                  <IconButton
                     label="Delete track"
                     icon={<TrashIcon />}
                     variant="danger"
@@ -1002,20 +1260,10 @@ function TrackTable({
                   />
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {editing !== null ? (
-        <MetadataEditor
-          track={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            onChanged();
-          }}
-        />
-      ) : null}
-    </>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

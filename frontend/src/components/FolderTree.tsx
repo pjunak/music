@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ChevronDownIcon,
@@ -55,7 +55,8 @@ interface Props {
   onSelect: (path: string) => void;
   /** Async fetcher: given a parent path, return its immediate subfolders. */
   loadChildren: (path: string) => Promise<TreeFolder[]>;
-  /** Trigger value: when this changes, the tree clears its cache and reloads. */
+  /** Trigger value: when this changes, the tree reloads root + open folders
+   *  (preserving which folders are expanded). */
   refreshKey?: number | string;
   /** Optional drop handler — when set, folder rows accept drops. */
   onDropOnFolder?: (folderPath: string, payload: unknown) => void;
@@ -72,16 +73,45 @@ export function FolderTree({
   const [rootChildren, setRootChildren] = useState<TreeFolder[] | null>(null);
   const [rootError, setRootError] = useState<string | null>(null);
 
+  // Latest `state` without making `refresh` depend on it (which would re-run
+  // the refresh effect on every expand/collapse). Lets refresh read which
+  // folders are open so it can restore them.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   const refresh = useCallback(async () => {
     setRootError(null);
+    // Snapshot the open subtrees BEFORE reloading so a rescan / add / rename /
+    // delete / upload doesn't collapse the tree (the long-standing bug was
+    // `setState({})` here). We re-fetch root + each open folder so badges and
+    // newly-created subfolders refresh, while keeping everything expanded.
+    const prev = stateRef.current;
+    const openPaths = Object.keys(prev).filter(
+      (p) => prev[p].expanded && prev[p].loaded,
+    );
     try {
-      const kids = await loadChildren("");
-      setRootChildren(kids);
+      setRootChildren(await loadChildren(""));
     } catch (e) {
       setRootError(e instanceof Error ? e.message : "load failed");
       setRootChildren([]);
+      return; // leave expansion state untouched on a root-load failure
     }
-    setState({}); // collapse all on refresh
+    const entries = await Promise.all(
+      openPaths.map(async (p) => {
+        try {
+          const children = await loadChildren(p);
+          return [p, { expanded: true, loaded: true, children, error: null }] as const;
+        } catch {
+          // Folder no longer resolves (deleted / renamed) — drop it.
+          return null;
+        }
+      }),
+    );
+    const next: Record<string, NodeState> = {};
+    for (const e of entries) if (e !== null) next[e[0]] = e[1];
+    setState(next);
   }, [loadChildren]);
 
   useEffect(() => {
