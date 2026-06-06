@@ -9,16 +9,86 @@ import { presetsAdminApi, presetsApi } from "@/core/api";
 import type { PresetEffect, PresetManifest } from "@/core/api";
 import { toast } from "@/core/toast";
 
-const SUPPORTED_EFFECTS: { type: string; description: string; defaults: PresetEffect }[] = [
-  { type: "lowpass", description: "Cuts highs above frequency", defaults: { type: "lowpass", frequency: 800, q: 0.7 } },
-  { type: "highpass", description: "Cuts lows below frequency", defaults: { type: "highpass", frequency: 200, q: 0.7 } },
-  { type: "bandpass", description: "Keeps a band around frequency", defaults: { type: "bandpass", frequency: 1000, q: 1.0 } },
-  { type: "delay", description: "Echo with feedback + wet mix", defaults: { type: "delay", time: 0.25, feedback: 0.3, wet: 0.4 } },
-  { type: "distortion", description: "Soft-clip saturation", defaults: { type: "distortion", amount: 50 } },
-  { type: "tremolo", description: "Amplitude wobble (rate Hz, depth 0–1)", defaults: { type: "tremolo", rate: 5, depth: 0.5 } },
-  { type: "reverb", description: "Synthesised IR reverb", defaults: { type: "reverb", decay: 2.0, wet: 0.4 } },
-  { type: "pitch_shift", description: "[skipped — not yet implemented]", defaults: { type: "pitch_shift", semitones: -2 } },
-];
+// Per-effect-type UI: a friendly label, a one-line blurb, and a slider control
+// for each numeric param. Param KEYS must match what the audio engine reads
+// (playbackEngine `buildEffect`) — only the presentation changes here. Effect
+// types NOT in this map are unsupported by the engine (e.g. `pitch_shift`):
+// they're flagged in the editor instead of silently doing nothing.
+interface ParamControl {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  def: number;
+  format: (v: number) => string;
+}
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const hz = (v: number) => `${Math.round(v)} Hz`;
+const sec = (v: number) => `${v.toFixed(2)} s`;
+const plain = (v: number) => `${v}`;
+
+const EFFECT_UI: Record<
+  string,
+  { label: string; blurb: string; params: ParamControl[] }
+> = {
+  lowpass: {
+    label: "Muffle (low-pass)",
+    blurb: "Cuts the highs — distant / underwater",
+    params: [
+      { key: "frequency", label: "Cutoff", min: 50, max: 18000, step: 10, def: 800, format: hz },
+      { key: "q", label: "Resonance", min: 0.1, max: 12, step: 0.1, def: 0.7, format: plain },
+    ],
+  },
+  highpass: {
+    label: "Thin (high-pass)",
+    blurb: "Cuts the lows — tinny / telephone",
+    params: [
+      { key: "frequency", label: "Cutoff", min: 50, max: 18000, step: 10, def: 200, format: hz },
+      { key: "q", label: "Resonance", min: 0.1, max: 12, step: 0.1, def: 0.7, format: plain },
+    ],
+  },
+  bandpass: {
+    label: "Band-pass",
+    blurb: "Keeps a band around the centre",
+    params: [
+      { key: "frequency", label: "Centre", min: 50, max: 18000, step: 10, def: 1000, format: hz },
+      { key: "q", label: "Width", min: 0.1, max: 12, step: 0.1, def: 1.0, format: plain },
+    ],
+  },
+  delay: {
+    label: "Echo",
+    blurb: "Repeats with feedback",
+    params: [
+      { key: "time", label: "Time", min: 0, max: 2, step: 0.01, def: 0.25, format: sec },
+      { key: "feedback", label: "Feedback", min: 0, max: 0.95, step: 0.01, def: 0.3, format: pct },
+      { key: "wet", label: "Mix", min: 0, max: 1, step: 0.01, def: 0.4, format: pct },
+    ],
+  },
+  distortion: {
+    label: "Distortion",
+    blurb: "Soft-clip grit",
+    params: [
+      { key: "amount", label: "Amount", min: 0, max: 100, step: 1, def: 50, format: plain },
+    ],
+  },
+  tremolo: {
+    label: "Tremolo",
+    blurb: "Volume wobble",
+    params: [
+      { key: "rate", label: "Rate", min: 0.1, max: 20, step: 0.1, def: 5, format: (v) => `${v.toFixed(1)} Hz` },
+      { key: "depth", label: "Depth", min: 0, max: 1, step: 0.01, def: 0.5, format: pct },
+    ],
+  },
+  reverb: {
+    label: "Reverb",
+    blurb: "Room / space tail",
+    params: [
+      { key: "decay", label: "Size", min: 0.1, max: 8, step: 0.1, def: 2.0, format: sec },
+      { key: "wet", label: "Mix", min: 0, max: 1, step: 0.01, def: 0.4, format: pct },
+    ],
+  },
+};
 
 export function PresetsView() {
   const [presets, setPresets] = useState<PresetManifest[]>([]);
@@ -90,9 +160,8 @@ export function PresetsView() {
           </span>
         </header>
         <p className="muted small">
-          Audio effect chains. The frontend audio engine applies them to the
-          ambient channel only. <code>pitch_shift</code> is skipped silently —
-          Web Audio has no native pitch shifter (deferred).
+          Audio effects applied to the music (ambient) channel. Turn one on,
+          drag its sliders. Stack several — they apply top to bottom.
         </p>
         <ul className="playlist-list">
           {presets.length === 0 ? (
@@ -175,6 +244,12 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
   const [effects, setEffects] = useState<PresetEffect[]>(
     () => preset?.effects.map((e) => ({ ...e })) ?? [],
   );
+  // Optional "when active" overrides — checkbox gates each slider; null on save
+  // when off (= leave that global alone).
+  const [volumeOn, setVolumeOn] = useState(preset?.volume != null);
+  const [volume, setVolume] = useState(preset?.volume ?? 0.8);
+  const [crossfadeOn, setCrossfadeOn] = useState(preset?.crossfade_ms != null);
+  const [crossfadeMs, setCrossfadeMs] = useState(preset?.crossfade_ms ?? 2000);
   const [busy, setBusy] = useState(false);
   const [pendingEffectType, setPendingEffectType] = useState("");
 
@@ -184,12 +259,26 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
       setName(preset.name);
       setDescription(preset.description ?? "");
       setEffects(preset.effects.map((e) => ({ ...e })));
+      setVolumeOn(preset.volume != null);
+      setVolume(preset.volume ?? 0.8);
+      setCrossfadeOn(preset.crossfade_ms != null);
+      setCrossfadeMs(preset.crossfade_ms ?? 2000);
     }
   }, [mode, preset]);
 
   function addEffect(type: string) {
-    const def = SUPPORTED_EFFECTS.find((s) => s.type === type)?.defaults ?? { type };
-    setEffects((es) => [...es, { ...def }]);
+    const ui = EFFECT_UI[type];
+    const params = ui
+      ? Object.fromEntries(ui.params.map((p) => [p.key, p.def]))
+      : {};
+    setEffects((es) => [...es, { type, ...params } as PresetEffect]);
+  }
+
+  // Slider setter — writes a numeric param straight through (no string coercion).
+  function setEffectParam(idx: number, key: string, value: number) {
+    setEffects((es) =>
+      es.map((e, i) => (i === idx ? { ...e, [key]: value } : e)),
+    );
   }
 
   function updateEffect(idx: number, key: string, value: string) {
@@ -225,6 +314,8 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
           id: id.trim(),
           name: name.trim(),
           effects,
+          volume: volumeOn ? volume : null,
+          crossfade_ms: crossfadeOn ? crossfadeMs : null,
         };
         const desc = description.trim();
         if (desc) payload.description = desc;
@@ -234,6 +325,8 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
         const payload: Parameters<typeof presetsAdminApi.update>[1] = {
           name: name.trim(),
           effects,
+          volume: volumeOn ? volume : null,
+          crossfade_ms: crossfadeOn ? crossfadeMs : null,
         };
         const desc = description.trim();
         if (desc) payload.description = desc;
@@ -311,55 +404,148 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
         </label>
       </div>
 
-      <section>
-        <h3>Effect chain</h3>
+      <section className="preset-overrides">
+        <h3>When active</h3>
         <p className="muted small">
-          Effects apply in order — the audio passes through each in sequence.
+          Optional — a preset can also nudge master volume and the crossfade
+          time when you switch it on. Leave a box unticked to leave that alone.
+          If several active presets set one, the last turned on wins.
+        </p>
+        <label className="override-row">
+          <input
+            type="checkbox"
+            checked={volumeOn}
+            onChange={(e) => setVolumeOn(e.target.checked)}
+          />
+          <span className="override-name">Set master volume</span>
+          {volumeOn ? (
+            <span className="override-control">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+              />
+              <span className="param-val">{Math.round(volume * 100)}%</span>
+            </span>
+          ) : null}
+        </label>
+        <label className="override-row">
+          <input
+            type="checkbox"
+            checked={crossfadeOn}
+            onChange={(e) => setCrossfadeOn(e.target.checked)}
+          />
+          <span className="override-name">Set crossfade</span>
+          {crossfadeOn ? (
+            <span className="override-control">
+              <input
+                type="range"
+                min={0}
+                max={10000}
+                step={100}
+                value={crossfadeMs}
+                onChange={(e) => setCrossfadeMs(Number(e.target.value))}
+              />
+              <span className="param-val">{(crossfadeMs / 1000).toFixed(1)} s</span>
+            </span>
+          ) : null}
+        </label>
+      </section>
+
+      <section>
+        <h3>Effects</h3>
+        <p className="muted small">
+          Applied top to bottom — the audio passes through each in order.
         </p>
         {effects.length === 0 ? (
           <p className="muted small">No effects yet. Add one below.</p>
         ) : (
           <ol className="effect-list">
-            {effects.map((eff, idx) => (
-              <li key={idx} className="effect-row">
-                <header>
-                  <strong>{eff.type}</strong>
-                  <div className="effect-row-actions">
-                    <IconButton
-                      label="Move effect up"
-                      icon={<ArrowUpIcon />}
-                      onClick={() => moveEffect(idx, -1)}
-                      disabled={idx === 0}
-                    />
-                    <IconButton
-                      label="Move effect down"
-                      icon={<ArrowDownIcon />}
-                      onClick={() => moveEffect(idx, 1)}
-                      disabled={idx === effects.length - 1}
-                    />
-                    <IconButton
-                      label="Remove effect"
-                      icon={<XIcon />}
-                      variant="danger"
-                      onClick={() => removeEffect(idx)}
-                    />
-                  </div>
-                </header>
-                <div className="effect-params">
-                  {Object.entries(eff)
-                    .filter(([k]) => k !== "type")
-                    .map(([k, v]) => (
-                      <label key={k}>
-                        <span className="muted small">{k}</span>
-                        <input
-                          value={String(v)}
-                          onChange={(e) => updateEffect(idx, k, e.target.value)}
-                        />
-                      </label>
-                    ))}
-                </div>
-              </li>
-            ))}
+            {effects.map((eff, idx) => {
+              const ui = EFFECT_UI[eff.type];
+              return (
+                <li key={idx} className="effect-row">
+                  <header>
+                    <span className="effect-title">
+                      <strong>{ui?.label ?? eff.type}</strong>
+                      {ui ? (
+                        <span className="muted small">{ui.blurb}</span>
+                      ) : (
+                        <span className="ref-missing">
+                          ⚠ not supported — this effect does nothing
+                        </span>
+                      )}
+                    </span>
+                    <div className="effect-row-actions">
+                      <IconButton
+                        label="Move effect up"
+                        icon={<ArrowUpIcon />}
+                        onClick={() => moveEffect(idx, -1)}
+                        disabled={idx === 0}
+                      />
+                      <IconButton
+                        label="Move effect down"
+                        icon={<ArrowDownIcon />}
+                        onClick={() => moveEffect(idx, 1)}
+                        disabled={idx === effects.length - 1}
+                      />
+                      <IconButton
+                        label="Remove effect"
+                        icon={<XIcon />}
+                        variant="danger"
+                        onClick={() => removeEffect(idx)}
+                      />
+                    </div>
+                  </header>
+                  {ui ? (
+                    <div className="effect-params">
+                      {ui.params.map((pc) => {
+                        const cur = Number(eff[pc.key]);
+                        const val = Number.isFinite(cur) ? cur : pc.def;
+                        return (
+                          <label key={pc.key} className="slider-field">
+                            <span className="slider-label">
+                              <span className="muted small">{pc.label}</span>
+                              <span className="param-val">{pc.format(val)}</span>
+                            </span>
+                            <input
+                              type="range"
+                              min={pc.min}
+                              max={pc.max}
+                              step={pc.step}
+                              value={val}
+                              onChange={(e) =>
+                                setEffectParam(idx, pc.key, Number(e.target.value))
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // Unknown/unsupported effect — keep the raw fields so an
+                    // existing preset stays editable (and removable) instead of
+                    // being silently uneditable.
+                    <div className="effect-params">
+                      {Object.entries(eff)
+                        .filter(([k]) => k !== "type")
+                        .map(([k, v]) => (
+                          <label key={k}>
+                            <span className="muted small">{k}</span>
+                            <input
+                              value={String(v)}
+                              onChange={(e) => updateEffect(idx, k, e.target.value)}
+                            />
+                          </label>
+                        ))}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         )}
         <div className="effect-add">
@@ -377,9 +563,9 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
             <option value="" disabled>
               + Add effect…
             </option>
-            {SUPPORTED_EFFECTS.map((s) => (
-              <option key={s.type} value={s.type}>
-                {s.type} — {s.description}
+            {Object.entries(EFFECT_UI).map(([type, ui]) => (
+              <option key={type} value={type}>
+                {ui.label} — {ui.blurb}
               </option>
             ))}
           </select>

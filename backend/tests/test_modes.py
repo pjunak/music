@@ -364,3 +364,64 @@ def test_added_item_is_referenced_by_sfx_endpoint(
     r = auth_client.get("/api/sfx/file", params={"path": "dnd/door.ogg"})
     assert r.status_code == 200
 
+
+
+# --- cues ---------------------------------------------------------------
+
+
+def test_cue_crud_roundtrip(auth_client: TestClient) -> None:
+    # Create a cue with a preset, playlist ref, start point, and a loop.
+    r = auth_client.post(
+        "/api/modes/dnd/cues",
+        json={
+            "id": "kraken",
+            "name": "Kraken Fight",
+            "preset": "cave",
+            "playlist": "Fight",
+            "start_index": 2,
+            "start_ms": 90000,
+            "sfx": [{"soundboard": "tavern", "item": "dnd/door.ogg"}],
+            "loops": [
+                {
+                    "soundboard": "tavern",
+                    "item": "dnd/door.ogg",
+                    "interval_s": 45,
+                    "volume": 0.5,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["id"] == "kraken"
+    assert body["preset"] == "cave"
+    assert body["start_ms"] == 90000
+    assert body["loops"][0]["interval_s"] == 45
+
+    # Appears in mode detail.
+    detail = auth_client.get("/api/modes/dnd").json()
+    assert "kraken" in detail["cues"]
+
+    # Update is a full replace.
+    r = auth_client.put(
+        "/api/modes/dnd/cues/kraken",
+        json={"name": "Kraken!", "loops": []},
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "Kraken!"
+    assert r.json()["loops"] == []
+
+    # Delete.
+    assert auth_client.delete("/api/modes/dnd/cues/kraken").status_code == 204
+    assert "kraken" not in auth_client.get("/api/modes/dnd").json()["cues"]
+
+
+def test_cue_create_conflict(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes/dnd/cues", json={"id": "dup", "name": "A"})
+    r = auth_client.post("/api/modes/dnd/cues", json={"id": "dup", "name": "B"})
+    assert r.status_code == 409
+
+
+def test_cue_create_rejects_bad_slug(auth_client: TestClient) -> None:
+    r = auth_client.post("/api/modes/dnd/cues", json={"id": "Bad Slug", "name": "X"})
+    assert r.status_code == 400

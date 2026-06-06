@@ -226,6 +226,7 @@ def reset_sync_singletons() -> None:
     from app.core.db import SessionLocal
     from app.devices.store import device_store
     from app.models.playback_state import PlaybackState
+    from app.sync import loops as loops_manager
     from app.sync.connection import manager
     from app.sync.devices import registry
     from app.sync.state import machine
@@ -234,6 +235,7 @@ def reset_sync_singletons() -> None:
     registry.reset_for_tests()
     manager.reset_for_tests()
     device_store.reset_for_tests()
+    loops_manager.stop_all()
     with SessionLocal() as db:
         row = db.get(PlaybackState, 1)
         if row is not None:

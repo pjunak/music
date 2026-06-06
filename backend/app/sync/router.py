@@ -11,6 +11,7 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
@@ -27,6 +28,7 @@ from app.models.user import User
 from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
 from app.sync import commit_and_broadcast
+from app.sync import loops as loops_manager
 from app.sync import state as state_module
 from app.sync.connection import manager
 from app.sync.devices import registry
@@ -46,11 +48,13 @@ from app.sync.protocol import (
     CancelInterruptAction,
     DeactivateSceneAction,
     ErrorMessage,
+    FireCueAction,
     FireInterruptPlaylistAction,
     FireInterruptTrackAction,
     FireSfxAction,
     InterruptSeekAction,
     InterruptSkipNextAction,
+    LoopingSfx,
     PauseAction,
     PositionReportAction,
     RegisterAction,
@@ -65,7 +69,9 @@ from app.sync.protocol import (
     SetDeviceVolumeAction,
     SetVolumeAction,
     SfxFired,
+    StartLoopAction,
     StateSnapshot,
+    StopLoopAction,
     action_adapter,
 )
 
@@ -131,13 +137,14 @@ async def _resolve_playlist_track_ids(playlist_id: int) -> tuple[list[int] | Non
 
 async def _resolve_playlist_by_name(
     name: str, mode_id: str
-) -> tuple[list[int] | None, str | None]:
-    """Resolve a scene's playlist reference (by name). Looks for a playlist
-    in the given mode OR a global playlist (mode_id=null) — same scoping
-    semantics as the playlists list endpoint's default."""
+) -> tuple[list[int] | None, int | None, str | None]:
+    """Resolve a scene/cue playlist reference (by name) to its track ids and
+    id. Looks for a playlist in the given mode OR a global playlist
+    (mode_id=null) — same scoping as the playlists list endpoint's default.
+    Returns (track_ids, playlist_id, error_detail)."""
     from sqlalchemy import or_, select
 
-    def _work() -> tuple[list[int] | None, str | None]:
+    def _work() -> tuple[list[int] | None, int | None, str | None]:
         db = SessionLocal()
         try:
             stmt = select(Playlist).where(
@@ -146,9 +153,9 @@ async def _resolve_playlist_by_name(
             )
             pl = db.scalars(stmt).first()
             if pl is None:
-                return (None, f"no playlist named '{name}' for mode '{mode_id}'")
+                return (None, None, f"no playlist named '{name}' for mode '{mode_id}'")
             items = playlists_domain.list_items(db, pl)
-            return ([it.track_id for it in items], None)
+            return ([it.track_id for it in items], pl.id, None)
         finally:
             db.close()
 
@@ -387,7 +394,12 @@ async def _h_set_active_presets(
     if unknown:
         await _send_error(websocket, f"unknown preset(s): {unknown}")
         return
-    await _apply_and_broadcast(state_module.set_active_presets(action.preset_ids))
+    volume, crossfade_ms = presets_loader.effective_overrides(action.preset_ids)
+    await _apply_and_broadcast(
+        state_module.set_active_presets(
+            action.preset_ids, volume=volume, crossfade_ms=crossfade_ms
+        )
+    )
 
 
 async def _h_set_crossfade(
@@ -502,7 +514,9 @@ async def _h_activate_scene(
     if scene.ambient:
         playlist_name = scene.ambient.get("playlist")
         if playlist_name:
-            track_ids, err = await _resolve_playlist_by_name(playlist_name, mode_id)
+            track_ids, _pl_id, err = await _resolve_playlist_by_name(
+                playlist_name, mode_id
+            )
             if err is not None:
                 await _send_error(websocket, err)
                 return
@@ -558,27 +572,11 @@ async def _h_fire_sfx(
     action: FireSfxAction, _device_id: str, websocket: WebSocket
 ) -> None:
     current_state = await state_module.machine.snapshot()
-    mode_id = current_state.active_mode_id
-    if mode_id is None:
-        await _send_error(websocket, "no active mode")
-        return
-    mode = modes_loader.get_mode(mode_id)
-    if mode is None or action.soundboard_id not in mode.soundboards:
-        await _send_error(
-            websocket,
-            f"unknown soundboard '{action.soundboard_id}' in mode '{mode_id}'",
-        )
-        return
-    soundboard = mode.soundboards[action.soundboard_id]
-    if not any(
-        item.file == action.item_path
-        for cat in soundboard.categories
-        for item in cat.items
-    ):
-        await _send_error(
-            websocket,
-            f"item '{action.item_path}' not in soundboard '{action.soundboard_id}'",
-        )
+    err = _sfx_item_error(
+        current_state.active_mode_id, action.soundboard_id, action.item_path
+    )
+    if err is not None:
+        await _send_error(websocket, err)
         return
     event = SfxFired(
         soundboard_id=action.soundboard_id,
@@ -586,6 +584,151 @@ async def _h_fire_sfx(
         volume=action.volume,
     )
     await manager.broadcast_to_outputs(event.model_dump(mode="json"))
+
+
+def _sfx_item_error(mode_id: str | None, soundboard_id: str, item_path: str) -> str | None:
+    """Validate an SFX reference against the active mode's soundboards (same
+    gate as fire_sfx). Returns an error string, or None if valid."""
+    if mode_id is None:
+        return "no active mode"
+    mode = modes_loader.get_mode(mode_id)
+    if mode is None or soundboard_id not in mode.soundboards:
+        return f"unknown soundboard '{soundboard_id}' in mode '{mode_id}'"
+    soundboard = mode.soundboards[soundboard_id]
+    if not any(
+        item.file == item_path for cat in soundboard.categories for item in cat.items
+    ):
+        return f"item '{item_path}' not in soundboard '{soundboard_id}'"
+    return None
+
+
+async def _h_start_loop(
+    action: StartLoopAction, _device_id: str, websocket: WebSocket
+) -> None:
+    current_state = await state_module.machine.snapshot()
+    err = _sfx_item_error(
+        current_state.active_mode_id, action.soundboard_id, action.item_path
+    )
+    if err is not None:
+        await _send_error(websocket, err)
+        return
+    loops_manager.start(
+        action.id,
+        action.soundboard_id,
+        action.item_path,
+        action.interval_s,
+        action.volume,
+    )
+    loop = LoopingSfx(
+        id=action.id,
+        name=action.name,
+        soundboard_id=action.soundboard_id,
+        item_path=action.item_path,
+        interval_s=action.interval_s,
+        volume=action.volume,
+    )
+    await _apply_and_broadcast(state_module.start_loop(loop))
+
+
+async def _h_stop_loop(
+    action: StopLoopAction, _device_id: str, websocket: WebSocket
+) -> None:
+    loops_manager.stop(action.id)
+    await _apply_and_broadcast(state_module.stop_loop(action.id))
+
+
+async def _h_fire_cue(
+    action: FireCueAction, _device_id: str, websocket: WebSocket
+) -> None:
+    current_state = await state_module.machine.snapshot()
+    mode_id = current_state.active_mode_id
+    if mode_id is None:
+        await _send_error(websocket, "no active mode")
+        return
+    mode = modes_loader.get_mode(mode_id)
+    cue = mode.cues.get(action.cue_id) if mode is not None else None
+    if cue is None:
+        await _send_error(
+            websocket, f"unknown cue '{action.cue_id}' in mode '{mode_id}'"
+        )
+        return
+
+    # Validate every reference up front so a broken cue fails atomically rather
+    # than half-applying.
+    if cue.preset is not None and cue.preset not in presets_loader.all_presets():
+        await _send_error(websocket, f"cue references unknown preset '{cue.preset}'")
+        return
+    track_ids: list[int] | None = None
+    source_playlist_id: int | None = None
+    if cue.playlist is not None:
+        track_ids, source_playlist_id, err = await _resolve_playlist_by_name(
+            cue.playlist, mode_id
+        )
+        if err is not None:
+            await _send_error(websocket, err)
+            return
+        if not track_ids:
+            await _send_error(websocket, f"cue playlist '{cue.playlist}' is empty")
+            return
+    for ref in [*cue.sfx, *cue.loops]:
+        err = _sfx_item_error(mode_id, ref.soundboard, ref.item)
+        if err is not None:
+            await _send_error(websocket, f"cue SFX: {err}")
+            return
+
+    # All valid — apply. Preset first (so its crossfade override is in place
+    # before the playlist swap reads it), then the playlist, then loops.
+    if cue.preset is not None:
+        volume, crossfade_ms = presets_loader.effective_overrides([cue.preset])
+        await _apply_and_broadcast(
+            state_module.set_active_presets(
+                [cue.preset], volume=volume, crossfade_ms=crossfade_ms
+            )
+        )
+    if track_ids is not None:
+        start_index = min(cue.start_index, len(track_ids) - 1)
+        await _apply_and_broadcast(
+            state_module.ambient_play_playlist(
+                track_ids, start_index, source_playlist_id=source_playlist_id
+            )
+        )
+        if cue.start_ms > 0:
+            await _apply_and_broadcast(state_module.ambient_seek(cue.start_ms))
+    for loop in cue.loops:
+        loop_id = uuid4().hex
+        loops_manager.start(
+            loop_id, loop.soundboard, loop.item, loop.interval_s, loop.volume
+        )
+        await _apply_and_broadcast(
+            state_module.start_loop(
+                LoopingSfx(
+                    id=loop_id,
+                    name=_sfx_display_name(mode, loop.soundboard, loop.item),
+                    soundboard_id=loop.soundboard,
+                    item_path=loop.item,
+                    interval_s=loop.interval_s,
+                    volume=loop.volume,
+                )
+            )
+        )
+    for sfx in cue.sfx:
+        await manager.broadcast_to_outputs(
+            SfxFired(
+                soundboard_id=sfx.soundboard, item_path=sfx.item, volume=sfx.volume
+            ).model_dump(mode="json")
+        )
+
+
+def _sfx_display_name(mode: Any, soundboard_id: str, item_path: str) -> str:
+    """Friendly name for a soundboard item (for the LOOPS panel). Falls back to
+    the item path if the lookup misses."""
+    sb = mode.soundboards.get(soundboard_id) if mode is not None else None
+    if sb is not None:
+        for cat in sb.categories:
+            for item in cat.items:
+                if item.file == item_path:
+                    return item.name
+    return item_path
 
 
 # --- dispatch registry ----------------------------------------------------
@@ -627,6 +770,9 @@ _DISPATCH: dict[type, Any] = {
     ActivateSceneAction: _h_activate_scene,
     DeactivateSceneAction: _h_deactivate_scene,
     FireSfxAction: _h_fire_sfx,
+    StartLoopAction: _h_start_loop,
+    StopLoopAction: _h_stop_loop,
+    FireCueAction: _h_fire_cue,
 }
 
 

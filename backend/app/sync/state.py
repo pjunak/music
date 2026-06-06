@@ -25,6 +25,7 @@ from app.sync.devices import registry
 from app.sync.protocol import (
     AmbientState,
     InterruptState,
+    LoopingSfx,
     LoopMode,
     PlayerState,
     PositionReport,
@@ -227,6 +228,11 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
     # client_ids here would otherwise be a stale snapshot of who was live.)
     out["active_output_device_ids"] = []
 
+    # Wipe looping SFX on boot for the same reason: the server-side timers that
+    # drive them don't survive a restart, so a persisted entry would show in the
+    # LOOPS panel with no timer behind it. Session-only, no auto-resume.
+    out["looping_sfx"] = []
+
     # Can't be "playing" with nothing loaded. If pruning emptied both lanes
     # (deleted current track, no interrupt), force is_playing=false so
     # clients don't dead-reckon a position clock against a phantom track on
@@ -331,16 +337,55 @@ def set_active_soundboard(soundboard_id: str | None) -> Any:
     return _mut
 
 
-def set_active_presets(preset_ids: list[str]) -> Any:
+def set_active_presets(
+    preset_ids: list[str],
+    *,
+    volume: float | None = None,
+    crossfade_ms: int | None = None,
+) -> Any:
+    """Set the active preset list, and optionally apply the master-volume /
+    crossfade overrides those presets declare (resolved last-wins by the
+    caller via `presets.loader.effective_overrides`). A None override leaves
+    that global untouched — there's no auto-revert when a preset turns off."""
+
     def _mut(state: PlayerState) -> PlayerState:
         # De-duplicate while preserving order.
         deduped: list[str] = []
         for p in preset_ids:
             if p not in deduped:
                 deduped.append(p)
-        if list(state.active_preset_ids) == deduped:
+        update: dict[str, Any] = {}
+        if list(state.active_preset_ids) != deduped:
+            update["active_preset_ids"] = deduped
+        if volume is not None and volume != state.volume:
+            update["volume"] = volume
+        if crossfade_ms is not None and crossfade_ms != state.crossfade_ms:
+            update["crossfade_ms"] = crossfade_ms
+        if not update:
             return state
-        return state.model_copy(update={"active_preset_ids": deduped})
+        return state.model_copy(update=update)
+
+    return _mut
+
+
+def start_loop(loop: LoopingSfx) -> Any:
+    """Add (or replace, by id) a looping SFX entry. The actual interval timer
+    is owned by `sync/loops.py` — this only records it in the broadcast state
+    so every LOOPS panel reflects it."""
+
+    def _mut(state: PlayerState) -> PlayerState:
+        kept = [entry for entry in state.looping_sfx if entry.id != loop.id]
+        return state.model_copy(update={"looping_sfx": [*kept, loop]})
+
+    return _mut
+
+
+def stop_loop(loop_id: str) -> Any:
+    def _mut(state: PlayerState) -> PlayerState:
+        kept = [entry for entry in state.looping_sfx if entry.id != loop_id]
+        if len(kept) == len(state.looping_sfx):
+            return state
+        return state.model_copy(update={"looping_sfx": kept})
 
     return _mut
 

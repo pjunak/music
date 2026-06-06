@@ -470,6 +470,16 @@ def test_state_load_prunes_dangling_track_ids(
             active_scene_id="ghost-scene",
             active_preset_ids=["cave", "nope-preset"],
             active_output_device_ids=["dev-stale-1", "dev-stale-2"],
+            looping_sfx=[
+                {
+                    "id": "stale-loop",
+                    "name": "Ghost loop",
+                    "soundboard_id": "sb",
+                    "item_path": "x.ogg",
+                    "interval_s": 30,
+                    "volume": 1.0,
+                }
+            ],
         )
 
     machine = StateMachine()
@@ -488,6 +498,7 @@ def test_state_load_prunes_dangling_track_ids(
     assert "cave" in snap.active_preset_ids
     assert "nope-preset" not in snap.active_preset_ids
     assert snap.active_output_device_ids == []
+    assert snap.looping_sfx == []  # wiped on boot — timers don't survive restart
 
 
 def test_state_load_prunes_dangling_pre_scene_snapshot(
@@ -1383,6 +1394,144 @@ def test_fire_sfx_validates_item_path(client: TestClient) -> None:
         msg = ws.receive_json()
         assert msg["type"] == "error"
         assert "not in soundboard" in msg["detail"]
+
+
+# --- looping SFX ----------------------------------------------------------
+
+
+def test_start_loop_requires_active_mode(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "Roar",
+                "soundboard_id": "tavern",
+                "item_path": "dnd/door.ogg",
+                "interval_s": 45,
+            }
+        )
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "no active mode" in msg["detail"]
+
+
+def test_start_loop_validates_item(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "X",
+                "soundboard_id": "tavern",
+                "item_path": "nope.ogg",
+                "interval_s": 10,
+            }
+        )
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "not in soundboard" in msg["detail"]
+
+
+def test_start_and_stop_loop_updates_state(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "Door knock",
+                "soundboard_id": "tavern",
+                "item_path": "dnd/door.ogg",
+                "interval_s": 45,
+                "volume": 0.5,
+            }
+        )
+        msg = ws.receive_json()
+        assert msg["type"] == "state_changed"
+        loops = msg["state"]["looping_sfx"]
+        assert len(loops) == 1
+        assert loops[0]["id"] == "l1"
+        assert loops[0]["name"] == "Door knock"
+        assert loops[0]["interval_s"] == 45
+        assert loops[0]["volume"] == 0.5
+
+        # Same id replaces rather than duplicating.
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "Door knock (faster)",
+                "soundboard_id": "tavern",
+                "item_path": "dnd/door.ogg",
+                "interval_s": 20,
+            }
+        )
+        msg = ws.receive_json()
+        assert len(msg["state"]["looping_sfx"]) == 1
+        assert msg["state"]["looping_sfx"][0]["interval_s"] == 20
+
+        ws.send_json({"type": "stop_loop", "id": "l1"})
+        msg = ws.receive_json()
+        assert msg["state"]["looping_sfx"] == []
+
+
+# --- cues -----------------------------------------------------------------
+
+
+def test_fire_cue_unknown(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+        ws.send_json({"type": "fire_cue", "cue_id": "nope"})
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "unknown cue" in msg["detail"]
+
+
+def test_fire_cue_applies_preset_and_starts_loop(auth_client: TestClient) -> None:
+    # Author a cue: apply preset "cave" + start a door-knock loop. No playlist,
+    # so the test needs no playlist setup.
+    r = auth_client.post(
+        "/api/modes/dnd/cues",
+        json={
+            "id": "ambush",
+            "name": "Ambush",
+            "preset": "cave",
+            "loops": [
+                {
+                    "soundboard": "tavern",
+                    "item": "dnd/door.ogg",
+                    "interval_s": 30,
+                    "volume": 0.5,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    with auth_client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()  # snapshot
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()  # mode change
+        ws.send_json({"type": "fire_cue", "cue_id": "ambush"})
+        # fire_cue broadcasts once per part — preset, then the loop. Take the
+        # final accumulated state.
+        first = ws.receive_json()
+        second = ws.receive_json()
+        assert first["type"] == "state_changed"
+        final = second["state"]
+        assert final["active_preset_ids"] == ["cave"]
+        assert len(final["looping_sfx"]) == 1
+        assert final["looping_sfx"][0]["soundboard_id"] == "tavern"
+        assert final["looping_sfx"][0]["interval_s"] == 30
 
 
 # --- scene activation -----------------------------------------------------

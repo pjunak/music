@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { CueEditor } from "@/components/CueEditor";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
 import { EditIcon, LightningIcon, TrashIcon } from "@/components/icons";
@@ -32,6 +33,10 @@ export function ModesView() {
     modeId: string;
     sceneId: string;
   } | null>(null);
+  const [editingCue, setEditingCue] = useState<{
+    modeId: string;
+    cueId: string;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,6 +56,7 @@ export function ModesView() {
   useEffect(() => {
     setEditingSoundboard(null);
     setEditingScene(null);
+    setEditingCue(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -179,6 +185,22 @@ export function ModesView() {
               { label: editingScene.sceneId },
             ]}
           />
+        ) : editingCue !== null ? (
+          <CueEditor
+            modeId={editingCue.modeId}
+            cueId={editingCue.cueId}
+            breadcrumb={[
+              { label: "Modes", onClick: () => setSelectedId(null) },
+              {
+                label:
+                  modes.find((m) => m.id === editingCue.modeId)?.name ??
+                  editingCue.modeId,
+                onClick: () => setEditingCue(null),
+              },
+              { label: "Cues" },
+              { label: editingCue.cueId },
+            ]}
+          />
         ) : selectedId !== null ? (
           <ModeDetailPane
             modeId={selectedId}
@@ -193,6 +215,7 @@ export function ModesView() {
             onEditScene={(scId) =>
               setEditingScene({ modeId: selectedId, sceneId: scId })
             }
+            onEditCue={(cueId) => setEditingCue({ modeId: selectedId, cueId })}
           />
         ) : (
           <div className="empty-detail">
@@ -281,12 +304,14 @@ function ModeDetailPane({
   onDeleted,
   onEditSoundboard,
   onEditScene,
+  onEditCue,
 }: {
   modeId: string;
   onChanged: () => Promise<void>;
   onDeleted: () => void;
   onEditSoundboard: (soundboardId: string) => void;
   onEditScene: (sceneId: string) => void;
+  onEditCue: (cueId: string) => void;
 }) {
   const [detail, setDetail] = useState<ModeDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -374,6 +399,21 @@ function ModeDetailPane({
         }
         onDelete={(id) => modesAdminApi.deleteScene(modeId, id)}
         onEdit={onEditScene}
+        onChanged={async () => {
+          await load();
+          await onChanged();
+        }}
+      />
+
+      <SubresourceList
+        kind="cue"
+        title="Cues"
+        items={Object.keys(detail.cues)}
+        onCreate={(id, name) =>
+          modesAdminApi.createCue(modeId, { id, name: name || id })
+        }
+        onDelete={(id) => modesAdminApi.deleteCue(modeId, id)}
+        onEdit={onEditCue}
         onChanged={async () => {
           await load();
           await onChanged();
@@ -820,7 +860,7 @@ function SubresourceList({
   onChanged,
   onEdit,
 }: {
-  kind: "soundboard" | "scene";
+  kind: "soundboard" | "scene" | "cue";
   title: string;
   items: string[];
   onCreate: (id: string, name?: string) => Promise<unknown>;

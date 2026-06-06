@@ -11,6 +11,7 @@ from app.api.deps import CurrentUser
 from app.core.config import get_settings
 from app.modes import loader as modes_loader
 from app.modes.loader import (
+    CueSpec,
     IntegrationsSpec,
     InterruptSpec,
     ModeManifest,
@@ -70,6 +71,7 @@ class ModeDetail(ModeSummary):
     integrations: IntegrationsSpec
     soundboards: dict[str, SoundboardManifest]
     scenes: dict[str, SceneSpec]
+    cues: dict[str, CueSpec]
 
 
 class ActiveMode(BaseModel):
@@ -185,6 +187,7 @@ def get_mode(mode_id: str, _: CurrentUser) -> ModeDetail:
         integrations=manifest.integrations,
         soundboards=manifest.soundboards,
         scenes=manifest.scenes,
+        cues=manifest.cues,
     )
 
 
@@ -229,6 +232,7 @@ def create_mode(payload: CreateModeRequest, _: CurrentUser) -> ModeSummary:
     _write_yaml(mode_dir / "manifest.yaml", manifest)
     (mode_dir / "soundboards").mkdir(exist_ok=True)
     (mode_dir / "scenes").mkdir(exist_ok=True)
+    (mode_dir / "cues").mkdir(exist_ok=True)
 
     modes_loader.load_all()
     return _summary(modes_loader.get_mode(payload.id))  # type: ignore[arg-type]
@@ -777,5 +781,119 @@ def delete_interrupt_template(
     interrupts.pop(index)
     reloaded = _save_manifest_yaml(path, manifest, mode_id)
     return reloaded.interrupts
+
+
+# --- cues (one YAML per cue under the mode's cues/ dir) -------------------
+
+
+class CueSfxIn(BaseModel):
+    soundboard: str = Field(min_length=1, max_length=128)
+    item: str = Field(min_length=1, max_length=512)
+    volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class CueLoopIn(BaseModel):
+    soundboard: str = Field(min_length=1, max_length=128)
+    item: str = Field(min_length=1, max_length=512)
+    interval_s: float = Field(ge=1, le=3600)
+    volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class CueBody(BaseModel):
+    """The full editable cue. The editor always submits the whole thing, so
+    create and update both replace the YAML wholesale."""
+
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = None
+    preset: str | None = Field(None, max_length=64)
+    playlist: str | None = Field(None, max_length=256)
+    start_index: int = Field(default=0, ge=0)
+    start_ms: int = Field(default=0, ge=0)
+    sfx: list[CueSfxIn] = Field(default_factory=list)
+    loops: list[CueLoopIn] = Field(default_factory=list)
+
+
+class CreateCueRequest(CueBody):
+    id: str = Field(min_length=1, max_length=64)
+
+
+def _cue_yaml(cue_id: str, body: CueBody) -> dict:
+    """Build a tidy cue YAML mapping — omit empty/default fields."""
+    out: dict = {"id": cue_id, "name": body.name}
+    if body.description:
+        out["description"] = body.description
+    if body.preset:
+        out["preset"] = body.preset
+    if body.playlist:
+        out["playlist"] = body.playlist
+    if body.start_index:
+        out["start_index"] = body.start_index
+    if body.start_ms:
+        out["start_ms"] = body.start_ms
+    if body.sfx:
+        out["sfx"] = [s.model_dump() for s in body.sfx]
+    if body.loops:
+        out["loops"] = [loop.model_dump() for loop in body.loops]
+    return out
+
+
+def _save_cue_yaml(path: Path, payload: dict, mode_id: str, cue_id: str) -> CueSpec:
+    _write_yaml(path, payload)
+    modes_loader.load_all()
+    manifest = modes_loader.get_mode(mode_id)
+    if manifest is None or cue_id not in manifest.cues:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="cue saved but failed to reload",
+        )
+    return manifest.cues[cue_id]
+
+
+@router.post(
+    "/{mode_id}/cues",
+    response_model=CueSpec,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_cue(mode_id: str, payload: CreateCueRequest, _: CurrentUser) -> CueSpec:
+    _validate_slug(payload.id, "cue")
+    mode_dir = _mode_dir_or_404(mode_id)
+    cue_path = mode_dir / "cues" / f"{payload.id}.yaml"
+    if cue_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"cue '{payload.id}' already exists in mode '{mode_id}'",
+        )
+    return _save_cue_yaml(cue_path, _cue_yaml(payload.id, payload), mode_id, payload.id)
+
+
+@router.put("/{mode_id}/cues/{cue_id}", response_model=CueSpec)
+def update_cue(
+    mode_id: str, cue_id: str, payload: CueBody, _: CurrentUser
+) -> CueSpec:
+    _validate_slug(cue_id, "cue")
+    mode_dir = _mode_dir_or_404(mode_id)
+    cue_path = mode_dir / "cues" / f"{cue_id}.yaml"
+    if not cue_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"cue '{cue_id}' not found in mode '{mode_id}'",
+        )
+    return _save_cue_yaml(cue_path, _cue_yaml(cue_id, payload), mode_id, cue_id)
+
+
+@router.delete(
+    "/{mode_id}/cues/{cue_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_cue(mode_id: str, cue_id: str, _: CurrentUser) -> None:
+    _validate_slug(cue_id, "cue")
+    mode_dir = _mode_dir_or_404(mode_id)
+    cue_path = mode_dir / "cues" / f"{cue_id}.yaml"
+    if not cue_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"cue '{cue_id}' not found",
+        )
+    cue_path.unlink()
+    modes_loader.load_all()
 
 

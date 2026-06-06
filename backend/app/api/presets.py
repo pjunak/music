@@ -53,12 +53,18 @@ class CreatePresetRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: str | None = None
     effects: list[EffectSpecIn] = Field(default_factory=list)
+    volume: float | None = Field(default=None, ge=0.0, le=1.0)
+    crossfade_ms: int | None = Field(default=None, ge=0, le=60000)
 
 
 class UpdatePresetRequest(BaseModel):
     name: str | None = Field(None, max_length=128)
     description: str | None = None
     effects: list[EffectSpecIn] | None = None
+    # Optional "mood" overrides. The frontend always sends the full form, so
+    # a null here means "clear it" — written through directly, not merged.
+    volume: float | None = Field(default=None, ge=0.0, le=1.0)
+    crossfade_ms: int | None = Field(default=None, ge=0, le=60000)
 
 
 def _filter_loaded(preset_ids: list[str]) -> list[str]:
@@ -88,7 +94,12 @@ async def set_active(payload: ActivePresets, _: CurrentUser) -> ActivePresets:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"unknown preset(s): {unknown}",
         )
-    await commit_and_broadcast(sync_state.set_active_presets(payload.preset_ids))
+    volume, crossfade_ms = presets_loader.effective_overrides(payload.preset_ids)
+    await commit_and_broadcast(
+        sync_state.set_active_presets(
+            payload.preset_ids, volume=volume, crossfade_ms=crossfade_ms
+        )
+    )
     state = await sync_state.machine.snapshot()
     return ActivePresets(preset_ids=state.active_preset_ids)
 
@@ -148,6 +159,10 @@ def create_preset(payload: CreatePresetRequest, _: CurrentUser) -> PresetManifes
     if payload.description is not None:
         yaml_payload["description"] = payload.description
     yaml_payload["effects"] = [e.model_dump() for e in payload.effects]
+    if payload.volume is not None:
+        yaml_payload["volume"] = payload.volume
+    if payload.crossfade_ms is not None:
+        yaml_payload["crossfade_ms"] = payload.crossfade_ms
     _write_preset_yaml(payload.id, yaml_payload)
 
     result = presets_loader.load_all()
@@ -190,6 +205,12 @@ def update_preset(
         yaml_payload["effects"] = [e.model_dump() for e in payload.effects]
     else:
         yaml_payload["effects"] = [e.model_dump() for e in existing.effects]
+    # Overrides are written through directly (null = cleared) since the editor
+    # always submits the full form — don't merge against the existing value.
+    if payload.volume is not None:
+        yaml_payload["volume"] = payload.volume
+    if payload.crossfade_ms is not None:
+        yaml_payload["crossfade_ms"] = payload.crossfade_ms
     _write_preset_yaml(preset_id, yaml_payload)
 
     result = presets_loader.load_all()

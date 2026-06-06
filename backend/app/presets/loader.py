@@ -60,6 +60,12 @@ class PresetManifest(BaseModel):
     name: str
     description: str | None = None
     effects: list[EffectSpec] = Field(default_factory=list)
+    # Optional "mood" overrides applied when the preset is activated. None =
+    # the preset leaves that global alone. (Folded in from the old Scene
+    # concept: a preset is the sound treatment — EQ + optionally volume +
+    # crossfade.) When several active presets set one, last-active wins.
+    volume: float | None = Field(default=None, ge=0.0, le=1.0)
+    crossfade_ms: int | None = Field(default=None, ge=0, le=60000)
 
 
 @dataclass
@@ -134,3 +140,21 @@ def all_presets() -> dict[str, PresetManifest]:
 
 def get_preset(preset_id: str) -> PresetManifest | None:
     return _presets.get(preset_id)
+
+
+def effective_overrides(preset_ids: list[str]) -> tuple[float | None, int | None]:
+    """Resolve the master-volume / crossfade overrides for a set of active
+    presets. Among the active presets in order, the last one that defines a
+    value wins (so stacking is predictable). Returns (volume, crossfade_ms),
+    each None when no active preset sets it (caller then leaves it unchanged)."""
+    volume: float | None = None
+    crossfade_ms: int | None = None
+    for pid in preset_ids:
+        p = _presets.get(pid)
+        if p is None:
+            continue
+        if p.volume is not None:
+            volume = p.volume
+        if p.crossfade_ms is not None:
+            crossfade_ms = p.crossfade_ms
+    return volume, crossfade_ms

@@ -209,6 +209,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db.close()
     await sync_state.machine.load(SessionLocal)
     yield
+    # Shutdown: cancel any running looping-SFX timer tasks cleanly.
+    from app.sync import loops as loops_manager
+
+    loops_manager.stop_all()
 
 
 def create_app() -> FastAPI:

@@ -1,4 +1,5 @@
 import type {
+  Cue,
   FolderEntry,
   InterruptSpec,
   KnownDevice,
@@ -108,6 +109,10 @@ export interface PresetManifest {
   name: string;
   description?: string | null;
   effects: PresetEffect[];
+  /** Optional overrides applied when the preset is activated (null = leave
+   *  the global alone). Folded in from the old Scene concept. */
+  volume?: number | null;
+  crossfade_ms?: number | null;
 }
 
 export const presetsApi = {
@@ -567,6 +572,18 @@ export const modesAdminApi = {
     api.delete<InterruptSpec[]>(
       `/api/modes/${encodeURIComponent(modeId)}/interrupts/${index}`,
     ),
+
+  createCue: (modeId: string, payload: Cue) =>
+    api.post<Cue>(`/api/modes/${encodeURIComponent(modeId)}/cues`, payload),
+  updateCue: (modeId: string, cueId: string, payload: Omit<Cue, "id">) =>
+    api.put<Cue>(
+      `/api/modes/${encodeURIComponent(modeId)}/cues/${encodeURIComponent(cueId)}`,
+      payload,
+    ),
+  deleteCue: (modeId: string, cueId: string) =>
+    api.delete<void>(
+      `/api/modes/${encodeURIComponent(modeId)}/cues/${encodeURIComponent(cueId)}`,
+    ),
 };
 
 // --- presets scaffolding -----------------------------------------------
@@ -577,10 +594,18 @@ export const presetsAdminApi = {
     name: string;
     description?: string;
     effects: PresetEffect[];
+    volume?: number | null;
+    crossfade_ms?: number | null;
   }) => api.post<PresetManifest>("/api/presets", payload),
   update: (
     id: string,
-    payload: { name?: string; description?: string; effects?: PresetEffect[] },
+    payload: {
+      name?: string;
+      description?: string;
+      effects?: PresetEffect[];
+      volume?: number | null;
+      crossfade_ms?: number | null;
+    },
   ) => api.put<PresetManifest>(`/api/presets/${encodeURIComponent(id)}`, payload),
   delete: (id: string) =>
     api.delete<void>(`/api/presets/${encodeURIComponent(id)}`),

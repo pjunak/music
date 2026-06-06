@@ -35,6 +35,17 @@ export interface PositionReport {
   reported_at: number;
 }
 
+/** A repeating SFX driven by a server-side interval timer. Shown in the
+ *  Console LOOPS panel; `id` is the stop handle. */
+export interface LoopingSfx {
+  id: string;
+  name: string;
+  soundboard_id: string;
+  item_path: string;
+  interval_s: number;
+  volume: number;
+}
+
 export interface DeviceInfo {
   /** Same value as `client_id` (the stable identity) — kept so existing
    *  code that keys on `device_id` keeps working. */
@@ -71,6 +82,8 @@ export interface PlayerState {
   crossfade_type: string;
   ambient: AmbientState;
   interrupt: InterruptState | null;
+  /** Repeating SFX currently running (server-timer driven). */
+  looping_sfx: LoopingSfx[];
   last_position_report: PositionReport | null;
   connected_devices: DeviceInfo[];
 }
@@ -168,11 +181,39 @@ export interface InterruptSpec {
   duck_to?: number | null;
 }
 
+export interface CueSfx {
+  soundboard: string;
+  item: string;
+  volume?: number;
+}
+
+export interface CueLoop {
+  soundboard: string;
+  item: string;
+  interval_s: number;
+  volume?: number;
+}
+
+/** A saved one-click setup: apply a preset, start a playlist (from a song +
+ *  timestamp), fire one-shot SFX, start loops. Mode-scoped. */
+export interface Cue {
+  id: string;
+  name: string;
+  description?: string | null;
+  preset?: string | null;
+  playlist?: string | null;
+  start_index?: number;
+  start_ms?: number;
+  sfx?: CueSfx[];
+  loops?: CueLoop[];
+}
+
 export interface ModeDetail extends ModeSummary {
   interrupts: InterruptSpec[];
   integrations: { lights?: unknown };
   soundboards: Record<string, SoundboardManifest>;
   scenes: Record<string, SceneSpec>;
+  cues: Record<string, Cue>;
 }
 
 // Playlist meta shape returned by /api/playlists.
@@ -253,6 +294,17 @@ export type WsAction =
   | { type: "interrupt_seek"; position_ms: number }
   | { type: "cancel_interrupt" }
   | { type: "fire_sfx"; soundboard_id: string; item_path: string; volume?: number }
+  | {
+      type: "start_loop";
+      id: string;
+      name: string;
+      soundboard_id: string;
+      item_path: string;
+      interval_s: number;
+      volume?: number;
+    }
+  | { type: "stop_loop"; id: string }
+  | { type: "fire_cue"; cue_id: string }
   | { type: "activate_scene"; scene_id: string }
   | { type: "deactivate_scene" };
 

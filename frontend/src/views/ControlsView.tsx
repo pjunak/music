@@ -8,7 +8,9 @@ import { usePlayerStore } from "@/core/playerStore";
 import type { PlaylistMeta } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
+import { CuesSection } from "./controls/CuesSection";
 import { InterruptSection } from "./controls/InterruptSection";
+import { LoopsSection } from "./controls/LoopsSection";
 import { PresetsSection } from "./controls/PresetsSection";
 import { ScenesSection } from "./controls/ScenesSection";
 import { SoundboardSection } from "./controls/SoundboardSection";
@@ -29,6 +31,10 @@ export function ControlsView() {
       <FirstRunWelcome />
       <div className="controls-grid">
         <section className="surface-card span-tall">
+          <h3>Cues</h3>
+          <CuesSection />
+        </section>
+        <section className="surface-card span-tall">
           <h3>Scenes</h3>
           <ScenesSection />
         </section>
@@ -43,6 +49,10 @@ export function ControlsView() {
         <section className="surface-card">
           <h3>Interrupt</h3>
           <InterruptSection />
+        </section>
+        <section className="surface-card">
+          <h3>Loops</h3>
+          <LoopsSection />
         </section>
         <section className="surface-card">
           <h3>EQ Presets</h3>

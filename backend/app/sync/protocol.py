@@ -187,6 +187,25 @@ class FireSfxAction(_Action):
     volume: float = Field(1.0, ge=0.0, le=1.0)
 
 
+class StartLoopAction(_Action):
+    """Start a repeating SFX. A server-side timer fires it every `interval_s`
+    until `stop_loop`. `id` is a client-minted handle (so the same client can
+    stop it). Lives in PlayerState so every LOOPS panel sees it."""
+
+    type: Literal["start_loop"]
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    soundboard_id: str = Field(min_length=1, max_length=128)
+    item_path: str = Field(min_length=1, max_length=512)
+    interval_s: float = Field(ge=1, le=3600)
+    volume: float = Field(1.0, ge=0.0, le=1.0)
+
+
+class StopLoopAction(_Action):
+    type: Literal["stop_loop"]
+    id: str = Field(min_length=1, max_length=64)
+
+
 class ActivateSceneAction(_Action):
     type: Literal["activate_scene"]
     scene_id: str = Field(min_length=1, max_length=128)
@@ -194,6 +213,14 @@ class ActivateSceneAction(_Action):
 
 class DeactivateSceneAction(_Action):
     type: Literal["deactivate_scene"]
+
+
+class FireCueAction(_Action):
+    """Fire a saved cue from the active mode: apply its preset, start its
+    playlist (from a song + timestamp), fire one-shot SFX, and start loops."""
+
+    type: Literal["fire_cue"]
+    cue_id: str = Field(min_length=1, max_length=128)
 
 
 Action = Annotated[
@@ -225,8 +252,11 @@ Action = Annotated[
     | InterruptSeekAction
     | CancelInterruptAction
     | FireSfxAction
+    | StartLoopAction
+    | StopLoopAction
     | ActivateSceneAction
-    | DeactivateSceneAction,
+    | DeactivateSceneAction
+    | FireCueAction,
     Field(discriminator="type"),
 ]
 
@@ -323,6 +353,19 @@ class ScenePreviousState(BaseModel):
     volume: float | None = None
 
 
+class LoopingSfx(BaseModel):
+    """A repeating SFX driven by a server-side interval timer. Held in
+    PlayerState so every client's LOOPS panel shows the same live set; the
+    actual timers live in `sync/loops.py`. `id` is the stop handle."""
+
+    id: str
+    name: str
+    soundboard_id: str
+    item_path: str
+    interval_s: float = Field(ge=1, le=3600)
+    volume: float = Field(1.0, ge=0.0, le=1.0)
+
+
 class PlayerState(BaseModel):
     """Canonical playback state. The server is the sole writer."""
 
@@ -347,6 +390,10 @@ class PlayerState(BaseModel):
 
     ambient: AmbientState = Field(default_factory=AmbientState)
     interrupt: InterruptState | None = None
+
+    # Repeating SFX currently running (server-timer driven). Cleared on boot
+    # (session-only, like active outputs — no auto-resume across a restart).
+    looping_sfx: list[LoopingSfx] = Field(default_factory=list)
 
     last_position_report: PositionReport | None = None
 

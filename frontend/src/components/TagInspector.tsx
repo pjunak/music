@@ -44,8 +44,8 @@ interface FieldDef {
 const LIBRARY_FIELDS: FieldDef[] = [
   {
     key: "display_title",
-    label: "Display name",
-    hint: "Shown in lists instead of the file's title. Library-only.",
+    label: "Nickname",
+    hint: "A friendly name shown in lists instead of the file's title. Library-only.",
   },
   {
     key: "origin",

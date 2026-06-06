@@ -192,6 +192,65 @@ def test_update_preset_replaces_effects(auth_client: TestClient) -> None:
     assert body["effects"][0]["type"] == "highpass"
 
 
+def test_preset_volume_crossfade_roundtrip_and_apply(auth_client: TestClient) -> None:
+    # A preset can optionally pin master volume + crossfade ("mood" overrides).
+    r = auth_client.post(
+        "/api/presets",
+        json={
+            "id": "moody",
+            "name": "Moody",
+            "effects": [{"type": "lowpass", "frequency": 600}],
+            "volume": 0.5,
+            "crossfade_ms": 3000,
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["volume"] == 0.5
+    assert body["crossfade_ms"] == 3000
+
+    # GET round-trips the overrides from disk.
+    got = auth_client.get("/api/presets/moody").json()
+    assert got["volume"] == 0.5
+    assert got["crossfade_ms"] == 3000
+
+    # Activating the preset applies the overrides to the shared player state.
+    with auth_client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()  # snapshot
+        ws.send_json({"type": "set_active_presets", "preset_ids": ["moody"]})
+        msg = ws.receive_json()
+        assert msg["state"]["active_preset_ids"] == ["moody"]
+        assert msg["state"]["volume"] == 0.5
+        assert msg["state"]["crossfade_ms"] == 3000
+
+
+def test_preset_overrides_last_active_wins(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/presets",
+        json={"id": "loud", "name": "Loud", "effects": [], "volume": 0.9},
+    )
+    auth_client.post(
+        "/api/presets",
+        json={"id": "soft", "name": "Soft", "effects": [], "volume": 0.2},
+    )
+    with auth_client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_presets", "preset_ids": ["loud", "soft"]})
+        msg = ws.receive_json()
+        assert msg["state"]["volume"] == 0.2  # last in the active list wins
+
+
+def test_preset_update_can_clear_overrides(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/presets",
+        json={"id": "clearme", "name": "C", "effects": [], "volume": 0.4},
+    )
+    # Re-saving the full form with volume omitted (null) clears it.
+    r = auth_client.put("/api/presets/clearme", json={"name": "C", "effects": []})
+    assert r.status_code == 200
+    assert r.json()["volume"] is None
+
+
 def test_delete_preset_removes_file_and_prunes_active(auth_client: TestClient) -> None:
     auth_client.post(
         "/api/presets",

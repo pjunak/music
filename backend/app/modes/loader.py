@@ -14,6 +14,9 @@ A mode bundle:
           tavern.yaml
           ambush.yaml
           ...
+        cues/                  # optional — one YAML per cue
+          kraken-fight.yaml
+          ...
 
 Modes are validated with Pydantic at load time. Bad files don't crash the
 running app; errors are captured per folder so one broken manifest
@@ -90,6 +93,39 @@ class SceneSpec(BaseModel):
     volume: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class CueSfx(BaseModel):
+    """A one-shot SFX a cue fires when it runs."""
+
+    soundboard: str
+    item: str
+    volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class CueLoop(BaseModel):
+    """A repeating SFX a cue starts (added to the live LOOPS panel)."""
+
+    soundboard: str
+    item: str
+    interval_s: float = Field(ge=1, le=3600)
+    volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class CueSpec(BaseModel):
+    """A saved one-click setup. Firing it applies a preset, starts a playlist
+    (from a given song + timestamp), fires one-shot SFX, and starts loops.
+    Everything references existing pieces by name; all parts are optional."""
+
+    id: str
+    name: str
+    description: str | None = None
+    preset: str | None = None  # preset id to apply (replaces active presets)
+    playlist: str | None = None  # playlist name to start on the ambient lane
+    start_index: int = Field(default=0, ge=0)  # which song in the playlist
+    start_ms: int = Field(default=0, ge=0)  # offset within that song
+    sfx: list[CueSfx] = Field(default_factory=list)
+    loops: list[CueLoop] = Field(default_factory=list)
+
+
 class ModeManifest(BaseModel):
     id: str
     name: str
@@ -105,6 +141,7 @@ class ModeManifest(BaseModel):
     root_dir: Path | None = None
     soundboards: dict[str, SoundboardManifest] = Field(default_factory=dict)
     scenes: dict[str, SceneSpec] = Field(default_factory=dict)
+    cues: dict[str, CueSpec] = Field(default_factory=dict)
 
 
 @dataclass
@@ -166,6 +203,17 @@ def _load_scenes(mode_dir: Path) -> dict[str, SceneSpec]:
     return out
 
 
+def _load_cues(mode_dir: Path) -> dict[str, CueSpec]:
+    out: dict[str, CueSpec] = {}
+    for stem, data in _load_yaml_dir(mode_dir / "cues"):
+        data.setdefault("id", stem)
+        cue = CueSpec.model_validate(data)
+        if cue.id != stem:
+            raise ValueError(f"cue id '{cue.id}' does not match filename '{stem}'")
+        out[cue.id] = cue
+    return out
+
+
 def _load_one(mode_dir: Path) -> ModeManifest:
     manifest_path = mode_dir / "manifest.yaml"
     if not manifest_path.exists():
@@ -179,6 +227,7 @@ def _load_one(mode_dir: Path) -> ModeManifest:
     manifest.root_dir = mode_dir.resolve()
     manifest.soundboards = _load_soundboards(mode_dir)
     manifest.scenes = _load_scenes(mode_dir)
+    manifest.cues = _load_cues(mode_dir)
     if manifest.default_soundboard and manifest.default_soundboard not in manifest.soundboards:
         raise ValueError(
             f"default_soundboard '{manifest.default_soundboard}' not found in soundboards/"
