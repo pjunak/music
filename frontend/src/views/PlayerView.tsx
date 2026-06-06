@@ -6,10 +6,34 @@ import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { useUiStore } from "@/core/uiStore";
 
+// How many upcoming tracks the room display previews. The queue is the
+// playlist made visible here, so this is the main "what's coming" surface.
+const QUEUE_PREVIEW = 6;
+
+/** Slug → display caption: "deep-forest" → "Deep Forest". The TV is a guest
+ *  surface and a mode/scene *name* never reaches it — only the id (the name-
+ *  bearing list endpoints are `CurrentUser`-gated) — so we humanise the slug
+ *  rather than widen the guest read surface just for a caption. */
+function humaniseSlug(slug: string): string {
+  return slug
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function PlayerView() {
   const trackId = usePlayerStore(selectActiveTrackId);
   const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
-  const interruptActive = usePlayerStore((s) => s.state?.interrupt !== null);
+  // `s.state?.interrupt` is `undefined` (not null) before the first snapshot,
+  // so compare against both nullish values — otherwise the badge flashes
+  // "Alert" on a cold load.
+  const interruptActive = usePlayerStore(
+    (s) => (s.state?.interrupt ?? null) !== null,
+  );
+  // Mode / scene context for the "what mood is on" caption. Only the *ids*
+  // (slugs) reach a guest tab; humanised for display (see `humaniseSlug`).
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
+  const activeSceneId = usePlayerStore((s) => s.state?.active_scene_id ?? null);
   // Subscribe directly to the array reference (or `undefined` when the WS
   // hasn't sent a snapshot yet). Don't `?? []` inside the selector — that
   // creates a fresh array literal on every render, which makes a downstream
@@ -20,7 +44,7 @@ export function PlayerView() {
   // Stable string keys derived from the id arrays — re-runs the fetch
   // effects only when the ids that matter actually change, not on every
   // unrelated state_changed broadcast.
-  const queueKey = (queueIds ?? []).slice(0, 3).join("|");
+  const queueKey = (queueIds ?? []).slice(0, QUEUE_PREVIEW).join("|");
   const historyKey = (historyIds ?? []).slice(-2).join("|");
   const hidePlayerArt = useUiStore((s) => s.hidePlayerArt);
 
@@ -49,7 +73,7 @@ export function PlayerView() {
     };
   }, [trackId]);
 
-  // Fetch metadata for the next 3 in queue and most recent 2 in history.
+  // Fetch metadata for the next few in queue and most recent 2 in history.
   useEffect(() => {
     let cancelled = false;
     if (queueKey === "") {
@@ -98,10 +122,7 @@ export function PlayerView() {
           ♪
         </div>
         <h1 className="player-title">Nothing playing</h1>
-        <p className="muted">
-          Open <strong>Library</strong> and press ▶ on a track, or pick a
-          playlist from <strong>Controls</strong>.
-        </p>
+        <p className="muted">The DM hasn't started any music yet.</p>
       </div>
     );
   }
@@ -123,7 +144,7 @@ export function PlayerView() {
         <div className="player-meta">
           <p className="player-status">
             {interruptActive ? (
-              <span className="badge badge-warn">⚡ Interrupt</span>
+              <span className="badge badge-warn">⚡ Alert</span>
             ) : isPlaying ? (
               <span className="badge badge-ok">▶ Playing</span>
             ) : (
@@ -136,6 +157,22 @@ export function PlayerView() {
             {track.album ? ` — ${track.album}` : ""}
             {track.origin ? ` · from ${track.origin}` : ""}
           </p>
+
+          {activeModeId || activeSceneId ? (
+            <p className="player-context">
+              {activeModeId ? (
+                <span className="player-context-mode">
+                  🎭 {humaniseSlug(activeModeId)}
+                </span>
+              ) : null}
+              {activeSceneId ? (
+                <span className="muted">
+                  {activeModeId ? " · " : ""}
+                  {humaniseSlug(activeSceneId)} scene
+                </span>
+              ) : null}
+            </p>
+          ) : null}
 
           {queueTracks.length > 0 ? (
             <section className="player-queue">

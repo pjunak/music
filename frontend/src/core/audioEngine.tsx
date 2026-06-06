@@ -29,6 +29,8 @@ export function AudioEngine() {
   // Wiring: connect DOM refs to the engine and register handlers.
   useEffect(() => {
     if (!ambientARef.current || !ambientBRef.current || !interruptRef.current) return;
+    // Identity for per-device volume trims (PlayerState.device_volumes).
+    playbackEngine.setClientId(useUiStore.getState().clientId);
     playbackEngine.setAmbientElements(ambientARef.current, ambientBRef.current);
     playbackEngine.setInterruptElement(interruptRef.current);
     playbackEngine.setHandlers({
@@ -158,7 +160,7 @@ export function AudioEngine() {
   // is fully manual — a device becomes a speaker only when the operator
   // designates it (Settings → Devices) and activates it (footer / Console
   // picker). This is what stops a signed-in tab from spontaneously playing
-  // audio out loud on refresh. See `app.devices.store` + OutputToggle.
+  // audio out loud on refresh. See `app.devices.store` + SpeakersControl.
 
   return (
     <>

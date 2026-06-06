@@ -300,6 +300,28 @@ def remove_active_output(device_id: str) -> Any:
     return _mut
 
 
+def set_device_volume(device_id: str, volume: float) -> Any:
+    """Set one device's per-device volume trim. Stored only when non-unity, so
+    a trim of 1.0 just drops the entry (the map stays small and "absent = 1.0"
+    stays the invariant). No-op when the value is unchanged."""
+
+    v = max(0.0, min(1.0, volume))
+
+    def _mut(state: PlayerState) -> PlayerState:
+        cur = dict(state.device_volumes)
+        if abs(v - 1.0) < 1e-9:
+            if device_id not in cur:
+                return state
+            cur.pop(device_id, None)
+        else:
+            if cur.get(device_id) == v:
+                return state
+            cur[device_id] = v
+        return state.model_copy(update={"device_volumes": cur})
+
+    return _mut
+
+
 def set_active_soundboard(soundboard_id: str | None) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if state.active_soundboard_id == soundboard_id:
@@ -386,7 +408,13 @@ def ambient_set_queue(track_ids: list[int]) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if list(state.ambient.queue) == list(track_ids):
             return state
-        return _replace_ambient(state, state.ambient.model_copy(update={"queue": list(track_ids)}))
+        # Explicit queue replacement = diverged from any source playlist.
+        return _replace_ambient(
+            state,
+            state.ambient.model_copy(
+                update={"queue": list(track_ids), "source_playlist_id": None}
+            ),
+        )
 
     return _mut
 
@@ -565,9 +593,12 @@ def ambient_stop() -> Any:
     return _mut
 
 
-def ambient_play_playlist(track_ids: list[int], start_index: int) -> Any:
+def ambient_play_playlist(
+    track_ids: list[int], start_index: int, source_playlist_id: int | None = None
+) -> Any:
     """Load a pre-resolved track list into ambient and start at start_index.
-    Implicitly sets is_playing=true."""
+    Implicitly sets is_playing=true. `source_playlist_id` is stamped on the lane
+    so the Console can show which playlist is driving."""
 
     def _mut(state: PlayerState) -> PlayerState:
         if not track_ids:
@@ -579,6 +610,7 @@ def ambient_play_playlist(track_ids: list[int], start_index: int) -> Any:
             history=list(track_ids[:idx]),
             position_ms=0,
             loop=state.ambient.loop,
+            source_playlist_id=source_playlist_id,
         )
         return state.model_copy(update={"ambient": new_ambient, "is_playing": True})
 

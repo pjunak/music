@@ -54,6 +54,14 @@ class SetActiveOutputsAction(_Action):
     device_ids: list[str] = Field(default_factory=list)
 
 
+class SetDeviceVolumeAction(_Action):
+    type: Literal["set_device_volume"]
+    # The output device whose per-device trim to set (a stable client_id).
+    device_id: str = Field(min_length=1, max_length=64)
+    # 0..1 trim, multiplied by master volume on that device only. 1.0 = no trim.
+    volume: float = Field(ge=0.0, le=1.0)
+
+
 class PositionReportAction(_Action):
     type: Literal["position_report"]
     position_ms: int = Field(ge=0)
@@ -195,6 +203,7 @@ Action = Annotated[
     | ResumeAction
     | SetActiveModeAction
     | SetActiveOutputsAction
+    | SetDeviceVolumeAction
     | PositionReportAction
     | AmbientPlayTrackAction
     | AmbientSetQueueAction
@@ -271,6 +280,11 @@ class AmbientState(BaseModel):
     position_ms: int = 0
     loop: LoopMode = "off"
     shuffle: ShuffleMode = "off"
+    # The playlist this lane was started from, so the Console can show which
+    # quick-play playlist is "now driving". Set by `ambient_play_playlist`,
+    # cleared whenever the queue is replaced from another source (play a single
+    # track, set the queue explicitly, stop, scene ambient). Skips/seek keep it.
+    source_playlist_id: int | None = None
 
 
 class InterruptState(BaseModel):
@@ -318,6 +332,10 @@ class PlayerState(BaseModel):
 
     active_mode_id: str | None = None
     active_output_device_ids: list[str] = Field(default_factory=list)
+    # Per-device volume trim (client_id → 0..1), applied on top of master
+    # `volume` on that device only. Absent = 1.0. Lets the operator tame a
+    # too-loud TV without touching master. Only non-unity trims are stored.
+    device_volumes: dict[str, float] = Field(default_factory=dict)
     active_soundboard_id: str | None = None
     active_preset_ids: list[str] = Field(default_factory=list)
 

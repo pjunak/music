@@ -11,6 +11,9 @@ export interface AmbientState {
   position_ms: number;
   loop: LoopMode;
   shuffle: ShuffleMode;
+  /** The playlist the lane was started from (for the Console's "now driving"
+   *  highlight), or null once the queue diverges. */
+  source_playlist_id: number | null;
 }
 
 export interface InterruptState {
@@ -58,6 +61,9 @@ export interface PlayerState {
   volume: number;
   active_mode_id: string | null;
   active_output_device_ids: string[];
+  /** Per-device volume trim (client_id → 0..1), applied on top of master
+   *  `volume` on that device only. Absent entry = 1.0 (no trim). */
+  device_volumes: Record<string, number>;
   active_soundboard_id: string | null;
   active_preset_ids: string[];
   active_scene_id: string | null;
@@ -211,6 +217,7 @@ export type WsAction =
   | { type: "resume" }
   | { type: "set_active_mode"; mode_id: string | null }
   | { type: "set_active_outputs"; device_ids: string[] }
+  | { type: "set_device_volume"; device_id: string; volume: number }
   | { type: "position_report"; position_ms: number }
   | { type: "ambient_play_track"; track_id: number }
   | { type: "ambient_set_queue"; track_ids: number[] }

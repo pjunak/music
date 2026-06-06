@@ -15,7 +15,7 @@ import {
 } from "@/components/icons";
 import type { ModeOption } from "@/components/ModeCycleButton";
 import { ModeCycleButton } from "@/components/ModeCycleButton";
-import { OutputToggle } from "@/components/OutputToggle";
+import { SpeakersControl } from "@/components/SpeakersControl";
 import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
@@ -295,7 +295,7 @@ export function NowPlayingBar() {
         </div>
 
         <div className="now-playing-right">
-          <OutputToggle />
+          <SpeakersControl />
           <VolumeControl
             value={volume}
             onChange={onVolumeChange}

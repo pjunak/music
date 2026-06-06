@@ -768,6 +768,17 @@ kbd,
   color: var(--muted);
   font-size: 1.1rem;
 }
+/* "What mood is on" caption — active mode (+ scene, if any). Subtle, sits
+ * under the artist line; the mode reads in the accent so the room can tell
+ * the setting at a glance. */
+.player-context {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.player-context-mode {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
 
 /* This-device name input — sits in the top-left of the app header where
  *  a static "Music" title used to live. No visible legend by design; the
@@ -1336,26 +1347,66 @@ kbd,
  * — both moved out: mode to the header, master volume already in the
  * NowPlayingBar). What's left is the multi-device picker, which is still
  * a live concern (fanning audio out to multiple TVs mid-session). */
-.outputs-bar {
+/* --- footer Speakers control + popover (replaces the Outputs bar) --- */
+.speakers-control {
+  position: relative;
+}
+.speakers-popover {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 50;
+  width: min(320px, 80vw);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.speakers-popover-head {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  flex-wrap: wrap;
-  padding: 0.45rem 0.9rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.outputs-bar-label {
+  justify-content: space-between;
+  padding: 0.2rem 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 0.7rem;
-  color: var(--muted);
 }
-.output-picker-options.inline {
-  flex-direction: row;
-  gap: 0.7rem;
-  flex-wrap: wrap;
+.speaker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.3rem;
+  border-radius: 4px;
+}
+.speaker-row.on {
+  background: var(--accent-soft);
+}
+.speaker-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  cursor: pointer;
+}
+.speaker-row-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.88rem;
+}
+.speaker-row-vol {
+  margin: 0;
+}
+.speakers-empty {
+  padding: 0.4rem 0.3rem;
+  margin: 0;
 }
 .controls-grid {
   display: grid;
@@ -1400,6 +1451,25 @@ kbd,
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+/* The playlist currently driving the ambient lane — "now playing" cue. */
+.quick-playlist-list li.driving {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.quick-playlist-list li.driving .playlist-name {
+  color: var(--accent-strong);
+}
+.driving-badge {
+  margin-right: 0.35rem;
+  color: var(--accent);
+}
+/* A named reference (interrupt → playlist) that no longer resolves. Warns
+ * the operator at authoring time that firing it would fail. */
+.ref-missing {
+  color: var(--warn);
+  font-weight: 600;
+  white-space: nowrap;
 }
 /* Generic "surface card with section heading" — used by every panel-shaped
  * UI (Controls grid items, Settings sections, Diagnostics sections).

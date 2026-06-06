@@ -200,6 +200,11 @@ export class PlaybackEngine {
   /** Master interrupt gain node — bypasses the effect chain. */
   private interruptMaster: GainNode | null = null;
 
+  /** This browser's stable client_id, so this device's per-device volume trim
+   *  (`PlayerState.device_volumes[clientId]`) can be folded into master gain.
+   *  Set once at mount via `setClientId`. */
+  private clientId = "";
+
   /** Currently inserted effect graphs. Disposed when presets change. */
   private installedEffects: BuiltEffect[] = [];
 
@@ -448,8 +453,13 @@ export class PlaybackEngine {
     const t = state.crossfade_type;
     if (t === "linear" || t === "equal_power" || t === "cut") this.crossfadeType = t;
 
-    if (state.volume !== this.lastVolume) {
-      this.lastVolume = state.volume;
+    // Effective volume = master × this device's per-device trim (absent = 1.0),
+    // so the operator can tame a too-loud TV from the Console without touching
+    // master. Folded into lastVolume so SFX (which read it) scale too.
+    const trim = state.device_volumes?.[this.clientId] ?? 1;
+    const effective = clamp01(state.volume) * clamp01(trim);
+    if (effective !== this.lastVolume) {
+      this.lastVolume = effective;
       this.applyMasterVolume();
     }
 
@@ -655,6 +665,12 @@ export class PlaybackEngine {
   }
 
   // ----- volume / master gain -----------------------------------------
+
+  /** Tell the engine this browser's client_id so it can apply this device's
+   *  per-device volume trim. Idempotent; safe to call on every mount. */
+  setClientId(id: string): void {
+    this.clientId = id;
+  }
 
   private applyMasterVolume(): void {
     const v = clamp01(this.lastVolume);

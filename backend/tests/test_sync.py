@@ -226,6 +226,21 @@ def test_set_volume_no_broadcast_when_unchanged(client: TestClient) -> None:
         assert msg["state"]["volume"] == 0.123
 
 
+def test_set_device_volume_broadcasts_and_clears_at_unity(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()  # snapshot
+
+        ws.send_json({"type": "set_device_volume", "device_id": "tv-1", "volume": 0.5})
+        msg = ws.receive_json()
+        assert msg["type"] == "state_changed"
+        assert msg["state"]["device_volumes"]["tv-1"] == 0.5
+
+        # Back to unity drops the entry — "absent = 1.0" keeps the map small.
+        ws.send_json({"type": "set_device_volume", "device_id": "tv-1", "volume": 1.0})
+        msg = ws.receive_json()
+        assert "tv-1" not in msg["state"]["device_volumes"]
+
+
 def test_pause_resume_toggles_is_playing(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()  # snapshot
@@ -583,6 +598,28 @@ def test_remove_active_output_mutator() -> None:
     # state machine knows to skip persistence + broadcast.
     same = remove_active_output("dev-not-present")(initial)
     assert same is initial
+
+
+def test_ambient_source_playlist_set_and_cleared() -> None:
+    """play_playlist stamps the source playlist; advancing keeps it; playing a
+    single track (which builds a fresh ambient state) clears it — so the
+    Console's "now driving" highlight tracks the lane correctly."""
+    from app.sync.protocol import PlayerState
+    from app.sync.state import (
+        ambient_play_playlist,
+        ambient_play_track,
+        ambient_skip_next,
+    )
+
+    base = PlayerState()
+    s1 = ambient_play_playlist([1, 2, 3], 0, source_playlist_id=42)(base)
+    assert s1.ambient.source_playlist_id == 42
+    # Advancing within the playlist keeps the source.
+    s2 = ambient_skip_next()(s1)
+    assert s2.ambient.source_playlist_id == 42
+    # Playing a single track builds a fresh ambient state → source cleared.
+    s3 = ambient_play_track(7)(s2)
+    assert s3.ambient.source_playlist_id is None
 
 
 # --- position reports -------------------------------------------------------

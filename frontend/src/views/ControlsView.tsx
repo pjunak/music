@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { IconButton } from "@/components/IconButton";
 import { PlayIcon } from "@/components/icons";
 import { diagnosticsApi, playlistsApi } from "@/core/api";
-import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
+import { usePlayerStore } from "@/core/playerStore";
 import type { PlaylistMeta } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
@@ -20,15 +20,13 @@ import { TransportSection } from "./controls/TransportSection";
  *  session: fire SFX, switch scenes, fire interrupts, etc.
  *
  *  Mode picker moved to the header (reachable from any tab); master volume
- *  and per-this-device output toggle live in the persistent NowPlayingBar.
- *  What's left here is the multi-device output picker (which TVs are
- *  currently outputting) — that's still a live concern, so it stays on
- *  this tab as a slim bar above the action grid. */
+ *  and the **Speakers** control (which devices output + per-device volume)
+ *  live in the persistent NowPlayingBar footer. This tab is just the live
+ *  action grid. */
 export function ControlsView() {
   return (
     <div className="controls-view">
       <FirstRunWelcome />
-      <OutputsBar />
       <div className="controls-grid">
         <section className="surface-card span-tall">
           <h3>Scenes</h3>
@@ -106,68 +104,15 @@ function FirstRunWelcome() {
   );
 }
 
-// --- outputs bar: which connected devices are currently outputting audio?
-//
-// Distinct from the NowPlayingBar's OutputToggle pill — that one is "is
-// THIS device an output?". This bar is the multi-device picker: "is the
-// living-room TV an output? what about the bedroom TV?" The operator may
-// want to fan out audio to multiple rooms mid-session.
-
-function OutputsBar() {
-  const state = usePlayerStore((s) => s.state);
-  const myDeviceId = usePlayerStore((s) => s.myDeviceId);
-  const devices = state?.connected_devices ?? [];
-  const activeIds = state?.active_output_device_ids ?? [];
-
-  // Only devices the operator has designated as outputs (Settings → Devices)
-  // and that are currently connected can be activated here.
-  const audioOutputs = devices.filter((d) => d.is_output);
-
-  function toggle(deviceId: string) {
-    const next = activeIds.includes(deviceId)
-      ? activeIds.filter((d) => d !== deviceId)
-      : [...activeIds, deviceId];
-    wsClient.send({ type: "set_active_outputs", device_ids: next });
-  }
-
-  return (
-    <div className="outputs-bar" role="group" aria-label="Active audio outputs">
-      <span className="outputs-bar-label">Outputs</span>
-      {audioOutputs.length === 0 ? (
-        <span className="muted small">
-          No output devices connected. Open this page on a TV / speaker tab,
-          then mark it as an audio output in Settings → Devices.
-        </span>
-      ) : (
-        <div className="output-picker-options inline">
-          {audioOutputs.map((d) => {
-            const checked = activeIds.includes(d.device_id);
-            const isMe = d.device_id === myDeviceId;
-            return (
-              <label key={d.device_id} className="output-picker-option">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggle(d.device_id)}
-                />
-                <span>
-                  {d.name}
-                  {isMe ? " (this)" : ""}
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // --- quick-play playlists: just a flat list of "play this whole playlist now"
 
 function QuickPlaylists() {
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
-  const activeTrackId = usePlayerStore(selectActiveTrackId);
+  // Which playlist is currently driving the ambient lane (server-tracked).
+  const drivingId = usePlayerStore(
+    (s) => s.state?.ambient.source_playlist_id ?? null,
+  );
+  const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
   const [playlists, setPlaylists] = useState<PlaylistMeta[]>([]);
 
   useEffect(() => {
@@ -186,31 +131,38 @@ function QuickPlaylists() {
     );
   }
 
-  // Active track id only used to flag if any of these are currently driving.
-  void activeTrackId;
-
   return (
     <ul className="quick-playlist-list">
-      {playlists.map((p) => (
-        <li key={p.id}>
-          <span className="playlist-name">{p.name}</span>
-          <span className="muted small">
-            {p.category ? `${p.category} · ` : ""}
-            {p.mode_id ?? "global"}
-          </span>
-          <IconButton
-            label="Play this playlist now"
-            icon={<PlayIcon />}
-            variant="primary"
-            onClick={() =>
-              wsClient.send({
-                type: "ambient_play_playlist",
-                playlist_id: p.id,
-              })
-            }
-          />
-        </li>
-      ))}
+      {playlists.map((p) => {
+        const driving = p.id === drivingId;
+        return (
+          <li key={p.id} className={driving ? "driving" : undefined}>
+            <span className="playlist-name">
+              {driving ? (
+                <span className="driving-badge" title="Now driving ambient">
+                  {isPlaying ? "▶" : "⏸"}
+                </span>
+              ) : null}
+              {p.name}
+            </span>
+            <span className="muted small">
+              {p.category ? `${p.category} · ` : ""}
+              {p.mode_id ?? "global"}
+            </span>
+            <IconButton
+              label={driving ? "Restart this playlist" : "Play this playlist now"}
+              icon={<PlayIcon />}
+              variant="primary"
+              onClick={() =>
+                wsClient.send({
+                  type: "ambient_play_playlist",
+                  playlist_id: p.id,
+                })
+              }
+            />
+          </li>
+        );
+      })}
     </ul>
   );
 }

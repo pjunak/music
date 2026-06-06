@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
@@ -10,7 +10,12 @@ import { SoundboardEditor } from "@/components/SoundboardEditor";
 import { VolumeControl } from "@/components/VolumeControl";
 import { modesAdminApi, modesApi, playlistsApi } from "@/core/api";
 import { toast } from "@/core/toast";
-import type { InterruptSpec, ModeDetail, ModeSummary } from "@/core/types";
+import type {
+  InterruptSpec,
+  ModeDetail,
+  ModeSummary,
+  PlaylistMeta,
+} from "@/core/types";
 import { wsClient } from "@/core/ws";
 
 export function ModesView() {
@@ -400,6 +405,34 @@ function InterruptTemplatesEditor({
   const [adding, setAdding] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
 
+  // Playlists this mode's interrupts can reference: mode-scoped + globals
+  // (same scoping the server uses to resolve a scene/interrupt playlist name).
+  // Held here so the form offers a real picker and the list can flag a
+  // reference that no longer resolves — instead of failing silently at fire.
+  const [playlists, setPlaylists] = useState<PlaylistMeta[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void playlistsApi
+      .list({})
+      .then((all) => {
+        if (!cancelled) {
+          setPlaylists(
+            all.filter((p) => p.mode_id === modeId || p.mode_id === null),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPlaylists([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modeId]);
+  const playlistNames = useMemo(
+    () => new Set(playlists.map((p) => p.name)),
+    [playlists],
+  );
+
   async function remove(idx: number) {
     const ok = await confirmDialog({
       title: `Delete interrupt "${detail.interrupts[idx]?.name ?? ""}"?`,
@@ -416,33 +449,28 @@ function InterruptTemplatesEditor({
     }
   }
 
-  async function fire(spec: InterruptSpec) {
+  function fire(spec: InterruptSpec) {
     if (spec.playlist) {
-      // Resolve the named playlist to an id, then fire it. We accept either
-      // mode-scoped playlists or globals — same lookup as scene activation.
-      try {
-        const matches = await playlistsApi.list({ mode_id: modeId });
-        const found =
-          matches.find((p) => p.name === spec.playlist) ?? null;
-        if (found === null) {
-          toast.error(
-            "Playlist not found",
-            `No playlist named "${spec.playlist ?? ""}" in this mode.`,
-          );
-          return;
-        }
-        wsClient.send({
-          type: "fire_interrupt_playlist",
-          playlist_id: found.id,
-          return_to_ambient: spec.return_to_ambient ?? true,
-          fade_in_ms: spec.fade_in_ms ?? 0,
-          fade_out_ms: spec.fade_out_ms ?? 0,
-          duck_to: spec.duck_to ?? null,
-        });
-        toast.info("Interrupt fired", spec.name);
-      } catch (e) {
-        toast.error("Fire failed", e instanceof Error ? e.message : undefined);
+      // Resolve the named playlist against the cached list (mode-scoped +
+      // globals) and fire it. A missing reference is the failure the picker +
+      // ⚠ badge are meant to prevent at authoring time.
+      const found = playlists.find((p) => p.name === spec.playlist) ?? null;
+      if (found === null) {
+        toast.error(
+          "Playlist not found",
+          `No playlist named "${spec.playlist ?? ""}" in this mode — re-pick it in the template.`,
+        );
+        return;
       }
+      wsClient.send({
+        type: "fire_interrupt_playlist",
+        playlist_id: found.id,
+        return_to_ambient: spec.return_to_ambient ?? true,
+        fade_in_ms: spec.fade_in_ms ?? 0,
+        fade_out_ms: spec.fade_out_ms ?? 0,
+        duck_to: spec.duck_to ?? null,
+      });
+      toast.info("Interrupt fired", spec.name);
       return;
     }
     if (spec.soundboard_item) {
@@ -483,6 +511,7 @@ function InterruptTemplatesEditor({
         <InterruptTemplateForm
           modeId={modeId}
           mode="create"
+          playlists={playlists}
           onClose={() => setAdding(false)}
           onSaved={async () => {
             setAdding(false);
@@ -503,6 +532,7 @@ function InterruptTemplatesEditor({
                   mode="edit"
                   index={idx}
                   initial={it}
+                  playlists={playlists}
                   onClose={() => setEditingIdx(null)}
                   onSaved={async () => {
                     setEditingIdx(null);
@@ -514,7 +544,19 @@ function InterruptTemplatesEditor({
               <li key={idx}>
                 <span>
                   <strong>{it.name}</strong>
-                  {it.playlist ? <> · playlist <code>{it.playlist}</code></> : null}
+                  {it.playlist ? (
+                    <>
+                      {" "}· playlist <code>{it.playlist}</code>
+                      {!playlistNames.has(it.playlist) ? (
+                        <span
+                          className="ref-missing"
+                          title="No playlist with this name in this mode — firing this interrupt will fail. Edit it to re-pick."
+                        >
+                          {" "}⚠ missing
+                        </span>
+                      ) : null}
+                    </>
+                  ) : null}
                   {it.soundboard_item ? (
                     <> · sfx <code>{it.soundboard_item}</code></>
                   ) : null}
@@ -571,6 +613,7 @@ function InterruptTemplateForm({
   mode,
   index,
   initial,
+  playlists,
   onClose,
   onSaved,
 }: {
@@ -578,6 +621,7 @@ function InterruptTemplateForm({
   mode: "create" | "edit";
   index?: number;
   initial?: InterruptSpec;
+  playlists: PlaylistMeta[];
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -672,13 +716,27 @@ function InterruptTemplateForm({
         </label>
         {source === "playlist" ? (
           <label>
-            <span className="muted small">Playlist name</span>
-            <input
+            <span className="muted small">Playlist</span>
+            <select
               value={playlist}
               onChange={(e) => setPlaylist(e.target.value)}
-              placeholder="tavern-music"
               required
-            />
+            >
+              <option value="" disabled>
+                Pick a playlist…
+              </option>
+              {playlists.map((p) => (
+                <option key={p.id} value={p.name}>
+                  {p.name}
+                  {p.mode_id === null ? " (global)" : ""}
+                </option>
+              ))}
+              {/* Preserve an edited template's now-missing reference so the
+                  operator can see + replace it rather than lose it silently. */}
+              {playlist !== "" && !playlists.some((p) => p.name === playlist) ? (
+                <option value={playlist}>⚠ {playlist} (missing)</option>
+              ) : null}
+            </select>
           </label>
         ) : (
           <label>

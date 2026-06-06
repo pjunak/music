@@ -62,6 +62,7 @@ from app.sync.protocol import (
     SetActivePresetsAction,
     SetActiveSoundboardAction,
     SetCrossfadeAction,
+    SetDeviceVolumeAction,
     SetVolumeAction,
     SfxFired,
     StateSnapshot,
@@ -251,6 +252,17 @@ async def _h_set_active_outputs(
     await _apply_and_broadcast(state_module.set_active_outputs(action.device_ids))
 
 
+async def _h_set_device_volume(
+    action: SetDeviceVolumeAction, _device_id: str, _ws: WebSocket
+) -> None:
+    # Per-device trim is informational state every output reads; setting it for
+    # a device that isn't currently an output is harmless (absent = 1.0, applied
+    # only by that device when it plays), so no designation check is needed.
+    await _apply_and_broadcast(
+        state_module.set_device_volume(action.device_id, action.volume)
+    )
+
+
 # --- ambient lane ---------------------------------------------------------
 
 
@@ -333,7 +345,9 @@ async def _h_ambient_play_playlist(
         await _send_error(websocket, "playlist is empty")
         return
     await _apply_and_broadcast(
-        state_module.ambient_play_playlist(track_ids, action.start_index)
+        state_module.ambient_play_playlist(
+            track_ids, action.start_index, source_playlist_id=action.playlist_id
+        )
     )
 
 
@@ -590,6 +604,7 @@ _DISPATCH: dict[type, Any] = {
     ResumeAction: _h_resume,
     SetActiveModeAction: _h_set_active_mode,
     SetActiveOutputsAction: _h_set_active_outputs,
+    SetDeviceVolumeAction: _h_set_device_volume,
     AmbientPlayTrackAction: _h_ambient_play_track,
     AmbientSetQueueAction: _h_ambient_set_queue,
     AmbientEnqueueAction: _h_ambient_enqueue,
