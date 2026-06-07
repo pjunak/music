@@ -10,6 +10,9 @@ import type { EqBand } from "@/core/eq";
 interface Props {
   bands: EqBand[];
   height?: number;
+  /** When false, the curve reads the (greyed) inactive rack accent. Included
+   *  in the draw deps so toggling active/inactive recolors the canvas. */
+  active?: boolean;
 }
 
 const DB_RANGE = 15; // vertical half-range (curve headroom beyond ±12 faders)
@@ -22,7 +25,7 @@ function cssVar(el: Element, name: string, fallback: string): string {
   return v || fallback;
 }
 
-export function EqCurve({ bands, height = 128 }: Props) {
+export function EqCurve({ bands, height = 128, active = true }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -44,10 +47,12 @@ export function EqCurve({ bands, height = 128 }: Props) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // Teal (the secondary accent) — the EQ rack is an Authoring surface, so
-    // its curve reads teal rather than the live-playback blue.
-    const accent = cssVar(canvas, "--accent2", "#3fc7c2");
-    const accentStrong = cssVar(canvas, "--accent2-strong", "#74dcd7");
+    // Reads the rack accent (teal when active, greyed when the module is off —
+    // the `.effect-off` ancestor overrides --rack-accent). Teal is the
+    // Authoring accent, distinct from the live-playback blue. `active` drives
+    // the fallback + re-runs this draw when the module is toggled.
+    const accent = cssVar(canvas, "--rack-accent", active ? "#3fc7c2" : "#3a3e46");
+    const accentStrong = cssVar(canvas, "--rack-accent-strong", active ? "#74dcd7" : "#b6b8be");
     const grid = cssVar(canvas, "--border", "#2a2d33");
     const muted = cssVar(canvas, "--muted", "#8a8c91");
 
@@ -112,7 +117,7 @@ export function EqCurve({ bands, height = 128 }: Props) {
     ctx.lineWidth = 2;
     ctx.lineJoin = "round";
     ctx.stroke();
-  }, [bands, height]);
+  }, [bands, height, active]);
 
   useEffect(() => {
     draw();

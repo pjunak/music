@@ -4,10 +4,12 @@ import type { FormEvent } from "react";
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { Fader } from "@/components/Fader";
+import { Field } from "@/components/Field";
 import { GraphicEqModule } from "@/components/GraphicEqModule";
 import { IconButton } from "@/components/IconButton";
-import { ArrowDownIcon, ArrowUpIcon, TrashIcon, XIcon } from "@/components/icons";
+import { TrashIcon, XIcon } from "@/components/icons";
 import { Knob } from "@/components/Knob";
+import { Switch } from "@/components/Switch";
 import { modesAdminApi, presetsAdminApi, presetsApi } from "@/core/api";
 import type { PresetEffect, PresetManifest } from "@/core/api";
 import { defaultEqBands, normalizeEqBands } from "@/core/eq";
@@ -100,7 +102,9 @@ const EFFECT_UI: Record<
   },
 };
 
-// Order shown in the "+ Add" picker — EQ first, then the colour/space effects.
+// The full effect rack, in canonical (chain) order — EQ first, then the
+// colour/space effects. Every one is always shown as a module; the chain
+// applies the enabled ones top-to-bottom in this order.
 const ADDABLE: { type: string; label: string; blurb: string }[] = [
   { type: "eq", ...EQ_META },
   ...Object.entries(EFFECT_UI).map(([type, ui]) => ({
@@ -109,6 +113,42 @@ const ADDABLE: { type: string; label: string; blurb: string }[] = [
     blurb: ui.blurb,
   })),
 ];
+const ADDABLE_TYPES = new Set(ADDABLE.map((a) => a.type));
+
+/** Default param map for an effect type (eq carries `bands`; the rest carry
+ *  the flat numeric params from EFFECT_UI). */
+function defaultParamsFor(type: string): Record<string, unknown> {
+  if (type === "eq") return { bands: defaultEqBands() };
+  const ui = EFFECT_UI[type];
+  return ui ? Object.fromEntries(ui.params.map((p) => [p.key, p.def])) : {};
+}
+
+/** Params for EVERY known effect type (defaults, overlaid with the preset's
+ *  stored values for the ones it includes). Lets a module's controls stay
+ *  visible + tuned even while bypassed, so toggling off→on restores it. */
+function buildEffectState(effects: PresetEffect[]): Record<string, Record<string, unknown>> {
+  const state: Record<string, Record<string, unknown>> = {};
+  for (const a of ADDABLE) state[a.type] = defaultParamsFor(a.type);
+  for (const e of effects) {
+    if (!ADDABLE_TYPES.has(e.type)) continue;
+    if (e.type === "eq") {
+      state.eq = { bands: normalizeEqBands((e as { bands?: EqBand[] }).bands) };
+    } else {
+      const rest: Record<string, unknown> = { ...(e as Record<string, unknown>) };
+      delete rest.type;
+      state[e.type] = { ...state[e.type], ...rest };
+    }
+  }
+  return state;
+}
+
+const buildActiveTypes = (effects: PresetEffect[]): Set<string> =>
+  new Set(effects.filter((e) => ADDABLE_TYPES.has(e.type)).map((e) => e.type));
+
+// Effects whose type isn't in the rack (e.g. a hand-edited `pitch_shift`) —
+// preserved + editable + removable so a save doesn't silently drop them.
+const buildExtraEffects = (effects: PresetEffect[]): PresetEffect[] =>
+  effects.filter((e) => !ADDABLE_TYPES.has(e.type)).map((e) => ({ ...e }));
 
 export function PresetsView() {
   // EQ presets are per-mode — this view edits the active mode's presets.
@@ -280,10 +320,13 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
   const [id, setId] = useState(preset?.id ?? "");
   const [name, setName] = useState(preset?.name ?? "");
   const [description, setDescription] = useState(preset?.description ?? "");
-  const [effects, setEffects] = useState<PresetEffect[]>(
-    () => preset?.effects.map((e) => ({ ...e })) ?? [],
-  );
-  // Optional "when active" overrides — checkbox gates each control; null on save
+  // Params for every effect type + the set of enabled ones. Splitting params
+  // from on/off means a bypassed module keeps its tuning (toggle off→on
+  // restores it) and the chain is always saved in canonical order.
+  const [effectState, setEffectState] = useState(() => buildEffectState(preset?.effects ?? []));
+  const [activeTypes, setActiveTypes] = useState(() => buildActiveTypes(preset?.effects ?? []));
+  const [extraEffects, setExtraEffects] = useState(() => buildExtraEffects(preset?.effects ?? []));
+  // Optional "when active" overrides — a toggle gates each control; null on save
   // when off (= leave that global alone).
   const [volumeOn, setVolumeOn] = useState(preset?.volume != null);
   const [volume, setVolume] = useState(preset?.volume ?? 0.8);
@@ -296,7 +339,9 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
       setId(preset.id);
       setName(preset.name);
       setDescription(preset.description ?? "");
-      setEffects(preset.effects.map((e) => ({ ...e })));
+      setEffectState(buildEffectState(preset.effects));
+      setActiveTypes(buildActiveTypes(preset.effects));
+      setExtraEffects(buildExtraEffects(preset.effects));
       setVolumeOn(preset.volume != null);
       setVolume(preset.volume ?? 0.8);
       setCrossfadeOn(preset.crossfade_ms != null);
@@ -304,35 +349,25 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
     }
   }, [mode, preset]);
 
-  // Each effect type is a singleton in the chain: clicking its palette chip
-  // adds it (with default params, appended to the end) if absent, or removes
-  // it if present. A hand-edited YAML with a duplicate still renders both rows
-  // (and each is removable via its module); the chip just toggles the first.
   function toggleEffect(type: string) {
-    setEffects((es) => {
-      const idx = es.findIndex((e) => e.type === type);
-      if (idx >= 0) return es.filter((_, i) => i !== idx);
-      if (type === "eq") {
-        return [...es, { type: "eq", bands: defaultEqBands() } as PresetEffect];
-      }
-      const ui = EFFECT_UI[type];
-      const params = ui ? Object.fromEntries(ui.params.map((p) => [p.key, p.def])) : {};
-      return [...es, { type, ...params } as PresetEffect];
+    setActiveTypes((s) => {
+      const next = new Set(s);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
     });
   }
 
-  function setEffectParam(idx: number, key: string, value: number) {
-    setEffects((es) =>
-      es.map((e, i) => (i === idx ? { ...e, [key]: value } : e)),
-    );
+  function setParam(type: string, key: string, value: number) {
+    setEffectState((s) => ({ ...s, [type]: { ...s[type], [key]: value } }));
   }
 
-  function setEffectBands(idx: number, bands: EqBand[]) {
-    setEffects((es) => es.map((e, i) => (i === idx ? { ...e, bands } : e)));
+  function setBands(type: string, bands: EqBand[]) {
+    setEffectState((s) => ({ ...s, [type]: { ...s[type], bands } }));
   }
 
-  function updateEffect(idx: number, key: string, value: string) {
-    setEffects((es) =>
+  function updateExtra(idx: number, key: string, value: string) {
+    setExtraEffects((es) =>
       es.map((e, i) => {
         if (i !== idx) return e;
         const numeric = key !== "type" && /^-?\d+(\.\d+)?$/.test(value);
@@ -341,23 +376,25 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
     );
   }
 
-  function removeEffect(idx: number) {
-    setEffects((es) => es.filter((_, i) => i !== idx));
+  function removeExtra(idx: number) {
+    setExtraEffects((es) => es.filter((_, i) => i !== idx));
   }
 
-  function moveEffect(idx: number, dir: -1 | 1) {
-    setEffects((es) => {
-      const next = [...es];
-      const target = idx + dir;
-      if (target < 0 || target >= next.length) return es;
-      [next[idx], next[target]] = [next[target], next[idx]];
-      return next;
-    });
+  // Compose the saved chain: enabled modules in canonical order, then any
+  // preserved unsupported effects.
+  function composeEffects(): PresetEffect[] {
+    const ordered = ADDABLE.filter((a) => activeTypes.has(a.type)).map((a) =>
+      a.type === "eq"
+        ? ({ type: "eq", bands: effectState.eq.bands as EqBand[] } as PresetEffect)
+        : ({ type: a.type, ...effectState[a.type] } as PresetEffect),
+    );
+    return [...ordered, ...extraEffects];
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
+    const effects = composeEffects();
     try {
       if (mode === "create") {
         const payload: Parameters<typeof presetsAdminApi.create>[1] = {
@@ -408,8 +445,6 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
     }
   }
 
-  const activeTypes = new Set(effects.map((e) => e.type));
-
   return (
     <form onSubmit={submit} className="preset-form">
       <header className="playlist-detail-header">
@@ -429,50 +464,47 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
       </header>
 
       <div className="playlist-meta-fields">
-        <label>
-          <span className="muted small">ID</span>
+        <Field label="ID">
           <input
+            type="text"
             value={id}
             onChange={(e) => setId(e.target.value)}
             disabled={mode === "edit"}
             pattern="[a-z0-9][a-z0-9_-]*"
             required
           />
-        </label>
-        <label>
-          <span className="muted small">Name</span>
+        </Field>
+        <Field label="Name">
           <input
+            type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
           />
-        </label>
-        <label>
-          <span className="muted small">Description</span>
+        </Field>
+        <Field label="Description">
           <input
+            type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
-        </label>
+        </Field>
       </div>
 
-      <section className="preset-overrides">
-        <h3>When active</h3>
+      <section className="preset-overrides surface-card authoring-card">
+        <h3 className="section-label">When active</h3>
         <p className="muted small">
           Optional — a preset can also nudge master volume and the crossfade
-          time when you switch it on. Untick to leave that alone. If several
-          active presets set one, the last turned on wins.
+          time when you switch it on. If several active presets set one, the last
+          turned on wins.
         </p>
         <div className="override-knobs">
           <div className={`override-knob${volumeOn ? "" : " override-off"}`}>
-            <label className="override-toggle">
-              <input
-                type="checkbox"
-                checked={volumeOn}
-                onChange={(e) => setVolumeOn(e.target.checked)}
-              />
-              <span className="muted small">Master volume</span>
-            </label>
+            <Switch
+              checked={volumeOn}
+              onChange={(e) => setVolumeOn(e.target.checked)}
+              label="Master volume"
+            />
             <Knob
               label="Volume"
               value={volume}
@@ -486,14 +518,11 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
             />
           </div>
           <div className={`override-knob${crossfadeOn ? "" : " override-off"}`}>
-            <label className="override-toggle">
-              <input
-                type="checkbox"
-                checked={crossfadeOn}
-                onChange={(e) => setCrossfadeOn(e.target.checked)}
-              />
-              <span className="muted small">Crossfade</span>
-            </label>
+            <Switch
+              checked={crossfadeOn}
+              onChange={(e) => setCrossfadeOn(e.target.checked)}
+              label="Crossfade"
+            />
             <Knob
               label="Time"
               value={crossfadeMs}
@@ -510,76 +539,44 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
       </section>
 
       <section>
-        <h3>Effects</h3>
+        <h3 className="section-label">Effects</h3>
         <p className="muted small">
-          Click an effect to add it; click again to remove. Active effects apply
-          top to bottom — reorder with ↑↓.
+          The full rack — flip a module's switch to enable it. Enabled effects
+          (teal) apply top to bottom; bypassed ones (grey) keep their settings.
         </p>
-        <div className="effect-palette" role="group" aria-label="Effects">
-          {ADDABLE.map((a) => (
-            <button
-              key={a.type}
-              type="button"
-              className="effect-chip"
-              aria-pressed={activeTypes.has(a.type)}
-              title={a.blurb}
-              onClick={() => toggleEffect(a.type)}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
-        {effects.length === 0 ? (
-          <p className="muted small">No effects active — pick some above.</p>
-        ) : (
-          <ol className="effect-list">
-            {effects.map((eff, idx) => {
-              const isEq = eff.type === "eq";
-              const ui = EFFECT_UI[eff.type];
-              const known = isEq || ui != null;
-              return (
-                <li key={idx} className="effect-row rack-module">
-                  <header>
-                    <span className="effect-title">
-                      <strong>{isEq ? EQ_META.label : ui?.label ?? eff.type}</strong>
-                      {known ? (
-                        <span className="muted small">{isEq ? EQ_META.blurb : ui?.blurb}</span>
-                      ) : (
-                        <span className="ref-missing">
-                          ⚠ not supported — this effect does nothing
-                        </span>
-                      )}
-                    </span>
-                    <div className="effect-row-actions">
-                      <IconButton
-                        label="Move effect up"
-                        icon={<ArrowUpIcon />}
-                        onClick={() => moveEffect(idx, -1)}
-                        disabled={idx === 0}
-                      />
-                      <IconButton
-                        label="Move effect down"
-                        icon={<ArrowDownIcon />}
-                        onClick={() => moveEffect(idx, 1)}
-                        disabled={idx === effects.length - 1}
-                      />
-                      <IconButton
-                        label="Remove effect"
-                        icon={<XIcon />}
-                        variant="danger"
-                        onClick={() => removeEffect(idx)}
-                      />
-                    </div>
-                  </header>
-                  {isEq ? (
+        <div className="effect-list">
+          {ADDABLE.map((a) => {
+            const type = a.type;
+            const active = activeTypes.has(type);
+            const params = effectState[type] ?? {};
+            return (
+              <div
+                key={type}
+                className={`effect-row rack-module${active ? "" : " effect-off"}`}
+              >
+                <header>
+                  <span className="effect-title">
+                    <strong>{a.label}</strong>
+                    <span className="muted small">{a.blurb}</span>
+                  </span>
+                  <Switch
+                    className="effect-toggle"
+                    checked={active}
+                    onChange={() => toggleEffect(type)}
+                    aria-label={`Enable ${a.label}`}
+                  />
+                </header>
+                <div className="rack-body">
+                  {type === "eq" ? (
                     <GraphicEqModule
-                      bands={normalizeEqBands(eff.bands)}
-                      onChange={(b) => setEffectBands(idx, b)}
+                      bands={normalizeEqBands(params.bands as EqBand[])}
+                      active={active}
+                      onChange={(b) => setBands("eq", b)}
                     />
-                  ) : ui ? (
+                  ) : (
                     <div className="knob-row">
-                      {ui.params.map((pc) => {
-                        const cur = Number(eff[pc.key]);
+                      {EFFECT_UI[type].params.map((pc) => {
+                        const cur = Number(params[pc.key]);
                         const val = Number.isFinite(cur) ? cur : pc.def;
                         // Frequency-type params read better as a tall fader; the
                         // rest are knobs (the hardware-rack vocabulary).
@@ -595,7 +592,8 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
                             label={pc.label}
                             format={pc.format}
                             def={pc.def}
-                            onChange={(v) => setEffectParam(idx, pc.key, v)}
+                            disabled={!active}
+                            onChange={(v) => setParam(type, pc.key, v)}
                           />
                         ) : (
                           <Knob
@@ -607,36 +605,55 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
                             label={pc.label}
                             format={pc.format}
                             def={pc.def}
-                            onChange={(v) => setEffectParam(idx, pc.key, v)}
+                            disabled={!active}
+                            onChange={(v) => setParam(type, pc.key, v)}
                           />
                         );
                       })}
                     </div>
-                  ) : (
-                    // Unknown/unsupported effect — keep raw fields so an existing
-                    // preset stays editable (and removable).
-                    <div className="effect-params">
-                      {Object.entries(eff)
-                        .filter(([k]) => k !== "type")
-                        .map(([k, v]) => (
-                          <label key={k}>
-                            <span className="muted small">{k}</span>
-                            <input
-                              value={String(v)}
-                              onChange={(e) => updateEffect(idx, k, e.target.value)}
-                            />
-                          </label>
-                        ))}
-                    </div>
                   )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
+                </div>
+              </div>
+            );
+          })}
+          {extraEffects.map((eff, idx) => (
+            <div key={`extra-${idx}`} className="effect-row rack-module">
+              <header>
+                <span className="effect-title">
+                  <strong>{eff.type}</strong>
+                  <span className="ref-missing">
+                    ⚠ not supported — this effect does nothing
+                  </span>
+                </span>
+                <IconButton
+                  label="Remove effect"
+                  icon={<XIcon />}
+                  variant="danger"
+                  onClick={() => removeExtra(idx)}
+                />
+              </header>
+              <div className="rack-body">
+                <div className="effect-params">
+                  {Object.entries(eff)
+                    .filter(([k]) => k !== "type")
+                    .map(([k, v]) => (
+                      <label key={k}>
+                        <span className="muted small">{k}</span>
+                        <input
+                          type="text"
+                          value={String(v)}
+                          onChange={(e) => updateExtra(idx, k, e.target.value)}
+                        />
+                      </label>
+                    ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
 
-      <div className="modal-actions">
+      <div className="form-actions">
         {mode === "create" ? (
           <button type="button" onClick={onClose} disabled={busy}>
             Cancel

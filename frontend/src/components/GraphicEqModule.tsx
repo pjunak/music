@@ -18,18 +18,20 @@ import { Fader } from "./Fader";
 interface Props {
   bands: EqBand[];
   onChange: (bands: EqBand[]) => void;
+  /** When false the module is bypassed — controls are locked + greyed. */
+  active?: boolean;
 }
 
 const fmtDb = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)}`;
 
-export function GraphicEqModule({ bands, onChange }: Props) {
+export function GraphicEqModule({ bands, onChange, active = true }: Props) {
   function setBand(i: number, gain: number) {
     onChange(bands.map((b, j) => (j === i ? { ...b, gain } : b)));
   }
 
   return (
     <div className="graphic-eq">
-      <EqCurve bands={bands} />
+      <EqCurve bands={bands} active={active} />
       <div className="eq-bands">
         {bands.map((b, i) => (
           <Fader
@@ -44,6 +46,7 @@ export function GraphicEqModule({ bands, onChange }: Props) {
             format={fmtDb}
             def={0}
             ariaLabel={`${EQ_BAND_LABELS[i]} Hz band gain`}
+            disabled={!active}
             onChange={(v) => setBand(i, v)}
           />
         ))}
@@ -54,7 +57,7 @@ export function GraphicEqModule({ bands, onChange }: Props) {
           type="button"
           className="btn-ghost"
           onClick={() => onChange(defaultEqBands())}
-          disabled={isFlat(bands)}
+          disabled={!active || isFlat(bands)}
         >
           Flat
         </button>
