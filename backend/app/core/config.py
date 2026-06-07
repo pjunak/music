@@ -26,20 +26,18 @@ class Settings(BaseSettings):
     sfx_library_dir: Path = Path("./sfx")
 
     modes_dir: Path = Path("../modes")
-    presets_dir: Path = Path("../presets")
 
     # Operator-curated registry of remembered devices + their audio-output
     # designations. A standalone JSON file (not in app.db) so it survives a
     # reinstall AND an app.db wipe — bind-mount it alongside the data volume.
     devices_file: Path = Path("./devices.json")
 
-    # Read-only seed directories. When `modes_dir` or `presets_dir` is
-    # missing/empty on startup, the contents of the corresponding seed dir
-    # are copied across so a fresh deploy with a blank bind-mount picks up
-    # the bundled defaults. Subsequent boots (where the dirs already have
-    # content) leave the operator's edits alone.
+    # Read-only seed directory. When `modes_dir` is missing/empty on startup,
+    # the seed dir's contents are copied across so a fresh deploy with a blank
+    # bind-mount picks up the bundled defaults. Subsequent boots (where the dir
+    # already has content) leave the operator's edits alone. EQ presets live
+    # under each mode now, so they ride along inside the modes seed.
     modes_seed_dir: Path | None = None
-    presets_seed_dir: Path | None = None
 
     allowed_origins: str = "http://localhost:5173"
     session_cookie_secure: bool = False

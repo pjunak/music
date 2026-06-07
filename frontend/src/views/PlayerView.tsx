@@ -11,9 +11,9 @@ import { useUiStore } from "@/core/uiStore";
 const QUEUE_PREVIEW = 6;
 
 /** Slug → display caption: "deep-forest" → "Deep Forest". The TV is a guest
- *  surface and a mode/scene *name* never reaches it — only the id (the name-
- *  bearing list endpoints are `CurrentUser`-gated) — so we humanise the slug
- *  rather than widen the guest read surface just for a caption. */
+ *  surface and a mode *name* never reaches it — only the id (the name-bearing
+ *  list endpoints are `CurrentUser`-gated) — so we humanise the slug rather
+ *  than widen the guest read surface just for a caption. */
 function humaniseSlug(slug: string): string {
   return slug
     .replace(/[-_]+/g, " ")
@@ -30,10 +30,9 @@ export function PlayerView() {
   const interruptActive = usePlayerStore(
     (s) => (s.state?.interrupt ?? null) !== null,
   );
-  // Mode / scene context for the "what mood is on" caption. Only the *ids*
-  // (slugs) reach a guest tab; humanised for display (see `humaniseSlug`).
+  // Mode context for the "what mood is on" caption. Only the *id* (slug)
+  // reaches a guest tab; humanised for display (see `humaniseSlug`).
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
-  const activeSceneId = usePlayerStore((s) => s.state?.active_scene_id ?? null);
   // Subscribe directly to the array reference (or `undefined` when the WS
   // hasn't sent a snapshot yet). Don't `?? []` inside the selector — that
   // creates a fresh array literal on every render, which makes a downstream
@@ -158,19 +157,11 @@ export function PlayerView() {
             {track.origin ? ` · from ${track.origin}` : ""}
           </p>
 
-          {activeModeId || activeSceneId ? (
+          {activeModeId ? (
             <p className="player-context">
-              {activeModeId ? (
-                <span className="player-context-mode">
-                  🎭 {humaniseSlug(activeModeId)}
-                </span>
-              ) : null}
-              {activeSceneId ? (
-                <span className="muted">
-                  {activeModeId ? " · " : ""}
-                  {humaniseSlug(activeSceneId)} scene
-                </span>
-              ) : null}
+              <span className="player-context-mode">
+                🎭 {humaniseSlug(activeModeId)}
+              </span>
             </p>
           ) : null}
 

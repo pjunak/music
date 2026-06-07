@@ -22,7 +22,6 @@ from app.api import (
     library,
     modes,
     playlists,
-    presets,
     sfx,
     sync,
 )
@@ -33,7 +32,6 @@ from app.library import index as library_index
 from app.models import Base
 from app.models.auth_session import AuthSession
 from app.modes import loader as modes_loader
-from app.presets import loader as presets_loader
 from app.sync import router as sync_router
 from app.sync import state as sync_state
 
@@ -144,11 +142,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     music_dir = settings.music_dir.resolve()
     sfx_dir = settings.sfx_library_dir.resolve()
     modes_dir = settings.modes_dir.resolve()
-    presets_dir = settings.presets_dir.resolve()
     logger.info("MUSIC_DIR=%s", music_dir)
     logger.info("SFX_LIBRARY_DIR=%s", sfx_dir)
     logger.info("MODES_DIR=%s", modes_dir)
-    logger.info("PRESETS_DIR=%s", presets_dir)
     logger.info("DEVICES_FILE=%s", settings.devices_file.resolve())
 
     # Idempotent base-structure init. The lifespan only ever creates
@@ -159,7 +155,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     music_dir.mkdir(parents=True, exist_ok=True)
     sfx_dir.mkdir(parents=True, exist_ok=True)
     _seed_if_empty(modes_dir, settings.modes_seed_dir, "modes")
-    _seed_if_empty(presets_dir, settings.presets_seed_dir, "presets")
 
     if "MUSIC_DIR" not in os.environ:
         logger.warning(
@@ -183,8 +178,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Base.metadata.create_all(bind=engine)
     _apply_additive_columns()
     device_store.load()
-    modes_loader.load_all()
-    presets_loader.load_all()
+    modes_loader.load_all()  # also loads each mode's per-mode EQ presets
     # Walk the music dir on boot so search/tree work immediately. A noop on
     # first deploy when MUSIC_DIR is empty.
     db = SessionLocal()
@@ -248,7 +242,6 @@ def create_app() -> FastAPI:
     app.include_router(library.router)
     app.include_router(modes.router)
     app.include_router(playlists.router)
-    app.include_router(presets.router)
     app.include_router(sfx.router)
     app.include_router(devices.router)
     app.include_router(diagnostics.router)

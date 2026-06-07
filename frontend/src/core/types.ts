@@ -77,7 +77,6 @@ export interface PlayerState {
   device_volumes: Record<string, number>;
   active_soundboard_id: string | null;
   active_preset_ids: string[];
-  active_scene_id: string | null;
   crossfade_ms: number;
   crossfade_type: string;
   ambient: AmbientState;
@@ -150,26 +149,6 @@ export interface SoundboardManifest {
   categories: SoundboardCategory[];
 }
 
-export interface SceneLoopingSfx {
-  soundboard: string;
-  item: string;
-  volume?: number;
-}
-
-export interface SceneSpec {
-  id: string;
-  name: string;
-  description?: string | null;
-  ambient?: { playlist?: string; crossfade_ms?: number } | null;
-  presets?: string[];
-  looping_sfx?: SceneLoopingSfx[];
-  /** Optional master-volume override for the duration of the scene.
-   *  Captured into pre_scene_state so deactivate restores the prior value. */
-  volume?: number | null;
-  // lights, external — opaque from the frontend's perspective for now.
-  [key: string]: unknown;
-}
-
 export interface InterruptSpec {
   name: string;
   playlist?: string | null;
@@ -212,7 +191,6 @@ export interface ModeDetail extends ModeSummary {
   interrupts: InterruptSpec[];
   integrations: { lights?: unknown };
   soundboards: Record<string, SoundboardManifest>;
-  scenes: Record<string, SceneSpec>;
   cues: Record<string, Cue>;
 }
 
@@ -304,9 +282,7 @@ export type WsAction =
       volume?: number;
     }
   | { type: "stop_loop"; id: string }
-  | { type: "fire_cue"; cue_id: string }
-  | { type: "activate_scene"; scene_id: string }
-  | { type: "deactivate_scene" };
+  | { type: "fire_cue"; cue_id: string };
 
 // --- WebSocket events (server → client) ----------------------------------
 
@@ -314,11 +290,4 @@ export type WsMessage =
   | { type: "state_snapshot"; your_device_id: string; state: PlayerState }
   | { type: "state_changed"; state: PlayerState }
   | { type: "sfx_fired"; soundboard_id: string; item_path: string; volume: number }
-  | {
-      type: "scene_activated";
-      scene_id: string;
-      mode_id: string;
-      scene: Record<string, unknown>;
-    }
-  | { type: "scene_deactivated"; scene_id: string; mode_id: string | null }
   | { type: "error"; detail: string };

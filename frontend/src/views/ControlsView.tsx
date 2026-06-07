@@ -12,14 +12,13 @@ import { CuesSection } from "./controls/CuesSection";
 import { InterruptSection } from "./controls/InterruptSection";
 import { LoopsSection } from "./controls/LoopsSection";
 import { PresetsSection } from "./controls/PresetsSection";
-import { ScenesSection } from "./controls/ScenesSection";
 import { SoundboardSection } from "./controls/SoundboardSection";
 import { TransportSection } from "./controls/TransportSection";
 
 /** The Console tab is the DM's *live* workspace. Authoring (creating
- *  playlists, editing modes/scenes/presets, managing files) lives in the
+ *  playlists, editing modes/presets/cues, managing files) lives in the
  *  dedicated tabs. Anything in here should be a thing the DM does mid-
- *  session: fire SFX, switch scenes, fire interrupts, etc.
+ *  session: fire SFX, fire cues, fire interrupts, etc.
  *
  *  Mode picker moved to the header (reachable from any tab); master volume
  *  and the **Speakers** control (which devices output + per-device volume)
@@ -33,10 +32,6 @@ export function ControlsView() {
         <section className="surface-card span-tall">
           <h3>Cues</h3>
           <CuesSection />
-        </section>
-        <section className="surface-card span-tall">
-          <h3>Scenes</h3>
-          <ScenesSection />
         </section>
         <section className="surface-card span-tall">
           <h3>Soundboard</h3>
@@ -70,8 +65,8 @@ export function ControlsView() {
 // --- first-run welcome card -------------------------------------------
 //
 // When the indexed-track count is zero, surface a friendly nudge toward
-// the Library tab. Without this the operator sees an empty Scenes grid /
-// empty Quick-play list and may wonder if something's broken, when really
+// the Library tab. Without this the operator sees an empty Quick-play list /
+// empty soundboard and may wonder if something's broken, when really
 // the answer is "we haven't uploaded anything yet."
 //
 // One-shot fetch on mount; if the count is non-zero the card never
@@ -100,12 +95,12 @@ function FirstRunWelcome() {
     <section className="surface-card first-run-welcome">
       <h2>Welcome — let's get some music in.</h2>
       <p className="muted small">
-        Your library has 0 tracks indexed. Drop audio files into{" "}
-        <strong>Library → Files</strong> and they'll show up in scenes,
-        quick-play playlists, and the soundboard.
+        Your library has 0 tracks indexed. Drop audio files into the{" "}
+        <strong>Library</strong> tab and they'll show up in cues, quick-play
+        playlists, and the soundboard.
       </p>
       <div>
-        <Link to="/library/files" className="btn-link">
+        <Link to="/library" className="btn-link">
           <PlayIcon />
           Go to Library
         </Link>

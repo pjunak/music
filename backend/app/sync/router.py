@@ -33,7 +33,6 @@ from app.sync import state as state_module
 from app.sync.connection import manager
 from app.sync.devices import registry
 from app.sync.protocol import (
-    ActivateSceneAction,
     AmbientClearQueueAction,
     AmbientEnqueueAction,
     AmbientPlayPlaylistAction,
@@ -46,7 +45,6 @@ from app.sync.protocol import (
     AmbientSkipPrevAction,
     AmbientStopAction,
     CancelInterruptAction,
-    DeactivateSceneAction,
     ErrorMessage,
     FireCueAction,
     FireInterruptPlaylistAction,
@@ -59,8 +57,6 @@ from app.sync.protocol import (
     PositionReportAction,
     RegisterAction,
     ResumeAction,
-    SceneActivated,
-    SceneDeactivated,
     SetActiveModeAction,
     SetActiveOutputsAction,
     SetActivePresetsAction,
@@ -138,18 +134,17 @@ async def _resolve_playlist_track_ids(playlist_id: int) -> tuple[list[int] | Non
 async def _resolve_playlist_by_name(
     name: str, mode_id: str
 ) -> tuple[list[int] | None, int | None, str | None]:
-    """Resolve a scene/cue playlist reference (by name) to its track ids and
-    id. Looks for a playlist in the given mode OR a global playlist
-    (mode_id=null) — same scoping as the playlists list endpoint's default.
-    Returns (track_ids, playlist_id, error_detail)."""
-    from sqlalchemy import or_, select
+    """Resolve a cue's playlist reference (by name) to its track ids and id.
+    Playlists are per-mode — only this mode's playlists are searched (no global
+    fallback). Returns (track_ids, playlist_id, error_detail)."""
+    from sqlalchemy import select
 
     def _work() -> tuple[list[int] | None, int | None, str | None]:
         db = SessionLocal()
         try:
             stmt = select(Playlist).where(
                 Playlist.name == name,
-                or_(Playlist.mode_id == mode_id, Playlist.mode_id.is_(None)),
+                Playlist.mode_id == mode_id,
             )
             pl = db.scalars(stmt).first()
             if pl is None:
@@ -389,12 +384,18 @@ async def _h_set_active_soundboard(
 async def _h_set_active_presets(
     action: SetActivePresetsAction, _device_id: str, websocket: WebSocket
 ) -> None:
-    loaded = presets_loader.all_presets()
+    current_state = await state_module.machine.snapshot()
+    mode = (
+        modes_loader.get_mode(current_state.active_mode_id)
+        if current_state.active_mode_id
+        else None
+    )
+    loaded = mode.presets if mode is not None else {}
     unknown = [p for p in action.preset_ids if p not in loaded]
     if unknown:
         await _send_error(websocket, f"unknown preset(s): {unknown}")
         return
-    volume, crossfade_ms = presets_loader.effective_overrides(action.preset_ids)
+    volume, crossfade_ms = presets_loader.effective_overrides(loaded, action.preset_ids)
     await _apply_and_broadcast(
         state_module.set_active_presets(
             action.preset_ids, volume=volume, crossfade_ms=crossfade_ms
@@ -476,93 +477,6 @@ async def _h_cancel_interrupt(
     _a: CancelInterruptAction, _device_id: str, _ws: WebSocket
 ) -> None:
     await _apply_and_broadcast(state_module.cancel_interrupt())
-
-
-# --- scene activation -----------------------------------------------------
-
-
-async def _h_activate_scene(
-    action: ActivateSceneAction, _device_id: str, websocket: WebSocket
-) -> None:
-    current_state = await state_module.machine.snapshot()
-    mode_id = current_state.active_mode_id
-    if mode_id is None:
-        await _send_error(websocket, "no active mode")
-        return
-    mode = modes_loader.get_mode(mode_id)
-    if mode is None or action.scene_id not in mode.scenes:
-        await _send_error(
-            websocket, f"unknown scene '{action.scene_id}' in mode '{mode_id}'"
-        )
-        return
-
-    scene = mode.scenes[action.scene_id]
-
-    # Validate presets are loaded.
-    scene_presets = scene.presets or []
-    loaded = presets_loader.all_presets()
-    unknown = [p for p in scene_presets if p not in loaded]
-    if unknown:
-        await _send_error(
-            websocket, f"scene references unknown preset(s): {unknown}"
-        )
-        return
-
-    # Resolve ambient (optional).
-    ambient_track_ids: list[int] | None = None
-    crossfade_ms: int | None = None
-    if scene.ambient:
-        playlist_name = scene.ambient.get("playlist")
-        if playlist_name:
-            track_ids, _pl_id, err = await _resolve_playlist_by_name(
-                playlist_name, mode_id
-            )
-            if err is not None:
-                await _send_error(websocket, err)
-                return
-            if not track_ids:
-                await _send_error(
-                    websocket, f"playlist '{playlist_name}' resolved to empty"
-                )
-                return
-            ambient_track_ids = track_ids
-        cf = scene.ambient.get("crossfade_ms")
-        if isinstance(cf, int):
-            crossfade_ms = cf
-
-    await _apply_and_broadcast(
-        state_module.activate_scene(
-            action.scene_id,
-            ambient_track_ids=ambient_track_ids,
-            crossfade_ms=crossfade_ms,
-            presets=scene_presets if scene_presets else None,
-            volume=scene.volume,
-        )
-    )
-
-    # Broadcast the full scene definition so audio engine + integrations
-    # can act on looping_sfx / lights / external. Goes to all clients —
-    # any consumer (UI showing the active scene, audio engine starting
-    # loops, future MQTT bridge firing externals) might care.
-    scene_payload = scene.model_dump()
-    scene_payload.pop("id", None)  # already in the event envelope
-    event = SceneActivated(
-        scene_id=action.scene_id, mode_id=mode_id, scene=scene_payload
-    )
-    await manager.broadcast(event.model_dump(mode="json"))
-
-
-async def _h_deactivate_scene(
-    _a: DeactivateSceneAction, _device_id: str, _ws: WebSocket
-) -> None:
-    current_state = await state_module.machine.snapshot()
-    prev_scene_id = current_state.active_scene_id
-    prev_mode_id = current_state.active_mode_id
-    if prev_scene_id is None:
-        return  # noop
-    await _apply_and_broadcast(state_module.deactivate_scene())
-    event = SceneDeactivated(scene_id=prev_scene_id, mode_id=prev_mode_id)
-    await manager.broadcast(event.model_dump(mode="json"))
 
 
 # --- SFX (fire-and-forget) ------------------------------------------------
@@ -655,7 +569,7 @@ async def _h_fire_cue(
 
     # Validate every reference up front so a broken cue fails atomically rather
     # than half-applying.
-    if cue.preset is not None and cue.preset not in presets_loader.all_presets():
+    if cue.preset is not None and cue.preset not in mode.presets:
         await _send_error(websocket, f"cue references unknown preset '{cue.preset}'")
         return
     track_ids: list[int] | None = None
@@ -679,7 +593,9 @@ async def _h_fire_cue(
     # All valid — apply. Preset first (so its crossfade override is in place
     # before the playlist swap reads it), then the playlist, then loops.
     if cue.preset is not None:
-        volume, crossfade_ms = presets_loader.effective_overrides([cue.preset])
+        volume, crossfade_ms = presets_loader.effective_overrides(
+            mode.presets, [cue.preset]
+        )
         await _apply_and_broadcast(
             state_module.set_active_presets(
                 [cue.preset], volume=volume, crossfade_ms=crossfade_ms
@@ -767,8 +683,6 @@ _DISPATCH: dict[type, Any] = {
     InterruptSkipNextAction: _h_interrupt_skip_next,
     InterruptSeekAction: _h_interrupt_seek,
     CancelInterruptAction: _h_cancel_interrupt,
-    ActivateSceneAction: _h_activate_scene,
-    DeactivateSceneAction: _h_deactivate_scene,
     FireSfxAction: _h_fire_sfx,
     StartLoopAction: _h_start_loop,
     StopLoopAction: _h_stop_loop,

@@ -2,31 +2,30 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { CueEditor } from "@/components/CueEditor";
 import { IconButton } from "@/components/IconButton";
-import { TrashIcon } from "@/components/icons";
+import { EditIcon, TrashIcon } from "@/components/icons";
 import { NoModeEmpty } from "@/components/NoModeEmpty";
-import { SoundboardEditor } from "@/components/SoundboardEditor";
 import { modesAdminApi, modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
-import type { ModeDetail, SoundboardManifest } from "@/core/types";
+import type { Cue, ModeDetail } from "@/core/types";
 
-/** Authoring → Soundboards. The active mode's soundboards: list, create,
- *  delete, and edit (categories + items) via the shared SoundboardEditor. */
-export function SoundboardsView() {
+/** Authoring → Cues. Lists the active mode's cues; edit opens the CueEditor. */
+export function CuesView() {
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
-  const [boards, setBoards] = useState<SoundboardManifest[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [cues, setCues] = useState<Cue[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     if (activeModeId === null) {
-      setBoards([]);
+      setCues([]);
       return;
     }
     try {
       const detail: ModeDetail = await modesApi.get(activeModeId);
-      setBoards(Object.values(detail.soundboards));
+      setCues(Object.values(detail.cues));
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
     }
@@ -36,50 +35,50 @@ export function SoundboardsView() {
     void load();
   }, [load]);
 
-  if (activeModeId === null) return <NoModeEmpty kind="Soundboards" />;
+  if (activeModeId === null) return <NoModeEmpty kind="Cues" />;
 
   async function remove(id: string) {
     if (activeModeId === null) return;
     const ok = await confirmDialog({
-      title: `Delete soundboard "${id}"?`,
+      title: `Delete cue "${id}"?`,
       tone: "danger",
       confirmLabel: "Delete",
     });
     if (!ok) return;
     try {
-      await modesAdminApi.deleteSoundboard(activeModeId, id);
-      toast.success("Soundboard deleted");
-      if (selectedId === id) setSelectedId(null);
+      await modesAdminApi.deleteCue(activeModeId, id);
+      toast.success("Cue deleted");
+      if (editingId === id) setEditingId(null);
       await load();
     } catch (e) {
       toast.error("Delete failed", e instanceof Error ? e.message : undefined);
     }
   }
 
-  if (selectedId !== null) {
+  if (editingId !== null) {
     return (
-      <SoundboardEditor
+      <CueEditor
         modeId={activeModeId}
-        soundboardId={selectedId}
+        cueId={editingId}
         breadcrumb={[
           {
-            label: "Soundboards",
+            label: "Cues",
             onClick: () => {
-              setSelectedId(null);
+              setEditingId(null);
               void load();
             },
           },
-          { label: selectedId },
+          { label: editingId },
         ]}
       />
     );
   }
 
   return (
-    <div className="two-pane-view soundboards-view">
+    <div className="two-pane-view cues-view">
       <div className="two-pane-pane">
         <header className="playlists-header">
-          <h2>Soundboards</h2>
+          <h2>Cues</h2>
           <button
             type="button"
             className="btn-primary"
@@ -88,45 +87,46 @@ export function SoundboardsView() {
             {creating ? "Cancel" : "+ New"}
           </button>
         </header>
+        <p className="muted small">
+          A cue is a one-click setup — apply a preset, start a playlist from a
+          song/time, fire SFX, start loops. Fire them from the Console.
+        </p>
         {creating ? (
-          <SoundboardCreateForm
-            existing={new Set(boards.map((b) => b.id))}
+          <CueCreateForm
+            existing={new Set(cues.map((c) => c.id))}
             onCreate={async (id, name) => {
-              await modesAdminApi.createSoundboard(
-                activeModeId,
-                name ? { id, name } : { id },
-              );
+              await modesAdminApi.createCue(activeModeId, { id, name });
               setCreating(false);
               await load();
-              setSelectedId(id);
+              setEditingId(id);
             }}
           />
         ) : null}
         <ul className="playlist-list">
-          {boards.length === 0 ? (
-            <li className="muted small empty">No soundboards in this mode yet.</li>
+          {cues.length === 0 ? (
+            <li className="muted small empty">No cues in this mode yet.</li>
           ) : (
-            boards.map((b) => (
-              <li key={b.id} className="playlist-list-item">
+            cues.map((c) => (
+              <li key={c.id} className="playlist-list-item">
                 <button
                   type="button"
                   className="playlist-list-item-meta btn-ghost"
-                  onClick={() => setSelectedId(b.id)}
+                  onClick={() => setEditingId(c.id)}
                 >
-                  <span className="playlist-name">{b.name || b.id}</span>
-                  <span className="muted small">
-                    {b.categories.reduce((acc, c) => acc + c.items.length, 0)} item
-                    {b.categories.reduce((acc, c) => acc + c.items.length, 0) === 1
-                      ? ""
-                      : "s"}
-                  </span>
+                  <span className="playlist-name">{c.name}</span>
+                  <span className="muted small">id: {c.id}</span>
                 </button>
                 <span className="simple-list-actions">
                   <IconButton
-                    label="Delete soundboard"
+                    label="Edit cue"
+                    icon={<EditIcon />}
+                    onClick={() => setEditingId(c.id)}
+                  />
+                  <IconButton
+                    label="Delete cue"
                     icon={<TrashIcon />}
                     variant="danger"
-                    onClick={() => void remove(b.id)}
+                    onClick={() => void remove(c.id)}
                   />
                 </span>
               </li>
@@ -138,7 +138,7 @@ export function SoundboardsView() {
   );
 }
 
-function SoundboardCreateForm({
+function CueCreateForm({
   existing,
   onCreate,
 }: {
@@ -152,12 +152,12 @@ function SoundboardCreateForm({
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (existing.has(id.trim())) {
-      toast.error("Soundboard id already exists");
+      toast.error("Cue id already exists");
       return;
     }
     setBusy(true);
     try {
-      await onCreate(id.trim(), name.trim());
+      await onCreate(id.trim(), name.trim() || id.trim());
     } catch (err) {
       toast.error("Create failed", err instanceof Error ? err.message : undefined);
     } finally {

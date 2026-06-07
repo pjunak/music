@@ -3,8 +3,7 @@
 The "persistent state worth caring about" (per CLAUDE.md) is:
 
   - `app.db`: auth users, playlists, DB-only metadata (display_title, origin)
-  - `MODES_DIR`: mode bundles (manifests, soundboards, scenes)
-  - `PRESETS_DIR`: audio-effect preset YAMLs
+  - `MODES_DIR`: mode bundles (manifests, soundboards, cues, EQ presets)
   - `DEVICES_FILE`: the remembered-devices list + output designations
 
 Music + SFX libraries are *not* included — they're large media managed out-of-
@@ -84,11 +83,11 @@ def _build_tarball() -> bytes:
             info.mtime = int(now)
             tar.addfile(info, io.BytesIO(data))
 
-        for label, src in (("modes", settings.modes_dir), ("presets", settings.presets_dir)):
-            src = src.resolve()
-            if not src.is_dir():
-                continue
-            tar.add(src, arcname=label, recursive=True)
+        # modes/ carries everything authored now (soundboards, cues, and
+        # per-mode EQ presets), so it's the only YAML tree to back up.
+        modes_src = settings.modes_dir.resolve()
+        if modes_src.is_dir():
+            tar.add(modes_src, arcname="modes", recursive=True)
 
         # The remembered-devices list — a standalone JSON file, included so a
         # restore brings back output designations along with everything else.
@@ -101,8 +100,9 @@ def _build_tarball() -> bytes:
 
 @router.get("/backup")
 def backup(_: CurrentUser) -> StreamingResponse:
-    """Download a tar.gz containing app.db + modes/ + presets/. Restore is
-    a manual operation: stop the server, replace files in place, restart."""
+    """Download a tar.gz containing app.db + modes/ (which now includes
+    per-mode EQ presets) + devices.json. Restore is a manual operation: stop
+    the server, replace files in place, restart."""
     payload = _build_tarball()
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     filename = f"music-backup-{timestamp}.tar.gz"

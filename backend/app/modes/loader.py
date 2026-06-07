@@ -10,12 +10,11 @@ A mode bundle:
           tavern.yaml
           dungeon.yaml
           ...
-        scenes/                # optional — one YAML per scene
-          tavern.yaml
-          ambush.yaml
-          ...
         cues/                  # optional — one YAML per cue
           kraken-fight.yaml
+          ...
+        presets/               # optional — one YAML per EQ preset
+          underwater.yaml
           ...
 
 Modes are validated with Pydantic at load time. Bad files don't crash the
@@ -29,12 +28,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
-from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
+from app.presets.loader import PresetManifest
 
 logger = logging.getLogger(__name__)
 
@@ -73,24 +72,6 @@ class SoundboardManifest(BaseModel):
     id: str
     name: str | None = None
     categories: list[SoundboardCategory] = Field(default_factory=list)
-
-
-class SceneSpec(BaseModel):
-    # Scenes are forward-compatible — unknown fields are preserved so future
-    # integrations (fog, lights, etc.) can add their own without schema churn.
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    name: str
-    description: str | None = None
-    ambient: dict[str, Any] | None = None  # {playlist: str, crossfade_ms: int?}
-    looping_sfx: list[dict[str, Any]] = Field(default_factory=list)
-    lights: dict[str, Any] | None = None
-    external: list[dict[str, Any]] = Field(default_factory=list)
-    presets: list[str] = Field(default_factory=list)
-    # Optional master-volume override for the duration of the scene. Captured
-    # into pre_scene_state so deactivate restores the prior value.
-    volume: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class CueSfx(BaseModel):
@@ -140,8 +121,8 @@ class ModeManifest(BaseModel):
     # Populated at load time, not part of the YAML contract.
     root_dir: Path | None = None
     soundboards: dict[str, SoundboardManifest] = Field(default_factory=dict)
-    scenes: dict[str, SceneSpec] = Field(default_factory=dict)
     cues: dict[str, CueSpec] = Field(default_factory=dict)
+    presets: dict[str, PresetManifest] = Field(default_factory=dict)
 
 
 @dataclass
@@ -190,19 +171,6 @@ def _load_soundboards(mode_dir: Path) -> dict[str, SoundboardManifest]:
     return out
 
 
-def _load_scenes(mode_dir: Path) -> dict[str, SceneSpec]:
-    out: dict[str, SceneSpec] = {}
-    for stem, data in _load_yaml_dir(mode_dir / "scenes"):
-        data.setdefault("id", stem)
-        scene = SceneSpec.model_validate(data)
-        if scene.id != stem:
-            raise ValueError(
-                f"scene id '{scene.id}' does not match filename '{stem}'"
-            )
-        out[scene.id] = scene
-    return out
-
-
 def _load_cues(mode_dir: Path) -> dict[str, CueSpec]:
     out: dict[str, CueSpec] = {}
     for stem, data in _load_yaml_dir(mode_dir / "cues"):
@@ -211,6 +179,21 @@ def _load_cues(mode_dir: Path) -> dict[str, CueSpec]:
         if cue.id != stem:
             raise ValueError(f"cue id '{cue.id}' does not match filename '{stem}'")
         out[cue.id] = cue
+    return out
+
+
+def _load_presets(mode_dir: Path) -> dict[str, PresetManifest]:
+    out: dict[str, PresetManifest] = {}
+    for stem, data in _load_yaml_dir(mode_dir / "presets"):
+        data.setdefault("id", stem)
+        preset = PresetManifest.model_validate(data)
+        if preset.id != stem:
+            raise ValueError(
+                f"preset id '{preset.id}' does not match filename '{stem}'"
+            )
+        for effect in preset.effects:
+            effect.validate_type()
+        out[preset.id] = preset
     return out
 
 
@@ -226,8 +209,8 @@ def _load_one(mode_dir: Path) -> ModeManifest:
         )
     manifest.root_dir = mode_dir.resolve()
     manifest.soundboards = _load_soundboards(mode_dir)
-    manifest.scenes = _load_scenes(mode_dir)
     manifest.cues = _load_cues(mode_dir)
+    manifest.presets = _load_presets(mode_dir)
     if manifest.default_soundboard and manifest.default_soundboard not in manifest.soundboards:
         raise ValueError(
             f"default_soundboard '{manifest.default_soundboard}' not found in soundboards/"

@@ -149,41 +149,12 @@ export function DiagnosticsView() {
                 {Object.keys(serverDx.modes.errors).length}
               </strong>
             </li>
-            <li>
-              <span className="muted small">EQ presets loaded</span>
-              <strong>{serverDx.presets.loaded_ids.length}</strong>
-            </li>
-            <li>
-              <span className="muted small">Preset load errors</span>
-              <strong
-                className={
-                  Object.keys(serverDx.presets.errors).length > 0
-                    ? "danger"
-                    : "ok"
-                }
-              >
-                {Object.keys(serverDx.presets.errors).length}
-              </strong>
-            </li>
           </ul>
           {Object.keys(serverDx.modes.errors).length > 0 ? (
             <details>
               <summary>Mode load errors</summary>
               <ul className="diagnostics-summary">
                 {Object.entries(serverDx.modes.errors).map(([id, err]) => (
-                  <li key={id}>
-                    <span className="muted small">{id}</span>
-                    <code className="error small">{err}</code>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-          {Object.keys(serverDx.presets.errors).length > 0 ? (
-            <details>
-              <summary>Preset load errors</summary>
-              <ul className="diagnostics-summary">
-                {Object.entries(serverDx.presets.errors).map(([id, err]) => (
                   <li key={id}>
                     <span className="muted small">{id}</span>
                     <code className="error small">{err}</code>

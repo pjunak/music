@@ -11,6 +11,7 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import { NoModeEmpty } from "@/components/NoModeEmpty";
 import { TrackBrowser } from "@/components/TrackBrowser";
 import { api, libraryApi, modesApi, playlistsApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
@@ -20,17 +21,20 @@ import type { ModeSummary, PlaylistMeta, Track, TrackInPlaylist } from "@/core/t
 import { wsClient } from "@/core/ws";
 
 export function PlaylistsView() {
+  // Playlists are per-mode now — this tab shows the active mode's only.
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
   const [modes, setModes] = useState<ModeSummary[]>([]);
-  const [filterMode, setFilterMode] = useState<string>("");
   const [playlists, setPlaylists] = useState<PlaylistMeta[]>([]);
   const [selected, setSelected] = useState<PlaylistMeta | null>(null);
   const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
+    if (activeModeId === null) {
+      setPlaylists([]);
+      return;
+    }
     try {
-      const list = await playlistsApi.list(
-        filterMode ? { mode_id: filterMode } : {},
-      );
+      const list = await playlistsApi.list({ mode_id: activeModeId });
       setPlaylists(list);
       // If our selected playlist disappeared, clear selection.
       if (selected !== null && !list.some((p) => p.id === selected.id)) {
@@ -39,8 +43,10 @@ export function PlaylistsView() {
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
     }
-  }, [filterMode, selected]);
+  }, [activeModeId, selected]);
 
+  // The modes list is only needed for the detail editor's "move to another
+  // mode" picker.
   useEffect(() => {
     void modesApi.list().then(setModes).catch(() => undefined);
   }, []);
@@ -48,6 +54,8 @@ export function PlaylistsView() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  if (activeModeId === null) return <NoModeEmpty kind="Playlists" />;
 
   return (
     <div className="two-pane-view playlists-view">
@@ -62,28 +70,10 @@ export function PlaylistsView() {
             + New
           </button>
         </header>
-        <div className="playlists-filter">
-          <label>
-            <span className="muted small">Mode</span>
-            <select
-              value={filterMode}
-              onChange={(e) => setFilterMode(e.target.value)}
-            >
-              <option value="">— all —</option>
-              {modes.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
         <ul className="playlist-list">
           {playlists.length === 0 ? (
             <li className="muted small empty">
-              {filterMode === ""
-                ? "No playlists yet. Click + New to make one."
-                : "No playlists for this mode."}
+              No playlists in this mode yet. Click + New to make one.
             </li>
           ) : (
             playlists.map((p) => {
@@ -99,10 +89,9 @@ export function PlaylistsView() {
                     onClick={() => setSelected(p)}
                   >
                     <span className="playlist-name">{p.name}</span>
-                    <span className="muted small">
-                      {p.category ? `${p.category} · ` : ""}
-                      {p.mode_id ? p.mode_id : "global"}
-                    </span>
+                    {p.category ? (
+                      <span className="muted small">{p.category}</span>
+                    ) : null}
                   </button>
                   <IconButton
                     label="Play this playlist now"
@@ -124,7 +113,7 @@ export function PlaylistsView() {
       <div className="two-pane-pane playlists-detail-pane">
         {creating ? (
           <CreatePlaylistForm
-            modes={modes}
+            modeId={activeModeId}
             onClose={() => setCreating(false)}
             onCreated={async (p) => {
               setCreating(false);
@@ -158,16 +147,15 @@ export function PlaylistsView() {
 // --- create form -------------------------------------------------------
 
 function CreatePlaylistForm({
-  modes,
+  modeId,
   onClose,
   onCreated,
 }: {
-  modes: ModeSummary[];
+  modeId: string;
   onClose: () => void;
   onCreated: (p: PlaylistMeta) => void;
 }) {
   const [name, setName] = useState("");
-  const [modeId, setModeId] = useState<string>("");
   const [category, setCategory] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
@@ -177,7 +165,7 @@ function CreatePlaylistForm({
     try {
       const p = await playlistsApi.create({
         name: name.trim(),
-        mode_id: modeId || null,
+        mode_id: modeId,
         category: category.trim() || null,
       });
       toast.success("Playlist created", p.name);
@@ -200,17 +188,6 @@ function CreatePlaylistForm({
           onChange={(e) => setName(e.target.value)}
           autoFocus
         />
-      </label>
-      <label>
-        <span>Mode (optional)</span>
-        <select value={modeId} onChange={(e) => setModeId(e.target.value)}>
-          <option value="">global</option>
-          {modes.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-            </option>
-          ))}
-        </select>
       </label>
       <label>
         <span>Category (optional)</span>

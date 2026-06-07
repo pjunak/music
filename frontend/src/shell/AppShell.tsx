@@ -15,9 +15,10 @@ import { useSfxHotkeys } from "@/core/useSfxHotkeys";
 import { useUiTransient } from "@/core/uiTransient";
 import { wsClient } from "@/core/ws";
 import { ControlsView } from "@/views/ControlsView";
+import { CuesView } from "@/views/CuesView";
 import { DiagnosticsView } from "@/views/DiagnosticsView";
+import { InterruptsView } from "@/views/InterruptsView";
 import { LibraryView } from "@/views/LibraryView";
-import { ModesView } from "@/views/ModesView";
 import { PlayerView } from "@/views/PlayerView";
 import { PlaylistsView } from "@/views/PlaylistsView";
 import { PresetsView } from "@/views/PresetsView";
@@ -142,9 +143,25 @@ export default function AppShell() {
                   items={[
                     { to: "playlists", label: "Playlists" },
                     { to: "soundboards", label: "Soundboards" },
-                    { to: "modes", label: "Modes" },
-                    { to: "presets", label: "Presets" },
+                    { to: "interrupts", label: "Interrupts" },
+                    { to: "presets", label: "EQ Presets" },
+                    { to: "cues", label: "Cues" },
                   ]}
+                  action={
+                    <button
+                      type="button"
+                      className="btn-ghost section-nav-import"
+                      onClick={() =>
+                        toast.info(
+                          "Import",
+                          "Importing from another mode isn't available yet.",
+                        )
+                      }
+                      title="Import items from another mode (coming soon)"
+                    >
+                      ⬇ Import
+                    </button>
+                  }
                 />
               </Protected>
             }
@@ -152,8 +169,9 @@ export default function AppShell() {
             <Route index element={<Navigate to="playlists" replace />} />
             <Route path="playlists" element={<PlaylistsView />} />
             <Route path="soundboards" element={<SoundboardsView />} />
-            <Route path="modes" element={<ModesView />} />
+            <Route path="interrupts" element={<InterruptsView />} />
             <Route path="presets" element={<PresetsView />} />
+            <Route path="cues" element={<CuesView />} />
           </Route>
           {/* Legacy routes — old top-level paths keep working for bookmarks
               and external links by redirecting into the new IA. */}
@@ -170,9 +188,12 @@ export default function AppShell() {
             path="soundboards"
             element={<Navigate to="/authoring/soundboards" replace />}
           />
+          {/* The Modes sub-tab is gone — mode CRUD moved to the header popup.
+              Old links land on the Authoring default. */}
+          <Route path="modes" element={<Navigate to="/authoring/playlists" replace />} />
           <Route
-            path="modes"
-            element={<Navigate to="/authoring/modes" replace />}
+            path="authoring/modes"
+            element={<Navigate to="/authoring/playlists" replace />}
           />
           <Route
             path="presets"

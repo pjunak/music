@@ -6,8 +6,8 @@ and it plays whatever the DM has going — following play/pause/skip/track chang
 server. No login and no server changes (it connects as a guest; see
 [the protocol guide](../README.md)).
 
-It's a deliberately *dumb* player — ambient music + soundboard SFX, no crossfade/EQ/scene
-effects (those are a browser-engine feature). That's the right trade-off for a
+It's a deliberately *dumb* player — ambient music + soundboard SFX, no crossfade/EQ/effect
+colouring (those are a browser-engine feature). That's the right trade-off for a
 leave-it-on-a-shelf speaker box.
 
 ## Install (Debian/Ubuntu)
@@ -106,7 +106,7 @@ setInterval(refresh, 2000);
 
 ## Want full-fidelity effects on this box instead?
 
-This client plays plain ambient + SFX. If you specifically want crossfades, EQ presets, and
-scene colouring on this output, run a kiosk browser pointed at the player's web app instead of
+This client plays plain ambient + SFX. If you specifically want crossfades and EQ-preset
+colouring on this output, run a kiosk browser pointed at the player's web app instead of
 this client (it's heavier, and not needed just to get music out of the speakers). The headless
 client is the right choice for tiny/always-on appliances.

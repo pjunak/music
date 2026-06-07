@@ -9,10 +9,10 @@ interface TabDef {
 
 /** Top-level authed tabs. Four groups:
  *
- *    Console   — the DM's live workspace (scenes, soundboard, transport).
- *    Library   — file management + tag editing (Files / Tags sub-tabs).
- *    Authoring — everything you set up before a session
- *                (Playlists / Soundboards / Modes / Presets sub-tabs).
+ *    Console   — the DM's live workspace (cues, soundboard, transport).
+ *    Library   — file management + tag editing (one screen).
+ *    Authoring — everything you set up before a session (Playlists /
+ *                Soundboards / Interrupts / EQ Presets / Cues sub-tabs).
  *    Settings  — preferences, sessions, backup, diagnostics link.
  *
  *  The TV (`/` index) is intentionally not in this list — it's the

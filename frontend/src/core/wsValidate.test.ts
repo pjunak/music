@@ -77,14 +77,4 @@ describe("validateWsMessage", () => {
       }),
     ).toBeNull();
   });
-
-  it("accepts scene_deactivated with mode_id null", () => {
-    expect(
-      validateWsMessage({
-        type: "scene_deactivated",
-        scene_id: "ambush",
-        mode_id: null,
-      }),
-    ).not.toBeNull();
-  });
 });

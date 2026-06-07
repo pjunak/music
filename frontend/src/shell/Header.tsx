@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { DeviceNameField } from "@/components/DeviceNameField";
 import { HelpIcon } from "@/components/icons";
@@ -9,12 +9,12 @@ import type { ModeSummary } from "@/core/types";
 import { useUiTransient } from "@/core/uiTransient";
 import { wsClient } from "@/core/ws";
 
+import { ModeManagerModal } from "./ModeManagerModal";
 import { Tabs } from "./Tabs";
 
 export function Header() {
   const wsStatus = usePlayerStore((s) => s.wsStatus);
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
-  const activeSceneId = usePlayerStore((s) => s.state?.active_scene_id ?? null);
   const authStatus = useAuthStore((s) => s.status);
   const isGuest = authStatus !== "authenticated";
   // Only offer "Sign in" once we *know* the viewer is anonymous — during the
@@ -23,7 +23,8 @@ export function Header() {
   const isAnonymous = authStatus === "anonymous";
 
   const [modes, setModes] = useState<ModeSummary[]>([]);
-  useEffect(() => {
+  const [modeMgrOpen, setModeMgrOpen] = useState(false);
+  const refreshModes = useCallback(() => {
     // /api/modes requires auth; guests will 401 — silently skip.
     if (isGuest) {
       setModes([]);
@@ -31,6 +32,9 @@ export function Header() {
     }
     modesApi.list().then(setModes).catch(() => setModes([]));
   }, [isGuest]);
+  useEffect(() => {
+    refreshModes();
+  }, [refreshModes]);
 
   const openShortcutSheet = useUiTransient((s) => s.setShortcutSheetOpen);
   const setLoginOpen = useUiTransient((s) => s.setLoginOpen);
@@ -60,12 +64,11 @@ export function Header() {
       {isGuest ? <span className="tabs-placeholder" /> : <Tabs />}
       <div className="app-header-right">
         {/* Mode picker: lives in the header so it's reachable from any
-            tab without jumping to Console. Read-only scene name follows
-            (scenes are picked from the Console's Scenes card). Authed-only
-            because /api/modes 401s for guests; guests never need to pick a
-            mode anyway since they're on the read-only TV view. */}
+            tab without jumping to Console. Authed-only because /api/modes
+            401s for guests; guests never need to pick a mode anyway since
+            they're on the read-only TV view. */}
         {!isGuest ? (
-          <label className="header-mode-picker" title="Active mode">
+          <div className="header-mode-picker" title="Active mode">
             <span className="muted small">mode</span>
             <select
               value={activeModeId ?? ""}
@@ -79,13 +82,16 @@ export function Header() {
                 </option>
               ))}
             </select>
-            {activeSceneId !== null ? (
-              <span className="header-scene-label" title="Active scene">
-                <span className="muted small">· scene</span>
-                <strong>{activeSceneId}</strong>
-              </span>
-            ) : null}
-          </label>
+            <button
+              type="button"
+              className="btn-ghost header-mode-manage"
+              onClick={() => setModeMgrOpen(true)}
+              title="Manage modes (create / rename / delete)"
+              aria-label="Manage modes"
+            >
+              ⚙
+            </button>
+          </div>
         ) : null}
         <button
           type="button"
@@ -106,6 +112,15 @@ export function Header() {
           </button>
         ) : null}
       </div>
+      {!isGuest ? (
+        <ModeManagerModal
+          open={modeMgrOpen}
+          onClose={() => setModeMgrOpen(false)}
+          modes={modes}
+          activeModeId={activeModeId}
+          onChanged={refreshModes}
+        />
+      ) : null}
     </header>
   );
 }

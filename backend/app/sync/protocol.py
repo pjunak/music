@@ -206,15 +206,6 @@ class StopLoopAction(_Action):
     id: str = Field(min_length=1, max_length=64)
 
 
-class ActivateSceneAction(_Action):
-    type: Literal["activate_scene"]
-    scene_id: str = Field(min_length=1, max_length=128)
-
-
-class DeactivateSceneAction(_Action):
-    type: Literal["deactivate_scene"]
-
-
 class FireCueAction(_Action):
     """Fire a saved cue from the active mode: apply its preset, start its
     playlist (from a song + timestamp), fire one-shot SFX, and start loops."""
@@ -254,8 +245,6 @@ Action = Annotated[
     | FireSfxAction
     | StartLoopAction
     | StopLoopAction
-    | ActivateSceneAction
-    | DeactivateSceneAction
     | FireCueAction,
     Field(discriminator="type"),
 ]
@@ -313,7 +302,7 @@ class AmbientState(BaseModel):
     # The playlist this lane was started from, so the Console can show which
     # quick-play playlist is "now driving". Set by `ambient_play_playlist`,
     # cleared whenever the queue is replaced from another source (play a single
-    # track, set the queue explicitly, stop, scene ambient). Skips/seek keep it.
+    # track, set the queue explicitly, stop). Skips/seek keep it.
     source_playlist_id: int | None = None
 
 
@@ -338,19 +327,6 @@ class InterruptState(BaseModel):
     fade_in_ms: int = 0
     fade_out_ms: int = 0
     duck_to: float | None = Field(None, ge=0.0, le=1.0)
-
-
-class ScenePreviousState(BaseModel):
-    """Snapshot of the fields a scene activation overwrote, captured so
-    `deactivate_scene` can restore them. Only populated for fields the
-    scene actually changed — a scene with no `ambient` block leaves
-    `ambient` here as None and ambient state is left alone on deactivate.
-    """
-
-    ambient: AmbientState | None = None
-    crossfade_ms: int | None = None
-    active_preset_ids: list[str] | None = None
-    volume: float | None = None
 
 
 class LoopingSfx(BaseModel):
@@ -384,9 +360,6 @@ class PlayerState(BaseModel):
 
     crossfade_ms: int = 0
     crossfade_type: str = "linear"
-
-    active_scene_id: str | None = None
-    pre_scene_state: ScenePreviousState | None = None
 
     ambient: AmbientState = Field(default_factory=AmbientState)
     interrupt: InterruptState | None = None
@@ -425,30 +398,6 @@ class SfxFired(BaseModel):
     soundboard_id: str
     item_path: str
     volume: float = 1.0
-
-
-class SceneActivated(BaseModel):
-    """A scene was just activated. Carries the full scene definition so each
-    listener (audio engine, lights bridge, MQTT integration) can act on the
-    fields it cares about. Broadcast to all clients — recipients ignore
-    fields they don't handle."""
-
-    type: Literal["scene_activated"] = "scene_activated"
-    scene_id: str
-    mode_id: str
-    scene: dict  # full scene manifest contents
-
-
-class SceneDeactivated(BaseModel):
-    """A previously-active scene ended. Listeners should stop any side
-    effects they started for that scene (looping SFX, persistent lights,
-    etc.). PlayerState fields the scene overwrote (ambient / crossfade_ms /
-    active_preset_ids) are auto-reverted server-side via `pre_scene_state`
-    and reach clients in the accompanying `state_changed`."""
-
-    type: Literal["scene_deactivated"] = "scene_deactivated"
-    scene_id: str
-    mode_id: str | None
 
 
 class ErrorMessage(BaseModel):

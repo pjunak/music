@@ -55,7 +55,7 @@ export function CueEditor({ modeId, cueId, breadcrumb }: Props) {
 
   useEffect(() => {
     void presetsApi
-      .list()
+      .list(modeId)
       .then(setPresets)
       .catch(() => setPresets([]));
     void playlistsApi
@@ -68,7 +68,7 @@ export function CueEditor({ modeId, cueId, breadcrumb }: Props) {
 
   if (error !== null) {
     return (
-      <div className="scene-editor-empty">
+      <div className="cue-editor-empty">
         <Breadcrumb items={breadcrumb} />
         <p className="error small">{error}</p>
       </div>
@@ -76,7 +76,7 @@ export function CueEditor({ modeId, cueId, breadcrumb }: Props) {
   }
   if (cue === null) {
     return (
-      <div className="scene-editor-empty">
+      <div className="cue-editor-empty">
         <Breadcrumb items={breadcrumb} />
         <p className="muted small">Loading…</p>
       </div>
@@ -185,7 +185,7 @@ function CueEditorForm({
   }
 
   return (
-    <form onSubmit={submit} className="scene-editor cue-editor">
+    <form onSubmit={submit} className="cue-editor">
       <Breadcrumb items={breadcrumb} />
       <header className="playlist-detail-header">
         <div>
@@ -417,9 +417,9 @@ function CueEditorForm({
   );
 }
 
-/** Cascading soundboard → item picker. Mirrors SceneEditor's row: text
- *  fallback when the referenced soundboard/item isn't in the loaded mode so a
- *  hand-edited cue isn't silently blanked. */
+/** Cascading soundboard → item picker. Text fallback when the referenced
+ *  soundboard/item isn't in the loaded mode so a hand-edited cue isn't
+ *  silently blanked. */
 function SfxItemPicker({
   soundboard,
   item,

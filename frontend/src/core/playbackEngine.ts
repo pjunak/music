@@ -13,7 +13,7 @@
  *
  * Ambient audio is routed through a single `AudioContext` graph so active
  * preset effects can be applied. Interrupts and SFX bypass the chain — the
- * intent is "scene effects colour the background music; alerts and stings
+ * intent is "preset effects colour the background music; alerts and stings
  * play clean".
  *
  * The biggest risk with Web Audio is the autoplay-blocked failure mode: an

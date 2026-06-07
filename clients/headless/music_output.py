@@ -18,8 +18,8 @@ What it does:
     now-playing) so another device on the LAN — e.g. a dnd-table control panel
     — can drive it without any server credential.
 
-It is deliberately a *dumb* player: ambient + SFX only, no crossfade/EQ/scene
-effects (those live in the browser engine). That is the right trade-off for a
+It is deliberately a *dumb* player: ambient + SFX only, no crossfade/EQ/effect
+colouring (those live in the browser engine). That is the right trade-off for a
 leave-it-on-a-shelf appliance.
 
 Config is via environment variables (or the matching CLI flags):

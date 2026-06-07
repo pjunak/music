@@ -3,20 +3,25 @@ import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
-import { usePlayerArray } from "@/core/playerStore";
+import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { wsClient } from "@/core/ws";
 
 export function PresetsSection() {
   // Stable selector via the helper — never mints a fresh [] when state is null
   // (which would loop useSyncExternalStore to React #185 on a cold load).
   const activeIds = usePlayerArray((s) => s.state?.active_preset_ids);
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
   const [presets, setPresets] = useState<PresetManifest[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (activeModeId === null) {
+      setPresets([]);
+      return;
+    }
     let cancelled = false;
     void presetsApi
-      .list()
+      .list(activeModeId)
       .then((p) => {
         if (!cancelled) setPresets(p);
       })
@@ -27,7 +32,7 @@ export function PresetsSection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeModeId]);
 
   function toggle(id: string) {
     const next = activeIds.includes(id)

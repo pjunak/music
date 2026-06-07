@@ -6,8 +6,6 @@ import type {
   ModeDetail,
   ModeSummary,
   PlaylistMeta,
-  SceneLoopingSfx,
-  SceneSpec,
   Track,
   TrackInPlaylist,
   TreeResponse,
@@ -110,13 +108,17 @@ export interface PresetManifest {
   description?: string | null;
   effects: PresetEffect[];
   /** Optional overrides applied when the preset is activated (null = leave
-   *  the global alone). Folded in from the old Scene concept. */
+   *  the global alone). */
   volume?: number | null;
   crossfade_ms?: number | null;
 }
 
 export const presetsApi = {
-  list: () => api.get<PresetManifest[]>("/api/presets"),
+  // Presets are per-mode now — list the given mode's EQ presets.
+  list: (modeId: string) =>
+    api.get<PresetManifest[]>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets`,
+    ),
 };
 
 export const devicesApi = {
@@ -433,6 +435,8 @@ export const sfxApi = {
 export const modesAdminApi = {
   create: (id: string, name: string) =>
     api.post<ModeSummary>("/api/modes", { id, name }),
+  rename: (id: string, name: string) =>
+    api.patch<ModeSummary>(`/api/modes/${encodeURIComponent(id)}`, { name }),
   delete: (id: string) =>
     api.delete<void>(`/api/modes/${encodeURIComponent(id)}`),
   reload: () =>
@@ -448,37 +452,6 @@ export const modesAdminApi = {
     api.delete<void>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}`,
     ),
-  createScene: (
-    modeId: string,
-    payload: { id: string; name: string; description?: string },
-  ) =>
-    api.post<unknown>(
-      `/api/modes/${encodeURIComponent(modeId)}/scenes`,
-      payload,
-    ),
-  deleteScene: (modeId: string, sceneId: string) =>
-    api.delete<void>(
-      `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
-    ),
-  updateScene: (
-    modeId: string,
-    sceneId: string,
-    payload: {
-      name?: string;
-      description?: string;
-      ambient?: { playlist?: string; crossfade_ms?: number };
-      clear_ambient?: boolean;
-      presets?: string[];
-      looping_sfx?: SceneLoopingSfx[];
-      volume?: number;
-      clear_volume?: boolean;
-    },
-  ) =>
-    api.patch<SceneSpec>(
-      `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
-      payload,
-    ),
-
   // Soundboard editor — categories + items inside an existing soundboard.
   // Each call returns the updated SoundboardManifest so the UI can re-render
   // without a separate fetch.
@@ -588,30 +561,41 @@ export const modesAdminApi = {
 
 // --- presets scaffolding -----------------------------------------------
 
+// EQ presets are per-mode now — CRUD lives under the modes API.
 export const presetsAdminApi = {
-  create: (payload: {
-    id: string;
-    name: string;
-    description?: string;
-    effects: PresetEffect[];
-    volume?: number | null;
-    crossfade_ms?: number | null;
-  }) => api.post<PresetManifest>("/api/presets", payload),
-  update: (
-    id: string,
+  create: (
+    modeId: string,
     payload: {
-      name?: string;
+      id: string;
+      name: string;
+      description?: string;
+      effects: PresetEffect[];
+      volume?: number | null;
+      crossfade_ms?: number | null;
+    },
+  ) =>
+    api.post<PresetManifest>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets`,
+      payload,
+    ),
+  update: (
+    modeId: string,
+    presetId: string,
+    payload: {
+      name: string;
       description?: string;
       effects?: PresetEffect[];
       volume?: number | null;
       crossfade_ms?: number | null;
     },
-  ) => api.put<PresetManifest>(`/api/presets/${encodeURIComponent(id)}`, payload),
-  delete: (id: string) =>
-    api.delete<void>(`/api/presets/${encodeURIComponent(id)}`),
-  reload: () =>
-    api.post<{ loaded: string[]; errors: Record<string, string> }>(
-      "/api/presets/reload",
+  ) =>
+    api.put<PresetManifest>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets/${encodeURIComponent(presetId)}`,
+      payload,
+    ),
+  delete: (modeId: string, presetId: string) =>
+    api.delete<void>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets/${encodeURIComponent(presetId)}`,
     ),
 };
 
@@ -629,7 +613,6 @@ export interface DiagnosticsResponse {
   track_count: number;
   last_scan_at: number | null;
   modes: LoaderStatus;
-  presets: LoaderStatus;
   connected_device_count: number;
   state_revision: number;
 }

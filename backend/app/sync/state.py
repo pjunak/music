@@ -29,7 +29,6 @@ from app.sync.protocol import (
     LoopMode,
     PlayerState,
     PositionReport,
-    ScenePreviousState,
     ShuffleMode,
 )
 
@@ -123,7 +122,7 @@ class StateMachine:
 
 
 def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
-    """Drop references inside `raw` to tracks / modes / presets / scenes /
+    """Drop references inside `raw` to tracks / modes / presets /
     soundboards that no longer exist. Returns a new dict; caller decides
     whether to persist it.
 
@@ -134,14 +133,12 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
       - `active_mode_id`: cleared if the mode is no longer loaded.
       - `active_soundboard_id`: cleared if no active mode or soundboard
         isn't part of it.
-      - `active_scene_id`: same scoping rule.
-      - `active_preset_ids`: filtered to only loaded presets.
+      - `active_preset_ids`: filtered to only the active mode's presets.
       - `active_output_device_ids`: cleared. Device ids are per-WS-connection
         and a server restart wipes them all; auto-claim re-establishes.
     """
     from app.models.track import Track  # local to keep cyclic-import risk down
     from app.modes import loader as modes_loader
-    from app.presets import loader as presets_loader
 
     out = dict(raw)
 
@@ -187,39 +184,14 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
     ):
         out["active_soundboard_id"] = None
 
-    active_scene_id = out.get("active_scene_id")
-    if active_scene_id is not None and (
-        active_mode is None or active_scene_id not in active_mode.scenes
-    ):
-        out["active_scene_id"] = None
-
-    loaded_presets = presets_loader.all_presets()
+    # Presets are per-mode now, so filter active ids against the active mode's
+    # presets (none survive when no mode is active).
+    loaded_presets = active_mode.presets if active_mode is not None else {}
     active_preset_ids = out.get("active_preset_ids") or []
     if isinstance(active_preset_ids, list):
         out["active_preset_ids"] = [
             p for p in active_preset_ids if isinstance(p, str) and p in loaded_presets
         ]
-
-    # Snapshot captured at scene activation — same dangling-ref hazards as the
-    # live ambient/preset fields, so prune in lockstep.
-    pre_scene = out.get("pre_scene_state")
-    if isinstance(pre_scene, dict):
-        snap = dict(pre_scene)
-        snap_ambient = snap.get("ambient")
-        if isinstance(snap_ambient, dict):
-            snap_ambient = dict(snap_ambient)
-            snap_ambient["current_track_id"] = _filter_track_id(
-                snap_ambient.get("current_track_id")
-            )
-            snap_ambient["queue"] = _filter_track_list(snap_ambient.get("queue"))
-            snap_ambient["history"] = _filter_track_list(snap_ambient.get("history"))
-            snap["ambient"] = snap_ambient
-        snap_presets = snap.get("active_preset_ids")
-        if isinstance(snap_presets, list):
-            snap["active_preset_ids"] = [
-                p for p in snap_presets if isinstance(p, str) and p in loaded_presets
-            ]
-        out["pre_scene_state"] = snap
 
     # Wipe active outputs on boot. Activation is fully manual — there is no
     # auto-claim and no auto-resume across a restart. The persistent output
@@ -278,7 +250,16 @@ def set_active_mode(mode_id: str | None) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if state.active_mode_id == mode_id:
             return state
-        return state.model_copy(update={"active_mode_id": mode_id})
+        # Presets + soundboard are per-mode — switching modes clears them so
+        # stale ids from the previous mode don't linger (they'd no longer
+        # resolve). Ambient/queue keep playing across the switch.
+        return state.model_copy(
+            update={
+                "active_mode_id": mode_id,
+                "active_preset_ids": [],
+                "active_soundboard_id": None,
+            }
+        )
 
     return _mut
 
@@ -769,88 +750,3 @@ def cancel_interrupt() -> Any:
     return _mut
 
 
-# --- Scene composition mutators -------------------------------------------
-
-
-def activate_scene(
-    scene_id: str,
-    *,
-    ambient_track_ids: list[int] | None,
-    crossfade_ms: int | None,
-    presets: list[str] | None,
-    volume: float | None = None,
-) -> Any:
-    """Composite mutator. Applies whichever of ambient/crossfade/presets/volume
-    the scene defined, plus stamps active_scene_id, in a single update so
-    clients see one state_changed broadcast for the whole transition.
-
-    Captures the prior values of any field the scene overwrites into
-    `pre_scene_state` so `deactivate_scene` can restore them. If a scene
-    is already active when this fires, the existing snapshot is preserved
-    - deactivating then unwinds back to the *first* scene's pre-state,
-    not the intermediate one."""
-
-    def _mut(state: PlayerState) -> PlayerState:
-        update: dict = {"active_scene_id": scene_id}
-
-        snapshot_kwargs: dict = {}
-        if presets is not None:
-            deduped: list[str] = []
-            for p in presets:
-                if p not in deduped:
-                    deduped.append(p)
-            update["active_preset_ids"] = deduped
-            snapshot_kwargs["active_preset_ids"] = list(state.active_preset_ids)
-
-        if crossfade_ms is not None:
-            update["crossfade_ms"] = crossfade_ms
-            snapshot_kwargs["crossfade_ms"] = state.crossfade_ms
-
-        if volume is not None:
-            update["volume"] = volume
-            snapshot_kwargs["volume"] = state.volume
-
-        if ambient_track_ids:
-            new_ambient = AmbientState(
-                current_track_id=ambient_track_ids[0],
-                queue=list(ambient_track_ids[1:]),
-                history=[],
-                position_ms=0,
-                loop=state.ambient.loop,
-            )
-            update["ambient"] = new_ambient
-            update["is_playing"] = True
-            snapshot_kwargs["ambient"] = state.ambient.model_copy(deep=True)
-
-        # Preserve any existing snapshot when transitioning between scenes
-        # so deactivate always returns to the original pre-scene state.
-        if state.pre_scene_state is None and snapshot_kwargs:
-            update["pre_scene_state"] = ScenePreviousState(**snapshot_kwargs)
-
-        return state.model_copy(update=update)
-
-    return _mut
-
-
-def deactivate_scene() -> Any:
-    """Clear active_scene_id and restore any pre-scene values captured at
-    activation time. Fields the scene didn't change (snapshot value None)
-    are left as-is."""
-
-    def _mut(state: PlayerState) -> PlayerState:
-        if state.active_scene_id is None and state.pre_scene_state is None:
-            return state
-        update: dict = {"active_scene_id": None, "pre_scene_state": None}
-        snap = state.pre_scene_state
-        if snap is not None:
-            if snap.active_preset_ids is not None:
-                update["active_preset_ids"] = list(snap.active_preset_ids)
-            if snap.crossfade_ms is not None:
-                update["crossfade_ms"] = snap.crossfade_ms
-            if snap.volume is not None:
-                update["volume"] = snap.volume
-            if snap.ambient is not None:
-                update["ambient"] = snap.ambient.model_copy(deep=True)
-        return state.model_copy(update=update)
-
-    return _mut

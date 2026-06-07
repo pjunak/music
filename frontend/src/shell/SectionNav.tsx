@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 interface SubTab {
@@ -13,13 +14,15 @@ interface Props {
    *  (e.g. "Library sections") so screen readers can announce context. */
   ariaLabel: string;
   items: SubTab[];
+  /** Optional right-aligned action(s) in the strip (e.g. an Import button). */
+  action?: ReactNode;
 }
 
 /** Sub-tab strip + outlet, used by the top-level Library and Authoring
  *  routes. The parent route renders this; its child routes get rendered
  *  into the outlet. Keeps the IA grouped without flattening every concern
  *  into the top-level tab strip. */
-export function SectionNav({ ariaLabel, items }: Props) {
+export function SectionNav({ ariaLabel, items, action }: Props) {
   return (
     <div className="section-nav-shell">
       <nav className="section-nav" aria-label={ariaLabel}>
@@ -35,6 +38,7 @@ export function SectionNav({ ariaLabel, items }: Props) {
             {t.label}
           </NavLink>
         ))}
+        {action ? <span className="section-nav-action">{action}</span> : null}
       </nav>
       <div className="section-nav-body">
         <Outlet />

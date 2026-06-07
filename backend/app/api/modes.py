@@ -15,9 +15,9 @@ from app.modes.loader import (
     IntegrationsSpec,
     InterruptSpec,
     ModeManifest,
-    SceneSpec,
     SoundboardManifest,
 )
+from app.presets.loader import SUPPORTED_EFFECT_TYPES, PresetManifest
 from app.sync import commit_and_broadcast
 from app.sync import state as sync_state
 
@@ -70,8 +70,8 @@ class ModeDetail(ModeSummary):
     interrupts: list[InterruptSpec]
     integrations: IntegrationsSpec
     soundboards: dict[str, SoundboardManifest]
-    scenes: dict[str, SceneSpec]
     cues: dict[str, CueSpec]
+    presets: dict[str, PresetManifest]
 
 
 class ActiveMode(BaseModel):
@@ -95,12 +95,6 @@ class CreateModeRequest(BaseModel):
 class CreateSoundboardRequest(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     name: str | None = Field(None, max_length=128)
-
-
-class CreateSceneRequest(BaseModel):
-    id: str = Field(min_length=1, max_length=64)
-    name: str = Field(min_length=1, max_length=128)
-    description: str | None = None
 
 
 class AddCategoryRequest(BaseModel):
@@ -186,9 +180,19 @@ def get_mode(mode_id: str, _: CurrentUser) -> ModeDetail:
         interrupts=manifest.interrupts,
         integrations=manifest.integrations,
         soundboards=manifest.soundboards,
-        scenes=manifest.scenes,
         cues=manifest.cues,
+        presets=manifest.presets,
     )
+
+
+@router.get("/{mode_id}/presets", response_model=list[PresetManifest])
+def list_mode_presets(mode_id: str, _: CurrentUser) -> list[PresetManifest]:
+    manifest = modes_loader.get_mode(mode_id)
+    if manifest is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="mode not loaded"
+        )
+    return list(manifest.presets.values())
 
 
 @router.get("/{mode_id}/theme.css")
@@ -231,8 +235,8 @@ def create_mode(payload: CreateModeRequest, _: CurrentUser) -> ModeSummary:
     mode_dir.mkdir(parents=True, exist_ok=False)
     _write_yaml(mode_dir / "manifest.yaml", manifest)
     (mode_dir / "soundboards").mkdir(exist_ok=True)
-    (mode_dir / "scenes").mkdir(exist_ok=True)
     (mode_dir / "cues").mkdir(exist_ok=True)
+    (mode_dir / "presets").mkdir(exist_ok=True)
 
     modes_loader.load_all()
     return _summary(modes_loader.get_mode(payload.id))  # type: ignore[arg-type]
@@ -257,6 +261,22 @@ def delete_mode(mode_id: str, _: CurrentUser) -> None:
             ),
         ) from e
     modes_loader.load_all()
+
+
+class RenameModeRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
+@router.patch("/{mode_id}", response_model=ModeSummary)
+def rename_mode(
+    mode_id: str, payload: RenameModeRequest, _: CurrentUser
+) -> ModeSummary:
+    """Rename a mode's display name (the on-disk slug/id is unchanged, so no
+    references need rewiring)."""
+    path, manifest = _load_manifest_yaml(mode_id)
+    manifest["name"] = payload.name
+    reloaded = _save_manifest_yaml(path, manifest, mode_id)
+    return _summary(reloaded)
 
 
 @router.post(
@@ -305,172 +325,6 @@ def delete_soundboard(mode_id: str, soundboard_id: str, _: CurrentUser) -> None:
         )
     sb_path.unlink()
     modes_loader.load_all()
-
-
-@router.post(
-    "/{mode_id}/scenes",
-    response_model=SceneSpec,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_scene(
-    mode_id: str, payload: CreateSceneRequest, _: CurrentUser
-) -> SceneSpec:
-    _validate_slug(payload.id, "scene")
-    mode_dir = _mode_dir_or_404(mode_id)
-    scene_path = mode_dir / "scenes" / f"{payload.id}.yaml"
-    if scene_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"scene '{payload.id}' already exists in mode '{mode_id}'",
-        )
-    yaml_payload: dict = {"id": payload.id, "name": payload.name}
-    if payload.description is not None:
-        yaml_payload["description"] = payload.description
-    _write_yaml(scene_path, yaml_payload)
-
-    modes_loader.load_all()
-    manifest = modes_loader.get_mode(mode_id)
-    if manifest is None or payload.id not in manifest.scenes:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="scene scaffolded but failed to reload",
-        )
-    return manifest.scenes[payload.id]
-
-
-@router.delete(
-    "/{mode_id}/scenes/{scene_id}", status_code=status.HTTP_204_NO_CONTENT
-)
-def delete_scene(mode_id: str, scene_id: str, _: CurrentUser) -> None:
-    _validate_slug(scene_id, "scene")
-    mode_dir = _mode_dir_or_404(mode_id)
-    scene_path = mode_dir / "scenes" / f"{scene_id}.yaml"
-    if not scene_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"scene '{scene_id}' not found",
-        )
-    scene_path.unlink()
-    modes_loader.load_all()
-
-
-# --- scene contents editing ----------------------------------------------
-
-
-class SceneAmbientUpdate(BaseModel):
-    """Just the ambient block. Empty/None clears it."""
-
-    playlist: str | None = Field(None, max_length=256)
-    crossfade_ms: int | None = Field(None, ge=0, le=30000)
-
-
-class SceneLoopingSfx(BaseModel):
-    soundboard: str = Field(min_length=1, max_length=128)
-    item: str = Field(min_length=1, max_length=512)
-    volume: float | None = Field(None, ge=0.0, le=1.0)
-
-
-class SceneUpdate(BaseModel):
-    """Fields to overwrite on a scene's YAML. Anything left unset is
-    preserved; passing an explicit `null` (where allowed) clears the field."""
-
-    name: str | None = Field(None, min_length=1, max_length=128)
-    description: str | None = None
-    ambient: SceneAmbientUpdate | None = None
-    clear_ambient: bool = Field(
-        False,
-        description="When true, removes the ambient block entirely. Takes precedence over `ambient`.",
-    )
-    presets: list[str] | None = Field(None, max_length=32)
-    looping_sfx: list[SceneLoopingSfx] | None = None
-    volume: float | None = Field(None, ge=0.0, le=1.0)
-    clear_volume: bool = Field(
-        False,
-        description="When true, removes the volume override. Takes precedence over `volume`.",
-    )
-
-
-def _load_scene_yaml(mode_id: str, scene_id: str) -> tuple[Path, dict]:
-    mode_dir = _mode_dir_or_404(mode_id)
-    scene_path = mode_dir / "scenes" / f"{scene_id}.yaml"
-    if not scene_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"scene '{scene_id}' not found in mode '{mode_id}'",
-        )
-    raw = yaml.safe_load(scene_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"scene '{scene_id}' YAML is not a mapping",
-        )
-    raw.setdefault("id", scene_id)
-    return (scene_path, raw)
-
-
-def _save_scene_yaml(path: Path, payload: dict, mode_id: str, scene_id: str) -> SceneSpec:
-    _write_yaml(path, payload)
-    modes_loader.load_all()
-    manifest = modes_loader.get_mode(mode_id)
-    if manifest is None or scene_id not in manifest.scenes:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="scene saved but failed to reload",
-        )
-    return manifest.scenes[scene_id]
-
-
-@router.patch(
-    "/{mode_id}/scenes/{scene_id}",
-    response_model=SceneSpec,
-)
-def update_scene(
-    mode_id: str,
-    scene_id: str,
-    payload: SceneUpdate,
-    _: CurrentUser,
-) -> SceneSpec:
-    _validate_slug(scene_id, "scene")
-    path, scene = _load_scene_yaml(mode_id, scene_id)
-
-    fields = payload.model_dump(exclude_unset=True)
-    if "name" in fields and fields["name"] is not None:
-        scene["name"] = fields["name"]
-    if "description" in fields:
-        if fields["description"]:
-            scene["description"] = fields["description"]
-        else:
-            scene.pop("description", None)
-    if payload.clear_ambient:
-        scene.pop("ambient", None)
-    elif "ambient" in fields and payload.ambient is not None:
-        amb_payload = payload.ambient.model_dump(exclude_none=True)
-        if amb_payload:
-            scene["ambient"] = amb_payload
-        else:
-            # Both fields None — caller probably meant clear_ambient. Honour
-            # the literal request: empty dict means "ambient block exists
-            # but has nothing in it", which is functionally equivalent to
-            # absent. Drop it to keep YAML tidy.
-            scene.pop("ambient", None)
-    if "presets" in fields:
-        if payload.presets:
-            scene["presets"] = list(payload.presets)
-        else:
-            scene.pop("presets", None)
-    if "looping_sfx" in fields:
-        if payload.looping_sfx:
-            scene["looping_sfx"] = [
-                ls.model_dump(exclude_none=True) for ls in payload.looping_sfx
-            ]
-        else:
-            scene.pop("looping_sfx", None)
-    if payload.clear_volume:
-        scene.pop("volume", None)
-    elif "volume" in fields and payload.volume is not None:
-        scene["volume"] = payload.volume
-
-    return _save_scene_yaml(path, scene, mode_id, scene_id)
 
 
 # --- soundboard editing (categories + items inside an existing soundboard) ---
@@ -894,6 +748,120 @@ def delete_cue(mode_id: str, cue_id: str, _: CurrentUser) -> None:
             detail=f"cue '{cue_id}' not found",
         )
     cue_path.unlink()
+    modes_loader.load_all()
+
+
+# --- EQ presets (one YAML per preset under the mode's presets/ dir) -------
+
+
+class EffectSpecIn(BaseModel):
+    """Loose effect spec — `type` plus arbitrary numeric params (the loader
+    validates `type` against the supported set)."""
+
+    type: str = Field(min_length=1)
+    model_config = {"extra": "allow"}
+
+
+class PresetBody(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = None
+    effects: list[EffectSpecIn] = Field(default_factory=list)
+    volume: float | None = Field(default=None, ge=0.0, le=1.0)
+    crossfade_ms: int | None = Field(default=None, ge=0, le=60000)
+
+
+class CreatePresetRequest(PresetBody):
+    id: str = Field(min_length=1, max_length=64)
+
+
+def _validate_effect_types(effects: list[EffectSpecIn]) -> None:
+    for e in effects:
+        if e.type not in SUPPORTED_EFFECT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unknown effect type '{e.type}'",
+            )
+
+
+def _preset_yaml(preset_id: str, body: PresetBody) -> dict:
+    out: dict = {"id": preset_id, "name": body.name}
+    if body.description:
+        out["description"] = body.description
+    out["effects"] = [e.model_dump() for e in body.effects]
+    if body.volume is not None:
+        out["volume"] = body.volume
+    if body.crossfade_ms is not None:
+        out["crossfade_ms"] = body.crossfade_ms
+    return out
+
+
+def _save_preset_yaml(
+    path: Path, payload: dict, mode_id: str, preset_id: str
+) -> PresetManifest:
+    _write_yaml(path, payload)
+    modes_loader.load_all()
+    manifest = modes_loader.get_mode(mode_id)
+    if manifest is None or preset_id not in manifest.presets:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="preset saved but failed to reload",
+        )
+    return manifest.presets[preset_id]
+
+
+@router.post(
+    "/{mode_id}/presets",
+    response_model=PresetManifest,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_preset(
+    mode_id: str, payload: CreatePresetRequest, _: CurrentUser
+) -> PresetManifest:
+    _validate_slug(payload.id, "preset")
+    _validate_effect_types(payload.effects)
+    mode_dir = _mode_dir_or_404(mode_id)
+    preset_path = mode_dir / "presets" / f"{payload.id}.yaml"
+    if preset_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"preset '{payload.id}' already exists in mode '{mode_id}'",
+        )
+    return _save_preset_yaml(
+        preset_path, _preset_yaml(payload.id, payload), mode_id, payload.id
+    )
+
+
+@router.put("/{mode_id}/presets/{preset_id}", response_model=PresetManifest)
+def update_preset(
+    mode_id: str, preset_id: str, payload: PresetBody, _: CurrentUser
+) -> PresetManifest:
+    _validate_slug(preset_id, "preset")
+    _validate_effect_types(payload.effects)
+    mode_dir = _mode_dir_or_404(mode_id)
+    preset_path = mode_dir / "presets" / f"{preset_id}.yaml"
+    if not preset_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"preset '{preset_id}' not found in mode '{mode_id}'",
+        )
+    return _save_preset_yaml(
+        preset_path, _preset_yaml(preset_id, payload), mode_id, preset_id
+    )
+
+
+@router.delete(
+    "/{mode_id}/presets/{preset_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_preset(mode_id: str, preset_id: str, _: CurrentUser) -> None:
+    _validate_slug(preset_id, "preset")
+    mode_dir = _mode_dir_or_404(mode_id)
+    preset_path = mode_dir / "presets" / f"{preset_id}.yaml"
+    if not preset_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"preset '{preset_id}' not found",
+        )
+    preset_path.unlink()
     modes_loader.load_all()
 
 

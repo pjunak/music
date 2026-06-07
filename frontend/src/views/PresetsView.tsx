@@ -5,8 +5,9 @@ import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
 import { ArrowDownIcon, ArrowUpIcon, TrashIcon, XIcon } from "@/components/icons";
-import { presetsAdminApi, presetsApi } from "@/core/api";
+import { modesAdminApi, presetsAdminApi, presetsApi } from "@/core/api";
 import type { PresetEffect, PresetManifest } from "@/core/api";
+import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 
 // Per-effect-type UI: a friendly label, a one-line blurb, and a slider control
@@ -91,13 +92,19 @@ const EFFECT_UI: Record<
 };
 
 export function PresetsView() {
+  // EQ presets are per-mode — this view edits the active mode's presets.
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
   const [presets, setPresets] = useState<PresetManifest[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
+    if (activeModeId === null) {
+      setPresets([]);
+      return;
+    }
     try {
-      const list = await presetsApi.list();
+      const list = await presetsApi.list(activeModeId);
       setPresets(list);
       if (selectedId !== null && !list.some((p) => p.id === selectedId)) {
         setSelectedId(null);
@@ -105,7 +112,7 @@ export function PresetsView() {
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
     }
-  }, [selectedId]);
+  }, [selectedId, activeModeId]);
 
   useEffect(() => {
     void refresh();
@@ -113,11 +120,11 @@ export function PresetsView() {
 
   async function reloadPresets() {
     try {
-      const result = await presetsAdminApi.reload();
+      const result = await modesAdminApi.reload();
       const loaded = result.loaded.length;
       const errs = Object.entries(result.errors);
       if (errs.length === 0) {
-        toast.success(`Reloaded ${loaded} preset${loaded === 1 ? "" : "s"}`);
+        toast.success(`Reloaded ${loaded} mode${loaded === 1 ? "" : "s"} from disk`);
       } else {
         const sample = errs
           .slice(0, 3)
@@ -136,6 +143,17 @@ export function PresetsView() {
   }
 
   const selected = presets.find((p) => p.id === selectedId) ?? null;
+
+  if (activeModeId === null) {
+    return (
+      <div className="empty-detail">
+        <EmptyState title="No mode selected">
+          EQ presets live inside a mode. Pick or create a mode from the header to
+          edit its presets.
+        </EmptyState>
+      </div>
+    );
+  }
 
   return (
     <div className="two-pane-view presets-view">
@@ -166,9 +184,8 @@ export function PresetsView() {
         <ul className="playlist-list">
           {presets.length === 0 ? (
             <li className="muted small empty">
-              No presets yet — click <strong>+ New</strong> to create one,
-              or drop YAML into <code>PRESETS_DIR</code> and POST{" "}
-              <code>/api/presets/reload</code>.
+              No EQ presets in this mode yet — click <strong>+ New</strong> to
+              create one.
             </li>
           ) : (
             presets.map((p) => (
@@ -195,6 +212,7 @@ export function PresetsView() {
       <div className="two-pane-pane presets-detail-pane">
         {creating ? (
           <PresetForm
+            modeId={activeModeId}
             mode="create"
             onClose={() => setCreating(false)}
             onSaved={async (id) => {
@@ -205,6 +223,7 @@ export function PresetsView() {
           />
         ) : selected !== null ? (
           <PresetForm
+            modeId={activeModeId}
             mode="edit"
             preset={selected}
             onClose={() => undefined}
@@ -230,6 +249,7 @@ export function PresetsView() {
 }
 
 interface FormProps {
+  modeId: string;
   mode: "create" | "edit";
   preset?: PresetManifest;
   onClose: () => void;
@@ -237,7 +257,7 @@ interface FormProps {
   onDeleted?: () => void;
 }
 
-function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
+function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormProps) {
   const [id, setId] = useState(preset?.id ?? "");
   const [name, setName] = useState(preset?.name ?? "");
   const [description, setDescription] = useState(preset?.description ?? "");
@@ -310,7 +330,7 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
     setBusy(true);
     try {
       if (mode === "create") {
-        const payload: Parameters<typeof presetsAdminApi.create>[0] = {
+        const payload: Parameters<typeof presetsAdminApi.create>[1] = {
           id: id.trim(),
           name: name.trim(),
           effects,
@@ -319,10 +339,10 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
         };
         const desc = description.trim();
         if (desc) payload.description = desc;
-        await presetsAdminApi.create(payload);
+        await presetsAdminApi.create(modeId, payload);
         toast.success("Preset created", id);
       } else {
-        const payload: Parameters<typeof presetsAdminApi.update>[1] = {
+        const payload: Parameters<typeof presetsAdminApi.update>[2] = {
           name: name.trim(),
           effects,
           volume: volumeOn ? volume : null,
@@ -330,7 +350,7 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
         };
         const desc = description.trim();
         if (desc) payload.description = desc;
-        await presetsAdminApi.update(id, payload);
+        await presetsAdminApi.update(modeId, id, payload);
         toast.success("Preset saved", id);
       }
       await onSaved(id);
@@ -350,7 +370,7 @@ function PresetForm({ mode, preset, onClose, onSaved, onDeleted }: FormProps) {
     });
     if (!ok) return;
     try {
-      await presetsAdminApi.delete(preset.id);
+      await presetsAdminApi.delete(modeId, preset.id);
       toast.success("Preset deleted");
       onDeleted?.();
     } catch (e) {

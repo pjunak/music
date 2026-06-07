@@ -37,9 +37,8 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
     } else if (msg.type === "state_changed") {
       set({ state: msg.state, stateReceivedAt: Date.now() });
     }
-    // sfx_fired / scene_activated / scene_deactivated / error handled by the
-    // audio engine and toast layer respectively (not here — we only track
-    // PlayerState in this store).
+    // sfx_fired / error handled by the audio engine and toast layer
+    // respectively (not here — we only track PlayerState in this store).
   },
 
   setStatus: (s) => {

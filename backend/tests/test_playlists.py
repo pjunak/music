@@ -24,26 +24,24 @@ def test_create_validates_mode_id(auth_client: TestClient) -> None:
     assert r.status_code == 400
 
 
-def test_list_filters_by_mode_includes_globals_by_default(auth_client: TestClient) -> None:
+def test_list_filters_strictly_by_mode(auth_client: TestClient) -> None:
+    # Playlists are per-mode now — filtering by mode returns only that mode's,
+    # with no global tier mixed in.
     auth_client.post(
         "/api/playlists",
         json={"name": "DnD-Combat", "mode_id": "dnd", "category": "combat"},
     )
     auth_client.post(
-        "/api/playlists", json={"name": "Global-Combat", "category": "combat"}
+        "/api/playlists", json={"name": "Orphan-Combat", "category": "combat"}
     )
 
-    mixed = auth_client.get(
+    listed = auth_client.get(
         "/api/playlists", params={"mode_id": "dnd", "category": "combat"}
     ).json()
-    names = {p["name"] for p in mixed}
-    assert "DnD-Combat" in names and "Global-Combat" in names
-
-    strict = auth_client.get(
-        "/api/playlists",
-        params={"mode_id": "dnd", "category": "combat", "include_global": False},
-    ).json()
-    assert all(p["mode_id"] == "dnd" for p in strict)
+    names = {p["name"] for p in listed}
+    assert "DnD-Combat" in names
+    assert "Orphan-Combat" not in names
+    assert all(p["mode_id"] == "dnd" for p in listed)
 
 
 def test_create_and_update_accept_category(auth_client: TestClient) -> None:

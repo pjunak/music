@@ -56,16 +56,6 @@ export function validateWsMessage(raw: unknown): WsMessage | null {
       if (!isString(raw.item_path)) return null;
       if (!isNumber(raw.volume)) return null;
       return raw as WsMessage;
-    case "scene_activated":
-      if (!isString(raw.scene_id)) return null;
-      if (!isString(raw.mode_id)) return null;
-      if (!isObject(raw.scene)) return null;
-      return raw as WsMessage;
-    case "scene_deactivated":
-      if (!isString(raw.scene_id)) return null;
-      // mode_id is `string | null` here.
-      if (raw.mode_id !== null && !isString(raw.mode_id)) return null;
-      return raw as WsMessage;
     case "error":
       if (!isString(raw.detail)) return null;
       return raw as WsMessage;

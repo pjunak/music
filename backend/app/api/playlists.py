@@ -130,17 +130,12 @@ def list_playlists(
     db: DbSession,
     mode_id: str | None = Query(None),
     category: str | None = Query(None),
-    include_global: bool = Query(
-        True, description="When filtering by mode_id, also include global (mode_id=null) playlists."
-    ),
 ) -> list[PlaylistMeta]:
+    # Playlists are per-mode now (no global tier) — filtering by mode_id returns
+    # exactly that mode's playlists.
     stmt = select(Playlist).order_by(Playlist.created_at.desc())
     if mode_id is not None:
-        stmt = (
-            stmt.where((Playlist.mode_id == mode_id) | (Playlist.mode_id.is_(None)))
-            if include_global
-            else stmt.where(Playlist.mode_id == mode_id)
-        )
+        stmt = stmt.where(Playlist.mode_id == mode_id)
     if category is not None:
         stmt = stmt.where(Playlist.category == category)
     rows = db.scalars(stmt).all()

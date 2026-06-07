@@ -92,13 +92,23 @@ export function AudioEngine() {
   useEffect(() => {
     const cache = new Map<string, PresetManifest>();
     let isMine = false;
+    let cacheModeId: string | null = null;
 
     let toastedError = false;
-    async function syncPresets(activeIds: string[]): Promise<void> {
+    async function syncPresets(
+      modeId: string | null,
+      activeIds: string[],
+    ): Promise<void> {
+      // Presets are per-mode — drop the cache when the mode changes so ids
+      // from the previous mode can't leak in.
+      if (modeId !== cacheModeId) {
+        cache.clear();
+        cacheModeId = modeId;
+      }
       const missing = activeIds.filter((id) => !cache.has(id));
-      if (missing.length > 0) {
+      if (missing.length > 0 && modeId !== null) {
         try {
-          const all = await presetsApi.list();
+          const all = await presetsApi.list(modeId);
           cache.clear();
           for (const m of all) cache.set(m.id, m);
           toastedError = false;
@@ -129,11 +139,12 @@ export function AudioEngine() {
       const s = usePlayerStore.getState();
       if (s.state === null) return;
       isMine = isThisDevicePlaying();
+      const modeId = s.state.active_mode_id;
       const ids = s.state.active_preset_ids;
-      const sig = `${isMine ? "1" : "0"}|${ids.join(",")}`;
+      const sig = `${isMine ? "1" : "0"}|${modeId ?? ""}|${ids.join(",")}`;
       if (sig === lastSig) return;
       lastSig = sig;
-      void syncPresets(ids);
+      void syncPresets(modeId, ids);
     };
     const unsubPlayer = usePlayerStore.subscribe(recompute);
     const unsubUi = useUiStore.subscribe((s, prev) => {

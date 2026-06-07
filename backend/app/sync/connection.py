@@ -34,7 +34,7 @@ class ConnectionManager:
     async def broadcast(self, message: dict) -> None:
         """Send `message` to every connected client, regardless of
         capabilities. Use for events that any consumer might care about
-        (scene activated/deactivated, future audit events, etc.)."""
+        (sfx fired, future audit events, etc.)."""
         if not self._sockets:
             return
         await self._send_to_each(self._sockets.keys(), message)

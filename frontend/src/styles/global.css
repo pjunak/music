@@ -415,7 +415,7 @@ kbd,
 /* Header mode picker — replaces the old static context-badge with a real
  * <select>, so the operator can switch modes from any tab. Styled to read
  * as part of the header chrome (rounded pill) rather than a prompt-y form
- * control. Scene name (when active) rides next to it as read-only status. */
+ * control. */
 .header-mode-picker {
   display: inline-flex;
   align-items: center;
@@ -448,13 +448,54 @@ kbd,
   outline: none;
   border-color: var(--accent);
 }
-.header-scene-label {
+.header-mode-manage {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+/* Manage-modes modal (create / rename / delete). */
+.mode-manager {
+  width: min(480px, 100%);
+}
+.mode-create-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+.mode-create-row input {
+  flex: 1;
+  min-width: 0;
+}
+.mode-manage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.mode-manage-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.55rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.mode-manage-name {
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.4rem;
 }
-.header-scene-label strong {
-  color: var(--accent-strong);
+.mode-manage-id {
+  font-family: ui-monospace, monospace;
+}
+.mode-manage-actions {
+  display: flex;
+  gap: 0.4rem;
 }
 .tabs-placeholder {
   flex: 1;
@@ -654,6 +695,19 @@ kbd,
   overflow-x: auto;
   scrollbar-width: none;
   flex-shrink: 0;
+  align-items: center;
+}
+/* Right-aligned action(s) in the sub-tab strip (e.g. the Import button). */
+.section-nav-action {
+  margin-left: auto;
+  padding-bottom: 0.3rem;
+}
+.section-nav-import {
+  font-size: 0.82rem;
+}
+/* Single-editor Authoring sub-tabs (Interrupts) — just pad the body. */
+.authoring-single {
+  padding-top: 0.2rem;
 }
 .section-nav::-webkit-scrollbar {
   display: none;
@@ -768,7 +822,7 @@ kbd,
   color: var(--muted);
   font-size: 1.1rem;
 }
-/* "What mood is on" caption — active mode (+ scene, if any). Subtle, sits
+/* "What mood is on" caption — active mode. Subtle, sits
  * under the artist line; the mode reads in the accent so the room can tell
  * the setting at a glance. */
 .player-context {
@@ -1834,48 +1888,6 @@ kbd,
   border-right: 1px solid var(--border);
 }
 
-/* --- scenes --- */
-
-.scenes-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.scene-active-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  background: var(--surface-2);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-}
-.scenes-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 0.5rem;
-}
-.scene-button {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  align-items: flex-start;
-  padding: 0.5rem 0.7rem;
-  text-align: left;
-}
-.scene-button.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.scene-button.active .scene-name {
-  color: var(--accent-strong);
-}
-.scene-name {
-  font-weight: 600;
-}
-
 /* --- soundboard --- */
 
 .soundboard-section {
@@ -2470,7 +2482,7 @@ kbd,
   border-radius: var(--radius);
 }
 
-/* Scene editor's looping-SFX row: cascading soundboard/item dropdowns
+/* Cue editor's looping-SFX row: cascading soundboard/item dropdowns
  * + an inline VolumeControl + a remove button. Allow the two selects to
  * shrink (default flex item min-width is the content size — long item
  * names would otherwise blow the layout out). */
@@ -3578,12 +3590,10 @@ input.volume-slider::-moz-range-thumb {
     font-size: 0.78rem;
     padding: 0.15rem 0.4rem;
   }
-  /* Mode picker on mobile: drop the "mode" label and the scene rider so
-   * the select itself fits in a tight header without pushing other items
-   * to a second row. The select's current value still shows the active
-   * mode at a glance; switching scenes is a Console-tab action anyway. */
-  .header-mode-picker > .muted.small,
-  .header-mode-picker .header-scene-label {
+  /* Mode picker on mobile: drop the "mode" label so the select itself fits
+   * in a tight header without pushing other items to a second row. The
+   * select's current value still shows the active mode at a glance. */
+  .header-mode-picker > .muted.small {
     display: none;
   }
   .header-mode-picker {
@@ -3794,10 +3804,7 @@ input.volume-slider::-moz-range-thumb {
     overflow-x: auto;
   }
 
-  /* Soundboards / scenes grids — tighter cell minimums so 2 columns fit. */
-  .scenes-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  }
+  /* Soundboard grid — tighter cell minimums so 2 columns fit. */
   .soundboard-grid {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   }
@@ -3831,7 +3838,7 @@ input.volume-slider::-moz-range-thumb {
 
   /* Modal sizing — give it a bit of breathing room from the screen
    * edges and let the body scroll when long forms (metadata editor,
-   * scene editor) wouldn't fit. */
+   * cue editor) wouldn't fit. */
   .modal {
     width: calc(100% - 1rem);
     max-height: calc(100vh - 1.5rem);
@@ -3926,8 +3933,7 @@ input.volume-slider::-moz-range-thumb {
     min-height: 36px;
   }
   /* Soundboard cells: these are fire-on-press during play, can't be tiny. */
-  .sfx-button,
-  .scene-button {
+  .sfx-button {
     min-height: 52px;
   }
   /* Checkboxes / radios in dense forms — enlarge the actual control so

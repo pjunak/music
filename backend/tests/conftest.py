@@ -53,21 +53,18 @@ def _test_env() -> Iterator[None]:
     music_dir = tmp / "music"
     sfx_dir = tmp / "sfx"
     modes_dir = tmp / "modes"
-    presets_dir = tmp / "presets"
     music_dir.mkdir()
     sfx_dir.mkdir()
     modes_dir.mkdir()
-    presets_dir.mkdir()
 
     os.environ["SECRET_KEY"] = "x" * 64
     os.environ["DATABASE_URL"] = f"sqlite:///{tmp / 'app.db'}"
     os.environ["MUSIC_DIR"] = str(music_dir)
     os.environ["SFX_LIBRARY_DIR"] = str(sfx_dir)
     os.environ["MODES_DIR"] = str(modes_dir)
-    os.environ["PRESETS_DIR"] = str(presets_dir)
     os.environ["DEVICES_FILE"] = str(tmp / "devices.json")
 
-    # Seed modes/dnd with theme + soundboards + a scene.
+    # Seed modes/dnd with theme + soundboards + EQ presets.
     dnd_dir = modes_dir / "dnd"
     dnd_dir.mkdir()
     (dnd_dir / "manifest.yaml").write_text(
@@ -106,13 +103,6 @@ def _test_env() -> Iterator[None]:
         "        name: Swords clash\n",
         encoding="utf-8",
     )
-    (dnd_dir / "scenes").mkdir()
-    (dnd_dir / "scenes" / "tavern.yaml").write_text(
-        "name: Stonehill Inn\n"
-        "ambient: { playlist: tavern-music, crossfade_ms: 2500 }\n"
-        "presets: [radio-vintage]\n",
-        encoding="utf-8",
-    )
 
     # SFX library: dnd/door.ogg is referenced and present; dnd/sword.ogg is
     # referenced but missing (exercises the 410 path). Use WAV bytes via the
@@ -121,12 +111,13 @@ def _test_env() -> Iterator[None]:
     (sfx_dir / "dnd").mkdir()
     (sfx_dir / "dnd" / "door.ogg").write_bytes(b"FAKEOGGDATA" * 50)
 
-    # Seed two preset YAMLs.
-    (presets_dir / "cave.yaml").write_text(
+    # Seed two EQ presets — now per-mode, under modes/dnd/presets/.
+    (dnd_dir / "presets").mkdir()
+    (dnd_dir / "presets" / "cave.yaml").write_text(
         "id: cave\nname: Cave\neffects:\n  - type: reverb\n    wet: 0.4\n",
         encoding="utf-8",
     )
-    (presets_dir / "radio-vintage.yaml").write_text(
+    (dnd_dir / "presets" / "radio-vintage.yaml").write_text(
         "id: radio-vintage\nname: Vintage Radio\neffects:\n  - type: highpass\n    frequency: 400\n",
         encoding="utf-8",
     )
