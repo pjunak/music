@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { Field } from "@/components/Field";
+import { Modal } from "@/components/Modal";
 import { ApiError } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { useUiTransient } from "@/core/uiTransient";
@@ -25,33 +27,21 @@ export function LoginModal() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const userRef = useRef<HTMLInputElement | null>(null);
 
   // Reset fields whenever the modal (re)opens so a previous attempt's text or
-  // error can't leak into a fresh open, and focus the first field.
+  // error can't leak into a fresh open. (Modal handles initial focus.)
   useEffect(() => {
     if (!open) return;
     setUsername("");
     setPassword("");
     setError(null);
     setPending(false);
-    queueMicrotask(() => userRef.current?.focus());
   }, [open]);
 
   // Auth resolving to authenticated (here, or via another tab) closes us.
   useEffect(() => {
     if (open && status === "authenticated") setOpen(false);
   }, [open, status, setOpen]);
-
-  // Escape closes — signing in is never destructive, so a stray Esc is safe.
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, setOpen]);
 
   if (!open) return null;
 
@@ -73,58 +63,44 @@ export function LoginModal() {
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={() => setOpen(false)}>
-      <form
-        className="modal login-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Sign in"
-        onMouseDown={(e) => e.stopPropagation()}
-        onSubmit={onSubmit}
-      >
-        <header className="modal-header">
-          <h2>Sign in</h2>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            aria-label="Close sign-in"
-            title="Close"
-          >
-            ×
-          </button>
-        </header>
-        <div className="modal-body">
-          <label className="login-field">
-            <span className="muted small">Username</span>
-            <input
-              ref={userRef}
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </label>
-          <label className="login-field">
-            <span className="muted small">Password</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
-          {error !== null ? <p className="error small">{error}</p> : null}
-        </div>
-        <div className="modal-actions">
+    <Modal
+      ariaLabel="Sign in"
+      title="Sign in"
+      className="login-modal"
+      closeButton
+      onClose={() => setOpen(false)}
+      onSubmit={onSubmit}
+      footer={
+        <>
           <button type="button" onClick={() => setOpen(false)}>
             Cancel
           </button>
           <button type="submit" className="btn-primary" disabled={pending}>
             {pending ? "Signing in…" : "Sign in"}
           </button>
-        </div>
-      </form>
-    </div>
+        </>
+      }
+    >
+      <Field label="Username">
+        <input
+          type="text"
+          data-autofocus
+          autoComplete="username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          required
+        />
+      </Field>
+      <Field label="Password">
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+      </Field>
+      {error !== null ? <p className="error small">{error}</p> : null}
+    </Modal>
   );
 }

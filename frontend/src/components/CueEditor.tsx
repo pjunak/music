@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 
 import { Breadcrumb } from "@/components/Breadcrumb";
 import type { BreadcrumbItem } from "@/components/Breadcrumb";
+import { Field } from "@/components/Field";
 import { IconButton } from "@/components/IconButton";
 import { XIcon } from "@/components/icons";
 import { VolumeControl } from "@/components/VolumeControl";
@@ -59,10 +60,8 @@ export function CueEditor({ modeId, cueId, breadcrumb }: Props) {
       .then(setPresets)
       .catch(() => setPresets([]));
     void playlistsApi
-      .list({})
-      .then((all) =>
-        setPlaylists(all.filter((p) => p.mode_id === modeId || p.mode_id === null)),
-      )
+      .list({ mode_id: modeId })
+      .then(setPlaylists)
       .catch(() => setPlaylists([]));
   }, [modeId]);
 
@@ -187,33 +186,35 @@ function CueEditorForm({
   return (
     <form onSubmit={submit} className="cue-editor">
       <Breadcrumb items={breadcrumb} />
-      <header className="playlist-detail-header">
-        <div>
-          <h2>Cue · {cue.id}</h2>
-          <p className="muted small">
-            Fire it live from the Console → Cues panel.
-          </p>
-        </div>
+      <header className="cue-editor-head">
+        <h2>{cue.name || cue.id}</h2>
+        <p className="muted small">Fire it live from the Console → Cues panel.</p>
       </header>
 
-      <div className="playlist-meta-fields">
-        <label>
-          <span className="muted small">Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
-        <label>
-          <span className="muted small">Description</span>
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-      </div>
+      <section className="surface-card authoring-card">
+        <h3 className="section-label">Details</h3>
+        <div className="field-row">
+          <Field label="Name">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="Description">
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </Field>
+        </div>
+      </section>
 
-      <section>
-        <h3>Sound</h3>
-        <label>
-          <span className="muted small">Apply preset</span>
+      <section className="surface-card authoring-card">
+        <h3 className="section-label">Sound</h3>
+        <Field label="Apply preset">
           <select value={preset} onChange={(e) => setPreset(e.target.value)}>
             <option value="">— none —</option>
             {presets.map((p) => (
@@ -225,48 +226,48 @@ function CueEditorForm({
               <option value={preset}>⚠ {preset} (missing)</option>
             ) : null}
           </select>
-        </label>
+        </Field>
         <div className="cue-colour">
-          <span className="muted small">Colour</span>
-          <div className="seg-control">
-            <span className="seg-on">Music</span>
+          <span className="field-label">Colour</span>
+          <div className="segmented">
+            <span className="segmented-item" aria-selected="true">
+              Music
+            </span>
             <span
-              className="seg-off"
+              className="segmented-item seg-soon"
               title="Colouring SFX isn't available yet — music only for now."
             >
               SFX
             </span>
             <span
-              className="seg-off"
+              className="segmented-item seg-soon"
               title="Colouring both isn't available yet — music only for now."
             >
               Both
             </span>
           </div>
+          <span className="muted small">SFX / Both — soon</span>
         </div>
       </section>
 
-      <section>
-        <h3>Music</h3>
-        <label>
-          <span className="muted small">Start playlist (mode or global)</span>
+      <section className="surface-card authoring-card">
+        <h3 className="section-label">Music</h3>
+        <Field label="Start playlist">
           <select value={playlist} onChange={(e) => setPlaylist(e.target.value)}>
             <option value="">— leave music alone —</option>
             {playlists.map((p) => (
               <option key={p.id} value={p.name}>
                 {p.name}
-                {p.mode_id === null ? " (global)" : ""}
               </option>
             ))}
             {playlist !== "" && !playlists.some((p) => p.name === playlist) ? (
               <option value={playlist}>⚠ {playlist} (missing)</option>
             ) : null}
           </select>
-        </label>
+        </Field>
         {playlist !== "" ? (
-          <div className="playlist-meta-fields">
-            <label>
-              <span className="muted small">From song</span>
+          <div className="field-row">
+            <Field label="From song">
               <select
                 value={startIndex}
                 onChange={(e) => setStartIndex(Number(e.target.value))}
@@ -281,21 +282,21 @@ function CueEditorForm({
                   ))
                 )}
               </select>
-            </label>
-            <label>
-              <span className="muted small">At time (m:ss)</span>
+            </Field>
+            <Field label="At time (m:ss)">
               <input
+                type="text"
                 value={formatTime(startMs)}
                 onChange={(e) => setStartMs(parseTime(e.target.value))}
                 placeholder="0:00"
               />
-            </label>
+            </Field>
           </div>
         ) : null}
       </section>
 
-      <section>
-        <h3>
+      <section className="surface-card authoring-card">
+        <h3 className="section-label">
           One-shot SFX <span className="muted small">(fired once on run)</span>
         </h3>
         {sfx.length === 0 ? <p className="muted small">None.</p> : null}
@@ -333,14 +334,15 @@ function CueEditorForm({
         </ul>
         <button
           type="button"
+          className="btn-secondary-soft"
           onClick={() => setSfx((prev) => [...prev, { soundboard: "", item: "" }])}
         >
           + Add SFX
         </button>
       </section>
 
-      <section>
-        <h3>
+      <section className="surface-card authoring-card">
+        <h3 className="section-label">
           Loops <span className="muted small">(repeat until stopped)</span>
         </h3>
         {loops.length === 0 ? <p className="muted small">None.</p> : null}
@@ -397,6 +399,7 @@ function CueEditorForm({
         </ul>
         <button
           type="button"
+          className="btn-secondary-soft"
           onClick={() =>
             setLoops((prev) => [
               ...prev,
@@ -408,7 +411,7 @@ function CueEditorForm({
         </button>
       </section>
 
-      <div className="modal-actions">
+      <div className="form-actions">
         <button type="submit" className="btn-primary" disabled={busy}>
           {busy ? "Saving…" : "Save changes"}
         </button>
@@ -443,6 +446,7 @@ function SfxItemPicker({
     <>
       {legacySoundboard ? (
         <input
+          type="text"
           value={soundboard}
           onChange={(e) => onChange({ soundboard: e.target.value })}
           title="This soundboard isn't in the loaded mode — edit as text."
@@ -463,6 +467,7 @@ function SfxItemPicker({
       )}
       {selected === undefined || legacyItem ? (
         <input
+          type="text"
           value={item}
           onChange={(e) => onChange({ item: e.target.value })}
           placeholder="item path (e.g. dnd/roar.ogg)"

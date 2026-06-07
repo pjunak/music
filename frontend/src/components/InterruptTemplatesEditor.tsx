@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { Field } from "@/components/Field";
 import { IconButton } from "@/components/IconButton";
 import { EditIcon, LightningIcon, TrashIcon } from "@/components/icons";
+import { SectionHeader } from "@/components/SectionHeader";
+import { Switch } from "@/components/Switch";
 import { VolumeControl } from "@/components/VolumeControl";
 import { modesAdminApi, playlistsApi } from "@/core/api";
 import { toast } from "@/core/toast";
@@ -105,12 +108,18 @@ export function InterruptTemplatesEditor({
 
   return (
     <section className="subresource-list">
-      <div className="subresource-header">
-        <h3>Interrupt templates</h3>
-        <button type="button" onClick={() => setAdding((v) => !v)}>
-          {adding ? "Cancel" : "+ Add"}
-        </button>
-      </div>
+      <SectionHeader
+        title="Interrupt templates"
+        actions={
+          <button
+            type="button"
+            className={adding ? "btn-ghost" : "btn-primary"}
+            onClick={() => setAdding((v) => !v)}
+          >
+            {adding ? "Cancel" : "+ Add"}
+          </button>
+        }
+      />
       <p className="muted small">
         Pre-configured interrupts the operator can fire from this list.
         Reference either a playlist (by name) or a soundboard item (by path
@@ -152,44 +161,45 @@ export function InterruptTemplatesEditor({
               </li>
             ) : (
               <li key={idx}>
-                <span>
+                <div className="entity-row-main">
                   <strong>{it.name}</strong>
-                  {it.playlist ? (
-                    <>
-                      {" "}· playlist <code>{it.playlist}</code>
-                      {!playlistNames.has(it.playlist) ? (
-                        <span
-                          className="ref-missing"
-                          title="No playlist with this name in this mode — firing this interrupt will fail. Edit it to re-pick."
-                        >
-                          {" "}⚠ missing
-                        </span>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {it.soundboard_item ? (
-                    <> · sfx <code>{it.soundboard_item}</code></>
-                  ) : null}
-                  {it.fade_in_ms || it.fade_out_ms ? (
-                    <span className="muted small">
-                      {" "}
-                      · fade {it.fade_in_ms ?? 0} / {it.fade_out_ms ?? 0} ms
-                    </span>
-                  ) : null}
-                  {it.return_to_ambient === false ? (
-                    <span className="muted small"> · stops on end</span>
-                  ) : null}
-                  {typeof it.duck_to === "number" ? (
-                    <span className="muted small">
-                      {" "}
-                      · ducks ambient to {Math.round(it.duck_to * 100)}%
-                    </span>
-                  ) : null}
-                </span>
+                  <div className="entity-row-meta">
+                    {it.playlist ? (
+                      <>
+                        <span className="badge badge-accent2">▶ {it.playlist}</span>
+                        {!playlistNames.has(it.playlist) ? (
+                          <span
+                            className="badge badge-danger"
+                            title="No playlist with this name in this mode — firing this interrupt will fail. Edit it to re-pick."
+                          >
+                            missing
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {it.soundboard_item ? (
+                      <span className="badge">sfx · {it.soundboard_item}</span>
+                    ) : null}
+                    {it.fade_in_ms || it.fade_out_ms ? (
+                      <span className="muted small">
+                        fade {it.fade_in_ms ?? 0} / {it.fade_out_ms ?? 0} ms
+                      </span>
+                    ) : null}
+                    {it.return_to_ambient === false ? (
+                      <span className="muted small">stops on end</span>
+                    ) : null}
+                    {typeof it.duck_to === "number" ? (
+                      <span className="muted small">
+                        ducks to {Math.round(it.duck_to * 100)}%
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
                 <span className="simple-list-actions">
                   <IconButton
                     label="Fire now"
                     icon={<LightningIcon />}
+                    variant="secondary"
                     onClick={() => fire(it)}
                   >
                     Fire
@@ -296,27 +306,29 @@ function InterruptTemplateForm({
   }
 
   return (
-    <form onSubmit={submit} className="metadata-form interrupt-form">
-      <div className="playlist-meta-fields">
-        <label>
-          <span className="muted small">Name</span>
+    <form onSubmit={submit} className="interrupt-form surface-card authoring-card">
+      <h3 className="section-label">
+        {mode === "create" ? "New interrupt template" : "Edit interrupt template"}
+      </h3>
+      <fieldset className="fieldset">
+        <legend>Trigger</legend>
+        <Field label="Name">
           <input
+            type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
             autoFocus
           />
-        </label>
-        <label>
-          <span className="muted small">Source</span>
+        </Field>
+        <Field label="Source">
           <select value={source} onChange={(e) => setSource(e.target.value as Source)}>
             <option value="playlist">Playlist (by name)</option>
             <option value="soundboard_item">Soundboard item (file path)</option>
           </select>
-        </label>
+        </Field>
         {source === "playlist" ? (
-          <label>
-            <span className="muted small">Playlist</span>
+          <Field label="Playlist">
             <select
               value={playlist}
               onChange={(e) => setPlaylist(e.target.value)}
@@ -334,67 +346,65 @@ function InterruptTemplateForm({
                 <option value={playlist}>⚠ {playlist} (missing)</option>
               ) : null}
             </select>
-          </label>
+          </Field>
         ) : (
-          <label>
-            <span className="muted small">SFX file path</span>
+          <Field label="SFX file path" hint="Relative to SFX_LIBRARY_DIR — e.g. dnd/door.ogg">
             <input
+              type="text"
               value={soundboardItem}
               onChange={(e) => setSoundboardItem(e.target.value)}
               placeholder="dnd/door.ogg"
               required
             />
-          </label>
+          </Field>
         )}
-        <label>
-          <span className="muted small">Fade in (ms)</span>
-          <input
-            type="number"
-            min={0}
-            max={10000}
-            value={fadeInMs}
-            onChange={(e) => setFadeInMs(parseInt(e.target.value, 10) || 0)}
-          />
-        </label>
-        <label>
-          <span className="muted small">Fade out (ms)</span>
-          <input
-            type="number"
-            min={0}
-            max={10000}
-            value={fadeOutMs}
-            onChange={(e) => setFadeOutMs(parseInt(e.target.value, 10) || 0)}
-          />
-        </label>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={returnToAmbient}
-            onChange={(e) => setReturnToAmbient(e.target.checked)}
-          />
-          <span>Resume ambient when this interrupt ends</span>
-        </label>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={duckEnabled}
-            onChange={(e) => setDuckEnabled(e.target.checked)}
-          />
-          <span>Duck ambient under the interrupt (cinematic) instead of pausing</span>
-        </label>
+      </fieldset>
+      <fieldset className="fieldset">
+        <legend>Transition</legend>
+        <div className="field-row">
+          <Field label="Fade in (ms)">
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              step={50}
+              value={fadeInMs}
+              onChange={(e) => setFadeInMs(parseInt(e.target.value, 10) || 0)}
+            />
+          </Field>
+          <Field label="Fade out (ms)">
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              step={50}
+              value={fadeOutMs}
+              onChange={(e) => setFadeOutMs(parseInt(e.target.value, 10) || 0)}
+            />
+          </Field>
+        </div>
+        <Switch
+          checked={returnToAmbient}
+          onChange={(e) => setReturnToAmbient(e.target.checked)}
+          label="Resume ambient when this interrupt ends"
+        />
+        <Switch
+          checked={duckEnabled}
+          onChange={(e) => setDuckEnabled(e.target.checked)}
+          label="Duck ambient under the interrupt (cinematic) instead of pausing"
+        />
         {duckEnabled ? (
-          <label>
-            <span className="muted small">Duck level (lower = quieter)</span>
+          <Field label={`Duck level — ${Math.round(duckLevel * 100)}% (lower = quieter)`}>
             <VolumeControl
               value={duckLevel}
               onChange={setDuckLevel}
               label="Duck level"
               showIcon={false}
             />
-          </label>
+          </Field>
         ) : null}
-      </div>
-      <div className="modal-actions">
+      </fieldset>
+      <div className="form-actions">
         <button type="button" onClick={onClose} disabled={busy}>
           Cancel
         </button>

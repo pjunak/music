@@ -44,8 +44,10 @@ export function EqCurve({ bands, height = 128 }: Props) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const accent = cssVar(canvas, "--accent", "#6aa6ff");
-    const accentStrong = cssVar(canvas, "--accent-strong", "#9bc2ff");
+    // Teal (the secondary accent) — the EQ rack is an Authoring surface, so
+    // its curve reads teal rather than the live-playback blue.
+    const accent = cssVar(canvas, "--accent2", "#3fc7c2");
+    const accentStrong = cssVar(canvas, "--accent2-strong", "#74dcd7");
     const grid = cssVar(canvas, "--border", "#2a2d33");
     const muted = cssVar(canvas, "--muted", "#8a8c91");
 

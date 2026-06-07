@@ -248,3 +248,131 @@ export function HelpIcon(props: IconProps) {
     </svg>
   );
 }
+
+/* --- glyphs that replaced emoji used as UI icons -------------------- */
+
+export function SettingsIcon(props: IconProps) {
+  // Cog — header "manage modes" + popover gear (was ⚙).
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="12" cy="12" r="3" {...stroke} />
+      <path
+        d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        {...stroke}
+      />
+    </svg>
+  );
+}
+
+export function MusicNoteIcon(props: IconProps) {
+  // Music root toggle (was 🎵).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M9 18V5l12-2v13" {...stroke} />
+      <circle cx="6" cy="18" r="3" {...stroke} />
+      <circle cx="18" cy="16" r="3" {...stroke} />
+    </svg>
+  );
+}
+
+export function SearchIcon(props: IconProps) {
+  // Library search (was 🔍).
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="11" cy="11" r="7" {...stroke} />
+      <path d="M21 21l-4.35-4.35" {...stroke} />
+    </svg>
+  );
+}
+
+export function RescanIcon(props: IconProps) {
+  // Two circular arrows — Rescan / Refresh (was ↻).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M21 3v6h-6" {...stroke} />
+      <path d="M3 12a9 9 0 0115-6.7L21 9" {...stroke} />
+      <path d="M3 21v-6h6" {...stroke} />
+      <path d="M21 12a9 9 0 01-15 6.7L3 15" {...stroke} />
+    </svg>
+  );
+}
+
+export function MoveIcon(props: IconProps) {
+  // Folder + out-arrow — "Move…" a folder/selection (was ↪).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M4 7a2 2 0 012-2h3l2 2h4a2 2 0 012 2v2" {...stroke} />
+      <path d="M4 9v9a1 1 0 001 1h6" {...stroke} />
+      <path d="M14 18h7M18 15l3 3-3 3" {...stroke} />
+    </svg>
+  );
+}
+
+export function ImportIcon(props: IconProps) {
+  // Down-into-tray — Upload/Import (was ⬇).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M12 3v12M7 10l5 5 5-5" {...stroke} />
+      <path d="M5 21h14" {...stroke} />
+    </svg>
+  );
+}
+
+export function ModeIcon(props: IconProps) {
+  // Stylised mask — the active "mode/theme" (was 🎭).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M4 5h16v5a8 8 0 01-16 0V5z" {...stroke} />
+      <circle cx="9" cy="9" r="0.6" fill="currentColor" />
+      <circle cx="15" cy="9" r="0.6" fill="currentColor" />
+      <path d="M9 13c1.2 1 4.8 1 6 0" {...stroke} />
+    </svg>
+  );
+}
+
+export function TagIcon(props: IconProps) {
+  // Tag — metadata / nickname (was 🏷).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M3 12V4a1 1 0 011-1h8l9 9-9 9z" {...stroke} />
+      <circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function CheckIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M5 12l5 5L20 6" {...stroke} />
+    </svg>
+  );
+}
+
+export function InfoIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="12" cy="12" r="9" {...stroke} />
+      <path d="M12 11v5" {...stroke} />
+      <circle cx="12" cy="8" r="0.7" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function WarnIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M12 3.5L21 19H3z" {...stroke} />
+      <path d="M12 10v4" {...stroke} />
+      <circle cx="12" cy="16.5" r="0.7" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function ErrorIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="12" cy="12" r="9" {...stroke} />
+      <path d="M9 9l6 6M15 9l-6 6" {...stroke} />
+    </svg>
+  );
+}

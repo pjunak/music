@@ -7,6 +7,8 @@ import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 
+import { TagIcon } from "./icons";
+
 /** The one tag editor — edits the current track selection, 1 or N.
  *
  *  This replaces both the old per-row metadata modal AND the separate Tags
@@ -141,7 +143,9 @@ export function TagInspector({
   if (count === 0) {
     return (
       <div className="tag-inspector tag-inspector-empty">
-        <h3>🏷 Tags</h3>
+        <h3>
+          <TagIcon aria-hidden="true" /> Tags
+        </h3>
         <p className="muted small">
           Select a track to view and edit its tags. Select several (tick the
           boxes) to edit them together.
@@ -273,7 +277,7 @@ export function TagInspector({
   return (
     <div className="tag-inspector">
       <h3>
-        🏷 Tags <span className="muted">· {heading}</span>
+        <TagIcon aria-hidden="true" /> Tags <span className="muted">· {heading}</span>
       </h3>
       <div className="tag-inspector-body">
         {filePath !== null ? (

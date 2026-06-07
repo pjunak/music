@@ -49,7 +49,7 @@ export function PresetsSection() {
   if (presets.length === 0) {
     return (
       <EmptyState>
-        No presets installed. Add one from <strong>Authoring → Presets</strong>.
+        No presets installed. Add one from <strong>Authoring → EQ Presets</strong>.
       </EmptyState>
     );
   }
@@ -63,7 +63,8 @@ export function PresetsSection() {
             <button
               key={p.id}
               type="button"
-              className={`preset-chip${on ? " active" : ""}`}
+              className="preset-chip btn-toggle"
+              aria-pressed={on}
               onClick={() => toggle(p.id)}
               title={p.description ?? undefined}
             >

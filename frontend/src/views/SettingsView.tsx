@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { SettingsIcon } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
+import { Switch } from "@/components/Switch";
 import { authApi, devicesApi } from "@/core/api";
 import type { ActiveSession } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
@@ -21,14 +23,11 @@ export function SettingsView() {
     <div className="settings-view">
       <section className="surface-card">
         <h3>Display</h3>
-        <label className="autotag-toggle">
-          <input
-            type="checkbox"
-            checked={hidePlayerArt}
-            onChange={(e) => setHidePlayerArt(e.target.checked)}
-          />
-          <span>Hide cover art on Player tab (blackout)</span>
-        </label>
+        <Switch
+          checked={hidePlayerArt}
+          onChange={(e) => setHidePlayerArt(e.target.checked)}
+          label="Hide cover art on Player tab (blackout)"
+        />
         <p className="muted small">
           Useful when this tab is the room display and you don't want the art
           dominating the view.
@@ -43,7 +42,7 @@ export function SettingsView() {
           Signed in as <strong>{user?.username ?? "(unknown)"}</strong>.
         </p>
         <div>
-          <button type="button" onClick={() => void logout()}>
+          <button type="button" className="btn-danger" onClick={() => void logout()}>
             Sign out
           </button>
         </div>
@@ -68,7 +67,7 @@ export function SettingsView() {
             className="btn-link"
             role="button"
           >
-            <span aria-hidden="true">🔧</span>
+            <SettingsIcon aria-hidden="true" />
             Open diagnostics
             <span aria-hidden="true" className="btn-link-external">↗</span>
           </a>
@@ -177,19 +176,21 @@ function DevicesPanel() {
                     <span className="badge"> this device</span>
                   ) : null}
                 </div>
-                <p className="muted small">
-                  {connectedIds.has(d.client_id) ? "● connected" : "○ offline"}
+                <p>
+                  {connectedIds.has(d.client_id) ? (
+                    <span className="badge badge-ok">connected</span>
+                  ) : (
+                    <span className="badge">offline</span>
+                  )}
                 </p>
               </div>
-              <label className="device-output-toggle" title="May this device play audio?">
-                <input
-                  type="checkbox"
-                  checked={d.is_output}
-                  disabled={busy}
-                  onChange={() => void save(d.client_id, d.name, !d.is_output)}
-                />
-                <span>Audio output</span>
-              </label>
+              <Switch
+                className="device-output-toggle"
+                checked={d.is_output}
+                disabled={busy}
+                onChange={() => void save(d.client_id, d.name, !d.is_output)}
+                label="Audio output"
+              />
               <div className="device-row-actions">
                 <button type="button" onClick={() => void rename(d)} disabled={busy}>
                   Rename
@@ -221,7 +222,9 @@ function DevicesPanel() {
                       <span className="badge"> this device</span>
                     ) : null}
                   </div>
-                  <p className="muted small">● connected</p>
+                  <p>
+                    <span className="badge badge-ok">connected</span>
+                  </p>
                 </div>
                 <div className="device-row-actions">
                   <button
@@ -283,8 +286,8 @@ function BackupPanel() {
     <section className="surface-card">
       <h3>Backup</h3>
       <p className="muted small">
-        Download a tar.gz of <code>app.db</code>, <code>modes/</code>,{" "}
-        <code>presets/</code>, and the saved <code>devices.json</code> — the
+        Download a tar.gz of <code>app.db</code>, <code>modes/</code> (including
+        each mode's EQ presets), and the saved <code>devices.json</code> — the
         persistent state worth keeping. Music and SFX libraries aren't included;
         back those up at the filesystem level (rsync / SFTP) since they're large
         and change rarely from the app's perspective.
@@ -379,11 +382,11 @@ function ActiveSessionsPanel() {
         <ul className="simple-list">
           {sessions.map((s) => (
             <li key={s.token_prefix}>
-              <div>
+              <div className="entity-row-main">
                 <div>
                   <code>{s.token_prefix}…</code>
                   {s.is_current ? (
-                    <span className="badge"> this device</span>
+                    <span className="badge badge-accent"> this device</span>
                   ) : null}
                 </div>
                 <p className="muted small">

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
-import { XIcon } from "@/components/icons";
+import { PlusIcon, XIcon } from "@/components/icons";
 import { modesApi } from "@/core/api";
 import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import type { ModeDetail } from "@/core/types";
@@ -45,17 +45,14 @@ export function LoopsSection() {
   return (
     <div className="loops-panel">
       <div className="loops-bar">
-        <span className="loops-title">LOOPS</span>
-        <button
-          type="button"
+        <IconButton
+          label={canAdd ? "Add a looping SFX" : "Pick a mode with a soundboard first"}
+          icon={<PlusIcon />}
+          variant="ghost"
           className="loops-add"
           onClick={() => setAdding((a) => !a)}
           disabled={!canAdd}
-          title={canAdd ? "Add a looping SFX" : "Pick a mode with a soundboard first"}
-          aria-label="Add a looping SFX"
-        >
-          +
-        </button>
+        />
       </div>
 
       {adding && mode !== null ? (
@@ -63,7 +60,7 @@ export function LoopsSection() {
       ) : null}
 
       {loops.length === 0 ? (
-        <p className="loops-empty muted small">Nothing looping.</p>
+        <EmptyState>Nothing looping.</EmptyState>
       ) : (
         <ul className="loop-list">
           {loops.map((l) => (

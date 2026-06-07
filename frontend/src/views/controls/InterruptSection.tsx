@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/EmptyState";
 import { libraryApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
@@ -44,10 +45,10 @@ export function InterruptSection() {
 
   if (interrupt === null) {
     return (
-      <p className="muted small">
-        No interrupt active. Fire one from the Library (⚡ on a track row) or
-        from a mode interrupt template.
-      </p>
+      <EmptyState>
+        No interrupt active. Fire one from the Library (the lightning button on a
+        track row) or from a mode interrupt template.
+      </EmptyState>
     );
   }
 
@@ -72,7 +73,12 @@ export function InterruptSection() {
           <button type="button" onClick={skip} title="Skip to next interrupt track">
             Skip
           </button>
-          <button type="button" onClick={cancel} title="End interrupt now">
+          <button
+            type="button"
+            className="btn-danger"
+            onClick={cancel}
+            title="End interrupt now"
+          >
             Cancel
           </button>
         </div>

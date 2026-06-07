@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
+import { Field } from "@/components/Field";
 import { IconButton } from "@/components/IconButton";
 import {
   ArrowDownIcon,
@@ -178,22 +179,25 @@ function CreatePlaylistForm({
   }
 
   return (
-    <form onSubmit={submit} className="metadata-form playlist-form">
-      <h3>New playlist</h3>
-      <label>
-        <span>Name</span>
+    <form onSubmit={submit} className="playlist-form surface-card authoring-card">
+      <h3 className="section-label">New playlist</h3>
+      <Field label="Name">
         <input
+          type="text"
           required
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
         />
-      </label>
-      <label>
-        <span>Category (optional)</span>
-        <input value={category} onChange={(e) => setCategory(e.target.value)} />
-      </label>
-      <div className="modal-actions">
+      </Field>
+      <Field label="Category (optional)">
+        <input
+          type="text"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        />
+      </Field>
+      <div className="form-actions">
         <button type="button" onClick={onClose} disabled={busy}>
           Cancel
         </button>
@@ -318,15 +322,15 @@ function PlaylistDetail({
       <header className="playlist-detail-header">
         <div>
           <h2>{playlist.name}</h2>
-          <p className="muted small">
-            {playlist.category ? `${playlist.category} · ` : ""}
-            {playlist.mode_id ? `mode ${playlist.mode_id}` : "global"}
-          </p>
+          {playlist.category ? (
+            <p className="muted small">{playlist.category}</p>
+          ) : null}
         </div>
         <div className="playlist-detail-actions">
           <IconButton
             label="Play this playlist"
             icon={<PlayIcon />}
+            variant="primary"
             onClick={() =>
               wsClient.send({
                 type: "ambient_play_playlist",
@@ -337,12 +341,14 @@ function PlaylistDetail({
             Play
           </IconButton>
           <a
+            className="btn-link btn-link-external"
             href={playlistsApi.exportUrl(playlist.id, "m3u")}
             title="Download as M3U (relative paths under MUSIC_DIR — drop alongside your music tree)"
           >
             Export M3U
           </a>
           <a
+            className="btn-link btn-link-external"
             href={playlistsApi.exportUrl(playlist.id, "json")}
             title="Download as JSON (structured: includes per-track metadata)"
           >
@@ -362,7 +368,7 @@ function PlaylistDetail({
       <PlaylistMetaEditor playlist={playlist} modes={modes} onSaved={onChanged} />
 
       <section
-        className="playlist-tracks-section"
+        className="playlist-tracks-section surface-card"
         onDragOver={(e) => {
           // Only react if the drag carries our payload — anything else
           // (browser-native file drag etc.) we ignore.
@@ -379,13 +385,11 @@ function PlaylistDetail({
           handleTrackDrop(e);
         }}
       >
-        <h3>Tracks ({tracks.length})</h3>
+        <h3 className="section-label">Tracks ({tracks.length})</h3>
         {loading ? (
           <p className="muted small">Loading…</p>
         ) : tracks.length === 0 ? (
-          <p className="muted small">
-            No tracks yet. Drag from the browser below or click <strong>+</strong>.
-          </p>
+          <p className="muted small">No tracks yet.</p>
         ) : (
           <ol className="playlist-track-list">
             {tracks.map((row) => {
@@ -437,8 +441,8 @@ function PlaylistDetail({
         )}
       </section>
 
-      <section>
-        <h3>Add tracks</h3>
+      <section className="surface-card">
+        <h3 className="section-label">Add tracks</h3>
         <p className="muted small">
           Click <strong>+</strong> on a row, or drag a track up into the list above.
         </p>
@@ -499,27 +503,28 @@ function PlaylistMetaEditor({
   }
 
   return (
-    <section className="playlist-meta-editor">
+    <section className="playlist-meta-editor authoring-card">
+      <h3 className="section-label">Settings</h3>
       <div className="playlist-meta-fields">
-        <label>
-          <span className="muted small">Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label>
-          <span className="muted small">Mode</span>
+        <Field label="Name">
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="Move to mode">
           <select value={modeId} onChange={(e) => setModeId(e.target.value)}>
-            <option value="">global</option>
             {modes.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
             ))}
           </select>
-        </label>
-        <label>
-          <span className="muted small">Category</span>
-          <input value={category} onChange={(e) => setCategory(e.target.value)} />
-        </label>
+        </Field>
+        <Field label="Category">
+          <input
+            type="text"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          />
+        </Field>
       </div>
       <button
         type="button"

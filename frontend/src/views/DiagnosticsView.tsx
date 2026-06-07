@@ -5,6 +5,7 @@ import type { DiagnosticsResponse } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerArray, usePlayerStore } from "@/core/playerStore";
+import { toast } from "@/core/toast";
 
 /** Fixed reference for "never". Avoids "Invalid Date" rendering when a
  *  loader / scan hasn't run since boot. */
@@ -75,14 +76,17 @@ export function DiagnosticsView() {
       ua: navigator.userAgent,
       timestamp: new Date().toISOString(),
     };
-    void navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    navigator.clipboard
+      .writeText(JSON.stringify(payload, null, 2))
+      .then(() => toast.success("Diagnostics copied to clipboard"))
+      .catch(() => toast.error("Copy failed", "Clipboard access was blocked."));
   }
 
   return (
     <div className="diagnostics-view">
       <header className="diagnostics-view-header">
         <h1>Diagnostics</h1>
-        <button type="button" onClick={copyToClipboard}>
+        <button type="button" className="btn-ghost" onClick={copyToClipboard}>
           Copy JSON
         </button>
       </header>
@@ -171,7 +175,7 @@ export function DiagnosticsView() {
         {connectedDevices.length === 0 ? (
           <p className="muted small">(none yet)</p>
         ) : (
-          <table className="diagnostics-channels">
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Device id</th>
@@ -234,7 +238,7 @@ export function DiagnosticsView() {
 
       <section className="surface-card">
         <h3>Channels</h3>
-        <table className="diagnostics-channels">
+        <table className="data-table diagnostics-channels">
           <thead>
             <tr>
               <th>Channel</th>
@@ -266,7 +270,13 @@ export function DiagnosticsView() {
                 <td>
                   {Number.isFinite(c.duration) ? c.duration.toFixed(1) : "—"}
                 </td>
-                <td>{c.errorCode ?? "—"}</td>
+                <td>
+                  {c.errorCode ? (
+                    <span className="badge badge-danger">{c.errorCode}</span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td className="diagnostics-src" title={c.src}>
                   {c.src.replace(/^.*\/api\//, "/api/") || "(empty)"}
                 </td>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { IconButton } from "@/components/IconButton";
-import { PlayIcon } from "@/components/icons";
+import { PauseIcon, PlayIcon } from "@/components/icons";
 import { diagnosticsApi, playlistsApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import type { PlaylistMeta } from "@/core/types";
@@ -144,16 +144,13 @@ function QuickPlaylists() {
           <li key={p.id} className={driving ? "driving" : undefined}>
             <span className="playlist-name">
               {driving ? (
-                <span className="driving-badge" title="Now driving ambient">
-                  {isPlaying ? "▶" : "⏸"}
+                <span className="driving-badge" title="Now driving ambient" aria-hidden="true">
+                  {isPlaying ? <PlayIcon /> : <PauseIcon />}
                 </span>
               ) : null}
               {p.name}
             </span>
-            <span className="muted small">
-              {p.category ? `${p.category} · ` : ""}
-              {p.mode_id ?? "global"}
-            </span>
+            <span className="muted small">{p.category || "Playlist"}</span>
             <IconButton
               label={driving ? "Restart this playlist" : "Play this playlist now"}
               icon={<PlayIcon />}

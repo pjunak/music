@@ -5,7 +5,7 @@ import { useAuthStore } from "@/core/auth";
 import { usePlayerStore } from "@/core/playerStore";
 import type { SoundboardManifest } from "@/core/types";
 
-import { XIcon } from "./icons";
+import { Modal } from "./Modal";
 
 /** Single keyboard-shortcut row: keys + what they do. */
 interface Shortcut {
@@ -26,8 +26,8 @@ const GLOBAL: Shortcut[] = [
 
 const TABS: Shortcut[] = [
   { keys: ["1"], label: "Console" },
-  { keys: ["2"], label: "Library (Files / Tags)" },
-  { keys: ["3"], label: "Authoring (Playlists / Soundboards / Modes / Presets)" },
+  { keys: ["2"], label: "Library" },
+  { keys: ["3"], label: "Authoring (Playlists / Soundboards / Interrupts / EQ Presets / Cues)" },
   { keys: ["4"], label: "Settings" },
 ];
 
@@ -44,14 +44,6 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
   );
   const isAuthed = useAuthStore((s) => s.status === "authenticated");
   const [soundboard, setSoundboard] = useState<SoundboardManifest | null>(null);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   // Pull the active soundboard if one's set. Skipped for guests since
   // modes/<id> requires auth.
@@ -86,53 +78,44 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal shortcut-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard shortcuts"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <header className="modal-header">
-          <h2>Keyboard shortcuts</h2>
-          <button type="button" onClick={onClose} aria-label="Close">
-            <XIcon />
-          </button>
-        </header>
-        <div className="modal-body shortcut-sheet-body">
-          <ShortcutSection title="Global" shortcuts={GLOBAL} />
-          <ShortcutSection title="Tabs" shortcuts={TABS} />
-          <section className="shortcut-section">
-            <h3>SFX hotkeys</h3>
-            {sfxShortcuts.length === 0 ? (
-              <p className="muted small">
-                {activeModeId === null
-                  ? "Pick a mode to see SFX hotkeys."
-                  : activeSoundboardId === null
-                    ? "Pick a soundboard from the Console tab to see its hotkeys."
-                    : "Active soundboard has no SFX with hotkeys."}
-              </p>
-            ) : (
-              <dl className="shortcut-list">
-                {sfxShortcuts.map((s, idx) => (
-                  <div key={idx} className="shortcut-row">
-                    <dt>
-                      {s.keys.map((k) => (
-                        <kbd key={k} className="kbd">
-                          {k}
-                        </kbd>
-                      ))}
-                    </dt>
-                    <dd>{s.label}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </section>
-        </div>
-      </div>
-    </div>
+    <Modal
+      ariaLabel="Keyboard shortcuts"
+      title="Keyboard shortcuts"
+      className="shortcut-sheet"
+      bodyClassName="shortcut-sheet-body"
+      closeButton
+      onClose={onClose}
+    >
+      <ShortcutSection title="Global" shortcuts={GLOBAL} />
+      <ShortcutSection title="Tabs" shortcuts={TABS} />
+      <section className="shortcut-section">
+        <h3 className="section-label">SFX hotkeys</h3>
+        {sfxShortcuts.length === 0 ? (
+          <p className="muted small">
+            {activeModeId === null
+              ? "Pick a mode to see SFX hotkeys."
+              : activeSoundboardId === null
+                ? "Pick a soundboard from the Console tab to see its hotkeys."
+                : "Active soundboard has no SFX with hotkeys."}
+          </p>
+        ) : (
+          <dl className="shortcut-list">
+            {sfxShortcuts.map((s, idx) => (
+              <div key={idx} className="shortcut-row">
+                <dt>
+                  {s.keys.map((k) => (
+                    <kbd key={k} className="kbd">
+                      {k}
+                    </kbd>
+                  ))}
+                </dt>
+                <dd>{s.label}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
+    </Modal>
   );
 }
 
@@ -145,7 +128,7 @@ function ShortcutSection({
 }) {
   return (
     <section className="shortcut-section">
-      <h3>{title}</h3>
+      <h3 className="section-label">{title}</h3>
       <dl className="shortcut-list">
         {shortcuts.map((s, idx) => (
           <div key={idx} className="shortcut-row">

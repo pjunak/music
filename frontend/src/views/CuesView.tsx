@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { confirmDialog } from "@/components/confirmDialog";
 import { CueEditor } from "@/components/CueEditor";
 import { IconButton } from "@/components/IconButton";
-import { EditIcon, TrashIcon } from "@/components/icons";
+import { TrashIcon } from "@/components/icons";
 import { NoModeEmpty } from "@/components/NoModeEmpty";
 import { modesAdminApi, modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
@@ -118,11 +118,6 @@ export function CuesView() {
                 </button>
                 <span className="simple-list-actions">
                   <IconButton
-                    label="Edit cue"
-                    icon={<EditIcon />}
-                    onClick={() => setEditingId(c.id)}
-                  />
-                  <IconButton
                     label="Delete cue"
                     icon={<TrashIcon />}
                     variant="danger"
@@ -166,8 +161,9 @@ function CueCreateForm({
   }
 
   return (
-    <form onSubmit={submit} className="mode-create-row">
+    <form onSubmit={submit} className="inline-create-row">
       <input
+        type="text"
         value={id}
         onChange={(e) => setId(e.target.value)}
         placeholder="id (slug)"
@@ -177,6 +173,7 @@ function CueCreateForm({
         autoFocus
       />
       <input
+        type="text"
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Name (optional)"

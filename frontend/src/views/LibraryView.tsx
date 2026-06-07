@@ -10,10 +10,17 @@ import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
 import {
+  EditIcon,
+  ImportIcon,
   LightningIcon,
+  MoveIcon,
+  MusicNoteIcon,
   PlayIcon,
   PlusIcon,
+  RescanIcon,
+  SearchIcon,
   TrashIcon,
+  XIcon,
 } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
 import { TagInspector } from "@/components/TagInspector";
@@ -79,30 +86,30 @@ export function LibraryView() {
   return (
     <div className="library-view">
       <header className="library-toolbar">
-        <div className="library-root-toggle" role="tablist" aria-label="Library root">
+        <div className="segmented" role="tablist" aria-label="Library root">
           <button
             type="button"
             role="tab"
             aria-selected={root === "music"}
-            className={root === "music" ? "btn-primary" : ""}
+            className="segmented-item"
             onClick={() => selectRoot("music")}
           >
-            🎵 Music
+            <MusicNoteIcon aria-hidden="true" /> Music
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={root === "sfx"}
-            className={root === "sfx" ? "btn-primary" : ""}
+            className="segmented-item"
             onClick={() => selectRoot("sfx")}
           >
-            ⚡ SFX
+            <LightningIcon aria-hidden="true" /> SFX
           </button>
         </div>
         {root === "music" ? (
           <div className="library-toolbar-search">
             <span className="library-toolbar-search-icon" aria-hidden="true">
-              🔍
+              <SearchIcon />
             </span>
             <input
               type="search"
@@ -119,7 +126,7 @@ export function LibraryView() {
                 aria-label="Clear search"
                 title="Clear"
               >
-                ✕
+                <XIcon />
               </button>
             ) : null}
           </div>
@@ -160,14 +167,22 @@ function RescanButton({
   if (root === "sfx") {
     // SFX doesn't have an index — refreshing the tree is enough.
     return (
-      <button type="button" onClick={onComplete} disabled={busy}>
-        ↻ Refresh
-      </button>
+      <IconButton
+        label="Refresh the folder view"
+        icon={<RescanIcon />}
+        className="library-rescan"
+        onClick={onComplete}
+        disabled={busy}
+      >
+        Refresh
+      </IconButton>
     );
   }
   return (
-    <button
-      type="button"
+    <IconButton
+      label="Rescan the music library from disk"
+      icon={<RescanIcon />}
+      className="library-rescan"
       disabled={busy}
       onClick={async () => {
         setBusy(true);
@@ -186,8 +201,8 @@ function RescanButton({
         }
       }}
     >
-      {busy ? "Rescanning…" : "↻ Rescan"}
-    </button>
+      {busy ? "Rescanning…" : "Rescan"}
+    </IconButton>
   );
 }
 
@@ -302,7 +317,7 @@ function MusicWorkspace({
       ) : null}
       <section className="library-main">
         {searching ? (
-          <div className="folder-header">
+          <div className="folder-band folder-band-search">
             <span className="muted small">
               {loading
                 ? "Searching…"
@@ -310,15 +325,13 @@ function MusicWorkspace({
             </span>
           </div>
         ) : (
-          <>
-            <FolderHeader path={path} root="music" onPathSelect={onPathChange} />
-            <UploadDrop
-              root="music"
-              dest={path}
-              onUploaded={onRefresh}
-              onNavigate={onPathChange}
-            />
-          </>
+          <FolderBand
+            root="music"
+            dest={path}
+            onPathSelect={onPathChange}
+            onUploaded={onRefresh}
+            onNavigate={onPathChange}
+          />
         )}
         {error !== null ? <p className="error small">{error}</p> : null}
         <SelectionToolbar
@@ -392,14 +405,10 @@ function LibraryShell({
         />
       </aside>
       <section className="library-main">
-        <FolderHeader
-          path={selectedPath}
-          root={rootKind}
-          onPathSelect={onPathChange}
-        />
-        <UploadDrop
+        <FolderBand
           root={rootKind}
           dest={selectedPath}
+          onPathSelect={onPathChange}
           onUploaded={onRefresh}
           onNavigate={onPathChange}
         />
@@ -578,7 +587,7 @@ function FolderHeader({
   // the deepest item, it won't fire.
   const items: BreadcrumbItem[] = [
     {
-      label: root === "music" ? "🎵 Music" : "⚡ SFX",
+      label: root === "music" ? "Music" : "SFX",
       onClick: () => onPathSelect(""),
       title: root === "music" ? "Go to music root" : "Go to SFX root",
     },
@@ -739,34 +748,39 @@ function FolderActions({
   return (
     <>
       <div className="folder-actions">
-        <button type="button" onClick={() => void newFolder()} title="Create a folder">
-          ＋ New
-        </button>
-        <button
-          type="button"
+        <IconButton
+          label="Create a folder"
+          icon={<PlusIcon />}
+          onClick={() => void newFolder()}
+        >
+          New
+        </IconButton>
+        <IconButton
+          label="Rename the selected folder"
+          icon={<EditIcon />}
+          disabled={!selectedPath}
           onClick={() => void renameFolder()}
-          disabled={!selectedPath}
-          title="Rename the selected folder"
         >
-          ✎ Rename
-        </button>
-        <button
-          type="button"
+          Rename
+        </IconButton>
+        <IconButton
+          label="Move the selected folder (and everything in it) into another folder"
+          icon={<MoveIcon />}
+          disabled={!selectedPath}
           onClick={() => setMoveOpen(true)}
-          disabled={!selectedPath}
-          title="Move the selected folder (and everything in it) into another folder"
         >
-          ↪ Move…
-        </button>
-        <button
-          type="button"
-          className="btn-danger"
+          Move…
+        </IconButton>
+        <IconButton
+          label="Delete the selected folder and everything in it"
+          icon={<TrashIcon />}
+          variant="danger"
+          className="folder-actions-delete"
+          disabled={!selectedPath}
           onClick={() => void deleteFolder()}
-          disabled={!selectedPath}
-          title="Delete the selected folder and everything in it"
         >
-          🗑 Delete
-        </button>
+          Delete
+        </IconButton>
       </div>
       {moveOpen ? (
         <FolderPickerModal
@@ -789,14 +803,20 @@ function FolderActions({
   );
 }
 
-function UploadDrop({
+/** One unified band: the folder breadcrumb on the left, a compact Upload
+ *  affordance on the right — and the WHOLE band is the drop target (drag
+ *  files anywhere over it). Replaces the old two stacked full-width rows
+ *  (breadcrumb row + separate drop-zone row). */
+function FolderBand({
   root,
   dest,
+  onPathSelect,
   onUploaded,
   onNavigate,
 }: {
   root: Root;
   dest: string;
+  onPathSelect: (p: string) => void;
   onUploaded: () => void;
   /** Navigate the browser to a folder path. Used after a folder drop so
    *  the operator lands inside the folder they just uploaded — otherwise
@@ -910,7 +930,7 @@ function UploadDrop({
   // browser (Firefox especially) neuters them and directory reads come
   // back empty. So we capture both the entry handles and the flat file
   // list synchronously here, then hand them to the async walker.
-  function onDrop(e: DragEvent<HTMLLabelElement>) {
+  function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setDragOver(false);
     const entries = entriesFromItems(e.dataTransfer.items);
@@ -950,9 +970,9 @@ function UploadDrop({
   }
 
   return (
-    <label
-      className={`drop-zone${dragOver ? " drop-zone-active" : ""}${
-        busy ? " drop-zone-uploading" : ""
+    <div
+      className={`folder-band${dragOver ? " folder-band-drop" : ""}${
+        busy ? " folder-band-busy" : ""
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -964,9 +984,9 @@ function UploadDrop({
       }}
       onDrop={onDrop}
     >
-      <input type="file" multiple accept="audio/*" onChange={onPick} hidden />
+      <FolderHeader path={dest} root={root} onPathSelect={onPathSelect} />
       {busy && progress !== null ? (
-        <div className="upload-progress">
+        <div className="upload-progress folder-band-progress">
           <div className="upload-progress-label">
             Uploading — {formatSize(progress.loaded)} / {formatSize(progress.total)}
           </div>
@@ -975,13 +995,21 @@ function UploadDrop({
             max={1}
           />
         </div>
-      ) : (
-        <span>
-          Drop audio files or folders here, or click to upload to{" "}
-          <strong>{dest === "" ? "(root)" : dest}</strong>
+      ) : dragOver ? (
+        <span className="folder-band-hint">
+          Drop to upload to <strong>{dest === "" ? "(root)" : dest}</strong>
         </span>
+      ) : (
+        <label
+          className="folder-band-upload"
+          title={`Upload audio to ${dest === "" ? "(root)" : dest}`}
+        >
+          <input type="file" multiple accept="audio/*" onChange={onPick} hidden />
+          <ImportIcon aria-hidden="true" />
+          <span>Upload</span>
+        </label>
       )}
-    </label>
+    </div>
   );
 }
 

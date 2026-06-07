@@ -1,54 +1,46 @@
-import { useEffect } from "react";
-
 import { useConfirmStore } from "./confirmDialog";
+import { Modal } from "./Modal";
 
 /** Renders the open confirm dialog (if any). Mounts once at the AppShell
- *  level — the open API itself is `confirmDialog()` from `./confirmDialog`. */
+ *  level — the open API itself is `confirmDialog()` from `./confirmDialog`.
+ *
+ *  No Enter-to-confirm: a destructive dialog must be confirmed by an explicit
+ *  click. Initial focus lands on Cancel for danger-tone, on the confirm
+ *  button otherwise — so a stray Enter is always the safe choice. */
 export function ConfirmDialogHost() {
   const current = useConfirmStore((s) => s.current);
   const resolve = useConfirmStore((s) => s.resolve);
 
-  useEffect(() => {
-    if (current === null) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") resolve(false);
-      if (e.key === "Enter") resolve(true);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [current, resolve]);
-
   if (current === null) return null;
 
-  const tone = current.tone ?? "primary";
+  const danger = (current.tone ?? "primary") === "danger";
   return (
-    <div className="modal-backdrop" onMouseDown={() => resolve(false)}>
-      <div
-        className="modal"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label={current.title}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <header className="modal-header">
-          <h2>{current.title}</h2>
-        </header>
-        <div className="modal-body">
-          {current.body !== undefined ? <p>{current.body}</p> : null}
-        </div>
-        <div className="modal-actions">
-          <button type="button" onClick={() => resolve(false)} autoFocus>
+    <Modal
+      role="alertdialog"
+      ariaLabel={current.title}
+      title={current.title}
+      onClose={() => resolve(false)}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={() => resolve(false)}
+            data-autofocus={danger ? true : undefined}
+          >
             {current.cancelLabel ?? "Cancel"}
           </button>
           <button
             type="button"
-            className={tone === "danger" ? "btn-danger" : "btn-primary"}
+            className={danger ? "btn-danger" : "btn-primary"}
             onClick={() => resolve(true)}
+            data-autofocus={danger ? undefined : true}
           >
             {current.confirmLabel ?? "OK"}
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {current.body !== undefined ? <p>{current.body}</p> : null}
+    </Modal>
   );
 }

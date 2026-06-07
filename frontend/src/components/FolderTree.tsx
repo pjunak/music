@@ -190,7 +190,7 @@ export function FolderTree({
       <div key={folder.path}>
         <div
           className={`tree-row${isSelected ? " selected" : ""}${isLeaf ? " tree-row-leaf" : ""}`}
-          style={{ paddingLeft: `${depth * 0.9 + 0.4}rem` }}
+          style={{ "--depth": depth } as React.CSSProperties}
           {...dropProps(folder.path)}
         >
           {isLeaf ? (
@@ -243,15 +243,15 @@ export function FolderTree({
           <div className="tree-children">
             {node.error !== null ? (
               <p
-                className="error small"
-                style={{ paddingLeft: `${(depth + 1) * 0.9 + 0.4}rem` }}
+                className="error small tree-note"
+                style={{ "--depth": depth + 1 } as React.CSSProperties}
               >
                 {node.error}
               </p>
             ) : node.children.length === 0 ? (
               <p
-                className="muted small"
-                style={{ paddingLeft: `${(depth + 1) * 0.9 + 0.4}rem` }}
+                className="muted small tree-note"
+                style={{ "--depth": depth + 1 } as React.CSSProperties}
               >
                 (empty)
               </p>
@@ -274,9 +274,7 @@ export function FolderTree({
           explicit. Move-to-root via drag isn't offered here; the Tags
           tab's Move… modal (with a root option) covers that rare case. */}
       {rootError !== null ? (
-        <p className="error small" style={{ padding: "0.4rem" }}>
-          {rootError}
-        </p>
+        <p className="error small tree-root-error">{rootError}</p>
       ) : null}
       <div className="tree-children">
         {rootChildrenView.map((c) => renderRow(c, 0))}

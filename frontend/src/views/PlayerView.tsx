@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { LightningIcon, ModeIcon, PauseIcon, PlayIcon } from "@/components/icons";
 import { libraryApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
@@ -143,11 +144,17 @@ export function PlayerView() {
         <div className="player-meta">
           <p className="player-status">
             {interruptActive ? (
-              <span className="badge badge-warn">⚡ Alert</span>
+              <span className="player-alert">
+                <LightningIcon aria-hidden="true" /> Alert
+              </span>
             ) : isPlaying ? (
-              <span className="badge badge-ok">▶ Playing</span>
+              <span className="badge badge-accent">
+                <PlayIcon aria-hidden="true" /> Playing
+              </span>
             ) : (
-              <span className="badge">⏸ Paused</span>
+              <span className="badge">
+                <PauseIcon aria-hidden="true" /> Paused
+              </span>
             )}
           </p>
           <h1 className="player-title">{trackTitle(track)}</h1>
@@ -160,7 +167,7 @@ export function PlayerView() {
           {activeModeId ? (
             <p className="player-context">
               <span className="player-context-mode">
-                🎭 {humaniseSlug(activeModeId)}
+                <ModeIcon aria-hidden="true" /> {humaniseSlug(activeModeId)}
               </span>
             </p>
           ) : null}

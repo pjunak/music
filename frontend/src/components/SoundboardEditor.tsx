@@ -5,7 +5,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import type { BreadcrumbItem } from "@/components/Breadcrumb";
 import { confirmDialog } from "@/components/confirmDialog";
 import { IconButton } from "@/components/IconButton";
-import { TrashIcon, XIcon } from "@/components/icons";
+import { TrashIcon, WarnIcon, XIcon } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
 import { modesAdminApi, modesApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
@@ -220,12 +220,15 @@ export function SoundboardEditor({
             );
             if (conflictKeys.size === 0) return null;
             return (
-              <p className="error small">
-                ⚠ Hotkey conflict: {Array.from(conflictKeys).map((k) => `"${k}"`).join(", ")}
-                {" "}
-                {conflictKeys.size === 1 ? "is" : "are"} bound to multiple items.
-                Only the last-registered item will fire when pressed.
-              </p>
+              <div className="alert alert-warn">
+                <WarnIcon aria-hidden="true" />
+                <span>
+                  Hotkey conflict:{" "}
+                  {Array.from(conflictKeys).map((k) => `"${k}"`).join(", ")}{" "}
+                  {conflictKeys.size === 1 ? "is" : "are"} bound to multiple items.
+                  Only the last-registered item will fire when pressed.
+                </span>
+              </div>
             );
           })()}
         <ul className="soundboard-categories">
@@ -357,12 +360,16 @@ function ItemRow({
       </code>
       <input
         className="soundboard-item-name"
+        type="text"
+        aria-label="Display name"
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Display name"
       />
       <input
         className={`soundboard-item-hotkey${hasHotkeyConflict ? " has-conflict" : ""}`}
+        type="text"
+        aria-label="Hotkey"
         value={hotkey}
         onChange={(e) => setHotkey(e.target.value.slice(0, 1))}
         maxLength={1}
@@ -444,12 +451,16 @@ function AddItemForm({
         ))}
       </select>
       <input
+        type="text"
+        aria-label="Display name"
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Display name"
         required
       />
       <input
+        type="text"
+        aria-label="Hotkey (optional)"
         value={hotkey}
         onChange={(e) => setHotkey(e.target.value.slice(0, 1))}
         maxLength={1}

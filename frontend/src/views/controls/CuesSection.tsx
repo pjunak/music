@@ -5,6 +5,7 @@ import { modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import type { Cue, ModeDetail } from "@/core/types";
+import { useFireFlash } from "@/core/useFireFlash";
 import { wsClient } from "@/core/ws";
 
 /** Live Cues panel — one button per cue in the active mode. Clicking fires the
@@ -14,6 +15,7 @@ export function CuesSection() {
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
   const [mode, setMode] = useState<ModeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [firedId, flash] = useFireFlash();
 
   useEffect(() => {
     setError(null);
@@ -49,13 +51,14 @@ export function CuesSection() {
     return (
       <EmptyState>
         Mode <code>{activeModeId}</code> has no cues — add one in{" "}
-        <strong>Authoring → Modes</strong>.
+        <strong>Authoring → Cues</strong>.
       </EmptyState>
     );
   }
 
   function fire(id: string, name: string) {
     wsClient.send({ type: "fire_cue", cue_id: id });
+    flash(id);
     toast.info("Cue fired", name);
   }
 
@@ -66,12 +69,12 @@ export function CuesSection() {
           <button
             key={c.id}
             type="button"
-            className="cue-button"
+            className={`fire-tile${firedId === c.id ? " fired" : ""}`}
             onClick={() => fire(c.id, c.name)}
             title={c.description ?? undefined}
           >
-            <span className="cue-button-name">{c.name}</span>
-            <span className="cue-button-meta muted small">{cueSummary(c)}</span>
+            <span className="fire-tile-name">{c.name}</span>
+            <span className="fire-tile-meta muted small">{cueSummary(c)}</span>
           </button>
         ))}
       </div>

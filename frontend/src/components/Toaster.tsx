@@ -1,11 +1,15 @@
+import type { ReactNode } from "react";
+
 import { useToastStore } from "@/core/toast";
 import type { ToastKind } from "@/core/toast";
 
-const ICONS: Record<ToastKind, string> = {
-  info: "ℹ",
-  success: "✓",
-  warn: "⚠",
-  error: "✕",
+import { CheckIcon, ErrorIcon, InfoIcon, WarnIcon, XIcon } from "./icons";
+
+const ICONS: Record<ToastKind, ReactNode> = {
+  info: <InfoIcon />,
+  success: <CheckIcon />,
+  warn: <WarnIcon />,
+  error: <ErrorIcon />,
 };
 
 export function Toaster() {
@@ -33,7 +37,7 @@ export function Toaster() {
             onClick={() => dismiss(t.id)}
             aria-label="Dismiss"
           >
-            ✕
+            <XIcon />
           </button>
         </div>
       ))}

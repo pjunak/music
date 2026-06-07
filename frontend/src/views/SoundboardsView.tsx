@@ -166,8 +166,9 @@ function SoundboardCreateForm({
   }
 
   return (
-    <form onSubmit={submit} className="mode-create-row">
+    <form onSubmit={submit} className="inline-create-row">
       <input
+        type="text"
         value={id}
         onChange={(e) => setId(e.target.value)}
         placeholder="id (slug)"
@@ -177,6 +178,7 @@ function SoundboardCreateForm({
         autoFocus
       />
       <input
+        type="text"
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Name (optional)"

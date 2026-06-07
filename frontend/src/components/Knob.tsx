@@ -110,6 +110,7 @@ export function Knob({
       <div
         className="knob-dial"
         role="slider"
+        aria-orientation="vertical"
         tabIndex={disabled ? -1 : 0}
         aria-labelledby={labelId}
         aria-valuemin={min}

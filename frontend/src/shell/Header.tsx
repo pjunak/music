@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { DeviceNameField } from "@/components/DeviceNameField";
-import { HelpIcon } from "@/components/icons";
+import { HelpIcon, ModeIcon, SettingsIcon } from "@/components/icons";
+import { IconButton } from "@/components/IconButton";
 import { modesApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { usePlayerStore } from "@/core/playerStore";
@@ -50,6 +51,12 @@ export function Header() {
     <header className="app-header">
       <div className="app-header-left">
         <DeviceNameField />
+      </div>
+      {/* The authoring tabs are operator-only; hiding the strip keeps guests on
+          the TV surface (a protected route they hit directly just shows the
+          in-place sign-in gate). */}
+      {isGuest ? <span className="tabs-placeholder" /> : <Tabs />}
+      <div className="app-header-right">
         <span
           className={`ws-status ws-status-${wsStatus}`}
           title={`WebSocket: ${wsStatus}`}
@@ -57,19 +64,15 @@ export function Header() {
           <span className="ws-status-dot" aria-hidden="true" />
           <span className="ws-status-text">{wsStatus}</span>
         </span>
-      </div>
-      {/* The authoring tabs are operator-only; hiding the strip keeps guests on
-          the TV surface (a protected route they hit directly just shows the
-          in-place sign-in gate). */}
-      {isGuest ? <span className="tabs-placeholder" /> : <Tabs />}
-      <div className="app-header-right">
         {/* Mode picker: lives in the header so it's reachable from any
             tab without jumping to Console. Authed-only because /api/modes
             401s for guests; guests never need to pick a mode anyway since
             they're on the read-only TV view. */}
         {!isGuest ? (
           <div className="header-mode-picker" title="Active mode">
-            <span className="muted small">mode</span>
+            <span className="header-mode-icon" aria-hidden="true">
+              <ModeIcon />
+            </span>
             <select
               value={activeModeId ?? ""}
               onChange={(e) => changeMode(e.target.value)}
@@ -82,15 +85,13 @@ export function Header() {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              className="btn-ghost header-mode-manage"
+            <IconButton
+              label="Manage modes (create / rename / delete)"
+              icon={<SettingsIcon />}
+              variant="ghost"
+              className="header-mode-manage"
               onClick={() => setModeMgrOpen(true)}
-              title="Manage modes (create / rename / delete)"
-              aria-label="Manage modes"
-            >
-              ⚙
-            </button>
+            />
           </div>
         ) : null}
         <button
