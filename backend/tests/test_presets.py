@@ -45,6 +45,28 @@ def test_create_preset_writes_yaml(auth_client: TestClient) -> None:
     assert "newp" in auth_client.get("/api/modes/dnd").json()["presets"]
 
 
+def test_create_preset_graphic_eq_bands_roundtrip(auth_client: TestClient) -> None:
+    """A graphic-EQ effect carries a nested `bands` list (freq + gain). The
+    loose `extra=allow` effect spec must preserve it through save → reload."""
+    bands = [
+        {"frequency": 32, "gain": 4.5},
+        {"frequency": 1000, "gain": -3.0},
+        {"frequency": 16000, "gain": 6.0},
+    ]
+    r = auth_client.post(
+        "/api/modes/dnd/presets",
+        json={"id": "eqp", "name": "Smiley", "effects": [{"type": "eq", "bands": bands}]},
+    )
+    assert r.status_code == 201, r.text
+    eff = r.json()["effects"][0]
+    assert eff["type"] == "eq"
+    assert eff["bands"] == bands
+
+    # Survives a fresh load from disk too.
+    detail = auth_client.get("/api/modes/dnd").json()
+    assert detail["presets"]["eqp"]["effects"][0]["bands"] == bands
+
+
 def test_create_preset_rejects_unknown_effect_type(auth_client: TestClient) -> None:
     r = auth_client.post(
         "/api/modes/dnd/presets",

@@ -30,6 +30,7 @@
  * type maps to a small graph of native Web Audio nodes — see `buildEffect`.
  */
 
+import { EQ_BAND_Q, normalizeEqBands } from "@/core/eq";
 import { toast } from "@/core/toast";
 import type { PlayerState } from "@/core/types";
 
@@ -1083,6 +1084,8 @@ const _warnedUnsupportedEffectTypes = new Set<string>();
 
 function buildEffect(ctx: AudioContext, spec: EffectSpec): BuiltEffect | null {
   switch (spec.type) {
+    case "eq":
+      return buildGraphicEq(ctx, spec);
     case "lowpass":
     case "highpass":
     case "bandpass":
@@ -1107,6 +1110,27 @@ function buildEffect(ctx: AudioContext, spec: EffectSpec): BuiltEffect | null {
       }
       return null;
   }
+}
+
+function buildGraphicEq(ctx: AudioContext, spec: EffectSpec): BuiltEffect {
+  // A series of one-octave peaking filters at the canonical band frequencies.
+  // The band gains come straight off the editor's faders; the same frequency +
+  // Q live in `core/eq.ts` so the editor's response curve matches this graph.
+  const bands = normalizeEqBands(spec.bands);
+  const input = ctx.createGain();
+  let node: AudioNode = input;
+  for (const band of bands) {
+    const filter = ctx.createBiquadFilter();
+    filter.type = "peaking";
+    filter.frequency.value = band.frequency;
+    filter.Q.value = EQ_BAND_Q;
+    filter.gain.value = band.gain;
+    node.connect(filter);
+    node = filter;
+  }
+  const output = ctx.createGain();
+  node.connect(output);
+  return { input, output };
 }
 
 function buildBiquad(

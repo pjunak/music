@@ -90,6 +90,18 @@ function initFrom(common: Record<FieldKey, string | null>): Record<FieldKey, str
   return out;
 }
 
+/** Split a stored path into its editable filename stem and its extension.
+ *  The extension is held back from editing so a rename can't accidentally
+ *  drop the file out of the indexer's audio-extension set. `dot > 0` skips
+ *  leading-dot names (no real audio file starts with a dot). */
+function splitName(path: string): { stem: string; ext: string } {
+  const base = path.split("/").pop() ?? path;
+  const dot = base.lastIndexOf(".");
+  return dot > 0
+    ? { stem: base.slice(0, dot), ext: base.slice(dot) }
+    : { stem: base, ext: "" };
+}
+
 export function TagInspector({
   selectedTracks,
   onSaved,
@@ -109,6 +121,20 @@ export function TagInspector({
   useEffect(() => {
     setValues(initFrom(common));
   }, [common]);
+
+  // Filename rename is single-track only (you can't rename N files to one
+  // name). Held separate from the tag fields because it's a different
+  // backend op (file move) that can't be batched into the bulk save.
+  const filePath = selectedTracks.length === 1 ? selectedTracks[0].path : null;
+  const { stem: currentStem, ext } = useMemo(
+    () => splitName(filePath ?? ""),
+    [filePath],
+  );
+  const [fileName, setFileName] = useState(currentStem);
+  const [renaming, setRenaming] = useState(false);
+  useEffect(() => {
+    setFileName(currentStem);
+  }, [currentStem]);
 
   const count = selectedTracks.length;
 
@@ -134,6 +160,32 @@ export function TagInspector({
 
   function revert() {
     setValues(initFrom(common));
+  }
+
+  const renameDirty =
+    filePath !== null &&
+    fileName.trim() !== "" &&
+    fileName.trim() !== currentStem;
+
+  async function renameFile() {
+    if (filePath === null || !renameDirty) return;
+    const next = fileName.trim();
+    if (next.includes("/") || next.includes("\\")) {
+      toast.error("Invalid filename", "A filename can't contain slashes.");
+      return;
+    }
+    const track = selectedTracks[0];
+    const parent = track.path.split("/").slice(0, -1).join("/");
+    setRenaming(true);
+    try {
+      await libraryApi.moveTrack(track.id, parent, `${next}${ext}`);
+      toast.success("File renamed", `${next}${ext}`);
+      onSaved();
+    } catch (e) {
+      toast.error("Rename failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setRenaming(false);
+    }
   }
 
   async function save() {
@@ -224,6 +276,38 @@ export function TagInspector({
         🏷 Tags <span className="muted">· {heading}</span>
       </h3>
       <div className="tag-inspector-body">
+        {filePath !== null ? (
+          <div className="insp-group">
+            <div className="insp-group-head">File</div>
+            <div className="insp-file">
+              <span className="insp-field-label">Filename</span>
+              <div className="insp-file-row">
+                <input
+                  className={`insp-file-input${renameDirty ? " changed" : ""}`}
+                  type="text"
+                  value={fileName}
+                  spellCheck={false}
+                  onChange={(e) => setFileName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void renameFile();
+                  }}
+                />
+                {ext ? <span className="insp-file-ext">{ext}</span> : null}
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={renaming || !renameDirty}
+                  onClick={() => void renameFile()}
+                >
+                  {renaming ? "Renaming…" : "Rename"}
+                </button>
+              </div>
+              <span className="insp-field-hint muted small">
+                Renames the file on disk in place. The extension is kept.
+              </span>
+            </div>
+          </div>
+        ) : null}
         <div className="insp-group">
           <div className="insp-group-head">Library only</div>
           {LIBRARY_FIELDS.map(renderField)}

@@ -3,18 +3,23 @@ import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
+import { Fader } from "@/components/Fader";
+import { GraphicEqModule } from "@/components/GraphicEqModule";
 import { IconButton } from "@/components/IconButton";
 import { ArrowDownIcon, ArrowUpIcon, TrashIcon, XIcon } from "@/components/icons";
+import { Knob } from "@/components/Knob";
 import { modesAdminApi, presetsAdminApi, presetsApi } from "@/core/api";
 import type { PresetEffect, PresetManifest } from "@/core/api";
+import { defaultEqBands, normalizeEqBands } from "@/core/eq";
+import type { EqBand } from "@/core/eq";
 import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 
-// Per-effect-type UI: a friendly label, a one-line blurb, and a slider control
+// Per-effect-type UI: a friendly label, a one-line blurb, and a control schema
 // for each numeric param. Param KEYS must match what the audio engine reads
-// (playbackEngine `buildEffect`) — only the presentation changes here. Effect
-// types NOT in this map are unsupported by the engine (e.g. `pitch_shift`):
-// they're flagged in the editor instead of silently doing nothing.
+// (playbackEngine `buildEffect`) — only the presentation changes here. The
+// graphic EQ (`eq`) is handled separately (GraphicEqModule). Effect types in
+// neither place are unsupported (e.g. `pitch_shift`) and get flagged.
 interface ParamControl {
   key: string;
   label: string;
@@ -23,11 +28,15 @@ interface ParamControl {
   step: number;
   def: number;
   format: (v: number) => string;
+  /** Log feel for wide frequency ranges. */
+  scale?: "linear" | "log";
 }
 const pct = (v: number) => `${Math.round(v * 100)}%`;
-const hz = (v: number) => `${Math.round(v)} Hz`;
-const sec = (v: number) => `${v.toFixed(2)} s`;
+const hz = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`);
+const sec = (v: number) => `${v.toFixed(2)}s`;
 const plain = (v: number) => `${v}`;
+
+const EQ_META = { label: "Graphic EQ", blurb: "10-band — drag the bands" };
 
 const EFFECT_UI: Record<
   string,
@@ -37,23 +46,23 @@ const EFFECT_UI: Record<
     label: "Muffle (low-pass)",
     blurb: "Cuts the highs — distant / underwater",
     params: [
-      { key: "frequency", label: "Cutoff", min: 50, max: 18000, step: 10, def: 800, format: hz },
-      { key: "q", label: "Resonance", min: 0.1, max: 12, step: 0.1, def: 0.7, format: plain },
+      { key: "frequency", label: "Cutoff", min: 50, max: 18000, step: 10, def: 800, format: hz, scale: "log" },
+      { key: "q", label: "Reso", min: 0.1, max: 12, step: 0.1, def: 0.7, format: plain },
     ],
   },
   highpass: {
     label: "Thin (high-pass)",
     blurb: "Cuts the lows — tinny / telephone",
     params: [
-      { key: "frequency", label: "Cutoff", min: 50, max: 18000, step: 10, def: 200, format: hz },
-      { key: "q", label: "Resonance", min: 0.1, max: 12, step: 0.1, def: 0.7, format: plain },
+      { key: "frequency", label: "Cutoff", min: 50, max: 18000, step: 10, def: 200, format: hz, scale: "log" },
+      { key: "q", label: "Reso", min: 0.1, max: 12, step: 0.1, def: 0.7, format: plain },
     ],
   },
   bandpass: {
     label: "Band-pass",
     blurb: "Keeps a band around the centre",
     params: [
-      { key: "frequency", label: "Centre", min: 50, max: 18000, step: 10, def: 1000, format: hz },
+      { key: "frequency", label: "Centre", min: 50, max: 18000, step: 10, def: 1000, format: hz, scale: "log" },
       { key: "q", label: "Width", min: 0.1, max: 12, step: 0.1, def: 1.0, format: plain },
     ],
   },
@@ -77,7 +86,7 @@ const EFFECT_UI: Record<
     label: "Tremolo",
     blurb: "Volume wobble",
     params: [
-      { key: "rate", label: "Rate", min: 0.1, max: 20, step: 0.1, def: 5, format: (v) => `${v.toFixed(1)} Hz` },
+      { key: "rate", label: "Rate", min: 0.1, max: 20, step: 0.1, def: 5, format: (v) => `${v.toFixed(1)}Hz` },
       { key: "depth", label: "Depth", min: 0, max: 1, step: 0.01, def: 0.5, format: pct },
     ],
   },
@@ -90,6 +99,16 @@ const EFFECT_UI: Record<
     ],
   },
 };
+
+// Order shown in the "+ Add" picker — EQ first, then the colour/space effects.
+const ADDABLE: { type: string; label: string; blurb: string }[] = [
+  { type: "eq", ...EQ_META },
+  ...Object.entries(EFFECT_UI).map(([type, ui]) => ({
+    type,
+    label: ui.label,
+    blurb: ui.blurb,
+  })),
+];
 
 export function PresetsView() {
   // EQ presets are per-mode — this view edits the active mode's presets.
@@ -178,8 +197,8 @@ export function PresetsView() {
           </span>
         </header>
         <p className="muted small">
-          Audio effects applied to the music (ambient) channel. Turn one on,
-          drag its sliders. Stack several — they apply top to bottom.
+          Audio effects applied to the music (ambient) channel. Stack a graphic
+          EQ and colour effects — they apply top to bottom.
         </p>
         <ul className="playlist-list">
           {presets.length === 0 ? (
@@ -264,7 +283,7 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
   const [effects, setEffects] = useState<PresetEffect[]>(
     () => preset?.effects.map((e) => ({ ...e })) ?? [],
   );
-  // Optional "when active" overrides — checkbox gates each slider; null on save
+  // Optional "when active" overrides — checkbox gates each control; null on save
   // when off (= leave that global alone).
   const [volumeOn, setVolumeOn] = useState(preset?.volume != null);
   const [volume, setVolume] = useState(preset?.volume ?? 0.8);
@@ -287,6 +306,10 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
   }, [mode, preset]);
 
   function addEffect(type: string) {
+    if (type === "eq") {
+      setEffects((es) => [...es, { type: "eq", bands: defaultEqBands() } as PresetEffect]);
+      return;
+    }
     const ui = EFFECT_UI[type];
     const params = ui
       ? Object.fromEntries(ui.params.map((p) => [p.key, p.def]))
@@ -294,11 +317,14 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
     setEffects((es) => [...es, { type, ...params } as PresetEffect]);
   }
 
-  // Slider setter — writes a numeric param straight through (no string coercion).
   function setEffectParam(idx: number, key: string, value: number) {
     setEffects((es) =>
       es.map((e, i) => (i === idx ? { ...e, [key]: value } : e)),
     );
+  }
+
+  function setEffectBands(idx: number, bands: EqBand[]) {
+    setEffects((es) => es.map((e, i) => (i === idx ? { ...e, bands } : e)));
   }
 
   function updateEffect(idx: number, key: string, value: string) {
@@ -428,51 +454,53 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
         <h3>When active</h3>
         <p className="muted small">
           Optional — a preset can also nudge master volume and the crossfade
-          time when you switch it on. Leave a box unticked to leave that alone.
-          If several active presets set one, the last turned on wins.
+          time when you switch it on. Untick to leave that alone. If several
+          active presets set one, the last turned on wins.
         </p>
-        <label className="override-row">
-          <input
-            type="checkbox"
-            checked={volumeOn}
-            onChange={(e) => setVolumeOn(e.target.checked)}
-          />
-          <span className="override-name">Set master volume</span>
-          {volumeOn ? (
-            <span className="override-control">
+        <div className="override-knobs">
+          <div className={`override-knob${volumeOn ? "" : " override-off"}`}>
+            <label className="override-toggle">
               <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
+                type="checkbox"
+                checked={volumeOn}
+                onChange={(e) => setVolumeOn(e.target.checked)}
               />
-              <span className="param-val">{Math.round(volume * 100)}%</span>
-            </span>
-          ) : null}
-        </label>
-        <label className="override-row">
-          <input
-            type="checkbox"
-            checked={crossfadeOn}
-            onChange={(e) => setCrossfadeOn(e.target.checked)}
-          />
-          <span className="override-name">Set crossfade</span>
-          {crossfadeOn ? (
-            <span className="override-control">
+              <span className="muted small">Master volume</span>
+            </label>
+            <Knob
+              label="Volume"
+              value={volume}
+              min={0}
+              max={1}
+              step={0.01}
+              def={0.8}
+              format={(v) => `${Math.round(v * 100)}%`}
+              onChange={setVolume}
+              disabled={!volumeOn}
+            />
+          </div>
+          <div className={`override-knob${crossfadeOn ? "" : " override-off"}`}>
+            <label className="override-toggle">
               <input
-                type="range"
-                min={0}
-                max={10000}
-                step={100}
-                value={crossfadeMs}
-                onChange={(e) => setCrossfadeMs(Number(e.target.value))}
+                type="checkbox"
+                checked={crossfadeOn}
+                onChange={(e) => setCrossfadeOn(e.target.checked)}
               />
-              <span className="param-val">{(crossfadeMs / 1000).toFixed(1)} s</span>
-            </span>
-          ) : null}
-        </label>
+              <span className="muted small">Crossfade</span>
+            </label>
+            <Knob
+              label="Time"
+              value={crossfadeMs}
+              min={0}
+              max={10000}
+              step={100}
+              def={2000}
+              format={(v) => `${(v / 1000).toFixed(1)}s`}
+              onChange={setCrossfadeMs}
+              disabled={!crossfadeOn}
+            />
+          </div>
+        </div>
       </section>
 
       <section>
@@ -485,14 +513,16 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
         ) : (
           <ol className="effect-list">
             {effects.map((eff, idx) => {
+              const isEq = eff.type === "eq";
               const ui = EFFECT_UI[eff.type];
+              const known = isEq || ui != null;
               return (
-                <li key={idx} className="effect-row">
+                <li key={idx} className={`effect-row rack-module${isEq ? " rack-eq" : ""}`}>
                   <header>
                     <span className="effect-title">
-                      <strong>{ui?.label ?? eff.type}</strong>
-                      {ui ? (
-                        <span className="muted small">{ui.blurb}</span>
+                      <strong>{isEq ? EQ_META.label : ui?.label ?? eff.type}</strong>
+                      {known ? (
+                        <span className="muted small">{isEq ? EQ_META.blurb : ui?.blurb}</span>
                       ) : (
                         <span className="ref-missing">
                           ⚠ not supported — this effect does nothing
@@ -520,35 +550,50 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
                       />
                     </div>
                   </header>
-                  {ui ? (
-                    <div className="effect-params">
+                  {isEq ? (
+                    <GraphicEqModule
+                      bands={normalizeEqBands(eff.bands)}
+                      onChange={(b) => setEffectBands(idx, b)}
+                    />
+                  ) : ui ? (
+                    <div className="knob-row">
                       {ui.params.map((pc) => {
                         const cur = Number(eff[pc.key]);
                         const val = Number.isFinite(cur) ? cur : pc.def;
-                        return (
-                          <label key={pc.key} className="slider-field">
-                            <span className="slider-label">
-                              <span className="muted small">{pc.label}</span>
-                              <span className="param-val">{pc.format(val)}</span>
-                            </span>
-                            <input
-                              type="range"
-                              min={pc.min}
-                              max={pc.max}
-                              step={pc.step}
-                              value={val}
-                              onChange={(e) =>
-                                setEffectParam(idx, pc.key, Number(e.target.value))
-                              }
-                            />
-                          </label>
+                        // Frequency-type params read better as a tall fader; the
+                        // rest are knobs (the hardware-rack vocabulary).
+                        return pc.scale === "log" ? (
+                          <Fader
+                            key={pc.key}
+                            value={val}
+                            min={pc.min}
+                            max={pc.max}
+                            step={pc.step}
+                            scale="log"
+                            height={104}
+                            label={pc.label}
+                            format={pc.format}
+                            def={pc.def}
+                            onChange={(v) => setEffectParam(idx, pc.key, v)}
+                          />
+                        ) : (
+                          <Knob
+                            key={pc.key}
+                            value={val}
+                            min={pc.min}
+                            max={pc.max}
+                            step={pc.step}
+                            label={pc.label}
+                            format={pc.format}
+                            def={pc.def}
+                            onChange={(v) => setEffectParam(idx, pc.key, v)}
+                          />
                         );
                       })}
                     </div>
                   ) : (
-                    // Unknown/unsupported effect — keep the raw fields so an
-                    // existing preset stays editable (and removable) instead of
-                    // being silently uneditable.
+                    // Unknown/unsupported effect — keep raw fields so an existing
+                    // preset stays editable (and removable).
                     <div className="effect-params">
                       {Object.entries(eff)
                         .filter(([k]) => k !== "type")
@@ -583,9 +628,9 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
             <option value="" disabled>
               + Add effect…
             </option>
-            {Object.entries(EFFECT_UI).map(([type, ui]) => (
-              <option key={type} value={type}>
-                {ui.label} — {ui.blurb}
+            {ADDABLE.map((a) => (
+              <option key={a.type} value={a.type}>
+                {a.label} — {a.blurb}
               </option>
             ))}
           </select>

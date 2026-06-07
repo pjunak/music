@@ -457,6 +457,29 @@ def test_track_move_renames_and_relocates(auth_client: TestClient) -> None:
     assert not (music_dir / "MoveSrc" / "movable.wav").exists()
 
 
+def test_track_rename_in_place(auth_client: TestClient) -> None:
+    """Renaming without relocating: destination == the file's current folder,
+    only the filename changes. This is the path the TagInspector's rename
+    control drives."""
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("oldname.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "RenameHere"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+
+    r = auth_client.post(
+        f"/api/library/tracks/{track_id}/move",
+        json={"destination": "RenameHere", "new_filename": "newname.wav"},
+    )
+    assert r.status_code == 200
+    assert r.json()["path"] == "RenameHere/newname.wav"
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "RenameHere" / "newname.wav").is_file()
+    assert not (music_dir / "RenameHere" / "oldname.wav").exists()
+
+
 def test_track_move_409_when_target_exists(auth_client: TestClient) -> None:
     auth_client.post(
         "/api/library/upload",

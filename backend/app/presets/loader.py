@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # (the editor flags any type not in its EFFECT_UI map).
 SUPPORTED_EFFECT_TYPES: frozenset[str] = frozenset(
     {
+        "eq",
         "reverb",
         "lowpass",
         "highpass",
