@@ -290,7 +290,6 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
   const [crossfadeOn, setCrossfadeOn] = useState(preset?.crossfade_ms != null);
   const [crossfadeMs, setCrossfadeMs] = useState(preset?.crossfade_ms ?? 2000);
   const [busy, setBusy] = useState(false);
-  const [pendingEffectType, setPendingEffectType] = useState("");
 
   useEffect(() => {
     if (mode === "edit" && preset) {
@@ -305,16 +304,21 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
     }
   }, [mode, preset]);
 
-  function addEffect(type: string) {
-    if (type === "eq") {
-      setEffects((es) => [...es, { type: "eq", bands: defaultEqBands() } as PresetEffect]);
-      return;
-    }
-    const ui = EFFECT_UI[type];
-    const params = ui
-      ? Object.fromEntries(ui.params.map((p) => [p.key, p.def]))
-      : {};
-    setEffects((es) => [...es, { type, ...params } as PresetEffect]);
+  // Each effect type is a singleton in the chain: clicking its palette chip
+  // adds it (with default params, appended to the end) if absent, or removes
+  // it if present. A hand-edited YAML with a duplicate still renders both rows
+  // (and each is removable via its module); the chip just toggles the first.
+  function toggleEffect(type: string) {
+    setEffects((es) => {
+      const idx = es.findIndex((e) => e.type === type);
+      if (idx >= 0) return es.filter((_, i) => i !== idx);
+      if (type === "eq") {
+        return [...es, { type: "eq", bands: defaultEqBands() } as PresetEffect];
+      }
+      const ui = EFFECT_UI[type];
+      const params = ui ? Object.fromEntries(ui.params.map((p) => [p.key, p.def])) : {};
+      return [...es, { type, ...params } as PresetEffect];
+    });
   }
 
   function setEffectParam(idx: number, key: string, value: number) {
@@ -403,6 +407,8 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
       toast.error("Delete failed", e instanceof Error ? e.message : undefined);
     }
   }
+
+  const activeTypes = new Set(effects.map((e) => e.type));
 
   return (
     <form onSubmit={submit} className="preset-form">
@@ -506,10 +512,25 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
       <section>
         <h3>Effects</h3>
         <p className="muted small">
-          Applied top to bottom — the audio passes through each in order.
+          Click an effect to add it; click again to remove. Active effects apply
+          top to bottom — reorder with ↑↓.
         </p>
+        <div className="effect-palette" role="group" aria-label="Effects">
+          {ADDABLE.map((a) => (
+            <button
+              key={a.type}
+              type="button"
+              className="effect-chip"
+              aria-pressed={activeTypes.has(a.type)}
+              title={a.blurb}
+              onClick={() => toggleEffect(a.type)}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
         {effects.length === 0 ? (
-          <p className="muted small">No effects yet. Add one below.</p>
+          <p className="muted small">No effects active — pick some above.</p>
         ) : (
           <ol className="effect-list">
             {effects.map((eff, idx) => {
@@ -517,7 +538,7 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
               const ui = EFFECT_UI[eff.type];
               const known = isEq || ui != null;
               return (
-                <li key={idx} className={`effect-row rack-module${isEq ? " rack-eq" : ""}`}>
+                <li key={idx} className="effect-row rack-module">
                   <header>
                     <span className="effect-title">
                       <strong>{isEq ? EQ_META.label : ui?.label ?? eff.type}</strong>
@@ -613,28 +634,6 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
             })}
           </ol>
         )}
-        <div className="effect-add">
-          <select
-            value={pendingEffectType}
-            onChange={(e) => {
-              const next = e.target.value;
-              if (next) {
-                addEffect(next);
-                setPendingEffectType("");
-              }
-            }}
-            aria-label="Add effect to chain"
-          >
-            <option value="" disabled>
-              + Add effect…
-            </option>
-            {ADDABLE.map((a) => (
-              <option key={a.type} value={a.type}>
-                {a.label} — {a.blurb}
-              </option>
-            ))}
-          </select>
-        </div>
       </section>
 
       <div className="modal-actions">

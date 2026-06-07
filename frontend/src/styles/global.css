@@ -3526,12 +3526,25 @@ kbd,
     width: 18px;
   }
 }
-.effect-add {
+/* Effect palette — one chip per available effect; click toggles it in/out of
+ * the chain (each type is a singleton). Active = teal (the rack/authoring
+ * accent), not the live-playback blue. */
+.effect-palette {
   display: flex;
-  gap: 0.4rem;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
-.effect-add select {
-  flex: 1;
+.effect-chip {
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: var(--text-base);
+}
+.effect-chip[aria-pressed="true"] {
+  background: var(--accent2-soft);
+  border-color: var(--accent2);
+  color: var(--accent2-strong);
+  font-weight: 600;
 }
 
 /* --- library empty state --- */
