@@ -483,15 +483,6 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
             autoFocus={mode === "create"}
           />
         </Field>
-        <Field label="ID" hint="Derived from the name — fixed once created.">
-          <input
-            type="text"
-            value={mode === "create" && !name.trim() ? "" : presetId}
-            placeholder="from name"
-            disabled
-            readOnly
-          />
-        </Field>
         <Field label="Description">
           <input
             type="text"

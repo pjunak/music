@@ -173,11 +173,6 @@ function CueCreateForm({
       <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
         Create
       </button>
-      {name.trim() ? (
-        <span className="muted small slug-preview">
-          id: <code>{derivedId}</code>
-        </span>
-      ) : null}
     </form>
   );
 }

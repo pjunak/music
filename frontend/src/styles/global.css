@@ -741,23 +741,12 @@ kbd,
 /* --- inline "create new" row (list-pane add forms) ------------------ */
 .inline-create-row {
   display: flex;
-  flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-5);
 }
 .inline-create-row > input {
   flex: 1;
   min-width: 0;
-}
-
-/* Derived-id preview under a name-only create row — wraps to its own line so
- *  the operator sees the slug their name will be saved under. */
-.slug-preview {
-  flex-basis: 100%;
-  margin: 0;
-}
-.slug-preview code {
-  color: var(--fg);
 }
 
 /* --- login modal + inline route gating --- */
@@ -916,7 +905,6 @@ kbd,
 }
 .mode-create-row {
   display: flex;
-  flex-wrap: wrap;
   gap: 0.4rem;
   margin-bottom: 0.8rem;
 }
