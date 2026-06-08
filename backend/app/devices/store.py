@@ -93,17 +93,13 @@ class DeviceStore:
             return self._with_id(client_id, rec) if rec is not None else None
 
     def is_output(self, client_id: str | None) -> bool:
+        """Whether this device is designated 'output by default' — i.e. should
+        auto-activate as a live output when it connects."""
         if client_id is None:
             return False
         with self._lock:
             rec = self._devices.get(client_id)
             return bool(rec and rec.get("is_output"))
-
-    def output_client_ids(self) -> set[str]:
-        with self._lock:
-            return {
-                cid for cid, rec in self._devices.items() if rec.get("is_output")
-            }
 
     def put(self, client_id: str, name: str, is_output: bool) -> dict[str, Any]:
         """Add or update a remembered device (the manual 'save' action).

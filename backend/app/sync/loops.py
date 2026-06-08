@@ -1,7 +1,8 @@
 """Server-side interval timers for looping SFX.
 
 Each active loop runs one asyncio task that broadcasts an `sfx_fired` event to
-the designated output devices every `interval_s` seconds, until cancelled. The
+every client every `interval_s` seconds (each client plays it only if it's an
+active output / force-local guest), until cancelled. The
 loop *records* (id, soundboard, item, interval, volume) live in `PlayerState`
 (so every client's LOOPS panel shows the same set); this module owns only the
 live timer tasks behind them.
@@ -33,7 +34,9 @@ async def _run(
     try:
         while True:
             await asyncio.sleep(interval_s)
-            await manager.broadcast_to_outputs(payload)
+            # Broadcast to all sockets; each client's engine plays it only when
+            # it's an active output (or a force-local guest). See connection.broadcast.
+            await manager.broadcast(payload)
     except asyncio.CancelledError:
         raise
     except Exception:  # never let a broadcast hiccup kill the loop silently

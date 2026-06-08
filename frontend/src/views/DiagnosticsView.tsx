@@ -180,7 +180,7 @@ export function DiagnosticsView() {
               <tr>
                 <th>Device id</th>
                 <th>Name</th>
-                <th>Designated output?</th>
+                <th>Default output?</th>
                 <th>Active output?</th>
                 <th>Me?</th>
               </tr>

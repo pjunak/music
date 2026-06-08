@@ -1,5 +1,6 @@
 """Device registry HTTP surface — the operator's manually-curated, file-backed
-device list and the audio-output designation that gates activation."""
+device list and the "output by default" designation (auto-activate on connect;
+it does NOT gate ad-hoc activation, which any connected device can do)."""
 from __future__ import annotations
 
 import json
@@ -55,23 +56,13 @@ def test_put_saves_device(auth_client: TestClient) -> None:
         assert any(x["client_id"] == "tv-client" for x in rows)
 
 
-def test_put_is_output_enables_activation(auth_client: TestClient) -> None:
+def test_connected_device_activates_without_designation(auth_client: TestClient) -> None:
+    """Any connected device can be made a live output — no save/designation
+    needed. Designation only controls default-on auto-activation at connect."""
     with auth_client.websocket_connect("/api/ws") as ws:
         ws.receive_json()
         _register(ws, "TV", "tv-client")
         ws.receive_json()
-
-        # Not saved/designated → activation rejected.
-        ws.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
-        assert ws.receive_json()["type"] == "error"
-
-        # Save as a designated output.
-        r = auth_client.put(
-            "/api/devices/tv-client", json={"name": "TV", "is_output": True}
-        )
-        assert r.status_code == 200
-        assert r.json()["is_output"] is True
-        ws.receive_json()  # save broadcast
 
         ws.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
         msg = ws.receive_json()
@@ -79,20 +70,37 @@ def test_put_is_output_enables_activation(auth_client: TestClient) -> None:
         assert msg["state"]["active_output_device_ids"] == ["tv-client"]
 
 
-def test_put_is_output_off_removes_active(auth_client: TestClient) -> None:
+def test_default_on_device_auto_activates_on_connect(auth_client: TestClient) -> None:
+    """A device saved 'output by default' auto-activates when it connects."""
+    # Designate first (device offline), then connect it.
+    r = auth_client.put(
+        "/api/devices/tv-client", json={"name": "TV", "is_output": True}
+    )
+    assert r.json()["is_output"] is True
+
+    with auth_client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()  # snapshot
+        _register(ws, "TV", "tv-client")
+        msg = ws.receive_json()  # register → auto-activate broadcast
+        assert msg["type"] == "state_changed"
+        assert msg["state"]["active_output_device_ids"] == ["tv-client"]
+
+
+def test_put_is_output_off_does_not_deactivate_live_output(auth_client: TestClient) -> None:
+    """Designation is independent of the live active set: turning 'default on'
+    off must NOT silence a device that's currently playing this session."""
     with auth_client.websocket_connect("/api/ws") as ws:
         ws.receive_json()
         _register(ws, "TV", "tv-client")
         ws.receive_json()
-        auth_client.put("/api/devices/tv-client", json={"name": "TV", "is_output": True})
-        ws.receive_json()  # save broadcast
+        # Activate ad-hoc (no designation needed).
         ws.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
         assert ws.receive_json()["state"]["active_output_device_ids"] == ["tv-client"]
 
-        # Flip output off → dropped from the live active set immediately.
+        # Toggle default-on off — the live output keeps playing.
         auth_client.put("/api/devices/tv-client", json={"name": "TV", "is_output": False})
-        msg = ws.receive_json()
-        assert "tv-client" not in msg["state"]["active_output_device_ids"]
+        msg = ws.receive_json()  # designation broadcast
+        assert "tv-client" in msg["state"]["active_output_device_ids"]
 
 
 def test_delete_device(auth_client: TestClient) -> None:

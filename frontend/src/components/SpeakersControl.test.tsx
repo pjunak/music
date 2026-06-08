@@ -73,6 +73,38 @@ describe("SpeakersControl", () => {
     });
   });
 
+  it("lists every connected device and activates an undesignated one", async () => {
+    useAuthStore.setState({ status: "authenticated", user: { id: 1, username: "dm" } });
+    useUiStore.setState({ clientId: CID, deviceName: "DM", forceLocalPlayback: false });
+    usePlayerStore.setState({
+      myDeviceId: CID,
+      stateReceivedAt: 1,
+      state: {
+        active_output_device_ids: [],
+        device_volumes: {},
+        connected_devices: [
+          { device_id: CID, name: "DM", is_output: false },
+          // Connected but NOT saved/designated — must still be listed + tickable.
+          { device_id: "tv-1", name: "Living Room TV", is_output: true },
+        ],
+      } as unknown as PlayerState,
+    });
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+
+    // Every connected device appears, and the designated one shows "default".
+    expect(screen.getByText("Living Room TV")).toBeInTheDocument();
+    expect(screen.getByText("default")).toBeInTheDocument();
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(2); // this device + the TV
+    await userEvent.click(checkboxes[1]); // activate the TV — no PUT/designation
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_active_outputs",
+      device_ids: ["tv-1"],
+    });
+  });
+
   it("sends a per-device volume on slider change", async () => {
     seedAuthed({ designated: true });
     renderControl();

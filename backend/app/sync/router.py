@@ -174,33 +174,47 @@ async def _h_register(
     action: RegisterAction, device_id: str, _ws: WebSocket
 ) -> None:
     # `device_id` here is the ephemeral connection id. Registering does NOT add
-    # the device to the persistent list — that's a manual operator action. We
-    # only look up whether this client_id is *already* a remembered output and
-    # cache that onto the live connection. An unremembered device connects with
-    # is_output=False and simply appears in `connected_devices` for the
-    # operator to optionally save.
-    is_output = device_store.is_output(action.client_id)
+    # the device to the persistent list — that's a manual operator action.
+    #
+    # The persistent `is_output` flag is now a "default-on" designation: it does
+    # NOT gate whether a device may output (any connected device can be ticked
+    # on via set_active_outputs), it only means "auto-activate this device as a
+    # live output whenever it connects". So a default-on device is added to the
+    # active-output set here on register; everything else connects inactive and
+    # simply appears in `connected_devices` for the operator to tick on (or save
+    # as default-on in Settings).
+    default_on = device_store.is_output(action.client_id)
     registry.bind(
         device_id,
         client_id=action.client_id,
         name=action.name,
-        is_output=is_output,
+        is_output=default_on,
     )
-    new_state = await state_module.machine.snapshot()
-    await manager.broadcast_state(new_state)
+    snap = await state_module.machine.snapshot()
+    if default_on and action.client_id not in snap.active_output_device_ids:
+        await _apply_and_broadcast(
+            state_module.set_active_outputs(
+                [*snap.active_output_device_ids, action.client_id]
+            )
+        )
+    else:
+        await manager.broadcast_state(snap)
 
 
 async def _h_position_report(
     action: PositionReportAction, device_id: str, websocket: WebSocket
 ) -> None:
-    if not registry.is_output_connection(device_id):
+    # Only a currently-ACTIVE output may stamp telemetry. (Active membership,
+    # not the persistent designation — an ad-hoc-activated device reports too,
+    # a designated-but-off one doesn't.) A well-behaved client self-gates and
+    # never reports unless it's playing; this is the server-side backstop.
+    client_id = registry.client_id_for(device_id) or device_id
+    snap = await state_module.machine.snapshot()
+    if client_id not in snap.active_output_device_ids:
         await _send_error(
-            websocket, "only designated output devices may report position"
+            websocket, "only active output devices may report position"
         )
         return
-    # Stamp telemetry under the stable client_id (informational only — surfaced
-    # in Diagnostics), falling back to the connection id if somehow unbound.
-    client_id = registry.client_id_for(device_id) or device_id
     await state_module.machine.apply(
         state_module.report_position(client_id, action.position_ms),
         SessionLocal,
@@ -234,21 +248,19 @@ async def _h_set_active_mode(
 async def _h_set_active_outputs(
     action: SetActiveOutputsAction, _device_id: str, websocket: WebSocket
 ) -> None:
-    # `device_ids` are stable client_ids. Only validate ids being **added** by
-    # this action against the persistent output designation — existing ids may
-    # be stale references (left over across restarts) and re-validating them
-    # would block every toggle. Validating against the persisted `is_output`
-    # (not liveness) lets the operator pre-arm a TV that's currently asleep.
+    # `device_ids` are stable client_ids. Any *connected* device can be made an
+    # output — designation is no longer a gate (it only decides default-on
+    # auto-activation at connect time). Validate only the ids being **added**,
+    # and only that they're currently connected; ids already active get a pass
+    # (stale-tolerant across reconnects so a leftover id can't block a toggle).
     current_state = await state_module.machine.snapshot()
     already_active = set(current_state.active_output_device_ids)
     new_ids = [d for d in action.device_ids if d not in already_active]
     if new_ids:
-        designated = device_store.output_client_ids()
-        bad = [d for d in new_ids if d not in designated]
+        connected = registry.connected_client_ids()
+        bad = [d for d in new_ids if d not in connected]
         if bad:
-            await _send_error(
-                websocket, f"device(s) not designated as outputs: {bad}"
-            )
+            await _send_error(websocket, f"device(s) not connected: {bad}")
             return
     await _apply_and_broadcast(state_module.set_active_outputs(action.device_ids))
 
@@ -496,7 +508,11 @@ async def _h_fire_sfx(
         item_path=action.item_path,
         volume=action.volume,
     )
-    await manager.broadcast_to_outputs(event.model_dump(mode="json"))
+    # Broadcast to every socket; each client's engine plays it only when that
+    # client is actually an output (active membership OR a force-local guest).
+    # Output membership is no longer a fixed designation, so gating server-side
+    # would miss ad-hoc-activated devices — the client is the source of truth.
+    await manager.broadcast(event.model_dump(mode="json"))
 
 
 def _sfx_item_error(mode_id: str | None, soundboard_id: str, item_path: str) -> str | None:
@@ -630,7 +646,7 @@ async def _h_fire_cue(
             )
         )
     for sfx in cue.sfx:
-        await manager.broadcast_to_outputs(
+        await manager.broadcast(
             SfxFired(
                 soundboard_id=sfx.soundboard, item_path=sfx.item, volume=sfx.volume
             ).model_dump(mode="json")

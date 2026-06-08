@@ -15,8 +15,6 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser
 from app.devices.store import device_store
-from app.sync import commit_and_broadcast
-from app.sync import state as sync_state
 from app.sync.connection import manager
 from app.sync.devices import registry
 from app.sync.state import machine
@@ -71,33 +69,28 @@ def list_devices(_: CurrentUser) -> list[DeviceOut]:
 @router.put("/{client_id}", response_model=DeviceOut)
 async def save_device(client_id: str, payload: DevicePut, _: CurrentUser) -> DeviceOut:
     """Remember a device (the manual 'save'/'add'), or update an existing one's
-    name / output designation. Idempotent create-or-update.
+    name / default-on designation. Idempotent create-or-update.
 
-    A device that ends up NOT a designated output is also dropped from the live
-    active outputs immediately — a de-designated device must stop being a
-    speaker. Designating one ON never auto-activates it (still manual)."""
+    `is_output` here is the "output by default" flag: it controls whether the
+    device auto-activates as a live output when it next connects — it does NOT
+    gate or change the *current* live active set. Toggling it on/off only
+    affects future connects (and the badge in the footer); a device that's
+    live right now keeps playing until it's turned off from the Speakers
+    popover or disconnects. (Activation is independent — any connected device
+    can be ticked on without being saved.)"""
     record = device_store.put(client_id, payload.name, payload.is_output)
     registry.refresh_is_output(client_id, payload.is_output)
     registry.refresh_name(client_id, payload.name)
-
-    if not payload.is_output:
-        changed, _state = await commit_and_broadcast(
-            sync_state.remove_active_output(client_id)
-        )
-        if not changed:
-            await _broadcast_snapshot()
-    else:
-        await _broadcast_snapshot()
-
+    await _broadcast_snapshot()
     return _to_out(record, _connected_client_ids())
 
 
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def forget_device(client_id: str, _: CurrentUser) -> None:
-    """Forget a device — drop it from the saved list and from active outputs.
-    If it's still connected it stays usable as a guest/local player but can no
-    longer be a designated/coordinated output until saved again."""
+    """Forget a device — drop it from the saved list (so it no longer
+    auto-activates by default). If it's still connected it remains usable and,
+    if it was a live output, keeps playing this session until turned off."""
     if not device_store.delete(client_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
     registry.refresh_is_output(client_id, False)
-    await commit_and_broadcast(sync_state.remove_active_output(client_id))
+    await _broadcast_snapshot()

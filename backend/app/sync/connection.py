@@ -32,28 +32,14 @@ class ConnectionManager:
         await self._send_to_each(self._sockets.keys(), message)
 
     async def broadcast(self, message: dict) -> None:
-        """Send `message` to every connected client, regardless of
-        capabilities. Use for events that any consumer might care about
-        (sfx fired, future audit events, etc.)."""
+        """Send `message` to every connected client. Used for fire-and-forget
+        audio events (SFX, loop ticks, cue stings): each client's engine plays
+        them only if it's actually an output (active membership OR a force-local
+        guest), so non-output controller tabs simply ignore the frames. Output
+        membership is dynamic now, so the client — not the server — gates."""
         if not self._sockets:
             return
         await self._send_to_each(self._sockets.keys(), message)
-
-    async def broadcast_to_outputs(self, message: dict) -> None:
-        """Send `message` only to connections whose device is a designated
-        audio output. Used for fire-and-forget audio events (SFX) that only
-        the playback devices need to act on — controller-only clients ignore
-        them."""
-        if not self._sockets:
-            return
-        from app.sync.devices import registry
-
-        targets = [
-            connection_id
-            for connection_id in self._sockets
-            if registry.is_output_connection(connection_id)
-        ]
-        await self._send_to_each(targets, message)
 
     async def _send_to_each(self, device_ids, message: dict) -> None:
         for device_id in list(device_ids):

@@ -151,10 +151,12 @@ function DevicesPanel() {
     <section className="surface-card">
       <h3>Devices</h3>
       <p className="muted small">
-        Choose which devices may play audio. A device only becomes a speaker
-        after you mark it as an <strong>audio output</strong> here and turn it
-        on — nothing starts playing on its own. This list is saved and survives
-        reinstalls.
+        Remember and name your devices. Marking one{" "}
+        <strong>output by default</strong> makes it auto-turn-on as a speaker
+        whenever it connects (handy for a fixed TV or speaker box). You don't
+        need to save a device to use it — any connected device can be turned on
+        ad-hoc from the <strong>Speakers</strong> menu in the footer. This list
+        is saved and survives reinstalls.
       </p>
 
       {error !== null ? <p className="error small">{error}</p> : null}
@@ -189,7 +191,7 @@ function DevicesPanel() {
                 checked={d.is_output}
                 disabled={busy}
                 onChange={() => void save(d.client_id, d.name, !d.is_output)}
-                label="Audio output"
+                label="Output by default"
               />
               <div className="device-row-actions">
                 <button type="button" onClick={() => void rename(d)} disabled={busy}>

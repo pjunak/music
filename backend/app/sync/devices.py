@@ -9,9 +9,12 @@ Two layers of identity now coexist:
   output designation; survives refresh and restart.
 
 This module stays DB-free (it's imported by the state machine, the connection
-manager and the router). The persistent `is_output` flag is read from the DB
-in the router's register handler and *cached* here via `bind` so hot paths
-(SFX fan-out, position gating) don't hit the database per event.
+manager and the router). The persistent `is_output` flag (the "default-on"
+designation) is read in the router's register handler and *cached* here via
+`bind` so each broadcast's `connected_devices` can show the flag without a DB
+hit. It is display/auto-activate only — SFX fan-out and position gating follow
+live active-output membership (`PlayerState.active_output_device_ids`), not
+this cache.
 """
 from __future__ import annotations
 
@@ -70,13 +73,21 @@ class DeviceRegistry:
         conn = self._conns.get(connection_id)
         return conn.client_id if conn is not None else None
 
-    def is_output_connection(self, connection_id: str) -> bool:
-        conn = self._conns.get(connection_id)
-        return conn is not None and conn.is_output
+    def connected_client_ids(self) -> set[str]:
+        """Stable client_ids of every registered live connection. Used to
+        validate that a device being activated as an output is actually
+        connected (activation no longer requires a persistent designation)."""
+        return {
+            conn.client_id
+            for conn in self._conns.values()
+            if conn.registered and conn.client_id is not None
+        }
 
     def refresh_is_output(self, client_id: str, value: bool) -> None:
-        """Push a designation change to every live socket of this device so
-        SFX fan-out / position gating react without waiting for a reconnect."""
+        """Push a default-on designation change to every live socket of this
+        device so its `connected_devices` entry reflects the new flag without a
+        reconnect. (Designation is display/auto-activate only; it does not gate
+        SFX or position — those follow live active-output membership.)"""
         for conn in self._conns.values():
             if conn.client_id == client_id:
                 conn.is_output = value

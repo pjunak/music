@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { devicesApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import {
@@ -9,8 +8,7 @@ import {
   usePlayerArray,
   usePlayerStore,
 } from "@/core/playerStore";
-import { toast } from "@/core/toast";
-import { defaultDeviceName, useUiStore } from "@/core/uiStore";
+import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
 import { VolumeControl } from "./VolumeControl";
@@ -28,8 +26,11 @@ const EMPTY_VOLUMES: Record<string, number> = {};
  *   - Guest → a local-only on/off (the server rejects output changes from guest
  *     sockets) via `forceLocalPlayback`; no multi-device popover.
  *   - Authed → a pill showing how many speakers are on (green when THIS device
- *     is one) that opens a popover listing each designated output with an on/off
- *     toggle + a per-device volume slider. */
+ *     is one) that opens a popover listing EVERY connected device with an
+ *     on/off toggle + per-device volume. Ticking a device on makes it a live
+ *     output for this session — no pre-designation needed. A "default" badge
+ *     marks devices saved as output-by-default (Settings → Devices), which
+ *     auto-activate when they connect. */
 export function SpeakersControl() {
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
   const isGuest = useAuthStore((s) => s.status) !== "authenticated";
@@ -79,7 +80,6 @@ function GuestSpeaker() {
 
 function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const isMyOutput = usePlayerStore(selectIsMyOutput);
@@ -87,7 +87,6 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   const activeIds = usePlayerArray((s) => s.state?.active_output_device_ids);
   const deviceVolumes =
     usePlayerStore((s) => s.state?.device_volumes) ?? EMPTY_VOLUMES;
-  const clientId = useUiStore((s) => s.clientId);
   const deviceName = useUiStore((s) => s.deviceName);
 
   useEffect(() => {
@@ -109,36 +108,12 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   }, [open]);
 
   const thisDevice = devices.find((d) => d.device_id === deviceId) ?? null;
-  const otherOutputs = devices.filter(
-    (d) => d.is_output && d.device_id !== deviceId,
-  );
+  const others = devices.filter((d) => d.device_id !== deviceId);
 
-  /** Turn a device on/off. `selfDesignate` (this device only) does the explicit
-   *  PUT is_output=true on first enable. Reads the live active list to avoid
+  /** Turn a device on/off as a live output. No designation needed — any
+   *  connected device can be activated. Reads the live active list to avoid
    *  clobbering a concurrent change. */
-  async function setOn(id: string, on: boolean, selfDesignate: boolean) {
-    if (busy) return;
-    if (selfDesignate && on) {
-      setBusy(true);
-      try {
-        await devicesApi.save(clientId, {
-          name: deviceName ?? defaultDeviceName(),
-          is_output: true,
-        });
-        toast.success(
-          "This device is now an audio output",
-          "Manage or remove it in Settings → Devices.",
-        );
-      } catch (e) {
-        toast.error(
-          "Couldn't set this device as an output",
-          e instanceof Error ? e.message : undefined,
-        );
-        return;
-      } finally {
-        setBusy(false);
-      }
-    }
+  function setOn(id: string, on: boolean) {
     const player = usePlayerStore.getState();
     const current = player.state?.active_output_device_ids ?? [];
     const next = on
@@ -193,27 +168,22 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
           <SpeakerRow
             name={`${thisDevice?.name ?? deviceName ?? "This device"} (this)`}
             on={activeIds.includes(deviceId)}
+            isDefault={thisDevice?.is_output ?? false}
             volume={deviceVolumes[deviceId] ?? 1}
-            busy={busy}
-            onToggle={(on) => void setOn(deviceId, on, !(thisDevice?.is_output ?? false))}
+            onToggle={(on) => setOn(deviceId, on)}
             onVolume={(v) => setVol(deviceId, v)}
           />
-          {otherOutputs.map((d) => (
+          {others.map((d) => (
             <SpeakerRow
               key={d.device_id}
               name={d.name}
               on={activeIds.includes(d.device_id)}
+              isDefault={d.is_output}
               volume={deviceVolumes[d.device_id] ?? 1}
-              onToggle={(on) => void setOn(d.device_id, on, false)}
+              onToggle={(on) => setOn(d.device_id, on)}
               onVolume={(v) => setVol(d.device_id, v)}
             />
           ))}
-          {otherOutputs.length === 0 ? (
-            <p className="muted small speakers-empty">
-              No other speakers yet. Open this app on a TV / speaker tab, then
-              mark it as an output in Settings → Devices.
-            </p>
-          ) : null}
         </div>
       ) : null}
     </div>
@@ -223,15 +193,15 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
 function SpeakerRow({
   name,
   on,
+  isDefault,
   volume,
-  busy,
   onToggle,
   onVolume,
 }: {
   name: string;
   on: boolean;
+  isDefault?: boolean;
   volume: number;
-  busy?: boolean;
   onToggle: (on: boolean) => void;
   onVolume: (v: number) => void;
 }) {
@@ -241,10 +211,17 @@ function SpeakerRow({
         <input
           type="checkbox"
           checked={on}
-          disabled={busy}
           onChange={(e) => onToggle(e.target.checked)}
         />
         <span className="speaker-row-name">{name}</span>
+        {isDefault ? (
+          <span
+            className="speaker-row-default"
+            title="Output on by default — auto-activates when this device connects (Settings → Devices)"
+          >
+            default
+          </span>
+        ) : null}
       </label>
       <VolumeControl
         value={volume}
