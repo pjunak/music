@@ -31,7 +31,7 @@ export function GraphicEqModule({ bands, onChange, active = true }: Props) {
 
   return (
     <div className="graphic-eq">
-      <EqCurve bands={bands} active={active} />
+      <EqCurve bands={bands} active={active} height={100} />
       <div className="eq-bands">
         {bands.map((b, i) => (
           <Fader
@@ -41,7 +41,7 @@ export function GraphicEqModule({ bands, onChange, active = true }: Props) {
             min={EQ_GAIN_MIN}
             max={EQ_GAIN_MAX}
             step={EQ_GAIN_STEP}
-            height={120}
+            height={92}
             label={EQ_BAND_LABELS[i]}
             format={fmtDb}
             def={0}

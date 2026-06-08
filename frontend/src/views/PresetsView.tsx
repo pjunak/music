@@ -491,58 +491,13 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
         </Field>
       </div>
 
-      <section className="preset-overrides surface-card authoring-card">
-        <h3 className="section-label">When active</h3>
-        <p className="muted small">
-          Optional — a preset can also nudge master volume and the crossfade
-          time when you switch it on. If several active presets set one, the last
-          turned on wins.
-        </p>
-        <div className="override-knobs">
-          <div className={`override-knob${volumeOn ? "" : " override-off"}`}>
-            <Switch
-              checked={volumeOn}
-              onChange={(e) => setVolumeOn(e.target.checked)}
-              label="Master volume"
-            />
-            <Knob
-              label="Volume"
-              value={volume}
-              min={0}
-              max={1}
-              step={0.01}
-              def={0.8}
-              format={(v) => `${Math.round(v * 100)}%`}
-              onChange={setVolume}
-              disabled={!volumeOn}
-            />
-          </div>
-          <div className={`override-knob${crossfadeOn ? "" : " override-off"}`}>
-            <Switch
-              checked={crossfadeOn}
-              onChange={(e) => setCrossfadeOn(e.target.checked)}
-              label="Crossfade"
-            />
-            <Knob
-              label="Time"
-              value={crossfadeMs}
-              min={0}
-              max={10000}
-              step={100}
-              def={2000}
-              format={(v) => `${(v / 1000).toFixed(1)}s`}
-              onChange={setCrossfadeMs}
-              disabled={!crossfadeOn}
-            />
-          </div>
-        </div>
-      </section>
-
       <section>
         <h3 className="section-label">Effects</h3>
         <p className="muted small">
           The full rack — flip a module's switch to enable it. Enabled effects
           (teal) apply top to bottom; bypassed ones (grey) keep their settings.
+          "When active" nudges master volume / crossfade when the preset is
+          switched on (last one on wins).
         </p>
         <div className="effect-list">
           {ADDABLE.map((a) => {
@@ -552,7 +507,9 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
             return (
               <div
                 key={type}
-                className={`effect-row rack-module${active ? "" : " effect-off"}`}
+                className={`effect-row rack-module${type === "eq" ? " effect-eq" : ""}${
+                  active ? "" : " effect-off"
+                }`}
               >
                 <header>
                   <span className="effect-title">
@@ -588,7 +545,7 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
                             max={pc.max}
                             step={pc.step}
                             scale="log"
-                            height={104}
+                            height={84}
                             label={pc.label}
                             format={pc.format}
                             def={pc.def}
@@ -616,6 +573,52 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
               </div>
             );
           })}
+          <div className="rack-module overrides-module">
+            <header>
+              <span className="effect-title">
+                <strong>When active</strong>
+                <span className="muted small">global tweaks on switch-on</span>
+              </span>
+            </header>
+            <div className="override-knobs">
+              <div className={`override-knob${volumeOn ? "" : " override-off"}`}>
+                <Switch
+                  checked={volumeOn}
+                  onChange={(e) => setVolumeOn(e.target.checked)}
+                  aria-label="Enable master-volume override"
+                />
+                <Knob
+                  label="Volume"
+                  value={volume}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  def={0.8}
+                  format={(v) => `${Math.round(v * 100)}%`}
+                  onChange={setVolume}
+                  disabled={!volumeOn}
+                />
+              </div>
+              <div className={`override-knob${crossfadeOn ? "" : " override-off"}`}>
+                <Switch
+                  checked={crossfadeOn}
+                  onChange={(e) => setCrossfadeOn(e.target.checked)}
+                  aria-label="Enable crossfade override"
+                />
+                <Knob
+                  label="Crossfade"
+                  value={crossfadeMs}
+                  min={0}
+                  max={10000}
+                  step={100}
+                  def={2000}
+                  format={(v) => `${(v / 1000).toFixed(1)}s`}
+                  onChange={setCrossfadeMs}
+                  disabled={!crossfadeOn}
+                />
+              </div>
+            </div>
+          </div>
           {extraEffects.map((eff, idx) => (
             <div key={`extra-${idx}`} className="effect-row rack-module">
               <header>

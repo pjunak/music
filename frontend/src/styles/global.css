@@ -3245,13 +3245,19 @@ kbd,
 
 /* --- presets effect editor --- */
 
+/* The rack packs compactly — small modules tile multiple-per-row so you can
+ * see the whole chain at once; the EQ spans the full width (it needs it). */
 .effect-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+.effect-row.effect-eq {
+  grid-column: 1 / -1;
 }
 .effect-row {
   background: var(--surface-2);
@@ -3302,13 +3308,15 @@ kbd,
   padding: 0.55rem 0.75rem 0.7rem;
 }
 
-/* Row of knobs / param faders inside a module. */
+/* Row of knobs / param faders inside a module — centred so a (shorter)
+ * frequency fader and the knobs align about their midpoints. */
 .knob-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0.6rem 1rem;
-  padding-top: 0.35rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3) var(--space-5);
+  padding-top: var(--space-2);
 }
 
 /* Rotary knob. */
@@ -3501,17 +3509,25 @@ kbd,
   gap: 0.5rem;
 }
 
-/* "When active" override knobs (checkbox-gated). */
+/* "When active" modifiers — a compact rack tile (neutral grey strip; these
+ * are global tweaks, not chain effects) that sits in the rack grid. */
+.overrides-module {
+  border-left: 3px solid var(--border-strong);
+}
+.overrides-module > header {
+  margin-bottom: var(--space-2);
+}
 .override-knobs {
   display: flex;
-  gap: 1.5rem;
+  justify-content: center;
+  gap: var(--space-6);
   flex-wrap: wrap;
 }
 .override-knob {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--space-1);
 }
 .override-knob.override-off {
   --rack-accent: var(--border-strong);
