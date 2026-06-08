@@ -31,7 +31,7 @@ export function GraphicEqModule({ bands, onChange, active = true }: Props) {
 
   return (
     <div className="graphic-eq">
-      <EqCurve bands={bands} active={active} height={100} />
+      <EqCurve bands={bands} active={active} height={150} />
       <div className="eq-bands">
         {bands.map((b, i) => (
           <Fader
@@ -41,7 +41,7 @@ export function GraphicEqModule({ bands, onChange, active = true }: Props) {
             min={EQ_GAIN_MIN}
             max={EQ_GAIN_MAX}
             step={EQ_GAIN_STEP}
-            height={92}
+            height={150}
             label={EQ_BAND_LABELS[i]}
             format={fmtDb}
             def={0}
@@ -55,11 +55,11 @@ export function GraphicEqModule({ bands, onChange, active = true }: Props) {
         <span className="muted small">dB · drag a band, double-click to zero</span>
         <button
           type="button"
-          className="btn-ghost"
           onClick={() => onChange(defaultEqBands())}
           disabled={!active || isFlat(bands)}
+          title="Reset all bands to 0 dB (flat response)"
         >
-          Flat
+          Reset
         </button>
       </div>
     </div>

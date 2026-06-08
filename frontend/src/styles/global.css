@@ -3245,19 +3245,54 @@ kbd,
 
 /* --- presets effect editor --- */
 
-/* The rack packs compactly — small modules tile multiple-per-row so you can
- * see the whole chain at once; the EQ spans the full width (it needs it). */
-.effect-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* Small effect modules — a uniform-height grid of clean cells, above the EQ.
+ * grid-auto-rows:1fr equalises every cell's height; each cell centres its
+ * controls so a 1-knob cell matches a fader cell. */
+.effect-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: var(--space-3);
-  align-items: start;
+  grid-auto-rows: 1fr;
+  margin-bottom: var(--space-3);
 }
-.effect-row.effect-eq {
-  grid-column: 1 / -1;
+.effect-cell {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--rack-accent);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+}
+.effect-cell.effect-off {
+  --rack-accent: var(--border-strong);
+  --rack-accent-strong: var(--muted-strong);
+}
+.effect-cell.effect-off .rack-body {
+  opacity: 0.6;
+}
+.effect-cell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.effect-cell-head .effect-title strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.effect-cell .rack-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--space-2);
+}
+/* "When active" modifiers cell — neutral strip (global tweak, not a chain
+ * effect). */
+.overrides-cell {
+  border-left-color: var(--border-strong);
 }
 .effect-row {
   background: var(--surface-2);
@@ -3509,14 +3544,7 @@ kbd,
   gap: 0.5rem;
 }
 
-/* "When active" modifiers — a compact rack tile (neutral grey strip; these
- * are global tweaks, not chain effects) that sits in the rack grid. */
-.overrides-module {
-  border-left: 3px solid var(--border-strong);
-}
-.overrides-module > header {
-  margin-bottom: var(--space-2);
-}
+/* "When active" modifiers — two switch-gated knobs inside the overrides cell. */
 .override-knobs {
   display: flex;
   justify-content: center;

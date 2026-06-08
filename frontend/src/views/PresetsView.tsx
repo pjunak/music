@@ -499,22 +499,16 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
           "When active" nudges master volume / crossfade when the preset is
           switched on (last one on wins).
         </p>
-        <div className="effect-list">
-          {ADDABLE.map((a) => {
+        <div className="effect-grid">
+          {ADDABLE.filter((a) => a.type !== "eq").map((a) => {
             const type = a.type;
             const active = activeTypes.has(type);
             const params = effectState[type] ?? {};
             return (
-              <div
-                key={type}
-                className={`effect-row rack-module${type === "eq" ? " effect-eq" : ""}${
-                  active ? "" : " effect-off"
-                }`}
-              >
-                <header>
-                  <span className="effect-title">
+              <div key={type} className={`effect-cell${active ? "" : " effect-off"}`}>
+                <header className="effect-cell-head">
+                  <span className="effect-title" title={a.blurb}>
                     <strong>{a.label}</strong>
-                    <span className="muted small">{a.blurb}</span>
                   </span>
                   <Switch
                     className="effect-toggle"
@@ -524,109 +518,100 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
                   />
                 </header>
                 <div className="rack-body">
-                  {type === "eq" ? (
-                    <GraphicEqModule
-                      bands={normalizeEqBands(params.bands as EqBand[])}
-                      active={active}
-                      onChange={(b) => setBands("eq", b)}
-                    />
-                  ) : (
-                    <div className="knob-row">
-                      {EFFECT_UI[type].params.map((pc) => {
-                        const cur = Number(params[pc.key]);
-                        const val = Number.isFinite(cur) ? cur : pc.def;
-                        // Frequency-type params read better as a tall fader; the
-                        // rest are knobs (the hardware-rack vocabulary).
-                        return pc.scale === "log" ? (
-                          <Fader
-                            key={pc.key}
-                            value={val}
-                            min={pc.min}
-                            max={pc.max}
-                            step={pc.step}
-                            scale="log"
-                            height={84}
-                            label={pc.label}
-                            format={pc.format}
-                            def={pc.def}
-                            disabled={!active}
-                            onChange={(v) => setParam(type, pc.key, v)}
-                          />
-                        ) : (
-                          <Knob
-                            key={pc.key}
-                            value={val}
-                            min={pc.min}
-                            max={pc.max}
-                            step={pc.step}
-                            label={pc.label}
-                            format={pc.format}
-                            def={pc.def}
-                            disabled={!active}
-                            onChange={(v) => setParam(type, pc.key, v)}
-                          />
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className="knob-row">
+                    {EFFECT_UI[type].params.map((pc) => {
+                      const cur = Number(params[pc.key]);
+                      const val = Number.isFinite(cur) ? cur : pc.def;
+                      // Frequency-type params read better as a tall fader; the
+                      // rest are knobs (the hardware-rack vocabulary).
+                      return pc.scale === "log" ? (
+                        <Fader
+                          key={pc.key}
+                          value={val}
+                          min={pc.min}
+                          max={pc.max}
+                          step={pc.step}
+                          scale="log"
+                          height={84}
+                          label={pc.label}
+                          format={pc.format}
+                          def={pc.def}
+                          disabled={!active}
+                          onChange={(v) => setParam(type, pc.key, v)}
+                        />
+                      ) : (
+                        <Knob
+                          key={pc.key}
+                          value={val}
+                          min={pc.min}
+                          max={pc.max}
+                          step={pc.step}
+                          label={pc.label}
+                          format={pc.format}
+                          def={pc.def}
+                          disabled={!active}
+                          onChange={(v) => setParam(type, pc.key, v)}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             );
           })}
-          <div className="rack-module overrides-module">
-            <header>
+          <div className="effect-cell overrides-cell">
+            <header className="effect-cell-head">
               <span className="effect-title">
                 <strong>When active</strong>
-                <span className="muted small">global tweaks on switch-on</span>
               </span>
             </header>
-            <div className="override-knobs">
-              <div className={`override-knob${volumeOn ? "" : " override-off"}`}>
-                <Switch
-                  checked={volumeOn}
-                  onChange={(e) => setVolumeOn(e.target.checked)}
-                  aria-label="Enable master-volume override"
-                />
-                <Knob
-                  label="Volume"
-                  value={volume}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  def={0.8}
-                  format={(v) => `${Math.round(v * 100)}%`}
-                  onChange={setVolume}
-                  disabled={!volumeOn}
-                />
-              </div>
-              <div className={`override-knob${crossfadeOn ? "" : " override-off"}`}>
-                <Switch
-                  checked={crossfadeOn}
-                  onChange={(e) => setCrossfadeOn(e.target.checked)}
-                  aria-label="Enable crossfade override"
-                />
-                <Knob
-                  label="Crossfade"
-                  value={crossfadeMs}
-                  min={0}
-                  max={10000}
-                  step={100}
-                  def={2000}
-                  format={(v) => `${(v / 1000).toFixed(1)}s`}
-                  onChange={setCrossfadeMs}
-                  disabled={!crossfadeOn}
-                />
+            <div className="rack-body">
+              <div className="override-knobs">
+                <div className={`override-knob${volumeOn ? "" : " override-off"}`}>
+                  <Switch
+                    checked={volumeOn}
+                    onChange={(e) => setVolumeOn(e.target.checked)}
+                    aria-label="Enable master-volume override"
+                  />
+                  <Knob
+                    label="Volume"
+                    value={volume}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    def={0.8}
+                    format={(v) => `${Math.round(v * 100)}%`}
+                    onChange={setVolume}
+                    disabled={!volumeOn}
+                  />
+                </div>
+                <div className={`override-knob${crossfadeOn ? "" : " override-off"}`}>
+                  <Switch
+                    checked={crossfadeOn}
+                    onChange={(e) => setCrossfadeOn(e.target.checked)}
+                    aria-label="Enable crossfade override"
+                  />
+                  <Knob
+                    label="Crossfade"
+                    value={crossfadeMs}
+                    min={0}
+                    max={10000}
+                    step={100}
+                    def={2000}
+                    format={(v) => `${(v / 1000).toFixed(1)}s`}
+                    onChange={setCrossfadeMs}
+                    disabled={!crossfadeOn}
+                  />
+                </div>
               </div>
             </div>
           </div>
           {extraEffects.map((eff, idx) => (
-            <div key={`extra-${idx}`} className="effect-row rack-module">
-              <header>
+            <div key={`extra-${idx}`} className="effect-cell">
+              <header className="effect-cell-head">
                 <span className="effect-title">
                   <strong>{eff.type}</strong>
-                  <span className="ref-missing">
-                    ⚠ not supported — this effect does nothing
-                  </span>
+                  <span className="ref-missing">⚠ unsupported</span>
                 </span>
                 <IconButton
                   label="Remove effect"
@@ -654,6 +639,36 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
             </div>
           ))}
         </div>
+
+        {/* Graphic EQ — full width, taller, sits below the effect grid. */}
+        {(() => {
+          const eqActive = activeTypes.has("eq");
+          return (
+            <div
+              className={`effect-row rack-module effect-eq${eqActive ? "" : " effect-off"}`}
+            >
+              <header>
+                <span className="effect-title">
+                  <strong>{EQ_META.label}</strong>
+                  <span className="muted small">{EQ_META.blurb}</span>
+                </span>
+                <Switch
+                  className="effect-toggle"
+                  checked={eqActive}
+                  onChange={() => toggleEffect("eq")}
+                  aria-label="Enable Graphic EQ"
+                />
+              </header>
+              <div className="rack-body">
+                <GraphicEqModule
+                  bands={normalizeEqBands(effectState.eq.bands as EqBand[])}
+                  active={eqActive}
+                  onChange={(b) => setBands("eq", b)}
+                />
+              </div>
+            </div>
+          );
+        })()}
       </section>
 
       <div className="form-actions">
