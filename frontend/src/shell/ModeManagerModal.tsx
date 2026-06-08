@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { confirmDialog } from "@/components/confirmDialog";
 import { inputDialog } from "@/components/inputDialog";
 import { modesAdminApi } from "@/core/api";
+import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
 import type { ModeSummary } from "@/core/types";
 import { wsClient } from "@/core/ws";
@@ -24,19 +25,21 @@ export function ModeManagerModal({
   activeModeId: string | null;
   onChanged: () => void | Promise<void>;
 }) {
-  const [id, setId] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (!open) return null;
 
+  // The on-disk slug is derived from the name — the operator never types an id.
+  const derivedId = uniqueSlug(name, new Set(modes.map((m) => m.id)), "mode");
+
   async function create(e: FormEvent) {
     e.preventDefault();
+    if (!name.trim()) return;
     setBusy(true);
     try {
-      const created = await modesAdminApi.create(id.trim(), name.trim());
+      const created = await modesAdminApi.create(derivedId, name.trim());
       toast.success("Mode created", created.name);
-      setId("");
       setName("");
       await onChanged();
       // Switch to the new mode so the (now mode-scoped) Authoring tabs land on it.
@@ -102,22 +105,20 @@ export function ModeManagerModal({
         <div className="modal-body">
           <form className="mode-create-row" onSubmit={create}>
             <input
-              value={id}
-              onChange={(e) => setId(e.target.value)}
-              placeholder="id (slug)"
-              pattern="[a-z0-9][a-z0-9_-]*"
-              title="lowercase letters/digits with optional dashes/underscores"
-              required
-            />
-            <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Display name"
+              placeholder="New mode name"
               required
+              autoFocus
             />
-            <button type="submit" className="btn-primary" disabled={busy}>
+            <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
               + Create
             </button>
+            {name.trim() ? (
+              <span className="muted small slug-preview">
+                id: <code>{derivedId}</code>
+              </span>
+            ) : null}
           </form>
 
           {modes.length === 0 ? (

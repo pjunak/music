@@ -15,6 +15,7 @@ import type { PresetEffect, PresetManifest } from "@/core/api";
 import { defaultEqBands, normalizeEqBands } from "@/core/eq";
 import type { EqBand } from "@/core/eq";
 import { usePlayerStore } from "@/core/playerStore";
+import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
 
 // Per-effect-type UI: a friendly label, a one-line blurb, and a control schema
@@ -273,6 +274,7 @@ export function PresetsView() {
           <PresetForm
             modeId={activeModeId}
             mode="create"
+            existingIds={new Set(presets.map((p) => p.id))}
             onClose={() => setCreating(false)}
             onSaved={async (id) => {
               setCreating(false);
@@ -285,6 +287,7 @@ export function PresetsView() {
             modeId={activeModeId}
             mode="edit"
             preset={selected}
+            existingIds={new Set(presets.map((p) => p.id))}
             onClose={() => undefined}
             onSaved={async () => {
               await refresh();
@@ -311,13 +314,15 @@ interface FormProps {
   modeId: string;
   mode: "create" | "edit";
   preset?: PresetManifest;
+  /** Existing preset ids in this mode — used to derive a collision-free slug
+   *  from the name on create. */
+  existingIds: Set<string>;
   onClose: () => void;
   onSaved: (id: string) => void | Promise<void>;
   onDeleted?: () => void;
 }
 
-function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormProps) {
-  const [id, setId] = useState(preset?.id ?? "");
+function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDeleted }: FormProps) {
   const [name, setName] = useState(preset?.name ?? "");
   const [description, setDescription] = useState(preset?.description ?? "");
   // Params for every effect type + the set of enabled ones. Splitting params
@@ -334,9 +339,13 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
   const [crossfadeMs, setCrossfadeMs] = useState(preset?.crossfade_ms ?? 2000);
   const [busy, setBusy] = useState(false);
 
+  // Id is the on-disk slug — fixed in edit, derived from the name on create
+  // (the operator never types it).
+  const presetId =
+    mode === "edit" ? (preset?.id ?? "") : uniqueSlug(name, existingIds, "preset");
+
   useEffect(() => {
     if (mode === "edit" && preset) {
-      setId(preset.id);
       setName(preset.name);
       setDescription(preset.description ?? "");
       setEffectState(buildEffectState(preset.effects));
@@ -393,12 +402,13 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (!name.trim()) return;
     setBusy(true);
     const effects = composeEffects();
     try {
       if (mode === "create") {
         const payload: Parameters<typeof presetsAdminApi.create>[1] = {
-          id: id.trim(),
+          id: presetId,
           name: name.trim(),
           effects,
           volume: volumeOn ? volume : null,
@@ -407,7 +417,7 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
         const desc = description.trim();
         if (desc) payload.description = desc;
         await presetsAdminApi.create(modeId, payload);
-        toast.success("Preset created", id);
+        toast.success("Preset created", presetId);
       } else {
         const payload: Parameters<typeof presetsAdminApi.update>[2] = {
           name: name.trim(),
@@ -417,10 +427,10 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
         };
         const desc = description.trim();
         if (desc) payload.description = desc;
-        await presetsAdminApi.update(modeId, id, payload);
-        toast.success("Preset saved", id);
+        await presetsAdminApi.update(modeId, presetId, payload);
+        toast.success("Preset saved", presetId);
       }
-      await onSaved(id);
+      await onSaved(presetId);
     } catch (err) {
       toast.error("Save failed", err instanceof Error ? err.message : undefined);
     } finally {
@@ -464,22 +474,22 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
       </header>
 
       <div className="playlist-meta-fields">
-        <Field label="ID">
-          <input
-            type="text"
-            value={id}
-            onChange={(e) => setId(e.target.value)}
-            disabled={mode === "edit"}
-            pattern="[a-z0-9][a-z0-9_-]*"
-            required
-          />
-        </Field>
         <Field label="Name">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
+            autoFocus={mode === "create"}
+          />
+        </Field>
+        <Field label="ID" hint="Derived from the name — fixed once created.">
+          <input
+            type="text"
+            value={mode === "create" && !name.trim() ? "" : presetId}
+            placeholder="from name"
+            disabled
+            readOnly
           />
         </Field>
         <Field label="Description">
@@ -677,7 +687,7 @@ function PresetForm({ modeId, mode, preset, onClose, onSaved, onDeleted }: FormP
             Cancel
           </button>
         ) : null}
-        <button type="submit" className="btn-primary" disabled={busy}>
+        <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
           {busy ? "Saving…" : mode === "create" ? "Create" : "Save changes"}
         </button>
       </div>

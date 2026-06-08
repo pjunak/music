@@ -8,6 +8,7 @@ import { NoModeEmpty } from "@/components/NoModeEmpty";
 import { SoundboardEditor } from "@/components/SoundboardEditor";
 import { modesAdminApi, modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
+import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
 import type { ModeDetail, SoundboardManifest } from "@/core/types";
 
@@ -92,10 +93,7 @@ export function SoundboardsView() {
           <SoundboardCreateForm
             existing={new Set(boards.map((b) => b.id))}
             onCreate={async (id, name) => {
-              await modesAdminApi.createSoundboard(
-                activeModeId,
-                name ? { id, name } : { id },
-              );
+              await modesAdminApi.createSoundboard(activeModeId, { id, name });
               setCreating(false);
               await load();
               setSelectedId(id);
@@ -145,19 +143,18 @@ function SoundboardCreateForm({
   existing: Set<string>;
   onCreate: (id: string, name: string) => Promise<void>;
 }) {
-  const [id, setId] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // The on-disk slug is derived from the name — no manual id entry.
+  const derivedId = uniqueSlug(name, existing, "soundboard");
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (existing.has(id.trim())) {
-      toast.error("Soundboard id already exists");
-      return;
-    }
+    if (!name.trim()) return;
     setBusy(true);
     try {
-      await onCreate(id.trim(), name.trim());
+      await onCreate(derivedId, name.trim());
     } catch (err) {
       toast.error("Create failed", err instanceof Error ? err.message : undefined);
     } finally {
@@ -169,23 +166,20 @@ function SoundboardCreateForm({
     <form onSubmit={submit} className="inline-create-row">
       <input
         type="text"
-        value={id}
-        onChange={(e) => setId(e.target.value)}
-        placeholder="id (slug)"
-        pattern="[a-z0-9][a-z0-9_-]*"
-        title="lowercase letters/digits with optional dashes/underscores"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="New soundboard name"
         required
         autoFocus
       />
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Name (optional)"
-      />
-      <button type="submit" className="btn-primary" disabled={busy}>
+      <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
         Create
       </button>
+      {name.trim() ? (
+        <span className="muted small slug-preview">
+          id: <code>{derivedId}</code>
+        </span>
+      ) : null}
     </form>
   );
 }

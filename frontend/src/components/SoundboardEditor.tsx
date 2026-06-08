@@ -9,6 +9,7 @@ import { TrashIcon, WarnIcon, XIcon } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
 import { modesAdminApi, modesApi, sfxApi } from "@/core/api";
 import type { SfxFile } from "@/core/api";
+import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
 import type { SoundboardManifest } from "@/core/types";
 
@@ -61,33 +62,23 @@ export function SoundboardEditor({
   }, []);
 
   async function addCategory() {
-    const id = await inputDialog({
-      title: "New category",
-      label: "Category id (slug)",
-      placeholder: "doors",
-      pattern: "[a-z0-9][a-z0-9_-]*",
-      patternHint: "lowercase letters/digits with optional - or _, starting with a letter or digit",
-      confirmLabel: "Next",
-      validate: (v) =>
-        /^[a-z0-9][a-z0-9_-]*$/.test(v) ? null : "Lowercase slug only (letters, digits, - _).",
-    });
-    if (id === null) return;
     const name = await inputDialog({
-      title: "Category name",
-      label: "Display name",
-      initial: id,
-      placeholder: id,
+      title: "New category",
+      label: "Category name",
+      placeholder: "Doors",
       confirmLabel: "Add",
-      trim: false,
     });
     if (name === null) return;
+    // Derive the on-disk slug from the name (the operator never types an id).
+    const existing = new Set((soundboard?.categories ?? []).map((c) => c.id));
+    const id = uniqueSlug(name, existing, "category");
     try {
       const updated = await modesAdminApi.addCategory(modeId, soundboardId, {
         id,
-        name: name.trim() || id,
+        name,
       });
       setSoundboard(updated as SoundboardManifest);
-      toast.success("Category added", id);
+      toast.success("Category added", name);
     } catch (e) {
       toast.error("Add failed", e instanceof Error ? e.message : undefined);
     }
