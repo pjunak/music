@@ -30,9 +30,9 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
  *  - ? (Shift+/) : open the keyboard-shortcut sheet
  *  - 1–4 : switch top-level tabs (Console, Library, Authoring, Settings).
  *          The TV route at `/` isn't reachable by number — it's the guest
- *          landing, not part of the authed tab strip. Sub-tabs (Library
- *          Files/Tags, Authoring Playlists/Soundboards/Modes/Presets) are
- *          click-only — adding numbers for them would crowd the shortcut
+ *          landing, not part of the authed tab strip. Sub-tabs (Authoring
+ *          Playlists/Soundboards/Interrupts/EQ Presets/Cues; Library has none)
+ *          are click-only — adding numbers for them would crowd the shortcut
  *          space and the sub-strip is right there.
  *  - Esc : already handled per-modal
  *
@@ -81,7 +81,7 @@ export function useKeyboardShortcuts(): void {
             // Selector targets the library toolbar's always-visible search
             // input. We navigate first (in case the user is on a different
             // tab) and focus on the next tick, after the route render.
-            navigate("/library/files");
+            navigate("/library");
             window.setTimeout(() => {
               const el = document.querySelector<HTMLInputElement>(
                 ".library-toolbar-search input[type=search]",

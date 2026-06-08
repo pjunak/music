@@ -344,9 +344,18 @@ export class PlaybackEngine {
   unlock(): void {
     const ctx = this.audioContext;
     if (ctx === null || ctx.state === "running") return;
-    void ctx.resume().catch((err: unknown) => {
-      console.warn("[playbackEngine] AudioContext resume failed", err);
-    });
+    void ctx
+      .resume()
+      .then(() => {
+        // A fresh user gesture re-opened the audio path — re-arm the
+        // autoplay-blocked guidance toast (the flag is module-global and
+        // otherwise stays true for the tab's lifetime, silencing every
+        // later block).
+        autoplayBlockedReported = false;
+      })
+      .catch((err: unknown) => {
+        console.warn("[playbackEngine] AudioContext resume failed", err);
+      });
   }
 
   // ----- Web Audio graph construction --------------------------------
@@ -484,6 +493,10 @@ export class PlaybackEngine {
     const newIsPlaying = state.is_playing;
     const prevAmbientId = this.lastAmbientId;
     const prevInterruptId = this.lastInterruptId;
+    // Set when a cinematic-duck interrupt just ended: ambient kept PLAYING
+    // (ducked) the whole time, so the server's frozen ambient.position_ms is
+    // stale and must NOT be applied as a seek (it would rewind the music).
+    let justEndedDuck = false;
 
     if (state.interrupt) {
       this.lastInterruptFadeOut = state.interrupt.fade_out_ms ?? 0;
@@ -508,12 +521,14 @@ export class PlaybackEngine {
         if (this.currentDuckTo !== null) {
           this.unduckAmbient(this.lastInterruptFadeOut);
           this.currentDuckTo = null;
+          justEndedDuck = true;
         }
       } else {
         this.stopInterrupt();
         if (this.currentDuckTo !== null) {
           this.unduckAmbient(0);
           this.currentDuckTo = null;
+          justEndedDuck = true;
         }
       }
       this.lastInterruptId = newInterruptId;
@@ -524,8 +539,15 @@ export class PlaybackEngine {
         if (newAmbientId === null) {
           this.stopAmbient();
         } else {
+          // "cut" means an instantaneous switch — never take the crossfade
+          // path (a cut with crossfade_ms>0 would otherwise hold the incoming
+          // channel silent for the whole window and swallow the track's
+          // lead-in, since ease() for "cut" stays at 0 until t===1).
           const useCrossfade =
-            this.lastAmbientId !== null && newIsPlaying && this.crossfadeMs > 0;
+            this.lastAmbientId !== null &&
+            newIsPlaying &&
+            this.crossfadeMs > 0 &&
+            this.crossfadeType !== "cut";
           this.swapAmbient(newAmbientId, useCrossfade ? this.crossfadeMs : 0);
         }
         this.lastAmbientId = newAmbientId;
@@ -550,7 +572,28 @@ export class PlaybackEngine {
       newAmbientId !== null &&
       newAmbientId === prevAmbientId
     ) {
-      this.maybeSeek(this.currentChannel()?.el ?? null, state.ambient.position_ms);
+      if (justEndedDuck) {
+        // Don't snap to the stale frozen position — re-baseline our telemetry
+        // to where the still-playing ambient element actually is, so the next
+        // broadcast's divergence gate doesn't fire and rewind the music.
+        const el = this.currentChannel()?.el;
+        if (el && Number.isFinite(el.currentTime)) {
+          this.lastReportedMs = Math.floor(el.currentTime * 1000);
+        }
+      } else {
+        this.maybeSeek(this.currentChannel()?.el ?? null, state.ambient.position_ms);
+        // Same-track broadcast that says "playing" while our element sits
+        // paused = a loop restart (loop:track, or a single-track loop:queue
+        // wrap): the element fired `ended` and parked at 0. Neither the swap
+        // branch (id unchanged) nor the resume branch (is_playing unchanged)
+        // ran, so resume here — otherwise the track is silent while the clock
+        // ticks up. Gated on `prevInterruptId === null` so this doesn't touch
+        // the interrupt-end resume path (handled by stopInterrupt).
+        if (newIsPlaying && prevInterruptId === null) {
+          const ch = this.currentChannel();
+          if (ch && ch.el.paused) this.safePlay("ambient (loop restart)", ch.el);
+        }
+      }
     }
 
     this.lastIsPlaying = newIsPlaying;

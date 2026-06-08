@@ -391,8 +391,8 @@ class StateChanged(BaseModel):
 
 class SfxFired(BaseModel):
     """Fire-and-forget event for soundboard items. Not part of PlayerState —
-    broadcast only to clients with the `audio_output` capability so each plays
-    the SFX locally."""
+    broadcast only to designated output devices (registry `is_output`) so each
+    plays the SFX locally."""
 
     type: Literal["sfx_fired"] = "sfx_fired"
     soundboard_id: str

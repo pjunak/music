@@ -253,7 +253,18 @@ function CueEditorForm({
       <section className="surface-card authoring-card">
         <h3 className="section-label">Music</h3>
         <Field label="Start playlist">
-          <select value={playlist} onChange={(e) => setPlaylist(e.target.value)}>
+          <select
+            value={playlist}
+            onChange={(e) => {
+              setPlaylist(e.target.value);
+              // Reset the song/time anchors — a carried-over index from a
+              // longer playlist would point past the end of a shorter one,
+              // leaving the "From song" dropdown blank and persisting a stale
+              // out-of-range start_index.
+              setStartIndex(0);
+              setStartMs(0);
+            }}
+          >
             <option value="">— leave music alone —</option>
             {playlists.map((p) => (
               <option key={p.id} value={p.name}>

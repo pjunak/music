@@ -11,8 +11,8 @@ import { wsClient } from "@/core/ws";
  *
  *  When an interrupt is active, shows what's playing and offers Skip /
  *  Cancel. When none is active, points the user at the Library tab — the
- *  ⚡ button on each track row fires it, and mode interrupt templates
- *  (Modes view) fire pre-configured ones. */
+ *  ⚡ button on each track row fires it, and interrupt templates
+ *  (Authoring → Interrupts) fire pre-configured ones. */
 export function InterruptSection() {
   const interrupt = usePlayerStore((s) => s.state?.interrupt ?? null);
   const [track, setTrack] = useState<Track | null>(null);

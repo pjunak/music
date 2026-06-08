@@ -29,7 +29,10 @@ SUPPORTED_EFFECT_TYPES: frozenset[str] = frozenset(
         "delay",
         "distortion",
         "tremolo",
-        "pitch_shift",
+        # NOTE: no "pitch_shift" — the Web Audio engine has no pitch shifter
+        # (buildEffect returns null for it), so accepting it here would let a
+        # preset save cleanly yet do nothing at playback. Re-add only once the
+        # engine + editor support it.
     }
 )
 

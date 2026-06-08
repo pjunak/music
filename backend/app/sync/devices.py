@@ -74,13 +74,6 @@ class DeviceRegistry:
         conn = self._conns.get(connection_id)
         return conn is not None and conn.is_output
 
-    def is_output_client(self, client_id: str | None) -> bool:
-        if client_id is None:
-            return False
-        return any(
-            c.client_id == client_id and c.is_output for c in self._conns.values()
-        )
-
     def refresh_is_output(self, client_id: str, value: bool) -> None:
         """Push a designation change to every live socket of this device so
         SFX fan-out / position gating react without waiting for a reconnect."""

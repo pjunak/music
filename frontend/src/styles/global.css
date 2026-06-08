@@ -1431,8 +1431,11 @@ kbd,
 }
 .library-body {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) 1fr;
-  gap: 1rem;
+  /* Match the Music workspace tree column + gap so SFX has the same visual
+   * structure and element sizes (SFX has no tag inspector, so it's the
+   * two-column tree + main variant). */
+  grid-template-columns: minmax(220px, var(--rail-tree)) minmax(0, 1fr);
+  gap: var(--space-6);
   flex: 1;
   min-height: 0;
 }
@@ -1481,6 +1484,8 @@ kbd,
   flex-direction: column;
   gap: 0.5rem;
   min-height: 0;
+  /* Positioning context for the floating selection bar (below). */
+  position: relative;
 }
 .library-meta {
   display: flex;
@@ -1511,17 +1516,33 @@ kbd,
   display: flex;
 }
 
-/* selection action bar above the list */
+/* selection action bar */
 /* Bulk multi-select bar — TEAL marks "batch context", distinct from the
- * blue single-row focus highlight. */
+ * blue single-row focus highlight. It FLOATS over the bottom of the list
+ * (absolute, centered) so appearing/disappearing never reflows the track
+ * list down — the old in-flow bar pushed every row down on first tick. */
 .selection-bar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4);
+  transform: translateX(-50%);
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  width: max-content;
+  max-width: calc(100% - 2 * var(--space-4));
   padding: var(--space-2) var(--space-4);
   background: var(--accent2-soft);
   border: 1px solid var(--accent2);
   border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+/* While the floating bar is visible, give the list room to scroll its last
+ * rows clear of it (the wrap is fixed-size, so this only changes inner
+ * scroll height — the list's top edge never moves). */
+.library-main.has-selection .track-table-wrap {
+  padding-bottom: 3.4rem;
 }
 .selection-bar-count {
   font-size: var(--text-base);
@@ -1546,8 +1567,18 @@ kbd,
    * content ~3px right). "recolor, never resize on hover." */
   border-left: 2px solid transparent;
 }
-.track-table tr.track-row.selected {
+/* Two distinct row states, matching the reserved accent semantics:
+ *  - .focused  = single plain-click highlight (BLUE, live/focus accent)
+ *  - .checked  = ticked into the bulk selection (TEAL, batch accent — same
+ *                family as the floating selection bar). */
+.track-table tr.track-row.focused {
   background: var(--accent-soft);
+}
+.track-table tr.track-row.checked {
+  background: var(--accent2-soft);
+}
+.track-table tr.track-row.checked.focused {
+  background: var(--accent2-soft);
 }
 .track-table td.track-file {
   font-size: 0.82rem;

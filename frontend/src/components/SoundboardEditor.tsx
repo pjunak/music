@@ -16,9 +16,9 @@ interface Props {
   modeId: string;
   soundboardId: string;
   /** Breadcrumb supplied by the host so it can express the ancestor chain
-   *  in its own terms (Modes tab uses "Modes › ModeName › Soundboards ›
-   *  Item"; Soundboards tab uses "Soundboards › Item"). The editor itself
-   *  appends nothing — the leaf label is the host's responsibility too. */
+   *  in its own terms (the Authoring → Soundboards tab uses
+   *  "Soundboards › Item"). The editor itself appends nothing — the leaf
+   *  label is the host's responsibility too. */
   breadcrumb: BreadcrumbItem[];
 }
 

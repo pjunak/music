@@ -18,7 +18,7 @@ const GLOBAL: Shortcut[] = [
   { keys: ["Space"], label: "Play / pause" },
   { keys: ["←"], label: "Previous track" },
   { keys: ["→"], label: "Next track" },
-  { keys: ["L"], label: "Cycle loop mode (off → queue → track)" },
+  { keys: ["L"], label: "Cycle loop mode (off → track → queue)" },
   { keys: ["/"], label: "Focus library search" },
   { keys: ["Esc"], label: "Close the open modal" },
   { keys: ["?"], label: "Show this sheet" },

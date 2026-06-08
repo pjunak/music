@@ -11,7 +11,7 @@ and silently rejected. `tv-mode.js` detects the dead WS and switches to
 polling this endpoint instead.
 
 Auth: `OptionalUser`, matching the WS endpoint's guest-friendly contract
-(`app/sync/router.py:611`). A logged-out TV bookmark can still read state
+(the `/api/ws` handler in `app/sync/router.py`). A logged-out TV bookmark can still read state
 and play whatever the controller (the logged-in user on another device)
 queues up. Anything that mutates state still requires a real login on the
 mutating endpoints — read-only here is safe.

@@ -62,7 +62,3 @@ def stop_all() -> None:
     for task in _tasks.values():
         task.cancel()
     _tasks.clear()
-
-
-def active_ids() -> list[str]:
-    return list(_tasks)

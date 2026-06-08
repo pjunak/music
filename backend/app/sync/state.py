@@ -134,8 +134,10 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
       - `active_soundboard_id`: cleared if no active mode or soundboard
         isn't part of it.
       - `active_preset_ids`: filtered to only the active mode's presets.
-      - `active_output_device_ids`: cleared. Device ids are per-WS-connection
-        and a server restart wipes them all; auto-claim re-establishes.
+      - `active_output_device_ids`: cleared on boot. Activation is fully
+        manual — there is no auto-claim or auto-resume; the operator
+        re-activates a designated device when they want sound. (The persistent
+        output *designation* lives in DEVICES_FILE, untouched here.)
     """
     from app.models.track import Track  # local to keep cyclic-import risk down
     from app.modes import loader as modes_loader
@@ -195,9 +197,10 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
 
     # Wipe active outputs on boot. Activation is fully manual — there is no
     # auto-claim and no auto-resume across a restart. The persistent output
-    # *designation* lives in the known_devices table and is untouched; the
-    # operator re-activates a designated device when they want sound. (The
-    # client_ids here would otherwise be a stale snapshot of who was live.)
+    # *designation* lives in DEVICES_FILE (app/devices/store.py) and is
+    # untouched; the operator re-activates a designated device when they want
+    # sound. (The client_ids here would otherwise be a stale snapshot of who
+    # was live.)
     out["active_output_device_ids"] = []
 
     # Wipe looping SFX on boot for the same reason: the server-side timers that
@@ -422,6 +425,7 @@ def ambient_play_track(track_id: int) -> Any:
             history=[],
             position_ms=0,
             loop=state.ambient.loop,
+            shuffle=state.ambient.shuffle,
         )
         return state.model_copy(update={"ambient": new_ambient, "is_playing": True})
 
@@ -501,8 +505,10 @@ def ambient_skip_next() -> Any:
             )
 
         # Queue empty.
-        if amb.loop == "queue" and amb.history:
+        if amb.loop == "queue" and (amb.history or amb.current_track_id is not None):
             # Wrap around: rebuild queue from history + current; play first.
+            # `current` alone (single-track lane, empty history) is enough —
+            # repeat-queue then restarts the one track, like repeat-track.
             full = [*amb.history]
             if amb.current_track_id is not None:
                 full.append(amb.current_track_id)
@@ -613,7 +619,7 @@ def ambient_stop() -> Any:
             return state
         return _replace_ambient(
             state,
-            AmbientState(loop=state.ambient.loop),
+            AmbientState(loop=state.ambient.loop, shuffle=state.ambient.shuffle),
         )
 
     return _mut
@@ -636,6 +642,7 @@ def ambient_play_playlist(
             history=list(track_ids[:idx]),
             position_ms=0,
             loop=state.ambient.loop,
+            shuffle=state.ambient.shuffle,
             source_playlist_id=source_playlist_id,
         )
         return state.model_copy(update={"ambient": new_ambient, "is_playing": True})

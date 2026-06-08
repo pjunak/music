@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, MouseEvent } from "react";
 
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -229,7 +229,15 @@ function MusicWorkspace({
   const [tracks, setTracks] = useState<Track[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Two independent concerns, deliberately decoupled:
+  //  - `checked`: the ticked-checkbox set that drives bulk move/delete. Only
+  //    a direct checkbox click, the header select-all, Ctrl/Cmd-click, or a
+  //    Shift range mutates it.
+  //  - `focused`: the single highlighted row a plain click selects, which
+  //    feeds the tag inspector. A plain click (or double-click to play)
+  //    must NOT tick a checkbox.
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [focused, setFocused] = useState<number | null>(null);
   const searching = query !== "";
 
   useEffect(() => {
@@ -245,9 +253,10 @@ function MusicWorkspace({
       .then((ts) => {
         if (cancelled) return;
         setTracks(ts);
-        // Prune selected ids that fell out of the now-visible set.
+        // Prune selection state that fell out of the now-visible set.
         const visible = new Set(ts.map((t) => t.id));
-        setSelected((prev) => new Set([...prev].filter((id) => visible.has(id))));
+        setChecked((prev) => new Set([...prev].filter((id) => visible.has(id))));
+        setFocused((prev) => (prev !== null && visible.has(prev) ? prev : null));
       })
       .catch((e: unknown) => {
         if (!cancelled) {
@@ -291,10 +300,16 @@ function MusicWorkspace({
     }
   }
 
-  const selectedTracks = useMemo(
-    () => tracks.filter((t) => selected.has(t.id)),
-    [tracks, selected],
-  );
+  // The inspector edits the ticked rows when there's a checkbox selection;
+  // otherwise it edits the single plain-click-highlighted row.
+  const inspectorTracks = useMemo(() => {
+    if (checked.size > 0) return tracks.filter((t) => checked.has(t.id));
+    if (focused !== null) {
+      const t = tracks.find((t) => t.id === focused);
+      return t ? [t] : [];
+    }
+    return [];
+  }, [tracks, checked, focused]);
 
   return (
     <div className={`music-workspace${searching ? " no-tree" : ""}`}>
@@ -315,7 +330,7 @@ function MusicWorkspace({
           />
         </aside>
       ) : null}
-      <section className="library-main">
+      <section className={`library-main${checked.size > 0 ? " has-selection" : ""}`}>
         {searching ? (
           <div className="folder-band folder-band-search">
             <span className="muted small">
@@ -334,26 +349,29 @@ function MusicWorkspace({
           />
         )}
         {error !== null ? <p className="error small">{error}</p> : null}
-        <SelectionToolbar
-          selected={selected}
-          total={tracks.length}
-          onClear={() => setSelected(new Set())}
-          onChanged={() => {
-            setSelected(new Set());
-            onRefresh();
-          }}
-        />
         <MusicTrackList
           tracks={tracks}
           activeTrackId={activeTrackId}
-          selected={selected}
-          onSelectionChange={setSelected}
+          checked={checked}
+          onCheckedChange={setChecked}
+          focused={focused}
+          onFocusedChange={setFocused}
           draggable={!searching}
           onChanged={onRefresh}
         />
+        <SelectionToolbar
+          selected={checked}
+          total={tracks.length}
+          onClear={() => setChecked(new Set())}
+          onChanged={() => {
+            setChecked(new Set());
+            setFocused(null);
+            onRefresh();
+          }}
+        />
       </section>
       <aside className="library-inspector">
-        <TagInspector selectedTracks={selectedTracks} onSaved={onRefresh} />
+        <TagInspector selectedTracks={inspectorTracks} onSaved={onRefresh} />
       </aside>
     </div>
   );
@@ -1137,23 +1155,37 @@ function SelectionToolbar({
 
 /** Multi-select track list — the list half of the unified Library. Columns are
  *  just Name (display) + File (basename) + Length; the rich tag fields live in
- *  the inspector. Plain row-click focuses one row in the inspector; the
- *  checkboxes (or Ctrl/Cmd-click) build a multi-selection. */
+ *  the inspector.
+ *
+ *  Two separate gestures, never conflated:
+ *   - A plain row-click only *highlights* the row (and feeds the inspector).
+ *     Double-click plays. Neither ticks a checkbox.
+ *   - Ticking a checkbox is the only way to build the bulk selection: a direct
+ *     checkbox click, the header select-all, Ctrl/Cmd-click on a row, or a
+ *     Shift-click range (anchor → clicked). */
 function MusicTrackList({
   tracks,
   activeTrackId,
-  selected,
-  onSelectionChange,
+  checked,
+  onCheckedChange,
+  focused,
+  onFocusedChange,
   draggable,
   onChanged,
 }: {
   tracks: Track[];
   activeTrackId: number | null;
-  selected: Set<number>;
-  onSelectionChange: (next: Set<number>) => void;
+  checked: Set<number>;
+  onCheckedChange: (next: Set<number>) => void;
+  focused: number | null;
+  onFocusedChange: (id: number | null) => void;
   draggable?: boolean;
   onChanged: () => void;
 }) {
+  // Anchor for Shift-range selection: the last row the user single-clicked or
+  // Ctrl-clicked. A ref (not state) — it only matters at the next click.
+  const anchorRef = useRef<number | null>(null);
+
   if (tracks.length === 0) {
     return (
       <EmptyState title="No tracks here">
@@ -1163,22 +1195,49 @@ function MusicTrackList({
     );
   }
 
-  const allSelected = tracks.every((t) => selected.has(t.id));
+  const allSelected = tracks.every((t) => checked.has(t.id));
 
   function toggleAll() {
-    onSelectionChange(allSelected ? new Set() : new Set(tracks.map((t) => t.id)));
+    onCheckedChange(allSelected ? new Set() : new Set(tracks.map((t) => t.id)));
   }
   function toggleOne(id: number) {
-    const next = new Set(selected);
+    const next = new Set(checked);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    onSelectionChange(next);
+    anchorRef.current = id;
+    onCheckedChange(next);
+  }
+  function selectRange(toId: number) {
+    const fromId = anchorRef.current ?? focused;
+    if (fromId === null) {
+      toggleOne(toId);
+      return;
+    }
+    const i = tracks.findIndex((t) => t.id === fromId);
+    const j = tracks.findIndex((t) => t.id === toId);
+    if (i === -1 || j === -1) {
+      toggleOne(toId);
+      return;
+    }
+    const [lo, hi] = i <= j ? [i, j] : [j, i];
+    const next = new Set(checked);
+    for (let k = lo; k <= hi; k++) next.add(tracks[k].id);
+    onCheckedChange(next);
   }
   function onRowClick(e: MouseEvent<HTMLTableRowElement>, id: number) {
     const target = e.target as HTMLElement;
     if (target.closest(".col-actions") || target.closest(".col-check")) return;
-    if (e.ctrlKey || e.metaKey) toggleOne(id);
-    else onSelectionChange(new Set([id])); // plain click focuses one row
+    if (e.shiftKey) {
+      selectRange(id);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      toggleOne(id);
+      return;
+    }
+    // Plain click: highlight only — never ticks a checkbox.
+    anchorRef.current = id;
+    onFocusedChange(id);
   }
 
   function play(t: Track) {
@@ -1235,13 +1294,14 @@ function MusicTrackList({
         </thead>
         <tbody>
           {tracks.map((t) => {
-            const isSel = selected.has(t.id);
+            const isChecked = checked.has(t.id);
+            const isFocused = focused === t.id;
             return (
               <tr
                 key={t.id}
-                className={`track-row${isSel ? " selected" : ""}${
-                  activeTrackId === t.id ? " playing" : ""
-                }`}
+                className={`track-row${isChecked ? " checked" : ""}${
+                  isFocused ? " focused" : ""
+                }${activeTrackId === t.id ? " playing" : ""}`}
                 onClick={(e) => onRowClick(e, t.id)}
                 onDoubleClick={() => play(t)}
                 draggable={draggable}
@@ -1260,7 +1320,7 @@ function MusicTrackList({
                 <td className="col-check">
                   <input
                     type="checkbox"
-                    checked={isSel}
+                    checked={isChecked}
                     onChange={() => toggleOne(t.id)}
                     aria-label={`Select ${trackTitle(t)}`}
                   />

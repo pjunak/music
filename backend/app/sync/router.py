@@ -11,7 +11,6 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
@@ -610,8 +609,11 @@ async def _h_fire_cue(
         )
         if cue.start_ms > 0:
             await _apply_and_broadcast(state_module.ambient_seek(cue.start_ms))
-    for loop in cue.loops:
-        loop_id = uuid4().hex
+    for i, loop in enumerate(cue.loops):
+        # Stable per-cue id so re-firing the same cue REPLACES its loops
+        # (timer + state both dedup by id) instead of stacking duplicate
+        # timers and duplicate LOOPS-panel rows on every press.
+        loop_id = f"cue:{action.cue_id}:{i}"
         loops_manager.start(
             loop_id, loop.soundboard, loop.item, loop.interval_s, loop.volume
         )

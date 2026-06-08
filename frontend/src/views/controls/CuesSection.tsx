@@ -10,7 +10,7 @@ import { wsClient } from "@/core/ws";
 
 /** Live Cues panel — one button per cue in the active mode. Clicking fires the
  *  cue (apply preset · start playlist from song/time · one-shot SFX · loops),
- *  resolved server-side. Authoring lives in Authoring → Modes → Cues. */
+ *  resolved server-side. Authoring lives in Authoring → Cues. */
 export function CuesSection() {
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
   const [mode, setMode] = useState<ModeDetail | null>(null);

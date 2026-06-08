@@ -601,8 +601,9 @@ export const presetsAdminApi = {
 
 // Diagnostics — server-side operational snapshot. Read by the
 // Diagnostics tab so the operator can see what's happening (track
-// count, last rescan, mode/preset load errors, connected devices)
-// without SSH'ing into the host.
+// count, last rescan, mode load errors — a per-mode preset error is
+// folded into that mode's error string — connected devices) without
+// SSH'ing into the host.
 export interface LoaderStatus {
   last_load_at: number | null;
   loaded_ids: string[];

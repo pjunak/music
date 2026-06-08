@@ -180,15 +180,18 @@ export function InterruptTemplatesEditor({
                     {it.soundboard_item ? (
                       <span className="badge">sfx · {it.soundboard_item}</span>
                     ) : null}
-                    {it.fade_in_ms || it.fade_out_ms ? (
+                    {/* fade / return / duck only apply to playlist interrupts
+                        (the interrupt lane); SFX-source fires a bare one-shot,
+                        so don't show transition meta for it. */}
+                    {it.playlist && (it.fade_in_ms || it.fade_out_ms) ? (
                       <span className="muted small">
                         fade {it.fade_in_ms ?? 0} / {it.fade_out_ms ?? 0} ms
                       </span>
                     ) : null}
-                    {it.return_to_ambient === false ? (
+                    {it.playlist && it.return_to_ambient === false ? (
                       <span className="muted small">stops on end</span>
                     ) : null}
-                    {typeof it.duck_to === "number" ? (
+                    {it.playlist && typeof it.duck_to === "number" ? (
                       <span className="muted small">
                         ducks to {Math.round(it.duck_to * 100)}%
                       </span>
@@ -348,7 +351,10 @@ function InterruptTemplateForm({
             </select>
           </Field>
         ) : (
-          <Field label="SFX file path" hint="Relative to SFX_LIBRARY_DIR — e.g. dnd/door.ogg">
+          <Field
+            label="SFX item path"
+            hint="Must be an item registered in the mode's default soundboard (e.g. dnd/door.ogg)."
+          >
             <input
               type="text"
               value={soundboardItem}
@@ -359,51 +365,62 @@ function InterruptTemplateForm({
           </Field>
         )}
       </fieldset>
-      <fieldset className="fieldset">
-        <legend>Transition</legend>
-        <div className="field-row">
-          <Field label="Fade in (ms)">
-            <input
-              type="number"
-              min={0}
-              max={10000}
-              step={50}
-              value={fadeInMs}
-              onChange={(e) => setFadeInMs(parseInt(e.target.value, 10) || 0)}
-            />
-          </Field>
-          <Field label="Fade out (ms)">
-            <input
-              type="number"
-              min={0}
-              max={10000}
-              step={50}
-              value={fadeOutMs}
-              onChange={(e) => setFadeOutMs(parseInt(e.target.value, 10) || 0)}
-            />
-          </Field>
-        </div>
-        <Switch
-          checked={returnToAmbient}
-          onChange={(e) => setReturnToAmbient(e.target.checked)}
-          label="Resume ambient when this interrupt ends"
-        />
-        <Switch
-          checked={duckEnabled}
-          onChange={(e) => setDuckEnabled(e.target.checked)}
-          label="Duck ambient under the interrupt (cinematic) instead of pausing"
-        />
-        {duckEnabled ? (
-          <Field label={`Duck level — ${Math.round(duckLevel * 100)}% (lower = quieter)`}>
-            <VolumeControl
-              value={duckLevel}
-              onChange={setDuckLevel}
-              label="Duck level"
-              showIcon={false}
-            />
-          </Field>
-        ) : null}
-      </fieldset>
+      {/* Transition controls only apply to playlist interrupts (the interrupt
+          lane). A soundboard-item source fires a fire-and-forget one-shot SFX
+          that bypasses the interrupt lane entirely — fade/duck/return-to-ambient
+          have no effect on it, so don't offer them. */}
+      {source === "playlist" ? (
+        <fieldset className="fieldset">
+          <legend>Transition</legend>
+          <div className="field-row">
+            <Field label="Fade in (ms)">
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                step={50}
+                value={fadeInMs}
+                onChange={(e) => setFadeInMs(parseInt(e.target.value, 10) || 0)}
+              />
+            </Field>
+            <Field label="Fade out (ms)">
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                step={50}
+                value={fadeOutMs}
+                onChange={(e) => setFadeOutMs(parseInt(e.target.value, 10) || 0)}
+              />
+            </Field>
+          </div>
+          <Switch
+            checked={returnToAmbient}
+            onChange={(e) => setReturnToAmbient(e.target.checked)}
+            label="Resume ambient when this interrupt ends"
+          />
+          <Switch
+            checked={duckEnabled}
+            onChange={(e) => setDuckEnabled(e.target.checked)}
+            label="Duck ambient under the interrupt (cinematic) instead of pausing"
+          />
+          {duckEnabled ? (
+            <Field label={`Duck level — ${Math.round(duckLevel * 100)}% (lower = quieter)`}>
+              <VolumeControl
+                value={duckLevel}
+                onChange={setDuckLevel}
+                label="Duck level"
+                showIcon={false}
+              />
+            </Field>
+          ) : null}
+        </fieldset>
+      ) : (
+        <p className="muted small">
+          A soundboard-item interrupt plays the SFX once at its set volume —
+          ambient keeps playing underneath (no fade or ducking).
+        </p>
+      )}
       <div className="form-actions">
         <button type="button" onClick={onClose} disabled={busy}>
           Cancel

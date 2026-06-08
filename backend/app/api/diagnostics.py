@@ -1,8 +1,9 @@
 """Operator-facing diagnostics endpoint.
 
 Surfaces in-memory state that's otherwise only visible in server logs:
-last scan/reload timestamps, mode and preset load errors, and live
-device/output counts. Read by the frontend's Diagnostics tab so the
+last scan/reload timestamps, mode load errors (a per-mode preset error is
+folded into that mode's error string), and live device/output counts. Read
+by the frontend's Diagnostics tab so the
 operator can see why a YAML edit didn't take effect (or whether the
 library got reindexed) without SSH'ing into the host.
 
