@@ -4672,3 +4672,207 @@ input.volume-slider::-moz-range-thumb {
     height: 18px;
   }
 }
+
+/* --- Library cleanup dialog ---------------------------------------------
+ * Batch context → teal accent family, per the accent semantics. The diff
+ * rows render old → new; "guess" badges (low confidence) use the warn
+ * badge because they genuinely ask for caution, not decoration. */
+
+.modal.modal-cleanup {
+  width: min(780px, 94vw);
+}
+
+.cleanup-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.cleanup-scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cleanup-choice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  cursor: pointer;
+}
+.cleanup-choice input {
+  flex: none;
+  /* Optical alignment with the first text line. */
+  transform: translateY(1px);
+}
+.cleanup-choice.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.cleanup-subchoice {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-left: var(--space-4);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.cleanup-hint {
+  display: block;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.cleanup-rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3) var(--space-6);
+}
+
+.cleanup-review-controls {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.cleanup-review-spacer {
+  flex: 1;
+}
+
+.cleanup-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-height: min(56vh, 40rem);
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.cleanup-folder {
+  margin-bottom: var(--space-2);
+}
+
+.cleanup-track {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.cleanup-track + .cleanup-track {
+  margin-top: var(--space-3);
+}
+
+.cleanup-track-path {
+  font-size: var(--text-sm);
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}
+
+.cleanup-op {
+  display: grid;
+  grid-template-columns: auto 5.5rem 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  cursor: pointer;
+}
+.cleanup-op input {
+  transform: translateY(1px);
+}
+
+.cleanup-op-kind {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.cleanup-diff {
+  overflow-wrap: anywhere;
+}
+.cleanup-old {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.cleanup-arrow {
+  color: var(--muted);
+  padding: 0 var(--space-2);
+}
+.cleanup-new {
+  color: var(--accent2-strong);
+  font-weight: 600;
+}
+.cleanup-conf {
+  margin-left: var(--space-3);
+}
+
+.cleanup-note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--warn);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.cleanup-progress {
+  padding: var(--space-7) 0;
+}
+
+.cleanup-done {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.cleanup-skips {
+  margin: 0;
+  padding-left: var(--space-6);
+}
+
+.cleanup-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: min(50vh, 32rem);
+  overflow-y: auto;
+}
+.cleanup-batch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--space-3) var(--space-4);
+}
+.cleanup-batch-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+.cleanup-journal-upload {
+  align-self: flex-start;
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .cleanup-rules {
+    grid-template-columns: 1fr;
+  }
+  .cleanup-op {
+    grid-template-columns: auto 1fr;
+  }
+  .cleanup-op-kind {
+    grid-column: 2;
+  }
+  .cleanup-diff {
+    grid-column: 2;
+  }
+}

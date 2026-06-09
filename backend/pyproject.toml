@@ -42,6 +42,11 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# The cleanup engine matches en/em dashes in filenames on purpose — the
+# "ambiguous unicode" warning is exactly the point of those patterns.
+"app/library/cleanup.py" = ["RUF001"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

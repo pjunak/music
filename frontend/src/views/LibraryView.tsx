@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent, MouseEvent } from "react";
+import type { ChangeEvent, Dispatch, DragEvent, MouseEvent, SetStateAction } from "react";
 
 import { Breadcrumb } from "@/components/Breadcrumb";
 import type { BreadcrumbItem } from "@/components/Breadcrumb";
+import { CleanupDialog } from "@/components/CleanupDialog";
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { FolderPickerModal } from "@/components/FolderPickerModal";
@@ -19,6 +20,7 @@ import {
   PlusIcon,
   RescanIcon,
   SearchIcon,
+  SparkleIcon,
   TrashIcon,
   XIcon,
 } from "@/components/icons";
@@ -77,6 +79,11 @@ export function LibraryView() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [pendingQuery, setPendingQuery] = useState("");
   const [query, setQuery] = useState("");
+  // Ticked-checkbox selection of the music list. Lives here (not in
+  // MusicWorkspace) so the toolbar's Clean up dialog can offer
+  // "selected tracks" as a scope.
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [cleanupOpen, setCleanupOpen] = useState(false);
 
   // Search-as-you-type: debounce keystrokes and auto-submit the result.
   // The input is always visible in the toolbar (music mode only), so the
@@ -97,6 +104,7 @@ export function LibraryView() {
     setRoot(next);
     setPath("");
     clearSearch();
+    setChecked(new Set());
   }
 
   return (
@@ -147,8 +155,27 @@ export function LibraryView() {
             ) : null}
           </div>
         ) : null}
+        {root === "music" ? (
+          <IconButton
+            label="Find and batch-fix common filename/tag issues"
+            icon={<SparkleIcon />}
+            className="library-cleanup-btn"
+            onClick={() => setCleanupOpen(true)}
+          >
+            Clean up
+          </IconButton>
+        ) : null}
         <RescanButton root={root} onComplete={() => setRefreshKey((k) => k + 1)} />
       </header>
+
+      {cleanupOpen && root === "music" ? (
+        <CleanupDialog
+          path={path}
+          checkedIds={[...checked]}
+          onClose={() => setCleanupOpen(false)}
+          onApplied={() => setRefreshKey((k) => k + 1)}
+        />
+      ) : null}
 
       {root === "music" ? (
         <MusicWorkspace
@@ -157,6 +184,8 @@ export function LibraryView() {
           query={query}
           refreshKey={refreshKey}
           onRefresh={() => setRefreshKey((k) => k + 1)}
+          checked={checked}
+          setChecked={setChecked}
         />
       ) : (
         <SfxBrowser
@@ -233,25 +262,27 @@ function MusicWorkspace({
   query,
   refreshKey,
   onRefresh,
+  checked,
+  setChecked,
 }: {
   path: string;
   onPathChange: (p: string) => void;
   query: string;
   refreshKey: number;
   onRefresh: () => void;
+  /** Ticked-checkbox set, owned by LibraryView (the cleanup dialog reads
+   *  it as a scope). Only a direct checkbox click, the header select-all,
+   *  Ctrl/Cmd-click, or a Shift range mutates it. */
+  checked: Set<number>;
+  setChecked: Dispatch<SetStateAction<Set<number>>>;
 }) {
   const activeTrackId = usePlayerStore(selectActiveTrackId);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // Two independent concerns, deliberately decoupled:
-  //  - `checked`: the ticked-checkbox set that drives bulk move/delete. Only
-  //    a direct checkbox click, the header select-all, Ctrl/Cmd-click, or a
-  //    Shift range mutates it.
-  //  - `focused`: the single highlighted row a plain click selects, which
-  //    feeds the tag inspector. A plain click (or double-click to play)
-  //    must NOT tick a checkbox.
-  const [checked, setChecked] = useState<Set<number>>(new Set());
+  // `focused` stays local: the single highlighted row a plain click
+  // selects, which feeds the tag inspector. A plain click (or
+  // double-click to play) must NOT tick a checkbox.
   const [focused, setFocused] = useState<number | null>(null);
   const searching = query !== "";
 
@@ -285,7 +316,7 @@ function MusicWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [searching, query, path, refreshKey]);
+  }, [searching, query, path, refreshKey, setChecked]);
 
   const loadChildren = useCallback(musicTreeChildren, []);
 

@@ -482,6 +482,15 @@ def update_path(db: Session, old_rel: str, new_rel: str) -> Track | None:
     return row
 
 
+def read_file_tags(path: Path) -> dict[str, Any]:
+    """The file's actual tag state: coerced TAG_REGISTRY values for tags
+    present in the file, with absent string tags as ""/missing and absent
+    numeric tags as None/missing. Unlike `metadata_for`, NO filename/folder
+    fallbacks are applied — callers that need to know what's really written
+    in the file (e.g. cleanup journaling for faithful reverts) use this."""
+    return _read_tags(path)
+
+
 # --- tag writeback (metadata editor) -------------------------------------
 
 
@@ -806,6 +815,7 @@ __all__ = [
     "list_folder",
     "metadata_for",
     "music_root",
+    "read_file_tags",
     "relative_audio_files_in",
     "remove_path",
     "rename_folder",

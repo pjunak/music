@@ -344,6 +344,105 @@ export const libraryApi = {
     ),
 };
 
+// --- library cleanup -----------------------------------------------------
+
+// Keep in lockstep with the backend `RuleId` Literal in app/api/cleanup.py
+// and the engine rule constants in app/library/cleanup.py.
+export type CleanupRuleId =
+  | "strip_track_numbers"
+  | "strip_artist"
+  | "strip_album"
+  | "strip_junk"
+  | "normalize_separators"
+  | "normalize_case"
+  | "tag_title"
+  | "tag_artist"
+  | "tag_album"
+  | "tag_number";
+
+export interface CleanupScope {
+  type: "all" | "folder" | "tracks";
+  path?: string;
+  recursive?: boolean;
+  track_ids?: number[];
+}
+
+export interface CleanupOp {
+  op_id: string;
+  track_id: number;
+  kind: "rename" | "tag";
+  field: string | null;
+  old: string | number | null;
+  new: string | number | null;
+  rules: string[];
+  confidence: "high" | "low";
+}
+
+export interface CleanupTrackPlan {
+  track_id: number;
+  path: string;
+  ops: CleanupOp[];
+  notes: string[];
+}
+
+export interface CleanupAnalyzeResult {
+  scanned: number;
+  plans: CleanupTrackPlan[];
+}
+
+export interface CleanupOpIn {
+  track_id: number;
+  kind: "rename" | "tag";
+  field: string | null;
+  old: string | number | null;
+  new: string | number | null;
+}
+
+export interface CleanupApplyResult {
+  batch_id: number | null;
+  applied: number;
+  skipped: BulkActionSkip[];
+}
+
+export interface CleanupBatchSummary {
+  id: number;
+  created_at: string;
+  scope_label: string;
+  item_count: number;
+  reverted_at: string | null;
+}
+
+export interface CleanupBatchDetail extends CleanupBatchSummary {
+  items: unknown[];
+}
+
+export interface CleanupRevertResult {
+  reverted: number;
+  skipped: BulkActionSkip[];
+}
+
+export const cleanupApi = {
+  analyze: (scope: CleanupScope, rules: CleanupRuleId[]) =>
+    api.post<CleanupAnalyzeResult>("/api/library/cleanup/analyze", { scope, rules }),
+  /** One chunk of accepted ops. Pass the batch_id from the previous chunk
+   *  so the whole run lands in a single revertable journal. */
+  apply: (ops: CleanupOpIn[], batchId: number | null, scopeLabel: string) =>
+    api.post<CleanupApplyResult>("/api/library/cleanup/apply", {
+      ops,
+      batch_id: batchId,
+      scope_label: scopeLabel,
+    }),
+  batches: () => api.get<CleanupBatchSummary[]>("/api/library/cleanup/batches"),
+  batch: (id: number) =>
+    api.get<CleanupBatchDetail>(`/api/library/cleanup/batches/${id}`),
+  revertBatch: (id: number) =>
+    api.post<CleanupRevertResult>(`/api/library/cleanup/batches/${id}/revert`),
+  /** Revert from a previously-downloaded journal file (disaster path —
+   *  works even after the server-side batch rows are gone). */
+  revertJournal: (items: unknown[]) =>
+    api.post<CleanupRevertResult>("/api/library/cleanup/revert", { items }),
+};
+
 // --- SFX ---------------------------------------------------------------
 
 export interface SfxFile {

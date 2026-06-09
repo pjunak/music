@@ -376,3 +376,13 @@ export function ErrorIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function SparkleIcon(props: IconProps) {
+  // "Clean up" affordance — a large four-point sparkle with a small echo.
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M10 3l1.7 4.8L16.5 9.5l-4.8 1.7L10 16l-1.7-4.8L3.5 9.5l4.8-1.7z" fill="currentColor" />
+      <path d="M18 13l1 2.7 2.7 1-2.7 1-1 2.7-1-2.7-2.7-1 2.7-1z" fill="currentColor" />
+    </svg>
+  );
+}
