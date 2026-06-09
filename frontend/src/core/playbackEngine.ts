@@ -1020,6 +1020,22 @@ export class PlaybackEngine {
     this.onSkipNext?.();
   }
 
+  /** Send one immediate position report for whichever lane is playing, so the
+   *  server's position_ms reflects where we truly were instead of the last 1s
+   *  interval report. Called by the footer Speakers toggle the instant the
+   *  operator turns THIS device's output off — while it's still an active
+   *  output, before the element is torn down and before `set_active_outputs`
+   *  drops it — so the next off→on reclaim resumes accurately instead of
+   *  snapping back to the stale last report. Gated on active-output + playing
+   *  so a stray call (guest, a device that isn't an output, a paused lane) is
+   *  a silent no-op rather than a report the server would reject. */
+  flushPositionReport(): void {
+    if (!this.isMyOutput || !this.lastIsPlaying || !this.onPositionReport) return;
+    const ms = this.currentPositionMs();
+    if (!Number.isFinite(ms) || ms < 0) return;
+    this.onPositionReport(Math.floor(ms));
+  }
+
   private currentPositionMs(): number {
     if (this.lastInterruptId !== null && this.interrupt) {
       return this.interrupt.el.currentTime * 1000;

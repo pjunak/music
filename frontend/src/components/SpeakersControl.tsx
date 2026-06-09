@@ -124,6 +124,14 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
     // Optimistic for THIS device so its audio reacts on the click.
     if (id === deviceId) {
       playbackEngine.unlock();
+      // Turning our own output off: flush a final position report while we're
+      // still an active output (queued before set_active_outputs on the same
+      // ordered socket, so the server accepts it) — otherwise its position_ms
+      // stays frozen at the last 1s report and a quick off→on resumes from that
+      // stale second (a small backward jump / replaying the same second).
+      if (!next.includes(deviceId)) {
+        playbackEngine.flushPositionReport();
+      }
       if (player.state !== null) {
         playbackEngine.applyState(
           { ...player.state, active_output_device_ids: next },
