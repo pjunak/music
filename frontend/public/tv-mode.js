@@ -2,26 +2,25 @@
    (old Samsung Smart TVs, etc.). Plain ES5 — no modules, no template
    literals, no arrow functions, no optional chaining.
 
-   Activates only when React didn't mount within 500 ms (or when ?tv
-   is in the URL). Connects as a guest WebSocket and acts as a passive
-   audio output: plays whatever the server says is currently playing. */
+   Loaded as <script nomodule> (index.html): a module-capable browser
+   skips it entirely, a module-incapable one runs it instead. That
+   capability split IS the "is TV mode needed?" decision — so there's no
+   timer and no race with React. main.tsx also injects it on demand for
+   the ?tv preview. In both cases the SPA won't render in this document,
+   so activation is immediate.
+
+   Registers a stable client_id (exactly like the SPA) so the operator can
+   pick this TV as an output in the Speakers popover, set its per-device
+   volume, and designate it output-by-default; it then plays whatever the
+   controller routes to it. If the wss:// WebSocket can't be opened (the
+   classic old-TV cert quirk — see makePollingClient) it falls back to
+   read-only HTTP polling and acts as a passive always-on speaker. */
 (function () {
   "use strict";
 
   // ---- Activation gate --------------------------------------------------
 
   function rootEl() { return document.getElementById("root"); }
-
-  function forced() {
-    var search = window.location.search || "";
-    if (search.charAt(0) === "?") search = search.substring(1);
-    var pairs = search.split("&");
-    for (var i = 0; i < pairs.length; i++) {
-      var key = pairs[i].split("=")[0];
-      if (key === "tv") return true;
-    }
-    return false;
-  }
 
   function reactMounted() {
     var r = rootEl();
@@ -358,13 +357,12 @@
       }
     }
 
-    function maybeSeek(targetMs) {
-      try {
-        var currentMs = active.currentTime * 1000;
-        if (Math.abs(currentMs - targetMs) > 1500) {
-          active.currentTime = targetMs / 1000;
-        }
-      } catch (e) {}
+    // Unconditional seek. WHETHER to seek is decided entirely by applyState's
+    // deliberate-move gate, so there's a single coordinated threshold;
+    // re-gating here against the element clock would open a dead-band that
+    // silently drops small honest seeks the outer gate already admitted.
+    function seek(targetMs) {
+      try { active.currentTime = targetMs / 1000; } catch (e) {}
     }
 
     function clearAudio() {
@@ -378,7 +376,7 @@
       swap: swap,
       setPlaying: setPlaying,
       setVolume: setVolume,
-      maybeSeek: maybeSeek,
+      seek: seek,
       clear: clearAudio
     };
   }
@@ -410,15 +408,17 @@
     var ws = null;
     var backoff = 1000;
     var stopped = false;
-    // Attempts since the last successful onopen (or since startup). Reset
-    // to 0 every time a connection opens. When it crosses GIVE_UP_AFTER
-    // without ever opening, WS is declared dead for this session and
-    // handlers.onGiveUp() fires so the caller can switch to a fallback
-    // (HTTP polling). 2 attempts is enough signal on a TV with a
-    // permanent WS-vs-cert quirk; flipping early is harmless because the
-    // polling fallback works in every scenario, including transient
-    // network blips during reconnection.
+    // Connection attempts since startup that never reached onopen (reset to 0
+    // on every successful open). We fall back to HTTP polling ONLY if the
+    // socket has never opened even once — that's the genuine permanent signal
+    // (an old TV whose wss:// handshake is cert-rejected; see
+    // makePollingClient). Once the socket HAS opened we know WS works on this
+    // TV, so a later drop is a transient blip: keep retrying WS with backoff
+    // forever rather than demoting (one-way, until a physical reload) to
+    // read-only polling and silently losing the TV's output selectability and
+    // per-device volume.
     var consecutiveAttemptsWithoutOpen = 0;
+    var everOpened = false;
     var GIVE_UP_AFTER = 2;
 
     function connect() {
@@ -437,6 +437,7 @@
       }
       ws.onopen = function () {
         consecutiveAttemptsWithoutOpen = 0;
+        everOpened = true;
         backoff = 1000;
         handlers.onStatus("connected via WebSocket", "#4caf50");
         handlers.onOpen(send);
@@ -457,7 +458,10 @@
 
     function scheduleReconnectOrGiveUp() {
       if (stopped) return;
-      if (consecutiveAttemptsWithoutOpen >= GIVE_UP_AFTER) {
+      // Give up to polling only if WS has NEVER opened (permanent cert/capability
+      // quirk). A socket that opened before and then dropped is a transient blip
+      // — keep retrying WS so the TV stays a selectable output once it recovers.
+      if (!everOpened && consecutiveAttemptsWithoutOpen >= GIVE_UP_AFTER) {
         stopped = true;
         if (typeof handlers.onGiveUp === "function") handlers.onGiveUp();
         return;
@@ -609,12 +613,30 @@
     return null;
   }
 
+  // Stable per-install identity, mirroring the SPA's uiStore.clientId. Old
+  // TVs lack crypto.randomUUID, so we mint a plain-random token and persist
+  // it. Keyed separately from the SPA (these browsers never run the SPA, so
+  // the two can't collide). The operator's "output by default" designation
+  // in Settings → Devices sticks to this id across reloads, and it's what
+  // makes the TV addressable in active_output_device_ids / device_volumes.
+  function getClientId() {
+    try {
+      var stored = window.localStorage && localStorage.getItem("tv-mode.client_id");
+      if (stored) return stored;
+    } catch (e) {}
+    var id = "tv-" + makeShortId() + makeShortId() + nowMs().toString(36);
+    try { window.localStorage && localStorage.setItem("tv-mode.client_id", id); }
+    catch (e) {}
+    return id;
+  }
+
   // Device name resolution:
   //   1. ?name=... URL param (one-time setup — also persists to localStorage)
   //   2. localStorage from a previous visit
-  //   3. generated default "Old TV (xxxxx)" — randomized each load
+  //   3. generated default "Old TV (xxxxx)" — minted once, then persisted so
+  //      the label (and the operator's device-list entry) is stable on reload
   // Bookmark `https://music.example/?tv&name=Living%20Room` once to claim
-  // a stable label that survives subsequent reloads.
+  // a friendlier label that survives subsequent reloads.
   function getDeviceName() {
     var fromUrl = getQueryParam("name");
     if (fromUrl) {
@@ -626,7 +648,10 @@
       var stored = window.localStorage && localStorage.getItem("tv-mode.name");
       if (stored) return stored;
     } catch (e) {}
-    return "Old TV (" + makeShortId() + ")";
+    var generated = "Old TV (" + makeShortId() + ")";
+    try { window.localStorage && localStorage.setItem("tv-mode.name", generated); }
+    catch (e) {}
+    return generated;
   }
 
   function formatTime(ms) {
@@ -646,14 +671,23 @@
 
     var lastTrackId = null;
     var lastIsPlaying = false;
+    var clientId = getClientId();
     var deviceLabel = getDeviceName();
     ui.setDeviceName(deviceLabel);
-    // Server-assigned device id. Captured from the first state_snapshot
-    // when connected via WebSocket; stays null in polling mode (no
-    // registration possible). isThisDeviceActive() treats null as
-    // "always play" so the polling fallback keeps acting as a passive
-    // speaker — the only mode where it can do anything useful, since
-    // pollers can't appear in active_output_device_ids.
+    // This device's identity in PlayerState. In WebSocket mode it's our own
+    // stable client_id (set in onOpen, mirroring the SPA) so the TV is a
+    // first-class, operator-selectable output — the operator ticks it on in
+    // the Speakers popover and can trim its per-device volume / save it
+    // default-on. In polling mode it stays null — a poller can't register, so
+    // it can never appear in active_output_device_ids; null makes
+    // isThisDeviceActive() return true so it still works as a passive
+    // always-on speaker (the only useful behaviour when it can't be selected).
+    // your_device_id from the snapshot is empty by design and ignored.
+    //
+    // The TV does NOT report position: it's a guest (a TV bookmark has no
+    // login) and the server rejects every guest action except register, so
+    // the server's position_ms is effectively frozen during playback — hence
+    // the deliberate-move seek gate in applyState below.
     var myDeviceId = null;
     // Timeline state. Server pushes position_ms in every state broadcast
     // (~every 2 s); we interpolate between pushes locally so the
@@ -662,6 +696,9 @@
     var currentTrackLengthMs = 0;
     var serverPositionMs = 0;
     var serverPositionTimestamp = nowMs();
+    // The previous server position_ms, to detect a *deliberate* remote seek
+    // vs. a frozen clock (see the same-track branch in applyState).
+    var lastServerPosMs = 0;
 
     function isThisDeviceActive(state) {
       if (myDeviceId === null) return true;
@@ -677,21 +714,30 @@
       var amb = state.ambient || {};
       var trackId = (amb.current_track_id == null) ? null : amb.current_track_id;
       var posMs = amb.position_ms || 0;
-      // Gate playback on this device being a selected output (when
-      // registered). The TV otherwise behaves as a passive subscriber
-      // that wouldn't show up in the controller UI's output picker —
-      // see audio_output capability in the WS register call below.
+      var trackChanged = trackId !== lastTrackId;
+      // Gate playback on this device being a selected output (WS mode, where
+      // we have an identity). In polling mode myDeviceId is null and
+      // isThisDeviceActive() returns true — a passive always-on speaker.
       var isPlaying = !!state.is_playing && isThisDeviceActive(state);
-      var vol = (typeof state.volume === "number") ? state.volume : 1;
+      var master = (typeof state.volume === "number") ? state.volume : 1;
+      // Per-device trim (master × this device's device_volumes entry), so the
+      // operator can tame a too-loud TV from the Speakers popover without
+      // touching master — same fold the SPA engine does. Only applies in WS
+      // mode (a poller has no addressable identity).
+      var trim = 1;
+      if (myDeviceId !== null && state.device_volumes &&
+          typeof state.device_volumes[myDeviceId] === "number") {
+        trim = state.device_volumes[myDeviceId];
+      }
       var crossfadeMs = state.crossfade_ms || 0;
 
-      engine.setVolume(vol);
+      engine.setVolume(clamp01(master * trim));
       // Capture latest server position for the progress interpolator
       // (runs on its own 250 ms timer below).
       serverPositionMs = posMs;
       serverPositionTimestamp = nowMs();
 
-      if (trackId !== lastTrackId) {
+      if (trackChanged) {
         if (trackId == null) {
           engine.clear();
           ui.setTitle("");
@@ -720,7 +766,24 @@
         }
         lastTrackId = trackId;
       } else if (trackId != null) {
-        engine.maybeSeek(posMs);
+        // Correct the element clock only on a *deliberate* server-side move,
+        // never on every push. The server doesn't dead-reckon position_ms and
+        // the TV can't report it (guest), so during playback the broadcast
+        // position is effectively FROZEN; blindly seeking to it would yank the
+        // element back each update and loop the first seconds of the track
+        // forever. A genuine seek / skip / loop-restart / cue start instead
+        // *moves* the server position — a jump from the last value we saw is
+        // the signal. (Same idea as the SPA's shouldApplyRemoteSeek, with one
+        // coordinated threshold so there's no dead-band.) Because a track
+        // change resets lastServerPosMs to 0 (the element's real start), a
+        // cue's non-zero start_ms reads as a move here and is honored.
+        if (Math.abs(posMs - lastServerPosMs) > 1000) {
+          engine.seek(posMs);
+          // A loop:track restart broadcasts position_ms 0 with is_playing
+          // still true; if the element had ended (parked/paused) the seek
+          // alone won't restart it, so nudge playback when we should be on.
+          if (isPlaying) engine.setPlaying(true);
+        }
       }
 
       if (isPlaying !== lastIsPlaying) {
@@ -728,6 +791,9 @@
         lastIsPlaying = isPlaying;
       }
       ui.setPlaying(isPlaying);
+      // After a track change the element restarts at 0, so anchor the seek
+      // gate there; otherwise track the latest server position.
+      lastServerPosMs = trackChanged ? 0 : posMs;
     }
 
     // Progress bar interpolator. Server pushes position only on state
@@ -759,11 +825,11 @@
     // page), switch to polling /api/sync/state. The 150ms delay lets the
     // operator see the "switching..." status transition on the TV screen.
     function startPolling() {
-      // Drop the WS-assigned device id — polling can't keep a registered
-      // device alive, so the server has already pruned it. Clearing this
-      // makes isThisDeviceActive() fall back to "always play" (passive
-      // speaker mode), the only behaviour that's useful when we can't
-      // be selected as an output.
+      // Drop our WS identity — polling can't keep a registered device alive,
+      // so the server has already pruned it. Clearing myDeviceId makes
+      // isThisDeviceActive() fall back to "always play" (passive speaker
+      // mode), the only useful behaviour when we can't be selected as an
+      // output.
       myDeviceId = null;
       ui.setStatus("WebSocket blocked — switching to HTTP polling...", "#ffb74d");
       setTimeout(function () {
@@ -777,24 +843,30 @@
       }, 150);
     }
 
+    // No WebSocket at all (a very old TV): the polling path needs only XHR, so
+    // use it directly instead of dead-ending. renderUnsupported is reserved for
+    // browsers that can't even do XHR (see activateTvMode).
+    if (typeof WebSocket === "undefined") {
+      startPolling();
+      return;
+    }
+
     makeWsClient(wsUrl, {
       onStatus: ui.setStatus,
       onOpen: function (send) {
-        // Advertise audio_output so the controller's UI lists this TV
-        // in its output picker. Without it the device registers but is
-        // invisible in the picker, and the user can't toggle it.
-        send({ type: "register", name: deviceLabel, capabilities: ["audio_output"] });
+        // Self-assign identity from our own stable client_id: the server's
+        // your_device_id is empty by design (it doesn't know us until this
+        // register arrives). This is what makes isThisDeviceActive() match
+        // against active_output_device_ids and lets the operator pick this TV
+        // in the Speakers popover, trim its volume, and save it default-on.
+        myDeviceId = clientId;
+        send({ type: "register", name: deviceLabel, client_id: clientId });
       },
       onMessage: function (msg) {
         if (!msg || !msg.type) return;
-        if (msg.type === "state_snapshot") {
-          // Server's assigned id for this connection — used by
-          // isThisDeviceActive() to check active_output_device_ids.
-          if (typeof msg.your_device_id === "string") {
-            myDeviceId = msg.your_device_id;
-          }
-          applyState(msg.state);
-        } else if (msg.type === "state_changed") {
+        // your_device_id is empty by design now — identity is our own
+        // client_id (set in onOpen). Snapshot and delta both just carry state.
+        if (msg.type === "state_snapshot" || msg.type === "state_changed") {
           applyState(msg.state);
         }
       },
@@ -804,40 +876,29 @@
 
   // ---- Bootstrap --------------------------------------------------------
 
-  // ES modules were added to Chrome v61, Firefox 60, Safari 11. Browsers
-  // missing this support can't load the SPA's module entry script and
-  // need tv-mode immediately, with no wait. Modern browsers get up to
-  // 4 s to mount React before tv-mode concludes the SPA is broken and
-  // takes over — fixes the F5 false-positive where a slow page reload
-  // got kidnapped after 500 ms.
-  function browserSupportsEsModules() {
-    try { return "noModule" in document.createElement("script"); }
-    catch (e) { return false; }
-  }
-
   function activateTvMode() {
-    if (typeof WebSocket === "undefined") {
-      renderUnsupported("WebSocket support is required.");
+    // The only hard floor is XHR: a WebSocket-less browser still works over the
+    // polling fallback (handled inside start()), so it's not dead-ended here.
+    if (typeof XMLHttpRequest === "undefined") {
+      renderUnsupported("This browser is too old to fetch playback state.");
       return;
     }
     renderStartScreen(function () { start(); });
   }
 
-  function pollForSpa(timeoutMs) {
-    var startTime = nowMs();
-    (function tick() {
-      if (reactMounted()) return;            // SPA is up, stay out of the way
-      if (nowMs() - startTime >= timeoutMs) {
-        activateTvMode();
-        return;
-      }
-      setTimeout(tick, 100);
-    })();
-  }
-
+  // This script runs in exactly two situations, both of which mean the SPA
+  // will NOT render in this document:
+  //   1. <script nomodule> on a browser too old for ES modules — the
+  //      capability gate that decides "is TV mode needed?" (index.html). A
+  //      module-capable browser never even fetches this file.
+  //   2. main.tsx injecting it for the ?tv preview (React is skipped there).
+  // So activate immediately. The old "wait Nms for React, then claim #root"
+  // timer is gone: it was the engine of the black-screen / phantom-redirect
+  // reports (a crashed or merely slow SPA got kidnapped). The reactMounted()
+  // check is pure defence against an accidental double-injection — it must
+  // never clobber a live SPA.
   whenReady(function () {
-    if (forced())                       { activateTvMode(); return; }
-    if (!browserSupportsEsModules())    { activateTvMode(); return; }
-    pollForSpa(4000);
+    if (reactMounted()) return;
+    activateTvMode();
   });
 })();
