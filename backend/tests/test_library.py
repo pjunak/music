@@ -714,5 +714,81 @@ def test_rename_folder_conflict(auth_client: TestClient) -> None:
     assert r.status_code == 409
 
 
+# --- regression: album-fallback preserves dots ---------------------------
+
+
+def test_metadata_album_fallback_preserves_dots() -> None:
+    """A WAV with no album tag falls back to its parent-folder name VERBATIM —
+    dots included. `metadata_for` derives the album from `Path(parent_rel).name`,
+    not a slugified form, so a folder literally named "Vol.1" must yield album
+    "Vol.1", never "Vol1". A root-level file (parent == ".") yields an empty
+    album, not "." and not the mangled folder name."""
+    from app.library import index as library_index
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+
+    dotted = music_dir / "Vol.1"
+    dotted.mkdir(exist_ok=True)
+    song = dotted / "song.wav"
+    song.write_bytes(_silent_wav())
+
+    meta = library_index.metadata_for(song, root=music_dir)
+    assert meta["album"] == "Vol.1"
+
+    # Root-level file: parent resolves to "." → album must be empty, not "."
+    # and not a mangled folder name.
+    root_song = music_dir / "rootlevel.wav"
+    root_song.write_bytes(_silent_wav())
+    root_meta = library_index.metadata_for(root_song, root=music_dir)
+    assert root_meta["album"] == ""
+
+
+# --- regression: delete_track OSError -> 500, row preserved ---------------
+
+
+def test_delete_track_unlink_failure_returns_500_and_keeps_row(
+    auth_client: TestClient, monkeypatch,
+) -> None:
+    """When the on-disk unlink raises OSError, the endpoint must surface a 500
+    (with a "unlink failed" detail) AND leave the DB row intact — the row is
+    only dropped *after* a successful unlink, so a failed delete can't orphan
+    the index.
+
+    The endpoint guards the unlink behind `abs_path.is_file()`, so the file has
+    to genuinely exist (a dir/symlink swap would make is_file() False and the
+    delete would short-circuit to 204). To force the OSError branch
+    deterministically on every OS, we make `Path.unlink` raise for this one
+    real, existing file — no privileged file-locking tricks, no platform skew."""
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("undeletable.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "Undeletable"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+    rel = upload["saved"][0]["path"]
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    target = (music_dir / rel).resolve()
+    assert target.is_file()  # is_file() stays True so the unlink branch runs
+
+    real_unlink = Path.unlink
+
+    def fake_unlink(self: Path, *args, **kwargs):
+        if self.resolve() == target:
+            raise OSError("simulated unlink failure")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fake_unlink)
+
+    r = auth_client.delete(f"/api/library/tracks/{track_id}")
+    assert r.status_code == 500
+    assert "unlink failed" in r.json()["detail"].lower()
+
+    # The row survived — a failed unlink must not orphan the index. The
+    # monkeypatch is auto-reverted by the fixture, so this re-fetch hits disk
+    # normally and the row is still there.
+    assert auth_client.get(f"/api/library/tracks/{track_id}").status_code == 200
+
+
 # Quiet pyflakes about io being imported for potential future test helpers.
 _ = io

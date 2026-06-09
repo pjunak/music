@@ -163,6 +163,21 @@ function CueEditorForm({
     e.preventDefault();
     setBusy(true);
     try {
+      // A row with only one of soundboard/item set would be silently dropped by
+      // the filter below, losing the operator's half-finished edit without a
+      // word. Block the save so they can finish or remove it deliberately.
+      const partialSfx = sfx.some((s) => Boolean(s.soundboard) !== Boolean(s.item));
+      const partialLoops = loops.some(
+        (l) => Boolean(l.soundboard) !== Boolean(l.item),
+      );
+      if (partialSfx || partialLoops) {
+        toast.error(
+          "Finish or remove incomplete SFX/loop rows",
+          "Each row needs both a soundboard and an item.",
+        );
+        setBusy(false);
+        return;
+      }
       const body: Omit<Cue, "id"> = {
         name: name.trim(),
         description: description.trim() || null,
@@ -229,18 +244,18 @@ function CueEditorForm({
         </Field>
         <div className="cue-colour">
           <span className="field-label">Colour</span>
-          <div className="segmented">
-            <span className="segmented-item" aria-selected="true">
-              Music
-            </span>
+          <div className="segmented" role="group" aria-label="Colour target">
+            <span className="segmented-item">Music</span>
             <span
               className="segmented-item seg-soon"
+              aria-disabled="true"
               title="Colouring SFX isn't available yet — music only for now."
             >
               SFX
             </span>
             <span
               className="segmented-item seg-soon"
+              aria-disabled="true"
               title="Colouring both isn't available yet — music only for now."
             >
               Both

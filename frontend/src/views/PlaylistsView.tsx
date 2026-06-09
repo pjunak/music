@@ -14,7 +14,7 @@ import {
 } from "@/components/icons";
 import { NoModeEmpty } from "@/components/NoModeEmpty";
 import { TrackBrowser } from "@/components/TrackBrowser";
-import { api, libraryApi, modesApi, playlistsApi } from "@/core/api";
+import { libraryApi, modesApi, playlistsApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
@@ -488,7 +488,7 @@ function PlaylistMetaEditor({
   async function save() {
     setBusy(true);
     try {
-      await api.patch(`/api/playlists/${playlist.id}`, {
+      await playlistsApi.update(playlist.id, {
         name: name.trim(),
         mode_id: modeId || null,
         category: category.trim() || null,

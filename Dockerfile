@@ -108,6 +108,11 @@ ENV MUSIC_DIR=/data/music \
 
 EXPOSE 8000
 
+# The slim image has no curl, so probe with Python's stdlib. start-period
+# covers scan_full on a large library before the container is judged healthy.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD ["python","-c","import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+
 # Schema is created (idempotently) by the FastAPI lifespan — no migrations
 # step. exec'ing uvicorn directly keeps signal handling clean (graceful
 # shutdown on SIGTERM from `docker stop`).

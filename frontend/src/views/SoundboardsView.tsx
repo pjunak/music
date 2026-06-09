@@ -169,6 +169,7 @@ function SoundboardCreateForm({
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="New soundboard name"
+        aria-label="New soundboard name"
         required
         autoFocus
       />

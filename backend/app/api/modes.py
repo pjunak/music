@@ -56,6 +56,16 @@ def _write_yaml(path: Path, payload: dict) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _merge_partial(target: dict, payload: BaseModel) -> None:
+    """Apply a partial-update payload onto an existing dict: each set field
+    overwrites, but a null/empty value clears the key so it round-trips out
+    of the YAML rather than persisting as a meaningless blank."""
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        target.pop(key, None) if (value is None or value == "") else target.__setitem__(
+            key, value
+        )
+
+
 class ModeSummary(BaseModel):
     id: str
     name: str
@@ -449,12 +459,7 @@ def update_soundboard_item(
             status_code=status.HTTP_404_NOT_FOUND, detail="item index out of range"
         )
     item = items[index]
-    fields = payload.model_dump(exclude_unset=True)
-    for key, value in fields.items():
-        if value is None or value == "":
-            item.pop(key, None)
-        else:
-            item[key] = value
+    _merge_partial(item, payload)
     return _save_soundboard_yaml(path, sb, mode_id)
 
 
@@ -599,12 +604,7 @@ def update_interrupt_template(
             detail="interrupt index out of range",
         )
     entry = dict(interrupts[index])
-    fields = payload.model_dump(exclude_unset=True)
-    for key, value in fields.items():
-        if value is None or value == "":
-            entry.pop(key, None)
-        else:
-            entry[key] = value
+    _merge_partial(entry, payload)
     # Re-validate the playlist / soundboard_item invariant against the merged
     # entry — a partial update that nulls one source must leave the other set.
     _validate_interrupt_payload(

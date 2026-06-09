@@ -1,3 +1,14 @@
+/** Slug → display caption: "deep-forest" → "Deep Forest". The TV is a guest
+ *  surface and a mode *name* never reaches it — only the id (the name-bearing
+ *  list endpoints are `CurrentUser`-gated) — so we humanise the slug rather
+ *  than widen the guest read surface just for a caption. */
+export function humaniseSlug(slug: string): string {
+  return slug
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /** Backend slug fields (`CreateModeRequest.id` etc.) cap at 64 chars. Keep
  *  derived slugs within that so a long name never silently produces an id the
  *  create endpoint rejects with a 400. */

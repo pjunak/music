@@ -276,6 +276,27 @@ def set_active_outputs(device_ids: list[str]) -> Any:
     return _mut
 
 
+def add_active_output(device_id: str) -> Any:
+    """Append a single device id to `active_output_device_ids`. No-op if the id
+    is already present. Used by the WS register path to auto-activate a
+    default-on device without a read-modify-write on a stale snapshot (which
+    races a concurrent register)."""
+
+    def _mut(state: PlayerState) -> PlayerState:
+        if device_id in state.active_output_device_ids:
+            return state
+        return state.model_copy(
+            update={
+                "active_output_device_ids": [
+                    *state.active_output_device_ids,
+                    device_id,
+                ]
+            }
+        )
+
+    return _mut
+
+
 def remove_active_output(device_id: str) -> Any:
     """Drop a single device id from `active_output_device_ids`. No-op if
     the id isn't present. Used by the WS disconnect path to keep the list

@@ -26,10 +26,7 @@ class ConnectionManager:
         self._sockets.clear()
 
     async def broadcast_state(self, state: PlayerState) -> None:
-        if not self._sockets:
-            return
-        message = StateChanged(state=state).model_dump(mode="json")
-        await self._send_to_each(self._sockets.keys(), message)
+        await self.broadcast(StateChanged(state=state).model_dump(mode="json"))
 
     async def broadcast(self, message: dict) -> None:
         """Send `message` to every connected client. Used for fire-and-forget

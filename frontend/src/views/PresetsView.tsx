@@ -510,6 +510,9 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
                 <header className="effect-cell-head">
                   <span className="effect-title" title={a.blurb}>
                     <strong>{a.label}</strong>
+                    <div>
+                      <span className="muted small effect-blurb">{a.blurb}</span>
+                    </div>
                   </span>
                   <Switch
                     className="effect-toggle"

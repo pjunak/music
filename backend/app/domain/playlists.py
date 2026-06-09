@@ -4,6 +4,12 @@ Playlists are now manual-only — see docs/FUTURE.md for the smart-playlist
 plan. The position invariant: items occupy contiguous, 0-indexed integer
 positions. Insert/delete/move all maintain that.
 
+The DB can still punch holes in it behind our back: ``PlaylistItem.track_id``
+is ``ondelete=CASCADE`` with SQLite FK enforcement on, so the library indexer
+deleting a vanished Track drops its items at the SQLite level, bypassing the
+shift logic and leaving gaps (e.g. [0, 2, 3]). So every read/write first
+``_repack``s the playlist back to contiguous before trusting the positions.
+
 The shifts use a two-pass negation pattern so SQLite's PK uniqueness
 constraint on (playlist_id, position) doesn't blow up mid-update —
 positions are first flipped negative (always unique within a playlist),
@@ -15,6 +21,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.playlist import Playlist, PlaylistItem
+
+# Parks the moved item far outside the negated-real-position range so the
+# flip-back pass can exclude it without colliding with any shifted row.
+_PARKED_POSITION = -1_000_000
 
 
 class PlaylistError(Exception):
@@ -34,6 +44,35 @@ def _length(db: Session, playlist_id: int) -> int:
         )
         or 0
     )
+
+
+def _repack(db: Session, playlist_id: int) -> bool:
+    """Heal a playlist's item positions back to contiguous 0..N-1, in order.
+
+    The position arithmetic below assumes contiguity, but a CASCADE delete of a
+    referenced Track row (see module docstring) can leave gaps that no shift
+    helper ever saw. Re-pack before trusting the positions. Returns True when it
+    actually moved a row, so a read caller can decide whether to persist the heal.
+
+    Same two-pass negation as the shift helpers so the (playlist_id, position)
+    PK stays unique mid-update.
+    """
+    items = list(
+        db.scalars(
+            select(PlaylistItem)
+            .where(PlaylistItem.playlist_id == playlist_id)
+            .order_by(PlaylistItem.position)
+        ).all()
+    )
+    if all(it.position == i for i, it in enumerate(items)):
+        return False
+    for i, it in enumerate(items):
+        it.position = -(i + 1)
+    db.flush()
+    for it in items:
+        it.position = -it.position - 1
+    db.flush()
+    return True
 
 
 def _shift_up(db: Session, playlist_id: int, from_position: int) -> None:
@@ -77,6 +116,7 @@ def _shift_down(db: Session, playlist_id: int, after_position: int) -> None:
 def add_track(
     db: Session, playlist: Playlist, track_id: int, position: int | None = None
 ) -> PlaylistItem:
+    _repack(db, playlist.id)
     length = _length(db, playlist.id)
     target = length if position is None else position
     if target < 0 or target > length:
@@ -93,6 +133,7 @@ def add_track(
 
 
 def remove_track(db: Session, playlist: Playlist, position: int) -> None:
+    _repack(db, playlist.id)
     item = db.get(PlaylistItem, (playlist.id, position))
     if item is None:
         raise PositionOutOfRange(f"no item at position {position}")
@@ -107,6 +148,7 @@ def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> N
     if from_pos == to_pos:
         return
 
+    _repack(db, playlist.id)
     length = _length(db, playlist.id)
     if from_pos < 0 or from_pos >= length:
         raise PositionOutOfRange(f"from_position {from_pos} out of range")
@@ -117,7 +159,7 @@ def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> N
     assert item is not None  # range checked above
 
     # Pull the moved item out of position so the shift can free up the target slot.
-    item.position = -1_000_000
+    item.position = _PARKED_POSITION
     db.flush()
 
     if from_pos < to_pos:
@@ -148,7 +190,7 @@ def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> N
         .where(
             PlaylistItem.playlist_id == playlist.id,
             PlaylistItem.position < 0,
-            PlaylistItem.position > -500_000,
+            PlaylistItem.position != _PARKED_POSITION,
         )
         .values(position=-PlaylistItem.position)
     )
@@ -159,6 +201,10 @@ def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> N
 
 
 def list_items(db: Session, playlist: Playlist) -> list[PlaylistItem]:
+    # Self-heal any cascade gap so callers always see contiguous positions;
+    # persist it here since `get_db` doesn't commit on a read path.
+    if _repack(db, playlist.id):
+        db.commit()
     return list(
         db.scalars(
             select(PlaylistItem)

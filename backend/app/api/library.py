@@ -26,9 +26,6 @@ from app.models.track import Track
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/library", tags=["library"])
 
-# Streamed upload chunk size. 1 MiB balances memory use against syscall count.
-_UPLOAD_CHUNK = 1 << 20
-
 SortKey = Literal["title", "artist", "album", "album_artist", "year", "length_s", "track_no", "added_at", "path"]
 SortOrder = Literal["asc", "desc"]
 
@@ -104,8 +101,10 @@ class TrackMetadataUpdate(BaseModel):
     album_artist: str | None = Field(None, max_length=512)
     album: str | None = Field(None, max_length=512)
     track_no: int | None = Field(None, ge=0, le=9999)
+    disc_no: int | None = Field(None, ge=0, le=9999)
     year: int | None = Field(None, ge=0, le=9999)
     genre: str | None = Field(None, max_length=128)
+    bpm: int | None = Field(None, ge=0, le=9999)
     display_title: str | None = Field(None, max_length=512)
     origin: str | None = Field(None, max_length=512)
 
@@ -136,11 +135,11 @@ class BulkMetadataResult(BaseModel):
     skipped: list[BulkMetadataSkip]
 
 
-# Fields that round-trip through ID3 / Vorbis tags. Anything outside this
-# set is treated as DB-only.
-_TAG_BACKED_FIELDS: frozenset[str] = frozenset(
-    {"title", "artist", "album_artist", "album", "track_no", "year", "genre"}
-)
+# Fields that round-trip through ID3 / Vorbis tags. Derived from the library
+# index's tag registry (the single source of truth for the tag<->format
+# mapping) so this can't drift from what `write_tags` actually persists.
+# Anything outside this set is treated as DB-only.
+_TAG_BACKED_FIELDS: frozenset[str] = frozenset(library_index.WRITABLE_TAGS)
 _DB_ONLY_FIELDS: frozenset[str] = frozenset({"display_title", "origin"})
 
 
@@ -517,7 +516,13 @@ def delete_track(track_id: int, _: CurrentUser, db: DbSession) -> None:
     track = _track_or_404(db, track_id)
     abs_path = library_index.to_absolute(track.path)
     if abs_path.is_file():
-        abs_path.unlink()
+        try:
+            abs_path.unlink()
+        except OSError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"file unlink failed: {e}",
+            ) from e
     db.delete(track)
     db.commit()
 
@@ -667,7 +672,7 @@ async def upload(
         partial = target.with_name(f".{target.name}.partial")
         try:
             with partial.open("wb") as out:
-                while chunk := await upload_file.read(_UPLOAD_CHUNK):
+                while chunk := await upload_file.read(library_index.UPLOAD_CHUNK):
                     out.write(chunk)
             partial.replace(target)
         except Exception:

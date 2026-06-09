@@ -55,6 +55,22 @@ function formatDuration(seconds: number): string {
   return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
 }
 
+const musicTreeChildren = async (p: string): Promise<TreeFolder[]> =>
+  (await libraryApi.tree(p)).folders.map((f) => ({
+    name: f.name,
+    path: f.path,
+    badge: f.track_count > 0 ? f.track_count : null,
+    hasChildren: f.has_children,
+  }));
+
+const sfxTreeChildren = async (p: string): Promise<TreeFolder[]> =>
+  (await sfxApi.tree(p)).folders.map((f) => ({
+    name: f.name,
+    path: f.path,
+    badge: f.file_count > 0 ? f.file_count : null,
+    hasChildren: f.has_children,
+  }));
+
 export function LibraryView() {
   const [root, setRoot] = useState<Root>("music");
   const [path, setPath] = useState("");
@@ -172,7 +188,6 @@ function RescanButton({
         icon={<RescanIcon />}
         className="library-rescan"
         onClick={onComplete}
-        disabled={busy}
       >
         Refresh
       </IconButton>
@@ -272,15 +287,7 @@ function MusicWorkspace({
     };
   }, [searching, query, path, refreshKey]);
 
-  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
-    const r = await libraryApi.tree(p);
-    return r.folders.map((f) => ({
-      name: f.name,
-      path: f.path,
-      badge: f.track_count > 0 ? f.track_count : null,
-      hasChildren: f.has_children,
-    }));
-  }, []);
+  const loadChildren = useCallback(musicTreeChildren, []);
 
   async function onDropOnFolder(folderPath: string, payload: unknown) {
     if (
@@ -351,6 +358,7 @@ function MusicWorkspace({
         {error !== null ? <p className="error small">{error}</p> : null}
         <MusicTrackList
           tracks={tracks}
+          loading={loading}
           activeTrackId={activeTrackId}
           checked={checked}
           onCheckedChange={setChecked}
@@ -472,15 +480,7 @@ function SfxBrowser({
     };
   }, [path, refreshKey]);
 
-  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
-    const r = await sfxApi.tree(p);
-    return r.folders.map((f) => ({
-      name: f.name,
-      path: f.path,
-      badge: f.file_count > 0 ? f.file_count : null,
-      hasChildren: f.has_children,
-    }));
-  }, []);
+  const loadChildren = useCallback(sfxTreeChildren, []);
 
   async function onDropOnFolder(folderPath: string, payload: unknown) {
     if (
@@ -571,7 +571,16 @@ function SfxBrowser({
                 )}
                 <span className="muted small">{formatSize(f.size_bytes)}</span>
                 <div className="sfx-file-actions">
-                  <IconButton label="Preview SFX" icon={<PlayIcon />} onClick={() => preview(f)} />
+                  <IconButton
+                    label={
+                      f.referenced
+                        ? "Preview SFX"
+                        : "Preview unavailable — add to a soundboard first"
+                    }
+                    icon={<PlayIcon />}
+                    disabled={!f.referenced}
+                    onClick={() => preview(f)}
+                  />
                   <IconButton
                     label="Delete SFX file"
                     icon={<TrashIcon />}
@@ -640,24 +649,7 @@ function FolderActions({
   const [moveBusy, setMoveBusy] = useState(false);
 
   const loadChildren = useCallback(
-    async (p: string): Promise<TreeFolder[]> => {
-      if (root === "music") {
-        const r = await libraryApi.tree(p);
-        return r.folders.map((f) => ({
-          name: f.name,
-          path: f.path,
-          badge: f.track_count > 0 ? f.track_count : null,
-          hasChildren: f.has_children,
-        }));
-      }
-      const r = await sfxApi.tree(p);
-      return r.folders.map((f) => ({
-        name: f.name,
-        path: f.path,
-        badge: f.file_count > 0 ? f.file_count : null,
-        hasChildren: f.has_children,
-      }));
-    },
+    (p: string) => (root === "music" ? musicTreeChildren(p) : sfxTreeChildren(p)),
     [root],
   );
 
@@ -1009,6 +1001,7 @@ function FolderBand({
             Uploading — {formatSize(progress.loaded)} / {formatSize(progress.total)}
           </div>
           <progress
+            aria-label="Upload progress"
             value={progress.total > 0 ? progress.loaded / progress.total : 0}
             max={1}
           />
@@ -1051,15 +1044,7 @@ function SelectionToolbar({
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const loadChildren = useCallback(async (p: string): Promise<TreeFolder[]> => {
-    const r = await libraryApi.tree(p);
-    return r.folders.map((f) => ({
-      name: f.name,
-      path: f.path,
-      badge: f.track_count > 0 ? f.track_count : null,
-      hasChildren: f.has_children,
-    }));
-  }, []);
+  const loadChildren = useCallback(musicTreeChildren, []);
 
   const ids = [...selected];
 
@@ -1165,6 +1150,7 @@ function SelectionToolbar({
  *     Shift-click range (anchor → clicked). */
 function MusicTrackList({
   tracks,
+  loading,
   activeTrackId,
   checked,
   onCheckedChange,
@@ -1174,6 +1160,7 @@ function MusicTrackList({
   onChanged,
 }: {
   tracks: Track[];
+  loading: boolean;
   activeTrackId: number | null;
   checked: Set<number>;
   onCheckedChange: (next: Set<number>) => void;
@@ -1187,6 +1174,11 @@ function MusicTrackList({
   const anchorRef = useRef<number | null>(null);
 
   if (tracks.length === 0) {
+    // A folder fetch in flight must not flash the false "No tracks here"
+    // empty state — mirror the search band's muted "Searching…" treatment.
+    if (loading) {
+      return <p className="muted small">Loading…</p>;
+    }
     return (
       <EmptyState title="No tracks here">
         Drop audio files into the zone above, or pick a different folder from

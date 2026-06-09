@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { LightningIcon, ModeIcon, PauseIcon, PlayIcon } from "@/components/icons";
 import { libraryApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
+import { humaniseSlug } from "@/core/slugify";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { useUiStore } from "@/core/uiStore";
@@ -10,17 +11,6 @@ import { useUiStore } from "@/core/uiStore";
 // How many upcoming tracks the room display previews. The queue is the
 // playlist made visible here, so this is the main "what's coming" surface.
 const QUEUE_PREVIEW = 6;
-
-/** Slug → display caption: "deep-forest" → "Deep Forest". The TV is a guest
- *  surface and a mode *name* never reaches it — only the id (the name-bearing
- *  list endpoints are `CurrentUser`-gated) — so we humanise the slug rather
- *  than widen the guest read surface just for a caption. */
-function humaniseSlug(slug: string): string {
-  return slug
-    .replace(/[-_]+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 export function PlayerView() {
   const trackId = usePlayerStore(selectActiveTrackId);
@@ -112,7 +102,13 @@ export function PlayerView() {
   if (hidePlayerArt) {
     // Blackout mode for a room display: no art, no chrome. The persistent
     // NowPlayingBar at the bottom still gives controls if needed.
-    return <div className="player-view player-view-blackout" aria-hidden="true" />;
+    return (
+      <div
+        className="player-view player-view-blackout"
+        role="img"
+        aria-label="Display blanked"
+      />
+    );
   }
 
   if (track === null) {
@@ -142,7 +138,7 @@ export function PlayerView() {
           )}
         </div>
         <div className="player-meta">
-          <p className="player-status">
+          <p className="player-status" aria-live="polite">
             {interruptActive ? (
               <span className="player-alert">
                 <LightningIcon aria-hidden="true" /> Alert
@@ -152,7 +148,7 @@ export function PlayerView() {
                 <PlayIcon aria-hidden="true" /> Playing
               </span>
             ) : (
-              <span className="badge">
+              <span className="badge badge-paused">
                 <PauseIcon aria-hidden="true" /> Paused
               </span>
             )}
@@ -174,7 +170,7 @@ export function PlayerView() {
 
           {queueTracks.length > 0 ? (
             <section className="player-queue">
-              <h3>Up next</h3>
+              <h2>Up next</h2>
               <ol>
                 {queueTracks.map((t) => (
                   <li key={t.id}>
@@ -195,7 +191,7 @@ export function PlayerView() {
 
           {historyTracks.length > 0 ? (
             <section className="player-history">
-              <h3>Recently played</h3>
+              <h2>Recently played</h2>
               <ol>
                 {historyTracks.map((t) => (
                   <li key={t.id} className="muted small">

@@ -1,5 +1,4 @@
 import argparse
-import sys
 
 from app.cli import create_user, init_storage, reload_modes, set_password
 
@@ -15,7 +14,3 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     return args.handler(args)
-
-
-if __name__ == "__main__":
-    sys.exit(main())

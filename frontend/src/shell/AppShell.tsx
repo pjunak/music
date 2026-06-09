@@ -32,6 +32,21 @@ import { NowPlayingBar } from "./NowPlayingBar";
 import { LoginRedirect, Protected, RouteSpinner } from "./routeGuards";
 import { SectionNav } from "./SectionNav";
 
+// Old paths kept alive for bookmarks/external links — each redirects into the
+// new IA. The Modes sub-tab is gone (mode CRUD moved to the header popup), so
+// its old links land on the Authoring default.
+const LEGACY_REDIRECTS: [string, string][] = [
+  ["controls", "/console"],
+  ["metadata", "/library"],
+  ["library/files", "/library"],
+  ["library/tags", "/library"],
+  ["playlists", "/authoring/playlists"],
+  ["soundboards", "/authoring/soundboards"],
+  ["modes", "/authoring/playlists"],
+  ["authoring/modes", "/authoring/playlists"],
+  ["presets", "/authoring/presets"],
+];
+
 export default function AppShell() {
   const applyMessage = usePlayerStore((s) => s.applyMessage);
   const setStatus = usePlayerStore((s) => s.setStatus);
@@ -130,8 +145,6 @@ export default function AppShell() {
               </Protected>
             }
           />
-          <Route path="library/files" element={<Navigate to="/library" replace />} />
-          <Route path="library/tags" element={<Navigate to="/library" replace />} />
           {/* Authoring group — everything you set up *before* a session:
               playlists, mode bundles, soundboards, audio-effect presets. */}
           <Route
@@ -175,30 +188,9 @@ export default function AppShell() {
           </Route>
           {/* Legacy routes — old top-level paths keep working for bookmarks
               and external links by redirecting into the new IA. */}
-          <Route path="controls" element={<Navigate to="/console" replace />} />
-          <Route
-            path="metadata"
-            element={<Navigate to="/library" replace />}
-          />
-          <Route
-            path="playlists"
-            element={<Navigate to="/authoring/playlists" replace />}
-          />
-          <Route
-            path="soundboards"
-            element={<Navigate to="/authoring/soundboards" replace />}
-          />
-          {/* The Modes sub-tab is gone — mode CRUD moved to the header popup.
-              Old links land on the Authoring default. */}
-          <Route path="modes" element={<Navigate to="/authoring/playlists" replace />} />
-          <Route
-            path="authoring/modes"
-            element={<Navigate to="/authoring/playlists" replace />}
-          />
-          <Route
-            path="presets"
-            element={<Navigate to="/authoring/presets" replace />}
-          />
+          {LEGACY_REDIRECTS.map(([from, to]) => (
+            <Route key={from} path={from} element={<Navigate to={to} replace />} />
+          ))}
           <Route
             path="settings"
             element={

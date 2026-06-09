@@ -18,16 +18,28 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
+import shutil
 import threading
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from mutagen import File as MutagenFile  # type: ignore[import-untyped]
-from sqlalchemy import select
+from mutagen.id3 import (  # type: ignore[import-untyped]
+    TALB,
+    TBPM,
+    TCON,
+    TDRC,
+    TIT2,
+    TPE1,
+    TPE2,
+    TPOS,
+    TRCK,
+    Frame,
+)
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -57,6 +69,9 @@ def last_scan_at() -> float | None:
 AUDIO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav", ".wma"}
 )
+
+# Streamed upload chunk size. 1 MiB balances memory use against syscall count.
+UPLOAD_CHUNK = 1 << 20
 
 
 @dataclass
@@ -121,6 +136,12 @@ def _coerce_int(value: Any) -> int | None:
         return None
     if isinstance(value, int):
         return value
+    # mutagen hands tags back as single-element lists (easy interface) or
+    # ID3 frame text lists — unwrap before parsing, same as _coerce_str.
+    if isinstance(value, list):
+        value = value[0] if value else None
+        if value is None:
+            return None
     text = str(value).strip()
     if not text:
         return None
@@ -142,20 +163,61 @@ def _coerce_str(value: Any) -> str:
     return str(value)
 
 
-# Map our keys to (easy-interface keys, ID3 frame IDs). For each input key we
-# try the easy keys first, then the ID3 frame IDs — so the same code reads
-# Vorbis-tagged FLACs and ID3-tagged WAVs uniformly.
-_TAG_LOOKUP: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
-    "title": (("title",), ("TIT2",)),
-    "artist": (("artist",), ("TPE1",)),
-    "album_artist": (("albumartist", "album_artist"), ("TPE2",)),
-    "album": (("album",), ("TALB",)),
-    "track_no": (("tracknumber", "track"), ("TRCK",)),
-    "disc_no": (("discnumber", "disc"), ("TPOS",)),
-    "year": (("date", "year", "originaldate"), ("TDRC", "TYER", "TDRL")),
-    "genre": (("genre",), ("TCON",)),
-    "bpm": (("bpm",), ("TBPM",)),
+@dataclass(frozen=True)
+class TagSpec:
+    """How one logical tag maps across formats — the single source of truth.
+
+    Reading is *many-spellings-in*: try `read_easy_keys` on the easy-string
+    interface (FLAC/OGG/Opus/M4A and MP3-via-EasyID3), then fall back to the
+    raw `id3_frame_ids` for WAV/AIFF, whose tag dict speaks ID3 frames, not
+    easy keys. Writing is *one-spelling-out*: emit `write_easy_key` on the
+    easy interface and an `id3_frame_class` instance on the WAV/AIFF frame
+    dict (the frame *class*, not just its id, because writing constructs it).
+    `coerce` normalises the read value (int for numeric tags, str otherwise);
+    `writable` gates whether the field round-trips back to disk at all.
+    """
+
+    read_easy_keys: tuple[str, ...]
+    id3_frame_ids: tuple[str, ...]
+    id3_frame_class: type[Frame]
+    write_easy_key: str
+    writable: bool
+    coerce: Callable[[Any], Any]
+
+
+# The one table. Every read/write mapping below is DERIVED from this — never
+# hand-maintain the derived views, edit a row here and they all follow.
+#                read_easy_keys                       id3_frame_ids              class  write_easy_key  writable  coerce
+TAG_REGISTRY: dict[str, TagSpec] = {
+    "title":        TagSpec(("title",),                    ("TIT2",),                 TIT2, "title",       True, _coerce_str),
+    "artist":       TagSpec(("artist",),                   ("TPE1",),                 TPE1, "artist",      True, _coerce_str),
+    "album_artist": TagSpec(("albumartist", "album_artist"), ("TPE2",),               TPE2, "albumartist", True, _coerce_str),
+    "album":        TagSpec(("album",),                    ("TALB",),                 TALB, "album",       True, _coerce_str),
+    "track_no":     TagSpec(("tracknumber", "track"),      ("TRCK",),                 TRCK, "tracknumber", True, _coerce_int),
+    "disc_no":      TagSpec(("discnumber", "disc"),        ("TPOS",),                 TPOS, "discnumber",  True, _coerce_int),
+    "year":         TagSpec(("date", "year", "originaldate"), ("TDRC", "TYER", "TDRL"), TDRC, "date",      True, _coerce_int),
+    "genre":        TagSpec(("genre",),                    ("TCON",),                 TCON, "genre",       True, _coerce_str),
+    "bpm":          TagSpec(("bpm",),                      ("TBPM",),                 TBPM, "bpm",          True, _coerce_int),
 }
+
+# --- derived views (do not edit — change TAG_REGISTRY) --------------------
+# Read lookup: our key -> (easy keys, ID3 frame ids). Used by `_read_tags`.
+_TAG_LOOKUP: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    key: (spec.read_easy_keys, spec.id3_frame_ids) for key, spec in TAG_REGISTRY.items()
+}
+# WAV/AIFF write: our key -> ID3 Frame class to construct.
+_WAV_FRAME_CLASSES: dict[str, type[Frame]] = {
+    key: spec.id3_frame_class for key, spec in TAG_REGISTRY.items() if spec.writable
+}
+# Easy-interface write (FLAC/OGG/Opus/M4A/MP3): our key -> canonical easy key.
+_EASY_WRITE_KEYS: dict[str, str] = {
+    key: spec.write_easy_key for key, spec in TAG_REGISTRY.items() if spec.writable
+}
+# Keys whose edits round-trip to the file's tags. Public: the API layer
+# derives its tag-backed field set from this so the two can't disagree.
+WRITABLE_TAGS: tuple[str, ...] = tuple(
+    key for key, spec in TAG_REGISTRY.items() if spec.writable
+)
 
 
 def _id3_text(frame: Any) -> Any:
@@ -201,10 +263,7 @@ def _read_tags(path: Path) -> dict[str, Any]:
     tags: dict[str, Any] = {}
     for our_key, (easy_keys, frame_ids) in _TAG_LOOKUP.items():
         value = lookup(easy_keys, frame_ids)
-        if our_key in ("track_no", "disc_no", "year", "bpm"):
-            tags[our_key] = _coerce_int(value)
-        else:
-            tags[our_key] = _coerce_str(value)
+        tags[our_key] = TAG_REGISTRY[our_key].coerce(value)
 
     info = getattr(meta, "info", None)
     if info is not None and getattr(info, "length", None):
@@ -249,7 +308,8 @@ def metadata_for(path: Path, root: Path | None = None) -> dict[str, Any]:
     the same shape we store in the DB."""
     base = root if root is not None else music_root()
     rel = to_relative(path, base)
-    parent_rel = str(PurePosixPath(rel).parent).replace(".", "")
+    parent = PurePosixPath(rel).parent
+    parent_rel = "" if str(parent) == "." else str(parent)
     fallback = _filename_fallbacks(path, parent_rel)
     tags = _read_tags(path)
     merged: dict[str, Any] = {}
@@ -425,8 +485,6 @@ def update_path(db: Session, old_rel: str, new_rel: str) -> Track | None:
 # --- tag writeback (metadata editor) -------------------------------------
 
 
-_WRITABLE_TAGS = ("title", "artist", "album_artist", "album", "track_no", "year", "genre")
-
 # WAV / AIFF embed ID3 inside a RIFF chunk; mutagen exposes them via the
 # format-specific class (WAVE / AIFF) but the tag dict only accepts ID3
 # Frame instances, not the easy-string interface. MP3 has EasyID3 that
@@ -436,7 +494,7 @@ _ID3_FRAME_FORMATS = frozenset({".wav", ".aiff", ".aif"})
 
 
 def write_tags(path: Path, fields: dict[str, Any]) -> None:
-    """Write the given fields back to the file's tags. Only `_WRITABLE_TAGS`
+    """Write the given fields back to the file's tags. Only `WRITABLE_TAGS`
     are honoured; unknown keys are ignored. ints get coerced to strings."""
     suffix = path.suffix.lower()
 
@@ -456,7 +514,6 @@ def write_tags(path: Path, fields: dict[str, Any]) -> None:
     if suffix in _ID3_FRAME_FORMATS:
         # WAV / AIFF: write ID3 frames directly. Mutagen has WAVE and AIFF
         # classes that store an ID3 dict at .tags.
-        from mutagen.id3 import TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRCK
         from mutagen.wave import WAVE
 
         wav_meta: Any = WAVE(str(path)) if suffix == ".wav" else None
@@ -467,24 +524,14 @@ def write_tags(path: Path, fields: dict[str, Any]) -> None:
         if wav_meta.tags is None:
             wav_meta.add_tags()
 
-        frames = {
-            "title": TIT2,
-            "artist": TPE1,
-            "album_artist": TPE2,
-            "album": TALB,
-            "track_no": TRCK,
-            "year": TDRC,
-            "genre": TCON,
-        }
-        for key, FrameClass in frames.items():
-            if key not in fields or key not in _WRITABLE_TAGS:
+        for key, frame_class in _WAV_FRAME_CLASSES.items():
+            if key not in fields:
                 continue
             value = fields[key]
-            frame_id = FrameClass.__name__
             if value is None or value == "":
-                wav_meta.tags.delall(frame_id)
+                wav_meta.tags.delall(frame_class.__name__)
             else:
-                wav_meta.tags.add(FrameClass(encoding=3, text=str(value)))
+                wav_meta.tags.add(frame_class(encoding=3, text=str(value)))
         wav_meta.save()
         return
 
@@ -499,17 +546,8 @@ def write_tags(path: Path, fields: dict[str, Any]) -> None:
 
 
 def _apply_easy(tag_dict: Any, fields: dict[str, Any]) -> None:
-    mapping = {
-        "title": "title",
-        "artist": "artist",
-        "album_artist": "albumartist",
-        "album": "album",
-        "track_no": "tracknumber",
-        "year": "date",
-        "genre": "genre",
-    }
-    for key, mutagen_key in mapping.items():
-        if key not in fields or key not in _WRITABLE_TAGS:
+    for key, mutagen_key in _EASY_WRITE_KEYS.items():
+        if key not in fields:
             continue
         value = fields[key]
         if value is None or value == "":
@@ -539,8 +577,6 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
     """Direct contents of `rel_path`: subfolders and tracks immediately
     under it (not recursive). Track counts on subfolders ARE recursive so
     the tree gives a useful density signal."""
-    from sqlalchemy import func
-
     root = music_root()
     rel_clean = rel_path.strip("/").replace("\\", "/")
     abs_dir = (root / rel_clean).resolve() if rel_clean else root
@@ -619,8 +655,6 @@ def delete_folder(
     inside this folder; returns how many rows were dropped (callers can
     surface that in the UI). Pass `db=None` for non-indexed roots (SFX).
     """
-    import shutil as _shutil
-
     base = root if root is not None else music_root()
     rel_clean = rel_path.strip("/").replace("\\", "/")
     if not rel_clean:
@@ -648,7 +682,7 @@ def delete_folder(
             removed_rows += 1
 
     if recursive:
-        _shutil.rmtree(target)
+        shutil.rmtree(target)
     else:
         target.rmdir()
 
@@ -666,8 +700,6 @@ def rename_folder(
     """Rename / move a folder. For the music root, also rewrites every
     `tracks.path` whose value lives under the renamed folder; returns the
     number of rewritten rows. Pass `db=None` for non-indexed roots (SFX)."""
-    import shutil as _shutil
-
     base = root if root is not None else music_root()
     src_clean = src_rel.strip("/").replace("\\", "/")
     dst_clean = dst_rel.strip("/").replace("\\", "/")
@@ -684,7 +716,7 @@ def rename_folder(
         raise FileExistsError(f"destination already exists: {dst_clean}")
 
     dst_abs.parent.mkdir(parents=True, exist_ok=True)
-    _shutil.move(str(src_abs), str(dst_abs))
+    shutil.move(str(src_abs), str(dst_abs))
 
     rewritten = 0
     if db is not None:
@@ -761,9 +793,9 @@ def relative_audio_files_in(absolute_dir: Path, root: Path | None = None) -> lis
     return list(_walk(absolute_dir))
 
 
-# Re-exports so `os` module access from callers stays minimal.
 __all__ = [
     "AUDIO_EXTENSIONS",
+    "WRITABLE_TAGS",
     "FolderEntry",
     "ScanSummary",
     "cover_art_for",
@@ -785,8 +817,3 @@ __all__ = [
     "update_path",
     "write_tags",
 ]
-
-
-# Silence unused-import warning for `os` in this top-level file (used by
-# tests via patch).
-_ = os

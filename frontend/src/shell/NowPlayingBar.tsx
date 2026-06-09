@@ -319,6 +319,7 @@ export function NowPlayingBar() {
           aria-valuemin={0}
           aria-valuemax={totalMs}
           aria-valuenow={Math.min(positionMs, totalMs)}
+          aria-valuetext={`${formatTime(positionMs)} of ${formatTime(totalMs)}`}
           tabIndex={seekable ? 0 : -1}
           title={seekable ? "Click to seek; arrow keys when focused (Shift = 30s)" : undefined}
         >

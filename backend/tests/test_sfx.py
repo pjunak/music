@@ -175,3 +175,27 @@ def test_rename_folder(auth_client: TestClient) -> None:
     sfx_dir = Path(os.environ["SFX_LIBRARY_DIR"])
     assert not (sfx_dir / "rename_me").exists()
     assert (sfx_dir / "renamed").is_dir()
+
+
+def test_management_routes_reject_traversal(auth_client: TestClient) -> None:
+    """Regression: the three management routes whose path resolution was
+    routed through library_index.to_absolute must reject a "../" escape with
+    400 (path escapes sfx root) — never a 200 that would leak/touch a file
+    outside SFX_LIBRARY_DIR, nor a 500 from an unguarded resolve. Mirrors the
+    /file traversal assertion above."""
+    # list tree — query param `path`
+    tree = auth_client.get("/api/sfx/tree", params={"path": "../.."})
+    assert tree.status_code == 400
+
+    # move file — JSON body, traversal in `src`
+    move = auth_client.post(
+        "/api/sfx/move",
+        json={"src": "../escape.ogg", "dst_folder": "anywhere", "new_filename": "x.ogg"},
+    )
+    assert move.status_code == 400
+
+    # delete file — query param `path`
+    delete = auth_client.delete(
+        "/api/sfx/files", params={"path": "../../etc/passwd"}
+    )
+    assert delete.status_code == 400

@@ -25,10 +25,6 @@ class RegisterAction(_Action):
     # UUID / length) so the documented headless-output protocol
     # (clients/README.md) stays open to any stable string.
     client_id: str = Field(min_length=1, max_length=64)
-    # Accepted for wire-compat with older clients but ignored — output
-    # eligibility now lives in the persistent device registry (`is_output`),
-    # not in a self-asserted capability.
-    capabilities: list[str] = Field(default_factory=list)
 
 
 class SetVolumeAction(_Action):
@@ -139,7 +135,7 @@ class SetActivePresetsAction(_Action):
 class SetCrossfadeAction(_Action):
     type: Literal["set_crossfade"]
     crossfade_ms: int = Field(ge=0, le=30000)
-    crossfade_type: str | None = None  # None = leave unchanged
+    crossfade_type: CrossfadeType | None = None  # None = leave unchanged
 
 
 # Interrupt lane actions. An interrupt takes over playback briefly; when it
@@ -275,6 +271,7 @@ class PositionReport(BaseModel):
 
 LoopMode = Literal["off", "queue", "track"]
 ShuffleMode = Literal["off", "random", "weighted"]
+CrossfadeType = Literal["linear", "equal_power", "cut"]
 
 
 class AmbientState(BaseModel):
@@ -345,6 +342,10 @@ class LoopingSfx(BaseModel):
 class PlayerState(BaseModel):
     """Canonical playback state. The server is the sole writer."""
 
+    # Monotonic "state changed N times" counter — a Diagnostics-only readout,
+    # NOT an optimistic-concurrency token: no client echoes it back and no
+    # stale-write is rejected on it. Don't bolt concurrency checks onto this
+    # without designing the full protocol (client echo + reject path) first.
     revision: int = 0
     is_playing: bool = False
     volume: float = 1.0
@@ -359,7 +360,7 @@ class PlayerState(BaseModel):
     active_preset_ids: list[str] = Field(default_factory=list)
 
     crossfade_ms: int = 0
-    crossfade_type: str = "linear"
+    crossfade_type: CrossfadeType = "linear"
 
     ambient: AmbientState = Field(default_factory=AmbientState)
     interrupt: InterruptState | None = None
@@ -391,8 +392,10 @@ class StateChanged(BaseModel):
 
 class SfxFired(BaseModel):
     """Fire-and-forget event for soundboard items. Not part of PlayerState —
-    broadcast only to designated output devices (registry `is_output`) so each
-    plays the SFX locally."""
+    broadcast to ALL sockets; each client's engine plays it locally only if that
+    client is an active output (or a force-local guest). The server no longer
+    gates this by designation — output membership is dynamic, so the client is
+    the source of truth."""
 
     type: Literal["sfx_fired"] = "sfx_fired"
     soundboard_id: str

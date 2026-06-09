@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
 import { modesApi } from "@/core/api";
+import { isInteractiveTarget } from "@/core/isInteractiveTarget";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeDetail } from "@/core/types";
+import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
 /** When the user has an active mode + soundboard, bind any keyboard
@@ -53,12 +55,7 @@ export function useSfxHotkeys(): void {
 
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const target = e.target;
-      if (target instanceof HTMLElement) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-        if (target.isContentEditable) return;
-      }
+      if (isInteractiveTarget(e.target)) return;
       const key = e.key.toLowerCase();
       const itemPath = bindings.get(key);
       if (itemPath === undefined) return;
@@ -67,7 +64,7 @@ export function useSfxHotkeys(): void {
         type: "fire_sfx",
         soundboard_id: activeSoundboardId as string,
         item_path: itemPath,
-        volume: 0.8,
+        volume: useUiStore.getState().sfxVolume,
       });
     }
 

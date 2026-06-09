@@ -53,7 +53,9 @@ Both return the **same** `PlayerState` shape. Both are reachable **without authe
    ```
    The operator must then mark you as an **audio output** in Settings → Devices (output is
    fully manual — nothing auto-designates). Once designated, that sticks to your `client_id`
-   across restarts. Only designated outputs receive SFX events and may report position.
+   across restarts. (SFX events are broadcast to **every** connected socket regardless of
+   designation — *you* decide whether to play them based on whether you're currently "on";
+   see [SFX events](#sfx-events). A guest output never reports position back to the server.)
 4. From then on the server pushes a **`state_changed`** on every change:
    ```json
    { "type": "state_changed", "state": { ...PlayerState } }
@@ -104,8 +106,9 @@ jumps.
 
 ## SFX events
 
-If the operator has designated you as an audio output, the server also pushes fire-and-forget
-sound effects:
+The server broadcasts fire-and-forget sound effects to **every** connected socket — play them
+only when you're "on" (the same gate you use for the music, above), so a connected-but-off
+client stays silent:
 ```json
 { "type": "sfx_fired", "soundboard_id": "tavern", "item_path": "dnd/door.ogg", "volume": 0.8 }
 ```

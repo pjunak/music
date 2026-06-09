@@ -15,6 +15,7 @@ Two surfaces here:
 """
 from __future__ import annotations
 
+import contextlib
 import shutil
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -30,8 +31,6 @@ from app.library import index as library_index
 from app.modes import loader as modes_loader
 
 router = APIRouter(prefix="/api/sfx", tags=["sfx"])
-
-_UPLOAD_CHUNK = 1 << 20
 
 # What we'll list / upload as SFX. Wider than music — short clips often
 # come as wav or ogg from sound packs.
@@ -166,9 +165,8 @@ def get_sfx_file(
         )
 
     root = sfx_root()
-    target = (root / rel).resolve()
     try:
-        target.relative_to(root)
+        target = library_index.to_absolute(rel, root=root)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="path escapes sfx root"
@@ -210,11 +208,13 @@ def list_tree(
 ) -> SfxTreeResponse:
     root = sfx_root()
     rel_clean = path.strip("/").replace("\\", "/")
-    abs_dir = (root / rel_clean).resolve() if rel_clean else root
-    try:
-        abs_dir.relative_to(root)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="path escapes sfx root") from e
+    if rel_clean:
+        try:
+            abs_dir = library_index.to_absolute(rel_clean, root=root)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="path escapes sfx root") from e
+    else:
+        abs_dir = root
     if not abs_dir.is_dir():
         return SfxTreeResponse(path=rel_clean, folders=[], files=[])
 
@@ -273,9 +273,17 @@ async def upload(
                     target = candidate
                     break
                 n += 1
-        with target.open("wb") as out:
-            while chunk := await upload_file.read(_UPLOAD_CHUNK):
-                out.write(chunk)
+        partial = target.with_name(f".{target.name}.partial")
+        try:
+            with partial.open("wb") as out:
+                while chunk := await upload_file.read(library_index.UPLOAD_CHUNK):
+                    out.write(chunk)
+            partial.replace(target)
+        except Exception:
+            if partial.exists():
+                with contextlib.suppress(OSError):
+                    partial.unlink()
+            raise
         saved.append(_stat_file(target, root))
     return SfxUploadResult(saved=saved, destination=dest.strip("/"))
 
@@ -287,9 +295,8 @@ def move_file(payload: SfxMoveRequest, _: CurrentUser) -> SfxFileOut:
         src_rel = _normalise(payload.src)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    src_abs = (root / src_rel).resolve()
     try:
-        src_abs.relative_to(root)
+        src_abs = library_index.to_absolute(src_rel, root=root)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="path escapes sfx root") from e
     if not src_abs.is_file():
@@ -322,9 +329,8 @@ def delete_file(
         rel = _normalise(path)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    target = (root / rel).resolve()
     try:
-        target.relative_to(root)
+        target = library_index.to_absolute(rel, root=root)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="path escapes sfx root") from e
     if not target.is_file():

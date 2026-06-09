@@ -33,9 +33,14 @@ class LiveConnection:
     registered: bool = False  # flips true after the client sends `register`
 
     def to_info(self) -> DeviceInfo:
-        cid = self.client_id or self.connection_id
+        # Only ever called for registered connections — all_infos() filters out
+        # any with a None client_id before reaching here.
+        assert self.client_id is not None
         return DeviceInfo(
-            device_id=cid, client_id=cid, name=self.name, is_output=self.is_output
+            device_id=self.client_id,
+            client_id=self.client_id,
+            name=self.name,
+            is_output=self.is_output,
         )
 
 

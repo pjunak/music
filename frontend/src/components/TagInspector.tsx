@@ -32,8 +32,10 @@ type FieldKey =
   | "album_artist"
   | "album"
   | "track_no"
+  | "disc_no"
   | "year"
-  | "genre";
+  | "genre"
+  | "bpm";
 
 interface FieldDef {
   key: FieldKey;
@@ -61,8 +63,10 @@ const TAG_FIELDS: FieldDef[] = [
   { key: "album_artist", label: "Album artist" },
   { key: "album", label: "Album" },
   { key: "track_no", label: "Track #", numeric: true },
+  { key: "disc_no", label: "Disc #", numeric: true },
   { key: "year", label: "Year", numeric: true },
   { key: "genre", label: "Genre" },
+  { key: "bpm", label: "BPM", numeric: true },
 ];
 const ALL_FIELDS = [...LIBRARY_FIELDS, ...TAG_FIELDS];
 
@@ -201,8 +205,14 @@ export function TagInspector({
         case "track_no":
           updates.track_no = v === "" ? null : Number(v);
           break;
+        case "disc_no":
+          updates.disc_no = v === "" ? null : Number(v);
+          break;
         case "year":
           updates.year = v === "" ? null : Number(v);
+          break;
+        case "bpm":
+          updates.bpm = v === "" ? null : Number(v);
           break;
         case "display_title":
           updates.display_title = v;

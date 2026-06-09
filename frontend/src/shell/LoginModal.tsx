@@ -88,6 +88,8 @@ export function LoginModal() {
           autoComplete="username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
+          aria-describedby="login-error"
+          aria-invalid={error !== null}
           required
         />
       </Field>
@@ -97,10 +99,16 @@ export function LoginModal() {
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          aria-describedby="login-error"
+          aria-invalid={error !== null}
           required
         />
       </Field>
-      {error !== null ? <p className="error small">{error}</p> : null}
+      {error !== null ? (
+        <p id="login-error" role="alert" className="error small">
+          {error}
+        </p>
+      ) : null}
     </Modal>
   );
 }

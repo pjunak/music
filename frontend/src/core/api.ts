@@ -6,6 +6,9 @@ import type {
   ModeDetail,
   ModeSummary,
   PlaylistMeta,
+  PresetEffect,
+  PresetManifest,
+  SoundboardManifest,
   Track,
   TrackInPlaylist,
   TreeResponse,
@@ -74,6 +77,45 @@ export const api = {
   delete: <T>(path: string) => request<T>("DELETE", path),
 };
 
+// XHR (not fetch) because only XHR exposes upload-progress events.
+function uploadWithProgress<T>(
+  path: string,
+  files: File[],
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<T> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f, f.name);
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}${path}`);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (e) => {
+      if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
+    };
+    xhr.onerror = () => reject(new Error("network error during upload"));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as T);
+        } catch {
+          reject(new Error("upload succeeded but response wasn't JSON"));
+        }
+        return;
+      }
+      let detail = `${xhr.status}: ${xhr.statusText}`;
+      try {
+        const body = JSON.parse(xhr.responseText) as { detail?: unknown };
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
+      }
+      reject(new ApiError(xhr.status, detail));
+    };
+    xhr.send(form);
+  });
+}
+
 // --- typed helpers per resource -----------------------------------------
 
 export const modesApi = {
@@ -97,21 +139,7 @@ export const authApi = {
     ),
 };
 
-export interface PresetEffect {
-  type: string;
-  [key: string]: unknown;
-}
-
-export interface PresetManifest {
-  id: string;
-  name: string;
-  description?: string | null;
-  effects: PresetEffect[];
-  /** Optional overrides applied when the preset is activated (null = leave
-   *  the global alone). */
-  volume?: number | null;
-  crossfade_ms?: number | null;
-}
+export type { PresetManifest, PresetEffect } from "@/core/types";
 
 export const presetsApi = {
   // Presets are per-mode now — list the given mode's EQ presets.
@@ -154,6 +182,10 @@ export const playlistsApi = {
     api.patch<void>(`/api/playlists/${playlistId}/tracks/${position}`, {
       to_position: toPosition,
     }),
+  update: (
+    playlistId: number,
+    payload: { name: string; mode_id?: string | null; category?: string | null },
+  ) => api.patch<PlaylistMeta>(`/api/playlists/${playlistId}`, payload),
   exportUrl: (playlistId: number, format: "m3u" | "json") =>
     `${BASE}/api/playlists/${playlistId}/export?format=${format}`,
 };
@@ -205,8 +237,10 @@ export interface MetadataUpdate {
   album_artist?: string;
   album?: string;
   track_no?: number | null;
+  disc_no?: number | null;
   year?: number | null;
   genre?: string;
+  bpm?: number | null;
   // DB-only fields — not written to the file's tags. See backend.
   display_title?: string;
   origin?: string;
@@ -264,40 +298,12 @@ export const libraryApi = {
     files: File[],
     dest: string,
     onProgress?: (loaded: number, total: number) => void,
-  ): Promise<UploadResult> => {
-    const form = new FormData();
-    for (const f of files) form.append("files", f, f.name);
-    return new Promise<UploadResult>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const path = `/api/library/upload?dest=${encodeURIComponent(dest)}`;
-      xhr.open("POST", `${BASE}${path}`);
-      xhr.withCredentials = true;
-      xhr.responseType = "text";
-      xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
-      };
-      xhr.onerror = () => reject(new Error("network error during upload"));
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            resolve(JSON.parse(xhr.responseText) as UploadResult);
-          } catch {
-            reject(new Error("upload succeeded but response wasn't JSON"));
-          }
-          return;
-        }
-        let detail = `${xhr.status}: ${xhr.statusText}`;
-        try {
-          const body = JSON.parse(xhr.responseText) as { detail?: unknown };
-          if (body && typeof body.detail === "string") detail = body.detail;
-        } catch {
-          if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
-        }
-        reject(new ApiError(xhr.status, detail));
-      };
-      xhr.send(form);
-    });
-  },
+  ): Promise<UploadResult> =>
+    uploadWithProgress<UploadResult>(
+      `/api/library/upload?dest=${encodeURIComponent(dest)}`,
+      files,
+      onProgress,
+    ),
   rescan: () => api.post<RescanResult>("/api/library/rescan"),
   updateMetadata: (id: number, payload: MetadataUpdate) =>
     api.patch<Track>(`/api/library/tracks/${id}/metadata`, payload),
@@ -376,40 +382,12 @@ export const sfxApi = {
     files: File[],
     dest: string,
     onProgress?: (loaded: number, total: number) => void,
-  ): Promise<SfxUploadResult> => {
-    const form = new FormData();
-    for (const f of files) form.append("files", f, f.name);
-    return new Promise<SfxUploadResult>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const path = `/api/sfx/upload?dest=${encodeURIComponent(dest)}`;
-      xhr.open("POST", `${BASE}${path}`);
-      xhr.withCredentials = true;
-      xhr.responseType = "text";
-      xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
-      };
-      xhr.onerror = () => reject(new Error("network error during upload"));
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            resolve(JSON.parse(xhr.responseText) as SfxUploadResult);
-          } catch {
-            reject(new Error("upload succeeded but response wasn't JSON"));
-          }
-          return;
-        }
-        let detail = `${xhr.status}: ${xhr.statusText}`;
-        try {
-          const body = JSON.parse(xhr.responseText) as { detail?: unknown };
-          if (body && typeof body.detail === "string") detail = body.detail;
-        } catch {
-          if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
-        }
-        reject(new ApiError(xhr.status, detail));
-      };
-      xhr.send(form);
-    });
-  },
+  ): Promise<SfxUploadResult> =>
+    uploadWithProgress<SfxUploadResult>(
+      `/api/sfx/upload?dest=${encodeURIComponent(dest)}`,
+      files,
+      onProgress,
+    ),
   moveFile: (src: string, dstFolder: string, newFilename?: string) =>
     api.post<SfxFile>("/api/sfx/move", {
       src,
@@ -460,20 +438,12 @@ export const modesAdminApi = {
     soundboardId: string,
     payload: { id: string; name: string },
   ) =>
-    api.post<{
-      id: string;
-      name?: string | null;
-      categories: Array<{
-        id: string;
-        name: string;
-        items: Array<{ file: string; name: string; hotkey?: string | null; icon?: string | null }>;
-      }>;
-    }>(
+    api.post<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories`,
       payload,
     ),
   deleteCategory: (modeId: string, soundboardId: string, categoryId: string) =>
-    api.delete<unknown>(
+    api.delete<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}`,
     ),
   addItem: (
@@ -482,7 +452,7 @@ export const modesAdminApi = {
     categoryId: string,
     payload: { file: string; name: string; hotkey?: string; icon?: string },
   ) =>
-    api.post<unknown>(
+    api.post<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items`,
       payload,
     ),
@@ -493,7 +463,7 @@ export const modesAdminApi = {
     index: number,
     payload: { name?: string; hotkey?: string; icon?: string; file?: string },
   ) =>
-    api.patch<unknown>(
+    api.patch<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items/${index}`,
       payload,
     ),
@@ -503,7 +473,7 @@ export const modesAdminApi = {
     categoryId: string,
     index: number,
   ) =>
-    api.delete<unknown>(
+    api.delete<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items/${index}`,
     ),
 

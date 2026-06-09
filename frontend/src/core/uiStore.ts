@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type TabKey = "player" | "library" | "controls" | "settings";
+/** Default SFX volume (0–1) used both for the store initializer and as the
+ *  fire-time fallback when no per-device override has been set. */
+export const DEFAULT_SFX_VOLUME = 0.8;
 
 /** Stable per-install identity. Generated once and persisted, so the server
  *  can recognise this browser across refreshes/restarts and the operator's
@@ -86,7 +88,7 @@ export const useUiStore = create<UiStore>()(
       clientId: generateClientId(),
       forceLocalPlayback: false,
       setForceLocalPlayback: (v) => set({ forceLocalPlayback: v }),
-      sfxVolume: 0.8,
+      sfxVolume: DEFAULT_SFX_VOLUME,
       setSfxVolume: (v) => set({ sfxVolume: Math.max(0, Math.min(1, v)) }),
     }),
     {

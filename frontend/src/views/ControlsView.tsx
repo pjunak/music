@@ -27,34 +27,35 @@ import { TransportSection } from "./controls/TransportSection";
 export function ControlsView() {
   return (
     <div className="controls-view">
+      <h1 className="sr-only">Console</h1>
       <FirstRunWelcome />
       <div className="controls-grid">
-        <section className="surface-card span-tall">
-          <h3>Cues</h3>
+        <section className="surface-card span-tall" aria-labelledby="panel-cues-h">
+          <h3 id="panel-cues-h">Cues</h3>
           <CuesSection />
         </section>
-        <section className="surface-card span-tall">
-          <h3>Soundboard</h3>
+        <section className="surface-card span-tall" aria-labelledby="panel-soundboard-h">
+          <h3 id="panel-soundboard-h">Soundboard</h3>
           <SoundboardSection />
         </section>
-        <section className="surface-card">
-          <h3>Transport</h3>
+        <section className="surface-card" aria-labelledby="panel-transport-h">
+          <h3 id="panel-transport-h">Transport</h3>
           <TransportSection />
         </section>
-        <section className="surface-card">
-          <h3>Interrupt</h3>
+        <section className="surface-card" aria-labelledby="panel-interrupt-h">
+          <h3 id="panel-interrupt-h">Interrupt</h3>
           <InterruptSection />
         </section>
-        <section className="surface-card">
-          <h3>Loops</h3>
+        <section className="surface-card" aria-labelledby="panel-loops-h">
+          <h3 id="panel-loops-h">Loops</h3>
           <LoopsSection />
         </section>
-        <section className="surface-card">
-          <h3>EQ Presets</h3>
+        <section className="surface-card" aria-labelledby="panel-presets-h">
+          <h3 id="panel-presets-h">EQ Presets</h3>
           <PresetsSection />
         </section>
-        <section className="surface-card">
-          <h3>Quick-play playlists</h3>
+        <section className="surface-card" aria-labelledby="panel-playlists-h">
+          <h3 id="panel-playlists-h">Quick-play playlists</h3>
           <QuickPlaylists />
         </section>
       </div>

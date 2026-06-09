@@ -77,6 +77,13 @@ export function TransportSection() {
           onTouchEnd={(e) =>
             setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
           }
+          // Keyboard arrow adjustments only fire onChange, so commit on keyup/blur too.
+          onKeyUp={(e) =>
+            setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
+          }
+          onBlur={(e) =>
+            setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
+          }
         />
         <span className="small num-readout">{(localCrossfade / 1000).toFixed(1)}s</span>
         <select

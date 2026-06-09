@@ -16,12 +16,22 @@ export function Toaster() {
   const toasts = useToastStore((s) => s.toasts);
   const dismiss = useToastStore((s) => s.dismiss);
 
-  if (toasts.length === 0) return null;
-
+  // Always-mounted live region: present before any toast so the screen
+  // reader has it under observation and announces additions as they arrive.
   return (
-    <div className="toaster" role="region" aria-label="Notifications">
+    <div
+      className="toaster"
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+      aria-atomic="false"
+    >
       {toasts.map((t) => (
-        <div key={t.id} className={`toast toast-${t.kind}`} role="status">
+        <div
+          key={t.id}
+          className={`toast toast-${t.kind}`}
+          role={t.kind === "error" ? "alert" : "status"}
+        >
           <span className="toast-icon" aria-hidden="true">
             {ICONS[t.kind]}
           </span>

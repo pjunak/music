@@ -1584,3 +1584,64 @@ def test_http_state_reflects_ws_mutations(
         payload = response.json()
         assert payload["ambient"]["current_track_id"] == seeded_track_id
         assert payload["is_playing"] is True
+
+
+# --- regression: add_active_output mutator + loop-timer resilience ---------
+
+
+def test_add_active_output_is_additive_no_clobber() -> None:
+    """The WS register auto-activate path uses `add_active_output` instead of a
+    read-modify-write on a stale snapshot. It must APPEND (preserving existing
+    active ids) rather than replace, and no-op when the id is already present
+    so the state machine skips a pointless persist + broadcast."""
+    from app.sync.protocol import PlayerState
+    from app.sync.state import add_active_output
+
+    state = PlayerState(active_output_device_ids=["a"])
+
+    # Adding a new id appends, keeping the existing one — no clobber.
+    appended = add_active_output("b")(state)
+    assert appended.active_output_device_ids == ["a", "b"]
+
+    # Adding an id already present is a no-op: returns the SAME instance so the
+    # machine knows to skip persistence + broadcast.
+    same = add_active_output("a")(state)
+    assert same is state
+
+
+async def test_looping_sfx_timer_survives_broadcast_error(monkeypatch) -> None:
+    """The `try/except` guarding `manager.broadcast` is INSIDE the while loop in
+    `loops._run`, so a single failing broadcast is logged and retried next tick
+    instead of killing the timer (which would orphan the LOOPS-panel entry with
+    no timer behind it). We make the first broadcast raise and assert the timer
+    keeps firing and delivers a valid `sfx_fired` payload afterwards."""
+    import asyncio
+
+    from app.sync import loops
+
+    calls: list[dict] = []
+    fired = asyncio.Event()
+
+    async def _flaky_broadcast(payload: dict) -> None:
+        calls.append(payload)
+        if len(calls) == 1:
+            raise RuntimeError("boom — first broadcast fails")
+        fired.set()
+
+    # `_run` references the module-level `manager`; patch its broadcast there.
+    monkeypatch.setattr(loops.manager, "broadcast", _flaky_broadcast)
+
+    loops.start("l1", "tavern", "dnd/door.ogg", interval_s=0.01, volume=1.0)
+    try:
+        # Drive off the Event (set on the first SUCCESSFUL tick), not a fixed
+        # sleep, so the test isn't flaky. wait_for caps the worst case.
+        await asyncio.wait_for(fired.wait(), timeout=2.0)
+    finally:
+        loops.stop("l1")
+
+    # First tick raised but did NOT kill the timer; a later tick succeeded.
+    assert len(calls) >= 2
+    good = calls[-1]
+    assert good["type"] == "sfx_fired"
+    assert good["soundboard_id"] == "tavern"
+    assert good["item_path"] == "dnd/door.ogg"

@@ -118,6 +118,22 @@ export interface TrackSummary {
   length_s: number;
 }
 
+// EQ preset shape — per-mode effect rack. Effects are loosely-typed (each
+// effect carries a `type` plus type-specific params validated server-side).
+export interface PresetEffect {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface PresetManifest {
+  id: string;
+  name: string;
+  description?: string;
+  effects: PresetEffect[];
+  volume?: number | null;
+  crossfade_ms?: number | null;
+}
+
 // Mode summary shape returned by /api/modes.
 export interface ModeSummary {
   id: string;

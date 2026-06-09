@@ -167,6 +167,7 @@ function CueCreateForm({
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="New cue name"
+        aria-label="New cue name"
         required
         autoFocus
       />

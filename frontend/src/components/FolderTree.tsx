@@ -271,8 +271,9 @@ export function FolderTree({
       {/* No explicit root row: the old "All music" / "All SFX" entry was
           redundant (the tab is already "Library") and selecting nothing at
           all IS the root state — the host's breadcrumb path makes that
-          explicit. Move-to-root via drag isn't offered here; the Tags
-          tab's Move… modal (with a root option) covers that rare case. */}
+          explicit. Move-to-root via drag isn't offered here; the Library's
+          Move… affordance (FolderActions / SelectionToolbar, with a root
+          option) covers that rare case. */}
       {rootError !== null ? (
         <p className="error small tree-root-error">{rootError}</p>
       ) : null}

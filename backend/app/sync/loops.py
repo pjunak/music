@@ -31,16 +31,19 @@ async def _run(
     payload = SfxFired(
         soundboard_id=soundboard_id, item_path=item_path, volume=volume
     ).model_dump(mode="json")
-    try:
-        while True:
-            await asyncio.sleep(interval_s)
-            # Broadcast to all sockets; each client's engine plays it only when
-            # it's an active output (or a force-local guest). See connection.broadcast.
+    while True:
+        await asyncio.sleep(interval_s)
+        # Broadcast to all sockets; each client's engine plays it only when
+        # it's an active output (or a force-local guest). See connection.broadcast.
+        # The try is *inside* the loop so a single broadcast hiccup is logged and
+        # retried next tick instead of killing the timer (which would orphan the
+        # LOOPS-panel entry that has no timer behind it).
+        try:
             await manager.broadcast(payload)
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # never let a broadcast hiccup kill the loop silently
-        logger.exception("looping sfx '%s' crashed", loop_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("looping sfx '%s' broadcast failed", loop_id)
 
 
 def start(

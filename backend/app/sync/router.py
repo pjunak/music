@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+from starlette.websockets import WebSocketState
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -190,14 +191,12 @@ async def _h_register(
         name=action.name,
         is_output=default_on,
     )
-    snap = await state_module.machine.snapshot()
-    if default_on and action.client_id not in snap.active_output_device_ids:
-        await _apply_and_broadcast(
-            state_module.set_active_outputs(
-                [*snap.active_output_device_ids, action.client_id]
-            )
-        )
+    if default_on:
+        # Additive mutator avoids the snapshot→set_active_outputs race where a
+        # concurrent register's stale snapshot would clobber the other's id.
+        await _apply_and_broadcast(state_module.add_active_output(action.client_id))
     else:
+        snap = await state_module.machine.snapshot()
         await manager.broadcast_state(snap)
 
 
@@ -415,17 +414,8 @@ async def _h_set_active_presets(
 
 
 async def _h_set_crossfade(
-    action: SetCrossfadeAction, _device_id: str, websocket: WebSocket
+    action: SetCrossfadeAction, _device_id: str, _ws: WebSocket
 ) -> None:
-    if action.crossfade_type is not None and action.crossfade_type not in (
-        "linear",
-        "equal_power",
-        "cut",
-    ):
-        await _send_error(
-            websocket, f"invalid crossfade_type: {action.crossfade_type}"
-        )
-        return
     await _apply_and_broadcast(
         state_module.set_crossfade(action.crossfade_ms, action.crossfade_type)
     )
@@ -816,6 +806,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             new_state = await state_module.machine.snapshot()
             await manager.broadcast_state(new_state)
         await asyncio.sleep(0)
-        if websocket.client_state.value not in (2, 3):
+        if websocket.client_state not in (
+            WebSocketState.DISCONNECTED,
+            WebSocketState.RESPONSE,
+        ):
             with contextlib.suppress(Exception):
                 await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)

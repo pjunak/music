@@ -53,7 +53,7 @@ export function InterruptSection() {
   }
 
   return (
-    <div className="interrupt-section">
+    <div className="interrupt-section" role="status" aria-live="polite">
       <div className="interrupt-active">
         <div className="interrupt-meta">
           <span className="track-title">

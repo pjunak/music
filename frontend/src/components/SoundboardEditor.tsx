@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -34,6 +34,11 @@ export function SoundboardEditor({
   const [soundboard, setSoundboard] = useState<SoundboardManifest | null>(null);
   const [sfxFiles, setSfxFiles] = useState<SfxFile[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const conflictHotkeys = useMemo(
+    () => (soundboard ? collectConflictHotkeys(soundboard) : new Set<string>()),
+    [soundboard],
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -77,7 +82,7 @@ export function SoundboardEditor({
         id,
         name,
       });
-      setSoundboard(updated as SoundboardManifest);
+      setSoundboard(updated);
       toast.success("Category added", name);
     } catch (e) {
       toast.error("Add failed", e instanceof Error ? e.message : undefined);
@@ -93,8 +98,12 @@ export function SoundboardEditor({
     });
     if (!ok) return;
     try {
-      await modesAdminApi.deleteCategory(modeId, soundboardId, categoryId);
-      await refresh();
+      const updated = await modesAdminApi.deleteCategory(
+        modeId,
+        soundboardId,
+        categoryId,
+      );
+      setSoundboard(updated);
       toast.success("Category removed");
     } catch (e) {
       toast.error("Remove failed", e instanceof Error ? e.message : undefined);
@@ -109,7 +118,7 @@ export function SoundboardEditor({
         categoryId,
         payload,
       );
-      setSoundboard(updated as SoundboardManifest);
+      setSoundboard(updated);
       toast.success("SFX added", payload.name);
     } catch (e) {
       toast.error("Add failed", e instanceof Error ? e.message : undefined);
@@ -129,7 +138,7 @@ export function SoundboardEditor({
         index,
         payload,
       );
-      setSoundboard(updated as SoundboardManifest);
+      setSoundboard(updated);
     } catch (e) {
       toast.error("Save failed", e instanceof Error ? e.message : undefined);
     }
@@ -143,7 +152,7 @@ export function SoundboardEditor({
         categoryId,
         index,
       );
-      setSoundboard(updated as SoundboardManifest);
+      setSoundboard(updated);
       toast.success("SFX removed");
     } catch (e) {
       toast.error("Remove failed", e instanceof Error ? e.message : undefined);
@@ -187,41 +196,21 @@ export function SoundboardEditor({
         </p>
       ) : (
         <>
-          {(() => {
-            // Hotkey conflict detection. The runtime
-            // (`useSfxHotkeys`) silently picks the last-registered item
-            // when two share a key, which makes "why did pressing 5
-            // play the wrong thing?" basically un-debuggable. Surface
-            // the duplicates here at edit time so the operator can fix
-            // it before live use.
-            const hotkeyCounts = new Map<string, number>();
-            for (const cat of soundboard.categories) {
-              for (const it of cat.items) {
-                if (!it.hotkey) continue;
-                hotkeyCounts.set(
-                  it.hotkey,
-                  (hotkeyCounts.get(it.hotkey) ?? 0) + 1,
-                );
-              }
-            }
-            const conflictKeys = new Set(
-              Array.from(hotkeyCounts.entries())
-                .filter(([, n]) => n > 1)
-                .map(([k]) => k),
-            );
-            if (conflictKeys.size === 0) return null;
-            return (
-              <div className="alert alert-warn">
-                <WarnIcon aria-hidden="true" />
-                <span>
-                  Hotkey conflict:{" "}
-                  {Array.from(conflictKeys).map((k) => `"${k}"`).join(", ")}{" "}
-                  {conflictKeys.size === 1 ? "is" : "are"} bound to multiple items.
-                  Only the last-registered item will fire when pressed.
-                </span>
-              </div>
-            );
-          })()}
+          {/* The runtime (`useSfxHotkeys`) silently picks the last-registered
+              item when two share a key, which makes "why did pressing 5 play
+              the wrong thing?" basically un-debuggable. Surface the duplicates
+              here at edit time so the operator can fix it before live use. */}
+          {conflictHotkeys.size > 0 ? (
+            <div className="alert alert-warn">
+              <WarnIcon aria-hidden="true" />
+              <span>
+                Hotkey conflict:{" "}
+                {Array.from(conflictHotkeys).map((k) => `"${k}"`).join(", ")}{" "}
+                {conflictHotkeys.size === 1 ? "is" : "are"} bound to multiple items.
+                Only the last-registered item will fire when pressed.
+              </span>
+            </div>
+          ) : null}
         <ul className="soundboard-categories">
           {soundboard.categories.map((cat) => (
             <li key={cat.id} className="soundboard-category">
@@ -242,7 +231,7 @@ export function SoundboardEditor({
 
               <ItemList
                 items={cat.items}
-                conflictHotkeys={collectConflictHotkeys(soundboard)}
+                conflictHotkeys={conflictHotkeys}
                 onUpdate={(idx, p) => updateItem(cat.id, idx, p)}
                 onDelete={(idx) => deleteItem(cat.id, idx)}
               />

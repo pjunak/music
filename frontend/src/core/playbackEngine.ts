@@ -32,19 +32,7 @@
 
 import { EQ_BAND_Q, normalizeEqBands } from "@/core/eq";
 import { toast } from "@/core/toast";
-import type { PlayerState } from "@/core/types";
-
-export interface EffectSpec {
-  type: string;
-  [key: string]: unknown;
-}
-
-export interface PresetManifest {
-  id: string;
-  name: string;
-  description?: string | null;
-  effects: EffectSpec[];
-}
+import type { PlayerState, PresetEffect as EffectSpec, PresetManifest } from "@/core/types";
 
 interface AmbientChannel {
   el: HTMLAudioElement;
@@ -157,8 +145,6 @@ function numParam(
   return fallback;
 }
 
-let autoplayBlockedReported = false;
-
 function attachErrorLogger(label: string, el: HTMLAudioElement): void {
   el.addEventListener("error", () => {
     const err = el.error;
@@ -216,6 +202,10 @@ export class PlaybackEngine {
   private lastVolume = 1.0;
   private lastInterruptFadeOut = 0;
   private lastPresetSignature = "";
+  /** One-shot guard for the autoplay-blocked guidance toast. Per-instance so
+   *  a torn-down + re-created engine re-arms it; re-armed on each fresh user
+   *  gesture in `unlock`. */
+  private autoplayBlockedReported = false;
   /** Position this device last reported to the server *and the server
    *  accepted* (i.e. the WS send actually went out). The baseline for
    *  remote-seek detection — see `shouldApplyRemoteSeek`. Reset to 0 on
@@ -348,10 +338,9 @@ export class PlaybackEngine {
       .resume()
       .then(() => {
         // A fresh user gesture re-opened the audio path — re-arm the
-        // autoplay-blocked guidance toast (the flag is module-global and
-        // otherwise stays true for the tab's lifetime, silencing every
-        // later block).
-        autoplayBlockedReported = false;
+        // autoplay-blocked guidance toast (the flag otherwise stays true for
+        // the engine's lifetime, silencing every later block).
+        this.autoplayBlockedReported = false;
       })
       .catch((err: unknown) => {
         console.warn("[playbackEngine] AudioContext resume failed", err);
@@ -661,23 +650,22 @@ export class PlaybackEngine {
    * `loadInto` short-circuit (`src.endsWith(url)`) skips reload and
    * `safePlay` resumes from the same paused position, which manifests as
    * "toggle does nothing until refresh". */
+  /** Tear the src off an <audio> channel so it stops audibly and a later
+   *  re-claim triggers a fresh load (a bare `pause()` leaves the old src, and
+   *  `loadInto`'s URL short-circuit would then skip the reload). */
+  private unloadElement(ch: { el: HTMLAudioElement; loadedUrl: string | null }): void {
+    ch.el.pause();
+    ch.el.removeAttribute("src");
+    ch.el.load();
+    ch.loadedUrl = null;
+  }
+
   private releaseOutput(): void {
     this.pauseAmbient();
-    if (this.ambientA?.el) {
-      this.ambientA.el.removeAttribute("src");
-      this.ambientA.el.load();
-      this.ambientA.loadedUrl = null;
-    }
-    if (this.ambientB?.el) {
-      this.ambientB.el.removeAttribute("src");
-      this.ambientB.el.load();
-      this.ambientB.loadedUrl = null;
-    }
+    if (this.ambientA) this.unloadElement(this.ambientA);
+    if (this.ambientB) this.unloadElement(this.ambientB);
     if (this.interrupt) {
-      this.interrupt.el.pause();
-      this.interrupt.el.removeAttribute("src");
-      this.interrupt.el.load();
-      this.interrupt.loadedUrl = null;
+      this.unloadElement(this.interrupt);
       this.interrupt.gainNode.gain.value = 0;
     }
     // Cancel any in-flight duck ramp and reset the duck gain so a
@@ -781,16 +769,8 @@ export class PlaybackEngine {
 
   private stopAmbient(): void {
     this.pauseAmbient();
-    if (this.ambientA?.el) {
-      this.ambientA.el.removeAttribute("src");
-      this.ambientA.el.load();
-      this.ambientA.loadedUrl = null;
-    }
-    if (this.ambientB?.el) {
-      this.ambientB.el.removeAttribute("src");
-      this.ambientB.el.load();
-      this.ambientB.loadedUrl = null;
-    }
+    if (this.ambientA) this.unloadElement(this.ambientA);
+    if (this.ambientB) this.unloadElement(this.ambientB);
     this.lastReportedMs = 0;
     this.endStallTime = -1;
   }
@@ -864,10 +844,7 @@ export class PlaybackEngine {
 
   private stopInterrupt(): void {
     if (this.interrupt) {
-      this.interrupt.el.pause();
-      this.interrupt.el.removeAttribute("src");
-      this.interrupt.el.load();
-      this.interrupt.loadedUrl = null;
+      this.unloadElement(this.interrupt);
       this.interrupt.gainNode.gain.value = 0;
     }
     if (this.lastIsPlaying) {
@@ -928,8 +905,8 @@ export class PlaybackEngine {
             ctxState: ctx?.state ?? "no-ctx",
           });
           if (err.name === "NotAllowedError") {
-            if (!autoplayBlockedReported) {
-              autoplayBlockedReported = true;
+            if (!this.autoplayBlockedReported) {
+              this.autoplayBlockedReported = true;
               toast.error(
                 "Browser blocked playback",
                 "Click anywhere on the page once, then press Play again.",
