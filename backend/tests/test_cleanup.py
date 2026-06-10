@@ -29,6 +29,7 @@ class Row:
     album: str = ""
     track_no: int | None = None
     disc_no: int | None = None
+    year: int | None = None
 
 
 _next_id = iter(range(1, 10_000))
@@ -259,6 +260,262 @@ def test_title_tag_with_junk_is_cleaned_even_when_filename_is_clean():
     assert title is not None and title.new == "Clean Name"
 
 
+# --- engine: folder-structure clues --------------------------------------------
+
+
+def test_suspect_album_equal_to_artist_gets_folder_album():
+    # Rip bug: the album field holds the artist's name. The folder name is
+    # the real album and must not be ignored just because album is "set".
+    rows = [
+        row(
+            "Hurdy-Gurdy Meditations/01 - Pastorale.mp3",
+            title="Pastorale",
+            artist="Andrey Vinogradov",
+            album="Andrey Vinogradov",
+            track_no=1,
+        ),
+        row(
+            "Hurdy-Gurdy Meditations/02 - Oberek.mp3",
+            title="Oberek",
+            artist="Andrey Vinogradov",
+            album="Andrey Vinogradov",
+            track_no=2,
+        ),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    album = op(plan_for(plans, rows[0]), "tag", "album")
+    assert album is not None
+    assert album.old == "Andrey Vinogradov"
+    assert album.new == "Hurdy-Gurdy Meditations"
+    assert album.confidence == "high"  # numbered sequence makes the folder albumish
+
+
+def test_self_titled_album_in_artist_folder_left_alone():
+    # artist == album == folder: could be a legit self-titled album, and the
+    # folder offers no *different* name anyway — no suggestion.
+    r = row("Weezer/Buddy Holly.mp3", title="Buddy Holly", artist="Weezer", album="Weezer")
+    plans = cleanup.analyze([r], [r])
+    assert plan_for(plans, r) is None
+
+
+def test_disc_folder_layout():
+    rows = [
+        row("Big Album/CD1/01 - One.mp3"),
+        row("Big Album/CD1/02 - Two.mp3"),
+        row("Big Album/CD2/01 - Three.mp3"),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    p = plan_for(plans, rows[0])
+    disc = op(p, "tag", "disc_no")
+    assert disc is not None and disc.new == 1 and disc.confidence == "high"
+    album = op(p, "tag", "album")
+    assert album is not None
+    assert album.old == "CD1"  # the row fallback was the disc folder
+    assert album.new == "Big Album" and album.confidence == "high"
+    assert op(plan_for(plans, rows[2]), "tag", "disc_no").new == 2
+
+
+def test_artist_album_folder_label():
+    rows = [
+        row("Two Steps From Hell - Archangel/01 - Winterspell.mp3"),
+        row("Two Steps From Hell - Archangel/02 - Dragon Rider.mp3"),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    p = plan_for(plans, rows[0])
+    artist = op(p, "tag", "artist")
+    assert artist is not None and artist.new == "Two Steps From Hell"
+    assert artist.confidence == "low"  # folder label alone is a guess
+    album = op(p, "tag", "album")
+    assert album is not None and album.new == "Archangel"
+    assert album.confidence == "high"  # numbered sequence → albumish
+
+
+def test_year_marker_in_folder():
+    rows = [
+        row("Skyrim OST (2011)/01 - Dragonborn.mp3"),
+        row("Skyrim OST (2011)/02 - Awake.mp3"),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    p = plan_for(plans, rows[0])
+    year = op(p, "tag", "year")
+    assert year is not None and year.new == 2011 and year.confidence == "high"
+    album = op(p, "tag", "album")
+    assert album is not None
+    assert album.old == "Skyrim OST (2011)" and album.new == "Skyrim OST"
+
+    # Rule gating: disabling tag_year drops the year op.
+    plans = cleanup.analyze(rows, rows, cleanup.DEFAULT_RULES - {"tag_year"})
+    assert op(plan_for(plans, rows[0]), "tag", "year") is None
+
+
+def test_dominant_sibling_artist_and_album_fill_stragglers():
+    rows = [
+        row("Mixtape/Alpha.mp3", title="Alpha", artist="The Band", album="Live Set"),
+        row("Mixtape/Beta.mp3", title="Beta", artist="The Band", album="Live Set"),
+        row("Mixtape/Gamma.mp3", title="Gamma"),  # untagged straggler
+    ]
+    plans = cleanup.analyze(rows, rows)
+    p = plan_for(plans, rows[2])
+    artist = op(p, "tag", "artist")
+    assert artist is not None and artist.new == "The Band" and artist.confidence == "high"
+    album = op(p, "tag", "album")
+    assert album is not None and album.new == "Live Set" and album.confidence == "high"
+    # The already-tagged siblings get no suggestions.
+    assert plan_for(plans, rows[0]) is None
+
+
+def test_album_artist_tag_fills_artist():
+    r = row("Misc/Halo.mp3", title="Halo", album_artist="Beyoncé")
+    plans = cleanup.analyze([r], [r])
+    artist = op(plan_for(plans, r), "tag", "artist")
+    assert artist is not None and artist.new == "Beyoncé" and artist.confidence == "high"
+
+
+def test_grandparent_artist_layout():
+    rows = [
+        row("Two Steps From Hell/Archangel/01 - Winterspell.mp3"),
+        row("Two Steps From Hell/Archangel/02 - Dragon Rider.mp3"),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    p = plan_for(plans, rows[0])
+    artist = op(p, "tag", "artist")
+    assert artist is not None and artist.new == "Two Steps From Hell"
+    assert artist.confidence == "low"  # structural guess, review confirms
+    # The album candidate equals the folder name the row already displays
+    # (fallback) — an invisible diff, so by design no op is proposed.
+    assert op(p, "tag", "album") is None
+
+
+def test_segment_matching_grandparent_strips_high():
+    rows = [
+        row("Daft Punk/Discovery/Daft Punk - One More Time.mp3"),
+        row("Daft Punk/Discovery/Daft Punk - Aerodynamic.mp3"),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    p = plan_for(plans, rows[0])
+    rename = op(p, "rename")
+    assert rename is not None and rename.new == "One More Time"
+    artist = op(p, "tag", "artist")
+    assert artist is not None and artist.new == "Daft Punk" and artist.confidence == "high"
+
+
+def test_generic_folder_names_never_suggested():
+    rows = [row("Uploads/01 - Foo.mp3"), row("Uploads/02 - Bar.mp3")]
+    plans = cleanup.analyze(rows, rows)
+    p = plan_for(plans, rows[0])
+    assert op(p, "rename") is not None  # number strip still works
+    assert op(p, "tag", "album") is None
+    assert op(p, "tag", "artist") is None
+
+
+# --- engine: online name verdicts ----------------------------------------------
+
+
+def verdict_map(names: dict[str, tuple[int, int]]) -> dict[str, tuple[int, int]]:
+    """Verdict map from {name: (artist_score, album_score)}."""
+    return {cleanup.loose_key(k): v for k, v in names.items()}
+
+
+def test_verdict_kind_thresholds():
+    assert cleanup.verdict_kind(100, 20) == "artist"
+    assert cleanup.verdict_kind(30, 95) == "album"
+    assert cleanup.verdict_kind(100, 100) == "both"  # self-titled albums exist
+    assert cleanup.verdict_kind(92, 80) == "both"  # too close to call
+    assert cleanup.verdict_kind(40, 50) == "unknown"
+
+
+def test_verified_artist_upgrades_lone_pair():
+    r = row("Misc/Andrey Vinogradov - Pastorale.mp3")
+    verdicts = verdict_map({"Andrey Vinogradov": (100, 25)})
+    plans = cleanup.analyze([r], [r], verdicts=verdicts)
+    p = plan_for(plans, r)
+    rename = op(p, "rename")
+    assert rename is not None and rename.new == "Pastorale" and rename.confidence == "high"
+    artist = op(p, "tag", "artist")
+    assert artist is not None and artist.new == "Andrey Vinogradov"
+    assert artist.confidence == "high" and artist.verified
+
+
+def test_verified_album_classifies_lone_pair_as_album():
+    r = row("Misc/Abbey Road - Come Together.mp3")
+    verdicts = verdict_map({"Abbey Road": (10, 100)})
+    plans = cleanup.analyze([r], [r], verdicts=verdicts)
+    p = plan_for(plans, r)
+    rename = op(p, "rename")
+    assert rename is not None and rename.new == "Come Together"
+    assert "strip_album" in rename.rules
+    album = op(p, "tag", "album")
+    assert album is not None and album.new == "Abbey Road"
+    assert album.confidence == "high" and album.verified
+    assert op(p, "tag", "artist") is None  # not mistaken for an artist
+
+
+def test_verdict_flips_folder_album_candidate_to_artist():
+    # Folder named after the artist, segment-less untagged files: offline
+    # the folder name is an *invisible* album candidate (it equals the
+    # row's fallback), so no op ships — but the name is queued for lookup,
+    # and the verdict moves it to the artist field on the next pass.
+    rows = [
+        row("Andrey Vinogradov/01 - Pastorale.mp3"),
+        row("Andrey Vinogradov/02 - Oberek.mp3"),
+    ]
+    offline = cleanup.analyze(rows, rows)
+    off_p = plan_for(offline, rows[0])
+    assert op(off_p, "tag", "artist") is None
+    assert op(off_p, "tag", "album") is None
+    assert cleanup.pending_lookups(offline) == ["Andrey Vinogradov"]
+
+    verdicts = verdict_map({"Andrey Vinogradov": (100, 30)})
+    plans = cleanup.analyze(rows, rows, verdicts=verdicts)
+    p = plan_for(plans, rows[0])
+    assert op(p, "tag", "album") is None  # wrong-side guess stays dropped
+    artist = op(p, "tag", "artist")
+    assert artist is not None and artist.new == "Andrey Vinogradov"
+    assert artist.confidence == "high" and artist.verified
+    assert cleanup.pending_lookups(plans, verdicts) == []
+
+
+def test_verified_album_upgrades_folder_album_candidate():
+    rows = [
+        row("Hurdy-Gurdy Meditations/Pastorale.mp3", title="Pastorale"),
+        row("Hurdy-Gurdy Meditations/Oberek.mp3", title="Oberek"),
+    ]
+    # Plain folder, no numbers/year: the candidate equals the fallback —
+    # invisible, no visible ops; the name still queues for lookup.
+    offline = cleanup.analyze(rows, rows)
+    assert op(plan_for(offline, rows[0]), "tag", "album") is None
+    assert "Hurdy-Gurdy Meditations" in cleanup.pending_lookups(offline)
+
+    # With a suspect album tag the suggestion exists; the verdict makes it high.
+    rows = [
+        row("Hurdy-Gurdy Meditations/Pastorale.mp3", title="Pastorale", artist="X", album="X"),
+        row("Hurdy-Gurdy Meditations/Oberek.mp3", title="Oberek", artist="X", album="X"),
+    ]
+    offline = cleanup.analyze(rows, rows)
+    off_album = op(plan_for(offline, rows[0]), "tag", "album")
+    assert off_album is not None and off_album.confidence == "low"
+
+    verdicts = verdict_map({"Hurdy-Gurdy Meditations": (5, 100)})
+    plans = cleanup.analyze(rows, rows, verdicts=verdicts)
+    album = op(plan_for(plans, rows[0]), "tag", "album")
+    assert album is not None and album.confidence == "high" and album.verified
+
+
+def test_pending_lookups_dedupes_and_skips_known():
+    rows = [
+        row("Misc/Daft Punk - One.mp3"),
+        row("Misc/Daft Punk - Two.mp3"),
+        row("Misc/Daft Punk - Three.mp3"),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    pending = cleanup.pending_lookups(plans)
+    assert pending == ["Daft Punk"]  # one entry for three tracks
+
+    verdicts = verdict_map({"Daft Punk": (100, 30)})
+    plans = cleanup.analyze(rows, rows, verdicts=verdicts)
+    assert cleanup.pending_lookups(plans, verdicts) == []  # known + now high
+
+
 # --- engine: collisions + scope ------------------------------------------------
 
 
@@ -454,6 +711,75 @@ def test_apply_partial_selection_only_ticked_ops(auth_client: TestClient):
     assert (music_dir / "CleanupPartial" / "04 - Delta.wav").is_file()  # not renamed
     tree = auth_client.get("/api/library/tree?path=CleanupPartial").json()
     assert {t["track_no"] for t in tree["tracks"]} == {4, 5}
+
+
+def test_verify_endpoint_caches_and_feeds_next_analysis(auth_client: TestClient, monkeypatch):
+    _seed_folder("CleanupVerify", ["Andrey Vinogradov - Pastorale.wav"])
+
+    r = auth_client.post(
+        "/api/library/cleanup/analyze",
+        json={"scope": {"type": "folder", "path": "CleanupVerify"}},
+    )
+    body = r.json()
+    assert "Andrey Vinogradov" in body["pending_lookups"]
+    artist_op = next(
+        o for p in body["plans"] for o in p["ops"] if o["field"] == "artist"
+    )
+    assert artist_op["confidence"] == "low" and not artist_op["verified"]
+
+    calls: list[str] = []
+
+    def fake_fetch(name: str) -> tuple[int, int]:
+        calls.append(name)
+        return (100, 20)  # clearly an artist
+
+    monkeypatch.setattr("app.library.cleanup_lookup.fetch_name_scores", fake_fetch)
+
+    r = auth_client.post(
+        "/api/library/cleanup/verify", json={"names": body["pending_lookups"]}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["verified"] == len(body["pending_lookups"])
+    assert r.json()["failed"] == []
+
+    # Cached: a second verify never touches the network again.
+    before = len(calls)
+    r = auth_client.post(
+        "/api/library/cleanup/verify", json={"names": ["Andrey Vinogradov"]}
+    )
+    assert r.json()["verified"] == 0
+    assert len(calls) == before
+
+    # The next analysis picks the verdicts up: upgraded, verified, settled.
+    r = auth_client.post(
+        "/api/library/cleanup/analyze",
+        json={"scope": {"type": "folder", "path": "CleanupVerify"}},
+    )
+    body = r.json()
+    assert body["pending_lookups"] == []
+    artist_op = next(
+        o for p in body["plans"] for o in p["ops"] if o["field"] == "artist"
+    )
+    assert artist_op["confidence"] == "high" and artist_op["verified"]
+
+
+def test_verify_failures_are_retried_not_cached(auth_client: TestClient, monkeypatch):
+    def boom(name: str) -> tuple[int, int]:
+        raise OSError("network down")
+
+    monkeypatch.setattr("app.library.cleanup_lookup.fetch_name_scores", boom)
+    r = auth_client.post(
+        "/api/library/cleanup/verify", json={"names": ["Flaky Lookup Name"]}
+    )
+    assert r.json() == {"verified": 0, "failed": ["Flaky Lookup Name"]}
+
+    monkeypatch.setattr(
+        "app.library.cleanup_lookup.fetch_name_scores", lambda name: (95, 10)
+    )
+    r = auth_client.post(
+        "/api/library/cleanup/verify", json={"names": ["Flaky Lookup Name"]}
+    )
+    assert r.json()["verified"] == 1  # not poisoned by the earlier failure
 
 
 def test_revert_from_uploaded_journal(auth_client: TestClient):

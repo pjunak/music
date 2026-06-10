@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
@@ -29,7 +29,7 @@ import { toast } from "@/core/toast";
  */
 
 type ScopeType = "all" | "folder" | "tracks";
-type Step = "configure" | "review" | "applying" | "done" | "history";
+type Step = "configure" | "checking" | "review" | "applying" | "done" | "history";
 
 interface RuleMeta {
   id: CleanupRuleId;
@@ -104,7 +104,13 @@ const RULE_GROUPS: { label: string; rules: RuleMeta[] }[] = [
       {
         id: "tag_number",
         label: "Fill empty track / disc number",
-        hint: "From the stripped leading number — pre-ticked only when the folder forms a numbered sequence (01, 02, …)",
+        hint: "From the stripped leading number or a CD1/CD2 subfolder — pre-ticked only when the folder forms a numbered sequence (01, 02, …)",
+        defaultOn: true,
+      },
+      {
+        id: "tag_year",
+        label: "Fill empty year tag",
+        hint: "From a year marker in the folder name — “Album (2013)”, “2019 - Album”",
         defaultOn: true,
       },
     ],
@@ -116,6 +122,9 @@ const DEFAULT_RULES: CleanupRuleId[] = RULE_GROUPS.flatMap((g) =>
 );
 
 const APPLY_CHUNK = 20;
+// Names per /verify call — the server paces MusicBrainz at 1 req/s with
+// two queries per name, so 5 keeps each request ~10s.
+const VERIFY_CHUNK = 5;
 
 function opLabel(op: CleanupOp): string {
   if (op.kind === "rename") return "File";
@@ -130,10 +139,15 @@ function opLabel(op: CleanupOp): string {
       return "Track #";
     case "disc_no":
       return "Disc #";
+    case "year":
+      return "Year";
     default:
       return op.field ?? "Tag";
   }
 }
+
+/** Stable display order for the by-field tick chips. */
+const LABEL_ORDER = ["File", "Title", "Artist", "Album", "Track #", "Disc #", "Year"];
 
 function Value({ value }: { value: string | number | null }) {
   if (value === null || value === "") {
@@ -176,6 +190,10 @@ export function CleanupDialog({
   const [result, setResult] = useState<CleanupAnalyzeResult | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [checkProgress, setCheckProgress] = useState({ done: 0, total: 0 });
+  // Set by the Skip button (or closing the dialog) to stop further lookup
+  // chunks; whatever resolved so far still feeds the re-analysis.
+  const skipCheckRef = useRef(false);
   const [summary, setSummary] = useState<{
     applied: number;
     skipped: { track_id: number; reason: string }[];
@@ -199,6 +217,21 @@ export function CleanupDialog({
 
   const plans: CleanupTrackPlan[] = useMemo(() => result?.plans ?? [], [result]);
   const allOps = useMemo(() => plans.flatMap((p) => p.ops), [plans]);
+  // Ops grouped by display label (File / Title / Artist / …) for the
+  // by-field tick chips — "I can see the artist column is always right,
+  // tick them all at once".
+  const labelGroups = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const o of allOps) {
+      const label = opLabel(o);
+      const arr = m.get(label);
+      if (arr) arr.push(o.op_id);
+      else m.set(label, [o.op_id]);
+    }
+    return [...m.entries()].sort(
+      (a, b) => LABEL_ORDER.indexOf(a[0]) - LABEL_ORDER.indexOf(b[0]),
+    );
+  }, [allOps]);
   const folderGroups = useMemo(() => {
     const m = new Map<string, CleanupTrackPlan[]>();
     for (const p of plans) {
@@ -219,30 +252,76 @@ export function CleanupDialog({
     });
   }
 
-  async function runAnalyze() {
-    setBusy(true);
-    try {
-      const r = await cleanupApi.analyze(scope, [...rules]);
-      if (r.plans.length === 0) {
-        toast.success(
-          "Nothing to clean",
-          `Scanned ${r.scanned} track${r.scanned === 1 ? "" : "s"} — no issues matched the enabled rules.`,
+  function prepareReview(r: CleanupAnalyzeResult): boolean {
+    if (r.plans.length === 0) {
+      toast.success(
+        "Nothing to clean",
+        `Scanned ${r.scanned} track${r.scanned === 1 ? "" : "s"} — no issues matched the enabled rules.`,
+      );
+      return false;
+    }
+    setResult(r);
+    // High-confidence suggestions start ticked; guesses start unticked
+    // so a quick "Apply" only ever commits the safe set.
+    setTicked(
+      new Set(
+        r.plans.flatMap((p) =>
+          p.ops.filter((o) => o.confidence === "high").map((o) => o.op_id),
+        ),
+      ),
+    );
+    setStep("review");
+    return true;
+  }
+
+  /** Resolve unfamiliar names against MusicBrainz. Verdicts are cached
+   *  server-side forever, so each distinct name across the whole library
+   *  is only ever looked up once — later runs reuse them instantly. */
+  async function checkNamesOnline(names: string[]) {
+    skipCheckRef.current = false;
+    setCheckProgress({ done: 0, total: names.length });
+    setStep("checking");
+    let failed = 0;
+    for (let i = 0; i < names.length; i += VERIFY_CHUNK) {
+      if (skipCheckRef.current) return;
+      const chunk = names.slice(i, i + VERIFY_CHUNK);
+      try {
+        const v = await cleanupApi.verify(chunk);
+        failed += v.failed.length;
+      } catch {
+        toast.warn(
+          "Online name check unavailable",
+          "Continuing with local clues only — unresolved names retry next run.",
         );
         return;
       }
-      setResult(r);
-      // High-confidence suggestions start ticked; guesses start unticked
-      // so a quick "Apply" only ever commits the safe set.
-      setTicked(
-        new Set(
-          r.plans.flatMap((p) =>
-            p.ops.filter((o) => o.confidence === "high").map((o) => o.op_id),
-          ),
-        ),
+      setCheckProgress({
+        done: Math.min(i + VERIFY_CHUNK, names.length),
+        total: names.length,
+      });
+    }
+    if (failed > 0) {
+      toast.warn(
+        `${failed} name lookup${failed === 1 ? "" : "s"} failed`,
+        "Those names keep their offline grading and retry on the next run.",
       );
-      setStep("review");
+    }
+  }
+
+  async function runAnalyze() {
+    setBusy(true);
+    try {
+      let r = await cleanupApi.analyze(scope, [...rules]);
+      if (r.pending_lookups.length > 0) {
+        // One more clue source: settle unknown artist-vs-album names
+        // online, then re-analyze with the verdicts folded in.
+        await checkNamesOnline(r.pending_lookups);
+        r = await cleanupApi.analyze(scope, [...rules]);
+      }
+      if (!prepareReview(r)) setStep("configure");
     } catch (e) {
       toast.error("Analysis failed", e instanceof Error ? e.message : undefined);
+      setStep("configure");
     } finally {
       setBusy(false);
     }
@@ -253,6 +332,20 @@ export function CleanupDialog({
       const next = new Set(prev);
       if (next.has(opId)) next.delete(opId);
       else next.add(opId);
+      return next;
+    });
+  }
+
+  function toggleLabel(opIds: string[]) {
+    // Header-checkbox semantics: if every op of this field is ticked,
+    // untick them all; otherwise tick them all.
+    setTicked((prev) => {
+      const next = new Set(prev);
+      const allOn = opIds.every((id) => next.has(id));
+      for (const id of opIds) {
+        if (allOn) next.delete(id);
+        else next.add(id);
+      }
       return next;
     });
   }
@@ -512,6 +605,30 @@ export function CleanupDialog({
           None
         </button>
       </div>
+      {labelGroups.length > 1 ? (
+        <div className="cleanup-review-controls cleanup-label-row">
+          <span className="muted small">By field:</span>
+          {labelGroups.map(([label, ids]) => {
+            const on = ids.every((id) => ticked.has(id));
+            return (
+              <button
+                key={label}
+                type="button"
+                className="btn-toggle"
+                aria-pressed={on}
+                title={
+                  on
+                    ? `Untick all ${ids.length} ${label} change${ids.length === 1 ? "" : "s"}`
+                    : `Tick all ${ids.length} ${label} change${ids.length === 1 ? "" : "s"}`
+                }
+                onClick={() => toggleLabel(ids)}
+              >
+                {label} <span className="cleanup-chip-count">{ids.length}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       <div className="cleanup-review">
         {folderGroups.map(([folder, group]) => (
           <section key={folder || "(root)"}>
@@ -547,6 +664,14 @@ export function CleanupDialog({
                           guess
                         </span>
                       ) : null}
+                      {op.verified ? (
+                        <span
+                          className="badge badge-ok cleanup-conf"
+                          title="Name verified against MusicBrainz"
+                        >
+                          verified
+                        </span>
+                      ) : null}
                     </span>
                   </label>
                 ))}
@@ -573,6 +698,26 @@ export function CleanupDialog({
         value={progress.total > 0 ? progress.done / progress.total : 0}
         max={1}
       />
+    </div>
+  );
+
+  const checkingBody = (
+    <div className="cleanup-checking">
+      <div className="upload-progress cleanup-progress">
+        <div className="upload-progress-label">
+          Checking names online — {checkProgress.done} / {checkProgress.total}
+        </div>
+        <progress
+          aria-label="Name check progress"
+          value={checkProgress.total > 0 ? checkProgress.done / checkProgress.total : 0}
+          max={1}
+        />
+      </div>
+      <p className="muted small">
+        Unfamiliar artist/album guesses are checked against MusicBrainz (one
+        request per second, as their API asks). Each name is looked up once and
+        the verdict is remembered — future cleanups reuse it instantly.
+      </p>
     </div>
   );
 
@@ -710,34 +855,54 @@ export function CleanupDialog({
       <button type="button" className="btn-ghost" onClick={() => setStep("configure")}>
         Back
       </button>
+    ) : step === "checking" ? (
+      <button
+        type="button"
+        className="btn-ghost"
+        onClick={() => {
+          skipCheckRef.current = true;
+        }}
+      >
+        Skip — use local clues only
+      </button>
     ) : undefined; // applying: no actions — let it finish
 
   const titles: Record<Step, string> = {
     configure: "Clean up library",
+    checking: "Checking names online",
     review: `Review proposed changes — ${scopeLabel}`,
     applying: "Applying changes",
     done: "Cleanup applied",
     history: "Cleanup history",
   };
 
+  function closeDialog() {
+    // Closing mid-check just stops further lookups; resolved verdicts are
+    // already cached and benefit the next run.
+    skipCheckRef.current = true;
+    onClose();
+  }
+
   return (
     <Modal
       title={titles[step]}
       ariaLabel="Library cleanup"
       className="modal-cleanup"
-      onClose={step === "applying" ? () => undefined : onClose}
+      onClose={step === "applying" ? () => undefined : closeDialog}
       footer={footer}
       closeButton={step !== "applying"}
     >
       {step === "configure"
         ? configureBody
-        : step === "review"
-          ? reviewBody
-          : step === "applying"
-            ? applyingBody
-            : step === "done"
-              ? doneBody
-              : historyBody}
+        : step === "checking"
+          ? checkingBody
+          : step === "review"
+            ? reviewBody
+            : step === "applying"
+              ? applyingBody
+              : step === "done"
+                ? doneBody
+                : historyBody}
     </Modal>
   );
 }

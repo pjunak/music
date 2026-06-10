@@ -358,7 +358,8 @@ export type CleanupRuleId =
   | "tag_title"
   | "tag_artist"
   | "tag_album"
-  | "tag_number";
+  | "tag_number"
+  | "tag_year";
 
 export interface CleanupScope {
   type: "all" | "folder" | "tracks";
@@ -376,6 +377,8 @@ export interface CleanupOp {
   new: string | number | null;
   rules: string[];
   confidence: "high" | "low";
+  /** Value confirmed by an online name lookup (MusicBrainz). */
+  verified: boolean;
 }
 
 export interface CleanupTrackPlan {
@@ -388,6 +391,15 @@ export interface CleanupTrackPlan {
 export interface CleanupAnalyzeResult {
   scanned: number;
   plans: CleanupTrackPlan[];
+  /** Names an online lookup could still settle — resolve via
+   *  cleanupApi.verify, then re-analyze (verdicts are cached forever,
+   *  each name is only ever looked up once). */
+  pending_lookups: string[];
+}
+
+export interface CleanupVerifyResult {
+  verified: number;
+  failed: string[];
 }
 
 export interface CleanupOpIn {
@@ -424,6 +436,10 @@ export interface CleanupRevertResult {
 export const cleanupApi = {
   analyze: (scope: CleanupScope, rules: CleanupRuleId[]) =>
     api.post<CleanupAnalyzeResult>("/api/library/cleanup/analyze", { scope, rules }),
+  /** Resolve a small batch of names against MusicBrainz (server paces at
+   *  1 req/s — keep batches ≤ 5 and chunk longer lists). */
+  verify: (names: string[]) =>
+    api.post<CleanupVerifyResult>("/api/library/cleanup/verify", { names }),
   /** One chunk of accepted ops. Pass the batch_id from the previous chunk
    *  so the whole run lands in a single revertable journal. */
   apply: (ops: CleanupOpIn[], batchId: number | null, scopeLabel: string) =>

@@ -25,9 +25,11 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
 from app.library import cleanup as engine
+from app.library import cleanup_lookup
 from app.library import index as library_index
 from app.models.base import utcnow
 from app.models.cleanup_batch import CleanupBatch
+from app.models.cleanup_lookup import CleanupNameLookup
 from app.models.track import Track
 
 logger = logging.getLogger(__name__)
@@ -44,13 +46,14 @@ RuleId = Literal[
     "tag_artist",
     "tag_album",
     "tag_number",
+    "tag_year",
 ]
 
 # Tag fields apply will write. The engine only suggests a subset, but the
 # apply path validates against this set so a hand-crafted op can't write
 # arbitrary attributes.
 _TAG_FIELDS: frozenset[str] = frozenset(
-    {"title", "artist", "album_artist", "album", "track_no", "disc_no"}
+    {"title", "artist", "album_artist", "album", "track_no", "disc_no", "year"}
 )
 
 
@@ -80,6 +83,7 @@ class CleanupOpOut(BaseModel):
     new: int | str | None
     rules: list[str]
     confidence: Literal["high", "low"]
+    verified: bool = False
 
 
 class CleanupTrackPlanOut(BaseModel):
@@ -92,6 +96,10 @@ class CleanupTrackPlanOut(BaseModel):
 class AnalyzeResult(BaseModel):
     scanned: int
     plans: list[CleanupTrackPlanOut]
+    # Names an online lookup could still settle (deduped; not yet cached).
+    # The client resolves them via POST /verify and re-analyzes — the
+    # second pass picks the verdicts up from the cache.
+    pending_lookups: list[str]
 
 
 class CleanupOpIn(BaseModel):
@@ -170,14 +178,27 @@ def _resolve_scope(db: DbSession, scope: CleanupScope) -> list[Track]:
     return list(db.scalars(select(Track)).all())
 
 
+def _load_verdicts(db: DbSession) -> dict[str, tuple[int, int]]:
+    """The whole lookup cache as the engine's verdict map. Names are only
+    ever queried once — after that they ride along with every analysis for
+    free, which is what lets the lookup act as just another clue instead
+    of a separate verification step."""
+    rows = db.scalars(select(CleanupNameLookup)).all()
+    return {r.loose_key: (r.artist_score, r.album_score) for r in rows}
+
+
 @router.post("/analyze", response_model=AnalyzeResult)
 def analyze(payload: AnalyzeRequest, _: CurrentUser, db: DbSession) -> AnalyzeResult:
     scope_tracks = _resolve_scope(db, payload.scope)
     all_tracks = list(db.scalars(select(Track)).all())
     enabled = set(payload.rules) if payload.rules is not None else engine.DEFAULT_RULES
-    plans = engine.analyze(scope_tracks, all_tracks, enabled)
+    verdicts = _load_verdicts(db)
+    plans = engine.analyze(scope_tracks, all_tracks, enabled, verdicts)
     return AnalyzeResult(
         scanned=len(scope_tracks),
+        # A plan may exist only to surface names worth looking up
+        # (`wants_lookup`); those aren't visible changes — don't render
+        # empty cards for them.
         plans=[
             CleanupTrackPlanOut(
                 track_id=p.track_id,
@@ -192,14 +213,69 @@ def analyze(payload: AnalyzeRequest, _: CurrentUser, db: DbSession) -> AnalyzeRe
                         new=o.new,
                         rules=list(o.rules),
                         confidence=o.confidence,  # type: ignore[arg-type]
+                        verified=o.verified,
                     )
                     for o in p.ops
                 ],
                 notes=p.notes,
             )
             for p in plans
+            if p.ops or p.notes
         ],
+        pending_lookups=engine.pending_lookups(plans, verdicts),
     )
+
+
+class VerifyRequest(BaseModel):
+    """One small batch of names to resolve against MusicBrainz. Kept short
+    (the lookup client paces at 1 request/second, two queries per name) so
+    a synchronous call stays well under proxy timeouts; the client chunks
+    a longer list and shows progress between calls."""
+
+    names: list[str] = Field(min_length=1, max_length=5)
+
+
+class VerifyResult(BaseModel):
+    verified: int
+    failed: list[str]
+
+
+@router.post("/verify", response_model=VerifyResult)
+def verify_names(payload: VerifyRequest, _: CurrentUser, db: DbSession) -> VerifyResult:
+    """Resolve names and cache the verdicts. Idempotent: already-cached
+    names are skipped, and failures aren't cached so they retry naturally
+    on a later run. The next /analyze picks the fresh verdicts up."""
+    verified = 0
+    failed: list[str] = []
+    for raw in payload.names:
+        name = raw.strip()
+        key = engine.loose_key(name)
+        if len(key) < 2:
+            continue
+        existing = db.scalar(
+            select(CleanupNameLookup).where(CleanupNameLookup.loose_key == key)
+        )
+        if existing is not None:
+            continue
+        try:
+            artist_score, album_score = cleanup_lookup.fetch_name_scores(name)
+        except Exception as e:
+            logger.warning("name lookup failed for %r: %s", name, e)
+            failed.append(name)
+            continue
+        db.add(
+            CleanupNameLookup(
+                loose_key=key,
+                name=name[:512],
+                artist_score=artist_score,
+                album_score=album_score,
+            )
+        )
+        # Commit per name: partial progress survives a failure later in
+        # the batch (those names just retry next run).
+        db.commit()
+        verified += 1
+    return VerifyResult(verified=verified, failed=failed)
 
 
 # --- apply ------------------------------------------------------------------

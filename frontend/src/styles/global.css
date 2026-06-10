@@ -4876,3 +4876,23 @@ input.volume-slider::-moz-range-thumb {
     grid-column: 2;
   }
 }
+
+/* By-field tick chips in the cleanup review (req: "tick all artist
+ * changes at once"). Built on .btn-toggle for the pressed state. */
+.cleanup-label-row {
+  margin-top: calc(-1 * var(--space-2));
+}
+.cleanup-chip-count {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.btn-toggle[aria-pressed="true"] .cleanup-chip-count {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.cleanup-checking {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}

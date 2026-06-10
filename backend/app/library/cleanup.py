@@ -31,10 +31,14 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Protocol
+
+# Verdict map: loose name key -> (artist_score, album_score) from cached
+# MusicBrainz lookups. Fed in by the API layer; None means "offline only".
+Verdicts = Mapping[str, tuple[int, int]]
 
 # --- rule ids ---------------------------------------------------------------
 
@@ -48,6 +52,7 @@ RULE_TAG_TITLE = "tag_title"
 RULE_TAG_ARTIST = "tag_artist"
 RULE_TAG_ALBUM = "tag_album"
 RULE_TAG_NUMBER = "tag_number"
+RULE_TAG_YEAR = "tag_year"
 
 ALL_RULES: frozenset[str] = frozenset(
     {
@@ -61,6 +66,7 @@ ALL_RULES: frozenset[str] = frozenset(
         RULE_TAG_ARTIST,
         RULE_TAG_ALBUM,
         RULE_TAG_NUMBER,
+        RULE_TAG_YEAR,
     }
 )
 # Case normalisation is opinionated (ALL-CAPS stems may be deliberate), so
@@ -83,6 +89,7 @@ class TrackLike(Protocol):
     album: str
     track_no: int | None
     disc_no: int | None
+    year: int | None
 
 
 @dataclass
@@ -94,6 +101,7 @@ class Suggestion:
     new: str | int | None
     rules: tuple[str, ...]
     confidence: str  # HIGH | LOW
+    verified: bool = False  # value confirmed by an online name lookup
 
     @property
     def op_id(self) -> str:
@@ -110,6 +118,11 @@ class TrackPlan:
     path: str
     ops: list[Suggestion] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Names this track's analysis computed but couldn't settle (no verdict
+    # yet, and not emitted as a confident op) — e.g. an album candidate
+    # suppressed as an invisible diff that a lookup might flip to the
+    # artist field. Feeds `pending_lookups`; not part of the visible plan.
+    wants_lookup: list[str] = field(default_factory=list)
 
 
 # --- text helpers -----------------------------------------------------------
@@ -130,6 +143,38 @@ def _loose(s: str) -> str:
 def _loose_eq(a: str, b: str) -> bool:
     la, lb = _loose(a), _loose(b)
     return bool(la) and la == lb
+
+
+def loose_key(name: str) -> str:
+    """Public form of the comparison key — the lookup cache is keyed on it
+    so every spelling variant of a verified name shares one verdict."""
+    return _loose(name)
+
+
+def verdict_kind(artist_score: int, album_score: int) -> str:
+    """Classify a name from its MusicBrainz search scores (0-100 relevance
+    of the best match as an artist vs as a release-group). Conservative on
+    purpose: anything not clearly one-sided is "both"/"unknown" and changes
+    nothing — a verdict may upgrade or flip a guess, never muddy a fact."""
+    artist_strong, album_strong = artist_score >= 90, album_score >= 90
+    if artist_strong and album_strong:
+        return "both"
+    if artist_strong and album_score <= 70:
+        return "artist"
+    if album_strong and artist_score <= 70:
+        return "album"
+    if artist_strong or album_strong:
+        return "both"  # one strong, the other middling — too close to call
+    return "unknown"
+
+
+def _known_kind(name: str | None, verdicts: Verdicts | None) -> str | None:
+    if not verdicts or not name:
+        return None
+    scores = verdicts.get(_loose(name))
+    if scores is None:
+        return None
+    return verdict_kind(*scores)
 
 
 def _normalize_separators(stem: str) -> str:
@@ -209,6 +254,9 @@ _JUNK_INNER = re.compile(
         |official
         |lyrics?
         |with\s+lyrics?
+        |audio\s+only
+        |official\s+(?:song|track)
+        |(?:hq|hd)\s+(?:audio|video|version)
         |hd|hq|4k
         |full\s+(?:album|song|track)
         |free\s+download
@@ -253,13 +301,88 @@ def _strip_junk(stem: str) -> str:
 
 # --- folder context ----------------------------------------------------------
 
+# Folder names that describe storage, not music — never offered as an
+# artist/album value (a file in "Uploads/" is not on an album called
+# Uploads). Matched loosely (case/accents/punctuation ignored).
+_GENERIC_FOLDER_NAMES: frozenset[str] = frozenset(
+    _loose(n)
+    for n in (
+        "uploads", "upload", "music", "new", "misc", "various", "downloads",
+        "download", "import", "imports", "inbox", "unsorted", "sorted",
+        "tracks", "songs", "audio", "files", "library", "collection",
+        "collections", "mp3", "mp3s", "flac", "flacs", "temp", "tmp", "other",
+        "stuff", "mixed", "mix", "singles", "albums", "album", "artists",
+        "artist", "compilations", "compilation", "playlists", "playlist",
+        "soundtracks", "soundtrack", "ost", "music library", "random",
+    )
+)
+
+
+def _is_generic_name(name: str) -> bool:
+    return not name or _loose(name) in _GENERIC_FOLDER_NAMES
+
+
+# "CD1", "Disc 2", "disk_3" — a disc container inside an album folder.
+_DISC_FOLDER_RE = re.compile(r"(?:cd|disc|disk)[\s._-]*(\d{1,2})", re.IGNORECASE)
+# Year decoration on a folder name: "Album (2013)" / "[1987]" / "2019 - Album".
+_FOLDER_YEAR_RE = re.compile(
+    r"^\s*((?:19|20)\d{2})\s*[-–—.]\s*(.+)$|^(.+?)\s*[(\[]((?:19|20)\d{2})[)\]]\s*$"
+)
+
+
+def _split_folder_label(name: str) -> tuple[str | None, str, int | None]:
+    """Decompose a folder name into (artist_part, album_part, year).
+
+    "Artist - Album (2013)" → ("Artist", "Album", 2013); "2019 - Album" →
+    (None... or split; "Plain Name" → (None, "Plain Name", None). The split
+    only fires on a spaced " - " so hyphenated names stay whole."""
+    base = name.strip()
+    year: int | None = None
+    m = _FOLDER_YEAR_RE.match(base)
+    if m:
+        if m.group(1) is not None:
+            year, base = int(m.group(1)), m.group(2).strip()
+        else:
+            base, year = m.group(3).strip(), int(m.group(4))
+    parts = [p.strip() for p in re.split(r"\s+-\s+", base) if p.strip()]
+    if len(parts) == 2:
+        return parts[0], parts[1], year
+    return None, base, year
+
+
+def _dominant(values: list[str]) -> tuple[str | None, bool]:
+    """(most common non-empty value, was it unanimous) when at least two
+    values agree and they make up ≥ 2/3 of the non-empty set — the
+    partially-tagged-album signal. (None, False) otherwise."""
+    cleaned = [v for v in values if v]
+    if len(cleaned) < 2:
+        return None, False
+    counts = Counter(_loose(v) for v in cleaned)
+    key, count = counts.most_common(1)[0]
+    if not key or count < 2 or count / len(cleaned) < 2 / 3:
+        return None, False
+    texts = Counter(v for v in cleaned if _loose(v) == key)
+    return texts.most_common(1)[0][0], count == len(cleaned)
+
 
 @dataclass
 class _FolderCtx:
-    name: str  # leaf folder name ("" at the music root)
+    name: str  # effective album-folder leaf ("" at root; the parent of a CD1/ folder)
+    parent_name: str  # raw immediate parent leaf (may be the disc folder itself)
+    grandparent: str  # leaf above the effective album folder ("" when none)
     numbers_corroborated: bool
     seg1: str | None  # canonical text of a folder-wide shared first segment
     seg2: str | None
+    disc_from_folder: int | None
+    folder_artist: str | None  # "Artist" half of an "Artist - Album" folder name
+    folder_album: str | None  # album candidate from the folder name (year/artist stripped)
+    folder_year: int | None
+    albumish: bool  # the folder smells like one album's container
+    dominant_artist: str | None
+    dominant_artist_unanimous: bool
+    dominant_album: str | None
+    dominant_album_unanimous: bool
+    verdicts: Verdicts | None = None
 
 
 def _numbers_corroborated(stems: Sequence[str]) -> bool:
@@ -289,9 +412,29 @@ def _shared_segment(seg_lists: Sequence[list[str]], index: int) -> str | None:
     return texts.most_common(1)[0][0]
 
 
-def _build_ctx(folder: str, raw_stems: Sequence[str]) -> _FolderCtx:
-    name = PurePosixPath(folder).name if folder else ""
-    stems = [_normalize_separators(s) for s in raw_stems]
+def _build_ctx(
+    folder: str, tracks: Sequence[TrackLike], verdicts: Verdicts | None = None
+) -> _FolderCtx:
+    path_parts = PurePosixPath(folder).parts if folder else ()
+    parent_name = path_parts[-1] if path_parts else ""
+
+    # A "CD1"-style parent is a disc container: the *album* context is one
+    # level up, and the disc number itself becomes a tag clue.
+    disc: int | None = None
+    album_parts = path_parts
+    if parent_name and (dm := _DISC_FOLDER_RE.fullmatch(parent_name.strip())):
+        disc = int(dm.group(1))
+        album_parts = path_parts[:-1]
+    name = album_parts[-1] if album_parts else ""
+    grandparent = album_parts[-2] if len(album_parts) >= 2 else ""
+
+    folder_artist: str | None = None
+    folder_album: str | None = None
+    folder_year: int | None = None
+    if name:
+        folder_artist, folder_album, folder_year = _split_folder_label(name)
+
+    stems = [_normalize_separators(PurePosixPath(t.path).stem) for t in tracks]
 
     pass1 = _numbers_corroborated(stems)
     denumbered = [(m.rest if (m := _match_leading_number(s)) else s) for s in stems]
@@ -315,7 +458,43 @@ def _build_ctx(folder: str, raw_stems: Sequence[str]) -> _FolderCtx:
             stripped.append(" - ".join(parts[n_drop:]))
         pass2 = _numbers_corroborated(stripped)
 
-    return _FolderCtx(name=name, numbers_corroborated=pass1 or pass2, seg1=seg1, seg2=seg2)
+    # Sibling-tag dominance: a partially-tagged album lets the tagged
+    # majority fill the stragglers. Values that are (probably) not real
+    # tags don't vote: disc-folder fallbacks ("CD1"), suspect duplicates
+    # (album == artist, a common rip bug), and folder-name echoes — an
+    # untagged row's album mirrors its parent folder, so counting those
+    # would let fallbacks outvote the genuinely tagged siblings.
+    dominant_artist, da_unanimous = _dominant([t.artist for t in tracks])
+    dominant_album, dal_unanimous = _dominant(
+        [
+            t.album
+            for t in tracks
+            if t.album
+            and not _DISC_FOLDER_RE.fullmatch(t.album.strip())
+            and not (t.artist and _loose_eq(t.album, t.artist))
+            and not _loose_eq(t.album, name)
+            and not _loose_eq(t.album, parent_name)
+        ]
+    )
+
+    return _FolderCtx(
+        name=name,
+        parent_name=parent_name,
+        grandparent=grandparent,
+        numbers_corroborated=pass1 or pass2,
+        seg1=seg1,
+        seg2=seg2,
+        disc_from_folder=disc,
+        folder_artist=folder_artist,
+        folder_album=folder_album,
+        folder_year=folder_year,
+        albumish=folder_year is not None or disc is not None or pass1 or pass2,
+        dominant_artist=dominant_artist,
+        dominant_artist_unanimous=da_unanimous,
+        dominant_album=dominant_album,
+        dominant_album_unanimous=dal_unanimous,
+        verdicts=verdicts,
+    )
 
 
 # --- per-track analysis -------------------------------------------------------
@@ -329,6 +508,22 @@ class _Extraction:
     artist: str | None = None
     artist_conf: str = LOW
     album: str | None = None
+    album_conf: str = LOW
+
+
+def _album_emptyish(track: TrackLike, ctx: _FolderCtx) -> bool:
+    """True when the album tag carries no usable information: absent, a
+    filename/folder fallback (the row mirrors the parent folder name when
+    the tag is missing), or a *suspect duplicate* — rips commonly stuff the
+    artist's name into the album field, so album == artist means the real
+    album is still unknown and folder clues stay in play."""
+    if not track.album:
+        return True
+    if _loose_eq(track.album, ctx.name) or _loose_eq(track.album, ctx.parent_name):
+        return True
+    if track.artist and _loose_eq(track.album, track.artist):
+        return True
+    return bool(track.album_artist) and _loose_eq(track.album, track.album_artist)
 
 
 def _classify_segment(
@@ -341,33 +536,68 @@ def _classify_segment(
     like part of the actual title and must be kept.
     """
     artist_empty = not track.artist
-    album_emptyish = not track.album or _loose_eq(track.album, ctx.name)
+    album_emptyish = _album_emptyish(track, ctx)
 
     if _loose_eq(seg, track.artist) or _loose_eq(seg, track.album_artist):
         return (RULE_ARTIST, HIGH, None)
-    if _loose_eq(seg, track.album):
+    if _loose_eq(seg, track.album) and not album_emptyish:
+        # A suspect album value (== artist) was already caught by the
+        # artist branch above; a folder-fallback value is handled below.
         return (RULE_ALBUM, HIGH, None)
-    if _loose_eq(seg, ctx.name):
-        # Folder named after the segment. Whether the folder is an artist
-        # or an album is ambiguous; artist is the more common layout, so
-        # the guess (if tags are empty) goes there — graded low.
-        guess = ("artist", seg, HIGH if ctx.seg1 and _loose_eq(seg, ctx.seg1) else LOW)
-        return (RULE_ARTIST, HIGH, guess if artist_empty else None)
+    if ctx.folder_artist is not None and _loose_eq(seg, ctx.folder_artist):
+        # The folder spells it out: "Artist - Album". A segment matching
+        # the artist half is the artist, with structural certainty.
+        return (RULE_ARTIST, HIGH, ("artist", seg, HIGH) if artist_empty else None)
+    if (
+        ctx.folder_artist is not None
+        and ctx.folder_album is not None
+        and _loose_eq(seg, ctx.folder_album)
+    ):
+        return (RULE_ALBUM, HIGH, ("album", seg, HIGH) if album_emptyish else None)
+    if _loose_eq(seg, ctx.grandparent):
+        # Artist/Album/"Artist - Title.mp3" — the segment names the
+        # grandparent folder, the classic per-artist library layout.
+        return (RULE_ARTIST, HIGH, ("artist", seg, HIGH) if artist_empty else None)
+    if _loose_eq(seg, ctx.name) or (
+        ctx.folder_album is not None and _loose_eq(seg, ctx.folder_album)
+    ):
+        # Folder named after the segment (possibly modulo a year marker).
+        # Stripping is safe — the segment is folder-redundant either way —
+        # but whether that name is an artist or an album is genuinely
+        # ambiguous (a game-soundtrack folder is an album-ish name, a band
+        # folder is an artist). An online verdict settles it; otherwise the
+        # tag guess ships low.
+        kind = _known_kind(seg, ctx.verdicts)
+        if kind == "album":
+            return (RULE_ALBUM, HIGH, ("album", seg, HIGH) if album_emptyish else None)
+        guess_conf = HIGH if kind == "artist" else LOW
+        return (RULE_ARTIST, HIGH, ("artist", seg, guess_conf) if artist_empty else None)
     if position == 0 and ctx.seg1 is not None and _loose_eq(seg, ctx.seg1):
-        conf = HIGH if _loose_eq(seg, ctx.name) else LOW
+        kind = _known_kind(seg, ctx.verdicts)
+        if kind == "album" and album_emptyish:
+            # A folder-wide "Album - Title" prefix, confirmed by lookup.
+            return (RULE_ALBUM, HIGH, ("album", seg, HIGH))
+        conf = HIGH if kind == "artist" else LOW
         return (RULE_ARTIST, HIGH, ("artist", seg, conf) if artist_empty else None)
     if position == 1 and ctx.seg2 is not None and _loose_eq(seg, ctx.seg2):
-        return (RULE_ALBUM, HIGH, ("album", seg, LOW) if album_emptyish else None)
+        conf = HIGH if _known_kind(seg, ctx.verdicts) == "album" else LOW
+        return (RULE_ALBUM, HIGH, ("album", seg, conf) if album_emptyish else None)
     if (
         position == 0
         and ctx.seg1 is None
         and n_parts == 2
-        and artist_empty
         and not seg.strip().isdigit()  # "01 - Foo" with number-strip off isn't "artist 01"
     ):
-        # Lone "A - B" file with no tags and no siblings to corroborate.
-        # Most likely "Artist - Title", but it's a guess — ships as low.
-        return (RULE_ARTIST, LOW, ("artist", seg, LOW))
+        # Lone "A - B" file with no siblings to corroborate. A verdict can
+        # settle which half of the metadata the prefix is; otherwise it's
+        # most likely "Artist - Title", but only as a low guess.
+        kind = _known_kind(seg, ctx.verdicts)
+        if kind == "album" and album_emptyish:
+            return (RULE_ALBUM, HIGH, ("album", seg, HIGH))
+        if artist_empty:
+            if kind == "artist":
+                return (RULE_ARTIST, HIGH, ("artist", seg, HIGH))
+            return (RULE_ARTIST, LOW, ("artist", seg, LOW))
     return None
 
 
@@ -436,6 +666,7 @@ def _transform_stem(
                 extraction.artist_conf = g_conf
             elif g_field == "album" and extraction.album is None:
                 extraction.album = g_value
+                extraction.album_conf = g_conf
         if rule in enabled:
             drop += 1
             fire(rule, conf)
@@ -503,34 +734,142 @@ def _plan_track(track: TrackLike, ctx: _FolderCtx, enabled: Collection[str]) -> 
                 )
             )
 
-    if RULE_TAG_ARTIST in enabled and not track.artist and extraction.artist:
+    artist_allowed = RULE_TAG_ARTIST in enabled and not track.artist
+    album_allowed = RULE_TAG_ALBUM in enabled and _album_emptyish(track, ctx)
+
+    # Each candidate carries whether a contrary online verdict may *flip*
+    # it to the other field: yes for structure/filename guesses (a folder
+    # name's kind is exactly what's uncertain), never for values copied
+    # from real tags (album_artist, sibling-tag dominance) — a fuzzy name
+    # match doesn't outrank explicit metadata.
+    artist_new: str | None = None
+    artist_conf = LOW
+    artist_flippable = False
+    if artist_allowed:
+        # Strongest signal first: the file's own album-artist tag, then
+        # what the filename segments said, then folder-level clues.
+        if track.album_artist:
+            artist_new, artist_conf = track.album_artist, HIGH
+        elif extraction.artist:
+            artist_new, artist_conf = extraction.artist, extraction.artist_conf
+            artist_flippable = extraction.artist_conf == LOW
+        elif ctx.dominant_artist:
+            # Tagged siblings vote: a partially-tagged album fills its
+            # stragglers; high only when every tagged sibling agrees.
+            artist_new = ctx.dominant_artist
+            artist_conf = HIGH if ctx.dominant_artist_unanimous else LOW
+        elif ctx.folder_artist and not _is_generic_name(ctx.folder_artist):
+            artist_new, artist_flippable = ctx.folder_artist, True
+        elif ctx.albumish and not _is_generic_name(ctx.grandparent):
+            # Artist/Album/tracks layout: the level above an album-looking
+            # folder is usually the artist — but only a guess.
+            artist_new, artist_flippable = ctx.grandparent, True
+
+    album_new: str | None = None
+    album_conf = LOW
+    album_flippable = False
+    if album_allowed:
+        artistish = [
+            v
+            for v in (
+                track.artist,
+                track.album_artist,
+                extraction.artist,
+                artist_new,
+                ctx.dominant_artist,
+                ctx.folder_artist,
+            )
+            if v
+        ]
+        if extraction.album:
+            album_new = extraction.album
+            album_conf = (
+                HIGH
+                if ctx.folder_album and _loose_eq(extraction.album, ctx.folder_album)
+                else extraction.album_conf
+            )
+            album_flippable = album_conf == LOW
+        elif ctx.dominant_album:
+            album_new = ctx.dominant_album
+            album_conf = HIGH if ctx.dominant_album_unanimous else LOW
+        elif (
+            ctx.folder_album
+            and not _is_generic_name(ctx.folder_album)
+            and not any(_loose_eq(ctx.folder_album, a) for a in artistish)
+        ):
+            # The folder itself, stripped of year decoration / artist half.
+            # High when the folder smells like one album's container
+            # (year marker, disc subfolders, a numbered sequence) — but the
+            # *kind* of the name stays uncertain, so it remains flippable.
+            album_new = ctx.folder_album
+            album_conf = HIGH if ctx.albumish else LOW
+            album_flippable = True
+
+    # Online verdicts referee the candidates: a confirmed kind upgrades the
+    # guess; a *contradicted* flippable one swaps sides instead of shipping
+    # wrong — e.g. a folder named after the artist would offer it as the
+    # album, but a lookup saying "that's an artist" moves it there.
+    verdict_artist = _known_kind(artist_new, ctx.verdicts)
+    verdict_album = _known_kind(album_new, ctx.verdicts)
+    artist_conf_pre, album_conf_pre = artist_conf, album_conf
+    flip_artist = verdict_artist == "album" and artist_flippable
+    flip_album = verdict_album == "artist" and album_flippable
+    if verdict_artist == "artist":
+        artist_conf = HIGH
+    if verdict_album == "album":
+        album_conf = HIGH
+    swap_artist, swap_album = artist_new, album_new
+    if flip_artist:
+        artist_new = None
+    if flip_album:
+        album_new = None
+    if flip_album and artist_allowed and artist_new is None and swap_album:
+        artist_new, artist_conf = swap_album, HIGH
+    if flip_artist and album_allowed and album_new is None and swap_artist:
+        album_new, album_conf = swap_artist, HIGH
+
+    # Names a lookup could still settle: computed candidates with no
+    # verdict yet, unless they're tag-derived certainties (a lookup can
+    # neither upgrade nor flip those). Includes candidates suppressed as
+    # invisible diffs — settling their kind is how e.g. an artist-named
+    # folder's name finds its way to the artist field on the next pass.
+    for candidate, conf, flippable in (
+        (swap_artist, artist_conf_pre, artist_flippable),
+        (swap_album, album_conf_pre, album_flippable),
+    ):
+        if (
+            candidate
+            and (flippable or conf == LOW)
+            and _known_kind(candidate, ctx.verdicts) is None
+            and str(candidate) not in plan.wants_lookup
+        ):
+            plan.wants_lookup.append(str(candidate))
+
+    if artist_new:
         plan.ops.append(
             Suggestion(
                 track_id=track.id,
                 kind="tag",
                 field="artist",
                 old="",
-                new=extraction.artist,
+                new=artist_new,
                 rules=(RULE_TAG_ARTIST,),
-                confidence=extraction.artist_conf,
+                confidence=artist_conf,
+                verified=_known_kind(artist_new, ctx.verdicts) == "artist",
             )
         )
 
-    if (
-        RULE_TAG_ALBUM in enabled
-        and extraction.album
-        and (not track.album or _loose_eq(track.album, ctx.name))
-        and extraction.album != track.album
-    ):
+    if album_new and album_new != track.album:
         plan.ops.append(
             Suggestion(
                 track_id=track.id,
                 kind="tag",
                 field="album",
                 old=track.album,
-                new=extraction.album,
+                new=album_new,
                 rules=(RULE_TAG_ALBUM,),
-                confidence=LOW,
+                confidence=album_conf,
+                verified=_known_kind(album_new, ctx.verdicts) == "album",
             )
         )
 
@@ -547,18 +886,38 @@ def _plan_track(track: TrackLike, ctx: _FolderCtx, enabled: Collection[str]) -> 
                     confidence=extraction.number_conf,
                 )
             )
-        if track.disc_no is None and extraction.disc_no is not None:
+        disc_new: int | None = None
+        disc_conf = LOW
+        if extraction.disc_no is not None:
+            disc_new, disc_conf = extraction.disc_no, extraction.number_conf
+        elif ctx.disc_from_folder is not None:
+            # Sitting inside "CD2/" *is* the disc number — unambiguous.
+            disc_new, disc_conf = ctx.disc_from_folder, HIGH
+        if track.disc_no is None and disc_new is not None:
             plan.ops.append(
                 Suggestion(
                     track_id=track.id,
                     kind="tag",
                     field="disc_no",
                     old=None,
-                    new=extraction.disc_no,
+                    new=disc_new,
                     rules=(RULE_TAG_NUMBER,),
-                    confidence=extraction.number_conf,
+                    confidence=disc_conf,
                 )
             )
+
+    if RULE_TAG_YEAR in enabled and track.year is None and ctx.folder_year is not None:
+        plan.ops.append(
+            Suggestion(
+                track_id=track.id,
+                kind="tag",
+                field="year",
+                old=None,
+                new=ctx.folder_year,
+                rules=(RULE_TAG_YEAR,),
+                confidence=HIGH,
+            )
+        )
 
     if new_stem != ppath.stem and fired:
         plan.ops.append(
@@ -588,10 +947,13 @@ def analyze(
     scope_tracks: Sequence[TrackLike],
     all_tracks: Sequence[TrackLike],
     enabled: Collection[str] | None = None,
+    verdicts: Verdicts | None = None,
 ) -> list[TrackPlan]:
     """Build cleanup plans for `scope_tracks`. `all_tracks` supplies folder
     context (sibling corroboration) — pass every indexed track; tracks
-    outside the scope inform the heuristics but get no suggestions."""
+    outside the scope inform the heuristics but get no suggestions.
+    `verdicts` is the cached online-lookup map (see `pending_lookups`);
+    analysis is identical and fully offline without it, just less sure."""
     rules = frozenset(enabled) if enabled is not None else DEFAULT_RULES
 
     by_folder_all: dict[str, list[TrackLike]] = {}
@@ -607,7 +969,7 @@ def analyze(
         # something (an album selected inside a junk-drawer folder), else
         # over the whole folder.
         ctx_tracks = group if len(group) >= 2 else by_folder_all.get(folder, group)
-        ctx = _build_ctx(folder, [PurePosixPath(t.path).stem for t in ctx_tracks])
+        ctx = _build_ctx(folder, ctx_tracks, verdicts)
 
         folder_plans = [_plan_track(t, ctx, rules) for t in sorted(group, key=lambda t: t.path)]
 
@@ -640,9 +1002,41 @@ def analyze(
                 continue
             proposed[key] = plan.track_id
 
-        plans.extend(p for p in folder_plans if p.ops or p.notes)
+        plans.extend(p for p in folder_plans if p.ops or p.notes or p.wants_lookup)
 
     return plans
+
+
+def pending_lookups(
+    plans: Sequence[TrackPlan], verdicts: Verdicts | None = None
+) -> list[str]:
+    """Distinct names whose artist-vs-album nature an online lookup could
+    still settle: each plan's `wants_lookup` plus the values of remaining
+    *low-confidence* artist/album suggestions. Deduped on the loose key
+    (one lookup covers every track and spelling variant of the name) and
+    ordered by first appearance. Tag-derived certainties are never
+    second-guessed, so a fully-confident analysis asks for nothing."""
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def add(name: str) -> None:
+        key = _loose(name.strip())
+        if len(key) < 2 or key in seen or (verdicts is not None and key in verdicts):
+            return
+        seen.add(key)
+        out.append(name.strip())
+
+    for plan in plans:
+        for wanted in plan.wants_lookup:
+            add(wanted)
+        for op in plan.ops:
+            if (
+                op.kind == "tag"
+                and op.field in ("artist", "album")
+                and op.confidence == LOW
+            ):
+                add(str(op.new or ""))
+    return out
 
 
 __all__ = [
@@ -651,5 +1045,9 @@ __all__ = [
     "Suggestion",
     "TrackLike",
     "TrackPlan",
+    "Verdicts",
     "analyze",
+    "loose_key",
+    "pending_lookups",
+    "verdict_kind",
 ]
