@@ -70,6 +70,10 @@ class TreeResponse(BaseModel):
     tracks: list[TrackOut]
 
 
+class FoldersResponse(BaseModel):
+    folders: list[FolderOut]
+
+
 class SearchResponse(BaseModel):
     tracks: list[TrackOut]
     total: int
@@ -247,6 +251,24 @@ def get_tree(
             for f in folders
         ],
         tracks=[TrackOut.model_validate(t) for t in tracks],
+    )
+
+
+@router.get("/folders", response_model=FoldersResponse)
+def list_all_folders(_: CurrentUser, db: DbSession) -> FoldersResponse:
+    """The whole folder hierarchy (any depth) in one response. Powers the
+    client-side tree: filtering, type-ahead and auto-reveal need every
+    folder up front rather than one lazy level per round trip."""
+    return FoldersResponse(
+        folders=[
+            FolderOut(
+                name=f.name,
+                path=f.path,
+                track_count=f.track_count,
+                has_children=f.has_children,
+            )
+            for f in library_index.all_folders(db)
+        ]
     )
 
 

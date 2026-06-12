@@ -49,6 +49,12 @@ interface UiStore {
    *  time they leave Controls. Per-device, not synced server-side. */
   sfxVolume: number;
   setSfxVolume: (v: number) => void;
+
+  /** Library folder-tree column width in px, set by dragging the tree's
+   *  right edge. `null` = the stylesheet default (`--rail-tree`).
+   *  Double-clicking the resize handle resets. Persisted. */
+  libraryTreeWidth: number | null;
+  setLibraryTreeWidth: (v: number | null) => void;
 }
 
 export function defaultDeviceName(): string {
@@ -90,6 +96,8 @@ export const useUiStore = create<UiStore>()(
       setForceLocalPlayback: (v) => set({ forceLocalPlayback: v }),
       sfxVolume: DEFAULT_SFX_VOLUME,
       setSfxVolume: (v) => set({ sfxVolume: Math.max(0, Math.min(1, v)) }),
+      libraryTreeWidth: null,
+      setLibraryTreeWidth: (v) => set({ libraryTreeWidth: v }),
     }),
     {
       name: "music-ui",
@@ -101,6 +109,7 @@ export const useUiStore = create<UiStore>()(
         deviceName: s.deviceName,
         clientId: s.clientId,
         sfxVolume: s.sfxVolume,
+        libraryTreeWidth: s.libraryTreeWidth,
       }),
       migrate: (persisted) => {
         // v0 → v1: drop the old self-asserted `capabilities` (output is now a

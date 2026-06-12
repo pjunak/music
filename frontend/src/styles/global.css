@@ -82,7 +82,8 @@
   --leading-base: 1.5;
 
   /* --- layout sizing ------------------------------------------------ */
-  --rail-tree: 280px; /* Library folder-tree column */
+  --rail-tree: 340px; /* Library folder-tree column (operator-resizable; the
+                         dragged width overrides this per-view via uiStore) */
   --rail-inspector: 340px; /* Library tag-inspector column */
   --form-width: 520px; /* create / meta cards, narrow forms */
   --footer-h: 5.5rem; /* NowPlayingBar height — drives the toaster offset */
@@ -1429,7 +1430,7 @@ kbd,
   /* Match the Music workspace tree column + gap so SFX has the same visual
    * structure and element sizes (SFX has no tag inspector, so it's the
    * two-column tree + main variant). */
-  grid-template-columns: minmax(220px, var(--rail-tree)) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, var(--rail-tree)) minmax(0, 1fr);
   gap: var(--space-6);
   flex: 1;
   min-height: 0;
@@ -1442,8 +1443,11 @@ kbd,
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-4);
-  overflow-y: auto;
   min-height: 0;
+  /* Scrolling lives on the tree's own .tree-scroll (so the filter box and
+   * the folder actions stay pinned) — and the aside must NOT clip overflow
+   * or the .rail-resize handle hanging into the grid gap would vanish. */
+  position: relative;
 }
 .library-sidebar h3 {
   margin: 0 0 0.2rem;
@@ -1497,7 +1501,7 @@ kbd,
 
 .music-workspace {
   display: grid;
-  grid-template-columns: minmax(220px, var(--rail-tree)) minmax(0, 1fr) minmax(280px, var(--rail-inspector));
+  grid-template-columns: minmax(240px, var(--rail-tree)) minmax(0, 1fr) minmax(280px, var(--rail-inspector));
   gap: var(--space-6);
   flex: 1;
   min-height: 0;
@@ -1690,8 +1694,11 @@ kbd,
 
 /* folder-picker modal: cap the embedded tree height */
 .folder-picker-tree {
+  /* The tree's own .tree-scroll scrolls (keeps the filter box pinned);
+   * this wrapper just bounds the height. */
+  display: flex;
+  flex-direction: column;
   max-height: 320px;
-  overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.3rem;
@@ -1708,7 +1715,8 @@ kbd,
 /* responsive: drop the inspector below the list, then stack the tree */
 @media (max-width: 1100px) {
   .music-workspace {
-    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+    /* Squeezed layout: still honour the operator's width, capped harder. */
+    grid-template-columns: minmax(200px, min(var(--rail-tree), 300px)) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
   }
   .music-workspace.no-tree {
@@ -1726,6 +1734,10 @@ kbd,
   }
   .music-workspace .library-sidebar {
     max-height: 32vh;
+  }
+  /* Stacked layout — there's no column edge to drag. */
+  .rail-resize {
+    display: none;
   }
 }
 
@@ -2506,22 +2518,76 @@ kbd,
 /* --- folder tree --- */
 
 .folder-tree {
-  --tree-indent: 0.9rem; /* per-depth indent step (was inline JS math) */
+  --tree-indent: 0.75rem; /* per-depth indent step — guides carry the depth
+                             signal, so the step can stay tight */
   display: flex;
   flex-direction: column;
-  gap: 0;
-  overflow-y: auto;
+  gap: var(--space-2);
+  flex: 1;
+  min-height: 0;
   font-size: var(--text-md);
 }
-.tree-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
+/* The scrolling part: rows only. The filter box above and the host's folder
+ * actions below stay pinned while the tree scrolls. */
+.tree-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.tree-filter {
+  position: relative;
+  display: flex;
   align-items: center;
-  gap: 0.1rem;
+  flex: none;
+}
+.tree-filter input {
+  width: 100%;
+  min-width: 0;
+  font-size: var(--text-base);
+  padding: var(--space-1) 1.8rem var(--space-1) 1.7rem;
+}
+.tree-filter-icon {
+  position: absolute;
+  left: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  pointer-events: none;
+}
+.tree-filter-clear {
+  position: absolute;
+  right: 2px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0 var(--space-2);
+}
+.tree-filter-clear:hover {
+  color: var(--fg);
+  background: transparent;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
   padding: var(--space-1) var(--space-2);
   padding-left: calc(var(--depth, 0) * var(--tree-indent) + var(--space-2));
   border-radius: 4px;
-  transition: background var(--transition);
+  cursor: pointer;
+  transition: background-color var(--transition);
+  /* Indent guides: one 1px line per ancestor level, drawn under the
+   * ancestors' chevron centres. background-color (hover/selected) layers
+   * beneath, so the rules below must never set the `background` shorthand. */
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--border) 0,
+    var(--border) 1px,
+    transparent 1px,
+    transparent var(--tree-indent)
+  );
+  background-repeat: no-repeat;
+  background-position: calc(var(--space-2) + 0.7rem) 0;
+  background-size: calc(var(--depth, 0) * var(--tree-indent)) 100%;
 }
 .tree-note {
   margin: 0.15rem 0;
@@ -2531,10 +2597,14 @@ kbd,
   padding: var(--space-2);
 }
 .tree-row.selected {
-  background: var(--accent-soft);
+  background-color: var(--accent-soft);
 }
 .tree-row:hover:not(.selected) {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
+}
+.tree-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .tree-toggle {
   display: inline-flex;
@@ -2542,6 +2612,7 @@ kbd,
   justify-content: center;
   width: 1.4rem;
   height: 1.4rem;
+  flex: none;
   padding: 0;
   font-size: 0.9rem;
   color: var(--muted);
@@ -2553,29 +2624,57 @@ kbd,
   border: none;
   pointer-events: none;
 }
-.tree-label {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: var(--space-2);
-  align-items: center;
-  padding: var(--space-1) 0.3rem;
-  text-align: left;
-  width: 100%;
-  min-width: 0;
-}
 .tree-icon {
   display: inline-flex;
   align-items: center;
+  flex: none;
+  margin-right: var(--space-2);
   font-size: var(--text-md);
   color: var(--muted);
 }
 .tree-name {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.tree-match {
+  /* Teal = utility/batch context, never the blue live-playback accent. */
+  background: var(--accent2-tint);
+  color: inherit;
+  border-radius: 2px;
+}
 .tree-badge {
+  flex: none;
   font-variant-numeric: tabular-nums;
+}
+/* Drag-to-resize handle on the sidebar's right edge — it reaches into the
+ * grid gap so the hit area doesn't cover tree rows. The visible 2px line
+ * only appears on hover/drag (no layout shift, nothing to discover by
+ * accident). Hidden on stacked (narrow) layouts. */
+.rail-resize {
+  position: absolute;
+  inset-block: 0;
+  right: -14px;
+  width: 14px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.rail-resize::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background var(--transition);
+}
+.rail-resize:hover::after,
+.rail-resize:active::after {
+  background: var(--accent2);
 }
 
 /* --- library tab additions: music/sfx toggle, sfx file list, drop accept --- */
@@ -2886,7 +2985,10 @@ kbd,
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-2);
-  overflow-y: auto;
+  /* The tree's own .tree-scroll scrolls; this wrapper just bounds it. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .track-browser-list {
   list-style: none;
@@ -4642,11 +4744,9 @@ input.volume-slider::-moz-range-thumb {
     min-height: 36px;
     padding: var(--space-2) var(--space-3);
   }
-  /* Folder-tree rows: the chevron + label are both interactive — give
-   * them enough height that a thumb can hit them without overlapping the
-   * row above or below. */
-  .tree-toggle,
-  .tree-label {
+  /* Folder-tree rows are the interactive unit now (the chevron is a small
+   * inner target) — give the whole row enough height for a thumb. */
+  .tree-row {
     min-height: 36px;
   }
   /* Soundboard cells: these are fire-on-press during play, can't be tiny. */

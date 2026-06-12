@@ -1,6 +1,7 @@
 import type {
   Cue,
   FolderEntry,
+  FoldersResponse,
   InterruptSpec,
   KnownDevice,
   ModeDetail,
@@ -294,6 +295,7 @@ export const libraryApi = {
     api.get<TreeResponse>(
       path ? `/api/library/tree?path=${encodeURIComponent(path)}` : "/api/library/tree",
     ),
+  allFolders: () => api.get<FoldersResponse>("/api/library/folders"),
   upload: (
     files: File[],
     dest: string,
@@ -482,6 +484,10 @@ export interface SfxTreeResponse {
   files: SfxFile[];
 }
 
+export interface SfxFoldersResponse {
+  folders: SfxFolder[];
+}
+
 export interface SfxUploadResult {
   saved: SfxFile[];
   destination: string;
@@ -493,6 +499,7 @@ export const sfxApi = {
     api.get<SfxTreeResponse>(
       path ? `/api/sfx/tree?path=${encodeURIComponent(path)}` : "/api/sfx/tree",
     ),
+  allFolders: () => api.get<SfxFoldersResponse>("/api/sfx/folders"),
   upload: (
     files: File[],
     dest: string,

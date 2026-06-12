@@ -88,6 +88,10 @@ class SfxTreeResponse(BaseModel):
     files: list[SfxFileOut]
 
 
+class SfxFoldersResponse(BaseModel):
+    folders: list[SfxFolderOut]
+
+
 class SfxUploadResult(BaseModel):
     saved: list[SfxFileOut]
     destination: str
@@ -199,6 +203,39 @@ def list_all_files(_: CurrentUser) -> list[SfxFileOut]:
     if root.is_dir():
         walk(root)
     return out
+
+
+@router.get("/folders", response_model=SfxFoldersResponse)
+def list_all_folders(_: CurrentUser) -> SfxFoldersResponse:
+    """Whole folder hierarchy in one response — same contract as the music
+    library's GET /api/library/folders, for the client-side tree."""
+    root = sfx_root()
+    folders: list[SfxFolderOut] = []
+
+    def walk(abs_dir: Path, rel: str) -> int:
+        """Emit subfolders of `abs_dir` depth-first; return its recursive
+        audio-file count (what the per-folder badges show)."""
+        total = 0
+        for child in sorted(abs_dir.iterdir(), key=lambda p: p.name.lower()):
+            if child.is_dir():
+                child_rel = f"{rel}/{child.name}" if rel else child.name
+                child_count = walk(child, child_rel)
+                folders.append(
+                    SfxFolderOut(
+                        name=child.name,
+                        path=child_rel,
+                        file_count=child_count,
+                        has_children=any(g.is_dir() for g in child.iterdir()),
+                    )
+                )
+                total += child_count
+            elif child.suffix.lower() in _SFX_EXTENSIONS:
+                total += 1
+        return total
+
+    if root.is_dir():
+        walk(root, "")
+    return SfxFoldersResponse(folders=folders)
 
 
 @router.get("/tree", response_model=SfxTreeResponse)

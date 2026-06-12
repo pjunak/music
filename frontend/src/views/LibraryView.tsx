@@ -12,6 +12,7 @@ import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
 import {
   EditIcon,
+  FolderOpenIcon,
   ImportIcon,
   LightningIcon,
   MoveIcon,
@@ -40,6 +41,7 @@ import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { useDebouncedValue } from "@/core/useDebouncedValue";
+import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
 type Root = "music" | "sfx";
@@ -57,20 +59,18 @@ function formatDuration(seconds: number): string {
   return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
 }
 
-const musicTreeChildren = async (p: string): Promise<TreeFolder[]> =>
-  (await libraryApi.tree(p)).folders.map((f) => ({
+const musicAllFolders = async (): Promise<TreeFolder[]> =>
+  (await libraryApi.allFolders()).folders.map((f) => ({
     name: f.name,
     path: f.path,
     badge: f.track_count > 0 ? f.track_count : null,
-    hasChildren: f.has_children,
   }));
 
-const sfxTreeChildren = async (p: string): Promise<TreeFolder[]> =>
-  (await sfxApi.tree(p)).folders.map((f) => ({
+const sfxAllFolders = async (): Promise<TreeFolder[]> =>
+  (await sfxApi.allFolders()).folders.map((f) => ({
     name: f.name,
     path: f.path,
     badge: f.file_count > 0 ? f.file_count : null,
-    hasChildren: f.has_children,
   }));
 
 export function LibraryView() {
@@ -84,6 +84,19 @@ export function LibraryView() {
   // "selected tracks" as a scope.
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [cleanupOpen, setCleanupOpen] = useState(false);
+
+  // The operator-resized tree width overrides the `--rail-tree` token on
+  // this view only. Applied as a direct CSS-var write (not a React style
+  // prop) so SidebarRail's drag handler can write the same var during the
+  // drag without fighting React's style reconciliation.
+  const treeWidth = useUiStore((s) => s.libraryTreeWidth);
+  const viewRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = viewRef.current;
+    if (el === null) return;
+    if (treeWidth !== null) el.style.setProperty("--rail-tree", `${treeWidth}px`);
+    else el.style.removeProperty("--rail-tree");
+  }, [treeWidth]);
 
   // Search-as-you-type: debounce keystrokes and auto-submit the result.
   // The input is always visible in the toolbar (music mode only), so the
@@ -108,7 +121,7 @@ export function LibraryView() {
   }
 
   return (
-    <div className="library-view">
+    <div className="library-view" ref={viewRef}>
       <header className="library-toolbar">
         <div className="segmented" role="tablist" aria-label="Library root">
           <button
@@ -186,6 +199,12 @@ export function LibraryView() {
           onRefresh={() => setRefreshKey((k) => k + 1)}
           checked={checked}
           setChecked={setChecked}
+          onRevealFolder={(p) => {
+            // Search result → browse mode at that folder; the tree's
+            // auto-reveal expands down to it.
+            clearSearch();
+            setPath(p);
+          }}
         />
       ) : (
         <SfxBrowser
@@ -264,6 +283,7 @@ function MusicWorkspace({
   onRefresh,
   checked,
   setChecked,
+  onRevealFolder,
 }: {
   path: string;
   onPathChange: (p: string) => void;
@@ -275,6 +295,8 @@ function MusicWorkspace({
    *  Ctrl/Cmd-click, or a Shift range mutates it. */
   checked: Set<number>;
   setChecked: Dispatch<SetStateAction<Set<number>>>;
+  /** Leave search mode and browse to this folder (reveal-from-search). */
+  onRevealFolder: (path: string) => void;
 }) {
   const activeTrackId = usePlayerStore(selectActiveTrackId);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -318,7 +340,12 @@ function MusicWorkspace({
     };
   }, [searching, query, path, refreshKey, setChecked]);
 
-  const loadChildren = useCallback(musicTreeChildren, []);
+  const loadAll = useCallback(musicAllFolders, []);
+
+  function revealTrack(t: Track) {
+    setFocused(t.id);
+    onRevealFolder(t.path.split("/").slice(0, -1).join("/"));
+  }
 
   async function onDropOnFolder(folderPath: string, payload: unknown) {
     if (
@@ -352,11 +379,11 @@ function MusicWorkspace({
   return (
     <div className={`music-workspace${searching ? " no-tree" : ""}`}>
       {!searching ? (
-        <aside className="library-sidebar">
+        <SidebarRail>
           <FolderTree
             selectedPath={path}
             onSelect={onPathChange}
-            loadChildren={loadChildren}
+            loadAll={loadAll}
             refreshKey={refreshKey}
             onDropOnFolder={onDropOnFolder}
           />
@@ -366,7 +393,7 @@ function MusicWorkspace({
             onChanged={onRefresh}
             onPathReset={() => onPathChange("")}
           />
-        </aside>
+        </SidebarRail>
       ) : null}
       <section className={`library-main${checked.size > 0 ? " has-selection" : ""}`}>
         {searching ? (
@@ -397,6 +424,7 @@ function MusicWorkspace({
           onFocusedChange={setFocused}
           draggable={!searching}
           onChanged={onRefresh}
+          {...(searching ? { onReveal: revealTrack } : {})}
         />
         <SelectionToolbar
           selected={checked}
@@ -426,7 +454,7 @@ function LibraryShell({
   selectedPath,
   onPathChange,
   refreshKey,
-  loadChildren,
+  loadAll,
   onDropOnFolder,
   onRefresh,
   onPathReset,
@@ -437,7 +465,7 @@ function LibraryShell({
   selectedPath: string;
   onPathChange: (p: string) => void;
   refreshKey: number;
-  loadChildren: (path: string) => Promise<TreeFolder[]>;
+  loadAll: () => Promise<TreeFolder[]>;
   onDropOnFolder?: (folderPath: string, payload: unknown) => void;
   onRefresh: () => void;
   onPathReset: () => void;
@@ -446,11 +474,11 @@ function LibraryShell({
 }) {
   return (
     <div className="library-body">
-      <aside className="library-sidebar">
+      <SidebarRail>
         <FolderTree
           selectedPath={selectedPath}
           onSelect={onPathChange}
-          loadChildren={loadChildren}
+          loadAll={loadAll}
           {...(refreshKey !== undefined ? { refreshKey } : {})}
           {...(onDropOnFolder !== undefined ? { onDropOnFolder } : {})}
         />
@@ -460,7 +488,7 @@ function LibraryShell({
           onChanged={onRefresh}
           onPathReset={onPathReset}
         />
-      </aside>
+      </SidebarRail>
       <section className="library-main">
         <FolderBand
           root={rootKind}
@@ -473,6 +501,65 @@ function LibraryShell({
         {children}
       </section>
     </div>
+  );
+}
+
+const RAIL_MIN = 240;
+const RAIL_MAX = 560;
+
+/** The tree-column <aside> plus its drag-to-resize right edge. The chosen
+ *  width is a persisted preference (uiStore.libraryTreeWidth) consumed as
+ *  the `--rail-tree` var by the library grids. During a drag the var is
+ *  written straight onto the `.library-view` element so layout tracks the
+ *  pointer without a store commit (= React render) per move; the store is
+ *  committed once on release. Double-click resets to the stylesheet
+ *  default. */
+function SidebarRail({ children }: { children: React.ReactNode }) {
+  const setWidth = useUiStore((s) => s.setLibraryTreeWidth);
+  const asideRef = useRef<HTMLElement | null>(null);
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    const aside = asideRef.current;
+    const host = aside?.closest<HTMLElement>(".library-view");
+    if (!aside || !host) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = aside.getBoundingClientRect().width;
+    let lastW = startW;
+    const onMove = (ev: PointerEvent) => {
+      ev.preventDefault();
+      lastW = Math.round(
+        Math.max(RAIL_MIN, Math.min(RAIL_MAX, startW + (ev.clientX - startX))),
+      );
+      host.style.setProperty("--rail-tree", `${lastW}px`);
+    };
+    const onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      // Commit; LibraryView's effect re-applies the same var from the store.
+      setWidth(lastW);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  }
+
+  return (
+    <aside ref={asideRef} className="library-sidebar">
+      {children}
+      <div
+        className="rail-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the folder tree column"
+        title="Drag to resize — double-click to reset"
+        onPointerDown={onPointerDown}
+        onDoubleClick={() => setWidth(null)}
+      />
+    </aside>
   );
 }
 
@@ -511,7 +598,7 @@ function SfxBrowser({
     };
   }, [path, refreshKey]);
 
-  const loadChildren = useCallback(sfxTreeChildren, []);
+  const loadAll = useCallback(sfxAllFolders, []);
 
   async function onDropOnFolder(folderPath: string, payload: unknown) {
     if (
@@ -568,7 +655,7 @@ function SfxBrowser({
       selectedPath={path}
       onPathChange={onPathChange}
       refreshKey={refreshKey}
-      loadChildren={loadChildren}
+      loadAll={loadAll}
       onDropOnFolder={onDropOnFolder}
       onRefresh={onRefresh}
       onPathReset={() => onPathChange("")}
@@ -679,8 +766,8 @@ function FolderActions({
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveBusy, setMoveBusy] = useState(false);
 
-  const loadChildren = useCallback(
-    (p: string) => (root === "music" ? musicTreeChildren(p) : sfxTreeChildren(p)),
+  const loadAll = useCallback(
+    () => (root === "music" ? musicAllFolders() : sfxAllFolders()),
     [root],
   );
 
@@ -827,7 +914,7 @@ function FolderActions({
         <FolderPickerModal
           title={`Move "${selectedPath}"`}
           body="Pick the destination parent folder. The folder and everything inside it moves together."
-          loadChildren={loadChildren}
+          loadAll={loadAll}
           busy={moveBusy}
           disableDest={(dest) =>
             dest === selectedPath || dest.startsWith(`${selectedPath}/`)
@@ -1075,7 +1162,7 @@ function SelectionToolbar({
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const loadChildren = useCallback(musicTreeChildren, []);
+  const loadAll = useCallback(musicAllFolders, []);
 
   const ids = [...selected];
 
@@ -1159,7 +1246,7 @@ function SelectionToolbar({
           title={`Move ${ids.length} track${ids.length === 1 ? "" : "s"}`}
           body="Pick the destination folder under MUSIC_DIR. Files keep their names; collisions are skipped per-track."
           confirmVerb="Move"
-          loadChildren={loadChildren}
+          loadAll={loadAll}
           busy={busy}
           onCancel={() => setMoveOpen(false)}
           onConfirm={(dest) => void doMove(dest)}
@@ -1189,6 +1276,7 @@ function MusicTrackList({
   onFocusedChange,
   draggable,
   onChanged,
+  onReveal,
 }: {
   tracks: Track[];
   loading: boolean;
@@ -1199,10 +1287,23 @@ function MusicTrackList({
   onFocusedChange: (id: number | null) => void;
   draggable?: boolean;
   onChanged: () => void;
+  /** When set (search mode), rows offer a "show in folder" action that
+   *  jumps back to browse mode at the track's parent folder. */
+  onReveal?: (t: Track) => void;
 }) {
   // Anchor for Shift-range selection: the last row the user single-clicked or
   // Ctrl-clicked. A ref (not state) — it only matters at the next click.
   const anchorRef = useRef<number | null>(null);
+
+  // After reveal-from-search the freshly-loaded folder listing should show
+  // the revealed track without hunting: nearest-scroll the focused row when
+  // the visible set changes. (A plain click also lands here, but the row is
+  // already in view then, so nearest-scroll is a no-op.)
+  const rowEls = useRef(new Map<number, HTMLTableRowElement>());
+  useEffect(() => {
+    if (focused === null) return;
+    rowEls.current.get(focused)?.scrollIntoView({ block: "nearest" });
+  }, [tracks, focused]);
 
   if (tracks.length === 0) {
     // A folder fetch in flight must not flash the false "No tracks here"
@@ -1322,6 +1423,10 @@ function MusicTrackList({
             return (
               <tr
                 key={t.id}
+                ref={(el) => {
+                  if (el) rowEls.current.set(t.id, el);
+                  else rowEls.current.delete(t.id);
+                }}
                 className={`track-row${isChecked ? " checked" : ""}${
                   isFocused ? " focused" : ""
                 }${activeTrackId === t.id ? " playing" : ""}`}
@@ -1352,6 +1457,13 @@ function MusicTrackList({
                 <td className="track-file muted">{basename(t.path)}</td>
                 <td className="col-num">{formatDuration(t.length_s)}</td>
                 <td className="col-actions">
+                  {onReveal ? (
+                    <IconButton
+                      label="Show in folder"
+                      icon={<FolderOpenIcon />}
+                      onClick={() => onReveal(t)}
+                    />
+                  ) : null}
                   <IconButton label="Play" icon={<PlayIcon />} onClick={() => play(t)} />
                   <IconButton
                     label="Add to queue"

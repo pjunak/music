@@ -77,6 +77,26 @@ def test_tree_subfolder_includes_files_and_referenced_flag(auth_client: TestClie
     assert files_by_path["dnd/door.ogg"]["referenced"] is True
 
 
+def test_folders_requires_auth(client: TestClient) -> None:
+    assert client.get("/api/sfx/folders").status_code == 401
+
+
+def test_folders_lists_whole_hierarchy_with_counts(auth_client: TestClient) -> None:
+    auth_client.post("/api/sfx/folders", json={"path": "AllF/doors"})
+    auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("creak.wav", b"x" * 8, "audio/wav"))],
+        params={"dest": "AllF/doors"},
+    )
+    body = auth_client.get("/api/sfx/folders").json()
+    by_path = {f["path"]: f for f in body["folders"]}
+    assert by_path["AllF"]["has_children"] is True
+    assert by_path["AllF/doors"]["has_children"] is False
+    # Counts are recursive: the parent sees the file inside its subfolder.
+    assert by_path["AllF"]["file_count"] >= 1
+    assert by_path["AllF/doors"]["file_count"] >= 1
+
+
 def test_upload_writes_into_destination(auth_client: TestClient) -> None:
     files = [("files", ("ping.wav", b"FAKE-WAV-A" * 10, "audio/wav"))]
     r = auth_client.post(

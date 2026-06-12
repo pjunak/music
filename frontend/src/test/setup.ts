@@ -11,3 +11,9 @@ import { cleanup } from "@testing-library/react";
 afterEach(() => {
   cleanup();
 });
+
+// jsdom doesn't implement scrollIntoView; FolderTree calls it for keyboard
+// focus + auto-reveal, so give it a no-op rather than a crash.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}

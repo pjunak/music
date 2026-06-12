@@ -6,13 +6,13 @@ import { Modal } from "./Modal";
 
 /** Modal that picks a destination folder from the same FolderTree widget used
  *  in the Library. Reused for bulk-moving tracks and for re-parenting a whole
- *  folder, so the operator's mental model (same tree, same lazy loading, same
+ *  folder, so the operator's mental model (same tree, same filter box, same
  *  root semantics) is identical everywhere. */
 export function FolderPickerModal({
   title,
   body,
   confirmVerb = "Move",
-  loadChildren,
+  loadAll,
   busy = false,
   initialDest = "",
   disableDest,
@@ -23,7 +23,7 @@ export function FolderPickerModal({
   body?: string;
   /** Verb shown on the confirm button, e.g. "Move" → "Move to (root)". */
   confirmVerb?: string;
-  loadChildren: (p: string) => Promise<TreeFolder[]>;
+  loadAll: () => Promise<TreeFolder[]>;
   busy?: boolean;
   initialDest?: string;
   /** Optional guard: return a reason string to block confirming for `dest`. */
@@ -57,7 +57,7 @@ export function FolderPickerModal({
     >
       {body ? <p className="muted small">{body}</p> : null}
       <div className="folder-picker-tree">
-        <FolderTree selectedPath={dest} onSelect={setDest} loadChildren={loadChildren} />
+        <FolderTree selectedPath={dest} onSelect={setDest} loadAll={loadAll} />
       </div>
       <p className="folder-picker-dest small">
         Destination: <strong>{dest === "" ? "(root)" : dest}</strong>

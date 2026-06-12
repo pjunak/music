@@ -101,6 +101,28 @@ def test_tree_unknown_path_is_empty(auth_client: TestClient) -> None:
     assert body["tracks"] == []
 
 
+# --- all folders (client-side tree) ---------------------------------------
+
+
+def test_folders_requires_auth(client: TestClient) -> None:
+    assert client.get("/api/library/folders").status_code == 401
+
+
+def test_folders_lists_whole_hierarchy_with_counts(
+    auth_client: TestClient, seeded_track_id: int
+) -> None:
+    # Empty nested folders must appear too — they're upload destinations.
+    auth_client.post("/api/library/folders", json={"path": "AllF/Skyrim/Combat"})
+    body = auth_client.get("/api/library/folders").json()
+    by_path = {f["path"]: f for f in body["folders"]}
+    assert by_path["AllF"]["has_children"] is True
+    assert by_path["AllF/Skyrim"]["has_children"] is True
+    assert by_path["AllF/Skyrim/Combat"]["has_children"] is False
+    assert by_path["AllF/Skyrim/Combat"]["track_count"] == 0
+    # The seeded track counts recursively on its own folder.
+    assert by_path["Demo"]["track_count"] >= 1
+
+
 # --- single track + stream + cover ---------------------------------------
 
 

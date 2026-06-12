@@ -638,6 +638,41 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
     return (folders, tracks)
 
 
+def all_folders(db: Session) -> list[FolderEntry]:
+    """Every directory under MUSIC_DIR at any depth, with recursive track
+    counts — one response, so the tree UI can build, filter and auto-reveal
+    the whole hierarchy client-side instead of round-tripping per level."""
+    root = music_root()
+
+    # Recursive counts in one pass: each track increments every ancestor dir.
+    counts: dict[str, int] = {}
+    for track_path in db.scalars(select(Track.path)):
+        parts = track_path.split("/")[:-1]
+        for i in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:i])
+            counts[prefix] = counts.get(prefix, 0) + 1
+
+    entries: list[FolderEntry] = []
+
+    def walk(abs_dir: Path, rel: str) -> None:
+        for child in sorted(abs_dir.iterdir(), key=lambda p: p.name.lower()):
+            if not child.is_dir():
+                continue
+            child_rel = f"{rel}/{child.name}" if rel else child.name
+            entries.append(
+                FolderEntry(
+                    name=child.name,
+                    path=child_rel,
+                    track_count=counts.get(child_rel, 0),
+                    has_children=any(g.is_dir() for g in child.iterdir()),
+                )
+            )
+            walk(child, child_rel)
+
+    walk(root, "")
+    return entries
+
+
 def ensure_folder(rel_path: str, root: Path | None = None) -> Path:
     """mkdir -p inside the given root (defaults to MUSIC_DIR). Returns
     the absolute path of the resulting directory."""

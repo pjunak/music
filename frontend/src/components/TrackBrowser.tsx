@@ -90,18 +90,14 @@ export function TrackBrowser({
     };
   }, [inSearchMode, query, folderPath]);
 
-  const loadFolderChildren = useCallback(
-    async (p: string): Promise<TreeFolder[]> => {
-      const r = await libraryApi.tree(p);
-      return r.folders.map((f) => ({
-        name: f.name,
-        path: f.path,
-        badge: f.track_count > 0 ? f.track_count : null,
-        hasChildren: f.has_children,
-      }));
-    },
-    [],
-  );
+  const loadAllFolders = useCallback(async (): Promise<TreeFolder[]> => {
+    const r = await libraryApi.allFolders();
+    return r.folders.map((f) => ({
+      name: f.name,
+      path: f.path,
+      badge: f.track_count > 0 ? f.track_count : null,
+    }));
+  }, []);
 
   function selectFolder(path: string) {
     setQuery("");
@@ -150,7 +146,7 @@ export function TrackBrowser({
           <FolderTree
             selectedPath={inSearchMode ? "" : folderPath}
             onSelect={selectFolder}
-            loadChildren={loadFolderChildren}
+            loadAll={loadAllFolders}
           />
         </aside>
         <ul className="track-browser-list">

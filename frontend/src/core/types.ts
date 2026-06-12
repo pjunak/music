@@ -243,6 +243,12 @@ export interface TreeResponse {
   tracks: Track[];
 }
 
+// Whole-hierarchy listing from /api/library/folders — every folder at any
+// depth in one response, so the tree UI can filter/reveal client-side.
+export interface FoldersResponse {
+  folders: FolderEntry[];
+}
+
 // --- WebSocket actions (client → server) ---------------------------------
 
 export type WsAction =
