@@ -12,7 +12,7 @@ def test_backup_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def test_backup_includes_db_modes_presets(auth_client: TestClient) -> None:
+def test_backup_includes_db_and_modes(auth_client: TestClient) -> None:
     r = auth_client.get("/api/admin/backup")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/gzip")
@@ -23,6 +23,6 @@ def test_backup_includes_db_modes_presets(auth_client: TestClient) -> None:
         names = tar.getnames()
     # SQLite snapshot at the root.
     assert "app.db" in names
-    # Modes and presets directories included.
+    # The modes tree (which now carries per-mode EQ presets too) is included.
     assert any(n == "modes" or n.startswith("modes/") for n in names)
-    assert any(n == "presets" or n.startswith("presets/") for n in names)
+    assert any(n.startswith("modes/") and "presets" in n for n in names)

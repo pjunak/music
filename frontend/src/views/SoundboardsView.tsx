@@ -1,167 +1,181 @@
 import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
-import { EmptyState } from "@/components/EmptyState";
+import { confirmDialog } from "@/components/confirmDialog";
+import { IconButton } from "@/components/IconButton";
+import { TrashIcon } from "@/components/icons";
+import { NoModeEmpty } from "@/components/NoModeEmpty";
 import { SoundboardEditor } from "@/components/SoundboardEditor";
-import { modesApi } from "@/core/api";
+import { modesAdminApi, modesApi } from "@/core/api";
+import { usePlayerStore } from "@/core/playerStore";
+import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
-import type { ModeSummary } from "@/core/types";
+import type { ModeDetail, SoundboardManifest } from "@/core/types";
 
-/** Top-level soundboard browser + editor.
- *
- *  Mirrors the Playlists tab's two-pane shell: list every soundboard
- *  across every mode on the left, edit the selected one on the right
- *  via the same `<SoundboardEditor>` the Modes tab uses.
- *
- *  Soundboards live under modes (`modes/<id>/soundboards/<sb>.yaml`), so
- *  *creating* one still happens from the Modes tab — that flow needs a
- *  mode picker, an id, and a name, which is awkward to bolt on here.
- *  This tab is for the common case: tweak existing soundboards without
- *  drilling through the Modes hierarchy each time. */
-
-interface BoardEntry {
-  modeId: string;
-  modeName: string;
-  boardId: string;
-  boardName: string;
-  itemCount: number;
-}
-
+/** Authoring → Soundboards. The active mode's soundboards: list, create,
+ *  delete, and edit (categories + items) via the shared SoundboardEditor. */
 export function SoundboardsView() {
-  const [boards, setBoards] = useState<BoardEntry[]>([]);
-  const [selected, setSelected] = useState<{ modeId: string; boardId: string } | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
+  const [boards, setBoards] = useState<SoundboardManifest[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async () => {
+    if (activeModeId === null) {
+      setBoards([]);
+      return;
+    }
     try {
-      const modes: ModeSummary[] = await modesApi.list();
-      // Pull each mode's full detail in parallel so we can flatten its
-      // soundboards into a single list. Modes are typically a handful, so
-      // the fan-out is negligible.
-      const details = await Promise.all(
-        modes.map((m) =>
-          modesApi
-            .get(m.id)
-            .then((d) => ({ summary: m, detail: d }))
-            .catch(() => null),
-        ),
-      );
-      const flat: BoardEntry[] = [];
-      for (const entry of details) {
-        if (entry === null) continue;
-        for (const sb of Object.values(entry.detail.soundboards)) {
-          flat.push({
-            modeId: entry.summary.id,
-            modeName: entry.summary.name,
-            boardId: sb.id,
-            boardName: sb.name || sb.id,
-            itemCount: sb.categories.reduce((acc, c) => acc + c.items.length, 0),
-          });
-        }
-      }
-      flat.sort((a, b) => {
-        const m = a.modeName.localeCompare(b.modeName);
-        return m !== 0 ? m : a.boardName.localeCompare(b.boardName);
-      });
-      setBoards(flat);
-      // Drop the selection if it disappeared (mode deleted, board renamed).
-      if (
-        selected !== null &&
-        !flat.some(
-          (b) => b.modeId === selected.modeId && b.boardId === selected.boardId,
-        )
-      ) {
-        setSelected(null);
-      }
+      const detail: ModeDetail = await modesApi.get(activeModeId);
+      setBoards(Object.values(detail.soundboards));
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
-    } finally {
-      setLoading(false);
     }
-  }, [selected]);
+  }, [activeModeId]);
 
   useEffect(() => {
-    void refresh();
-    // The dep on `refreshKey` lets the SoundboardEditor force a reload after
-    // it mutates a soundboard (so the item-count badge in the list updates).
-  }, [refresh, refreshKey]);
+    void load();
+  }, [load]);
 
-  function bumpRefresh() {
-    setRefreshKey((k) => k + 1);
+  if (activeModeId === null) return <NoModeEmpty kind="Soundboards" />;
+
+  async function remove(id: string) {
+    if (activeModeId === null) return;
+    const ok = await confirmDialog({
+      title: `Delete soundboard "${id}"?`,
+      tone: "danger",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+    try {
+      await modesAdminApi.deleteSoundboard(activeModeId, id);
+      toast.success("Soundboard deleted");
+      if (selectedId === id) setSelectedId(null);
+      await load();
+    } catch (e) {
+      toast.error("Delete failed", e instanceof Error ? e.message : undefined);
+    }
+  }
+
+  if (selectedId !== null) {
+    return (
+      <SoundboardEditor
+        modeId={activeModeId}
+        soundboardId={selectedId}
+        breadcrumb={[
+          {
+            label: "Soundboards",
+            onClick: () => {
+              setSelectedId(null);
+              void load();
+            },
+          },
+          { label: selectedId },
+        ]}
+      />
+    );
   }
 
   return (
     <div className="two-pane-view soundboards-view">
-      <div className="two-pane-pane soundboards-list-pane">
+      <div className="two-pane-pane">
         <header className="playlists-header">
           <h2>Soundboards</h2>
-          <span className="muted small">{boards.length}</span>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => setCreating((v) => !v)}
+          >
+            {creating ? "Cancel" : "+ New"}
+          </button>
         </header>
-        <p className="muted small">
-          Edit any soundboard from any mode. Create new ones from the{" "}
-          <strong>Modes</strong> tab.
-        </p>
+        {creating ? (
+          <SoundboardCreateForm
+            existing={new Set(boards.map((b) => b.id))}
+            onCreate={async (id, name) => {
+              await modesAdminApi.createSoundboard(activeModeId, { id, name });
+              setCreating(false);
+              await load();
+              setSelectedId(id);
+            }}
+          />
+        ) : null}
         <ul className="playlist-list">
-          {loading && boards.length === 0 ? (
-            <li className="muted small empty">Loading…</li>
-          ) : boards.length === 0 ? (
-            <li className="muted small empty">
-              No soundboards yet — open the <strong>Modes</strong> tab and add
-              one to a mode.
-            </li>
+          {boards.length === 0 ? (
+            <li className="muted small empty">No soundboards in this mode yet.</li>
           ) : (
-            boards.map((b) => {
-              const isSelected =
-                selected?.modeId === b.modeId && selected?.boardId === b.boardId;
-              return (
-                <li
-                  key={`${b.modeId}/${b.boardId}`}
-                  className={`playlist-list-item ${isSelected ? "active" : ""}`}
+            boards.map((b) => (
+              <li key={b.id} className="playlist-list-item">
+                <button
+                  type="button"
+                  className="playlist-list-item-meta btn-ghost"
+                  onClick={() => setSelectedId(b.id)}
                 >
-                  <button
-                    type="button"
-                    className="playlist-list-item-meta btn-ghost"
-                    onClick={() =>
-                      setSelected({ modeId: b.modeId, boardId: b.boardId })
-                    }
-                  >
-                    <span className="playlist-name">{b.boardName}</span>
-                    <span className="muted small">
-                      mode <code>{b.modeId}</code> · {b.itemCount} item
-                      {b.itemCount === 1 ? "" : "s"}
-                    </span>
-                  </button>
-                </li>
-              );
-            })
+                  <span className="playlist-name">{b.name || b.id}</span>
+                  <span className="muted small">
+                    {b.categories.reduce((acc, c) => acc + c.items.length, 0)} item
+                    {b.categories.reduce((acc, c) => acc + c.items.length, 0) === 1
+                      ? ""
+                      : "s"}
+                  </span>
+                </button>
+                <span className="simple-list-actions">
+                  <IconButton
+                    label="Delete soundboard"
+                    icon={<TrashIcon />}
+                    variant="danger"
+                    onClick={() => void remove(b.id)}
+                  />
+                </span>
+              </li>
+            ))
           )}
         </ul>
       </div>
-
-      <div className="two-pane-pane soundboards-detail-pane">
-        {selected !== null ? (
-          <SoundboardEditor
-            key={`${selected.modeId}/${selected.boardId}`}
-            modeId={selected.modeId}
-            soundboardId={selected.boardId}
-            onBack={() => {
-              setSelected(null);
-              bumpRefresh();
-            }}
-            backLabel="All soundboards"
-          />
-        ) : (
-          <div className="empty-detail">
-            <EmptyState title="No soundboard selected">
-              Pick one from the list to edit its categories and items, or open
-              the <strong>Modes</strong> tab to add a new soundboard to a mode.
-            </EmptyState>
-          </div>
-        )}
-      </div>
     </div>
+  );
+}
+
+function SoundboardCreateForm({
+  existing,
+  onCreate,
+}: {
+  existing: Set<string>;
+  onCreate: (id: string, name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // The on-disk slug is derived from the name — no manual id entry.
+  const derivedId = uniqueSlug(name, existing, "soundboard");
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      await onCreate(derivedId, name.trim());
+    } catch (err) {
+      toast.error("Create failed", err instanceof Error ? err.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="inline-create-row">
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="New soundboard name"
+        aria-label="New soundboard name"
+        required
+        autoFocus
+      />
+      <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
+        Create
+      </button>
+    </form>
   );
 }

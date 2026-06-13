@@ -4,7 +4,6 @@ from typing import Annotated
 from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.core.db import get_db
 from app.models.auth_session import AuthSession
 from app.models.user import User
@@ -68,6 +67,3 @@ def get_optional_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 DbSession = Annotated[Session, Depends(get_db)]
-
-# Re-export so routers don't have to import get_settings directly for cookie config.
-settings = get_settings()

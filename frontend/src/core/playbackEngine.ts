@@ -13,7 +13,7 @@
  *
  * Ambient audio is routed through a single `AudioContext` graph so active
  * preset effects can be applied. Interrupts and SFX bypass the chain — the
- * intent is "scene effects colour the background music; alerts and stings
+ * intent is "preset effects colour the background music; alerts and stings
  * play clean".
  *
  * The biggest risk with Web Audio is the autoplay-blocked failure mode: an
@@ -30,20 +30,9 @@
  * type maps to a small graph of native Web Audio nodes — see `buildEffect`.
  */
 
+import { EQ_BAND_Q, normalizeEqBands } from "@/core/eq";
 import { toast } from "@/core/toast";
-import type { PlayerState } from "@/core/types";
-
-export interface EffectSpec {
-  type: string;
-  [key: string]: unknown;
-}
-
-export interface PresetManifest {
-  id: string;
-  name: string;
-  description?: string | null;
-  effects: EffectSpec[];
-}
+import type { PlayerState, PresetEffect as EffectSpec, PresetManifest } from "@/core/types";
 
 interface AmbientChannel {
   el: HTMLAudioElement;
@@ -82,8 +71,64 @@ type Slot = "A" | "B";
 
 const POSITION_REPORT_INTERVAL_MS = 1000;
 
+/** Drift tolerance for remote-seek detection and snapping. */
+const REMOTE_SEEK_THRESHOLD_MS = 1500;
+
+/** Minimum gap between two queue-advances. Stops a single track-end from
+ *  being acted on twice when the `ended` event and the stall backstop race,
+ *  and absorbs the round-trip before the next track's state arrives (during
+ *  which the stalled element is still the current channel). Comfortably below
+ *  the length of any real track so `loop: track` still re-advances. */
+const ADVANCE_DEBOUNCE_MS = 2000;
+
+/** How close to the end (seconds) the element must be before the stall
+ *  backstop will consider advancing. Scoped tight so a mid-track buffer
+ *  underrun is never mistaken for end-of-track. */
+const END_STALL_WINDOW_S = 1.0;
+
+/** Per-poll progress (seconds) below which playback counts as "not
+ *  advancing". Generous enough to ignore sub-frame jitter. */
+const END_STALL_EPSILON_S = 0.05;
+
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+/**
+ * Decide whether an incoming server position represents a genuine remote
+ * seek that the locally-playing element should snap to.
+ *
+ * The output device is the source of truth for its own playback position.
+ * Routine `state_changed` broadcasts (volume, queue edits, mode switches, …)
+ * are NOT seeks — the server doesn't dead-reckon `position_ms`, so each one
+ * carries back the position this device itself last *reported*. Comparing
+ * that echo against the live element time would false-positive on every
+ * unrelated change and yank playback backward — on a sluggish TV, all the
+ * way to the start (its reports lag, so the echoed position is far behind).
+ *
+ * So we gate on divergence from our OWN telemetry instead: a real seek (the
+ * DM dragging the scrub bar, a `loop: track` restart) moves the server
+ * position away from what we reported; an echo does not. `lastReportedMs`
+ * only advances on reports that actually reached the wire, so a dropped send
+ * during a reconnect can't make a later echo look like a seek.
+ */
+export function shouldApplyRemoteSeek(args: {
+  /** Server-broadcast position for the still-current track. */
+  targetMs: number;
+  /** Position this device last successfully reported to the server. */
+  lastReportedMs: number;
+  /** The element's live `currentTime`, in ms. */
+  elapsedMs: number;
+  thresholdMs: number;
+}): boolean {
+  const { targetMs, lastReportedMs, elapsedMs, thresholdMs } = args;
+  if (!Number.isFinite(elapsedMs)) return false;
+  // Gate: only a position that diverged from our telemetry is a real seek.
+  if (Math.abs(targetMs - lastReportedMs) <= thresholdMs) return false;
+  // Apply: skip the snap if the element already sits at the target, so a
+  // redundant broadcast doesn't cause a needless re-seek.
+  if (Math.abs(targetMs - elapsedMs) <= thresholdMs) return false;
+  return true;
 }
 
 function numParam(
@@ -99,8 +144,6 @@ function numParam(
   }
   return fallback;
 }
-
-let autoplayBlockedReported = false;
 
 function attachErrorLogger(label: string, el: HTMLAudioElement): void {
   el.addEventListener("error", () => {
@@ -144,6 +187,11 @@ export class PlaybackEngine {
   /** Master interrupt gain node — bypasses the effect chain. */
   private interruptMaster: GainNode | null = null;
 
+  /** This browser's stable client_id, so this device's per-device volume trim
+   *  (`PlayerState.device_volumes[clientId]`) can be folded into master gain.
+   *  Set once at mount via `setClientId`. */
+  private clientId = "";
+
   /** Currently inserted effect graphs. Disposed when presets change. */
   private installedEffects: BuiltEffect[] = [];
 
@@ -154,6 +202,23 @@ export class PlaybackEngine {
   private lastVolume = 1.0;
   private lastInterruptFadeOut = 0;
   private lastPresetSignature = "";
+  /** One-shot guard for the autoplay-blocked guidance toast. Per-instance so
+   *  a torn-down + re-created engine re-arms it; re-armed on each fresh user
+   *  gesture in `unlock`. */
+  private autoplayBlockedReported = false;
+  /** Position this device last reported to the server *and the server
+   *  accepted* (i.e. the WS send actually went out). The baseline for
+   *  remote-seek detection — see `shouldApplyRemoteSeek`. Reset to 0 on
+   *  every fresh track load because the server zeroes `position_ms` on a
+   *  track change. */
+  private lastReportedMs = 0;
+  /** `performance.now()` of the last queue-advance we triggered. Debounces
+   *  the `ended` event against the stall backstop. */
+  private lastAdvanceAt = -Infinity;
+  /** `currentTime` (seconds) observed on the previous report tick while
+   *  within the end-of-track window, or -1 when not armed. Lets the stall
+   *  backstop require two consecutive no-progress polls before acting. */
+  private endStallTime = -1;
   /** When non-null, an interrupt is currently ducking ambient (rather
    *  than pausing it). Records the target level so the un-duck path
    *  knows whether it has work to do on interrupt-end. */
@@ -172,7 +237,10 @@ export class PlaybackEngine {
 
   private onSkipNext: (() => void) | null = null;
   private onInterruptSkipNext: (() => void) | null = null;
-  private onPositionReport: ((ms: number) => void) | null = null;
+  /** Reports the position upstream and returns whether it actually went out
+   *  (false if the socket is mid-reconnect). The return value gates
+   *  `lastReportedMs` so a dropped report doesn't desync seek detection. */
+  private onPositionReport: ((ms: number) => boolean) | null = null;
 
   // ----- wiring -------------------------------------------------------
 
@@ -181,6 +249,18 @@ export class PlaybackEngine {
     if (ctx === null) {
       // Web Audio unavailable — bail; we can't drive ambient without a graph.
       console.warn("[playbackEngine] AudioContext unavailable; ambient muted");
+      return;
+    }
+    // Idempotent re-entry. React StrictMode (dev) double-invokes the mounting
+    // effect with the SAME <audio> elements; `createMediaElementSource` throws
+    // if called twice on one element ("already connected"). Reuse the existing
+    // source nodes and just re-attach the "ended" listeners destroy() detached
+    // (addEventListener dedupes the stable bound ref). In production this method
+    // runs once (ambientA is null here), so the guard is inert and the live
+    // audio graph is built exactly as before.
+    if (this.ambientA?.el === a && this.ambientB?.el === b) {
+      a.addEventListener("ended", this.handleAmbientEnded);
+      b.addEventListener("ended", this.handleAmbientEnded);
       return;
     }
     // Browsers ignore `audio.volume` once a MediaElementAudioSourceNode is
@@ -211,6 +291,11 @@ export class PlaybackEngine {
   setInterruptElement(el: HTMLAudioElement): void {
     const ctx = this.ensureAudioContext();
     if (ctx === null) return;
+    // Idempotent re-entry — see setAmbientElements. Inert in production.
+    if (this.interrupt?.el === el) {
+      el.addEventListener("ended", this.handleInterruptEnded);
+      return;
+    }
     el.volume = 1;
     const source = ctx.createMediaElementSource(el);
     const gainNode = ctx.createGain();
@@ -227,7 +312,7 @@ export class PlaybackEngine {
   setHandlers(handlers: {
     onSkipNext: () => void;
     onInterruptSkipNext: () => void;
-    onPositionReport: (ms: number) => void;
+    onPositionReport: (ms: number) => boolean;
   }): void {
     this.onSkipNext = handlers.onSkipNext;
     this.onInterruptSkipNext = handlers.onInterruptSkipNext;
@@ -249,9 +334,17 @@ export class PlaybackEngine {
   unlock(): void {
     const ctx = this.audioContext;
     if (ctx === null || ctx.state === "running") return;
-    void ctx.resume().catch((err: unknown) => {
-      console.warn("[playbackEngine] AudioContext resume failed", err);
-    });
+    void ctx
+      .resume()
+      .then(() => {
+        // A fresh user gesture re-opened the audio path — re-arm the
+        // autoplay-blocked guidance toast (the flag otherwise stays true for
+        // the engine's lifetime, silencing every later block).
+        this.autoplayBlockedReported = false;
+      })
+      .catch((err: unknown) => {
+        console.warn("[playbackEngine] AudioContext resume failed", err);
+      });
   }
 
   // ----- Web Audio graph construction --------------------------------
@@ -359,8 +452,13 @@ export class PlaybackEngine {
     const t = state.crossfade_type;
     if (t === "linear" || t === "equal_power" || t === "cut") this.crossfadeType = t;
 
-    if (state.volume !== this.lastVolume) {
-      this.lastVolume = state.volume;
+    // Effective volume = master × this device's per-device trim (absent = 1.0),
+    // so the operator can tame a too-loud TV from the Console without touching
+    // master. Folded into lastVolume so SFX (which read it) scale too.
+    const trim = state.device_volumes?.[this.clientId] ?? 1;
+    const effective = clamp01(state.volume) * clamp01(trim);
+    if (effective !== this.lastVolume) {
+      this.lastVolume = effective;
       this.applyMasterVolume();
     }
 
@@ -374,6 +472,8 @@ export class PlaybackEngine {
       this.lastAmbientId = null;
       this.lastInterruptId = null;
       this.lastIsPlaying = false;
+      this.lastReportedMs = 0;
+      this.endStallTime = -1;
       return;
     }
 
@@ -382,6 +482,10 @@ export class PlaybackEngine {
     const newIsPlaying = state.is_playing;
     const prevAmbientId = this.lastAmbientId;
     const prevInterruptId = this.lastInterruptId;
+    // Set when a cinematic-duck interrupt just ended: ambient kept PLAYING
+    // (ducked) the whole time, so the server's frozen ambient.position_ms is
+    // stale and must NOT be applied as a seek (it would rewind the music).
+    let justEndedDuck = false;
 
     if (state.interrupt) {
       this.lastInterruptFadeOut = state.interrupt.fade_out_ms ?? 0;
@@ -406,12 +510,14 @@ export class PlaybackEngine {
         if (this.currentDuckTo !== null) {
           this.unduckAmbient(this.lastInterruptFadeOut);
           this.currentDuckTo = null;
+          justEndedDuck = true;
         }
       } else {
         this.stopInterrupt();
         if (this.currentDuckTo !== null) {
           this.unduckAmbient(0);
           this.currentDuckTo = null;
+          justEndedDuck = true;
         }
       }
       this.lastInterruptId = newInterruptId;
@@ -422,8 +528,15 @@ export class PlaybackEngine {
         if (newAmbientId === null) {
           this.stopAmbient();
         } else {
+          // "cut" means an instantaneous switch — never take the crossfade
+          // path (a cut with crossfade_ms>0 would otherwise hold the incoming
+          // channel silent for the whole window and swallow the track's
+          // lead-in, since ease() for "cut" stays at 0 until t===1).
           const useCrossfade =
-            this.lastAmbientId !== null && newIsPlaying && this.crossfadeMs > 0;
+            this.lastAmbientId !== null &&
+            newIsPlaying &&
+            this.crossfadeMs > 0 &&
+            this.crossfadeType !== "cut";
           this.swapAmbient(newAmbientId, useCrossfade ? this.crossfadeMs : 0);
         }
         this.lastAmbientId = newAmbientId;
@@ -435,13 +548,12 @@ export class PlaybackEngine {
       }
     }
 
-    // Seek detection. The server doesn't broadcast on routine
-    // position_reports (those are persisted with broadcast=False), so any
-    // state_changed that arrives with the same track id but a position
-    // far from the element's currentTime came from a deliberate jump
-    // (operator clicked the seek bar, /loop seek action, etc.). Snap the
-    // element to match. Threshold is generous enough to swallow normal
-    // playback drift between report intervals.
+    // Seek detection on a same-track broadcast. A genuine seek (operator drags
+    // the scrub bar, /loop seek action) moves the server position away from
+    // our telemetry; an unrelated change (volume, queue edit) just echoes the
+    // position we last reported. `maybeSeek` distinguishes the two — see
+    // `shouldApplyRemoteSeek` — so this no longer false-fires and restarts the
+    // track on every state change.
     if (newInterruptId !== null && newInterruptId === prevInterruptId && state.interrupt) {
       this.maybeSeek(this.interrupt?.el ?? null, state.interrupt.position_ms);
     } else if (
@@ -449,7 +561,28 @@ export class PlaybackEngine {
       newAmbientId !== null &&
       newAmbientId === prevAmbientId
     ) {
-      this.maybeSeek(this.currentChannel()?.el ?? null, state.ambient.position_ms);
+      if (justEndedDuck) {
+        // Don't snap to the stale frozen position — re-baseline our telemetry
+        // to where the still-playing ambient element actually is, so the next
+        // broadcast's divergence gate doesn't fire and rewind the music.
+        const el = this.currentChannel()?.el;
+        if (el && Number.isFinite(el.currentTime)) {
+          this.lastReportedMs = Math.floor(el.currentTime * 1000);
+        }
+      } else {
+        this.maybeSeek(this.currentChannel()?.el ?? null, state.ambient.position_ms);
+        // Same-track broadcast that says "playing" while our element sits
+        // paused = a loop restart (loop:track, or a single-track loop:queue
+        // wrap): the element fired `ended` and parked at 0. Neither the swap
+        // branch (id unchanged) nor the resume branch (is_playing unchanged)
+        // ran, so resume here — otherwise the track is silent while the clock
+        // ticks up. Gated on `prevInterruptId === null` so this doesn't touch
+        // the interrupt-end resume path (handled by stopInterrupt).
+        if (newIsPlaying && prevInterruptId === null) {
+          const ch = this.currentChannel();
+          if (ch && ch.el.paused) this.safePlay("ambient (loop restart)", ch.el);
+        }
+      }
     }
 
     this.lastIsPlaying = newIsPlaying;
@@ -458,11 +591,22 @@ export class PlaybackEngine {
 
   private maybeSeek(el: HTMLAudioElement | null, targetMs: number): void {
     if (el === null) return;
-    if (!Number.isFinite(el.currentTime)) return;
-    const elapsedMs = el.currentTime * 1000;
-    if (Math.abs(targetMs - elapsedMs) > 1500) {
-      el.currentTime = Math.max(0, targetMs / 1000);
+    const elapsedMs = Number.isFinite(el.currentTime) ? el.currentTime * 1000 : NaN;
+    if (
+      !shouldApplyRemoteSeek({
+        targetMs,
+        lastReportedMs: this.lastReportedMs,
+        elapsedMs,
+        thresholdMs: REMOTE_SEEK_THRESHOLD_MS,
+      })
+    ) {
+      return;
     }
+    el.currentTime = Math.max(0, targetMs / 1000);
+    // The snap target is now where the server believes us to be, so treat it
+    // as our telemetry baseline — otherwise the seek's own echo in the next
+    // broadcast would re-trigger.
+    this.lastReportedMs = Math.floor(targetMs);
   }
 
   /** Ramp the ambient duck gain to `toLevel` over `ms`. `toLevel` of 0.3
@@ -506,23 +650,22 @@ export class PlaybackEngine {
    * `loadInto` short-circuit (`src.endsWith(url)`) skips reload and
    * `safePlay` resumes from the same paused position, which manifests as
    * "toggle does nothing until refresh". */
+  /** Tear the src off an <audio> channel so it stops audibly and a later
+   *  re-claim triggers a fresh load (a bare `pause()` leaves the old src, and
+   *  `loadInto`'s URL short-circuit would then skip the reload). */
+  private unloadElement(ch: { el: HTMLAudioElement; loadedUrl: string | null }): void {
+    ch.el.pause();
+    ch.el.removeAttribute("src");
+    ch.el.load();
+    ch.loadedUrl = null;
+  }
+
   private releaseOutput(): void {
     this.pauseAmbient();
-    if (this.ambientA?.el) {
-      this.ambientA.el.removeAttribute("src");
-      this.ambientA.el.load();
-      this.ambientA.loadedUrl = null;
-    }
-    if (this.ambientB?.el) {
-      this.ambientB.el.removeAttribute("src");
-      this.ambientB.el.load();
-      this.ambientB.loadedUrl = null;
-    }
+    if (this.ambientA) this.unloadElement(this.ambientA);
+    if (this.ambientB) this.unloadElement(this.ambientB);
     if (this.interrupt) {
-      this.interrupt.el.pause();
-      this.interrupt.el.removeAttribute("src");
-      this.interrupt.el.load();
-      this.interrupt.loadedUrl = null;
+      this.unloadElement(this.interrupt);
       this.interrupt.gainNode.gain.value = 0;
     }
     // Cancel any in-flight duck ramp and reset the duck gain so a
@@ -530,6 +673,8 @@ export class PlaybackEngine {
     this.duckRampToken += 1;
     if (this.ambientDuck !== null) this.ambientDuck.gain.value = 1;
     this.currentDuckTo = null;
+    this.lastReportedMs = 0;
+    this.endStallTime = -1;
   }
 
   // ----- SFX ---------------------------------------------------------
@@ -552,6 +697,12 @@ export class PlaybackEngine {
   }
 
   // ----- volume / master gain -----------------------------------------
+
+  /** Tell the engine this browser's client_id so it can apply this device's
+   *  per-device volume trim. Idempotent; safe to call on every mount. */
+  setClientId(id: string): void {
+    this.clientId = id;
+  }
 
   private applyMasterVolume(): void {
     const v = clamp01(this.lastVolume);
@@ -583,6 +734,11 @@ export class PlaybackEngine {
     const other = this.otherChannel();
     if (!current || !other) return;
 
+    // A track change zeroes the server's position_ms, and the element starts
+    // at 0 — reset the seek baseline and disarm the stall backstop to match.
+    this.lastReportedMs = 0;
+    this.endStallTime = -1;
+
     if (crossfadeMs <= 0) {
       this.loadInto(current, url);
       this.setGainNow(current, 1);
@@ -613,16 +769,10 @@ export class PlaybackEngine {
 
   private stopAmbient(): void {
     this.pauseAmbient();
-    if (this.ambientA?.el) {
-      this.ambientA.el.removeAttribute("src");
-      this.ambientA.el.load();
-      this.ambientA.loadedUrl = null;
-    }
-    if (this.ambientB?.el) {
-      this.ambientB.el.removeAttribute("src");
-      this.ambientB.el.load();
-      this.ambientB.loadedUrl = null;
-    }
+    if (this.ambientA) this.unloadElement(this.ambientA);
+    if (this.ambientB) this.unloadElement(this.ambientB);
+    this.lastReportedMs = 0;
+    this.endStallTime = -1;
   }
 
   private setGainNow(ch: AmbientChannel, value: number): void {
@@ -672,6 +822,10 @@ export class PlaybackEngine {
 
   private startInterrupt(trackId: number, fadeInMs: number): void {
     if (!this.interrupt) return;
+    // Reports now flow to the interrupt lane, which starts at 0 — reset the
+    // shared seek baseline so the first interrupt broadcast isn't read as a
+    // seek.
+    this.lastReportedMs = 0;
     const url = `/api/library/tracks/${trackId}/stream`;
     if (this.interrupt.loadedUrl !== url) {
       this.interrupt.el.src = url;
@@ -690,10 +844,7 @@ export class PlaybackEngine {
 
   private stopInterrupt(): void {
     if (this.interrupt) {
-      this.interrupt.el.pause();
-      this.interrupt.el.removeAttribute("src");
-      this.interrupt.el.load();
-      this.interrupt.loadedUrl = null;
+      this.unloadElement(this.interrupt);
       this.interrupt.gainNode.gain.value = 0;
     }
     if (this.lastIsPlaying) {
@@ -754,8 +905,8 @@ export class PlaybackEngine {
             ctxState: ctx?.state ?? "no-ctx",
           });
           if (err.name === "NotAllowedError") {
-            if (!autoplayBlockedReported) {
-              autoplayBlockedReported = true;
+            if (!this.autoplayBlockedReported) {
+              this.autoplayBlockedReported = true;
               toast.error(
                 "Browser blocked playback",
                 "Click anywhere on the page once, then press Play again.",
@@ -781,10 +932,85 @@ export class PlaybackEngine {
   private scheduleReports(): void {
     if (this.reportTimer !== null) return;
     this.reportTimer = window.setInterval(() => {
-      if (!this.isMyOutput || !this.lastIsPlaying || !this.onPositionReport) return;
+      if (!this.isMyOutput || !this.lastIsPlaying) return;
+      // Backstop for browsers that don't reliably fire `ended` (older smart
+      // TVs / WebViews): if playback has stalled at the tail, advance the
+      // queue ourselves rather than waiting for an event that isn't coming.
+      this.maybeAdvanceAtEnd();
+      if (!this.onPositionReport) return;
       const ms = this.currentPositionMs();
-      if (Number.isFinite(ms) && ms >= 0) this.onPositionReport(Math.floor(ms));
+      if (!Number.isFinite(ms) || ms < 0) return;
+      const floored = Math.floor(ms);
+      // Only treat the position as "known to the server" once the report is
+      // actually on the wire. A mid-reconnect send is a silent no-op;
+      // advancing the baseline anyway would later make an unrelated broadcast
+      // (which echoes the server's stale position) look like a remote seek.
+      if (this.onPositionReport(floored)) {
+        this.lastReportedMs = floored;
+      }
     }, POSITION_REPORT_INTERVAL_MS);
+  }
+
+  /** Stall backstop. Fires a queue-advance when the current ambient element
+   *  has reached the tail of the track but isn't progressing — the case where
+   *  a flaky browser never delivers `ended`. Requires two consecutive
+   *  no-progress polls inside the end window, so healthy playback (which is
+   *  still advancing right up to the real `ended`) never trips it and never
+   *  loses its final second. */
+  private maybeAdvanceAtEnd(): void {
+    if (this.lastInterruptId !== null) {
+      this.endStallTime = -1;
+      return; // interrupts run their own end handling
+    }
+    const ch = this.currentChannel();
+    const el = ch?.el;
+    if (!el || el.paused) {
+      this.endStallTime = -1;
+      return;
+    }
+    const dur = el.duration;
+    const now = el.currentTime;
+    if (!Number.isFinite(dur) || dur <= 0 || !Number.isFinite(now)) {
+      this.endStallTime = -1;
+      return; // unknown duration → can't tell the tail from the middle
+    }
+    if (dur - now > END_STALL_WINDOW_S) {
+      this.endStallTime = -1;
+      return; // not near the end
+    }
+    if (this.endStallTime >= 0 && now <= this.endStallTime + END_STALL_EPSILON_S) {
+      // Near the end and not advancing since the previous poll → stalled.
+      this.endStallTime = -1;
+      this.fireAmbientAdvance();
+      return;
+    }
+    this.endStallTime = now; // arm: re-check on the next poll
+  }
+
+  /** Single funnel for advancing the ambient queue, debounced so the `ended`
+   *  event and the stall backstop can't double-skip a track (and so the
+   *  in-flight round-trip to load the next track doesn't get re-triggered). */
+  private fireAmbientAdvance(): void {
+    const now = performance.now();
+    if (now - this.lastAdvanceAt < ADVANCE_DEBOUNCE_MS) return;
+    this.lastAdvanceAt = now;
+    this.onSkipNext?.();
+  }
+
+  /** Send one immediate position report for whichever lane is playing, so the
+   *  server's position_ms reflects where we truly were instead of the last 1s
+   *  interval report. Called by the footer Speakers toggle the instant the
+   *  operator turns THIS device's output off — while it's still an active
+   *  output, before the element is torn down and before `set_active_outputs`
+   *  drops it — so the next off→on reclaim resumes accurately instead of
+   *  snapping back to the stale last report. Gated on active-output + playing
+   *  so a stray call (guest, a device that isn't an output, a paused lane) is
+   *  a silent no-op rather than a report the server would reject. */
+  flushPositionReport(): void {
+    if (!this.isMyOutput || !this.lastIsPlaying || !this.onPositionReport) return;
+    const ms = this.currentPositionMs();
+    if (!Number.isFinite(ms) || ms < 0) return;
+    this.onPositionReport(Math.floor(ms));
   }
 
   private currentPositionMs(): number {
@@ -876,7 +1102,7 @@ export class PlaybackEngine {
     const target = e.currentTarget;
     const cur = this.currentChannel();
     if (cur && target === cur.el) {
-      this.onSkipNext?.();
+      this.fireAmbientAdvance();
     }
   };
 
@@ -894,6 +1120,8 @@ const _warnedUnsupportedEffectTypes = new Set<string>();
 
 function buildEffect(ctx: AudioContext, spec: EffectSpec): BuiltEffect | null {
   switch (spec.type) {
+    case "eq":
+      return buildGraphicEq(ctx, spec);
     case "lowpass":
     case "highpass":
     case "bandpass":
@@ -918,6 +1146,27 @@ function buildEffect(ctx: AudioContext, spec: EffectSpec): BuiltEffect | null {
       }
       return null;
   }
+}
+
+function buildGraphicEq(ctx: AudioContext, spec: EffectSpec): BuiltEffect {
+  // A series of one-octave peaking filters at the canonical band frequencies.
+  // The band gains come straight off the editor's faders; the same frequency +
+  // Q live in `core/eq.ts` so the editor's response curve matches this graph.
+  const bands = normalizeEqBands(spec.bands);
+  const input = ctx.createGain();
+  let node: AudioNode = input;
+  for (const band of bands) {
+    const filter = ctx.createBiquadFilter();
+    filter.type = "peaking";
+    filter.frequency.value = band.frequency;
+    filter.Q.value = EQ_BAND_Q;
+    filter.gain.value = band.gain;
+    node.connect(filter);
+    node = filter;
+  }
+  const output = ctx.createGain();
+  node.connect(output);
+  return { input, output };
 }
 
 function buildBiquad(

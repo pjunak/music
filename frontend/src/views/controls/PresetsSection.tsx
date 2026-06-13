@@ -1,19 +1,27 @@
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/EmptyState";
 import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
-import { usePlayerStore } from "@/core/playerStore";
+import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { wsClient } from "@/core/ws";
 
 export function PresetsSection() {
-  const activeIds = usePlayerStore((s) => s.state?.active_preset_ids ?? []);
+  // Stable selector via the helper — never mints a fresh [] when state is null
+  // (which would loop useSyncExternalStore to React #185 on a cold load).
+  const activeIds = usePlayerArray((s) => s.state?.active_preset_ids);
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
   const [presets, setPresets] = useState<PresetManifest[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (activeModeId === null) {
+      setPresets([]);
+      return;
+    }
     let cancelled = false;
     void presetsApi
-      .list()
+      .list(activeModeId)
       .then((p) => {
         if (!cancelled) setPresets(p);
       })
@@ -24,7 +32,7 @@ export function PresetsSection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeModeId]);
 
   function toggle(id: string) {
     const next = activeIds.includes(id)
@@ -39,7 +47,11 @@ export function PresetsSection() {
 
   if (error !== null) return <p className="error small">{error}</p>;
   if (presets.length === 0) {
-    return <p className="muted small">No presets installed under PRESETS_DIR.</p>;
+    return (
+      <EmptyState>
+        No presets installed. Add one from <strong>Authoring → EQ Presets</strong>.
+      </EmptyState>
+    );
   }
 
   return (
@@ -51,7 +63,8 @@ export function PresetsSection() {
             <button
               key={p.id}
               type="button"
-              className={`preset-chip${on ? " active" : ""}`}
+              className="preset-chip btn-toggle"
+              aria-pressed={on}
               onClick={() => toggle(p.id)}
               title={p.description ?? undefined}
             >

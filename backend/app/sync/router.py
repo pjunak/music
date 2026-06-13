@@ -9,18 +9,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import random
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+from starlette.websockets import WebSocketState
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.devices.store import device_store
 from app.domain import playlists as playlists_domain
-from app.library import index as library_index
 from app.models.auth_session import AuthSession
 from app.models.playlist import Playlist
 from app.models.track import Track
@@ -28,14 +28,13 @@ from app.models.user import User
 from app.modes import loader as modes_loader
 from app.presets import loader as presets_loader
 from app.sync import commit_and_broadcast
+from app.sync import loops as loops_manager
 from app.sync import state as state_module
 from app.sync.connection import manager
 from app.sync.devices import registry
 from app.sync.protocol import (
-    ActivateSceneAction,
     AmbientClearQueueAction,
     AmbientEnqueueAction,
-    AmbientPlayFolderAction,
     AmbientPlayPlaylistAction,
     AmbientPlayTrackAction,
     AmbientSeekAction,
@@ -46,27 +45,29 @@ from app.sync.protocol import (
     AmbientSkipPrevAction,
     AmbientStopAction,
     CancelInterruptAction,
-    DeactivateSceneAction,
     ErrorMessage,
+    FireCueAction,
     FireInterruptPlaylistAction,
     FireInterruptTrackAction,
     FireSfxAction,
     InterruptSeekAction,
     InterruptSkipNextAction,
+    LoopingSfx,
     PauseAction,
     PositionReportAction,
     RegisterAction,
     ResumeAction,
-    SceneActivated,
-    SceneDeactivated,
     SetActiveModeAction,
     SetActiveOutputsAction,
     SetActivePresetsAction,
     SetActiveSoundboardAction,
     SetCrossfadeAction,
+    SetDeviceVolumeAction,
     SetVolumeAction,
     SfxFired,
+    StartLoopAction,
     StateSnapshot,
+    StopLoopAction,
     action_adapter,
 )
 
@@ -132,82 +133,28 @@ async def _resolve_playlist_track_ids(playlist_id: int) -> tuple[list[int] | Non
 
 async def _resolve_playlist_by_name(
     name: str, mode_id: str
-) -> tuple[list[int] | None, str | None]:
-    """Resolve a scene's playlist reference (by name). Looks for a playlist
-    in the given mode OR a global playlist (mode_id=null) — same scoping
-    semantics as the playlists list endpoint's default."""
-    from sqlalchemy import or_, select
+) -> tuple[list[int] | None, int | None, str | None]:
+    """Resolve a cue's playlist reference (by name) to its track ids and id.
+    Playlists are per-mode — only this mode's playlists are searched (no global
+    fallback). Returns (track_ids, playlist_id, error_detail)."""
+    from sqlalchemy import select
 
-    def _work() -> tuple[list[int] | None, str | None]:
+    def _work() -> tuple[list[int] | None, int | None, str | None]:
         db = SessionLocal()
         try:
             stmt = select(Playlist).where(
                 Playlist.name == name,
-                or_(Playlist.mode_id == mode_id, Playlist.mode_id.is_(None)),
+                Playlist.mode_id == mode_id,
             )
             pl = db.scalars(stmt).first()
             if pl is None:
-                return (None, f"no playlist named '{name}' for mode '{mode_id}'")
+                return (None, None, f"no playlist named '{name}' for mode '{mode_id}'")
             items = playlists_domain.list_items(db, pl)
-            return ([it.track_id for it in items], None)
+            return ([it.track_id for it in items], pl.id, None)
         finally:
             db.close()
 
     return await run_in_threadpool(_work)
-
-
-async def _resolve_folder_track_ids(path: str) -> list[int]:
-    """All track ids under a library folder (recursive, in path order). An
-    empty path resolves to the whole library."""
-
-    def _work() -> list[int]:
-        db = SessionLocal()
-        try:
-            return library_index.track_ids_under(db, path)
-        finally:
-            db.close()
-
-    return await run_in_threadpool(_work)
-
-
-async def _resolve_follow_next() -> int | None:
-    """For follow ("Continue") mode: the next library track after the one
-    currently playing, or None when follow doesn't apply right now — a
-    different loop mode is set, the queue still has tracks (so a normal
-    advance handles it), or nothing is playing. Snapshots the live state so
-    the skip handler can pass the successor into the pure mutator."""
-    snap = await state_module.machine.snapshot()
-    amb = snap.ambient
-    if amb.loop != "follow" or amb.queue or amb.current_track_id is None:
-        return None
-    current_id = amb.current_track_id
-
-    def _work() -> int | None:
-        db = SessionLocal()
-        try:
-            track = db.get(Track, current_id)
-            if track is None:
-                return None
-            return library_index.next_track_id_after(db, track.path)
-        finally:
-            db.close()
-
-    return await run_in_threadpool(_work)
-
-
-async def _arrange_for_play(
-    track_ids: list[int], start_index: int
-) -> tuple[list[int], int]:
-    """Apply the live shuffle flag to a freshly-resolved track list. With
-    shuffle on, the whole list is randomised and playback starts at index 0
-    (a random first track — what "shuffle this album" should do); otherwise
-    the list and start index pass through untouched."""
-    snap = await state_module.machine.snapshot()
-    if snap.ambient.shuffle and len(track_ids) > 1:
-        shuffled = list(track_ids)
-        random.shuffle(shuffled)
-        return shuffled, 0
-    return track_ids, start_index
 
 
 async def _apply_and_broadcast(mutator: Any) -> None:
@@ -227,19 +174,48 @@ async def _apply_and_broadcast(mutator: Any) -> None:
 async def _h_register(
     action: RegisterAction, device_id: str, _ws: WebSocket
 ) -> None:
-    registry.update(device_id, name=action.name, capabilities=action.capabilities)
-    new_state = await state_module.machine.snapshot()
-    await manager.broadcast_state(new_state)
+    # `device_id` here is the ephemeral connection id. Registering does NOT add
+    # the device to the persistent list — that's a manual operator action.
+    #
+    # The persistent `is_output` flag is now a "default-on" designation: it does
+    # NOT gate whether a device may output (any connected device can be ticked
+    # on via set_active_outputs), it only means "auto-activate this device as a
+    # live output whenever it connects". So a default-on device is added to the
+    # active-output set here on register; everything else connects inactive and
+    # simply appears in `connected_devices` for the operator to tick on (or save
+    # as default-on in Settings).
+    default_on = device_store.is_output(action.client_id)
+    registry.bind(
+        device_id,
+        client_id=action.client_id,
+        name=action.name,
+        is_output=default_on,
+    )
+    if default_on:
+        # Additive mutator avoids the snapshot→set_active_outputs race where a
+        # concurrent register's stale snapshot would clobber the other's id.
+        await _apply_and_broadcast(state_module.add_active_output(action.client_id))
+    else:
+        snap = await state_module.machine.snapshot()
+        await manager.broadcast_state(snap)
 
 
 async def _h_position_report(
     action: PositionReportAction, device_id: str, websocket: WebSocket
 ) -> None:
-    if not registry.has_capability(device_id, "audio_output"):
-        await _send_error(websocket, "only audio_output devices may report position")
+    # Only a currently-ACTIVE output may stamp telemetry. (Active membership,
+    # not the persistent designation — an ad-hoc-activated device reports too,
+    # a designated-but-off one doesn't.) A well-behaved client self-gates and
+    # never reports unless it's playing; this is the server-side backstop.
+    client_id = registry.client_id_for(device_id) or device_id
+    snap = await state_module.machine.snapshot()
+    if client_id not in snap.active_output_device_ids:
+        await _send_error(
+            websocket, "only active output devices may report position"
+        )
         return
     await state_module.machine.apply(
-        state_module.report_position(device_id, action.position_ms),
+        state_module.report_position(client_id, action.position_ms),
         SessionLocal,
         broadcast=False,
     )
@@ -271,21 +247,32 @@ async def _h_set_active_mode(
 async def _h_set_active_outputs(
     action: SetActiveOutputsAction, _device_id: str, websocket: WebSocket
 ) -> None:
-    # Only validate device ids being **added** by this action. Existing
-    # ids in active_output_device_ids may be stale references to devices
-    # that disconnected long ago (e.g. left over in playback_state across
-    # server restarts) — re-validating them would block every toggle
-    # attempt for the user.
+    # `device_ids` are stable client_ids. Any *connected* device can be made an
+    # output — designation is no longer a gate (it only decides default-on
+    # auto-activation at connect time). Validate only the ids being **added**,
+    # and only that they're currently connected; ids already active get a pass
+    # (stale-tolerant across reconnects so a leftover id can't block a toggle).
     current_state = await state_module.machine.snapshot()
     already_active = set(current_state.active_output_device_ids)
     new_ids = [d for d in action.device_ids if d not in already_active]
-    bad = [d for d in new_ids if not registry.has_capability(d, "audio_output")]
-    if bad:
-        await _send_error(
-            websocket, f"device(s) not registered with audio_output: {bad}"
-        )
-        return
+    if new_ids:
+        connected = registry.connected_client_ids()
+        bad = [d for d in new_ids if d not in connected]
+        if bad:
+            await _send_error(websocket, f"device(s) not connected: {bad}")
+            return
     await _apply_and_broadcast(state_module.set_active_outputs(action.device_ids))
+
+
+async def _h_set_device_volume(
+    action: SetDeviceVolumeAction, _device_id: str, _ws: WebSocket
+) -> None:
+    # Per-device trim is informational state every output reads; setting it for
+    # a device that isn't currently an output is harmless (absent = 1.0, applied
+    # only by that device when it plays), so no designation check is needed.
+    await _apply_and_broadcast(
+        state_module.set_device_volume(action.device_id, action.volume)
+    )
 
 
 # --- ambient lane ---------------------------------------------------------
@@ -326,10 +313,7 @@ async def _h_ambient_clear_queue(
 async def _h_ambient_skip_next(
     _a: AmbientSkipNextAction, _device_id: str, _ws: WebSocket
 ) -> None:
-    # Resolve the follow successor first (no-op unless we're in follow mode at
-    # the end of the queue) so the pure mutator can advance into the library.
-    follow_next_id = await _resolve_follow_next()
-    await _apply_and_broadcast(state_module.ambient_skip_next(follow_next_id))
+    await _apply_and_broadcast(state_module.ambient_skip_next())
 
 
 async def _h_ambient_skip_prev(
@@ -353,17 +337,7 @@ async def _h_ambient_set_loop(
 async def _h_ambient_set_shuffle(
     action: AmbientSetShuffleAction, _device_id: str, _ws: WebSocket
 ) -> None:
-    # Turning shuffle on reshuffles the live queue immediately so the change
-    # is audible without reloading the source; the randomisation happens here
-    # (not in the mutator) to keep the state machine deterministic.
-    new_queue: list[int] | None = None
-    if action.shuffle:
-        snap = await state_module.machine.snapshot()
-        new_queue = list(snap.ambient.queue)
-        random.shuffle(new_queue)
-    await _apply_and_broadcast(
-        state_module.ambient_set_shuffle(action.shuffle, new_queue)
-    )
+    await _apply_and_broadcast(state_module.ambient_set_shuffle(action.shuffle))
 
 
 async def _h_ambient_stop(
@@ -382,23 +356,10 @@ async def _h_ambient_play_playlist(
     if not track_ids:
         await _send_error(websocket, "playlist is empty")
         return
-    ordered, start_index = await _arrange_for_play(track_ids, action.start_index)
     await _apply_and_broadcast(
-        state_module.ambient_play_playlist(ordered, start_index)
-    )
-
-
-async def _h_ambient_play_folder(
-    action: AmbientPlayFolderAction, _device_id: str, websocket: WebSocket
-) -> None:
-    track_ids = await _resolve_folder_track_ids(action.path)
-    if not track_ids:
-        where = f'"{action.path}"' if action.path else "the library"
-        await _send_error(websocket, f"no tracks in {where}")
-        return
-    ordered, start_index = await _arrange_for_play(track_ids, action.start_index)
-    await _apply_and_broadcast(
-        state_module.ambient_play_playlist(ordered, start_index)
+        state_module.ambient_play_playlist(
+            track_ids, action.start_index, source_playlist_id=action.playlist_id
+        )
     )
 
 
@@ -433,26 +394,28 @@ async def _h_set_active_soundboard(
 async def _h_set_active_presets(
     action: SetActivePresetsAction, _device_id: str, websocket: WebSocket
 ) -> None:
-    loaded = presets_loader.all_presets()
+    current_state = await state_module.machine.snapshot()
+    mode = (
+        modes_loader.get_mode(current_state.active_mode_id)
+        if current_state.active_mode_id
+        else None
+    )
+    loaded = mode.presets if mode is not None else {}
     unknown = [p for p in action.preset_ids if p not in loaded]
     if unknown:
         await _send_error(websocket, f"unknown preset(s): {unknown}")
         return
-    await _apply_and_broadcast(state_module.set_active_presets(action.preset_ids))
+    volume, crossfade_ms = presets_loader.effective_overrides(loaded, action.preset_ids)
+    await _apply_and_broadcast(
+        state_module.set_active_presets(
+            action.preset_ids, volume=volume, crossfade_ms=crossfade_ms
+        )
+    )
 
 
 async def _h_set_crossfade(
-    action: SetCrossfadeAction, _device_id: str, websocket: WebSocket
+    action: SetCrossfadeAction, _device_id: str, _ws: WebSocket
 ) -> None:
-    if action.crossfade_type is not None and action.crossfade_type not in (
-        "linear",
-        "equal_power",
-        "cut",
-    ):
-        await _send_error(
-            websocket, f"invalid crossfade_type: {action.crossfade_type}"
-        )
-        return
     await _apply_and_broadcast(
         state_module.set_crossfade(action.crossfade_ms, action.crossfade_type)
     )
@@ -517,91 +480,6 @@ async def _h_cancel_interrupt(
     await _apply_and_broadcast(state_module.cancel_interrupt())
 
 
-# --- scene activation -----------------------------------------------------
-
-
-async def _h_activate_scene(
-    action: ActivateSceneAction, _device_id: str, websocket: WebSocket
-) -> None:
-    current_state = await state_module.machine.snapshot()
-    mode_id = current_state.active_mode_id
-    if mode_id is None:
-        await _send_error(websocket, "no active mode")
-        return
-    mode = modes_loader.get_mode(mode_id)
-    if mode is None or action.scene_id not in mode.scenes:
-        await _send_error(
-            websocket, f"unknown scene '{action.scene_id}' in mode '{mode_id}'"
-        )
-        return
-
-    scene = mode.scenes[action.scene_id]
-
-    # Validate presets are loaded.
-    scene_presets = scene.presets or []
-    loaded = presets_loader.all_presets()
-    unknown = [p for p in scene_presets if p not in loaded]
-    if unknown:
-        await _send_error(
-            websocket, f"scene references unknown preset(s): {unknown}"
-        )
-        return
-
-    # Resolve ambient (optional).
-    ambient_track_ids: list[int] | None = None
-    crossfade_ms: int | None = None
-    if scene.ambient:
-        playlist_name = scene.ambient.get("playlist")
-        if playlist_name:
-            track_ids, err = await _resolve_playlist_by_name(playlist_name, mode_id)
-            if err is not None:
-                await _send_error(websocket, err)
-                return
-            if not track_ids:
-                await _send_error(
-                    websocket, f"playlist '{playlist_name}' resolved to empty"
-                )
-                return
-            ambient_track_ids = track_ids
-        cf = scene.ambient.get("crossfade_ms")
-        if isinstance(cf, int):
-            crossfade_ms = cf
-
-    await _apply_and_broadcast(
-        state_module.activate_scene(
-            action.scene_id,
-            ambient_track_ids=ambient_track_ids,
-            crossfade_ms=crossfade_ms,
-            presets=scene_presets if scene_presets else None,
-            volume=scene.volume,
-        )
-    )
-
-    # Broadcast the full scene definition so audio engine + integrations
-    # can act on looping_sfx / lights / external. Goes to all clients —
-    # any consumer (UI showing the active scene, audio engine starting
-    # loops, future MQTT bridge firing externals) might care.
-    scene_payload = scene.model_dump()
-    scene_payload.pop("id", None)  # already in the event envelope
-    event = SceneActivated(
-        scene_id=action.scene_id, mode_id=mode_id, scene=scene_payload
-    )
-    await manager.broadcast(event.model_dump(mode="json"))
-
-
-async def _h_deactivate_scene(
-    _a: DeactivateSceneAction, _device_id: str, _ws: WebSocket
-) -> None:
-    current_state = await state_module.machine.snapshot()
-    prev_scene_id = current_state.active_scene_id
-    prev_mode_id = current_state.active_mode_id
-    if prev_scene_id is None:
-        return  # noop
-    await _apply_and_broadcast(state_module.deactivate_scene())
-    event = SceneDeactivated(scene_id=prev_scene_id, mode_id=prev_mode_id)
-    await manager.broadcast(event.model_dump(mode="json"))
-
-
 # --- SFX (fire-and-forget) ------------------------------------------------
 
 
@@ -609,36 +487,172 @@ async def _h_fire_sfx(
     action: FireSfxAction, _device_id: str, websocket: WebSocket
 ) -> None:
     current_state = await state_module.machine.snapshot()
-    mode_id = current_state.active_mode_id
-    if mode_id is None:
-        await _send_error(websocket, "no active mode")
-        return
-    mode = modes_loader.get_mode(mode_id)
-    if mode is None or action.soundboard_id not in mode.soundboards:
-        await _send_error(
-            websocket,
-            f"unknown soundboard '{action.soundboard_id}' in mode '{mode_id}'",
-        )
-        return
-    soundboard = mode.soundboards[action.soundboard_id]
-    if not any(
-        item.file == action.item_path
-        for cat in soundboard.categories
-        for item in cat.items
-    ):
-        await _send_error(
-            websocket,
-            f"item '{action.item_path}' not in soundboard '{action.soundboard_id}'",
-        )
+    err = _sfx_item_error(
+        current_state.active_mode_id, action.soundboard_id, action.item_path
+    )
+    if err is not None:
+        await _send_error(websocket, err)
         return
     event = SfxFired(
         soundboard_id=action.soundboard_id,
         item_path=action.item_path,
         volume=action.volume,
     )
-    await manager.broadcast_to_capability(
-        "audio_output", event.model_dump(mode="json")
+    # Broadcast to every socket; each client's engine plays it only when that
+    # client is actually an output (active membership OR a force-local guest).
+    # Output membership is no longer a fixed designation, so gating server-side
+    # would miss ad-hoc-activated devices — the client is the source of truth.
+    await manager.broadcast(event.model_dump(mode="json"))
+
+
+def _sfx_item_error(mode_id: str | None, soundboard_id: str, item_path: str) -> str | None:
+    """Validate an SFX reference against the active mode's soundboards (same
+    gate as fire_sfx). Returns an error string, or None if valid."""
+    if mode_id is None:
+        return "no active mode"
+    mode = modes_loader.get_mode(mode_id)
+    if mode is None or soundboard_id not in mode.soundboards:
+        return f"unknown soundboard '{soundboard_id}' in mode '{mode_id}'"
+    soundboard = mode.soundboards[soundboard_id]
+    if not any(
+        item.file == item_path for cat in soundboard.categories for item in cat.items
+    ):
+        return f"item '{item_path}' not in soundboard '{soundboard_id}'"
+    return None
+
+
+async def _h_start_loop(
+    action: StartLoopAction, _device_id: str, websocket: WebSocket
+) -> None:
+    current_state = await state_module.machine.snapshot()
+    err = _sfx_item_error(
+        current_state.active_mode_id, action.soundboard_id, action.item_path
     )
+    if err is not None:
+        await _send_error(websocket, err)
+        return
+    loops_manager.start(
+        action.id,
+        action.soundboard_id,
+        action.item_path,
+        action.interval_s,
+        action.volume,
+    )
+    loop = LoopingSfx(
+        id=action.id,
+        name=action.name,
+        soundboard_id=action.soundboard_id,
+        item_path=action.item_path,
+        interval_s=action.interval_s,
+        volume=action.volume,
+    )
+    await _apply_and_broadcast(state_module.start_loop(loop))
+
+
+async def _h_stop_loop(
+    action: StopLoopAction, _device_id: str, websocket: WebSocket
+) -> None:
+    loops_manager.stop(action.id)
+    await _apply_and_broadcast(state_module.stop_loop(action.id))
+
+
+async def _h_fire_cue(
+    action: FireCueAction, _device_id: str, websocket: WebSocket
+) -> None:
+    current_state = await state_module.machine.snapshot()
+    mode_id = current_state.active_mode_id
+    if mode_id is None:
+        await _send_error(websocket, "no active mode")
+        return
+    mode = modes_loader.get_mode(mode_id)
+    cue = mode.cues.get(action.cue_id) if mode is not None else None
+    if cue is None:
+        await _send_error(
+            websocket, f"unknown cue '{action.cue_id}' in mode '{mode_id}'"
+        )
+        return
+
+    # Validate every reference up front so a broken cue fails atomically rather
+    # than half-applying.
+    if cue.preset is not None and cue.preset not in mode.presets:
+        await _send_error(websocket, f"cue references unknown preset '{cue.preset}'")
+        return
+    track_ids: list[int] | None = None
+    source_playlist_id: int | None = None
+    if cue.playlist is not None:
+        track_ids, source_playlist_id, err = await _resolve_playlist_by_name(
+            cue.playlist, mode_id
+        )
+        if err is not None:
+            await _send_error(websocket, err)
+            return
+        if not track_ids:
+            await _send_error(websocket, f"cue playlist '{cue.playlist}' is empty")
+            return
+    for ref in [*cue.sfx, *cue.loops]:
+        err = _sfx_item_error(mode_id, ref.soundboard, ref.item)
+        if err is not None:
+            await _send_error(websocket, f"cue SFX: {err}")
+            return
+
+    # All valid — apply. Preset first (so its crossfade override is in place
+    # before the playlist swap reads it), then the playlist, then loops.
+    if cue.preset is not None:
+        volume, crossfade_ms = presets_loader.effective_overrides(
+            mode.presets, [cue.preset]
+        )
+        await _apply_and_broadcast(
+            state_module.set_active_presets(
+                [cue.preset], volume=volume, crossfade_ms=crossfade_ms
+            )
+        )
+    if track_ids is not None:
+        start_index = min(cue.start_index, len(track_ids) - 1)
+        await _apply_and_broadcast(
+            state_module.ambient_play_playlist(
+                track_ids, start_index, source_playlist_id=source_playlist_id
+            )
+        )
+        if cue.start_ms > 0:
+            await _apply_and_broadcast(state_module.ambient_seek(cue.start_ms))
+    for i, loop in enumerate(cue.loops):
+        # Stable per-cue id so re-firing the same cue REPLACES its loops
+        # (timer + state both dedup by id) instead of stacking duplicate
+        # timers and duplicate LOOPS-panel rows on every press.
+        loop_id = f"cue:{action.cue_id}:{i}"
+        loops_manager.start(
+            loop_id, loop.soundboard, loop.item, loop.interval_s, loop.volume
+        )
+        await _apply_and_broadcast(
+            state_module.start_loop(
+                LoopingSfx(
+                    id=loop_id,
+                    name=_sfx_display_name(mode, loop.soundboard, loop.item),
+                    soundboard_id=loop.soundboard,
+                    item_path=loop.item,
+                    interval_s=loop.interval_s,
+                    volume=loop.volume,
+                )
+            )
+        )
+    for sfx in cue.sfx:
+        await manager.broadcast(
+            SfxFired(
+                soundboard_id=sfx.soundboard, item_path=sfx.item, volume=sfx.volume
+            ).model_dump(mode="json")
+        )
+
+
+def _sfx_display_name(mode: Any, soundboard_id: str, item_path: str) -> str:
+    """Friendly name for a soundboard item (for the LOOPS panel). Falls back to
+    the item path if the lookup misses."""
+    sb = mode.soundboards.get(soundboard_id) if mode is not None else None
+    if sb is not None:
+        for cat in sb.categories:
+            for item in cat.items:
+                if item.file == item_path:
+                    return item.name
+    return item_path
 
 
 # --- dispatch registry ----------------------------------------------------
@@ -657,6 +671,7 @@ _DISPATCH: dict[type, Any] = {
     ResumeAction: _h_resume,
     SetActiveModeAction: _h_set_active_mode,
     SetActiveOutputsAction: _h_set_active_outputs,
+    SetDeviceVolumeAction: _h_set_device_volume,
     AmbientPlayTrackAction: _h_ambient_play_track,
     AmbientSetQueueAction: _h_ambient_set_queue,
     AmbientEnqueueAction: _h_ambient_enqueue,
@@ -668,7 +683,6 @@ _DISPATCH: dict[type, Any] = {
     AmbientSetShuffleAction: _h_ambient_set_shuffle,
     AmbientStopAction: _h_ambient_stop,
     AmbientPlayPlaylistAction: _h_ambient_play_playlist,
-    AmbientPlayFolderAction: _h_ambient_play_folder,
     SetActiveSoundboardAction: _h_set_active_soundboard,
     SetActivePresetsAction: _h_set_active_presets,
     SetCrossfadeAction: _h_set_crossfade,
@@ -677,9 +691,10 @@ _DISPATCH: dict[type, Any] = {
     InterruptSkipNextAction: _h_interrupt_skip_next,
     InterruptSeekAction: _h_interrupt_seek,
     CancelInterruptAction: _h_cancel_interrupt,
-    ActivateSceneAction: _h_activate_scene,
-    DeactivateSceneAction: _h_deactivate_scene,
     FireSfxAction: _h_fire_sfx,
+    StartLoopAction: _h_start_loop,
+    StopLoopAction: _h_stop_loop,
+    FireCueAction: _h_fire_cue,
 }
 
 
@@ -708,10 +723,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
 
     device = registry.add()
-    manager.add(device.device_id, websocket)
+    manager.add(device.connection_id, websocket)
 
+    # The snapshot goes out before the client's `register` (which carries the
+    # client_id), so the server can't name the device here. The client knows
+    # its own stable client_id and self-assigns identity — your_device_id stays
+    # empty (see StateSnapshot).
     snapshot_state = await state_module.machine.snapshot()
-    await _send(websocket, StateSnapshot(your_device_id=device.device_id, state=snapshot_state))
+    await _send(websocket, StateSnapshot(state=snapshot_state))
 
     try:
         while True:
@@ -747,8 +766,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 # Fall through so the action gets the standard guest rejection
                 # below (or, for register, succeeds).
 
-            # Guests can register themselves (so the device shows up as a
-            # potential audio_output) but nothing else.
+            # Guests can register themselves (so the device appears in the
+            # operator's device list and can be designated as an output) but
+            # nothing else.
             if is_guest and not isinstance(action, RegisterAction):
                 await _send_error(
                     websocket, "guest sessions cannot mutate state — please sign in"
@@ -756,7 +776,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 continue
 
             try:
-                await _dispatch(action, device.device_id, websocket)
+                await _dispatch(action, device.connection_id, websocket)
             except Exception as e:
                 # Single-user home server — surface the exception type +
                 # message in the error frame so the operator sees the
@@ -767,19 +787,28 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     websocket, f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
                 )
     finally:
-        manager.remove(device.device_id)
-        registry.remove(device.device_id)
-        # Prune the disconnecting device from active_output_device_ids so
-        # the operator's next session doesn't inherit a stale reference
-        # that blocks toggle attempts (see set_active_outputs validation).
-        with contextlib.suppress(Exception):
-            await commit_and_broadcast(
-                state_module.remove_active_output(device.device_id)
-            )
+        client_id = registry.client_id_for(device.connection_id)
+        manager.remove(device.connection_id)
+        registry.remove(device.connection_id)
+        # Prune the disconnecting device from active_output_device_ids — but
+        # only when its *last* tab closes. Closing one tab of a device that has
+        # another output tab open shouldn't silence it. The persistent
+        # is_output designation is untouched; on reconnect the device sits
+        # inactive (fully-manual: no auto-resume) until re-activated.
+        if client_id is not None and not registry.has_other_connection(
+            client_id, device.connection_id
+        ):
+            with contextlib.suppress(Exception):
+                await commit_and_broadcast(
+                    state_module.remove_active_output(client_id)
+                )
         with contextlib.suppress(Exception):
             new_state = await state_module.machine.snapshot()
             await manager.broadcast_state(new_state)
         await asyncio.sleep(0)
-        if websocket.client_state.value not in (2, 3):
+        if websocket.client_state not in (
+            WebSocketState.DISCONNECTED,
+            WebSocketState.RESPONSE,
+        ):
             with contextlib.suppress(Exception):
                 await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)

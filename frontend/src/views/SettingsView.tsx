@@ -1,91 +1,40 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
-import { authApi } from "@/core/api";
+import { SettingsIcon } from "@/components/icons";
+import { inputDialog } from "@/components/inputDialog";
+import { Switch } from "@/components/Switch";
+import { authApi, devicesApi } from "@/core/api";
 import type { ActiveSession } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
+import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
+import type { KnownDevice } from "@/core/types";
 import { useUiStore } from "@/core/uiStore";
-import type { Capability } from "@/core/uiStore";
-import { wsClient } from "@/core/ws";
-
-const ALL_CAPS: { key: Capability; label: string; description: string }[] = [
-  {
-    key: "controls",
-    label: "Controller",
-    description:
-      "This tab can send actions (play, pause, fire SFX, activate scenes).",
-  },
-  {
-    key: "audio_output",
-    label: "Audio output",
-    description:
-      "This tab actually plays audio. Enable on devices connected to speakers; disable on a phone you only use as a remote.",
-  },
-];
 
 export function SettingsView() {
   const hidePlayerArt = useUiStore((s) => s.hidePlayerArt);
   const setHidePlayerArt = useUiStore((s) => s.setHidePlayerArt);
 
-  const capabilities = useUiStore((s) => s.capabilities);
-  const setCapabilities = useUiStore((s) => s.setCapabilities);
-
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-
-  function toggleCap(cap: Capability) {
-    const next = capabilities.includes(cap)
-      ? capabilities.filter((c) => c !== cap)
-      : [...capabilities, cap];
-    setCapabilities(next);
-    wsClient.sendRegister();
-  }
 
   return (
     <div className="settings-view">
       <section className="surface-card">
         <h3>Display</h3>
-        <label className="autotag-toggle">
-          <input
-            type="checkbox"
-            checked={hidePlayerArt}
-            onChange={(e) => setHidePlayerArt(e.target.checked)}
-          />
-          <span>Hide cover art on Player tab (blackout)</span>
-        </label>
+        <Switch
+          checked={hidePlayerArt}
+          onChange={(e) => setHidePlayerArt(e.target.checked)}
+          label="Hide cover art on Player tab (blackout)"
+        />
         <p className="muted small">
           Useful when this tab is the room display and you don't want the art
           dominating the view.
         </p>
       </section>
 
-      <section className="surface-card">
-        <h3>This device</h3>
-        <p className="muted small">
-          Rename this device on the <strong>Player</strong> tab — the field
-          there is reachable to guest sessions too.
-        </p>
-
-        <div className="settings-caps">
-          {ALL_CAPS.map((cap) => {
-            const on = capabilities.includes(cap.key);
-            return (
-              <label key={cap.key} className="settings-cap">
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => toggleCap(cap.key)}
-                />
-                <div>
-                  <div className="settings-cap-label">{cap.label}</div>
-                  <p className="muted small">{cap.description}</p>
-                </div>
-              </label>
-            );
-          })}
-        </div>
-      </section>
+      <DevicesPanel />
 
       <section className="surface-card">
         <h3>Account</h3>
@@ -93,7 +42,7 @@ export function SettingsView() {
           Signed in as <strong>{user?.username ?? "(unknown)"}</strong>.
         </p>
         <div>
-          <button type="button" onClick={() => void logout()}>
+          <button type="button" className="btn-danger" onClick={() => void logout()}>
             Sign out
           </button>
         </div>
@@ -118,13 +67,183 @@ export function SettingsView() {
             className="btn-link"
             role="button"
           >
-            <span aria-hidden="true">🔧</span>
+            <SettingsIcon aria-hidden="true" />
             Open diagnostics
             <span aria-hidden="true" className="btn-link-external">↗</span>
           </a>
         </div>
       </section>
     </div>
+  );
+}
+
+/** The remembered-devices registry: the operator's manually-curated list of
+ *  which devices may act as audio outputs. Output is fully manual — a device
+ *  only ever produces audio after being saved here AND marked as an output AND
+ *  activated. Connected devices not yet saved are surfaced with an "Add"
+ *  action; saved devices persist across reinstalls (server-side file). */
+function DevicesPanel() {
+  const [saved, setSaved] = useState<KnownDevice[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const connectedDevices = usePlayerArray((s) => s.state?.connected_devices);
+  const myDeviceId = usePlayerStore((s) => s.myDeviceId);
+
+  const refresh = useCallback(async () => {
+    try {
+      setSaved(await devicesApi.list());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "load failed");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const savedIds = new Set((saved ?? []).map((d) => d.client_id));
+  const connectedIds = new Set(connectedDevices.map((d) => d.client_id));
+  // Connected devices the operator hasn't remembered yet.
+  const unsaved = connectedDevices.filter((d) => !savedIds.has(d.client_id));
+
+  async function save(clientId: string, name: string, isOutput: boolean) {
+    setBusy(true);
+    try {
+      await devicesApi.save(clientId, { name, is_output: isOutput });
+      await refresh();
+    } catch (e) {
+      toast.error("Update failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rename(d: KnownDevice) {
+    const name = await inputDialog({
+      title: "Rename device",
+      label: "Device name",
+      initial: d.name,
+    });
+    if (name === null) return; // null = cancelled; required+trim handled by the dialog
+    await save(d.client_id, name, d.is_output);
+  }
+
+  async function forget(d: KnownDevice) {
+    const ok = await confirmDialog({
+      title: "Forget device?",
+      body: `Remove "${d.name}" from the saved list? It can be added again while it's connected.`,
+      tone: "danger",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await devicesApi.remove(d.client_id);
+      await refresh();
+    } catch (e) {
+      toast.error("Remove failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="surface-card">
+      <h3>Devices</h3>
+      <p className="muted small">
+        Remember and name your devices. Marking one{" "}
+        <strong>output by default</strong> makes it auto-turn-on as a speaker
+        whenever it connects (handy for a fixed TV or speaker box). You don't
+        need to save a device to use it — any connected device can be turned on
+        ad-hoc from the <strong>Speakers</strong> menu in the footer. This list
+        is saved and survives reinstalls.
+      </p>
+
+      {error !== null ? <p className="error small">{error}</p> : null}
+
+      {saved === null ? (
+        <p className="muted small">Loading…</p>
+      ) : saved.length === 0 ? (
+        <p className="muted small">
+          No saved devices yet. Add a connected device below to remember it.
+        </p>
+      ) : (
+        <ul className="device-list">
+          {saved.map((d) => (
+            <li key={d.client_id} className="device-row">
+              <div className="device-row-main">
+                <div className="device-row-name">
+                  {d.name || "(unnamed)"}
+                  {d.client_id === myDeviceId ? (
+                    <span className="badge"> this device</span>
+                  ) : null}
+                </div>
+                <p>
+                  {connectedIds.has(d.client_id) ? (
+                    <span className="badge badge-ok">connected</span>
+                  ) : (
+                    <span className="badge">offline</span>
+                  )}
+                </p>
+              </div>
+              <Switch
+                className="device-output-toggle"
+                checked={d.is_output}
+                disabled={busy}
+                onChange={() => void save(d.client_id, d.name, !d.is_output)}
+                label="Output by default"
+              />
+              <div className="device-row-actions">
+                <button type="button" onClick={() => void rename(d)} disabled={busy}>
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  onClick={() => void forget(d)}
+                  disabled={busy}
+                >
+                  Forget
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {unsaved.length > 0 ? (
+        <div className="device-unsaved">
+          <p className="muted small">Connected, not yet saved:</p>
+          <ul className="device-list">
+            {unsaved.map((d) => (
+              <li key={d.client_id} className="device-row">
+                <div className="device-row-main">
+                  <div className="device-row-name">
+                    {d.name || "(unnamed)"}
+                    {d.client_id === myDeviceId ? (
+                      <span className="badge"> this device</span>
+                    ) : null}
+                  </div>
+                  <p>
+                    <span className="badge badge-ok">connected</span>
+                  </p>
+                </div>
+                <div className="device-row-actions">
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => void save(d.client_id, d.name, false)}
+                    disabled={busy}
+                  >
+                    Add to list
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -169,11 +288,11 @@ function BackupPanel() {
     <section className="surface-card">
       <h3>Backup</h3>
       <p className="muted small">
-        Download a tar.gz of <code>app.db</code>, <code>modes/</code>, and{" "}
-        <code>presets/</code> — the persistent state worth keeping. Music and
-        SFX libraries aren't included; back those up at the filesystem level
-        (rsync / SFTP) since they're large and change rarely from the app's
-        perspective.
+        Download a tar.gz of <code>app.db</code>, <code>modes/</code> (including
+        each mode's EQ presets), and the saved <code>devices.json</code> — the
+        persistent state worth keeping. Music and SFX libraries aren't included;
+        back those up at the filesystem level (rsync / SFTP) since they're large
+        and change rarely from the app's perspective.
       </p>
       <p className="muted small">
         Restore is manual: stop the server, replace the files in place, start
@@ -265,11 +384,11 @@ function ActiveSessionsPanel() {
         <ul className="simple-list">
           {sessions.map((s) => (
             <li key={s.token_prefix}>
-              <div>
+              <div className="entity-row-main">
                 <div>
                   <code>{s.token_prefix}…</code>
                   {s.is_current ? (
-                    <span className="badge"> this device</span>
+                    <span className="badge badge-accent"> this device</span>
                   ) : null}
                 </div>
                 <p className="muted small">

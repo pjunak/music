@@ -1,11 +1,15 @@
 import type {
+  Cue,
   FolderEntry,
+  FoldersResponse,
   InterruptSpec,
+  KnownDevice,
   ModeDetail,
   ModeSummary,
   PlaylistMeta,
-  SceneLoopingSfx,
-  SceneSpec,
+  PresetEffect,
+  PresetManifest,
+  SoundboardManifest,
   Track,
   TrackInPlaylist,
   TreeResponse,
@@ -74,6 +78,45 @@ export const api = {
   delete: <T>(path: string) => request<T>("DELETE", path),
 };
 
+// XHR (not fetch) because only XHR exposes upload-progress events.
+function uploadWithProgress<T>(
+  path: string,
+  files: File[],
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<T> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f, f.name);
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}${path}`);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (e) => {
+      if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
+    };
+    xhr.onerror = () => reject(new Error("network error during upload"));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as T);
+        } catch {
+          reject(new Error("upload succeeded but response wasn't JSON"));
+        }
+        return;
+      }
+      let detail = `${xhr.status}: ${xhr.statusText}`;
+      try {
+        const body = JSON.parse(xhr.responseText) as { detail?: unknown };
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
+      }
+      reject(new ApiError(xhr.status, detail));
+    };
+    xhr.send(form);
+  });
+}
+
 // --- typed helpers per resource -----------------------------------------
 
 export const modesApi = {
@@ -97,20 +140,23 @@ export const authApi = {
     ),
 };
 
-export interface PresetEffect {
-  type: string;
-  [key: string]: unknown;
-}
-
-export interface PresetManifest {
-  id: string;
-  name: string;
-  description?: string | null;
-  effects: PresetEffect[];
-}
+export type { PresetManifest, PresetEffect } from "@/core/types";
 
 export const presetsApi = {
-  list: () => api.get<PresetManifest[]>("/api/presets"),
+  // Presets are per-mode now — list the given mode's EQ presets.
+  list: (modeId: string) =>
+    api.get<PresetManifest[]>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets`,
+    ),
+};
+
+export const devicesApi = {
+  list: () => api.get<KnownDevice[]>("/api/devices"),
+  /** Remember a device (or update its name / output designation). */
+  save: (clientId: string, payload: { name: string; is_output: boolean }) =>
+    api.put<KnownDevice>(`/api/devices/${encodeURIComponent(clientId)}`, payload),
+  remove: (clientId: string) =>
+    api.delete<void>(`/api/devices/${encodeURIComponent(clientId)}`),
 };
 
 export const playlistsApi = {
@@ -137,6 +183,10 @@ export const playlistsApi = {
     api.patch<void>(`/api/playlists/${playlistId}/tracks/${position}`, {
       to_position: toPosition,
     }),
+  update: (
+    playlistId: number,
+    payload: { name: string; mode_id?: string | null; category?: string | null },
+  ) => api.patch<PlaylistMeta>(`/api/playlists/${playlistId}`, payload),
   exportUrl: (playlistId: number, format: "m3u" | "json") =>
     `${BASE}/api/playlists/${playlistId}/export?format=${format}`,
 };
@@ -188,8 +238,10 @@ export interface MetadataUpdate {
   album_artist?: string;
   album?: string;
   track_no?: number | null;
+  disc_no?: number | null;
   year?: number | null;
   genre?: string;
+  bpm?: number | null;
   // DB-only fields — not written to the file's tags. See backend.
   display_title?: string;
   origin?: string;
@@ -243,44 +295,17 @@ export const libraryApi = {
     api.get<TreeResponse>(
       path ? `/api/library/tree?path=${encodeURIComponent(path)}` : "/api/library/tree",
     ),
+  allFolders: () => api.get<FoldersResponse>("/api/library/folders"),
   upload: (
     files: File[],
     dest: string,
     onProgress?: (loaded: number, total: number) => void,
-  ): Promise<UploadResult> => {
-    const form = new FormData();
-    for (const f of files) form.append("files", f, f.name);
-    return new Promise<UploadResult>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const path = `/api/library/upload?dest=${encodeURIComponent(dest)}`;
-      xhr.open("POST", `${BASE}${path}`);
-      xhr.withCredentials = true;
-      xhr.responseType = "text";
-      xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
-      };
-      xhr.onerror = () => reject(new Error("network error during upload"));
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            resolve(JSON.parse(xhr.responseText) as UploadResult);
-          } catch {
-            reject(new Error("upload succeeded but response wasn't JSON"));
-          }
-          return;
-        }
-        let detail = `${xhr.status}: ${xhr.statusText}`;
-        try {
-          const body = JSON.parse(xhr.responseText) as { detail?: unknown };
-          if (body && typeof body.detail === "string") detail = body.detail;
-        } catch {
-          if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
-        }
-        reject(new ApiError(xhr.status, detail));
-      };
-      xhr.send(form);
-    });
-  },
+  ): Promise<UploadResult> =>
+    uploadWithProgress<UploadResult>(
+      `/api/library/upload?dest=${encodeURIComponent(dest)}`,
+      files,
+      onProgress,
+    ),
   rescan: () => api.post<RescanResult>("/api/library/rescan"),
   updateMetadata: (id: number, payload: MetadataUpdate) =>
     api.patch<Track>(`/api/library/tracks/${id}/metadata`, payload),
@@ -304,7 +329,7 @@ export const libraryApi = {
   coverUrl: (id: number) => `${BASE}/api/library/tracks/${id}/cover`,
   streamUrl: (id: number) => `${BASE}/api/library/tracks/${id}/stream`,
   createFolder: (path: string) =>
-    api.post<{ name: string; path: string; track_count: number }>(
+    api.post<{ name: string; path: string; track_count: number; has_children: boolean }>(
       "/api/library/folders",
       { path },
     ),
@@ -315,10 +340,125 @@ export const libraryApi = {
     );
   },
   renameFolder: (src: string, dst: string) =>
-    api.post<{ name: string; path: string; track_count: number }>(
+    api.post<{ name: string; path: string; track_count: number; has_children: boolean }>(
       "/api/library/folders/rename",
       { src, dst },
     ),
+};
+
+// --- library cleanup -----------------------------------------------------
+
+// Keep in lockstep with the backend `RuleId` Literal in app/api/cleanup.py
+// and the engine rule constants in app/library/cleanup.py.
+export type CleanupRuleId =
+  | "strip_track_numbers"
+  | "strip_artist"
+  | "strip_album"
+  | "strip_junk"
+  | "normalize_separators"
+  | "normalize_case"
+  | "tag_title"
+  | "tag_artist"
+  | "tag_album"
+  | "tag_number"
+  | "tag_year";
+
+export interface CleanupScope {
+  type: "all" | "folder" | "tracks";
+  path?: string;
+  recursive?: boolean;
+  track_ids?: number[];
+}
+
+export interface CleanupOp {
+  op_id: string;
+  track_id: number;
+  kind: "rename" | "tag";
+  field: string | null;
+  old: string | number | null;
+  new: string | number | null;
+  rules: string[];
+  confidence: "high" | "low";
+  /** Value confirmed by an online name lookup (MusicBrainz). */
+  verified: boolean;
+}
+
+export interface CleanupTrackPlan {
+  track_id: number;
+  path: string;
+  ops: CleanupOp[];
+  notes: string[];
+}
+
+export interface CleanupAnalyzeResult {
+  scanned: number;
+  plans: CleanupTrackPlan[];
+  /** Names an online lookup could still settle — resolve via
+   *  cleanupApi.verify, then re-analyze (verdicts are cached forever,
+   *  each name is only ever looked up once). */
+  pending_lookups: string[];
+}
+
+export interface CleanupVerifyResult {
+  verified: number;
+  failed: string[];
+}
+
+export interface CleanupOpIn {
+  track_id: number;
+  kind: "rename" | "tag";
+  field: string | null;
+  old: string | number | null;
+  new: string | number | null;
+}
+
+export interface CleanupApplyResult {
+  batch_id: number | null;
+  applied: number;
+  skipped: BulkActionSkip[];
+}
+
+export interface CleanupBatchSummary {
+  id: number;
+  created_at: string;
+  scope_label: string;
+  item_count: number;
+  reverted_at: string | null;
+}
+
+export interface CleanupBatchDetail extends CleanupBatchSummary {
+  items: unknown[];
+}
+
+export interface CleanupRevertResult {
+  reverted: number;
+  skipped: BulkActionSkip[];
+}
+
+export const cleanupApi = {
+  analyze: (scope: CleanupScope, rules: CleanupRuleId[]) =>
+    api.post<CleanupAnalyzeResult>("/api/library/cleanup/analyze", { scope, rules }),
+  /** Resolve a small batch of names against MusicBrainz (server paces at
+   *  1 req/s — keep batches ≤ 5 and chunk longer lists). */
+  verify: (names: string[]) =>
+    api.post<CleanupVerifyResult>("/api/library/cleanup/verify", { names }),
+  /** One chunk of accepted ops. Pass the batch_id from the previous chunk
+   *  so the whole run lands in a single revertable journal. */
+  apply: (ops: CleanupOpIn[], batchId: number | null, scopeLabel: string) =>
+    api.post<CleanupApplyResult>("/api/library/cleanup/apply", {
+      ops,
+      batch_id: batchId,
+      scope_label: scopeLabel,
+    }),
+  batches: () => api.get<CleanupBatchSummary[]>("/api/library/cleanup/batches"),
+  batch: (id: number) =>
+    api.get<CleanupBatchDetail>(`/api/library/cleanup/batches/${id}`),
+  revertBatch: (id: number) =>
+    api.post<CleanupRevertResult>(`/api/library/cleanup/batches/${id}/revert`),
+  /** Revert from a previously-downloaded journal file (disaster path —
+   *  works even after the server-side batch rows are gone). */
+  revertJournal: (items: unknown[]) =>
+    api.post<CleanupRevertResult>("/api/library/cleanup/revert", { items }),
 };
 
 // --- SFX ---------------------------------------------------------------
@@ -335,12 +475,17 @@ export interface SfxFolder {
   name: string;
   path: string;
   file_count: number;
+  has_children: boolean;
 }
 
 export interface SfxTreeResponse {
   path: string;
   folders: SfxFolder[];
   files: SfxFile[];
+}
+
+export interface SfxFoldersResponse {
+  folders: SfxFolder[];
 }
 
 export interface SfxUploadResult {
@@ -354,44 +499,17 @@ export const sfxApi = {
     api.get<SfxTreeResponse>(
       path ? `/api/sfx/tree?path=${encodeURIComponent(path)}` : "/api/sfx/tree",
     ),
+  allFolders: () => api.get<SfxFoldersResponse>("/api/sfx/folders"),
   upload: (
     files: File[],
     dest: string,
     onProgress?: (loaded: number, total: number) => void,
-  ): Promise<SfxUploadResult> => {
-    const form = new FormData();
-    for (const f of files) form.append("files", f, f.name);
-    return new Promise<SfxUploadResult>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const path = `/api/sfx/upload?dest=${encodeURIComponent(dest)}`;
-      xhr.open("POST", `${BASE}${path}`);
-      xhr.withCredentials = true;
-      xhr.responseType = "text";
-      xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable) onProgress(e.loaded, e.total);
-      };
-      xhr.onerror = () => reject(new Error("network error during upload"));
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            resolve(JSON.parse(xhr.responseText) as SfxUploadResult);
-          } catch {
-            reject(new Error("upload succeeded but response wasn't JSON"));
-          }
-          return;
-        }
-        let detail = `${xhr.status}: ${xhr.statusText}`;
-        try {
-          const body = JSON.parse(xhr.responseText) as { detail?: unknown };
-          if (body && typeof body.detail === "string") detail = body.detail;
-        } catch {
-          if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
-        }
-        reject(new ApiError(xhr.status, detail));
-      };
-      xhr.send(form);
-    });
-  },
+  ): Promise<SfxUploadResult> =>
+    uploadWithProgress<SfxUploadResult>(
+      `/api/sfx/upload?dest=${encodeURIComponent(dest)}`,
+      files,
+      onProgress,
+    ),
   moveFile: (src: string, dstFolder: string, newFilename?: string) =>
     api.post<SfxFile>("/api/sfx/move", {
       src,
@@ -417,6 +535,8 @@ export const sfxApi = {
 export const modesAdminApi = {
   create: (id: string, name: string) =>
     api.post<ModeSummary>("/api/modes", { id, name }),
+  rename: (id: string, name: string) =>
+    api.patch<ModeSummary>(`/api/modes/${encodeURIComponent(id)}`, { name }),
   delete: (id: string) =>
     api.delete<void>(`/api/modes/${encodeURIComponent(id)}`),
   reload: () =>
@@ -432,37 +552,6 @@ export const modesAdminApi = {
     api.delete<void>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}`,
     ),
-  createScene: (
-    modeId: string,
-    payload: { id: string; name: string; description?: string },
-  ) =>
-    api.post<unknown>(
-      `/api/modes/${encodeURIComponent(modeId)}/scenes`,
-      payload,
-    ),
-  deleteScene: (modeId: string, sceneId: string) =>
-    api.delete<void>(
-      `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
-    ),
-  updateScene: (
-    modeId: string,
-    sceneId: string,
-    payload: {
-      name?: string;
-      description?: string;
-      ambient?: { playlist?: string; crossfade_ms?: number };
-      clear_ambient?: boolean;
-      presets?: string[];
-      looping_sfx?: SceneLoopingSfx[];
-      volume?: number;
-      clear_volume?: boolean;
-    },
-  ) =>
-    api.patch<SceneSpec>(
-      `/api/modes/${encodeURIComponent(modeId)}/scenes/${encodeURIComponent(sceneId)}`,
-      payload,
-    ),
-
   // Soundboard editor — categories + items inside an existing soundboard.
   // Each call returns the updated SoundboardManifest so the UI can re-render
   // without a separate fetch.
@@ -471,20 +560,12 @@ export const modesAdminApi = {
     soundboardId: string,
     payload: { id: string; name: string },
   ) =>
-    api.post<{
-      id: string;
-      name?: string | null;
-      categories: Array<{
-        id: string;
-        name: string;
-        items: Array<{ file: string; name: string; hotkey?: string | null; icon?: string | null }>;
-      }>;
-    }>(
+    api.post<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories`,
       payload,
     ),
   deleteCategory: (modeId: string, soundboardId: string, categoryId: string) =>
-    api.delete<unknown>(
+    api.delete<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}`,
     ),
   addItem: (
@@ -493,7 +574,7 @@ export const modesAdminApi = {
     categoryId: string,
     payload: { file: string; name: string; hotkey?: string; icon?: string },
   ) =>
-    api.post<unknown>(
+    api.post<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items`,
       payload,
     ),
@@ -504,7 +585,7 @@ export const modesAdminApi = {
     index: number,
     payload: { name?: string; hotkey?: string; icon?: string; file?: string },
   ) =>
-    api.patch<unknown>(
+    api.patch<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items/${index}`,
       payload,
     ),
@@ -514,7 +595,7 @@ export const modesAdminApi = {
     categoryId: string,
     index: number,
   ) =>
-    api.delete<unknown>(
+    api.delete<SoundboardManifest>(
       `/api/modes/${encodeURIComponent(modeId)}/soundboards/${encodeURIComponent(soundboardId)}/categories/${encodeURIComponent(categoryId)}/items/${index}`,
     ),
 
@@ -556,33 +637,65 @@ export const modesAdminApi = {
     api.delete<InterruptSpec[]>(
       `/api/modes/${encodeURIComponent(modeId)}/interrupts/${index}`,
     ),
+
+  createCue: (modeId: string, payload: Cue) =>
+    api.post<Cue>(`/api/modes/${encodeURIComponent(modeId)}/cues`, payload),
+  updateCue: (modeId: string, cueId: string, payload: Omit<Cue, "id">) =>
+    api.put<Cue>(
+      `/api/modes/${encodeURIComponent(modeId)}/cues/${encodeURIComponent(cueId)}`,
+      payload,
+    ),
+  deleteCue: (modeId: string, cueId: string) =>
+    api.delete<void>(
+      `/api/modes/${encodeURIComponent(modeId)}/cues/${encodeURIComponent(cueId)}`,
+    ),
 };
 
 // --- presets scaffolding -----------------------------------------------
 
+// EQ presets are per-mode now — CRUD lives under the modes API.
 export const presetsAdminApi = {
-  create: (payload: {
-    id: string;
-    name: string;
-    description?: string;
-    effects: PresetEffect[];
-  }) => api.post<PresetManifest>("/api/presets", payload),
+  create: (
+    modeId: string,
+    payload: {
+      id: string;
+      name: string;
+      description?: string;
+      effects: PresetEffect[];
+      volume?: number | null;
+      crossfade_ms?: number | null;
+    },
+  ) =>
+    api.post<PresetManifest>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets`,
+      payload,
+    ),
   update: (
-    id: string,
-    payload: { name?: string; description?: string; effects?: PresetEffect[] },
-  ) => api.put<PresetManifest>(`/api/presets/${encodeURIComponent(id)}`, payload),
-  delete: (id: string) =>
-    api.delete<void>(`/api/presets/${encodeURIComponent(id)}`),
-  reload: () =>
-    api.post<{ loaded: string[]; errors: Record<string, string> }>(
-      "/api/presets/reload",
+    modeId: string,
+    presetId: string,
+    payload: {
+      name: string;
+      description?: string;
+      effects?: PresetEffect[];
+      volume?: number | null;
+      crossfade_ms?: number | null;
+    },
+  ) =>
+    api.put<PresetManifest>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets/${encodeURIComponent(presetId)}`,
+      payload,
+    ),
+  delete: (modeId: string, presetId: string) =>
+    api.delete<void>(
+      `/api/modes/${encodeURIComponent(modeId)}/presets/${encodeURIComponent(presetId)}`,
     ),
 };
 
 // Diagnostics — server-side operational snapshot. Read by the
 // Diagnostics tab so the operator can see what's happening (track
-// count, last rescan, mode/preset load errors, connected devices)
-// without SSH'ing into the host.
+// count, last rescan, mode load errors — a per-mode preset error is
+// folded into that mode's error string — connected devices) without
+// SSH'ing into the host.
 export interface LoaderStatus {
   last_load_at: number | null;
   loaded_ids: string[];
@@ -593,7 +706,6 @@ export interface DiagnosticsResponse {
   track_count: number;
   last_scan_at: number | null;
   modes: LoaderStatus;
-  presets: LoaderStatus;
   connected_device_count: number;
   state_revision: number;
 }

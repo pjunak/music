@@ -1,8 +1,9 @@
 """Operator-facing diagnostics endpoint.
 
 Surfaces in-memory state that's otherwise only visible in server logs:
-last scan/reload timestamps, mode and preset load errors, and live
-device/output counts. Read by the frontend's Diagnostics tab so the
+last scan/reload timestamps, mode load errors (a per-mode preset error is
+folded into that mode's error string), and live device/output counts. Read
+by the frontend's Diagnostics tab so the
 operator can see why a YAML edit didn't take effect (or whether the
 library got reindexed) without SSH'ing into the host.
 
@@ -18,7 +19,6 @@ from app.api.deps import CurrentUser, DbSession
 from app.library import index as library_index
 from app.models.track import Track
 from app.modes import loader as modes_loader
-from app.presets import loader as presets_loader
 from app.sync import state as sync_state
 from app.sync.devices import registry
 
@@ -44,7 +44,6 @@ class DiagnosticsResponse(BaseModel):
     track_count: int
     last_scan_at: float | None
     modes: LoaderStatus
-    presets: LoaderStatus
     connected_device_count: int
     state_revision: int
 
@@ -60,19 +59,11 @@ async def get_diagnostics(_: CurrentUser, db: DbSession) -> DiagnosticsResponse:
         errors=dict(modes_result.errors) if modes_result else {},
     )
 
-    presets_result, presets_at = presets_loader.last_load()
-    presets_status = LoaderStatus(
-        last_load_at=presets_at,
-        loaded_ids=list(presets_result.loaded.keys()) if presets_result else [],
-        errors=dict(presets_result.errors) if presets_result else {},
-    )
-
     state = await sync_state.machine.snapshot()
     return DiagnosticsResponse(
         track_count=track_count,
         last_scan_at=library_index.last_scan_at(),
         modes=modes_status,
-        presets=presets_status,
         connected_device_count=len(registry.all_infos()),
         state_revision=state.revision,
     )

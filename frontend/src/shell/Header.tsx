@@ -1,23 +1,31 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
 
 import { DeviceNameField } from "@/components/DeviceNameField";
+import { HelpIcon, ModeIcon, SettingsIcon } from "@/components/icons";
+import { IconButton } from "@/components/IconButton";
 import { modesApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeSummary } from "@/core/types";
+import { useUiTransient } from "@/core/uiTransient";
+import { wsClient } from "@/core/ws";
 
+import { ModeManagerModal } from "./ModeManagerModal";
 import { Tabs } from "./Tabs";
 
 export function Header() {
   const wsStatus = usePlayerStore((s) => s.wsStatus);
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
-  const activeSceneId = usePlayerStore((s) => s.state?.active_scene_id ?? null);
   const authStatus = useAuthStore((s) => s.status);
   const isGuest = authStatus !== "authenticated";
+  // Only offer "Sign in" once we *know* the viewer is anonymous — during the
+  // brief "unknown" boot window we show nothing rather than flashing the
+  // button at an operator who's already signed in.
+  const isAnonymous = authStatus === "anonymous";
 
   const [modes, setModes] = useState<ModeSummary[]>([]);
-  useEffect(() => {
+  const [modeMgrOpen, setModeMgrOpen] = useState(false);
+  const refreshModes = useCallback(() => {
     // /api/modes requires auth; guests will 401 — silently skip.
     if (isGuest) {
       setModes([]);
@@ -25,13 +33,30 @@ export function Header() {
     }
     modesApi.list().then(setModes).catch(() => setModes([]));
   }, [isGuest]);
+  useEffect(() => {
+    refreshModes();
+  }, [refreshModes]);
 
-  const activeMode = modes.find((m) => m.id === activeModeId) ?? null;
+  const openShortcutSheet = useUiTransient((s) => s.setShortcutSheetOpen);
+  const setLoginOpen = useUiTransient((s) => s.setLoginOpen);
+
+  function changeMode(modeId: string) {
+    wsClient.send({
+      type: "set_active_mode",
+      mode_id: modeId === "" ? null : modeId,
+    });
+  }
 
   return (
     <header className="app-header">
       <div className="app-header-left">
         <DeviceNameField />
+      </div>
+      {/* The authoring tabs are operator-only; hiding the strip keeps guests on
+          the TV surface (a protected route they hit directly just shows the
+          in-place sign-in gate). */}
+      {isGuest ? <span className="tabs-placeholder" /> : <Tabs />}
+      <div className="app-header-right">
         <span
           className={`ws-status ws-status-${wsStatus}`}
           title={`WebSocket: ${wsStatus}`}
@@ -39,32 +64,64 @@ export function Header() {
           <span className="ws-status-dot" aria-hidden="true" />
           <span className="ws-status-text">{wsStatus}</span>
         </span>
-      </div>
-      {/* Guests see only the Player route. Hiding the tab strip prevents
-          confusion where clicking "Library" just bounces them to /login. */}
-      {isGuest ? <span className="tabs-placeholder" /> : <Tabs />}
-      <div className="app-header-right">
-        {activeModeId !== null ? (
-          <span className="context-badge" title="Active mode / scene">
-            <span className="muted small">mode</span>
-            <strong>
-              {activeMode?.name ?? activeModeId}
-            </strong>
-            {activeSceneId !== null ? (
-              <>
-                <span className="muted small">·</span>
-                <span className="muted small">scene</span>
-                <strong>{activeSceneId}</strong>
-              </>
-            ) : null}
-          </span>
+        {/* Mode picker: lives in the header so it's reachable from any
+            tab without jumping to Console. Authed-only because /api/modes
+            401s for guests; guests never need to pick a mode anyway since
+            they're on the read-only TV view. */}
+        {!isGuest ? (
+          <div className="header-mode-picker" title="Active mode">
+            <span className="header-mode-icon" aria-hidden="true">
+              <ModeIcon />
+            </span>
+            <select
+              value={activeModeId ?? ""}
+              onChange={(e) => changeMode(e.target.value)}
+              aria-label="Active mode"
+            >
+              <option value="">— none —</option>
+              {modes.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <IconButton
+              label="Manage modes (create / rename / delete)"
+              icon={<SettingsIcon />}
+              variant="ghost"
+              className="header-mode-manage"
+              onClick={() => setModeMgrOpen(true)}
+            />
+          </div>
         ) : null}
-        {isGuest ? (
-          <Link to="/login" className="btn-ghost guest-signin-link">
+        <button
+          type="button"
+          className="header-help btn-ghost"
+          onClick={() => openShortcutSheet(true)}
+          title="Keyboard shortcuts (?)"
+          aria-label="Show keyboard shortcuts"
+        >
+          <HelpIcon />
+        </button>
+        {isAnonymous ? (
+          <button
+            type="button"
+            className="btn-link guest-signin-link"
+            onClick={() => setLoginOpen(true)}
+          >
             Sign in
-          </Link>
+          </button>
         ) : null}
       </div>
+      {!isGuest ? (
+        <ModeManagerModal
+          open={modeMgrOpen}
+          onClose={() => setModeMgrOpen(false)}
+          modes={modes}
+          activeModeId={activeModeId}
+          onChanged={refreshModes}
+        />
+      ) : null}
     </header>
   );
 }

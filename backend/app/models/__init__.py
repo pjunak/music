@@ -3,6 +3,8 @@
 each caller having to import each model individually."""
 from app.models.auth_session import AuthSession
 from app.models.base import Base
+from app.models.cleanup_batch import CleanupBatch
+from app.models.cleanup_lookup import CleanupNameLookup
 from app.models.playback_state import PlaybackState
 from app.models.playlist import Playlist, PlaylistItem
 from app.models.track import Track
@@ -11,6 +13,8 @@ from app.models.user import User
 __all__ = [
     "AuthSession",
     "Base",
+    "CleanupBatch",
+    "CleanupNameLookup",
     "PlaybackState",
     "Playlist",
     "PlaylistItem",

@@ -5,6 +5,7 @@ import { VolumeControl } from "@/components/VolumeControl";
 import { modesApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import type { ModeDetail } from "@/core/types";
+import { useFireFlash } from "@/core/useFireFlash";
 import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
@@ -18,6 +19,7 @@ export function SoundboardSection() {
   const [error, setError] = useState<string | null>(null);
   const sfxVolume = useUiStore((s) => s.sfxVolume);
   const setSfxVolume = useUiStore((s) => s.setSfxVolume);
+  const [firedKey, flash] = useFireFlash();
 
   useEffect(() => {
     setError(null);
@@ -56,8 +58,8 @@ export function SoundboardSection() {
   if (soundboards.length === 0) {
     return (
       <EmptyState>
-        Mode <code>{activeModeId}</code> has no soundboards — add one from the
-        Modes tab.
+        Mode <code>{activeModeId}</code> has no soundboards — add one from{" "}
+        <strong>Authoring → Soundboards</strong>.
       </EmptyState>
     );
   }
@@ -73,6 +75,7 @@ export function SoundboardSection() {
       item_path: itemPath,
       volume: sfxVolume,
     });
+    flash(itemPath);
   }
 
   const active = activeSoundboardId !== null ? mode.soundboards[activeSoundboardId] : null;
@@ -104,9 +107,12 @@ export function SoundboardSection() {
       </div>
 
       {active === null ? (
-        <p className="muted small">Select a soundboard above to see its items.</p>
+        <EmptyState>Pick a soundboard above to see its items.</EmptyState>
       ) : active.categories.length === 0 ? (
-        <p className="muted small">Soundboard <code>{active.id}</code> has no items.</p>
+        <EmptyState>
+          Soundboard <code>{active.id}</code> has no items yet. Add some from{" "}
+          <strong>Authoring → Soundboards</strong>.
+        </EmptyState>
       ) : (
         <div className="soundboard-categories">
           {active.categories.map((cat) => (
@@ -117,11 +123,11 @@ export function SoundboardSection() {
                   <button
                     key={item.file}
                     type="button"
-                    className="sfx-button"
+                    className={`fire-tile sfx-tile${firedKey === item.file ? " fired" : ""}`}
                     onClick={() => fire(active.id, item.file)}
                     title={item.hotkey ? `Press ${item.hotkey} from anywhere` : item.name}
                   >
-                    <span className="sfx-button-name">{item.name}</span>
+                    <span className="fire-tile-name">{item.name}</span>
                     {item.hotkey ? <kbd className="kbd">{item.hotkey}</kbd> : null}
                   </button>
                 ))}

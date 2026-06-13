@@ -1,0 +1,68 @@
+import { useState } from "react";
+
+import { FolderTree } from "./FolderTree";
+import type { TreeFolder } from "./FolderTree";
+import { Modal } from "./Modal";
+
+/** Modal that picks a destination folder from the same FolderTree widget used
+ *  in the Library. Reused for bulk-moving tracks and for re-parenting a whole
+ *  folder, so the operator's mental model (same tree, same filter box, same
+ *  root semantics) is identical everywhere. */
+export function FolderPickerModal({
+  title,
+  body,
+  confirmVerb = "Move",
+  loadAll,
+  busy = false,
+  initialDest = "",
+  disableDest,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body?: string;
+  /** Verb shown on the confirm button, e.g. "Move" → "Move to (root)". */
+  confirmVerb?: string;
+  loadAll: () => Promise<TreeFolder[]>;
+  busy?: boolean;
+  initialDest?: string;
+  /** Optional guard: return a reason string to block confirming for `dest`. */
+  disableDest?: (dest: string) => string | null;
+  onCancel: () => void;
+  onConfirm: (dest: string) => void;
+}) {
+  const [dest, setDest] = useState(initialDest);
+  const blocked = disableDest ? disableDest(dest) : null;
+
+  return (
+    <Modal
+      ariaLabel={title}
+      title={title}
+      onClose={onCancel}
+      footer={
+        <>
+          <button type="button" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => onConfirm(dest)}
+            disabled={busy || blocked !== null}
+          >
+            {busy ? "Working…" : `${confirmVerb} to ${dest === "" ? "(root)" : dest}`}
+          </button>
+        </>
+      }
+    >
+      {body ? <p className="muted small">{body}</p> : null}
+      <div className="folder-picker-tree">
+        <FolderTree selectedPath={dest} onSelect={setDest} loadAll={loadAll} />
+      </div>
+      <p className="folder-picker-dest small">
+        Destination: <strong>{dest === "" ? "(root)" : dest}</strong>
+      </p>
+      {blocked !== null ? <p className="error small">{blocked}</p> : null}
+    </Modal>
+  );
+}

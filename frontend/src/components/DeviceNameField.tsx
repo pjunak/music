@@ -3,6 +3,8 @@ import { useState } from "react";
 import { defaultDeviceName, useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
+import { EditIcon } from "./icons";
+
 /** Editable name for *this* browser session, used by the operator's
  *  Outputs picker to identify which TV / phone / desktop is which.
  *
@@ -29,18 +31,21 @@ export function DeviceNameField() {
   }
 
   return (
-    <input
-      className="device-name-field"
-      type="text"
-      value={localName}
-      placeholder={defaultDeviceName()}
-      onChange={(e) => setLocalName(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-      }}
-      title="This device's name in the operator's outputs picker. Edit and press Enter (or click away) to apply."
-      aria-label="This device's name"
-    />
+    <span className="device-name-field-wrap">
+      <input
+        className="device-name-field"
+        type="text"
+        value={localName}
+        placeholder={defaultDeviceName()}
+        onChange={(e) => setLocalName(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        title="This device's name in the operator's outputs picker. Edit and press Enter (or click away) to apply."
+        aria-label="This device's name"
+      />
+      <EditIcon className="device-name-field-icon" aria-hidden="true" />
+    </span>
   );
 }

@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 
 import { presetsApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
-import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
@@ -30,11 +29,15 @@ export function AudioEngine() {
   // Wiring: connect DOM refs to the engine and register handlers.
   useEffect(() => {
     if (!ambientARef.current || !ambientBRef.current || !interruptRef.current) return;
+    // Identity for per-device volume trims (PlayerState.device_volumes).
+    playbackEngine.setClientId(useUiStore.getState().clientId);
     playbackEngine.setAmbientElements(ambientARef.current, ambientBRef.current);
     playbackEngine.setInterruptElement(interruptRef.current);
     playbackEngine.setHandlers({
       onSkipNext: () => wsClient.send({ type: "ambient_skip_next" }),
       onInterruptSkipNext: () => wsClient.send({ type: "interrupt_skip_next" }),
+      // Returns whether the report reached the server — the engine uses that
+      // to gate its seek-detection baseline.
       onPositionReport: (ms) =>
         wsClient.send({ type: "position_report", position_ms: ms }),
     });
@@ -89,13 +92,23 @@ export function AudioEngine() {
   useEffect(() => {
     const cache = new Map<string, PresetManifest>();
     let isMine = false;
+    let cacheModeId: string | null = null;
 
     let toastedError = false;
-    async function syncPresets(activeIds: string[]): Promise<void> {
+    async function syncPresets(
+      modeId: string | null,
+      activeIds: string[],
+    ): Promise<void> {
+      // Presets are per-mode — drop the cache when the mode changes so ids
+      // from the previous mode can't leak in.
+      if (modeId !== cacheModeId) {
+        cache.clear();
+        cacheModeId = modeId;
+      }
       const missing = activeIds.filter((id) => !cache.has(id));
-      if (missing.length > 0) {
+      if (missing.length > 0 && modeId !== null) {
         try {
-          const all = await presetsApi.list();
+          const all = await presetsApi.list(modeId);
           cache.clear();
           for (const m of all) cache.set(m.id, m);
           toastedError = false;
@@ -126,11 +139,12 @@ export function AudioEngine() {
       const s = usePlayerStore.getState();
       if (s.state === null) return;
       isMine = isThisDevicePlaying();
+      const modeId = s.state.active_mode_id;
       const ids = s.state.active_preset_ids;
-      const sig = `${isMine ? "1" : "0"}|${ids.join(",")}`;
+      const sig = `${isMine ? "1" : "0"}|${modeId ?? ""}|${ids.join(",")}`;
       if (sig === lastSig) return;
       lastSig = sig;
-      void syncPresets(ids);
+      void syncPresets(modeId, ids);
     };
     const unsubPlayer = usePlayerStore.subscribe(recompute);
     const unsubUi = useUiStore.subscribe((s, prev) => {
@@ -153,42 +167,11 @@ export function AudioEngine() {
     return unsub;
   }, []);
 
-  // Auto-claim active output: first state snapshot we see with no active
-  // outputs and our device having `audio_output` capability triggers a
-  // self-claim, so playing actually produces audio without the operator
-  // having to dive into Controls. Guest connections can't mutate state, so
-  // we skip — the Player tab's "Play on this device" button drives
-  // forceLocalPlayback for them instead.
-  useEffect(() => {
-    let claimed = false;
-    let lastDeviceId: string | null = null;
-    const unsub = usePlayerStore.subscribe((s) => {
-      // Reset the auto-claim latch on device-id changes (sign-out / sign-in
-      // reconnects the WS with a fresh device id). Without this, signing
-      // back in inherits the previous session's `claimed=true` and the
-      // user has to claim manually.
-      if (s.myDeviceId !== lastDeviceId) {
-        claimed = false;
-        lastDeviceId = s.myDeviceId;
-      }
-      if (claimed || s.state === null || s.myDeviceId === null) return;
-      if (useAuthStore.getState().status !== "authenticated") return;
-      const me = s.state.connected_devices.find(
-        (d) => d.device_id === s.myDeviceId,
-      );
-      if (!me || !me.capabilities.includes("audio_output")) return;
-      if (s.state.active_output_device_ids.length > 0) {
-        if (s.state.active_output_device_ids.includes(s.myDeviceId)) claimed = true;
-        return;
-      }
-      claimed = true;
-      wsClient.send({
-        type: "set_active_outputs",
-        device_ids: [s.myDeviceId],
-      });
-    });
-    return unsub;
-  }, []);
+  // NB: there is intentionally NO auto-claim of the active-output slot. Output
+  // is fully manual — a device becomes a speaker only when the operator
+  // designates it (Settings → Devices) and activates it (footer / Console
+  // picker). This is what stops a signed-in tab from spontaneously playing
+  // audio out loud on refresh. See `app.devices.store` + SpeakersControl.
 
   return (
     <>

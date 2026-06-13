@@ -19,7 +19,12 @@ class _Action(BaseModel):
 class RegisterAction(_Action):
     type: Literal["register"]
     name: str = Field(min_length=1, max_length=128)
-    capabilities: list[str] = Field(default_factory=list)
+    # Stable per-install identity the client mints once (localStorage). It's
+    # what makes an audio-output designation stick to a physical device across
+    # reconnects. Validated only as a non-empty opaque token (not a strict
+    # UUID / length) so the documented headless-output protocol
+    # (clients/README.md) stays open to any stable string.
+    client_id: str = Field(min_length=1, max_length=64)
 
 
 class SetVolumeAction(_Action):
@@ -43,6 +48,14 @@ class SetActiveModeAction(_Action):
 class SetActiveOutputsAction(_Action):
     type: Literal["set_active_outputs"]
     device_ids: list[str] = Field(default_factory=list)
+
+
+class SetDeviceVolumeAction(_Action):
+    type: Literal["set_device_volume"]
+    # The output device whose per-device trim to set (a stable client_id).
+    device_id: str = Field(min_length=1, max_length=64)
+    # 0..1 trim, multiplied by master volume on that device only. 1.0 = no trim.
+    volume: float = Field(ge=0.0, le=1.0)
 
 
 class PositionReportAction(_Action):
@@ -89,12 +102,14 @@ class AmbientSeekAction(_Action):
 
 class AmbientSetLoopAction(_Action):
     type: Literal["ambient_set_loop"]
-    loop: Literal["off", "follow", "queue", "track"]
+    loop: Literal["off", "queue", "track"]
 
 
 class AmbientSetShuffleAction(_Action):
     type: Literal["ambient_set_shuffle"]
-    shuffle: bool
+    # "weighted" picks randomly too for now — the weighting (by play count /
+    # recency) is the to-be-implemented refinement, not a separate behaviour.
+    shuffle: Literal["off", "random", "weighted"]
 
 
 class AmbientStopAction(_Action):
@@ -104,13 +119,6 @@ class AmbientStopAction(_Action):
 class AmbientPlayPlaylistAction(_Action):
     type: Literal["ambient_play_playlist"]
     playlist_id: int
-    start_index: int = Field(0, ge=0)
-
-
-class AmbientPlayFolderAction(_Action):
-    type: Literal["ambient_play_folder"]
-    # Folder path relative to MUSIC_DIR; "" plays the whole library.
-    path: str = Field("", max_length=1024)
     start_index: int = Field(0, ge=0)
 
 
@@ -127,7 +135,7 @@ class SetActivePresetsAction(_Action):
 class SetCrossfadeAction(_Action):
     type: Literal["set_crossfade"]
     crossfade_ms: int = Field(ge=0, le=30000)
-    crossfade_type: str | None = None  # None = leave unchanged
+    crossfade_type: CrossfadeType | None = None  # None = leave unchanged
 
 
 # Interrupt lane actions. An interrupt takes over playback briefly; when it
@@ -175,13 +183,31 @@ class FireSfxAction(_Action):
     volume: float = Field(1.0, ge=0.0, le=1.0)
 
 
-class ActivateSceneAction(_Action):
-    type: Literal["activate_scene"]
-    scene_id: str = Field(min_length=1, max_length=128)
+class StartLoopAction(_Action):
+    """Start a repeating SFX. A server-side timer fires it every `interval_s`
+    until `stop_loop`. `id` is a client-minted handle (so the same client can
+    stop it). Lives in PlayerState so every LOOPS panel sees it."""
+
+    type: Literal["start_loop"]
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    soundboard_id: str = Field(min_length=1, max_length=128)
+    item_path: str = Field(min_length=1, max_length=512)
+    interval_s: float = Field(ge=1, le=3600)
+    volume: float = Field(1.0, ge=0.0, le=1.0)
 
 
-class DeactivateSceneAction(_Action):
-    type: Literal["deactivate_scene"]
+class StopLoopAction(_Action):
+    type: Literal["stop_loop"]
+    id: str = Field(min_length=1, max_length=64)
+
+
+class FireCueAction(_Action):
+    """Fire a saved cue from the active mode: apply its preset, start its
+    playlist (from a song + timestamp), fire one-shot SFX, and start loops."""
+
+    type: Literal["fire_cue"]
+    cue_id: str = Field(min_length=1, max_length=128)
 
 
 Action = Annotated[
@@ -191,6 +217,7 @@ Action = Annotated[
     | ResumeAction
     | SetActiveModeAction
     | SetActiveOutputsAction
+    | SetDeviceVolumeAction
     | PositionReportAction
     | AmbientPlayTrackAction
     | AmbientSetQueueAction
@@ -203,7 +230,6 @@ Action = Annotated[
     | AmbientSetShuffleAction
     | AmbientStopAction
     | AmbientPlayPlaylistAction
-    | AmbientPlayFolderAction
     | SetActiveSoundboardAction
     | SetActivePresetsAction
     | SetCrossfadeAction
@@ -213,8 +239,9 @@ Action = Annotated[
     | InterruptSeekAction
     | CancelInterruptAction
     | FireSfxAction
-    | ActivateSceneAction
-    | DeactivateSceneAction,
+    | StartLoopAction
+    | StopLoopAction
+    | FireCueAction,
     Field(discriminator="type"),
 ]
 
@@ -225,9 +252,15 @@ action_adapter: TypeAdapter[Action] = TypeAdapter(Action)
 
 
 class DeviceInfo(BaseModel):
+    """A currently-connected device. `device_id` carries the stable `client_id`
+    (they're the same value now) so existing clients that key on `device_id`
+    keep working unchanged. `is_output` reflects the persistent registry
+    designation."""
+
     device_id: str
+    client_id: str
     name: str
-    capabilities: list[str]
+    is_output: bool = False
 
 
 class PositionReport(BaseModel):
@@ -236,14 +269,9 @@ class PositionReport(BaseModel):
     reported_at: float  # epoch seconds
 
 
-# End-of-queue behaviour. Mutually exclusive by construction — only one can
-# be in effect at a time:
-#   off    — stop when the queue is exhausted.
-#   follow — keep going into the rest of the library (path order) once the
-#            queue runs dry. The "Continue / Autoplay (∞)" mode.
-#   queue  — loop the queue back to its start (repeat-all).
-#   track  — repeat the current track forever (repeat-one).
-LoopMode = Literal["off", "follow", "queue", "track"]
+LoopMode = Literal["off", "queue", "track"]
+ShuffleMode = Literal["off", "random", "weighted"]
+CrossfadeType = Literal["linear", "equal_power", "cut"]
 
 
 class AmbientState(BaseModel):
@@ -255,6 +283,11 @@ class AmbientState(BaseModel):
     While an interrupt is active, `position_ms` is *not* updated (position
     reports go to the interrupt lane), so it preserves the resume point
     automatically.
+
+    `shuffle` controls how `skip_next` picks the next track: "off" advances
+    sequentially (queue head); "random"/"weighted" pull a random queue entry.
+    Weighting is not yet implemented — "weighted" currently behaves as uniform
+    random, so the control is usable without the algorithm landing first.
     """
 
     current_track_id: int | None = None
@@ -262,11 +295,12 @@ class AmbientState(BaseModel):
     history: list[int] = Field(default_factory=list)
     position_ms: int = 0
     loop: LoopMode = "off"
-    # When true, freshly-loaded playlists/folders are randomised and toggling
-    # it on reshuffles the live queue. Orthogonal to `loop` — shuffle only
-    # changes *order*, so it composes with follow (each song still plays once,
-    # then follow continues into the library).
-    shuffle: bool = False
+    shuffle: ShuffleMode = "off"
+    # The playlist this lane was started from, so the Console can show which
+    # quick-play playlist is "now driving". Set by `ambient_play_playlist`,
+    # cleared whenever the queue is replaced from another source (play a single
+    # track, set the queue explicitly, stop). Skips/seek keep it.
+    source_playlist_id: int | None = None
 
 
 class InterruptState(BaseModel):
@@ -292,39 +326,48 @@ class InterruptState(BaseModel):
     duck_to: float | None = Field(None, ge=0.0, le=1.0)
 
 
-class ScenePreviousState(BaseModel):
-    """Snapshot of the fields a scene activation overwrote, captured so
-    `deactivate_scene` can restore them. Only populated for fields the
-    scene actually changed — a scene with no `ambient` block leaves
-    `ambient` here as None and ambient state is left alone on deactivate.
-    """
+class LoopingSfx(BaseModel):
+    """A repeating SFX driven by a server-side interval timer. Held in
+    PlayerState so every client's LOOPS panel shows the same live set; the
+    actual timers live in `sync/loops.py`. `id` is the stop handle."""
 
-    ambient: AmbientState | None = None
-    crossfade_ms: int | None = None
-    active_preset_ids: list[str] | None = None
-    volume: float | None = None
+    id: str
+    name: str
+    soundboard_id: str
+    item_path: str
+    interval_s: float = Field(ge=1, le=3600)
+    volume: float = Field(1.0, ge=0.0, le=1.0)
 
 
 class PlayerState(BaseModel):
     """Canonical playback state. The server is the sole writer."""
 
+    # Monotonic "state changed N times" counter — a Diagnostics-only readout,
+    # NOT an optimistic-concurrency token: no client echoes it back and no
+    # stale-write is rejected on it. Don't bolt concurrency checks onto this
+    # without designing the full protocol (client echo + reject path) first.
     revision: int = 0
     is_playing: bool = False
     volume: float = 1.0
 
     active_mode_id: str | None = None
     active_output_device_ids: list[str] = Field(default_factory=list)
+    # Per-device volume trim (client_id → 0..1), applied on top of master
+    # `volume` on that device only. Absent = 1.0. Lets the operator tame a
+    # too-loud TV without touching master. Only non-unity trims are stored.
+    device_volumes: dict[str, float] = Field(default_factory=dict)
     active_soundboard_id: str | None = None
     active_preset_ids: list[str] = Field(default_factory=list)
 
     crossfade_ms: int = 0
-    crossfade_type: str = "linear"
-
-    active_scene_id: str | None = None
-    pre_scene_state: ScenePreviousState | None = None
+    crossfade_type: CrossfadeType = "linear"
 
     ambient: AmbientState = Field(default_factory=AmbientState)
     interrupt: InterruptState | None = None
+
+    # Repeating SFX currently running (server-timer driven). Cleared on boot
+    # (session-only, like active outputs — no auto-resume across a restart).
+    looping_sfx: list[LoopingSfx] = Field(default_factory=list)
 
     last_position_report: PositionReport | None = None
 
@@ -333,7 +376,12 @@ class PlayerState(BaseModel):
 
 class StateSnapshot(BaseModel):
     type: Literal["state_snapshot"] = "state_snapshot"
-    your_device_id: str
+    # Empty by design: the snapshot is sent *before* the client's `register`
+    # arrives, so the server doesn't yet know its client_id. The client knows
+    # its own stable client_id (localStorage) and self-assigns `myDeviceId`
+    # from that — see frontend playerStore. Kept as a (possibly empty) string
+    # so the structural WS guard's type check is satisfied without change.
+    your_device_id: str = ""
     state: PlayerState
 
 
@@ -344,37 +392,15 @@ class StateChanged(BaseModel):
 
 class SfxFired(BaseModel):
     """Fire-and-forget event for soundboard items. Not part of PlayerState —
-    broadcast only to clients with the `audio_output` capability so each plays
-    the SFX locally."""
+    broadcast to ALL sockets; each client's engine plays it locally only if that
+    client is an active output (or a force-local guest). The server no longer
+    gates this by designation — output membership is dynamic, so the client is
+    the source of truth."""
 
     type: Literal["sfx_fired"] = "sfx_fired"
     soundboard_id: str
     item_path: str
     volume: float = 1.0
-
-
-class SceneActivated(BaseModel):
-    """A scene was just activated. Carries the full scene definition so each
-    listener (audio engine, lights bridge, MQTT integration) can act on the
-    fields it cares about. Broadcast to all clients — recipients ignore
-    fields they don't handle."""
-
-    type: Literal["scene_activated"] = "scene_activated"
-    scene_id: str
-    mode_id: str
-    scene: dict  # full scene manifest contents
-
-
-class SceneDeactivated(BaseModel):
-    """A previously-active scene ended. Listeners should stop any side
-    effects they started for that scene (looping SFX, persistent lights,
-    etc.). PlayerState fields the scene overwrote (ambient / crossfade_ms /
-    active_preset_ids) are auto-reverted server-side via `pre_scene_state`
-    and reach clients in the accompanying `state_changed`."""
-
-    type: Literal["scene_deactivated"] = "scene_deactivated"
-    scene_id: str
-    mode_id: str | None
 
 
 class ErrorMessage(BaseModel):

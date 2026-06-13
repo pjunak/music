@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/EmptyState";
 import { libraryApi } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
@@ -10,8 +11,8 @@ import { wsClient } from "@/core/ws";
  *
  *  When an interrupt is active, shows what's playing and offers Skip /
  *  Cancel. When none is active, points the user at the Library tab — the
- *  ⚡ button on each track row fires it, and mode interrupt templates
- *  (Modes view) fire pre-configured ones. */
+ *  ⚡ button on each track row fires it, and interrupt templates
+ *  (Authoring → Interrupts) fire pre-configured ones. */
 export function InterruptSection() {
   const interrupt = usePlayerStore((s) => s.state?.interrupt ?? null);
   const [track, setTrack] = useState<Track | null>(null);
@@ -44,15 +45,15 @@ export function InterruptSection() {
 
   if (interrupt === null) {
     return (
-      <p className="muted small">
-        No interrupt active. Fire one from the Library (⚡ on a track row) or
-        from a mode interrupt template.
-      </p>
+      <EmptyState>
+        No interrupt active. Fire one from the Library (the lightning button on a
+        track row) or from a mode interrupt template.
+      </EmptyState>
     );
   }
 
   return (
-    <div className="interrupt-section">
+    <div className="interrupt-section" role="status" aria-live="polite">
       <div className="interrupt-active">
         <div className="interrupt-meta">
           <span className="track-title">
@@ -72,7 +73,12 @@ export function InterruptSection() {
           <button type="button" onClick={skip} title="Skip to next interrupt track">
             Skip
           </button>
-          <button type="button" onClick={cancel} title="End interrupt now">
+          <button
+            type="button"
+            className="btn-danger"
+            onClick={cancel}
+            title="End interrupt now"
+          >
             Cancel
           </button>
         </div>

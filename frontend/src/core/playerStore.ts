@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { PlayerState, WsMessage } from "@/core/types";
+import { useUiStore } from "@/core/uiStore";
 import type { WsStatus } from "@/core/ws";
 
 interface PlayerStore {
@@ -24,17 +25,20 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
 
   applyMessage: (msg) => {
     if (msg.type === "state_snapshot") {
+      // Identity is the client's own stable client_id (the server sends an
+      // empty your_device_id — register arrives after the snapshot). This is
+      // the same value carried in `connected_devices[].device_id` and
+      // `active_output_device_ids`, so `selectIsMyOutput` matches correctly.
       set({
         state: msg.state,
-        myDeviceId: msg.your_device_id,
+        myDeviceId: useUiStore.getState().clientId,
         stateReceivedAt: Date.now(),
       });
     } else if (msg.type === "state_changed") {
       set({ state: msg.state, stateReceivedAt: Date.now() });
     }
-    // sfx_fired / scene_activated / scene_deactivated / error handled by the
-    // audio engine and toast layer respectively (not here — we only track
-    // PlayerState in this store).
+    // sfx_fired / error handled by the audio engine and toast layer
+    // respectively (not here — we only track PlayerState in this store).
   },
 
   setStatus: (s) => {
@@ -62,6 +66,12 @@ export function selectIsMyOutput(s: PlayerStore): boolean {
  *  received. When paused, returns whatever the server last said. */
 export function selectAmbientPositionMs(s: PlayerStore): number {
   if (s.state === null) return 0;
+  // No ambient track loaded → there is no position to report. Without this
+  // guard the clock dead-reckons from a stale position_ms whenever the
+  // server reports is_playing=true with an empty ambient lane (a playlist
+  // that ran off the end, a deleted track pruned on boot), which is what
+  // made "Nothing playing" tick upward.
+  if (s.state.ambient.current_track_id === null) return 0;
   const base = s.state.ambient.position_ms;
   if (!s.state.is_playing || s.state.interrupt !== null) return base;
   const elapsed = Date.now() - s.stateReceivedAt;
@@ -72,4 +82,22 @@ export function selectAmbientPositionMs(s: PlayerStore): number {
 export function selectActiveTrackId(s: PlayerStore): number | null {
   if (s.state === null) return null;
   return s.state.interrupt?.current_track_id ?? s.state.ambient.current_track_id ?? null;
+}
+
+/** Shared stable empty array — one reference, reused, so the `?? []` default in
+ *  `usePlayerArray` never mints a fresh array (which would loop the store). */
+const EMPTY_ARRAY: readonly never[] = [];
+
+/** Stable-selector helper for array slices of `PlayerState`. Returns the
+ *  selected array, or a SHARED empty array when it's nullish (e.g. before the
+ *  first snapshot arrives) — so the `?? []` default lives OUTSIDE the selector
+ *  and can't loop `useSyncExternalStore` to React #185.
+ *
+ *  Prefer this over `usePlayerStore((s) => s.state?.x ?? [])`, which mints a
+ *  fresh `[]` on every call and is forbidden by the `local/stable-store-selector`
+ *  ESLint rule. */
+export function usePlayerArray<T>(
+  selector: (s: PlayerStore) => readonly T[] | undefined,
+): readonly T[] {
+  return usePlayerStore(selector) ?? EMPTY_ARRAY;
 }

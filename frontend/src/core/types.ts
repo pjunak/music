@@ -1,10 +1,8 @@
 // Protocol types mirroring backend/app/sync/protocol.py.
 // Source of truth for the contract: backend/app/sync/protocol.py.
 
-// End-of-queue behaviour, mutually exclusive: off (stop), follow (continue
-// into the library — "Continue / Autoplay"), queue (repeat-all), track
-// (repeat-one). Mirrors LoopMode in backend/app/sync/protocol.py.
-export type LoopMode = "off" | "follow" | "queue" | "track";
+export type LoopMode = "off" | "queue" | "track";
+export type ShuffleMode = "off" | "random" | "weighted";
 
 export interface AmbientState {
   current_track_id: number | null;
@@ -12,9 +10,10 @@ export interface AmbientState {
   history: number[];
   position_ms: number;
   loop: LoopMode;
-  /** When true, loaded playlists/folders are randomised and toggling on
-   *  reshuffles the live queue. Orthogonal to `loop`. */
-  shuffle: boolean;
+  shuffle: ShuffleMode;
+  /** The playlist the lane was started from (for the Console's "now driving"
+   *  highlight), or null once the queue diverges. */
+  source_playlist_id: number | null;
 }
 
 export interface InterruptState {
@@ -36,10 +35,35 @@ export interface PositionReport {
   reported_at: number;
 }
 
-export interface DeviceInfo {
-  device_id: string;
+/** A repeating SFX driven by a server-side interval timer. Shown in the
+ *  Console LOOPS panel; `id` is the stop handle. */
+export interface LoopingSfx {
+  id: string;
   name: string;
-  capabilities: string[];
+  soundboard_id: string;
+  item_path: string;
+  interval_s: number;
+  volume: number;
+}
+
+export interface DeviceInfo {
+  /** Same value as `client_id` (the stable identity) — kept so existing
+   *  code that keys on `device_id` keeps working. */
+  device_id: string;
+  client_id: string;
+  name: string;
+  /** Whether this device is a designated audio output (persistent registry). */
+  is_output: boolean;
+}
+
+/** A remembered device from the operator's persistent registry
+ *  (`GET /api/devices`). */
+export interface KnownDevice {
+  client_id: string;
+  name: string;
+  is_output: boolean;
+  connected: boolean;
+  added_at: string | null;
 }
 
 export interface PlayerState {
@@ -48,13 +72,17 @@ export interface PlayerState {
   volume: number;
   active_mode_id: string | null;
   active_output_device_ids: string[];
+  /** Per-device volume trim (client_id → 0..1), applied on top of master
+   *  `volume` on that device only. Absent entry = 1.0 (no trim). */
+  device_volumes: Record<string, number>;
   active_soundboard_id: string | null;
   active_preset_ids: string[];
-  active_scene_id: string | null;
   crossfade_ms: number;
   crossfade_type: string;
   ambient: AmbientState;
   interrupt: InterruptState | null;
+  /** Repeating SFX currently running (server-timer driven). */
+  looping_sfx: LoopingSfx[];
   last_position_report: PositionReport | null;
   connected_devices: DeviceInfo[];
 }
@@ -90,6 +118,22 @@ export interface TrackSummary {
   length_s: number;
 }
 
+// EQ preset shape — per-mode effect rack. Effects are loosely-typed (each
+// effect carries a `type` plus type-specific params validated server-side).
+export interface PresetEffect {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface PresetManifest {
+  id: string;
+  name: string;
+  description?: string;
+  effects: PresetEffect[];
+  volume?: number | null;
+  crossfade_ms?: number | null;
+}
+
 // Mode summary shape returned by /api/modes.
 export interface ModeSummary {
   id: string;
@@ -121,26 +165,6 @@ export interface SoundboardManifest {
   categories: SoundboardCategory[];
 }
 
-export interface SceneLoopingSfx {
-  soundboard: string;
-  item: string;
-  volume?: number;
-}
-
-export interface SceneSpec {
-  id: string;
-  name: string;
-  description?: string | null;
-  ambient?: { playlist?: string; crossfade_ms?: number } | null;
-  presets?: string[];
-  looping_sfx?: SceneLoopingSfx[];
-  /** Optional master-volume override for the duration of the scene.
-   *  Captured into pre_scene_state so deactivate restores the prior value. */
-  volume?: number | null;
-  // lights, external — opaque from the frontend's perspective for now.
-  [key: string]: unknown;
-}
-
 export interface InterruptSpec {
   name: string;
   playlist?: string | null;
@@ -152,11 +176,38 @@ export interface InterruptSpec {
   duck_to?: number | null;
 }
 
+export interface CueSfx {
+  soundboard: string;
+  item: string;
+  volume?: number;
+}
+
+export interface CueLoop {
+  soundboard: string;
+  item: string;
+  interval_s: number;
+  volume?: number;
+}
+
+/** A saved one-click setup: apply a preset, start a playlist (from a song +
+ *  timestamp), fire one-shot SFX, start loops. Mode-scoped. */
+export interface Cue {
+  id: string;
+  name: string;
+  description?: string | null;
+  preset?: string | null;
+  playlist?: string | null;
+  start_index?: number;
+  start_ms?: number;
+  sfx?: CueSfx[];
+  loops?: CueLoop[];
+}
+
 export interface ModeDetail extends ModeSummary {
   interrupts: InterruptSpec[];
   integrations: { lights?: unknown };
   soundboards: Record<string, SoundboardManifest>;
-  scenes: Record<string, SceneSpec>;
+  cues: Record<string, Cue>;
 }
 
 // Playlist meta shape returned by /api/playlists.
@@ -181,6 +232,9 @@ export interface FolderEntry {
   name: string;
   path: string;
   track_count: number;
+  /** True iff this folder has at least one subfolder. Used by the tree UI
+   *  to hide the expand toggle on leaf folders. */
+  has_children: boolean;
 }
 
 export interface TreeResponse {
@@ -189,15 +243,22 @@ export interface TreeResponse {
   tracks: Track[];
 }
 
+// Whole-hierarchy listing from /api/library/folders — every folder at any
+// depth in one response, so the tree UI can filter/reveal client-side.
+export interface FoldersResponse {
+  folders: FolderEntry[];
+}
+
 // --- WebSocket actions (client → server) ---------------------------------
 
 export type WsAction =
-  | { type: "register"; name: string; capabilities: string[] }
+  | { type: "register"; name: string; client_id: string }
   | { type: "set_volume"; volume: number }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "set_active_mode"; mode_id: string | null }
   | { type: "set_active_outputs"; device_ids: string[] }
+  | { type: "set_device_volume"; device_id: string; volume: number }
   | { type: "position_report"; position_ms: number }
   | { type: "ambient_play_track"; track_id: number }
   | { type: "ambient_set_queue"; track_ids: number[] }
@@ -207,10 +268,9 @@ export type WsAction =
   | { type: "ambient_skip_prev" }
   | { type: "ambient_seek"; position_ms: number }
   | { type: "ambient_set_loop"; loop: LoopMode }
-  | { type: "ambient_set_shuffle"; shuffle: boolean }
+  | { type: "ambient_set_shuffle"; shuffle: ShuffleMode }
   | { type: "ambient_stop" }
   | { type: "ambient_play_playlist"; playlist_id: number; start_index?: number }
-  | { type: "ambient_play_folder"; path: string; start_index?: number }
   | { type: "set_active_soundboard"; soundboard_id: string | null }
   | { type: "set_active_presets"; preset_ids: string[] }
   | { type: "set_crossfade"; crossfade_ms: number; crossfade_type?: string }
@@ -234,8 +294,17 @@ export type WsAction =
   | { type: "interrupt_seek"; position_ms: number }
   | { type: "cancel_interrupt" }
   | { type: "fire_sfx"; soundboard_id: string; item_path: string; volume?: number }
-  | { type: "activate_scene"; scene_id: string }
-  | { type: "deactivate_scene" };
+  | {
+      type: "start_loop";
+      id: string;
+      name: string;
+      soundboard_id: string;
+      item_path: string;
+      interval_s: number;
+      volume?: number;
+    }
+  | { type: "stop_loop"; id: string }
+  | { type: "fire_cue"; cue_id: string };
 
 // --- WebSocket events (server → client) ----------------------------------
 
@@ -243,11 +312,4 @@ export type WsMessage =
   | { type: "state_snapshot"; your_device_id: string; state: PlayerState }
   | { type: "state_changed"; state: PlayerState }
   | { type: "sfx_fired"; soundboard_id: string; item_path: string; volume: number }
-  | {
-      type: "scene_activated";
-      scene_id: string;
-      mode_id: string;
-      scene: Record<string, unknown>;
-    }
-  | { type: "scene_deactivated"; scene_id: string; mode_id: string | null }
   | { type: "error"; detail: string };

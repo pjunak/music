@@ -13,7 +13,11 @@ const LOOP_MODES: { value: LoopMode; label: string }[] = [
   { value: "track", label: "Repeat one" },
 ];
 
-const CROSSFADE_TYPES = ["linear", "equal_power", "cut"] as const;
+const CROSSFADE_TYPES: { value: string; label: string }[] = [
+  { value: "linear", label: "Linear" },
+  { value: "equal_power", label: "Equal power" },
+  { value: "cut", label: "Cut" },
+];
 
 export function TransportSection() {
   const loop = usePlayerStore((s) => s.state?.ambient.loop ?? "off");
@@ -58,6 +62,7 @@ export function TransportSection() {
               key={m.value}
               type="button"
               className={`loop-toggle${loop === m.value ? " active" : ""}`}
+              aria-pressed={loop === m.value}
               onClick={() => setLoop(m.value)}
             >
               {m.label}
@@ -99,17 +104,22 @@ export function TransportSection() {
           onTouchEnd={(e) =>
             setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
           }
+          // Keyboard arrow adjustments only fire onChange, so commit on keyup/blur too.
+          onKeyUp={(e) =>
+            setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
+          }
+          onBlur={(e) =>
+            setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
+          }
         />
-        <span className="small" style={{ minWidth: "5ch" }}>
-          {(localCrossfade / 1000).toFixed(1)}s
-        </span>
+        <span className="small num-readout">{(localCrossfade / 1000).toFixed(1)}s</span>
         <select
           value={crossfadeType}
           onChange={(e) => setCrossfadeType(e.target.value)}
         >
           {CROSSFADE_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
+            <option key={t.value} value={t.value}>
+              {t.label}
             </option>
           ))}
         </select>

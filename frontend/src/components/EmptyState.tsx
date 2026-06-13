@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 /** Empty / placeholder state for "no items yet" surfaces.
  *
  *  Used wherever a list, panel, or tab has nothing to show — playlists
- *  before the first one, presets before any are installed, scenes when
+ *  before the first one, presets before any are installed, cues when
  *  the active mode declares none, etc. Centralising this keeps the
  *  visual language consistent (centred, padded, muted body) and gives
  *  one place to add icons, illustrations, or doc links later. */

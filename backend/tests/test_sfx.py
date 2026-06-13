@@ -77,6 +77,26 @@ def test_tree_subfolder_includes_files_and_referenced_flag(auth_client: TestClie
     assert files_by_path["dnd/door.ogg"]["referenced"] is True
 
 
+def test_folders_requires_auth(client: TestClient) -> None:
+    assert client.get("/api/sfx/folders").status_code == 401
+
+
+def test_folders_lists_whole_hierarchy_with_counts(auth_client: TestClient) -> None:
+    auth_client.post("/api/sfx/folders", json={"path": "AllF/doors"})
+    auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("creak.wav", b"x" * 8, "audio/wav"))],
+        params={"dest": "AllF/doors"},
+    )
+    body = auth_client.get("/api/sfx/folders").json()
+    by_path = {f["path"]: f for f in body["folders"]}
+    assert by_path["AllF"]["has_children"] is True
+    assert by_path["AllF/doors"]["has_children"] is False
+    # Counts are recursive: the parent sees the file inside its subfolder.
+    assert by_path["AllF"]["file_count"] >= 1
+    assert by_path["AllF/doors"]["file_count"] >= 1
+
+
 def test_upload_writes_into_destination(auth_client: TestClient) -> None:
     files = [("files", ("ping.wav", b"FAKE-WAV-A" * 10, "audio/wav"))]
     r = auth_client.post(
@@ -175,3 +195,27 @@ def test_rename_folder(auth_client: TestClient) -> None:
     sfx_dir = Path(os.environ["SFX_LIBRARY_DIR"])
     assert not (sfx_dir / "rename_me").exists()
     assert (sfx_dir / "renamed").is_dir()
+
+
+def test_management_routes_reject_traversal(auth_client: TestClient) -> None:
+    """Regression: the three management routes whose path resolution was
+    routed through library_index.to_absolute must reject a "../" escape with
+    400 (path escapes sfx root) — never a 200 that would leak/touch a file
+    outside SFX_LIBRARY_DIR, nor a 500 from an unguarded resolve. Mirrors the
+    /file traversal assertion above."""
+    # list tree — query param `path`
+    tree = auth_client.get("/api/sfx/tree", params={"path": "../.."})
+    assert tree.status_code == 400
+
+    # move file — JSON body, traversal in `src`
+    move = auth_client.post(
+        "/api/sfx/move",
+        json={"src": "../escape.ogg", "dst_folder": "anywhere", "new_filename": "x.ogg"},
+    )
+    assert move.status_code == 400
+
+    # delete file — query param `path`
+    delete = auth_client.delete(
+        "/api/sfx/files", params={"path": "../../etc/passwd"}
+    )
+    assert delete.status_code == 400

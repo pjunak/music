@@ -19,18 +19,17 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "init-storage",
         help=(
-            "Create music/, sfx/, modes/, presets/ under the configured "
-            "storage roots if they don't exist. Existing dirs are left "
-            "alone."
+            "Create music/, sfx/, modes/ under the configured storage roots "
+            "if they don't exist. Existing dirs are left alone."
         ),
     )
     p.add_argument(
         "--seed",
         action="store_true",
         help=(
-            "Also copy bundled defaults into modes/ and presets/ when those "
-            "dirs are empty. Defaults to off when run from the CLI; the "
-            "lifespan does this automatically."
+            "Also copy bundled defaults into modes/ when it's empty (EQ "
+            "presets ride along per-mode). Defaults to off when run from the "
+            "CLI; the lifespan does this automatically."
         ),
     )
     p.set_defaults(handler=run)
@@ -59,7 +58,6 @@ def run(args: argparse.Namespace) -> int:
         ("music", settings.music_dir.resolve()),
         ("sfx", settings.sfx_library_dir.resolve()),
         ("modes", settings.modes_dir.resolve()),
-        ("presets", settings.presets_dir.resolve()),
     ]
     for label, path in targets:
         existed = path.is_dir()
@@ -69,8 +67,5 @@ def run(args: argparse.Namespace) -> int:
     if args.seed:
         _seed_if_empty(
             settings.modes_dir.resolve(), settings.modes_seed_dir, "modes"
-        )
-        _seed_if_empty(
-            settings.presets_dir.resolve(), settings.presets_seed_dir, "presets"
         )
     return 0

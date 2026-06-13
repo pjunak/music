@@ -7,15 +7,26 @@ interface TabDef {
   end?: boolean;
 }
 
+/** Top-level authed tabs. Four groups:
+ *
+ *    Console   — the DM's live workspace (cues, soundboard, transport).
+ *    Library   — file management + tag editing (one screen).
+ *    Authoring — everything you set up before a session (Playlists /
+ *                Soundboards / Interrupts / EQ Presets / Cues sub-tabs).
+ *    Settings  — preferences, sessions, backup, diagnostics link.
+ *
+ *  The TV (`/` index) is intentionally not in this list — it's the
+ *  read-only display surface for guests / room displays, not somewhere a
+ *  logged-in operator navigates to. Going there manually (via the bare URL
+ *  or `/tv`) still works; AppShell redirects authed visitors from `/` back
+ *  to /console.
+ *
+ *  Library and Authoring use `startsWith` matching so the top-level tab
+ *  stays highlighted while you're on a sub-route. */
 const TABS: TabDef[] = [
-  { to: "/", label: "Player", end: true },
+  { to: "/console", label: "Console" },
   { to: "/library", label: "Library" },
-  { to: "/metadata", label: "Metadata" },
-  { to: "/playlists", label: "Playlists" },
-  { to: "/soundboards", label: "Soundboards" },
-  { to: "/modes", label: "Modes" },
-  { to: "/presets", label: "EQ Presets" },
-  { to: "/controls", label: "Controls" },
+  { to: "/authoring", label: "Authoring" },
   { to: "/settings", label: "Settings" },
 ];
 
@@ -62,7 +73,7 @@ export function Tabs() {
   const activeLabel =
     TABS.find((t) =>
       t.end ? location.pathname === t.to : location.pathname.startsWith(t.to),
-    )?.label ?? "Player";
+    )?.label ?? "Console";
 
   return (
     <>

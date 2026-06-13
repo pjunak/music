@@ -74,12 +74,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --no-index --find-links=/wheels music-backend && \
     rm -rf /wheels
 
-# Modes + presets ship as read-only seeds at /seeds/{modes,presets}. On boot
-# the backend copies them into MODES_DIR / PRESETS_DIR only when those
-# directories are empty, so user edits made in a bind-mounted volume survive
+# Modes ship as a read-only seed at /seeds/modes (EQ presets ride along inside
+# each mode). On boot the backend copies it into MODES_DIR only when that
+# directory is empty, so user edits made in a bind-mounted volume survive
 # image rebuilds.
 COPY modes /seeds/modes
-COPY presets /seeds/presets
 
 # Built frontend SPA from stage 1.
 COPY --from=frontend-builder /frontend/dist /app/static
@@ -88,7 +87,7 @@ COPY --from=frontend-builder /frontend/dist /app/static
 # on the host so bind-mounted dirs can be chown'd to match.
 #
 # `/data` is the recommended mount point: bind-mount it from the host to
-# persist music/, sfx/, modes/, presets/, and app.db across image rebuilds.
+# persist music/, sfx/, modes/, and app.db across image rebuilds.
 # Subdirs are created by the app on first boot if missing — see lifespan.
 RUN groupadd -r music && \
     useradd -r -g music -u 1000 -d /app -s /sbin/nologin music && \
@@ -103,12 +102,16 @@ USER music
 ENV MUSIC_DIR=/data/music \
     SFX_LIBRARY_DIR=/data/sfx \
     MODES_DIR=/data/modes \
-    PRESETS_DIR=/data/presets \
     MODES_SEED_DIR=/seeds/modes \
-    PRESETS_SEED_DIR=/seeds/presets \
+    DEVICES_FILE=/data/devices.json \
     DATABASE_URL=sqlite:////data/app.db
 
 EXPOSE 8000
+
+# The slim image has no curl, so probe with Python's stdlib. start-period
+# covers scan_full on a large library before the container is judged healthy.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD ["python","-c","import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
 
 # Schema is created (idempotently) by the FastAPI lifespan — no migrations
 # step. exec'ing uvicorn directly keeps signal handling clean (graceful

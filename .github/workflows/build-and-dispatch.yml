@@ -21,8 +21,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate production deploys on the backend + frontend test/lint suites: the
+  # build/push and infra dispatch only run if these pass.
+  verify:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Backend lint and tests
+        run: |
+          cd backend
+          pip install -e .[dev]
+          ruff check app tests
+          pytest
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Frontend lint, typecheck, and tests
+        run: |
+          cd frontend
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+
   build:
     name: Build and push image
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

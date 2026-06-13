@@ -17,7 +17,7 @@ def run(args: argparse.Namespace) -> int:
         print(
             f"- {mode.id}: {mode.name} "
             f"({len(mode.panels)} panels, {len(mode.soundboards)} soundboards, "
-            f"{len(mode.scenes)} scenes)"
+            f"{len(mode.cues)} cues, {len(mode.presets)} presets)"
         )
     for mode_id, error in result.errors.items():
         print(f"! {mode_id}: {error}")

@@ -1,0 +1,29 @@
+# systemd unit for the headless output. Install to /etc/systemd/system/,
+# adjust paths to where you put music_output.py, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now music-output
+#
+# Config lives in /etc/music-output.env (see below), so the unit itself is host-agnostic.
+[Unit]
+Description=Music headless audio output
+# Wait for the network and the sound stack before starting — otherwise the
+# first connect/playback attempt races boot and fails until the Restart kicks in.
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# An env file keeps the server URL / name / control port out of the unit:
+#   MUSIC_SERVER_URL=http://192.168.1.50:8000
+#   MUSIC_OUTPUT_NAME=Living-room speaker
+#   MUSIC_CONTROL_PORT=8731
+EnvironmentFile=/etc/music-output.env
+ExecStart=/usr/bin/python3 /opt/music-output/music_output.py
+Restart=always
+RestartSec=3
+# Needs audio-device access; add the service user to the audio group, or run as
+# a user that already has it. (On a single-purpose box, a dedicated user is tidy.)
+SupplementaryGroups=audio
+
+[Install]
+WantedBy=multi-user.target

@@ -26,9 +26,6 @@ from app.models.track import Track
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/library", tags=["library"])
 
-# Streamed upload chunk size. 1 MiB balances memory use against syscall count.
-_UPLOAD_CHUNK = 1 << 20
-
 SortKey = Literal["title", "artist", "album", "album_artist", "year", "length_s", "track_no", "added_at", "path"]
 SortOrder = Literal["asc", "desc"]
 
@@ -64,12 +61,17 @@ class FolderOut(BaseModel):
     name: str
     path: str
     track_count: int
+    has_children: bool
 
 
 class TreeResponse(BaseModel):
     path: str
     folders: list[FolderOut]
     tracks: list[TrackOut]
+
+
+class FoldersResponse(BaseModel):
+    folders: list[FolderOut]
 
 
 class SearchResponse(BaseModel):
@@ -103,8 +105,10 @@ class TrackMetadataUpdate(BaseModel):
     album_artist: str | None = Field(None, max_length=512)
     album: str | None = Field(None, max_length=512)
     track_no: int | None = Field(None, ge=0, le=9999)
+    disc_no: int | None = Field(None, ge=0, le=9999)
     year: int | None = Field(None, ge=0, le=9999)
     genre: str | None = Field(None, max_length=128)
+    bpm: int | None = Field(None, ge=0, le=9999)
     display_title: str | None = Field(None, max_length=512)
     origin: str | None = Field(None, max_length=512)
 
@@ -135,11 +139,11 @@ class BulkMetadataResult(BaseModel):
     skipped: list[BulkMetadataSkip]
 
 
-# Fields that round-trip through ID3 / Vorbis tags. Anything outside this
-# set is treated as DB-only.
-_TAG_BACKED_FIELDS: frozenset[str] = frozenset(
-    {"title", "artist", "album_artist", "album", "track_no", "year", "genre"}
-)
+# Fields that round-trip through ID3 / Vorbis tags. Derived from the library
+# index's tag registry (the single source of truth for the tag<->format
+# mapping) so this can't drift from what `write_tags` actually persists.
+# Anything outside this set is treated as DB-only.
+_TAG_BACKED_FIELDS: frozenset[str] = frozenset(library_index.WRITABLE_TAGS)
 _DB_ONLY_FIELDS: frozenset[str] = frozenset({"display_title", "origin"})
 
 
@@ -238,9 +242,33 @@ def get_tree(
     return TreeResponse(
         path=path.strip("/"),
         folders=[
-            FolderOut(name=f.name, path=f.path, track_count=f.track_count) for f in folders
+            FolderOut(
+                name=f.name,
+                path=f.path,
+                track_count=f.track_count,
+                has_children=f.has_children,
+            )
+            for f in folders
         ],
         tracks=[TrackOut.model_validate(t) for t in tracks],
+    )
+
+
+@router.get("/folders", response_model=FoldersResponse)
+def list_all_folders(_: CurrentUser, db: DbSession) -> FoldersResponse:
+    """The whole folder hierarchy (any depth) in one response. Powers the
+    client-side tree: filtering, type-ahead and auto-reveal need every
+    folder up front rather than one lazy level per round trip."""
+    return FoldersResponse(
+        folders=[
+            FolderOut(
+                name=f.name,
+                path=f.path,
+                track_count=f.track_count,
+                has_children=f.has_children,
+            )
+            for f in library_index.all_folders(db)
+        ]
     )
 
 
@@ -510,7 +538,13 @@ def delete_track(track_id: int, _: CurrentUser, db: DbSession) -> None:
     track = _track_or_404(db, track_id)
     abs_path = library_index.to_absolute(track.path)
     if abs_path.is_file():
-        abs_path.unlink()
+        try:
+            abs_path.unlink()
+        except OSError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"file unlink failed: {e}",
+            ) from e
     db.delete(track)
     db.commit()
 
@@ -660,7 +694,7 @@ async def upload(
         partial = target.with_name(f".{target.name}.partial")
         try:
             with partial.open("wb") as out:
-                while chunk := await upload_file.read(_UPLOAD_CHUNK):
+                while chunk := await upload_file.read(library_index.UPLOAD_CHUNK):
                     out.write(chunk)
             partial.replace(target)
         except Exception:
@@ -703,7 +737,8 @@ def create_folder(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     rel = library_index.to_relative(abs_path)
-    return FolderOut(name=abs_path.name, path=rel, track_count=0)
+    # Newly created — empty by definition.
+    return FolderOut(name=abs_path.name, path=rel, track_count=0, has_children=False)
 
 
 @router.delete("/folders", response_model=FolderDeleteResult)
@@ -737,4 +772,13 @@ def rename_folder(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     new_abs = library_index.to_absolute(payload.dst.strip("/"))
-    return FolderOut(name=new_abs.name, path=payload.dst.strip("/"), track_count=0)
+    has_children = (
+        new_abs.is_dir()
+        and any(grandchild.is_dir() for grandchild in new_abs.iterdir())
+    )
+    return FolderOut(
+        name=new_abs.name,
+        path=payload.dst.strip("/"),
+        track_count=0,
+        has_children=has_children,
+    )

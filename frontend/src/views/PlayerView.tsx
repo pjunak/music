@@ -1,15 +1,29 @@
 import { useEffect, useState } from "react";
 
+import { LightningIcon, ModeIcon, PauseIcon, PlayIcon } from "@/components/icons";
 import { libraryApi } from "@/core/api";
 import { selectActiveTrackId, usePlayerStore } from "@/core/playerStore";
+import { humaniseSlug } from "@/core/slugify";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { useUiStore } from "@/core/uiStore";
 
+// How many upcoming tracks the room display previews. The queue is the
+// playlist made visible here, so this is the main "what's coming" surface.
+const QUEUE_PREVIEW = 6;
+
 export function PlayerView() {
   const trackId = usePlayerStore(selectActiveTrackId);
   const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
-  const interruptActive = usePlayerStore((s) => s.state?.interrupt !== null);
+  // `s.state?.interrupt` is `undefined` (not null) before the first snapshot,
+  // so compare against both nullish values — otherwise the badge flashes
+  // "Alert" on a cold load.
+  const interruptActive = usePlayerStore(
+    (s) => (s.state?.interrupt ?? null) !== null,
+  );
+  // Mode context for the "what mood is on" caption. Only the *id* (slug)
+  // reaches a guest tab; humanised for display (see `humaniseSlug`).
+  const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
   // Subscribe directly to the array reference (or `undefined` when the WS
   // hasn't sent a snapshot yet). Don't `?? []` inside the selector — that
   // creates a fresh array literal on every render, which makes a downstream
@@ -20,7 +34,7 @@ export function PlayerView() {
   // Stable string keys derived from the id arrays — re-runs the fetch
   // effects only when the ids that matter actually change, not on every
   // unrelated state_changed broadcast.
-  const queueKey = (queueIds ?? []).slice(0, 3).join("|");
+  const queueKey = (queueIds ?? []).slice(0, QUEUE_PREVIEW).join("|");
   const historyKey = (historyIds ?? []).slice(-2).join("|");
   const hidePlayerArt = useUiStore((s) => s.hidePlayerArt);
 
@@ -49,7 +63,7 @@ export function PlayerView() {
     };
   }, [trackId]);
 
-  // Fetch metadata for the next 3 in queue and most recent 2 in history.
+  // Fetch metadata for the next few in queue and most recent 2 in history.
   useEffect(() => {
     let cancelled = false;
     if (queueKey === "") {
@@ -88,7 +102,13 @@ export function PlayerView() {
   if (hidePlayerArt) {
     // Blackout mode for a room display: no art, no chrome. The persistent
     // NowPlayingBar at the bottom still gives controls if needed.
-    return <div className="player-view player-view-blackout" aria-hidden="true" />;
+    return (
+      <div
+        className="player-view player-view-blackout"
+        role="img"
+        aria-label="Display blanked"
+      />
+    );
   }
 
   if (track === null) {
@@ -98,10 +118,7 @@ export function PlayerView() {
           ♪
         </div>
         <h1 className="player-title">Nothing playing</h1>
-        <p className="muted">
-          Open <strong>Library</strong> and press ▶ on a track, or pick a
-          playlist from <strong>Controls</strong>.
-        </p>
+        <p className="muted">The DM hasn't started any music yet.</p>
       </div>
     );
   }
@@ -121,13 +138,19 @@ export function PlayerView() {
           )}
         </div>
         <div className="player-meta">
-          <p className="player-status">
+          <p className="player-status" aria-live="polite">
             {interruptActive ? (
-              <span className="badge badge-warn">⚡ Interrupt</span>
+              <span className="player-alert">
+                <LightningIcon aria-hidden="true" /> Alert
+              </span>
             ) : isPlaying ? (
-              <span className="badge badge-ok">▶ Playing</span>
+              <span className="badge badge-accent">
+                <PlayIcon aria-hidden="true" /> Playing
+              </span>
             ) : (
-              <span className="badge">⏸ Paused</span>
+              <span className="badge badge-paused">
+                <PauseIcon aria-hidden="true" /> Paused
+              </span>
             )}
           </p>
           <h1 className="player-title">{trackTitle(track)}</h1>
@@ -137,9 +160,17 @@ export function PlayerView() {
             {track.origin ? ` · from ${track.origin}` : ""}
           </p>
 
+          {activeModeId ? (
+            <p className="player-context">
+              <span className="player-context-mode">
+                <ModeIcon aria-hidden="true" /> {humaniseSlug(activeModeId)}
+              </span>
+            </p>
+          ) : null}
+
           {queueTracks.length > 0 ? (
             <section className="player-queue">
-              <h3>Up next</h3>
+              <h2>Up next</h2>
               <ol>
                 {queueTracks.map((t) => (
                   <li key={t.id}>
@@ -160,7 +191,7 @@ export function PlayerView() {
 
           {historyTracks.length > 0 ? (
             <section className="player-history">
-              <h3>Recently played</h3>
+              <h2>Recently played</h2>
               <ol>
                 {historyTracks.map((t) => (
                   <li key={t.id} className="muted small">

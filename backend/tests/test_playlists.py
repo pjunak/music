@@ -24,26 +24,24 @@ def test_create_validates_mode_id(auth_client: TestClient) -> None:
     assert r.status_code == 400
 
 
-def test_list_filters_by_mode_includes_globals_by_default(auth_client: TestClient) -> None:
+def test_list_filters_strictly_by_mode(auth_client: TestClient) -> None:
+    # Playlists are per-mode now — filtering by mode returns only that mode's,
+    # with no global tier mixed in.
     auth_client.post(
         "/api/playlists",
         json={"name": "DnD-Combat", "mode_id": "dnd", "category": "combat"},
     )
     auth_client.post(
-        "/api/playlists", json={"name": "Global-Combat", "category": "combat"}
+        "/api/playlists", json={"name": "Orphan-Combat", "category": "combat"}
     )
 
-    mixed = auth_client.get(
+    listed = auth_client.get(
         "/api/playlists", params={"mode_id": "dnd", "category": "combat"}
     ).json()
-    names = {p["name"] for p in mixed}
-    assert "DnD-Combat" in names and "Global-Combat" in names
-
-    strict = auth_client.get(
-        "/api/playlists",
-        params={"mode_id": "dnd", "category": "combat", "include_global": False},
-    ).json()
-    assert all(p["mode_id"] == "dnd" for p in strict)
+    names = {p["name"] for p in listed}
+    assert "DnD-Combat" in names
+    assert "Orphan-Combat" not in names
+    assert all(p["mode_id"] == "dnd" for p in listed)
 
 
 def test_create_and_update_accept_category(auth_client: TestClient) -> None:
@@ -276,3 +274,105 @@ def test_export_unknown_format_rejected(
 def test_export_requires_auth(client: TestClient) -> None:
     r = client.get("/api/playlists/1/export")
     assert r.status_code == 401
+
+
+# --- track-delete cascade regression ----------------------------------------
+
+
+def test_track_delete_cascade_then_add_stays_contiguous(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+    db_session: Session,
+) -> None:
+    """A Track row removed by the indexer (its file vanished) cascade-deletes
+    the referencing PlaylistItem at the SQLite level (FK ondelete=CASCADE),
+    bypassing `_shift_down` and leaving a position gap like [0, 2, 3]. The next
+    `add_track(position=None)` derived its target from a COUNT of 3 and collided
+    with the surviving position-3 row → IntegrityError on the composite PK. The
+    domain now re-packs to contiguous on every read/write, so the gap closes and
+    the append succeeds.
+    """
+    from app.library import index as library_index
+    from app.models.track import Track
+
+    pid = auth_client.post("/api/playlists", json={"name": "cascade"}).json()["id"]
+    a, b, c = extra_seeded_track_ids
+    for tid in [seeded_track_id, a, b, c]:
+        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": tid})
+    rows = auth_client.get(f"/api/playlists/{pid}/tracks").json()
+    assert [r["position"] for r in rows] == [0, 1, 2, 3]
+
+    # Delete the in-playlist track at position 1 via the indexer path → the DB
+    # cascade drops its item, leaving positions [0, 2, 3].
+    victim = db_session.get(Track, a)
+    assert victim is not None
+    assert library_index.remove_path(db_session, victim.path) is True
+    db_session.expire_all()
+    assert db_session.get(Track, a) is None
+
+    # Used to 500 on an IntegrityError (target 3 collided with the surviving row).
+    r = auth_client.post(
+        f"/api/playlists/{pid}/tracks", json={"track_id": seeded_track_id}
+    )
+    assert r.status_code == 201, r.text
+
+    rows = auth_client.get(f"/api/playlists/{pid}/tracks").json()
+    positions = [row["position"] for row in rows]
+    assert positions == list(range(len(rows)))  # contiguous 0..N-1
+    assert positions == [0, 1, 2, 3]
+    # Survivors keep their order; the re-added track lands at the tail.
+    assert [row["track_id"] for row in rows] == [seeded_track_id, b, c, seeded_track_id]
+
+
+# --- move_track regression: no-op + sentinel flip-back ----------------------
+
+
+def test_move_track_noop_and_sentinel_fully_flipped_back(
+    auth_client: TestClient,
+    extra_seeded_track_ids: list[int],
+    db_session: Session,
+) -> None:
+    """Locks two move_track invariants:
+
+    (1) Moving an item onto its own position is a no-op — order and positions
+        stay [0,1,2] (the `from_pos == to_pos` early return).
+    (2) After a real move (0 -> 2), every row is back at a contiguous,
+        non-negative position. A regression in the negation flip-back pass
+        would strand a row at the `_PARKED_POSITION` sentinel (-1_000_000) or
+        leave a stale negative value behind.
+    """
+    from app.domain import playlists as playlists_domain
+    from app.models.playlist import PlaylistItem
+
+    pid = auth_client.post("/api/playlists", json={"name": "sentinel"}).json()["id"]
+    a, b, c = extra_seeded_track_ids
+    for tid in [a, b, c]:
+        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": tid})
+
+    # (1) Move the middle item to its own position — no-op early return.
+    assert auth_client.patch(
+        f"/api/playlists/{pid}/tracks/1", json={"to_position": 1}
+    ).status_code == 204
+    rows = auth_client.get(f"/api/playlists/{pid}/tracks").json()
+    assert [r["position"] for r in rows] == [0, 1, 2]
+    assert [r["track_id"] for r in rows] == [a, b, c]
+
+    # (2) Move position 0 to position 2, then inspect the DB rows directly.
+    assert auth_client.patch(
+        f"/api/playlists/{pid}/tracks/0", json={"to_position": 2}
+    ).status_code == 204
+
+    db_session.expire_all()
+    items = db_session.scalars(
+        select(PlaylistItem)
+        .where(PlaylistItem.playlist_id == pid)
+        .order_by(PlaylistItem.position)
+    ).all()
+    positions = [it.position for it in items]
+    # Exactly the contiguous set {0,1,2} — no sentinel / stale negative left.
+    assert positions == [0, 1, 2]
+    assert all(it.position >= 0 for it in items)
+    assert playlists_domain._PARKED_POSITION not in positions
+    # Order resolved as expected (a moved to the tail).
+    assert [it.track_id for it in items] == [b, c, a]

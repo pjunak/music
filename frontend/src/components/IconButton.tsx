@@ -21,7 +21,7 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-labe
   icon: ReactNode;
   /** Optional visible text after the icon. */
   children?: ReactNode;
-  variant?: "default" | "primary" | "danger" | "ghost";
+  variant?: "default" | "primary" | "secondary" | "danger" | "ghost";
 }
 
 export function IconButton({
@@ -36,11 +36,13 @@ export function IconButton({
   const variantClass =
     variant === "primary"
       ? "btn-primary"
-      : variant === "danger"
-        ? "btn-danger"
-        : variant === "ghost"
-          ? "btn-ghost"
-          : "";
+      : variant === "secondary"
+        ? "btn-secondary"
+        : variant === "danger"
+          ? "btn-danger"
+          : variant === "ghost"
+            ? "btn-ghost"
+            : "";
   const composed = ["icon-button", variantClass, className]
     .filter(Boolean)
     .join(" ");

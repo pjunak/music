@@ -1,27 +1,30 @@
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 import { IconButton } from "@/components/IconButton";
 import {
-  InfinityIcon,
   LightningIcon,
   PauseIcon,
   PlayIcon,
   RepeatIcon,
   RepeatOneIcon,
   ShuffleIcon,
+  ShuffleWeightedIcon,
   SkipNextIcon,
   SkipPrevIcon,
 } from "@/components/icons";
-import { OutputToggle } from "@/components/OutputToggle";
+import type { ModeOption } from "@/components/ModeCycleButton";
+import { ModeCycleButton } from "@/components/ModeCycleButton";
+import { SpeakersControl } from "@/components/SpeakersControl";
 import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
+import { useAuthStore } from "@/core/auth";
 import {
   selectAmbientPositionMs,
   usePlayerStore,
 } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
-import type { LoopMode, Track } from "@/core/types";
+import type { LoopMode, ShuffleMode, Track } from "@/core/types";
 import { useTickWhile } from "@/core/useTickWhile";
 import { wsClient } from "@/core/ws";
 
@@ -32,6 +35,54 @@ function formatTime(ms: number): string {
   const sec = totalSec % 60;
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
+
+// Repeat cycle: off → single (current track) → whole queue. Mirrors the
+// `L` keyboard shortcut's order.
+const REPEAT_OPTIONS: ModeOption<LoopMode>[] = [
+  {
+    value: "off",
+    icon: <RepeatIcon />,
+    active: false,
+    legend: "Repeat off — click to repeat the current track",
+  },
+  {
+    value: "track",
+    icon: <RepeatOneIcon />,
+    active: true,
+    legend: "Repeating current track — click to repeat the whole queue",
+  },
+  {
+    value: "queue",
+    icon: <RepeatIcon />,
+    active: true,
+    legend: "Repeating the whole queue — click to turn repeat off",
+  },
+];
+
+// Shuffle cycle: off → random → weighted. Weighted draws uniformly for now
+// (the weighting algorithm is still to be implemented), hence the "planned"
+// note in its legend.
+const SHUFFLE_OPTIONS: ModeOption<ShuffleMode>[] = [
+  {
+    value: "off",
+    icon: <ShuffleIcon />,
+    active: false,
+    legend: "Shuffle off — click for random order",
+  },
+  {
+    value: "random",
+    icon: <ShuffleIcon />,
+    active: true,
+    legend: "Shuffle: random — click for weighted random",
+  },
+  {
+    value: "weighted",
+    icon: <ShuffleWeightedIcon />,
+    active: true,
+    legend:
+      "Shuffle: weighted random (planned — equal weights for now) — click to turn shuffle off",
+  },
+];
 
 /** Persistent footer.
  *
@@ -53,14 +104,15 @@ export function NowPlayingBar() {
   );
   const volume = usePlayerStore((s) => s.state?.volume ?? 1);
   const loop = usePlayerStore((s) => s.state?.ambient.loop ?? "off");
-  const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? false);
-  const connected = usePlayerStore((s) => s.state !== null);
+  const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? "off");
+  const isGuest = useAuthStore((s) => s.status !== "authenticated");
 
   const [track, setTrack] = useState<Track | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch metadata for whatever's currently playing (interrupt wins).
   const displayId = interruptId ?? currentId;
+  const hasTrack = displayId !== null;
   useEffect(() => {
     if (displayId === null) {
       setTrack(null);
@@ -83,7 +135,10 @@ export function NowPlayingBar() {
   // Force re-renders twice a second while playing so the dead-reckoned
   // ambient position (computed from `stateReceivedAt` in the player
   // store) advances visually without requiring a server-side update.
-  useTickWhile(isPlaying, 500);
+  // Gated on hasTrack too: with no track loaded there's nothing to
+  // advance, and ticking would just spin the render loop for a clock
+  // that should read 0:00.
+  useTickWhile(isPlaying && hasTrack, 500);
 
   const positionMs = usePlayerStore(selectAmbientPositionMs);
   const totalMs = track !== null ? Math.round(track.length_s * 1000) : 0;
@@ -100,25 +155,21 @@ export function NowPlayingBar() {
   function prev() {
     wsClient.send({ type: "ambient_skip_prev" });
   }
-  function toggleShuffle() {
-    wsClient.send({ type: "ambient_set_shuffle", shuffle: !shuffle });
+  function setRepeat(mode: LoopMode) {
+    wsClient.send({ type: "ambient_set_loop", loop: mode });
   }
-  // Repeat button cycles off → repeat-all → repeat-one → off. "follow" is
-  // owned by the Continue button, so from there one press engages repeat-all.
-  function cycleRepeat() {
-    const nextLoop: LoopMode =
-      loop === "queue" ? "track" : loop === "track" ? "off" : "queue";
-    wsClient.send({ type: "ambient_set_loop", loop: nextLoop });
-  }
-  // Continue (∞) is a toggle between follow and off. Setting "follow"
-  // implicitly clears repeat-all/one — they share one enum server-side, so
-  // the two can never be active at once.
-  function toggleContinue() {
-    wsClient.send({ type: "ambient_set_loop", loop: loop === "follow" ? "off" : "follow" });
+  function setShuffle(mode: ShuffleMode) {
+    wsClient.send({ type: "ambient_set_shuffle", shuffle: mode });
   }
 
-  const repeatActive = loop === "queue" || loop === "track";
-  const continueActive = loop === "follow";
+  function seekTo(ms: number) {
+    const clamped = Math.max(0, Math.min(totalMs, Math.round(ms)));
+    if (interruptId !== null) {
+      wsClient.send({ type: "interrupt_seek", position_ms: clamped });
+    } else {
+      wsClient.send({ type: "ambient_seek", position_ms: clamped });
+    }
+  }
 
   function onSeek(e: MouseEvent<HTMLDivElement>) {
     if (totalMs <= 0) return;
@@ -126,11 +177,39 @@ export function NowPlayingBar() {
     if (el === null) return;
     const rect = el.getBoundingClientRect();
     const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const seekMs = Math.round(fraction * totalMs);
-    if (interruptId !== null) {
-      wsClient.send({ type: "interrupt_seek", position_ms: seekMs });
-    } else {
-      wsClient.send({ type: "ambient_seek", position_ms: seekMs });
+    seekTo(fraction * totalMs);
+  }
+
+  /** Keyboard handler for the seek bar when it has focus. Mirrors the
+   *  HTML5 range-slider conventions:
+   *    ←/→         : ±5s
+   *    Shift+←/→   : ±30s
+   *    Home / End  : jump to start / end
+   *
+   *  Important: e.preventDefault() blocks the global ←/→ shortcut from
+   *  ALSO firing prev/next, but only for React's synthetic dispatch.
+   *  The native window-level keydown listener in useKeyboardShortcuts is
+   *  separately guarded by the role="slider" check in isInteractiveTarget. */
+  function onSeekKey(e: KeyboardEvent<HTMLDivElement>) {
+    if (totalMs <= 0) return;
+    const big = e.shiftKey ? 30000 : 5000;
+    switch (e.key) {
+      case "ArrowLeft":
+        e.preventDefault();
+        seekTo(positionMs - big);
+        return;
+      case "ArrowRight":
+        e.preventDefault();
+        seekTo(positionMs + big);
+        return;
+      case "Home":
+        e.preventDefault();
+        seekTo(0);
+        return;
+      case "End":
+        e.preventDefault();
+        seekTo(totalMs);
+        return;
     }
   }
 
@@ -140,11 +219,10 @@ export function NowPlayingBar() {
 
   const seekable = totalMs > 0;
   const fraction = seekable ? Math.min(1, positionMs / totalMs) : 0;
-  // Disable transport when there's literally nothing loaded — otherwise
-  // pressing play sets is_playing=true server-side and the position
-  // counter starts ticking against an empty track, looking like
+  // `hasTrack` (computed above) disables transport when nothing's loaded —
+  // otherwise pressing play sets is_playing=true server-side and the
+  // position counter starts ticking against an empty track, looking like
   // playback when nothing's actually queued.
-  const hasTrack = displayId !== null;
 
   return (
     <footer className="now-playing">
@@ -171,13 +249,12 @@ export function NowPlayingBar() {
         </div>
 
         <div className="now-playing-controls">
-          <IconButton
-            label={shuffle ? "Shuffle: on (S)" : "Shuffle: off (S)"}
-            icon={<ShuffleIcon />}
-            onClick={toggleShuffle}
-            className={shuffle ? "is-active" : ""}
-            aria-pressed={shuffle}
-            disabled={!connected}
+          <ModeCycleButton
+            options={SHUFFLE_OPTIONS}
+            current={shuffle}
+            onCycle={setShuffle}
+            readOnly={isGuest}
+            readOnlyHint="sign in to change"
           />
           <IconButton
             label="Previous (←)"
@@ -208,41 +285,24 @@ export function NowPlayingBar() {
             onClick={next}
             disabled={!hasTrack}
           />
-          <IconButton
-            label={
-              loop === "track"
-                ? "Repeat: one (L)"
-                : loop === "queue"
-                  ? "Repeat: all (L)"
-                  : "Repeat: off (L)"
-            }
-            icon={loop === "track" ? <RepeatOneIcon /> : <RepeatIcon />}
-            onClick={cycleRepeat}
-            className={repeatActive ? "is-active" : ""}
-            aria-pressed={repeatActive}
-            disabled={!connected}
-          />
-          <IconButton
-            label={
-              continueActive
-                ? "Continue into library: on (L)"
-                : "Continue into library: off (L)"
-            }
-            icon={<InfinityIcon />}
-            onClick={toggleContinue}
-            className={continueActive ? "is-active" : ""}
-            aria-pressed={continueActive}
-            disabled={!connected}
+          <ModeCycleButton
+            options={REPEAT_OPTIONS}
+            current={loop}
+            onCycle={setRepeat}
+            readOnly={isGuest}
+            readOnlyHint="sign in to change"
           />
         </div>
 
         <div className="now-playing-right">
-          <OutputToggle />
+          <SpeakersControl />
           <VolumeControl
             value={volume}
             onChange={onVolumeChange}
             label="Master volume"
             className="now-playing-volume"
+            readOnly={isGuest}
+            readOnlyTitle="Master volume — sign in to change"
           />
         </div>
       </div>
@@ -253,13 +313,15 @@ export function NowPlayingBar() {
           ref={progressRef}
           className={`seek-bar seek-bar-large${seekable ? "" : " seek-bar-disabled"}`}
           onClick={seekable ? onSeek : undefined}
+          onKeyDown={seekable ? onSeekKey : undefined}
           role={seekable ? "slider" : undefined}
           aria-label={seekable ? "Seek" : undefined}
           aria-valuemin={0}
           aria-valuemax={totalMs}
           aria-valuenow={Math.min(positionMs, totalMs)}
+          aria-valuetext={`${formatTime(positionMs)} of ${formatTime(totalMs)}`}
           tabIndex={seekable ? 0 : -1}
-          title={seekable ? "Click to seek" : undefined}
+          title={seekable ? "Click to seek; arrow keys when focused (Shift = 30s)" : undefined}
         >
           <div
             className="seek-bar-fill"

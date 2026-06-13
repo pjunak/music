@@ -1,67 +1,133 @@
-"""In-memory registry of currently-connected clients.
+"""In-memory table of currently-open WebSocket connections.
 
-Devices are ephemeral — they exist only while their WebSocket connection is
-open. On reconnect a client gets a fresh device id; persistent identification
-across sessions isn't a feature today.
+Two layers of identity now coexist:
+
+- **connection_id** (`dev-…`) — minted per socket, unique even across two tabs
+  of the same browser. The connection-manager key.
+- **client_id** — the stable per-install token the client sends in `register`.
+  The identity that matters for the persistent device registry and for audio-
+  output designation; survives refresh and restart.
+
+This module stays DB-free (it's imported by the state machine, the connection
+manager and the router). The persistent `is_output` flag (the "default-on"
+designation) is read in the router's register handler and *cached* here via
+`bind` so each broadcast's `connected_devices` can show the flag without a DB
+hit. It is display/auto-activate only — SFX fan-out and position gating follow
+live active-output membership (`PlayerState.active_output_device_ids`), not
+this cache.
 """
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.sync.protocol import DeviceInfo
 
 
 @dataclass
-class ConnectedDevice:
-    device_id: str
+class LiveConnection:
+    connection_id: str
+    client_id: str | None = None
     name: str = ""
-    capabilities: list[str] = field(default_factory=list)
+    is_output: bool = False  # cached from KnownDevice at register time
     registered: bool = False  # flips true after the client sends `register`
 
     def to_info(self) -> DeviceInfo:
+        # Only ever called for registered connections — all_infos() filters out
+        # any with a None client_id before reaching here.
+        assert self.client_id is not None
         return DeviceInfo(
-            device_id=self.device_id, name=self.name, capabilities=list(self.capabilities)
+            device_id=self.client_id,
+            client_id=self.client_id,
+            name=self.name,
+            is_output=self.is_output,
         )
 
 
 class DeviceRegistry:
     def __init__(self) -> None:
-        self._devices: dict[str, ConnectedDevice] = {}
+        self._conns: dict[str, LiveConnection] = {}
 
-    def add(self) -> ConnectedDevice:
-        device_id = f"dev-{secrets.token_urlsafe(8)}"
-        device = ConnectedDevice(device_id=device_id)
-        self._devices[device_id] = device
-        return device
+    def add(self) -> LiveConnection:
+        connection_id = f"dev-{secrets.token_urlsafe(8)}"
+        conn = LiveConnection(connection_id=connection_id)
+        self._conns[connection_id] = conn
+        return conn
 
-    def remove(self, device_id: str) -> None:
-        self._devices.pop(device_id, None)
+    def remove(self, connection_id: str) -> None:
+        self._conns.pop(connection_id, None)
 
-    def update(
-        self, device_id: str, *, name: str, capabilities: list[str]
-    ) -> ConnectedDevice | None:
-        dev = self._devices.get(device_id)
-        if dev is None:
+    def bind(
+        self, connection_id: str, *, client_id: str, name: str, is_output: bool
+    ) -> LiveConnection | None:
+        """Attach the stable identity + cached designation to a live socket
+        after its `register` was processed."""
+        conn = self._conns.get(connection_id)
+        if conn is None:
             return None
-        dev.name = name
-        dev.capabilities = list(capabilities)
-        dev.registered = True
-        return dev
+        conn.client_id = client_id
+        conn.name = name
+        conn.is_output = is_output
+        conn.registered = True
+        return conn
 
-    def get(self, device_id: str) -> ConnectedDevice | None:
-        return self._devices.get(device_id)
+    def get(self, connection_id: str) -> LiveConnection | None:
+        return self._conns.get(connection_id)
 
-    def has_capability(self, device_id: str, capability: str) -> bool:
-        dev = self._devices.get(device_id)
-        return dev is not None and capability in dev.capabilities
+    def client_id_for(self, connection_id: str) -> str | None:
+        conn = self._conns.get(connection_id)
+        return conn.client_id if conn is not None else None
+
+    def connected_client_ids(self) -> set[str]:
+        """Stable client_ids of every registered live connection. Used to
+        validate that a device being activated as an output is actually
+        connected (activation no longer requires a persistent designation)."""
+        return {
+            conn.client_id
+            for conn in self._conns.values()
+            if conn.registered and conn.client_id is not None
+        }
+
+    def refresh_is_output(self, client_id: str, value: bool) -> None:
+        """Push a default-on designation change to every live socket of this
+        device so its `connected_devices` entry reflects the new flag without a
+        reconnect. (Designation is display/auto-activate only; it does not gate
+        SFX or position — those follow live active-output membership.)"""
+        for conn in self._conns.values():
+            if conn.client_id == client_id:
+                conn.is_output = value
+
+    def refresh_name(self, client_id: str, name: str) -> None:
+        """Push a rename to every live socket so the next broadcast's
+        `connected_devices` shows the new name without a reconnect."""
+        for conn in self._conns.values():
+            if conn.client_id == client_id:
+                conn.name = name
+
+    def has_other_connection(self, client_id: str, exclude_connection_id: str) -> bool:
+        """True if another live socket shares this client_id — the multi-tab
+        guard that keeps closing one tab from de-activating a device that still
+        has another output tab open."""
+        return any(
+            cid != exclude_connection_id and conn.client_id == client_id
+            for cid, conn in self._conns.items()
+        )
 
     def all_infos(self) -> list[DeviceInfo]:
-        return [d.to_info() for d in self._devices.values() if d.registered]
+        """Connected devices, one entry per client_id (two tabs collapse to a
+        single device). Only registered connections appear."""
+        by_client: dict[str, LiveConnection] = {}
+        for conn in self._conns.values():
+            if not conn.registered or conn.client_id is None:
+                continue
+            # Last writer wins — fine for name/is_output (same client_id shares
+            # both); keeps a single representative entry.
+            by_client[conn.client_id] = conn
+        return [conn.to_info() for conn in by_client.values()]
 
     def reset_for_tests(self) -> None:
-        """Drop all registered devices. For test isolation only."""
-        self._devices.clear()
+        """Drop all live connections. For test isolation only."""
+        self._conns.clear()
 
 
 # Module-level singleton — single-process scope.

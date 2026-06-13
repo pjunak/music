@@ -27,6 +27,13 @@ interface Props {
   prefix?: ReactNode;
   /** Optional className passed to the wrapping <label>, for layout overrides. */
   className?: string;
+  /** Render as a non-interactive display of the current value. Used for
+   *  guests viewing the master volume (server rejects their `set_volume`
+   *  with "guest sessions cannot mutate state" — letting the slider drag
+   *  fire an error per pixel is worse UX than just locking it). */
+  readOnly?: boolean;
+  /** Tooltip shown when readOnly. Defaults to a generic explanation. */
+  readOnlyTitle?: string;
 }
 
 export function VolumeControl({
@@ -37,10 +44,17 @@ export function VolumeControl({
   showPercent = true,
   prefix,
   className,
+  readOnly = false,
+  readOnlyTitle,
 }: Props) {
-  const composed = ["volume-row", className].filter(Boolean).join(" ");
+  const composed = ["volume-row", className, readOnly ? "volume-row-readonly" : null]
+    .filter(Boolean)
+    .join(" ");
+  // `disabled` on <input type="range"> is the only cross-browser way to
+  // make it non-interactive — `readOnly` is silently ignored. We swallow
+  // onChange too so a programmatic dispatch can't sneak through.
   return (
-    <label className={composed} title={label}>
+    <label className={composed} title={readOnly ? readOnlyTitle ?? label : label}>
       {prefix !== undefined ? (
         <span className="volume-row-prefix muted small">{prefix}</span>
       ) : null}
@@ -52,8 +66,13 @@ export function VolumeControl({
         max={1}
         step={0.01}
         value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
+        onChange={(e) => {
+          if (readOnly) return;
+          onChange(parseFloat(e.target.value));
+        }}
+        disabled={readOnly}
         aria-label={label}
+        aria-readonly={readOnly || undefined}
         style={{ "--volume-pct": `${value * 100}%` } as CSSProperties}
       />
       {showPercent ? (

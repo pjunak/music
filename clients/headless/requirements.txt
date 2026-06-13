@@ -1,0 +1,5 @@
+# Headless output client deps.
+# python-mpv also needs the libmpv shared library at the OS level:
+#   Debian/Ubuntu:  sudo apt install mpv libmpv2   (older releases: libmpv1)
+websocket-client>=1.7
+python-mpv>=1.0

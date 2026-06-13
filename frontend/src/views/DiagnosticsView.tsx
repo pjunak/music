@@ -4,7 +4,8 @@ import { diagnosticsApi } from "@/core/api";
 import type { DiagnosticsResponse } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { playbackEngine } from "@/core/playbackEngine";
-import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
+import { selectIsMyOutput, usePlayerArray, usePlayerStore } from "@/core/playerStore";
+import { toast } from "@/core/toast";
 
 /** Fixed reference for "never". Avoids "Invalid Date" rendering when a
  *  loader / scan hasn't run since boot. */
@@ -33,13 +34,11 @@ export function DiagnosticsView() {
   const wsStatus = usePlayerStore((s) => s.wsStatus);
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
   const isMyOutput = usePlayerStore(selectIsMyOutput);
-  const activeOutputs = usePlayerStore(
-    (s) => s.state?.active_output_device_ids ?? [],
-  );
+  // Stable array selectors via the helper (a fresh `?? []` inside would loop
+  // useSyncExternalStore — React #185). `?? null` below is fine: a primitive.
+  const activeOutputs = usePlayerArray((s) => s.state?.active_output_device_ids);
   const masterVolumeFromState = usePlayerStore((s) => s.state?.volume ?? null);
-  const connectedDevices = usePlayerStore(
-    (s) => s.state?.connected_devices ?? [],
-  );
+  const connectedDevices = usePlayerArray((s) => s.state?.connected_devices);
   const authStatus = useAuthStore((s) => s.status);
 
   // Server-side snapshot — polled every 5s while the page is open.
@@ -77,14 +76,17 @@ export function DiagnosticsView() {
       ua: navigator.userAgent,
       timestamp: new Date().toISOString(),
     };
-    void navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    navigator.clipboard
+      .writeText(JSON.stringify(payload, null, 2))
+      .then(() => toast.success("Diagnostics copied to clipboard"))
+      .catch(() => toast.error("Copy failed", "Clipboard access was blocked."));
   }
 
   return (
     <div className="diagnostics-view">
       <header className="diagnostics-view-header">
         <h1>Diagnostics</h1>
-        <button type="button" onClick={copyToClipboard}>
+        <button type="button" className="btn-ghost" onClick={copyToClipboard}>
           Copy JSON
         </button>
       </header>
@@ -151,41 +153,12 @@ export function DiagnosticsView() {
                 {Object.keys(serverDx.modes.errors).length}
               </strong>
             </li>
-            <li>
-              <span className="muted small">EQ presets loaded</span>
-              <strong>{serverDx.presets.loaded_ids.length}</strong>
-            </li>
-            <li>
-              <span className="muted small">Preset load errors</span>
-              <strong
-                className={
-                  Object.keys(serverDx.presets.errors).length > 0
-                    ? "danger"
-                    : "ok"
-                }
-              >
-                {Object.keys(serverDx.presets.errors).length}
-              </strong>
-            </li>
           </ul>
           {Object.keys(serverDx.modes.errors).length > 0 ? (
             <details>
               <summary>Mode load errors</summary>
               <ul className="diagnostics-summary">
                 {Object.entries(serverDx.modes.errors).map(([id, err]) => (
-                  <li key={id}>
-                    <span className="muted small">{id}</span>
-                    <code className="error small">{err}</code>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-          {Object.keys(serverDx.presets.errors).length > 0 ? (
-            <details>
-              <summary>Preset load errors</summary>
-              <ul className="diagnostics-summary">
-                {Object.entries(serverDx.presets.errors).map(([id, err]) => (
                   <li key={id}>
                     <span className="muted small">{id}</span>
                     <code className="error small">{err}</code>
@@ -202,12 +175,12 @@ export function DiagnosticsView() {
         {connectedDevices.length === 0 ? (
           <p className="muted small">(none yet)</p>
         ) : (
-          <table className="diagnostics-channels">
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Device id</th>
                 <th>Name</th>
-                <th>Capabilities</th>
+                <th>Default output?</th>
                 <th>Active output?</th>
                 <th>Me?</th>
               </tr>
@@ -219,7 +192,7 @@ export function DiagnosticsView() {
                     <code>{d.device_id}</code>
                   </td>
                   <td>{d.name}</td>
-                  <td>{d.capabilities.join(", ") || "(none)"}</td>
+                  <td>{d.is_output ? "yes" : "no"}</td>
                   <td>{activeOutputs.includes(d.device_id) ? "yes" : "no"}</td>
                   <td>{d.device_id === myDeviceId ? "yes" : "—"}</td>
                 </tr>
@@ -265,7 +238,7 @@ export function DiagnosticsView() {
 
       <section className="surface-card">
         <h3>Channels</h3>
-        <table className="diagnostics-channels">
+        <table className="data-table diagnostics-channels">
           <thead>
             <tr>
               <th>Channel</th>
@@ -297,7 +270,13 @@ export function DiagnosticsView() {
                 <td>
                   {Number.isFinite(c.duration) ? c.duration.toFixed(1) : "—"}
                 </td>
-                <td>{c.errorCode ?? "—"}</td>
+                <td>
+                  {c.errorCode ? (
+                    <span className="badge badge-danger">{c.errorCode}</span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td className="diagnostics-src" title={c.src}>
                   {c.src.replace(/^.*\/api\//, "/api/") || "(empty)"}
                 </td>

@@ -101,6 +101,28 @@ def test_tree_unknown_path_is_empty(auth_client: TestClient) -> None:
     assert body["tracks"] == []
 
 
+# --- all folders (client-side tree) ---------------------------------------
+
+
+def test_folders_requires_auth(client: TestClient) -> None:
+    assert client.get("/api/library/folders").status_code == 401
+
+
+def test_folders_lists_whole_hierarchy_with_counts(
+    auth_client: TestClient, seeded_track_id: int
+) -> None:
+    # Empty nested folders must appear too — they're upload destinations.
+    auth_client.post("/api/library/folders", json={"path": "AllF/Skyrim/Combat"})
+    body = auth_client.get("/api/library/folders").json()
+    by_path = {f["path"]: f for f in body["folders"]}
+    assert by_path["AllF"]["has_children"] is True
+    assert by_path["AllF/Skyrim"]["has_children"] is True
+    assert by_path["AllF/Skyrim/Combat"]["has_children"] is False
+    assert by_path["AllF/Skyrim/Combat"]["track_count"] == 0
+    # The seeded track counts recursively on its own folder.
+    assert by_path["Demo"]["track_count"] >= 1
+
+
 # --- single track + stream + cover ---------------------------------------
 
 
@@ -457,6 +479,29 @@ def test_track_move_renames_and_relocates(auth_client: TestClient) -> None:
     assert not (music_dir / "MoveSrc" / "movable.wav").exists()
 
 
+def test_track_rename_in_place(auth_client: TestClient) -> None:
+    """Renaming without relocating: destination == the file's current folder,
+    only the filename changes. This is the path the TagInspector's rename
+    control drives."""
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("oldname.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "RenameHere"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+
+    r = auth_client.post(
+        f"/api/library/tracks/{track_id}/move",
+        json={"destination": "RenameHere", "new_filename": "newname.wav"},
+    )
+    assert r.status_code == 200
+    assert r.json()["path"] == "RenameHere/newname.wav"
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "RenameHere" / "newname.wav").is_file()
+    assert not (music_dir / "RenameHere" / "oldname.wav").exists()
+
+
 def test_track_move_409_when_target_exists(auth_client: TestClient) -> None:
     auth_client.post(
         "/api/library/upload",
@@ -691,66 +736,80 @@ def test_rename_folder_conflict(auth_client: TestClient) -> None:
     assert r.status_code == 409
 
 
-# --- follow / play-folder helpers ----------------------------------------
-#
-# The Extras/ fixture files (extra-2/3/4.wav) are contiguous in path order —
-# nothing can sort between "Extras/extra-2.wav" and "Extras/extra-3.wav" — so
-# these assertions hold regardless of what other tests leave in the shared
-# session library.
+# --- regression: album-fallback preserves dots ---------------------------
 
 
-def test_track_ids_under_folder_in_path_order(
-    client: TestClient, extra_seeded_track_ids: list[int]
-) -> None:
-    from app.core.db import SessionLocal
+def test_metadata_album_fallback_preserves_dots() -> None:
+    """A WAV with no album tag falls back to its parent-folder name VERBATIM —
+    dots included. `metadata_for` derives the album from `Path(parent_rel).name`,
+    not a slugified form, so a folder literally named "Vol.1" must yield album
+    "Vol.1", never "Vol1". A root-level file (parent == ".") yields an empty
+    album, not "." and not the mangled folder name."""
     from app.library import index as library_index
 
-    with SessionLocal() as db:
-        ids = library_index.track_ids_under(db, "Extras")
-    assert ids == extra_seeded_track_ids
+    music_dir = Path(os.environ["MUSIC_DIR"])
+
+    dotted = music_dir / "Vol.1"
+    dotted.mkdir(exist_ok=True)
+    song = dotted / "song.wav"
+    song.write_bytes(_silent_wav())
+
+    meta = library_index.metadata_for(song, root=music_dir)
+    assert meta["album"] == "Vol.1"
+
+    # Root-level file: parent resolves to "." → album must be empty, not "."
+    # and not a mangled folder name.
+    root_song = music_dir / "rootlevel.wav"
+    root_song.write_bytes(_silent_wav())
+    root_meta = library_index.metadata_for(root_song, root=music_dir)
+    assert root_meta["album"] == ""
 
 
-def test_track_ids_under_empty_path_returns_whole_library(
-    client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+# --- regression: delete_track OSError -> 500, row preserved ---------------
+
+
+def test_delete_track_unlink_failure_returns_500_and_keeps_row(
+    auth_client: TestClient, monkeypatch,
 ) -> None:
-    from app.core.db import SessionLocal
-    from app.library import index as library_index
+    """When the on-disk unlink raises OSError, the endpoint must surface a 500
+    (with a "unlink failed" detail) AND leave the DB row intact — the row is
+    only dropped *after* a successful unlink, so a failed delete can't orphan
+    the index.
 
-    with SessionLocal() as db:
-        ids = library_index.track_ids_under(db, "")
-    # Whole-library load is a superset of every known track.
-    assert seeded_track_id in ids
-    for tid in extra_seeded_track_ids:
-        assert tid in ids
+    The endpoint guards the unlink behind `abs_path.is_file()`, so the file has
+    to genuinely exist (a dir/symlink swap would make is_file() False and the
+    delete would short-circuit to 204). To force the OSError branch
+    deterministically on every OS, we make `Path.unlink` raise for this one
+    real, existing file — no privileged file-locking tricks, no platform skew."""
+    upload = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("undeletable.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "Undeletable"},
+    ).json()
+    track_id = upload["saved"][0]["id"]
+    rel = upload["saved"][0]["path"]
 
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    target = (music_dir / rel).resolve()
+    assert target.is_file()  # is_file() stays True so the unlink branch runs
 
-def test_next_track_id_after_is_adjacent(
-    client: TestClient, extra_seeded_track_ids: list[int]
-) -> None:
-    from app.core.db import SessionLocal
-    from app.library import index as library_index
+    real_unlink = Path.unlink
 
-    with SessionLocal() as db:
-        # Extras/extra-2 < extra-3 < extra-4, contiguous in path order.
-        nxt = library_index.next_track_id_after(db, "Extras/extra-2.wav")
-        assert nxt == extra_seeded_track_ids[1]
-        nxt2 = library_index.next_track_id_after(db, "Extras/extra-3.wav")
-        assert nxt2 == extra_seeded_track_ids[2]
+    def fake_unlink(self: Path, *args, **kwargs):
+        if self.resolve() == target:
+            raise OSError("simulated unlink failure")
+        return real_unlink(self, *args, **kwargs)
 
+    monkeypatch.setattr(Path, "unlink", fake_unlink)
 
-def test_next_track_id_after_wraps_or_stops_at_end(
-    client: TestClient, seeded_track_id: int
-) -> None:
-    from app.core.db import SessionLocal
-    from app.library import index as library_index
+    r = auth_client.delete(f"/api/library/tracks/{track_id}")
+    assert r.status_code == 500
+    assert "unlink failed" in r.json()["detail"].lower()
 
-    # A path that sorts after any real track exercises the end-of-library
-    # branch deterministically without needing to know the last track.
-    sentinel = "￿"
-    with SessionLocal() as db:
-        assert library_index.next_track_id_after(db, sentinel, wrap=False) is None
-        # With wrap, follow loops back to the library's first track.
-        assert library_index.next_track_id_after(db, sentinel, wrap=True) is not None
+    # The row survived — a failed unlink must not orphan the index. The
+    # monkeypatch is auto-reverted by the fixture, so this re-fetch hits disk
+    # normally and the row is still there.
+    assert auth_client.get(f"/api/library/tracks/{track_id}").status_code == 200
 
 
 # Quiet pyflakes about io being imported for potential future test helpers.

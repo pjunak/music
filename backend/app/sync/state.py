@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from typing import Any
 
@@ -24,10 +25,11 @@ from app.sync.devices import registry
 from app.sync.protocol import (
     AmbientState,
     InterruptState,
+    LoopingSfx,
     LoopMode,
     PlayerState,
     PositionReport,
-    ScenePreviousState,
+    ShuffleMode,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,7 +122,7 @@ class StateMachine:
 
 
 def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
-    """Drop references inside `raw` to tracks / modes / presets / scenes /
+    """Drop references inside `raw` to tracks / modes / presets /
     soundboards that no longer exist. Returns a new dict; caller decides
     whether to persist it.
 
@@ -131,14 +133,14 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
       - `active_mode_id`: cleared if the mode is no longer loaded.
       - `active_soundboard_id`: cleared if no active mode or soundboard
         isn't part of it.
-      - `active_scene_id`: same scoping rule.
-      - `active_preset_ids`: filtered to only loaded presets.
-      - `active_output_device_ids`: cleared. Device ids are per-WS-connection
-        and a server restart wipes them all; auto-claim re-establishes.
+      - `active_preset_ids`: filtered to only the active mode's presets.
+      - `active_output_device_ids`: cleared on boot. Activation is fully
+        manual — there is no auto-claim or auto-resume; the operator
+        re-activates a designated device when they want sound. (The persistent
+        output *designation* lives in DEVICES_FILE, untouched here.)
     """
     from app.models.track import Track  # local to keep cyclic-import risk down
     from app.modes import loader as modes_loader
-    from app.presets import loader as presets_loader
 
     out = dict(raw)
 
@@ -184,44 +186,40 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
     ):
         out["active_soundboard_id"] = None
 
-    active_scene_id = out.get("active_scene_id")
-    if active_scene_id is not None and (
-        active_mode is None or active_scene_id not in active_mode.scenes
-    ):
-        out["active_scene_id"] = None
-
-    loaded_presets = presets_loader.all_presets()
+    # Presets are per-mode now, so filter active ids against the active mode's
+    # presets (none survive when no mode is active).
+    loaded_presets = active_mode.presets if active_mode is not None else {}
     active_preset_ids = out.get("active_preset_ids") or []
     if isinstance(active_preset_ids, list):
         out["active_preset_ids"] = [
             p for p in active_preset_ids if isinstance(p, str) and p in loaded_presets
         ]
 
-    # Snapshot captured at scene activation — same dangling-ref hazards as the
-    # live ambient/preset fields, so prune in lockstep.
-    pre_scene = out.get("pre_scene_state")
-    if isinstance(pre_scene, dict):
-        snap = dict(pre_scene)
-        snap_ambient = snap.get("ambient")
-        if isinstance(snap_ambient, dict):
-            snap_ambient = dict(snap_ambient)
-            snap_ambient["current_track_id"] = _filter_track_id(
-                snap_ambient.get("current_track_id")
-            )
-            snap_ambient["queue"] = _filter_track_list(snap_ambient.get("queue"))
-            snap_ambient["history"] = _filter_track_list(snap_ambient.get("history"))
-            snap["ambient"] = snap_ambient
-        snap_presets = snap.get("active_preset_ids")
-        if isinstance(snap_presets, list):
-            snap["active_preset_ids"] = [
-                p for p in snap_presets if isinstance(p, str) and p in loaded_presets
-            ]
-        out["pre_scene_state"] = snap
-
-    # Wipe active outputs: device ids are per-connection so every restart
-    # leaves the previous list stale. Auto-claim re-establishes once a
-    # client reconnects.
+    # Wipe active outputs on boot. Activation is fully manual — there is no
+    # auto-claim and no auto-resume across a restart. The persistent output
+    # *designation* lives in DEVICES_FILE (app/devices/store.py) and is
+    # untouched; the operator re-activates a designated device when they want
+    # sound. (The client_ids here would otherwise be a stale snapshot of who
+    # was live.)
     out["active_output_device_ids"] = []
+
+    # Wipe looping SFX on boot for the same reason: the server-side timers that
+    # drive them don't survive a restart, so a persisted entry would show in the
+    # LOOPS panel with no timer behind it. Session-only, no auto-resume.
+    out["looping_sfx"] = []
+
+    # Can't be "playing" with nothing loaded. If pruning emptied both lanes
+    # (deleted current track, no interrupt), force is_playing=false so
+    # clients don't dead-reckon a position clock against a phantom track on
+    # the next boot. Catches every "playing nothing" path, not just the
+    # ones we know about.
+    ambient_after = out.get("ambient") or {}
+    interrupt_after = out.get("interrupt")
+    nothing_loaded = (
+        ambient_after.get("current_track_id") is None and interrupt_after is None
+    )
+    if nothing_loaded and out.get("is_playing"):
+        out["is_playing"] = False
 
     return out
 
@@ -255,7 +253,16 @@ def set_active_mode(mode_id: str | None) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if state.active_mode_id == mode_id:
             return state
-        return state.model_copy(update={"active_mode_id": mode_id})
+        # Presets + soundboard are per-mode — switching modes clears them so
+        # stale ids from the previous mode don't linger (they'd no longer
+        # resolve). Ambient/queue keep playing across the switch.
+        return state.model_copy(
+            update={
+                "active_mode_id": mode_id,
+                "active_preset_ids": [],
+                "active_soundboard_id": None,
+            }
+        )
 
     return _mut
 
@@ -265,6 +272,27 @@ def set_active_outputs(device_ids: list[str]) -> Any:
         if list(state.active_output_device_ids) == list(device_ids):
             return state
         return state.model_copy(update={"active_output_device_ids": list(device_ids)})
+
+    return _mut
+
+
+def add_active_output(device_id: str) -> Any:
+    """Append a single device id to `active_output_device_ids`. No-op if the id
+    is already present. Used by the WS register path to auto-activate a
+    default-on device without a read-modify-write on a stale snapshot (which
+    races a concurrent register)."""
+
+    def _mut(state: PlayerState) -> PlayerState:
+        if device_id in state.active_output_device_ids:
+            return state
+        return state.model_copy(
+            update={
+                "active_output_device_ids": [
+                    *state.active_output_device_ids,
+                    device_id,
+                ]
+            }
+        )
 
     return _mut
 
@@ -283,6 +311,28 @@ def remove_active_output(device_id: str) -> Any:
     return _mut
 
 
+def set_device_volume(device_id: str, volume: float) -> Any:
+    """Set one device's per-device volume trim. Stored only when non-unity, so
+    a trim of 1.0 just drops the entry (the map stays small and "absent = 1.0"
+    stays the invariant). No-op when the value is unchanged."""
+
+    v = max(0.0, min(1.0, volume))
+
+    def _mut(state: PlayerState) -> PlayerState:
+        cur = dict(state.device_volumes)
+        if abs(v - 1.0) < 1e-9:
+            if device_id not in cur:
+                return state
+            cur.pop(device_id, None)
+        else:
+            if cur.get(device_id) == v:
+                return state
+            cur[device_id] = v
+        return state.model_copy(update={"device_volumes": cur})
+
+    return _mut
+
+
 def set_active_soundboard(soundboard_id: str | None) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if state.active_soundboard_id == soundboard_id:
@@ -292,16 +342,55 @@ def set_active_soundboard(soundboard_id: str | None) -> Any:
     return _mut
 
 
-def set_active_presets(preset_ids: list[str]) -> Any:
+def set_active_presets(
+    preset_ids: list[str],
+    *,
+    volume: float | None = None,
+    crossfade_ms: int | None = None,
+) -> Any:
+    """Set the active preset list, and optionally apply the master-volume /
+    crossfade overrides those presets declare (resolved last-wins by the
+    caller via `presets.loader.effective_overrides`). A None override leaves
+    that global untouched — there's no auto-revert when a preset turns off."""
+
     def _mut(state: PlayerState) -> PlayerState:
         # De-duplicate while preserving order.
         deduped: list[str] = []
         for p in preset_ids:
             if p not in deduped:
                 deduped.append(p)
-        if list(state.active_preset_ids) == deduped:
+        update: dict[str, Any] = {}
+        if list(state.active_preset_ids) != deduped:
+            update["active_preset_ids"] = deduped
+        if volume is not None and volume != state.volume:
+            update["volume"] = volume
+        if crossfade_ms is not None and crossfade_ms != state.crossfade_ms:
+            update["crossfade_ms"] = crossfade_ms
+        if not update:
             return state
-        return state.model_copy(update={"active_preset_ids": deduped})
+        return state.model_copy(update=update)
+
+    return _mut
+
+
+def start_loop(loop: LoopingSfx) -> Any:
+    """Add (or replace, by id) a looping SFX entry. The actual interval timer
+    is owned by `sync/loops.py` — this only records it in the broadcast state
+    so every LOOPS panel reflects it."""
+
+    def _mut(state: PlayerState) -> PlayerState:
+        kept = [entry for entry in state.looping_sfx if entry.id != loop.id]
+        return state.model_copy(update={"looping_sfx": [*kept, loop]})
+
+    return _mut
+
+
+def stop_loop(loop_id: str) -> Any:
+    def _mut(state: PlayerState) -> PlayerState:
+        kept = [entry for entry in state.looping_sfx if entry.id != loop_id]
+        if len(kept) == len(state.looping_sfx):
+            return state
+        return state.model_copy(update={"looping_sfx": kept})
 
     return _mut
 
@@ -370,7 +459,13 @@ def ambient_set_queue(track_ids: list[int]) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if list(state.ambient.queue) == list(track_ids):
             return state
-        return _replace_ambient(state, state.ambient.model_copy(update={"queue": list(track_ids)}))
+        # Explicit queue replacement = diverged from any source playlist.
+        return _replace_ambient(
+            state,
+            state.ambient.model_copy(
+                update={"queue": list(track_ids), "source_playlist_id": None}
+            ),
+        )
 
     return _mut
 
@@ -396,15 +491,8 @@ def ambient_clear_queue() -> Any:
     return _mut
 
 
-def ambient_skip_next(follow_next_id: int | None = None) -> Any:
-    """Advance to next track. Behavior at end of queue depends on loop mode.
-
-    `follow_next_id` is the next library track the *handler* resolved for
-    follow mode (the mutator can't touch the DB). It's only consulted when
-    the queue is empty and `loop == "follow"`; otherwise it's ignored. None
-    means "no successor available" (e.g. end of library with wrap off), so
-    follow degrades to idle.
-    """
+def ambient_skip_next() -> Any:
+    """Advance to next track. Behavior at end of queue depends on loop mode."""
 
     def _mut(state: PlayerState) -> PlayerState:
         amb = state.ambient
@@ -416,12 +504,15 @@ def ambient_skip_next(follow_next_id: int | None = None) -> Any:
             return _replace_ambient(state, amb.model_copy(update={"position_ms": 0}))
 
         if amb.queue:
-            # Normal advance.
+            # Normal advance. Shuffle (random/weighted) pulls a random entry
+            # instead of the head; "off" keeps deterministic queue order.
+            # Weighting is TODO — "weighted" draws uniformly for now.
             new_history = list(amb.history)
             if amb.current_track_id is not None:
                 new_history.append(amb.current_track_id)
-            new_current = amb.queue[0]
-            new_queue = amb.queue[1:]
+            pick = random.randrange(len(amb.queue)) if amb.shuffle != "off" else 0
+            new_current = amb.queue[pick]
+            new_queue = [t for i, t in enumerate(amb.queue) if i != pick]
             return _replace_ambient(
                 state,
                 amb.model_copy(
@@ -435,8 +526,10 @@ def ambient_skip_next(follow_next_id: int | None = None) -> Any:
             )
 
         # Queue empty.
-        if amb.loop == "queue" and amb.history:
+        if amb.loop == "queue" and (amb.history or amb.current_track_id is not None):
             # Wrap around: rebuild queue from history + current; play first.
+            # `current` alone (single-track lane, empty history) is enough —
+            # repeat-queue then restarts the one track, like repeat-track.
             full = [*amb.history]
             if amb.current_track_id is not None:
                 full.append(amb.current_track_id)
@@ -454,33 +547,16 @@ def ambient_skip_next(follow_next_id: int | None = None) -> Any:
                 ),
             )
 
-        if amb.loop == "follow" and follow_next_id is not None:
-            # Continue into the library: the just-finished track joins history
-            # and the handler-resolved successor becomes current. Queue stays
-            # empty — follow advances one library track at a time, so the next
-            # skip re-resolves from the new current.
-            new_history = list(amb.history)
-            if amb.current_track_id is not None:
-                new_history.append(amb.current_track_id)
-            return _replace_ambient(
-                state,
-                amb.model_copy(
-                    update={
-                        "current_track_id": follow_next_id,
-                        "queue": [],
-                        "history": new_history,
-                        "position_ms": 0,
-                    }
+        # Loop off, end of queue: clear current AND stop. Leaving
+        # is_playing=true here is what let clients dead-reckon the position
+        # clock upward against an empty lane ("Nothing playing" ticking up).
+        return state.model_copy(
+            update={
+                "ambient": amb.model_copy(
+                    update={"current_track_id": None, "position_ms": 0}
                 ),
-            )
-
-        # Loop off (or follow with no successor), end of queue: clear current,
-        # become idle.
-        return _replace_ambient(
-            state,
-            amb.model_copy(
-                update={"current_track_id": None, "position_ms": 0}
-            ),
+                "is_playing": False,
+            }
         )
 
     return _mut
@@ -539,22 +615,13 @@ def ambient_set_loop(mode: LoopMode) -> Any:
     return _mut
 
 
-def ambient_set_shuffle(shuffle: bool, new_queue: list[int] | None = None) -> Any:
-    """Set the shuffle flag. When turning shuffle on, the handler passes the
-    already-randomised live queue via `new_queue` so the reorder takes effect
-    immediately (the mutator stays free of randomness). Turning it off leaves
-    the queue as-is — there's no original-order restore."""
-
+def ambient_set_shuffle(mode: ShuffleMode) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
-        amb = state.ambient
-        updates: dict = {}
-        if amb.shuffle != shuffle:
-            updates["shuffle"] = shuffle
-        if new_queue is not None and list(amb.queue) != list(new_queue):
-            updates["queue"] = list(new_queue)
-        if not updates:
+        if state.ambient.shuffle == mode:
             return state
-        return _replace_ambient(state, amb.model_copy(update=updates))
+        return _replace_ambient(
+            state, state.ambient.model_copy(update={"shuffle": mode})
+        )
 
     return _mut
 
@@ -579,14 +646,12 @@ def ambient_stop() -> Any:
     return _mut
 
 
-def ambient_play_playlist(track_ids: list[int], start_index: int) -> Any:
+def ambient_play_playlist(
+    track_ids: list[int], start_index: int, source_playlist_id: int | None = None
+) -> Any:
     """Load a pre-resolved track list into ambient and start at start_index.
-    Implicitly sets is_playing=true.
-
-    Source-agnostic: the handler resolves the ids (a playlist, a folder, or
-    a shuffled arrangement of either) and hands them here already ordered, so
-    this same mutator backs both `ambient_play_playlist` and
-    `ambient_play_folder`."""
+    Implicitly sets is_playing=true. `source_playlist_id` is stamped on the lane
+    so the Console can show which playlist is driving."""
 
     def _mut(state: PlayerState) -> PlayerState:
         if not track_ids:
@@ -599,6 +664,7 @@ def ambient_play_playlist(track_ids: list[int], start_index: int) -> Any:
             position_ms=0,
             loop=state.ambient.loop,
             shuffle=state.ambient.shuffle,
+            source_playlist_id=source_playlist_id,
         )
         return state.model_copy(update={"ambient": new_ambient, "is_playing": True})
 
@@ -712,89 +778,3 @@ def cancel_interrupt() -> Any:
     return _mut
 
 
-# --- Scene composition mutators -------------------------------------------
-
-
-def activate_scene(
-    scene_id: str,
-    *,
-    ambient_track_ids: list[int] | None,
-    crossfade_ms: int | None,
-    presets: list[str] | None,
-    volume: float | None = None,
-) -> Any:
-    """Composite mutator. Applies whichever of ambient/crossfade/presets/volume
-    the scene defined, plus stamps active_scene_id, in a single update so
-    clients see one state_changed broadcast for the whole transition.
-
-    Captures the prior values of any field the scene overwrites into
-    `pre_scene_state` so `deactivate_scene` can restore them. If a scene
-    is already active when this fires, the existing snapshot is preserved
-    - deactivating then unwinds back to the *first* scene's pre-state,
-    not the intermediate one."""
-
-    def _mut(state: PlayerState) -> PlayerState:
-        update: dict = {"active_scene_id": scene_id}
-
-        snapshot_kwargs: dict = {}
-        if presets is not None:
-            deduped: list[str] = []
-            for p in presets:
-                if p not in deduped:
-                    deduped.append(p)
-            update["active_preset_ids"] = deduped
-            snapshot_kwargs["active_preset_ids"] = list(state.active_preset_ids)
-
-        if crossfade_ms is not None:
-            update["crossfade_ms"] = crossfade_ms
-            snapshot_kwargs["crossfade_ms"] = state.crossfade_ms
-
-        if volume is not None:
-            update["volume"] = volume
-            snapshot_kwargs["volume"] = state.volume
-
-        if ambient_track_ids:
-            new_ambient = AmbientState(
-                current_track_id=ambient_track_ids[0],
-                queue=list(ambient_track_ids[1:]),
-                history=[],
-                position_ms=0,
-                loop=state.ambient.loop,
-                shuffle=state.ambient.shuffle,
-            )
-            update["ambient"] = new_ambient
-            update["is_playing"] = True
-            snapshot_kwargs["ambient"] = state.ambient.model_copy(deep=True)
-
-        # Preserve any existing snapshot when transitioning between scenes
-        # so deactivate always returns to the original pre-scene state.
-        if state.pre_scene_state is None and snapshot_kwargs:
-            update["pre_scene_state"] = ScenePreviousState(**snapshot_kwargs)
-
-        return state.model_copy(update=update)
-
-    return _mut
-
-
-def deactivate_scene() -> Any:
-    """Clear active_scene_id and restore any pre-scene values captured at
-    activation time. Fields the scene didn't change (snapshot value None)
-    are left as-is."""
-
-    def _mut(state: PlayerState) -> PlayerState:
-        if state.active_scene_id is None and state.pre_scene_state is None:
-            return state
-        update: dict = {"active_scene_id": None, "pre_scene_state": None}
-        snap = state.pre_scene_state
-        if snap is not None:
-            if snap.active_preset_ids is not None:
-                update["active_preset_ids"] = list(snap.active_preset_ids)
-            if snap.crossfade_ms is not None:
-                update["crossfade_ms"] = snap.crossfade_ms
-            if snap.volume is not None:
-                update["volume"] = snap.volume
-            if snap.ambient is not None:
-                update["ambient"] = snap.ambient.model_copy(deep=True)
-        return state.model_copy(update=update)
-
-    return _mut

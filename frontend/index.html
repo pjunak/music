@@ -8,7 +8,14 @@
   <body>
     <div id="root"></div>
     <noscript><div style="padding:40px;font-family:sans-serif;color:#fff;background:#0a0a0a;">This app requires JavaScript.</div></noscript>
-    <script src="/tv-mode.js" defer></script>
+    <!-- tv-mode.js is the legacy fallback for browsers that can't run the
+         ES-module SPA (old Smart TVs). `nomodule` is a race-free capability
+         check: module-capable browsers ignore it entirely (so it can never
+         race React or masquerade as "TV mode"); browsers without module
+         support skip the module script below and run this instead. For an
+         explicit ?tv preview on a modern browser, main.tsx injects it on
+         demand. -->
+    <script nomodule src="/tv-mode.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

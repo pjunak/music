@@ -5,7 +5,8 @@ from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession, settings
+from app.api.deps import CurrentUser, DbSession
+from app.core.config import get_settings
 from app.core.security import (
     generate_session_token,
     session_expiry,
@@ -28,14 +29,15 @@ class UserInfo(BaseModel):
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    s = get_settings()
     response.set_cookie(
-        key=settings.session_cookie_name,
+        key=s.session_cookie_name,
         value=token,
-        max_age=settings.session_ttl_days * 24 * 3600,
+        max_age=s.session_ttl_days * 24 * 3600,
         httponly=True,
         samesite="lax",
-        secure=settings.session_cookie_secure,
-        domain=settings.session_cookie_domain or None,
+        secure=s.session_cookie_secure,
+        domain=s.session_cookie_domain or None,
         path="/",
     )
 
@@ -48,13 +50,14 @@ def login(payload: LoginRequest, response: Response, db: DbSession) -> UserInfo:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
         )
 
+    s = get_settings()
     token = generate_session_token()
     now = datetime.now(UTC)
     session = AuthSession(
         token=token,
         user_id=user.id,
         created_at=now,
-        expires_at=session_expiry(settings.session_ttl_days),
+        expires_at=session_expiry(s.session_ttl_days),
         last_seen=now,
     )
     db.add(session)
@@ -70,7 +73,7 @@ def logout(response: Response, user: CurrentUser, db: DbSession) -> None:
     # threading the exact token from the cookie down to the handler.
     db.query(AuthSession).filter(AuthSession.user_id == user.id).delete()
     db.commit()
-    response.delete_cookie(settings.session_cookie_name, path="/")
+    response.delete_cookie(get_settings().session_cookie_name, path="/")
 
 
 @router.get("/me", response_model=UserInfo)

@@ -1,7 +1,7 @@
 """Sync layer: WebSocket auth, snapshot, register, broadcast, action validation.
 
-Covers the foundation. Playback-specific actions (queue, ambient, interrupts,
-SFX, scenes) and their tests come in subsequent commits.
+Covers the foundation plus playback-specific actions (queue, ambient,
+interrupts, SFX, cues).
 """
 from __future__ import annotations
 
@@ -15,29 +15,31 @@ from fastapi.testclient import TestClient
 @pytest.fixture(autouse=True)
 def _reset_sync_state():
     """The state machine, device registry, and connection manager are
-    process-wide singletons; reset them between sync tests so leftovers
-    from a prior test don't (a) cause writes that match prior values to
-    no-op into a hung receive_json or (b) carry stale device entries into
-    the next test's snapshot."""
-    from app.core.db import SessionLocal
-    from app.models.playback_state import PlaybackState
-    from app.sync.connection import manager
-    from app.sync.devices import registry
-    from app.sync.state import machine
+    process-wide singletons; reset them (plus the known_devices table)
+    between sync tests so leftovers from a prior test don't (a) cause writes
+    that match prior values to no-op into a hung receive_json or (b) carry
+    stale device entries / output designations into the next test."""
+    from tests.conftest import reset_sync_singletons
 
-    def _reset() -> None:
-        machine.reset_for_tests()
-        registry.reset_for_tests()
-        manager.reset_for_tests()
-        with SessionLocal() as db:
-            row = db.get(PlaybackState, 1)
-            if row is not None:
-                row.state_json = {}
-                db.commit()
-
-    _reset()
+    reset_sync_singletons()
     yield
-    _reset()
+    reset_sync_singletons()
+
+
+def _register(ws, name: str = "device", client_id: str = "client-1") -> None:
+    """Send a register action. Identity now flows through `client_id`."""
+    ws.send_json({"type": "register", "name": name, "client_id": client_id})
+
+
+def _designate(client_id: str, value: bool = True) -> None:
+    """Remember a device as a designated audio output straight in the file
+    store + live registry cache, bypassing the HTTP API so no extra broadcast
+    lands on the test sockets. Mirrors what the operator's device list does."""
+    from app.devices.store import device_store
+    from app.sync.devices import registry
+
+    device_store.put(client_id, client_id, value)
+    registry.refresh_is_output(client_id, value)
 
 
 def _login(client: TestClient) -> None:
@@ -146,13 +148,7 @@ def test_ws_guest_can_register_to_appear_in_outputs(client: TestClient) -> None:
     Player tab on a TV can show up in the operator's Outputs picker."""
     with client.websocket_connect("/api/ws") as guest:
         guest.receive_json()  # snapshot
-        guest.send_json(
-            {
-                "type": "register",
-                "name": "TV",
-                "capabilities": ["audio_output"],
-            }
-        )
+        _register(guest, "TV", "tv-client")
         # Register is broadcast as a state_changed; receive it.
         msg = guest.receive_json()
         assert msg["type"] == "state_changed"
@@ -164,8 +160,11 @@ def test_ws_accepts_with_cookie_and_sends_snapshot(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         msg = ws.receive_json()
         assert msg["type"] == "state_snapshot"
+        # Identity now comes from the client's own persistent client_id, so the
+        # server leaves your_device_id empty in the snapshot (sent before
+        # register).
         assert "your_device_id" in msg
-        assert msg["your_device_id"].startswith("dev-")
+        assert msg["your_device_id"] == ""
         state = msg["state"]
         assert "revision" in state
         assert state["is_playing"] is False
@@ -182,9 +181,7 @@ def test_register_appears_in_state_for_other_clients(client: TestClient) -> None
         a.receive_json()  # snapshot for A
         b.receive_json()  # snapshot for B
 
-        a.send_json(
-            {"type": "register", "name": "Laptop", "capabilities": ["controls"]}
-        )
+        _register(a, "Laptop", "laptop-1")
 
         # Both A and B should see a state_changed reflecting A's registration.
         msg_a = a.receive_json()
@@ -193,7 +190,9 @@ def test_register_appears_in_state_for_other_clients(client: TestClient) -> None
             assert msg["type"] == "state_changed"
             devices = msg["state"]["connected_devices"]
             assert any(
-                d["name"] == "Laptop" and "controls" in d["capabilities"]
+                d["name"] == "Laptop"
+                and d["client_id"] == "laptop-1"
+                and d["is_output"] is False
                 for d in devices
             )
 
@@ -225,6 +224,21 @@ def test_set_volume_no_broadcast_when_unchanged(client: TestClient) -> None:
         ws.send_json({"type": "set_volume", "volume": 0.123})
         msg = ws.receive_json()
         assert msg["state"]["volume"] == 0.123
+
+
+def test_set_device_volume_broadcasts_and_clears_at_unity(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()  # snapshot
+
+        ws.send_json({"type": "set_device_volume", "device_id": "tv-1", "volume": 0.5})
+        msg = ws.receive_json()
+        assert msg["type"] == "state_changed"
+        assert msg["state"]["device_volumes"]["tv-1"] == 0.5
+
+        # Back to unity drops the entry — "absent = 1.0" keeps the map small.
+        ws.send_json({"type": "set_device_volume", "device_id": "tv-1", "volume": 1.0})
+        msg = ws.receive_json()
+        assert "tv-1" not in msg["state"]["device_volumes"]
 
 
 def test_pause_resume_toggles_is_playing(client: TestClient) -> None:
@@ -283,107 +297,142 @@ def test_set_active_outputs_rejects_unregistered_device(client: TestClient) -> N
         assert msg["type"] == "error"
 
 
-def test_set_active_outputs_rejects_device_without_audio_output(
+def test_set_active_outputs_accepts_connected_undesignated_device(
     client: TestClient,
 ) -> None:
+    """Any CONNECTED device can be made a live output — no prior designation
+    needed. Designation only controls default-on auto-activation at connect."""
     _login(client)
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
-        snap_a = a.receive_json()
+        a.receive_json()
         b.receive_json()
-        # A registers as controls-only, no audio_output capability.
-        a.send_json(
-            {"type": "register", "name": "A", "capabilities": ["controls"]}
-        )
+        _register(a, "A", "a-client")  # connected, NOT designated
         a.receive_json()  # state_changed
         b.receive_json()  # state_changed (reg propagates)
 
-        b.send_json(
-            {
-                "type": "set_active_outputs",
-                "device_ids": [snap_a["your_device_id"]],
-            }
-        )
+        b.send_json({"type": "set_active_outputs", "device_ids": ["a-client"]})
         msg = b.receive_json()
-        assert msg["type"] == "error"
+        assert msg["type"] == "state_changed"
+        assert msg["state"]["active_output_device_ids"] == ["a-client"]
 
 
-def test_set_active_outputs_accepts_audio_output_device(client: TestClient) -> None:
+def test_set_active_outputs_accepts_designated_output_device(client: TestClient) -> None:
     _login(client)
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
-        snap_a = a.receive_json()
-        b.receive_json()
-        a.send_json(
-            {"type": "register", "name": "TV", "capabilities": ["audio_output"]}
-        )
         a.receive_json()
         b.receive_json()
+        _register(a, "TV", "tv-client")
+        a.receive_json()
+        b.receive_json()
+        _designate("tv-client")
 
-        b.send_json(
-            {
-                "type": "set_active_outputs",
-                "device_ids": [snap_a["your_device_id"]],
-            }
-        )
+        b.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
         # Both A and B receive the state_changed.
         msg_a = a.receive_json()
         msg_b = b.receive_json()
         for msg in (msg_a, msg_b):
             assert msg["type"] == "state_changed"
-            assert msg["state"]["active_output_device_ids"] == [snap_a["your_device_id"]]
+            assert msg["state"]["active_output_device_ids"] == ["tv-client"]
 
 
 def test_set_active_outputs_does_not_re_validate_existing_ids(
     client: TestClient,
 ) -> None:
-    """Stale device ids that are already in active_output_device_ids must
-    not block the operator's next toggle. We only validate ids being
-    *added* to the list."""
+    """Ids already in active_output_device_ids must not block the operator's
+    next toggle. We only validate ids being *added* (that they're connected);
+    existing ids get a pass — stale-tolerant across reconnects."""
     _login(client)
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
-        snap_a = a.receive_json()
-        b.receive_json()
-        a.send_json(
-            {"type": "register", "name": "A", "capabilities": ["audio_output"]}
-        )
         a.receive_json()
         b.receive_json()
-        b.send_json(
-            {"type": "register", "name": "B", "capabilities": ["audio_output"]}
-        )
+        _register(a, "A", "a-client")
+        a.receive_json()
+        b.receive_json()
+        _register(b, "B", "b-client")
         a.receive_json()
         b.receive_json()
 
         # Set A as the only active output.
-        b.send_json(
-            {"type": "set_active_outputs", "device_ids": [snap_a["your_device_id"]]}
-        )
+        b.send_json({"type": "set_active_outputs", "device_ids": ["a-client"]})
         a.receive_json()
         b.receive_json()
 
-    # `a` socket closes; its device id is now stale in active_output_device_ids
-    # (the disconnect-prune state_changed will land on `b` before this block ends).
-    # `b` then logs in fresh and tries to add itself — the request will include
-    # both the stale id (from current state) and the new id (b). The server must
-    # not reject because of the stale one.
-
-    with client.websocket_connect("/api/ws") as fresh:
-        snap_fresh = fresh.receive_json()
-        fresh.send_json(
-            {"type": "register", "name": "Fresh", "capabilities": ["audio_output"]}
+        # Adding B must not re-validate (and thus reject on) the already-active
+        # A — only newly-added ids are checked.
+        b.send_json(
+            {"type": "set_active_outputs", "device_ids": ["a-client", "b-client"]}
         )
-        fresh.receive_json()
-        # Whatever's already in active_output_device_ids stays; we just add ourselves.
-        existing = list(snap_fresh["state"]["active_output_device_ids"])
-        fresh.send_json(
-            {
-                "type": "set_active_outputs",
-                "device_ids": [*existing, snap_fresh["your_device_id"]],
-            }
-        )
-        # Either we get a state_changed (success) — but never an error.
-        msg = fresh.receive_json()
+        msg = b.receive_json()
         assert msg["type"] == "state_changed"
-        assert snap_fresh["your_device_id"] in msg["state"]["active_output_device_ids"]
+        assert "b-client" in msg["state"]["active_output_device_ids"]
+
+
+def test_register_does_not_auto_save_device(client: TestClient) -> None:
+    """Connecting must NOT add a device to the saved list — remembering a
+    device is a manual operator action. It appears live in connected_devices
+    but the persistent registry stays empty until explicitly saved."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        _register(ws, "Living Room TV", "tv-client")
+        msg = ws.receive_json()
+        # Appears live...
+        assert any(
+            d["client_id"] == "tv-client"
+            for d in msg["state"]["connected_devices"]
+        )
+        # ...but is not in the persistent saved list.
+        rows = client.get("/api/devices").json()
+        assert all(r["client_id"] != "tv-client" for r in rows)
+
+
+def test_refresh_reactivates_only_default_on_outputs(client: TestClient) -> None:
+    """A device activated ad-hoc (not saved default-on) must NOT auto-resume on
+    reconnect — that was the original refresh-becomes-a-speaker bug. A device
+    saved 'output by default' DOES auto-activate on reconnect — that's the whole
+    point of the flag."""
+    _login(client)
+    # --- ad-hoc activation: no auto-resume on refresh ---
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        _register(ws, "Phone", "phone-1")
+        ws.receive_json()
+        ws.send_json({"type": "set_active_outputs", "device_ids": ["phone-1"]})
+        assert ws.receive_json()["state"]["active_output_device_ids"] == ["phone-1"]
+    # Socket closed → last tab gone → pruned from active outputs.
+    with client.websocket_connect("/api/ws") as ws2:
+        snap = ws2.receive_json()
+        assert "phone-1" not in snap["state"]["active_output_device_ids"]
+        _register(ws2, "Phone", "phone-1")
+        msg = ws2.receive_json()
+        assert "phone-1" not in msg["state"]["active_output_device_ids"]
+
+    # --- default-on: auto-activates on (re)connect ---
+    _designate("tv-client")  # saved output-by-default
+    with client.websocket_connect("/api/ws") as ws3:
+        ws3.receive_json()  # snapshot
+        _register(ws3, "TV", "tv-client")
+        msg = ws3.receive_json()  # register → auto-activate broadcast
+        assert "tv-client" in msg["state"]["active_output_device_ids"]
+
+
+def test_two_tabs_same_client_id_single_device_entry(client: TestClient) -> None:
+    """Two tabs of one browser share a client_id and collapse to a single
+    device entry in connected_devices."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
+        a.receive_json()
+        b.receive_json()
+        _register(a, "TV", "tv-client")
+        a.receive_json()
+        b.receive_json()
+        _register(b, "TV", "tv-client")
+        msg = a.receive_json()
+        b.receive_json()
+        tv_entries = [
+            d for d in msg["state"]["connected_devices"] if d["client_id"] == "tv-client"
+        ]
+        assert len(tv_entries) == 1
 
 
 def test_state_load_prunes_dangling_track_ids(
@@ -419,9 +468,18 @@ def test_state_load_prunes_dangling_track_ids(
             },
             active_mode_id="ghost-mode",
             active_soundboard_id="ghost-sb",
-            active_scene_id="ghost-scene",
             active_preset_ids=["cave", "nope-preset"],
             active_output_device_ids=["dev-stale-1", "dev-stale-2"],
+            looping_sfx=[
+                {
+                    "id": "stale-loop",
+                    "name": "Ghost loop",
+                    "soundboard_id": "sb",
+                    "item_path": "x.ogg",
+                    "interval_s": 30,
+                    "volume": 1.0,
+                }
+            ],
         )
 
     machine = StateMachine()
@@ -436,52 +494,10 @@ def test_state_load_prunes_dangling_track_ids(
     assert snap.interrupt is None
     assert snap.active_mode_id is None
     assert snap.active_soundboard_id is None
-    assert snap.active_scene_id is None
-    assert "cave" in snap.active_preset_ids
-    assert "nope-preset" not in snap.active_preset_ids
+    # Mode pruned to None → presets are per-mode, so none survive.
+    assert snap.active_preset_ids == []
     assert snap.active_output_device_ids == []
-
-
-def test_state_load_prunes_dangling_pre_scene_snapshot(
-    auth_client: TestClient,
-    seeded_track_id: int,
-) -> None:
-    """The scene-revert snapshot stores a captured ambient lane. Track
-    rows referenced there can disappear too — same dangling-ref hazard as
-    the live ambient field, so the loader must prune both in lockstep."""
-    from app.core.db import SessionLocal
-    from app.domain import playback_state as playback_state_domain
-    from app.sync.state import StateMachine
-
-    with SessionLocal() as db:
-        playback_state_domain.update_state(
-            db,
-            pre_scene_state={
-                "ambient": {
-                    "current_track_id": 999_001,
-                    "queue": [seeded_track_id, 999_002],
-                    "history": [999_003],
-                    "position_ms": 12000,
-                    "loop": "off",
-                },
-                "crossfade_ms": 1500,
-                "active_preset_ids": ["cave", "phantom-preset"],
-            },
-        )
-
-    machine = StateMachine()
-    import asyncio
-
-    asyncio.run(machine.load(SessionLocal))
-    snap = asyncio.run(machine.snapshot())
-    assert snap.pre_scene_state is not None
-    assert snap.pre_scene_state.ambient is not None
-    assert snap.pre_scene_state.ambient.current_track_id is None
-    assert snap.pre_scene_state.ambient.queue == [seeded_track_id]
-    assert snap.pre_scene_state.ambient.history == []
-    assert snap.pre_scene_state.crossfade_ms == 1500
-    assert "phantom-preset" not in snap.pre_scene_state.active_preset_ids
-    assert "cave" in snap.pre_scene_state.active_preset_ids
+    assert snap.looping_sfx == []  # wiped on boot — timers don't survive restart
 
 
 def test_state_load_after_track_deletion_clears_active_track(
@@ -552,15 +568,37 @@ def test_remove_active_output_mutator() -> None:
     assert same is initial
 
 
+def test_ambient_source_playlist_set_and_cleared() -> None:
+    """play_playlist stamps the source playlist; advancing keeps it; playing a
+    single track (which builds a fresh ambient state) clears it — so the
+    Console's "now driving" highlight tracks the lane correctly."""
+    from app.sync.protocol import PlayerState
+    from app.sync.state import (
+        ambient_play_playlist,
+        ambient_play_track,
+        ambient_skip_next,
+    )
+
+    base = PlayerState()
+    s1 = ambient_play_playlist([1, 2, 3], 0, source_playlist_id=42)(base)
+    assert s1.ambient.source_playlist_id == 42
+    # Advancing within the playlist keeps the source.
+    s2 = ambient_skip_next()(s1)
+    assert s2.ambient.source_playlist_id == 42
+    # Playing a single track builds a fresh ambient state → source cleared.
+    s3 = ambient_play_track(7)(s2)
+    assert s3.ambient.source_playlist_id is None
+
+
 # --- position reports -------------------------------------------------------
 
 
-def test_position_report_requires_audio_output(client: TestClient) -> None:
+def test_position_report_requires_active_output(client: TestClient) -> None:
+    """Only a currently-ACTIVE output may report position. A connected-but-
+    inactive device is rejected (a well-behaved client self-gates anyway)."""
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json(
-            {"type": "register", "name": "Phone", "capabilities": ["controls"]}
-        )
+        _register(ws, "Phone", "phone-1")  # connected, not an active output
         ws.receive_json()  # state_changed for register
 
         ws.send_json({"type": "position_report", "position_ms": 1000})
@@ -573,9 +611,11 @@ def test_position_report_does_not_broadcast(client: TestClient) -> None:
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
         a.receive_json()
         b.receive_json()
-        a.send_json(
-            {"type": "register", "name": "TV", "capabilities": ["audio_output"]}
-        )
+        _register(a, "TV", "tv-client")
+        a.receive_json()
+        b.receive_json()
+        # Make A a live output so its position report is accepted (and silent).
+        a.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
         a.receive_json()
         b.receive_json()
 
@@ -701,6 +741,10 @@ def test_ambient_skip_next_at_end_of_queue_loop_off(
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
         assert amb["current_track_id"] is None
+        assert amb["position_ms"] == 0
+        # Running off the end of the queue stops playback — otherwise
+        # clients dead-reckon the position clock against an empty lane.
+        assert msg["state"]["is_playing"] is False
 
 
 def test_ambient_skip_next_loop_track_replays(
@@ -744,6 +788,38 @@ def test_ambient_skip_next_loop_queue_wraps(
         assert amb["current_track_id"] == seeded_track_id
         assert amb["queue"] == [a]
         assert amb["history"] == []
+
+
+def test_ambient_set_shuffle_broadcasts(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": "random"})
+        msg = ws.receive_json()
+        assert msg["state"]["ambient"]["shuffle"] == "random"
+
+
+def test_ambient_shuffle_advances_to_a_queue_member(
+    client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    a, b, c = extra_seeded_track_ids
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_queue", "track_ids": [a, b, c]})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": "random"})
+        ws.receive_json()
+
+        ws.send_json({"type": "ambient_skip_next"})
+        msg = ws.receive_json()
+        amb = msg["state"]["ambient"]
+        # The picked track comes from the queue (any of the three), the other
+        # two remain, and the previous current lands in history.
+        assert amb["current_track_id"] in {a, b, c}
+        assert sorted([*amb["queue"], amb["current_track_id"]]) == sorted([a, b, c])
+        assert amb["history"] == [seeded_track_id]
+        assert amb["position_ms"] == 0
 
 
 def test_ambient_skip_prev_with_history(
@@ -1018,6 +1094,9 @@ def test_set_active_presets_validates(client: TestClient) -> None:
 def test_set_active_presets_dedupes(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
+        # Presets are per-mode now — activate the mode that owns cave/radio.
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
         ws.send_json(
             {"type": "set_active_presets", "preset_ids": ["cave", "radio-vintage", "cave"]}
         )
@@ -1073,17 +1152,6 @@ def test_http_set_active_mode_broadcasts_to_ws_clients(
         assert msg["state"]["active_mode_id"] == "dnd"
 
 
-def test_http_set_active_presets_broadcasts_to_ws_clients(
-    auth_client, client: TestClient
-) -> None:
-    with client.websocket_connect("/api/ws") as ws:
-        ws.receive_json()
-
-        auth_client.put("/api/presets/active", json={"preset_ids": ["cave"]})
-
-        msg = ws.receive_json()
-        assert msg["type"] == "state_changed"
-        assert msg["state"]["active_preset_ids"] == ["cave"]
 
 
 def test_position_report_stamps_ambient_position(
@@ -1093,7 +1161,11 @@ def test_position_report_stamps_ambient_position(
     with client.websocket_connect("/api/ws") as a, client.websocket_connect("/api/ws") as b:
         a.receive_json()
         b.receive_json()
-        a.send_json({"type": "register", "name": "TV", "capabilities": ["audio_output"]})
+        _register(a, "TV", "tv-client")
+        a.receive_json()
+        b.receive_json()
+        # A must be a live output to report position.
+        a.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
         a.receive_json()
         b.receive_json()
 
@@ -1307,7 +1379,10 @@ def test_position_report_stamps_interrupt_when_active(
     interrupt_id = extra_seeded_track_ids[0]
     with _ws_authed(client) as ws:
         ws.receive_json()  # snapshot
-        ws.send_json({"type": "register", "name": "TV", "capabilities": ["audio_output"]})
+        _register(ws, "TV", "tv-client")
+        ws.receive_json()
+        # Make it a live output so its position reports are accepted.
+        ws.send_json({"type": "set_active_outputs", "device_ids": ["tv-client"]})
         ws.receive_json()
 
         ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
@@ -1389,201 +1464,159 @@ def test_fire_sfx_validates_item_path(client: TestClient) -> None:
         assert "not in soundboard" in msg["detail"]
 
 
-# --- scene activation -----------------------------------------------------
+# --- looping SFX ----------------------------------------------------------
 
 
-def _make_tavern_playlist(auth_client, track_ids: list[int]) -> int:
-    """Create a manual playlist named 'tavern-music' in dnd mode for the
-    test scene to resolve to. Returns the playlist id."""
-    pid = auth_client.post(
-        "/api/playlists",
-        json={"name": "tavern-music", "source": "manual", "mode_id": "dnd"},
-    ).json()["id"]
-    for bid in track_ids:
-        auth_client.post(f"/api/playlists/{pid}/tracks", json={"track_id": bid})
-    return pid
-
-
-def test_activate_scene_requires_active_mode(client: TestClient) -> None:
+def test_start_loop_requires_active_mode(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "Roar",
+                "soundboard_id": "tavern",
+                "item_path": "dnd/door.ogg",
+                "interval_s": 45,
+            }
+        )
         msg = ws.receive_json()
         assert msg["type"] == "error"
         assert "no active mode" in msg["detail"]
 
 
-def test_activate_scene_validates_scene_id(client: TestClient) -> None:
+def test_start_loop_validates_item(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
         ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
         ws.receive_json()
-        ws.send_json({"type": "activate_scene", "scene_id": "nope"})
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "X",
+                "soundboard_id": "tavern",
+                "item_path": "nope.ogg",
+                "interval_s": 10,
+            }
+        )
         msg = ws.receive_json()
         assert msg["type"] == "error"
-        assert "unknown scene" in msg["detail"]
+        assert "not in soundboard" in msg["detail"]
 
 
-def test_activate_scene_validates_playlist_reference(client: TestClient) -> None:
-    """The fixture scene references playlist 'tavern-music' which doesn't
-    exist by default — error surfaces clearly instead of crashing."""
+def test_start_and_stop_loop_updates_state(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()
         ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
         ws.receive_json()
-        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "Door knock",
+                "soundboard_id": "tavern",
+                "item_path": "dnd/door.ogg",
+                "interval_s": 45,
+                "volume": 0.5,
+            }
+        )
+        msg = ws.receive_json()
+        assert msg["type"] == "state_changed"
+        loops = msg["state"]["looping_sfx"]
+        assert len(loops) == 1
+        assert loops[0]["id"] == "l1"
+        assert loops[0]["name"] == "Door knock"
+        assert loops[0]["interval_s"] == 45
+        assert loops[0]["volume"] == 0.5
+
+        # Same id replaces rather than duplicating.
+        ws.send_json(
+            {
+                "type": "start_loop",
+                "id": "l1",
+                "name": "Door knock (faster)",
+                "soundboard_id": "tavern",
+                "item_path": "dnd/door.ogg",
+                "interval_s": 20,
+            }
+        )
+        msg = ws.receive_json()
+        assert len(msg["state"]["looping_sfx"]) == 1
+        assert msg["state"]["looping_sfx"][0]["interval_s"] == 20
+
+        ws.send_json({"type": "stop_loop", "id": "l1"})
+        msg = ws.receive_json()
+        assert msg["state"]["looping_sfx"] == []
+
+
+# --- cues -----------------------------------------------------------------
+
+
+def test_fire_cue_unknown(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+        ws.send_json({"type": "fire_cue", "cue_id": "nope"})
         msg = ws.receive_json()
         assert msg["type"] == "error"
-        assert "no playlist named" in msg["detail"]
+        assert "unknown cue" in msg["detail"]
 
 
-def test_activate_scene_composite_apply(
-    auth_client, client: TestClient, extra_seeded_track_ids: list[int]
-) -> None:
-    _make_tavern_playlist(auth_client, extra_seeded_track_ids)
+def test_fire_cue_applies_preset_and_starts_loop(auth_client: TestClient) -> None:
+    # Author a cue: apply preset "cave" + start a door-knock loop. No playlist,
+    # so the test needs no playlist setup.
+    r = auth_client.post(
+        "/api/modes/dnd/cues",
+        json={
+            "id": "ambush",
+            "name": "Ambush",
+            "preset": "cave",
+            "loops": [
+                {
+                    "soundboard": "tavern",
+                    "item": "dnd/door.ogg",
+                    "interval_s": 30,
+                    "volume": 0.5,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
 
-    with client.websocket_connect("/api/ws") as ws:
+    with auth_client.websocket_connect("/api/ws") as ws:
         ws.receive_json()  # snapshot
         ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
-        state_changed = ws.receive_json()
-        assert state_changed["state"]["active_mode_id"] == "dnd"
-
-        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
-        # Single state_changed for the composite mutation, then a
-        # scene_activated event.
-        state_changed = ws.receive_json()
-        assert state_changed["type"] == "state_changed"
-        s = state_changed["state"]
-        assert s["active_scene_id"] == "tavern"
-        assert s["active_preset_ids"] == ["radio-vintage"]
-        assert s["crossfade_ms"] == 2500
-        assert s["ambient"]["current_track_id"] == extra_seeded_track_ids[0]
-        assert s["ambient"]["queue"] == extra_seeded_track_ids[1:]
-        assert s["is_playing"] is True
-
-        scene_event = ws.receive_json()
-        assert scene_event["type"] == "scene_activated"
-        assert scene_event["scene_id"] == "tavern"
-        assert scene_event["mode_id"] == "dnd"
-        assert scene_event["scene"]["name"] == "Stonehill Inn"
-        assert scene_event["scene"]["presets"] == ["radio-vintage"]
+        ws.receive_json()  # mode change
+        ws.send_json({"type": "fire_cue", "cue_id": "ambush"})
+        # fire_cue broadcasts once per part — preset, then the loop. Take the
+        # final accumulated state.
+        first = ws.receive_json()
+        second = ws.receive_json()
+        assert first["type"] == "state_changed"
+        final = second["state"]
+        assert final["active_preset_ids"] == ["cave"]
+        assert len(final["looping_sfx"]) == 1
+        assert final["looping_sfx"][0]["soundboard_id"] == "tavern"
+        assert final["looping_sfx"][0]["interval_s"] == 30
 
 
-def test_deactivate_scene_reverts_overwritten_state_and_emits_event(
-    auth_client, client: TestClient, extra_seeded_track_ids: list[int]
-) -> None:
-    _make_tavern_playlist(auth_client, extra_seeded_track_ids)
-
-    with client.websocket_connect("/api/ws") as ws:
-        ws.receive_json()
-        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
-        ws.receive_json()
-        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
-        ws.receive_json()  # state_changed
-        ws.receive_json()  # scene_activated
-
-        ws.send_json({"type": "deactivate_scene"})
-        state_changed = ws.receive_json()
-        assert state_changed["type"] == "state_changed"
-        s = state_changed["state"]
-        assert s["active_scene_id"] is None
-        # Fields the scene overwrote (presets, ambient, crossfade) revert
-        # to the values captured at activation time.
-        assert s["active_preset_ids"] == []
-        assert s["crossfade_ms"] == 0
-        assert s["ambient"]["current_track_id"] is None
-        assert s["pre_scene_state"] is None
-
-        deact_event = ws.receive_json()
-        assert deact_event["type"] == "scene_deactivated"
-        assert deact_event["scene_id"] == "tavern"
-
-
-def test_deactivate_scene_preserves_unrelated_state(
-    auth_client, client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
-) -> None:
-    """User changes that happen *after* a scene activates (e.g. setting
-    volume, picking a different soundboard) are not reverted on
-    deactivation — only the fields the scene itself overwrote are."""
-    _make_tavern_playlist(auth_client, extra_seeded_track_ids)
-
-    with client.websocket_connect("/api/ws") as ws:
-        ws.receive_json()
-        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
-        ws.receive_json()
-        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
-        ws.receive_json()
-        ws.receive_json()
-        ws.send_json({"type": "set_volume", "volume": 0.31})
-        ws.receive_json()
-        ws.send_json({"type": "set_active_soundboard", "soundboard_id": "tavern"})
-        ws.receive_json()
-
-        ws.send_json({"type": "deactivate_scene"})
-        s = ws.receive_json()["state"]
-        assert s["volume"] == 0.31
-        assert s["active_soundboard_id"] == "tavern"
-
-
-def test_chained_scene_deactivate_unwinds_to_original(
-    auth_client, client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
-) -> None:
-    """Activating a second scene while one is already active must not
-    overwrite the original snapshot — deactivating goes back to the
-    state before the *first* scene, not the intermediate one."""
-    _make_tavern_playlist(auth_client, extra_seeded_track_ids)
-
-    with client.websocket_connect("/api/ws") as ws:
-        ws.receive_json()
-        ws.send_json({"type": "set_active_presets", "preset_ids": ["cave"]})
-        ws.receive_json()
-        ws.send_json({"type": "set_crossfade", "crossfade_ms": 500})
-        ws.receive_json()
-        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
-        ws.receive_json()
-
-        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
-        ws.receive_json()
-        ws.receive_json()
-        # Re-activating the same scene replaces the active scene marker
-        # but the snapshot from the first activation is preserved.
-        ws.send_json({"type": "activate_scene", "scene_id": "tavern"})
-        ws.receive_json()
-        ws.receive_json()
-
-        ws.send_json({"type": "deactivate_scene"})
-        s = ws.receive_json()["state"]
-        assert s["active_preset_ids"] == ["cave"]
-        assert s["crossfade_ms"] == 500
-
-
-def test_deactivate_scene_noop_when_none_active(client: TestClient) -> None:
-    with _ws_authed(client) as ws:
-        ws.receive_json()
-        ws.send_json({"type": "deactivate_scene"})
-        # No broadcasts. Trigger one to verify.
-        ws.send_json({"type": "set_volume", "volume": 0.333})
-        msg = ws.receive_json()
-        assert msg["state"]["volume"] == 0.333
-
-
-def test_fire_sfx_broadcasts_to_audio_output_devices(client: TestClient) -> None:
-    """Fire-and-forget: the SFX event reaches audio_output devices but the
-    sender (controller) does not get the event echoed back."""
+def test_fire_sfx_broadcasts_to_all_clients(client: TestClient) -> None:
+    """Fire-and-forget: the SFX event is broadcast to EVERY connected socket;
+    each client's engine decides whether to actually play it (active output /
+    force-local guest). Output membership is dynamic, so the server can't gate
+    it — both the controller and the output see the frame on the wire."""
     _login(client)
     with client.websocket_connect("/api/ws") as controller, client.websocket_connect(
         "/api/ws"
     ) as output:
         controller.receive_json()  # snapshot
         output.receive_json()  # snapshot
-        controller.send_json(
-            {"type": "register", "name": "Phone", "capabilities": ["controls"]}
-        )
+        _register(controller, "Phone", "phone-1")
         controller.receive_json()  # state_changed (register)
         output.receive_json()
-        output.send_json(
-            {"type": "register", "name": "TV", "capabilities": ["audio_output"]}
-        )
+        _register(output, "TV", "tv-client")
         controller.receive_json()
         output.receive_json()
 
@@ -1599,19 +1632,14 @@ def test_fire_sfx_broadcasts_to_audio_output_devices(client: TestClient) -> None
                 "volume": 0.5,
             }
         )
-        # Output (audio_output) gets the sfx_fired event.
-        msg = output.receive_json()
-        assert msg["type"] == "sfx_fired"
-        assert msg["soundboard_id"] == "tavern"
-        assert msg["item_path"] == "dnd/door.ogg"
-        assert msg["volume"] == 0.5
-
-        # Controller did NOT receive sfx_fired. Verify by sending a state-
-        # changing action and checking the next message is THAT, not sfx_fired.
-        controller.send_json({"type": "set_volume", "volume": 0.42})
-        next_msg = controller.receive_json()
-        assert next_msg["type"] == "state_changed"
-        assert next_msg["state"]["volume"] == 0.42
+        # Both sockets receive the sfx_fired frame (client-side gating decides
+        # whether to play it).
+        for sock in (output, controller):
+            msg = sock.receive_json()
+            assert msg["type"] == "sfx_fired"
+            assert msg["soundboard_id"] == "tavern"
+            assert msg["item_path"] == "dnd/door.ogg"
+            assert msg["volume"] == 0.5
 
 
 # --- HTTP polling fallback (/api/sync/state) -------------------------------
@@ -1665,3 +1693,64 @@ def test_http_state_reflects_ws_mutations(
         payload = response.json()
         assert payload["ambient"]["current_track_id"] == seeded_track_id
         assert payload["is_playing"] is True
+
+
+# --- regression: add_active_output mutator + loop-timer resilience ---------
+
+
+def test_add_active_output_is_additive_no_clobber() -> None:
+    """The WS register auto-activate path uses `add_active_output` instead of a
+    read-modify-write on a stale snapshot. It must APPEND (preserving existing
+    active ids) rather than replace, and no-op when the id is already present
+    so the state machine skips a pointless persist + broadcast."""
+    from app.sync.protocol import PlayerState
+    from app.sync.state import add_active_output
+
+    state = PlayerState(active_output_device_ids=["a"])
+
+    # Adding a new id appends, keeping the existing one — no clobber.
+    appended = add_active_output("b")(state)
+    assert appended.active_output_device_ids == ["a", "b"]
+
+    # Adding an id already present is a no-op: returns the SAME instance so the
+    # machine knows to skip persistence + broadcast.
+    same = add_active_output("a")(state)
+    assert same is state
+
+
+async def test_looping_sfx_timer_survives_broadcast_error(monkeypatch) -> None:
+    """The `try/except` guarding `manager.broadcast` is INSIDE the while loop in
+    `loops._run`, so a single failing broadcast is logged and retried next tick
+    instead of killing the timer (which would orphan the LOOPS-panel entry with
+    no timer behind it). We make the first broadcast raise and assert the timer
+    keeps firing and delivers a valid `sfx_fired` payload afterwards."""
+    import asyncio
+
+    from app.sync import loops
+
+    calls: list[dict] = []
+    fired = asyncio.Event()
+
+    async def _flaky_broadcast(payload: dict) -> None:
+        calls.append(payload)
+        if len(calls) == 1:
+            raise RuntimeError("boom — first broadcast fails")
+        fired.set()
+
+    # `_run` references the module-level `manager`; patch its broadcast there.
+    monkeypatch.setattr(loops.manager, "broadcast", _flaky_broadcast)
+
+    loops.start("l1", "tavern", "dnd/door.ogg", interval_s=0.01, volume=1.0)
+    try:
+        # Drive off the Event (set on the first SUCCESSFUL tick), not a fixed
+        # sleep, so the test isn't flaky. wait_for caps the worst case.
+        await asyncio.wait_for(fired.wait(), timeout=2.0)
+    finally:
+        loops.stop("l1")
+
+    # First tick raised but did NOT kill the timer; a later tick succeeded.
+    assert len(calls) >= 2
+    good = calls[-1]
+    assert good["type"] == "sfx_fired"
+    assert good["soundboard_id"] == "tavern"
+    assert good["item_path"] == "dnd/door.ogg"

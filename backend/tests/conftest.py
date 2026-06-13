@@ -53,20 +53,18 @@ def _test_env() -> Iterator[None]:
     music_dir = tmp / "music"
     sfx_dir = tmp / "sfx"
     modes_dir = tmp / "modes"
-    presets_dir = tmp / "presets"
     music_dir.mkdir()
     sfx_dir.mkdir()
     modes_dir.mkdir()
-    presets_dir.mkdir()
 
     os.environ["SECRET_KEY"] = "x" * 64
     os.environ["DATABASE_URL"] = f"sqlite:///{tmp / 'app.db'}"
     os.environ["MUSIC_DIR"] = str(music_dir)
     os.environ["SFX_LIBRARY_DIR"] = str(sfx_dir)
     os.environ["MODES_DIR"] = str(modes_dir)
-    os.environ["PRESETS_DIR"] = str(presets_dir)
+    os.environ["DEVICES_FILE"] = str(tmp / "devices.json")
 
-    # Seed modes/dnd with theme + soundboards + a scene.
+    # Seed modes/dnd with theme + soundboards + EQ presets.
     dnd_dir = modes_dir / "dnd"
     dnd_dir.mkdir()
     (dnd_dir / "manifest.yaml").write_text(
@@ -105,13 +103,6 @@ def _test_env() -> Iterator[None]:
         "        name: Swords clash\n",
         encoding="utf-8",
     )
-    (dnd_dir / "scenes").mkdir()
-    (dnd_dir / "scenes" / "tavern.yaml").write_text(
-        "name: Stonehill Inn\n"
-        "ambient: { playlist: tavern-music, crossfade_ms: 2500 }\n"
-        "presets: [radio-vintage]\n",
-        encoding="utf-8",
-    )
 
     # SFX library: dnd/door.ogg is referenced and present; dnd/sword.ogg is
     # referenced but missing (exercises the 410 path). Use WAV bytes via the
@@ -120,12 +111,13 @@ def _test_env() -> Iterator[None]:
     (sfx_dir / "dnd").mkdir()
     (sfx_dir / "dnd" / "door.ogg").write_bytes(b"FAKEOGGDATA" * 50)
 
-    # Seed two preset YAMLs.
-    (presets_dir / "cave.yaml").write_text(
+    # Seed two EQ presets — now per-mode, under modes/dnd/presets/.
+    (dnd_dir / "presets").mkdir()
+    (dnd_dir / "presets" / "cave.yaml").write_text(
         "id: cave\nname: Cave\neffects:\n  - type: reverb\n    wet: 0.4\n",
         encoding="utf-8",
     )
-    (presets_dir / "radio-vintage.yaml").write_text(
+    (dnd_dir / "presets" / "radio-vintage.yaml").write_text(
         "id: radio-vintage\nname: Vintage Radio\neffects:\n  - type: highpass\n    frequency: 400\n",
         encoding="utf-8",
     )
@@ -215,6 +207,31 @@ def extra_seeded_track_ids() -> list[int]:
             assert track is not None
             ids.append(track.id)
     return ids
+
+
+def reset_sync_singletons() -> None:
+    """Reset the process-wide sync singletons (state machine, live device
+    registry, connection manager), the persisted playback row, and the
+    file-backed device store, so devices/designations from a prior test don't
+    leak. Shared by the autouse fixtures in test_sync and test_devices."""
+    from app.core.db import SessionLocal
+    from app.devices.store import device_store
+    from app.models.playback_state import PlaybackState
+    from app.sync import loops as loops_manager
+    from app.sync.connection import manager
+    from app.sync.devices import registry
+    from app.sync.state import machine
+
+    machine.reset_for_tests()
+    registry.reset_for_tests()
+    manager.reset_for_tests()
+    device_store.reset_for_tests()
+    loops_manager.stop_all()
+    with SessionLocal() as db:
+        row = db.get(PlaybackState, 1)
+        if row is not None:
+            row.state_json = {}
+            db.commit()
 
 
 @pytest.fixture

@@ -130,17 +130,12 @@ def list_playlists(
     db: DbSession,
     mode_id: str | None = Query(None),
     category: str | None = Query(None),
-    include_global: bool = Query(
-        True, description="When filtering by mode_id, also include global (mode_id=null) playlists."
-    ),
 ) -> list[PlaylistMeta]:
+    # Playlists are per-mode now (no global tier) — filtering by mode_id returns
+    # exactly that mode's playlists.
     stmt = select(Playlist).order_by(Playlist.created_at.desc())
     if mode_id is not None:
-        stmt = (
-            stmt.where((Playlist.mode_id == mode_id) | (Playlist.mode_id.is_(None)))
-            if include_global
-            else stmt.where(Playlist.mode_id == mode_id)
-        )
+        stmt = stmt.where(Playlist.mode_id == mode_id)
     if category is not None:
         stmt = stmt.where(Playlist.category == category)
     rows = db.scalars(stmt).all()
@@ -157,13 +152,19 @@ def update_playlist(
     playlist_id: int, payload: PlaylistUpdate, _: CurrentUser, db: DbSession
 ) -> PlaylistMeta:
     pl = _get_playlist(db, playlist_id)
-    if payload.name is not None:
-        pl.name = payload.name
-    if payload.mode_id is not None:
-        _validate_mode(payload.mode_id)
-        pl.mode_id = payload.mode_id
-    if payload.category is not None:
-        pl.category = payload.category
+    # exclude_unset distinguishes "field omitted" (leave alone) from an
+    # explicit null (clear) — without it, sending `category: null` to blank a
+    # category was silently dropped by the old `is not None` guard.
+    fields = payload.model_dump(exclude_unset=True)
+    if fields.get("name") is not None:
+        pl.name = fields["name"]
+    # mode_id is never cleared (a null would orphan the playlist out of every
+    # mode); only re-point it when a real id is supplied.
+    if fields.get("mode_id") is not None:
+        _validate_mode(fields["mode_id"])
+        pl.mode_id = fields["mode_id"]
+    if "category" in fields:
+        pl.category = fields["category"]
     db.commit()
     db.refresh(pl)
     return PlaylistMeta.model_validate(pl)

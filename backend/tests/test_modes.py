@@ -23,7 +23,7 @@ def test_list_returns_loaded_modes(auth_client: TestClient) -> None:
     assert dnd["default_soundboard"] == "tavern"
 
 
-def test_get_mode_includes_soundboards_and_scenes(auth_client: TestClient) -> None:
+def test_get_mode_includes_soundboards(auth_client: TestClient) -> None:
     r = auth_client.get("/api/modes/dnd")
     assert r.status_code == 200
     body = r.json()
@@ -32,11 +32,6 @@ def test_get_mode_includes_soundboards_and_scenes(auth_client: TestClient) -> No
     tavern = body["soundboards"]["tavern"]
     assert tavern["categories"][0]["id"] == "doors"
     assert tavern["categories"][0]["items"][0]["hotkey"] == "d"
-    assert "tavern" in body["scenes"]
-    scene = body["scenes"]["tavern"]
-    assert scene["name"] == "Stonehill Inn"
-    assert scene["ambient"]["playlist"] == "tavern-music"
-    assert scene["presets"] == ["radio-vintage"]
 
 
 def test_get_unknown_mode_404(auth_client: TestClient) -> None:
@@ -137,7 +132,8 @@ def test_create_mode_scaffolds_dir_and_manifest(auth_client: TestClient) -> None
     modes_dir = Path(os.environ["MODES_DIR"])
     assert (modes_dir / "newmode" / "manifest.yaml").is_file()
     assert (modes_dir / "newmode" / "soundboards").is_dir()
-    assert (modes_dir / "newmode" / "scenes").is_dir()
+    assert (modes_dir / "newmode" / "cues").is_dir()
+    assert (modes_dir / "newmode" / "presets").is_dir()
 
     listed = {m["id"] for m in auth_client.get("/api/modes").json()}
     assert "newmode" in listed
@@ -191,32 +187,6 @@ def test_delete_soundboard(auth_client: TestClient) -> None:
     assert r.status_code == 204
     detail = auth_client.get("/api/modes/sbdel").json()
     assert "x" not in detail["soundboards"]
-
-
-def test_create_scene(auth_client: TestClient) -> None:
-    auth_client.post("/api/modes", json={"id": "scenetest", "name": "Scene Host"})
-    r = auth_client.post(
-        "/api/modes/scenetest/scenes",
-        json={"id": "tavern", "name": "Stonehill Inn", "description": "Quiet"},
-    )
-    assert r.status_code == 201
-
-    modes_dir = Path(os.environ["MODES_DIR"])
-    assert (modes_dir / "scenetest" / "scenes" / "tavern.yaml").is_file()
-
-    detail = auth_client.get("/api/modes/scenetest").json()
-    assert "tavern" in detail["scenes"]
-
-
-def test_delete_scene(auth_client: TestClient) -> None:
-    auth_client.post("/api/modes", json={"id": "scenedel", "name": "Scene Del"})
-    auth_client.post(
-        "/api/modes/scenedel/scenes", json={"id": "x", "name": "X"}
-    )
-    r = auth_client.delete("/api/modes/scenedel/scenes/x")
-    assert r.status_code == 204
-    detail = auth_client.get("/api/modes/scenedel").json()
-    assert "x" not in detail["scenes"]
 
 
 # --- soundboard editor (categories + items) -----------------------------
@@ -364,3 +334,76 @@ def test_added_item_is_referenced_by_sfx_endpoint(
     r = auth_client.get("/api/sfx/file", params={"path": "dnd/door.ogg"})
     assert r.status_code == 200
 
+
+
+# --- cues ---------------------------------------------------------------
+
+
+def test_cue_crud_roundtrip(auth_client: TestClient) -> None:
+    # Create a cue with a preset, playlist ref, start point, and a loop.
+    r = auth_client.post(
+        "/api/modes/dnd/cues",
+        json={
+            "id": "kraken",
+            "name": "Kraken Fight",
+            "preset": "cave",
+            "playlist": "Fight",
+            "start_index": 2,
+            "start_ms": 90000,
+            "sfx": [{"soundboard": "tavern", "item": "dnd/door.ogg"}],
+            "loops": [
+                {
+                    "soundboard": "tavern",
+                    "item": "dnd/door.ogg",
+                    "interval_s": 45,
+                    "volume": 0.5,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["id"] == "kraken"
+    assert body["preset"] == "cave"
+    assert body["start_ms"] == 90000
+    assert body["loops"][0]["interval_s"] == 45
+
+    # Appears in mode detail.
+    detail = auth_client.get("/api/modes/dnd").json()
+    assert "kraken" in detail["cues"]
+
+    # Update is a full replace.
+    r = auth_client.put(
+        "/api/modes/dnd/cues/kraken",
+        json={"name": "Kraken!", "loops": []},
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "Kraken!"
+    assert r.json()["loops"] == []
+
+    # Delete.
+    assert auth_client.delete("/api/modes/dnd/cues/kraken").status_code == 204
+    assert "kraken" not in auth_client.get("/api/modes/dnd").json()["cues"]
+
+
+def test_cue_create_conflict(auth_client: TestClient) -> None:
+    auth_client.post("/api/modes/dnd/cues", json={"id": "dup", "name": "A"})
+    r = auth_client.post("/api/modes/dnd/cues", json={"id": "dup", "name": "B"})
+    assert r.status_code == 409
+
+
+def test_cue_create_rejects_bad_slug(auth_client: TestClient) -> None:
+    r = auth_client.post("/api/modes/dnd/cues", json={"id": "Bad Slug", "name": "X"})
+    assert r.status_code == 400
+
+
+def test_rename_mode(auth_client: TestClient) -> None:
+    r = auth_client.patch("/api/modes/dnd", json={"name": "D&D Reborn"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "D&D Reborn"
+    listed = {m["id"]: m["name"] for m in auth_client.get("/api/modes").json()}
+    assert listed["dnd"] == "D&D Reborn"
+
+
+def test_rename_mode_404(auth_client: TestClient) -> None:
+    assert auth_client.patch("/api/modes/nope", json={"name": "X"}).status_code == 404

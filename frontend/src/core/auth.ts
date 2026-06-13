@@ -17,7 +17,7 @@ interface AuthState {
   logout: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   status: "unknown",
   user: null,
 
@@ -29,12 +29,20 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (err instanceof ApiError && err.status === 401) {
         // Definitive "not signed in" — clear the session.
         set({ status: "anonymous", user: null });
+      } else if (get().status === "unknown") {
+        // Non-401 failure on the *initial* check (server unreachable, 502
+        // while the container is still booting, non-JSON from the proxy).
+        // We must resolve to something concrete: leaving status "unknown"
+        // strands the whole app on a blocking spinner (the "black screen
+        // for a few seconds that never recovers"). Resolve to anonymous so
+        // the public TV view renders and the login gate offers a retry.
+        console.warn("[auth] initial refresh failed (non-401) — treating as anonymous", err);
+        set({ status: "anonymous", user: null });
       } else {
-        // Network error / 5xx / non-JSON — server told us nothing
-        // useful about auth state. Don't tear down the local session:
-        // if we were authenticated, stay so until a real 401 arrives.
-        // (Without this, a brief WiFi blip used to log the user out
-        // of the SPA on the next /api/auth/me call.)
+        // Same failure but we were ALREADY authenticated — a transient blip
+        // shouldn't sign the operator out mid-session. Keep the session until
+        // a real 401 arrives. (Without this, a brief WiFi drop used to log the
+        // user out of the SPA on the next /api/auth/me call.)
         console.warn("[auth] refresh failed (non-401, keeping current state)", err);
       }
     }
