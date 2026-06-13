@@ -582,6 +582,39 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
     return (folders, tracks)
 
 
+def track_ids_under(db: Session, rel_path: str) -> list[int]:
+    """All track ids at or under `rel_path` (recursive), in library order
+    (`path` ascending — the same ordering the folder browser uses). An empty
+    `rel_path` returns the whole library. Used to load a folder/album into the
+    ambient queue."""
+    rel_clean = rel_path.strip("/").replace("\\", "/")
+    stmt = select(Track.id)
+    if rel_clean:
+        prefix = f"{rel_clean}/"
+        stmt = stmt.where(
+            (Track.path == rel_clean) | (Track.path.like(f"{prefix}%"))
+        )
+    stmt = stmt.order_by(Track.path)
+    return [int(r) for r in db.scalars(stmt).all()]
+
+
+def next_track_id_after(db: Session, path: str, *, wrap: bool = True) -> int | None:
+    """The id of the track that immediately follows `path` in library order
+    (`path` ascending). Drives "follow / continue" playback. With `wrap`
+    (default), the library's first track follows its last so follow never
+    runs out; with ``wrap=False`` the end of the library returns None. Returns
+    None when the library is empty."""
+    nxt = db.scalar(
+        select(Track.id).where(Track.path > path).order_by(Track.path).limit(1)
+    )
+    if nxt is not None:
+        return int(nxt)
+    if not wrap:
+        return None
+    first = db.scalar(select(Track.id).order_by(Track.path).limit(1))
+    return int(first) if first is not None else None
+
+
 def ensure_folder(rel_path: str, root: Path | None = None) -> Path:
     """mkdir -p inside the given root (defaults to MUSIC_DIR). Returns
     the absolute path of the resulting directory."""
@@ -763,6 +796,7 @@ __all__ = [
     "list_folder",
     "metadata_for",
     "music_root",
+    "next_track_id_after",
     "relative_audio_files_in",
     "remove_path",
     "rename_folder",
@@ -771,6 +805,7 @@ __all__ = [
     "scan_paths",
     "to_absolute",
     "to_relative",
+    "track_ids_under",
     "update_path",
     "write_tags",
 ]

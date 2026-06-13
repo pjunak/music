@@ -180,3 +180,49 @@ export function VolumeIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function ShuffleIcon(props: IconProps) {
+  // Two crossing arrows — the universal shuffle glyph.
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M16 3h5v5" {...stroke} />
+      <path d="M4 20L21 3" {...stroke} />
+      <path d="M21 16v5h-5" {...stroke} />
+      <path d="M15 15l6 6" {...stroke} />
+      <path d="M4 4l5 5" {...stroke} />
+    </svg>
+  );
+}
+
+export function RepeatIcon(props: IconProps) {
+  // Looping arrows = repeat-all (loop the queue).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M4 12V9a3 3 0 013-3h13m-3-3l3 3l-3 3" {...stroke} />
+      <path d="M20 12v3a3 3 0 01-3 3H4m3 3l-3-3l3-3" {...stroke} />
+    </svg>
+  );
+}
+
+export function RepeatOneIcon(props: IconProps) {
+  // Repeat loop with a "1" in the middle = repeat-one (loop current track).
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M4 12V9a3 3 0 013-3h13m-3-3l3 3l-3 3" {...stroke} />
+      <path d="M20 12v3a3 3 0 01-3 3H4m3 3l-3-3l3-3" {...stroke} />
+      <path d="M11 11l1-1v4" {...stroke} />
+    </svg>
+  );
+}
+
+export function InfinityIcon(props: IconProps) {
+  // Lemniscate — "Continue / Autoplay": keep playing into the library.
+  return (
+    <svg {...baseProps} {...props}>
+      <path
+        d="M9.828 9.172a4 4 0 100 5.656a10 10 0 002.172-2.828a10 10 0 012.172-2.828a4 4 0 110 5.656a10 10 0 01-2.172-2.828a10 10 0 00-2.172-2.828"
+        {...stroke}
+      />
+    </svg>
+  );
+}

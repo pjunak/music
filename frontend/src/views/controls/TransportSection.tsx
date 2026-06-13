@@ -4,16 +4,20 @@ import { usePlayerStore } from "@/core/playerStore";
 import type { LoopMode } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
+// End-of-queue behaviour, mutually exclusive. "Continue" is follow/autoplay:
+// keep playing into the rest of the library once the queue runs dry.
 const LOOP_MODES: { value: LoopMode; label: string }[] = [
   { value: "off", label: "Off" },
-  { value: "queue", label: "Queue" },
-  { value: "track", label: "Track" },
+  { value: "follow", label: "Continue" },
+  { value: "queue", label: "Repeat all" },
+  { value: "track", label: "Repeat one" },
 ];
 
 const CROSSFADE_TYPES = ["linear", "equal_power", "cut"] as const;
 
 export function TransportSection() {
   const loop = usePlayerStore((s) => s.state?.ambient.loop ?? "off");
+  const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? false);
   const crossfadeMs = usePlayerStore((s) => s.state?.crossfade_ms ?? 0);
   const crossfadeType = usePlayerStore(
     (s) => s.state?.crossfade_type ?? "linear",
@@ -25,6 +29,10 @@ export function TransportSection() {
 
   function setLoop(mode: LoopMode) {
     wsClient.send({ type: "ambient_set_loop", loop: mode });
+  }
+
+  function setShuffle(on: boolean) {
+    wsClient.send({ type: "ambient_set_shuffle", shuffle: on });
   }
 
   function setCrossfadeMs(ms: number) {
@@ -55,6 +63,25 @@ export function TransportSection() {
               {m.label}
             </button>
           ))}
+        </div>
+      </div>
+      <div className="transport-row">
+        <span className="muted small">Shuffle</span>
+        <div className="loop-toggles">
+          <button
+            type="button"
+            className={`loop-toggle${!shuffle ? " active" : ""}`}
+            onClick={() => setShuffle(false)}
+          >
+            Off
+          </button>
+          <button
+            type="button"
+            className={`loop-toggle${shuffle ? " active" : ""}`}
+            onClick={() => setShuffle(true)}
+          >
+            On
+          </button>
         </div>
       </div>
       <div className="transport-row">

@@ -357,6 +357,7 @@ def ambient_play_track(track_id: int) -> Any:
             history=[],
             position_ms=0,
             loop=state.ambient.loop,
+            shuffle=state.ambient.shuffle,
         )
         return state.model_copy(update={"ambient": new_ambient, "is_playing": True})
 
@@ -395,8 +396,15 @@ def ambient_clear_queue() -> Any:
     return _mut
 
 
-def ambient_skip_next() -> Any:
-    """Advance to next track. Behavior at end of queue depends on loop mode."""
+def ambient_skip_next(follow_next_id: int | None = None) -> Any:
+    """Advance to next track. Behavior at end of queue depends on loop mode.
+
+    `follow_next_id` is the next library track the *handler* resolved for
+    follow mode (the mutator can't touch the DB). It's only consulted when
+    the queue is empty and `loop == "follow"`; otherwise it's ignored. None
+    means "no successor available" (e.g. end of library with wrap off), so
+    follow degrades to idle.
+    """
 
     def _mut(state: PlayerState) -> PlayerState:
         amb = state.ambient
@@ -446,7 +454,28 @@ def ambient_skip_next() -> Any:
                 ),
             )
 
-        # Loop off, end of queue: clear current, become idle.
+        if amb.loop == "follow" and follow_next_id is not None:
+            # Continue into the library: the just-finished track joins history
+            # and the handler-resolved successor becomes current. Queue stays
+            # empty — follow advances one library track at a time, so the next
+            # skip re-resolves from the new current.
+            new_history = list(amb.history)
+            if amb.current_track_id is not None:
+                new_history.append(amb.current_track_id)
+            return _replace_ambient(
+                state,
+                amb.model_copy(
+                    update={
+                        "current_track_id": follow_next_id,
+                        "queue": [],
+                        "history": new_history,
+                        "position_ms": 0,
+                    }
+                ),
+            )
+
+        # Loop off (or follow with no successor), end of queue: clear current,
+        # become idle.
         return _replace_ambient(
             state,
             amb.model_copy(
@@ -510,6 +539,26 @@ def ambient_set_loop(mode: LoopMode) -> Any:
     return _mut
 
 
+def ambient_set_shuffle(shuffle: bool, new_queue: list[int] | None = None) -> Any:
+    """Set the shuffle flag. When turning shuffle on, the handler passes the
+    already-randomised live queue via `new_queue` so the reorder takes effect
+    immediately (the mutator stays free of randomness). Turning it off leaves
+    the queue as-is — there's no original-order restore."""
+
+    def _mut(state: PlayerState) -> PlayerState:
+        amb = state.ambient
+        updates: dict = {}
+        if amb.shuffle != shuffle:
+            updates["shuffle"] = shuffle
+        if new_queue is not None and list(amb.queue) != list(new_queue):
+            updates["queue"] = list(new_queue)
+        if not updates:
+            return state
+        return _replace_ambient(state, amb.model_copy(update=updates))
+
+    return _mut
+
+
 def ambient_stop() -> Any:
     """Clear ambient lane entirely. Doesn't change is_playing — that's
     a separate action."""
@@ -524,7 +573,7 @@ def ambient_stop() -> Any:
             return state
         return _replace_ambient(
             state,
-            AmbientState(loop=state.ambient.loop),
+            AmbientState(loop=state.ambient.loop, shuffle=state.ambient.shuffle),
         )
 
     return _mut
@@ -532,7 +581,12 @@ def ambient_stop() -> Any:
 
 def ambient_play_playlist(track_ids: list[int], start_index: int) -> Any:
     """Load a pre-resolved track list into ambient and start at start_index.
-    Implicitly sets is_playing=true."""
+    Implicitly sets is_playing=true.
+
+    Source-agnostic: the handler resolves the ids (a playlist, a folder, or
+    a shuffled arrangement of either) and hands them here already ordered, so
+    this same mutator backs both `ambient_play_playlist` and
+    `ambient_play_folder`."""
 
     def _mut(state: PlayerState) -> PlayerState:
         if not track_ids:
@@ -544,6 +598,7 @@ def ambient_play_playlist(track_ids: list[int], start_index: int) -> Any:
             history=list(track_ids[:idx]),
             position_ms=0,
             loop=state.ambient.loop,
+            shuffle=state.ambient.shuffle,
         )
         return state.model_copy(update={"ambient": new_ambient, "is_playing": True})
 
@@ -705,6 +760,7 @@ def activate_scene(
                 history=[],
                 position_ms=0,
                 loop=state.ambient.loop,
+                shuffle=state.ambient.shuffle,
             )
             update["ambient"] = new_ambient
             update["is_playing"] = True

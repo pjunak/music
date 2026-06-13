@@ -3,9 +3,13 @@ import type { MouseEvent } from "react";
 
 import { IconButton } from "@/components/IconButton";
 import {
+  InfinityIcon,
   LightningIcon,
   PauseIcon,
   PlayIcon,
+  RepeatIcon,
+  RepeatOneIcon,
+  ShuffleIcon,
   SkipNextIcon,
   SkipPrevIcon,
 } from "@/components/icons";
@@ -17,7 +21,7 @@ import {
   usePlayerStore,
 } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
-import type { Track } from "@/core/types";
+import type { LoopMode, Track } from "@/core/types";
 import { useTickWhile } from "@/core/useTickWhile";
 import { wsClient } from "@/core/ws";
 
@@ -48,6 +52,9 @@ export function NowPlayingBar() {
     (s) => s.state?.interrupt?.current_track_id ?? null,
   );
   const volume = usePlayerStore((s) => s.state?.volume ?? 1);
+  const loop = usePlayerStore((s) => s.state?.ambient.loop ?? "off");
+  const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? false);
+  const connected = usePlayerStore((s) => s.state !== null);
 
   const [track, setTrack] = useState<Track | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
@@ -93,6 +100,25 @@ export function NowPlayingBar() {
   function prev() {
     wsClient.send({ type: "ambient_skip_prev" });
   }
+  function toggleShuffle() {
+    wsClient.send({ type: "ambient_set_shuffle", shuffle: !shuffle });
+  }
+  // Repeat button cycles off → repeat-all → repeat-one → off. "follow" is
+  // owned by the Continue button, so from there one press engages repeat-all.
+  function cycleRepeat() {
+    const nextLoop: LoopMode =
+      loop === "queue" ? "track" : loop === "track" ? "off" : "queue";
+    wsClient.send({ type: "ambient_set_loop", loop: nextLoop });
+  }
+  // Continue (∞) is a toggle between follow and off. Setting "follow"
+  // implicitly clears repeat-all/one — they share one enum server-side, so
+  // the two can never be active at once.
+  function toggleContinue() {
+    wsClient.send({ type: "ambient_set_loop", loop: loop === "follow" ? "off" : "follow" });
+  }
+
+  const repeatActive = loop === "queue" || loop === "track";
+  const continueActive = loop === "follow";
 
   function onSeek(e: MouseEvent<HTMLDivElement>) {
     if (totalMs <= 0) return;
@@ -146,6 +172,14 @@ export function NowPlayingBar() {
 
         <div className="now-playing-controls">
           <IconButton
+            label={shuffle ? "Shuffle: on (S)" : "Shuffle: off (S)"}
+            icon={<ShuffleIcon />}
+            onClick={toggleShuffle}
+            className={shuffle ? "is-active" : ""}
+            aria-pressed={shuffle}
+            disabled={!connected}
+          />
+          <IconButton
             label="Previous (←)"
             icon={<SkipPrevIcon />}
             onClick={prev}
@@ -173,6 +207,32 @@ export function NowPlayingBar() {
             icon={<SkipNextIcon />}
             onClick={next}
             disabled={!hasTrack}
+          />
+          <IconButton
+            label={
+              loop === "track"
+                ? "Repeat: one (L)"
+                : loop === "queue"
+                  ? "Repeat: all (L)"
+                  : "Repeat: off (L)"
+            }
+            icon={loop === "track" ? <RepeatOneIcon /> : <RepeatIcon />}
+            onClick={cycleRepeat}
+            className={repeatActive ? "is-active" : ""}
+            aria-pressed={repeatActive}
+            disabled={!connected}
+          />
+          <IconButton
+            label={
+              continueActive
+                ? "Continue into library: on (L)"
+                : "Continue into library: off (L)"
+            }
+            icon={<InfinityIcon />}
+            onClick={toggleContinue}
+            className={continueActive ? "is-active" : ""}
+            aria-pressed={continueActive}
+            disabled={!connected}
           />
         </div>
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.domain import playlists as playlists_domain
+from app.library import index as library_index
 from app.models.auth_session import AuthSession
 from app.models.playlist import Playlist
 from app.models.track import Track
@@ -33,11 +35,13 @@ from app.sync.protocol import (
     ActivateSceneAction,
     AmbientClearQueueAction,
     AmbientEnqueueAction,
+    AmbientPlayFolderAction,
     AmbientPlayPlaylistAction,
     AmbientPlayTrackAction,
     AmbientSeekAction,
     AmbientSetLoopAction,
     AmbientSetQueueAction,
+    AmbientSetShuffleAction,
     AmbientSkipNextAction,
     AmbientSkipPrevAction,
     AmbientStopAction,
@@ -150,6 +154,60 @@ async def _resolve_playlist_by_name(
             db.close()
 
     return await run_in_threadpool(_work)
+
+
+async def _resolve_folder_track_ids(path: str) -> list[int]:
+    """All track ids under a library folder (recursive, in path order). An
+    empty path resolves to the whole library."""
+
+    def _work() -> list[int]:
+        db = SessionLocal()
+        try:
+            return library_index.track_ids_under(db, path)
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_work)
+
+
+async def _resolve_follow_next() -> int | None:
+    """For follow ("Continue") mode: the next library track after the one
+    currently playing, or None when follow doesn't apply right now — a
+    different loop mode is set, the queue still has tracks (so a normal
+    advance handles it), or nothing is playing. Snapshots the live state so
+    the skip handler can pass the successor into the pure mutator."""
+    snap = await state_module.machine.snapshot()
+    amb = snap.ambient
+    if amb.loop != "follow" or amb.queue or amb.current_track_id is None:
+        return None
+    current_id = amb.current_track_id
+
+    def _work() -> int | None:
+        db = SessionLocal()
+        try:
+            track = db.get(Track, current_id)
+            if track is None:
+                return None
+            return library_index.next_track_id_after(db, track.path)
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_work)
+
+
+async def _arrange_for_play(
+    track_ids: list[int], start_index: int
+) -> tuple[list[int], int]:
+    """Apply the live shuffle flag to a freshly-resolved track list. With
+    shuffle on, the whole list is randomised and playback starts at index 0
+    (a random first track — what "shuffle this album" should do); otherwise
+    the list and start index pass through untouched."""
+    snap = await state_module.machine.snapshot()
+    if snap.ambient.shuffle and len(track_ids) > 1:
+        shuffled = list(track_ids)
+        random.shuffle(shuffled)
+        return shuffled, 0
+    return track_ids, start_index
 
 
 async def _apply_and_broadcast(mutator: Any) -> None:
@@ -268,7 +326,10 @@ async def _h_ambient_clear_queue(
 async def _h_ambient_skip_next(
     _a: AmbientSkipNextAction, _device_id: str, _ws: WebSocket
 ) -> None:
-    await _apply_and_broadcast(state_module.ambient_skip_next())
+    # Resolve the follow successor first (no-op unless we're in follow mode at
+    # the end of the queue) so the pure mutator can advance into the library.
+    follow_next_id = await _resolve_follow_next()
+    await _apply_and_broadcast(state_module.ambient_skip_next(follow_next_id))
 
 
 async def _h_ambient_skip_prev(
@@ -289,6 +350,22 @@ async def _h_ambient_set_loop(
     await _apply_and_broadcast(state_module.ambient_set_loop(action.loop))
 
 
+async def _h_ambient_set_shuffle(
+    action: AmbientSetShuffleAction, _device_id: str, _ws: WebSocket
+) -> None:
+    # Turning shuffle on reshuffles the live queue immediately so the change
+    # is audible without reloading the source; the randomisation happens here
+    # (not in the mutator) to keep the state machine deterministic.
+    new_queue: list[int] | None = None
+    if action.shuffle:
+        snap = await state_module.machine.snapshot()
+        new_queue = list(snap.ambient.queue)
+        random.shuffle(new_queue)
+    await _apply_and_broadcast(
+        state_module.ambient_set_shuffle(action.shuffle, new_queue)
+    )
+
+
 async def _h_ambient_stop(
     _a: AmbientStopAction, _device_id: str, _ws: WebSocket
 ) -> None:
@@ -305,8 +382,23 @@ async def _h_ambient_play_playlist(
     if not track_ids:
         await _send_error(websocket, "playlist is empty")
         return
+    ordered, start_index = await _arrange_for_play(track_ids, action.start_index)
     await _apply_and_broadcast(
-        state_module.ambient_play_playlist(track_ids, action.start_index)
+        state_module.ambient_play_playlist(ordered, start_index)
+    )
+
+
+async def _h_ambient_play_folder(
+    action: AmbientPlayFolderAction, _device_id: str, websocket: WebSocket
+) -> None:
+    track_ids = await _resolve_folder_track_ids(action.path)
+    if not track_ids:
+        where = f'"{action.path}"' if action.path else "the library"
+        await _send_error(websocket, f"no tracks in {where}")
+        return
+    ordered, start_index = await _arrange_for_play(track_ids, action.start_index)
+    await _apply_and_broadcast(
+        state_module.ambient_play_playlist(ordered, start_index)
     )
 
 
@@ -573,8 +665,10 @@ _DISPATCH: dict[type, Any] = {
     AmbientSkipPrevAction: _h_ambient_skip_prev,
     AmbientSeekAction: _h_ambient_seek,
     AmbientSetLoopAction: _h_ambient_set_loop,
+    AmbientSetShuffleAction: _h_ambient_set_shuffle,
     AmbientStopAction: _h_ambient_stop,
     AmbientPlayPlaylistAction: _h_ambient_play_playlist,
+    AmbientPlayFolderAction: _h_ambient_play_folder,
     SetActiveSoundboardAction: _h_set_active_soundboard,
     SetActivePresetsAction: _h_set_active_presets,
     SetCrossfadeAction: _h_set_crossfade,

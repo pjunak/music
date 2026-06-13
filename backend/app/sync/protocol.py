@@ -89,7 +89,12 @@ class AmbientSeekAction(_Action):
 
 class AmbientSetLoopAction(_Action):
     type: Literal["ambient_set_loop"]
-    loop: Literal["off", "queue", "track"]
+    loop: Literal["off", "follow", "queue", "track"]
+
+
+class AmbientSetShuffleAction(_Action):
+    type: Literal["ambient_set_shuffle"]
+    shuffle: bool
 
 
 class AmbientStopAction(_Action):
@@ -99,6 +104,13 @@ class AmbientStopAction(_Action):
 class AmbientPlayPlaylistAction(_Action):
     type: Literal["ambient_play_playlist"]
     playlist_id: int
+    start_index: int = Field(0, ge=0)
+
+
+class AmbientPlayFolderAction(_Action):
+    type: Literal["ambient_play_folder"]
+    # Folder path relative to MUSIC_DIR; "" plays the whole library.
+    path: str = Field("", max_length=1024)
     start_index: int = Field(0, ge=0)
 
 
@@ -188,8 +200,10 @@ Action = Annotated[
     | AmbientSkipPrevAction
     | AmbientSeekAction
     | AmbientSetLoopAction
+    | AmbientSetShuffleAction
     | AmbientStopAction
     | AmbientPlayPlaylistAction
+    | AmbientPlayFolderAction
     | SetActiveSoundboardAction
     | SetActivePresetsAction
     | SetCrossfadeAction
@@ -222,7 +236,14 @@ class PositionReport(BaseModel):
     reported_at: float  # epoch seconds
 
 
-LoopMode = Literal["off", "queue", "track"]
+# End-of-queue behaviour. Mutually exclusive by construction — only one can
+# be in effect at a time:
+#   off    — stop when the queue is exhausted.
+#   follow — keep going into the rest of the library (path order) once the
+#            queue runs dry. The "Continue / Autoplay (∞)" mode.
+#   queue  — loop the queue back to its start (repeat-all).
+#   track  — repeat the current track forever (repeat-one).
+LoopMode = Literal["off", "follow", "queue", "track"]
 
 
 class AmbientState(BaseModel):
@@ -241,6 +262,11 @@ class AmbientState(BaseModel):
     history: list[int] = Field(default_factory=list)
     position_ms: int = 0
     loop: LoopMode = "off"
+    # When true, freshly-loaded playlists/folders are randomised and toggling
+    # it on reshuffles the live queue. Orthogonal to `loop` — shuffle only
+    # changes *order*, so it composes with follow (each song still plays once,
+    # then follow continues into the library).
+    shuffle: bool = False
 
 
 class InterruptState(BaseModel):

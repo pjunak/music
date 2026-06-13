@@ -1495,7 +1495,16 @@ kbd,
 }
 
 .folder-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.3rem 0.1rem;
+}
+.folder-header-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-shrink: 0;
 }
 .folder-actions {
   display: flex;
@@ -2297,6 +2306,16 @@ kbd,
 .now-playing-controls .now-playing-play:hover:not(:disabled) {
   background: var(--accent-strong);
   color: #0a0a0a;
+}
+/* Shuffle / repeat / continue are mode toggles — highlight in the accent
+ * colour when engaged so their on/off state reads at a glance. They stay
+ * the same square size as the skip buttons (they're not the round primary
+ * play button). */
+.now-playing-controls button.is-active {
+  color: var(--accent);
+}
+.now-playing-controls button.is-active:hover:not(:disabled) {
+  color: var(--accent-strong);
 }
 /* "Is this device an audio output?" pill — sits next to the volume slider
  * on the right side of the footer.

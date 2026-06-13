@@ -10,6 +10,7 @@ import {
   LightningIcon,
   PlayIcon,
   PlusIcon,
+  ShuffleIcon,
   TrashIcon,
 } from "@/components/icons";
 import { MetadataEditor } from "@/components/MetadataEditor";
@@ -554,11 +555,36 @@ function SfxBrowser({
 
 function FolderHeader({ path, root }: { path: string; root: Root }) {
   const crumbs = path === "" ? [] : path.split("/");
+  const folderLabel = path === "" ? "all music" : crumbs[crumbs.length - 1];
+
+  // Load the whole folder (recursive) into the ambient queue. "Shuffle" turns
+  // shuffle on first so the server randomises the load; both respect Continue
+  // (∞) for what happens once the folder is exhausted.
+  function playFolder(shuffle: boolean) {
+    if (shuffle) wsClient.send({ type: "ambient_set_shuffle", shuffle: true });
+    wsClient.send({ type: "ambient_play_folder", path });
+  }
+
   return (
     <div className="folder-header">
       <span className="muted small">
         {root === "music" ? "🎵" : "⚡"} /{crumbs.length > 0 ? `${crumbs.join(" / ")}` : ""}
       </span>
+      {root === "music" ? (
+        <div className="folder-header-actions">
+          <IconButton
+            label={`Play ${folderLabel}`}
+            icon={<PlayIcon />}
+            variant="primary"
+            onClick={() => playFolder(false)}
+          />
+          <IconButton
+            label={`Shuffle ${folderLabel}`}
+            icon={<ShuffleIcon />}
+            onClick={() => playFolder(true)}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

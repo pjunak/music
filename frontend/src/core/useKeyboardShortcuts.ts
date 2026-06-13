@@ -19,7 +19,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *  Conventions:
  *  - Space: toggle play / pause
  *  - ← / → : prev / next track
- *  - L : cycle ambient loop mode
+ *  - L : cycle ambient loop mode (off → continue → repeat-all → repeat-one)
+ *  - S : toggle shuffle
  *  - / : focus the library search box
  *  - 1–9 : switch tabs in tab order (Player, Library, Metadata, Playlists,
  *          Soundboards, Modes, Presets, Controls, Settings)
@@ -56,10 +57,19 @@ export function useKeyboardShortcuts(): void {
         case "l":
         case "L": {
           if (state === null) return;
-          const order = ["off", "queue", "track"] as const;
+          const order = ["off", "follow", "queue", "track"] as const;
           const idx = order.indexOf(state.ambient.loop);
           const next = order[(idx + 1) % order.length];
           wsClient.send({ type: "ambient_set_loop", loop: next });
+          return;
+        }
+        case "s":
+        case "S": {
+          if (state === null) return;
+          wsClient.send({
+            type: "ambient_set_shuffle",
+            shuffle: !state.ambient.shuffle,
+          });
           return;
         }
         case "/":

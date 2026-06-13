@@ -691,5 +691,67 @@ def test_rename_folder_conflict(auth_client: TestClient) -> None:
     assert r.status_code == 409
 
 
+# --- follow / play-folder helpers ----------------------------------------
+#
+# The Extras/ fixture files (extra-2/3/4.wav) are contiguous in path order —
+# nothing can sort between "Extras/extra-2.wav" and "Extras/extra-3.wav" — so
+# these assertions hold regardless of what other tests leave in the shared
+# session library.
+
+
+def test_track_ids_under_folder_in_path_order(
+    client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    from app.core.db import SessionLocal
+    from app.library import index as library_index
+
+    with SessionLocal() as db:
+        ids = library_index.track_ids_under(db, "Extras")
+    assert ids == extra_seeded_track_ids
+
+
+def test_track_ids_under_empty_path_returns_whole_library(
+    client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    from app.core.db import SessionLocal
+    from app.library import index as library_index
+
+    with SessionLocal() as db:
+        ids = library_index.track_ids_under(db, "")
+    # Whole-library load is a superset of every known track.
+    assert seeded_track_id in ids
+    for tid in extra_seeded_track_ids:
+        assert tid in ids
+
+
+def test_next_track_id_after_is_adjacent(
+    client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    from app.core.db import SessionLocal
+    from app.library import index as library_index
+
+    with SessionLocal() as db:
+        # Extras/extra-2 < extra-3 < extra-4, contiguous in path order.
+        nxt = library_index.next_track_id_after(db, "Extras/extra-2.wav")
+        assert nxt == extra_seeded_track_ids[1]
+        nxt2 = library_index.next_track_id_after(db, "Extras/extra-3.wav")
+        assert nxt2 == extra_seeded_track_ids[2]
+
+
+def test_next_track_id_after_wraps_or_stops_at_end(
+    client: TestClient, seeded_track_id: int
+) -> None:
+    from app.core.db import SessionLocal
+    from app.library import index as library_index
+
+    # A path that sorts after any real track exercises the end-of-library
+    # branch deterministically without needing to know the last track.
+    sentinel = "￿"
+    with SessionLocal() as db:
+        assert library_index.next_track_id_after(db, sentinel, wrap=False) is None
+        # With wrap, follow loops back to the library's first track.
+        assert library_index.next_track_id_after(db, sentinel, wrap=True) is not None
+
+
 # Quiet pyflakes about io being imported for potential future test helpers.
 _ = io

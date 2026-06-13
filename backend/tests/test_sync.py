@@ -852,6 +852,115 @@ def test_ambient_play_playlist_404(client: TestClient) -> None:
         assert "playlist not found" in msg["detail"]
 
 
+# --- follow ("Continue") + shuffle + play-folder --------------------------
+
+
+def test_ambient_set_loop_follow(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_loop", "loop": "follow"})
+        msg = ws.receive_json()
+        assert msg["state"]["ambient"]["loop"] == "follow"
+
+
+def test_ambient_skip_next_follow_continues_into_library(
+    client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    """At the end of the queue with loop=follow, playback continues into the
+    next library track (path order) instead of going idle. extra-2 is
+    immediately followed by extra-3, so the assertion is order-stable."""
+    start = extra_seeded_track_ids[0]  # Extras/extra-2.wav
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_track", "track_id": start})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_loop", "loop": "follow"})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_skip_next"})  # queue empty -> follow
+        amb = ws.receive_json()["state"]["ambient"]
+        assert amb["current_track_id"] == extra_seeded_track_ids[1]
+        assert amb["history"] == [start]
+        assert amb["queue"] == []
+
+
+def test_ambient_skip_next_loop_off_does_not_follow(
+    client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    """Sanity counterpart: with loop off, the same end-of-queue skip goes
+    idle rather than continuing into the library."""
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json(
+            {"type": "ambient_play_track", "track_id": extra_seeded_track_ids[0]}
+        )
+        ws.receive_json()
+        ws.send_json({"type": "ambient_skip_next"})
+        assert ws.receive_json()["state"]["ambient"]["current_track_id"] is None
+
+
+def test_ambient_set_shuffle_reorders_queue_preserving_set(
+    client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_queue", "track_ids": extra_seeded_track_ids})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": True})
+        amb = ws.receive_json()["state"]["ambient"]
+        assert amb["shuffle"] is True
+        # Same tracks, each exactly once — only the order may differ.
+        assert sorted(amb["queue"]) == sorted(extra_seeded_track_ids)
+
+
+def test_ambient_play_track_preserves_shuffle(
+    client: TestClient, seeded_track_id: int
+) -> None:
+    """Regression: loading a track rebuilds AmbientState, which must carry
+    the shuffle flag forward (it previously only carried `loop`)."""
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": True})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
+        amb = ws.receive_json()["state"]["ambient"]
+        assert amb["shuffle"] is True
+
+
+def test_ambient_play_folder_loads_folder_in_order(
+    client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_folder", "path": "Extras"})
+        msg = ws.receive_json()
+        amb = msg["state"]["ambient"]
+        assert amb["current_track_id"] == extra_seeded_track_ids[0]
+        assert amb["queue"] == extra_seeded_track_ids[1:]
+        assert msg["state"]["is_playing"] is True
+
+
+def test_ambient_play_folder_shuffled_preserves_set(
+    client: TestClient, extra_seeded_track_ids: list[int]
+) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": True})
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_folder", "path": "Extras"})
+        amb = ws.receive_json()["state"]["ambient"]
+        loaded = [amb["current_track_id"], *amb["queue"]]
+        assert sorted(loaded) == sorted(extra_seeded_track_ids)
+
+
+def test_ambient_play_folder_empty_errors(client: TestClient) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_folder", "path": "NoSuchFolderXYZ"})
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "no tracks" in msg["detail"]
+
+
 # --- mode-scoped session settings -----------------------------------------
 
 
