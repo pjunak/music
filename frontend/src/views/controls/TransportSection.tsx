@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { usePlayerStore } from "@/core/playerStore";
-import type { LoopMode } from "@/core/types";
+import type { LoopMode, ShuffleMode } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
 // End-of-queue behaviour, mutually exclusive. "Continue" is follow/autoplay:
@@ -13,6 +13,14 @@ const LOOP_MODES: { value: LoopMode; label: string }[] = [
   { value: "track", label: "Repeat one" },
 ];
 
+// Shuffle picks a random queue entry on skip ("weighted" is planned — uniform
+// for now). Mirrors the footer's shuffle cycle and the backend ShuffleMode.
+const SHUFFLE_MODES: { value: ShuffleMode; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "random", label: "Random" },
+  { value: "weighted", label: "Weighted" },
+];
+
 const CROSSFADE_TYPES: { value: string; label: string }[] = [
   { value: "linear", label: "Linear" },
   { value: "equal_power", label: "Equal power" },
@@ -21,7 +29,7 @@ const CROSSFADE_TYPES: { value: string; label: string }[] = [
 
 export function TransportSection() {
   const loop = usePlayerStore((s) => s.state?.ambient.loop ?? "off");
-  const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? false);
+  const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? "off");
   const crossfadeMs = usePlayerStore((s) => s.state?.crossfade_ms ?? 0);
   const crossfadeType = usePlayerStore(
     (s) => s.state?.crossfade_type ?? "linear",
@@ -35,8 +43,8 @@ export function TransportSection() {
     wsClient.send({ type: "ambient_set_loop", loop: mode });
   }
 
-  function setShuffle(on: boolean) {
-    wsClient.send({ type: "ambient_set_shuffle", shuffle: on });
+  function setShuffle(mode: ShuffleMode) {
+    wsClient.send({ type: "ambient_set_shuffle", shuffle: mode });
   }
 
   function setCrossfadeMs(ms: number) {
@@ -73,20 +81,17 @@ export function TransportSection() {
       <div className="transport-row">
         <span className="muted small">Shuffle</span>
         <div className="loop-toggles">
-          <button
-            type="button"
-            className={`loop-toggle${!shuffle ? " active" : ""}`}
-            onClick={() => setShuffle(false)}
-          >
-            Off
-          </button>
-          <button
-            type="button"
-            className={`loop-toggle${shuffle ? " active" : ""}`}
-            onClick={() => setShuffle(true)}
-          >
-            On
-          </button>
+          {SHUFFLE_MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              className={`loop-toggle${shuffle === m.value ? " active" : ""}`}
+              aria-pressed={shuffle === m.value}
+              onClick={() => setShuffle(m.value)}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
       </div>
       <div className="transport-row">

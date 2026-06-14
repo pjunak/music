@@ -3,6 +3,7 @@ import type { KeyboardEvent, MouseEvent } from "react";
 
 import { IconButton } from "@/components/IconButton";
 import {
+  InfinityIcon,
   LightningIcon,
   PauseIcon,
   PlayIcon,
@@ -56,6 +57,26 @@ const REPEAT_OPTIONS: ModeOption<LoopMode>[] = [
     icon: <RepeatIcon />,
     active: true,
     legend: "Repeating the whole queue — click to turn repeat off",
+  },
+];
+
+// Continue ("Autoplay"): a 2-state toggle (off ↔ follow) that shares the loop
+// enum with repeat. Because it reads the same `loop` value, engaging repeat
+// shows Continue as off and vice-versa — the two are mutually exclusive for
+// free. When loop is "queue"/"track" (not in these options) ModeCycleButton
+// falls back to index 0 = off, so it correctly reads as off.
+const CONTINUE_OPTIONS: ModeOption<LoopMode>[] = [
+  {
+    value: "off",
+    icon: <InfinityIcon />,
+    active: false,
+    legend: "Continue off — click to keep playing into the library when the queue ends",
+  },
+  {
+    value: "follow",
+    icon: <InfinityIcon />,
+    active: true,
+    legend: "Continuing into the library when the queue ends — click to turn off",
   },
 ];
 
@@ -287,6 +308,13 @@ export function NowPlayingBar() {
           />
           <ModeCycleButton
             options={REPEAT_OPTIONS}
+            current={loop}
+            onCycle={setRepeat}
+            readOnly={isGuest}
+            readOnlyHint="sign in to change"
+          />
+          <ModeCycleButton
+            options={CONTINUE_OPTIONS}
             current={loop}
             onCycle={setRepeat}
             readOnly={isGuest}

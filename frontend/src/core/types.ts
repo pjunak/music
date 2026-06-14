@@ -1,7 +1,9 @@
 // Protocol types mirroring backend/app/sync/protocol.py.
 // Source of truth for the contract: backend/app/sync/protocol.py.
 
-export type LoopMode = "off" | "queue" | "track";
+// "follow" continues into the rest of the library once the queue ends — the
+// "Continue / Autoplay (∞)" mode. Mutually exclusive with the repeat modes.
+export type LoopMode = "off" | "follow" | "queue" | "track";
 export type ShuffleMode = "off" | "random" | "weighted";
 
 export interface AmbientState {
@@ -271,6 +273,7 @@ export type WsAction =
   | { type: "ambient_set_shuffle"; shuffle: ShuffleMode }
   | { type: "ambient_stop" }
   | { type: "ambient_play_playlist"; playlist_id: number; start_index?: number }
+  | { type: "ambient_play_folder"; path: string; start_index?: number }
   | { type: "set_active_soundboard"; soundboard_id: string | null }
   | { type: "set_active_presets"; preset_ids: string[] }
   | { type: "set_crossfade"; crossfade_ms: number; crossfade_type?: string }

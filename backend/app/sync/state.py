@@ -491,8 +491,13 @@ def ambient_clear_queue() -> Any:
     return _mut
 
 
-def ambient_skip_next() -> Any:
-    """Advance to next track. Behavior at end of queue depends on loop mode."""
+def ambient_skip_next(follow_next_id: int | None = None) -> Any:
+    """Advance to next track. Behavior at end of queue depends on loop mode.
+
+    `follow_next_id` is the next library track the *handler* resolved for
+    follow mode (the mutator can't touch the DB). It's only consulted when the
+    queue is empty and `loop == "follow"`; None means no successor available,
+    so follow degrades to idle."""
 
     def _mut(state: PlayerState) -> PlayerState:
         amb = state.ambient
@@ -547,9 +552,30 @@ def ambient_skip_next() -> Any:
                 ),
             )
 
-        # Loop off, end of queue: clear current AND stop. Leaving
-        # is_playing=true here is what let clients dead-reckon the position
-        # clock upward against an empty lane ("Nothing playing" ticking up).
+        if amb.loop == "follow" and follow_next_id is not None:
+            # Continue into the library: the just-finished track joins history
+            # and the handler-resolved successor becomes current. Queue stays
+            # empty — follow advances one library track at a time, re-resolving
+            # from the new current on the next skip. Keeps is_playing as-is.
+            new_history = list(amb.history)
+            if amb.current_track_id is not None:
+                new_history.append(amb.current_track_id)
+            return _replace_ambient(
+                state,
+                amb.model_copy(
+                    update={
+                        "current_track_id": follow_next_id,
+                        "queue": [],
+                        "history": new_history,
+                        "position_ms": 0,
+                    }
+                ),
+            )
+
+        # Loop off (or follow with no successor), end of queue: clear current
+        # AND stop. Leaving is_playing=true here is what let clients dead-reckon
+        # the position clock upward against an empty lane ("Nothing playing"
+        # ticking up).
         return state.model_copy(
             update={
                 "ambient": amb.model_copy(

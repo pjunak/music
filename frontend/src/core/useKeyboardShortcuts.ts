@@ -62,9 +62,10 @@ export function useKeyboardShortcuts(): void {
         case "L": {
           if (!isAuthed) return;
           if (state === null) return;
-          // off → single (track) → whole queue, matching the footer's
-          // repeat-cycle button order.
-          const order = ["off", "track", "queue"] as const;
+          // off → single (track) → whole queue → continue (follow into the
+          // library). One key cycles the whole loop enum; the footer splits it
+          // into a repeat-cycle button + a Continue toggle for clarity.
+          const order = ["off", "track", "queue", "follow"] as const;
           const idx = order.indexOf(state.ambient.loop);
           const next = order[(idx + 1) % order.length];
           wsClient.send({ type: "ambient_set_loop", loop: next });

@@ -928,7 +928,8 @@ def test_ambient_play_playlist_404(client: TestClient) -> None:
         assert "playlist not found" in msg["detail"]
 
 
-# --- follow ("Continue") + shuffle + play-folder --------------------------
+# --- follow ("Continue") + play-folder ------------------------------------
+# (Shuffle is origin's ShuffleMode enum — covered by its own tests above.)
 
 
 def test_ambient_set_loop_follow(client: TestClient) -> None:
@@ -974,32 +975,18 @@ def test_ambient_skip_next_loop_off_does_not_follow(
         assert ws.receive_json()["state"]["ambient"]["current_track_id"] is None
 
 
-def test_ambient_set_shuffle_reorders_queue_preserving_set(
-    client: TestClient, extra_seeded_track_ids: list[int]
-) -> None:
-    with _ws_authed(client) as ws:
-        ws.receive_json()
-        ws.send_json({"type": "ambient_set_queue", "track_ids": extra_seeded_track_ids})
-        ws.receive_json()
-        ws.send_json({"type": "ambient_set_shuffle", "shuffle": True})
-        amb = ws.receive_json()["state"]["ambient"]
-        assert amb["shuffle"] is True
-        # Same tracks, each exactly once — only the order may differ.
-        assert sorted(amb["queue"]) == sorted(extra_seeded_track_ids)
-
-
 def test_ambient_play_track_preserves_shuffle(
     client: TestClient, seeded_track_id: int
 ) -> None:
-    """Regression: loading a track rebuilds AmbientState, which must carry
-    the shuffle flag forward (it previously only carried `loop`)."""
+    """Regression: loading a track rebuilds AmbientState, which must carry the
+    shuffle mode forward (it would otherwise reset to "off")."""
     with _ws_authed(client) as ws:
         ws.receive_json()
-        ws.send_json({"type": "ambient_set_shuffle", "shuffle": True})
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": "random"})
         ws.receive_json()
         ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
         amb = ws.receive_json()["state"]["ambient"]
-        assert amb["shuffle"] is True
+        assert amb["shuffle"] == "random"
 
 
 def test_ambient_play_folder_loads_folder_in_order(
@@ -1013,19 +1000,6 @@ def test_ambient_play_folder_loads_folder_in_order(
         assert amb["current_track_id"] == extra_seeded_track_ids[0]
         assert amb["queue"] == extra_seeded_track_ids[1:]
         assert msg["state"]["is_playing"] is True
-
-
-def test_ambient_play_folder_shuffled_preserves_set(
-    client: TestClient, extra_seeded_track_ids: list[int]
-) -> None:
-    with _ws_authed(client) as ws:
-        ws.receive_json()
-        ws.send_json({"type": "ambient_set_shuffle", "shuffle": True})
-        ws.receive_json()
-        ws.send_json({"type": "ambient_play_folder", "path": "Extras"})
-        amb = ws.receive_json()["state"]["ambient"]
-        loaded = [amb["current_track_id"], *amb["queue"]]
-        assert sorted(loaded) == sorted(extra_seeded_track_ids)
 
 
 def test_ambient_play_folder_empty_errors(client: TestClient) -> None:

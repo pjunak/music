@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.devices.store import device_store
 from app.domain import playlists as playlists_domain
+from app.library import index as library_index
 from app.models.auth_session import AuthSession
 from app.models.playlist import Playlist
 from app.models.track import Track
@@ -35,6 +36,7 @@ from app.sync.devices import registry
 from app.sync.protocol import (
     AmbientClearQueueAction,
     AmbientEnqueueAction,
+    AmbientPlayFolderAction,
     AmbientPlayPlaylistAction,
     AmbientPlayTrackAction,
     AmbientSeekAction,
@@ -151,6 +153,45 @@ async def _resolve_playlist_by_name(
                 return (None, None, f"no playlist named '{name}' for mode '{mode_id}'")
             items = playlists_domain.list_items(db, pl)
             return ([it.track_id for it in items], pl.id, None)
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_work)
+
+
+async def _resolve_folder_track_ids(path: str) -> list[int]:
+    """All track ids under a library folder (recursive, in path order). An
+    empty path resolves to the whole library."""
+
+    def _work() -> list[int]:
+        db = SessionLocal()
+        try:
+            return library_index.track_ids_under(db, path)
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_work)
+
+
+async def _resolve_follow_next() -> int | None:
+    """For follow ("Continue") mode: the next library track after the one
+    currently playing, or None when follow doesn't apply right now — a
+    different loop mode is set, the queue still has tracks (a normal advance
+    handles those), or nothing is playing. Snapshots the live state so the
+    skip handler can pass the successor into the pure mutator."""
+    snap = await state_module.machine.snapshot()
+    amb = snap.ambient
+    if amb.loop != "follow" or amb.queue or amb.current_track_id is None:
+        return None
+    current_id = amb.current_track_id
+
+    def _work() -> int | None:
+        db = SessionLocal()
+        try:
+            track = db.get(Track, current_id)
+            if track is None:
+                return None
+            return library_index.next_track_id_after(db, track.path)
         finally:
             db.close()
 
@@ -313,7 +354,10 @@ async def _h_ambient_clear_queue(
 async def _h_ambient_skip_next(
     _a: AmbientSkipNextAction, _device_id: str, _ws: WebSocket
 ) -> None:
-    await _apply_and_broadcast(state_module.ambient_skip_next())
+    # Resolve the follow successor first (no-op unless we're in follow mode at
+    # the end of the queue) so the pure mutator can advance into the library.
+    follow_next_id = await _resolve_follow_next()
+    await _apply_and_broadcast(state_module.ambient_skip_next(follow_next_id))
 
 
 async def _h_ambient_skip_prev(
@@ -359,6 +403,23 @@ async def _h_ambient_play_playlist(
     await _apply_and_broadcast(
         state_module.ambient_play_playlist(
             track_ids, action.start_index, source_playlist_id=action.playlist_id
+        )
+    )
+
+
+async def _h_ambient_play_folder(
+    action: AmbientPlayFolderAction, _device_id: str, websocket: WebSocket
+) -> None:
+    track_ids = await _resolve_folder_track_ids(action.path)
+    if not track_ids:
+        where = f'"{action.path}"' if action.path else "the library"
+        await _send_error(websocket, f"no tracks in {where}")
+        return
+    # A folder isn't a playlist, so no source_playlist_id. Order is path order;
+    # shuffle (if engaged) randomises at skip-time, matching playlist playback.
+    await _apply_and_broadcast(
+        state_module.ambient_play_playlist(
+            track_ids, action.start_index, source_playlist_id=None
         )
     )
 
@@ -683,6 +744,7 @@ _DISPATCH: dict[type, Any] = {
     AmbientSetShuffleAction: _h_ambient_set_shuffle,
     AmbientStopAction: _h_ambient_stop,
     AmbientPlayPlaylistAction: _h_ambient_play_playlist,
+    AmbientPlayFolderAction: _h_ambient_play_folder,
     SetActiveSoundboardAction: _h_set_active_soundboard,
     SetActivePresetsAction: _h_set_active_presets,
     SetCrossfadeAction: _h_set_crossfade,

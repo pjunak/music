@@ -21,6 +21,7 @@ import {
   PlusIcon,
   RescanIcon,
   SearchIcon,
+  ShuffleIcon,
   SparkleIcon,
   TrashIcon,
   XIcon,
@@ -745,9 +746,34 @@ function FolderHeader({
       };
     }),
   ];
+
+  // Load this folder (recursive) into the ambient queue. "" plays the whole
+  // library. "Shuffle" flips shuffle to random first so the load is randomised;
+  // both respect Continue (∞) for what happens once the folder is exhausted.
+  const folderLabel = path === "" ? "all music" : segments[segments.length - 1];
+  function playFolder(shuffled: boolean) {
+    if (shuffled) wsClient.send({ type: "ambient_set_shuffle", shuffle: "random" });
+    wsClient.send({ type: "ambient_play_folder", path });
+  }
+
   return (
     <div className="folder-header">
       <Breadcrumb items={items} />
+      {root === "music" ? (
+        <div className="folder-header-actions">
+          <IconButton
+            label={`Play ${folderLabel}`}
+            icon={<PlayIcon />}
+            variant="primary"
+            onClick={() => playFolder(false)}
+          />
+          <IconButton
+            label={`Shuffle ${folderLabel}`}
+            icon={<ShuffleIcon />}
+            onClick={() => playFolder(true)}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

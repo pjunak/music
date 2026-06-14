@@ -102,7 +102,7 @@ class AmbientSeekAction(_Action):
 
 class AmbientSetLoopAction(_Action):
     type: Literal["ambient_set_loop"]
-    loop: Literal["off", "queue", "track"]
+    loop: Literal["off", "follow", "queue", "track"]
 
 
 class AmbientSetShuffleAction(_Action):
@@ -119,6 +119,13 @@ class AmbientStopAction(_Action):
 class AmbientPlayPlaylistAction(_Action):
     type: Literal["ambient_play_playlist"]
     playlist_id: int
+    start_index: int = Field(0, ge=0)
+
+
+class AmbientPlayFolderAction(_Action):
+    type: Literal["ambient_play_folder"]
+    # Folder path relative to MUSIC_DIR; "" plays the whole library.
+    path: str = Field("", max_length=1024)
     start_index: int = Field(0, ge=0)
 
 
@@ -230,6 +237,7 @@ Action = Annotated[
     | AmbientSetShuffleAction
     | AmbientStopAction
     | AmbientPlayPlaylistAction
+    | AmbientPlayFolderAction
     | SetActiveSoundboardAction
     | SetActivePresetsAction
     | SetCrossfadeAction
@@ -269,7 +277,10 @@ class PositionReport(BaseModel):
     reported_at: float  # epoch seconds
 
 
-LoopMode = Literal["off", "queue", "track"]
+# "follow" continues into the rest of the library (path order) once the queue
+# runs dry — the "Continue / Autoplay (∞)" mode. Mutually exclusive with the
+# repeat modes by construction (one enum), so repeat and follow can't both be on.
+LoopMode = Literal["off", "follow", "queue", "track"]
 ShuffleMode = Literal["off", "random", "weighted"]
 CrossfadeType = Literal["linear", "equal_power", "cut"]
 

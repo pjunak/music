@@ -184,6 +184,19 @@ export function RepeatIcon(props: IconProps) {
   );
 }
 
+export function InfinityIcon(props: IconProps) {
+  // Lemniscate — "Continue / Autoplay": keep playing into the library once the
+  // queue ends. Muted for "off", accent when engaged (legend carries which).
+  return (
+    <svg {...baseProps} {...props}>
+      <path
+        d="M9.828 9.172a4 4 0 100 5.656a10 10 0 002.172-2.828a10 10 0 012.172-2.828a4 4 0 110 5.656a10 10 0 01-2.172-2.828a10 10 0 00-2.172-2.828"
+        {...stroke}
+      />
+    </svg>
+  );
+}
+
 export function RepeatOneIcon(props: IconProps) {
   // Repeat loop with a "1" in the middle — repeat the current track only.
   return (
