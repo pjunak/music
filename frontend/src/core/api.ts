@@ -361,7 +361,8 @@ export type CleanupRuleId =
   | "tag_artist"
   | "tag_album"
   | "tag_number"
-  | "tag_year";
+  | "tag_year"
+  | "rename_folders";
 
 export interface CleanupScope {
   type: "all" | "folder" | "tracks";
@@ -390,9 +391,21 @@ export interface CleanupTrackPlan {
   notes: string[];
 }
 
+/** A proposed folder rename (leaf-only — `path` stays, its last segment
+ *  becomes `new`). Reviewed and applied alongside the per-track ops. */
+export interface CleanupFolderSuggestion {
+  op_id: string;
+  path: string;
+  old: string;
+  new: string;
+  rules: string[];
+  confidence: "high" | "low";
+}
+
 export interface CleanupAnalyzeResult {
   scanned: number;
   plans: CleanupTrackPlan[];
+  folders: CleanupFolderSuggestion[];
   /** Names an online lookup could still settle — resolve via
    *  cleanupApi.verify, then re-analyze (verdicts are cached forever,
    *  each name is only ever looked up once). */
@@ -406,10 +419,12 @@ export interface CleanupVerifyResult {
 
 export interface CleanupOpIn {
   track_id: number;
-  kind: "rename" | "tag";
+  kind: "rename" | "tag" | "folder_rename";
   field: string | null;
   old: string | number | null;
   new: string | number | null;
+  /** Folder path for folder_rename ops (track_id is unused, sent as 0). */
+  path?: string;
 }
 
 export interface CleanupApplyResult {

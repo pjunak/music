@@ -408,6 +408,119 @@ def test_generic_folder_names_never_suggested():
     assert op(p, "tag", "artist") is None
 
 
+# --- engine: folder renames ----------------------------------------------------
+
+
+def folder_for(folders: list[cleanup.FolderSuggestion], path: str):
+    return next((f for f in folders if f.path == path), None)
+
+
+def test_folder_tidy_separators():
+    rows = [
+        row("Skyrim_OST_(2011)/01 - Dragonborn.mp3"),
+        row("Skyrim_OST_(2011)/02 - Awake.mp3"),
+    ]
+    folders = cleanup.analyze_folders(rows, rows)
+    f = folder_for(folders, "Skyrim_OST_(2011)")
+    assert f is not None
+    assert f.new == "Skyrim OST (2011)" and f.confidence == "high"
+
+
+def test_messy_folder_name_feeds_clean_album_tag():
+    # The clue side of the same coin: a messy folder yields a *clean* album
+    # tag suggestion (underscores normalised before it's offered).
+    rows = [
+        row("Skyrim_OST_(2011)/01 - Dragonborn.mp3"),
+        row("Skyrim_OST_(2011)/02 - Awake.mp3"),
+    ]
+    plans = cleanup.analyze(rows, rows)
+    album = op(plan_for(plans, rows[0]), "tag", "album")
+    assert album is not None and album.new == "Skyrim OST"
+    year = op(plan_for(plans, rows[0]), "tag", "year")
+    assert year is not None and year.new == 2011
+
+
+def test_folder_disc_canonical():
+    rows = [
+        row("Big Album/CD1/01 - One.mp3"),
+        row("Big Album/CD1/02 - Two.mp3"),
+        row("Big Album/CD2/01 - Three.mp3"),
+    ]
+    folders = cleanup.analyze_folders(rows, rows)
+    assert folder_for(folders, "Big Album/CD1").new == "Disc 1"
+    assert folder_for(folders, "Big Album/CD2").new == "Disc 2"
+    assert all(f.confidence == "high" for f in folders)
+    # The already-clean album parent isn't renamed.
+    assert folder_for(folders, "Big Album") is None
+
+
+def test_folder_part_canonical():
+    rows = [row("Long Mix/pt1/a.mp3"), row("Long Mix/pt2/b.mp3")]
+    folders = cleanup.analyze_folders(rows, rows)
+    assert folder_for(folders, "Long Mix/pt1").new == "Part 1"
+    assert folder_for(folders, "Long Mix/pt2").new == "Part 2"
+
+
+def test_folder_rebuild_from_numeric_name():
+    rows = [
+        row("1/a.mp3", title="A", artist="Pendulum", album="Immersion", year=2010),
+        row("1/b.mp3", title="B", artist="Pendulum", album="Immersion", year=2010),
+    ]
+    folders = cleanup.analyze_folders(rows, rows)
+    f = folder_for(folders, "1")
+    assert f is not None
+    assert f.new == "Pendulum - Immersion (2010)"
+    assert f.confidence == "low"  # rebuilding is a guess
+
+
+def test_folder_rebuild_when_only_artist_plus_junk_left():
+    rows = [
+        row("Daft Punk [www.crap.com]/x.mp3", title="X", artist="Daft Punk", album="Discovery"),
+        row("Daft Punk [www.crap.com]/y.mp3", title="Y", artist="Daft Punk", album="Discovery"),
+    ]
+    folders = cleanup.analyze_folders(rows, rows)
+    f = folder_for(folders, "Daft Punk [www.crap.com]")
+    assert f is not None and f.new == "Daft Punk - Discovery" and f.confidence == "low"
+
+
+def test_folder_rebuild_omits_artist_when_parent_is_artist():
+    # Artist/Album layout: rebuilding the album folder shouldn't echo the
+    # artist that the parent folder already names.
+    rows = [
+        row("Pendulum/1/a.mp3", title="A", artist="Pendulum", album="Immersion", year=2010),
+        row("Pendulum/1/b.mp3", title="B", artist="Pendulum", album="Immersion", year=2010),
+    ]
+    folders = cleanup.analyze_folders(rows, rows)
+    f = folder_for(folders, "Pendulum/1")
+    assert f is not None and f.new == "Immersion (2010)"
+
+
+def test_generic_folders_not_renamed():
+    rows = [row("Uploads/01 - Foo.mp3"), row("Uploads/02 - Bar.mp3")]
+    assert cleanup.analyze_folders(rows, rows) == []
+
+
+def test_folder_renames_are_idempotent():
+    rows = [
+        row("Skyrim OST (2011)/01 - Dragonborn.mp3"),
+        row("Skyrim OST (2011)/02 - Awake.mp3"),
+        row("Box/Disc 1/01 - A.mp3"),
+    ]
+    assert cleanup.analyze_folders(rows, rows) == []
+
+
+def test_folder_rule_off_yields_nothing():
+    rows = [row("Messy_Name/a.mp3"), row("Messy_Name/b.mp3")]
+    assert cleanup.analyze_folders(rows, rows, cleanup.DEFAULT_RULES - {"rename_folders"}) == []
+
+
+def test_folder_rename_collision_with_existing_is_dropped():
+    rows = [row("Album_X/a.mp3"), row("Album X/b.mp3")]
+    folders = cleanup.analyze_folders(rows, rows)
+    # "Album_X" would tidy to "Album X", which already exists — dropped.
+    assert folder_for(folders, "Album_X") is None
+
+
 # --- engine: online name verdicts ----------------------------------------------
 
 
@@ -592,6 +705,32 @@ def test_cleanup_requires_auth(client: TestClient):
         "/api/library/cleanup/analyze", json={"scope": {"type": "all"}}
     )
     assert r.status_code == 401
+
+
+def test_folder_scope_escapes_like_wildcards(auth_client: TestClient):
+    """A folder name containing an underscore must not over-match siblings.
+    `_` is SQLite's any-single-char LIKE wildcard, so scoping to "A_B" used
+    to also drag in "AXB" — and underscores are exactly the residue this
+    tool cleans, so the case is common, not exotic. Cleaned up afterward
+    because MUSIC_DIR + the DB are session-shared (conftest)."""
+    from app.core.db import SessionLocal
+    from app.library import index as library_index
+
+    _seed_folder("A_B", ["01 - In Scope.wav"])
+    _seed_folder("AXB", ["01 - Out Of Scope.wav"])
+    try:
+        r = auth_client.post(
+            "/api/library/cleanup/analyze",
+            json={"scope": {"type": "folder", "path": "A_B", "recursive": True}},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["scanned"] == 1
+        assert [p["path"] for p in body["plans"]] == ["A_B/01 - In Scope.wav"]
+    finally:
+        with SessionLocal() as db:
+            library_index.delete_folder(db, "A_B", recursive=True)
+            library_index.delete_folder(db, "AXB", recursive=True)
 
 
 def test_analyze_apply_revert_roundtrip(auth_client: TestClient):
@@ -780,6 +919,97 @@ def test_verify_failures_are_retried_not_cached(auth_client: TestClient, monkeyp
         "/api/library/cleanup/verify", json={"names": ["Flaky Lookup Name"]}
     )
     assert r.json()["verified"] == 1  # not poisoned by the earlier failure
+
+
+def test_folder_rename_roundtrip(auth_client: TestClient):
+    _seed_folder("Skyrim_OST_(2011)", ["01 - Dragonborn.wav", "02 - Awake.wav"])
+
+    r = auth_client.post(
+        "/api/library/cleanup/analyze",
+        json={"scope": {"type": "folder", "path": "Skyrim_OST_(2011)", "recursive": True}},
+    )
+    assert r.status_code == 200, r.text
+    folders = r.json()["folders"]
+    f = next(x for x in folders if x["path"] == "Skyrim_OST_(2011)")
+    assert f["new"] == "Skyrim OST (2011)" and f["confidence"] == "high"
+
+    op = {
+        "track_id": 0,
+        "kind": "folder_rename",
+        "field": None,
+        "old": f["old"],
+        "new": f["new"],
+        "path": f["path"],
+    }
+    r = auth_client.post(
+        "/api/library/cleanup/apply",
+        json={"ops": [op], "scope_label": "folder test"},
+    )
+    body = r.json()
+    assert body["skipped"] == [] and body["applied"] == 1
+    batch_id = body["batch_id"]
+    assert batch_id is not None
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "Skyrim OST (2011)" / "01 - Dragonborn.wav").is_file()
+    assert not (music_dir / "Skyrim_OST_(2011)").exists()
+
+    # The index followed the move — tracks resolve under the new folder.
+    tree = auth_client.get("/api/library/tree", params={"path": "Skyrim OST (2011)"}).json()
+    assert {t["path"].split("/")[-1] for t in tree["tracks"]} == {
+        "01 - Dragonborn.wav",
+        "02 - Awake.wav",
+    }
+
+    # Revert moves the folder back.
+    r = auth_client.post(f"/api/library/cleanup/batches/{batch_id}/revert")
+    assert r.status_code == 200, r.text
+    assert r.json()["skipped"] == []
+    assert (music_dir / "Skyrim_OST_(2011)" / "01 - Dragonborn.wav").is_file()
+    assert not (music_dir / "Skyrim OST (2011)").exists()
+
+
+def test_nested_album_and_disc_rename_roundtrip(auth_client: TestClient):
+    _seed_folder("Big_Album/cd1", ["01 - One.wav"])
+    _seed_folder("Big_Album/cd2", ["01 - Two.wav"])
+
+    r = auth_client.post(
+        "/api/library/cleanup/analyze",
+        json={"scope": {"type": "folder", "path": "Big_Album", "recursive": True}},
+    )
+    folders = {x["path"]: x for x in r.json()["folders"]}
+    assert folders["Big_Album"]["new"] == "Big Album"
+    assert folders["Big_Album/cd1"]["new"] == "Disc 1"
+    assert folders["Big_Album/cd2"]["new"] == "Disc 2"
+
+    ops = [
+        {
+            "track_id": 0,
+            "kind": "folder_rename",
+            "field": None,
+            "old": x["old"],
+            "new": x["new"],
+            "path": x["path"],
+        }
+        for x in folders.values()
+    ]
+    r = auth_client.post("/api/library/cleanup/apply", json={"ops": ops})
+    body = r.json()
+    assert body["skipped"] == [] and body["applied"] == 3
+    batch_id = body["batch_id"]
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "Big Album" / "Disc 1" / "01 - One.wav").is_file()
+    assert (music_dir / "Big Album" / "Disc 2" / "01 - Two.wav").is_file()
+    assert not (music_dir / "Big_Album").exists()
+
+    # Reverse-order revert restores the parent before the children, so the
+    # whole nested rename unwinds cleanly.
+    r = auth_client.post(f"/api/library/cleanup/batches/{batch_id}/revert")
+    assert r.json()["skipped"] == []
+    assert (music_dir / "Big_Album" / "cd1" / "01 - One.wav").is_file()
+    assert (music_dir / "Big_Album" / "cd2" / "01 - Two.wav").is_file()
+    assert not (music_dir / "Big Album").exists()
 
 
 def test_revert_from_uploaded_journal(auth_client: TestClient):

@@ -53,6 +53,7 @@ RULE_TAG_ARTIST = "tag_artist"
 RULE_TAG_ALBUM = "tag_album"
 RULE_TAG_NUMBER = "tag_number"
 RULE_TAG_YEAR = "tag_year"
+RULE_FOLDERS = "rename_folders"
 
 ALL_RULES: frozenset[str] = frozenset(
     {
@@ -67,6 +68,7 @@ ALL_RULES: frozenset[str] = frozenset(
         RULE_TAG_ALBUM,
         RULE_TAG_NUMBER,
         RULE_TAG_YEAR,
+        RULE_FOLDERS,
     }
 )
 # Case normalisation is opinionated (ALL-CAPS stems may be deliberate), so
@@ -123,6 +125,24 @@ class TrackPlan:
     # suppressed as an invisible diff that a lookup might flip to the
     # artist field. Feeds `pending_lookups`; not part of the visible plan.
     wants_lookup: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FolderSuggestion:
+    """A proposed folder rename (leaf-only — `path` stays put, its last
+    segment becomes `new`). Folder-level, so it lives outside `TrackPlan`;
+    the apply layer renames it via the index's `rename_folder` (which keeps
+    every track path under it in sync) and journals it for revert."""
+
+    path: str  # current folder path (relative, forward-slash)
+    old: str  # current leaf name
+    new: str  # proposed leaf name
+    rules: tuple[str, ...]
+    confidence: str  # HIGH | LOW
+
+    @property
+    def op_id(self) -> str:
+        return f"folder:{self.path}"
 
 
 # --- text helpers -----------------------------------------------------------
@@ -324,6 +344,12 @@ def _is_generic_name(name: str) -> bool:
 
 # "CD1", "Disc 2", "disk_3" — a disc container inside an album folder.
 _DISC_FOLDER_RE = re.compile(r"(?:cd|disc|disk)[\s._-]*(\d{1,2})", re.IGNORECASE)
+# "Part 1", "pt2", "Part.3" — a part container (used like a disc). `fullmatch`
+# at the call sites keeps real titles ("Part of Me", "Particle") out.
+_PART_FOLDER_RE = re.compile(r"(?:pt|part)[\s._-]*(\d{1,3})", re.IGNORECASE)
+# A folder named only as a number ("1", "01") carries no album identity —
+# a rebuild-from-tags trigger.
+_PURE_NUM_RE = re.compile(r"^\d+$")
 # Year decoration on a folder name: "Album (2013)" / "[1987]" / "2019 - Album".
 _FOLDER_YEAR_RE = re.compile(
     r"^\s*((?:19|20)\d{2})\s*[-–—.]\s*(.+)$|^(.+?)\s*[(\[]((?:19|20)\d{2})[)\]]\s*$"
@@ -335,8 +361,12 @@ def _split_folder_label(name: str) -> tuple[str | None, str, int | None]:
 
     "Artist - Album (2013)" → ("Artist", "Album", 2013); "2019 - Album" →
     (None... or split; "Plain Name" → (None, "Plain Name", None). The split
-    only fires on a spaced " - " so hyphenated names stay whole."""
-    base = name.strip()
+    only fires on a spaced " - " so hyphenated names stay whole.
+
+    Separators are normalised first (`Skyrim_OST_(2011)` → `Skyrim OST
+    (2011)`) so the artist/album values this yields — which become both tag
+    suggestions and the folder-rename target — are already tidy."""
+    base = _normalize_separators(name)
     year: int | None = None
     m = _FOLDER_YEAR_RE.match(base)
     if m:
@@ -943,6 +973,13 @@ def _parent(path: str) -> str:
     return "" if str(parent) == "." else str(parent)
 
 
+def _group_by_folder(tracks: Sequence[TrackLike]) -> dict[str, list[TrackLike]]:
+    by_folder: dict[str, list[TrackLike]] = {}
+    for t in tracks:
+        by_folder.setdefault(_parent(t.path), []).append(t)
+    return by_folder
+
+
 def analyze(
     scope_tracks: Sequence[TrackLike],
     all_tracks: Sequence[TrackLike],
@@ -956,12 +993,8 @@ def analyze(
     analysis is identical and fully offline without it, just less sure."""
     rules = frozenset(enabled) if enabled is not None else DEFAULT_RULES
 
-    by_folder_all: dict[str, list[TrackLike]] = {}
-    for t in all_tracks:
-        by_folder_all.setdefault(_parent(t.path), []).append(t)
-    by_folder_scope: dict[str, list[TrackLike]] = {}
-    for t in scope_tracks:
-        by_folder_scope.setdefault(_parent(t.path), []).append(t)
+    by_folder_all = _group_by_folder(all_tracks)
+    by_folder_scope = _group_by_folder(scope_tracks)
 
     plans: list[TrackPlan] = []
     for folder, group in sorted(by_folder_scope.items()):
@@ -1007,6 +1040,232 @@ def analyze(
     return plans
 
 
+# --- folder renames -----------------------------------------------------------
+
+
+def _sanitize_leaf(name: str) -> str:
+    """A folder leaf can't hold a path separator; collapse whitespace and
+    trim dangling separators, like `_tidy` does for filenames."""
+    out = name.replace("/", "-").replace("\\", "-")
+    out = _WS_RE.sub(" ", out).strip()
+    return out.strip(" -–—._")[:120]
+
+
+def _disc_part_canonical(leaf: str) -> tuple[str, str] | None:
+    """`(canonical_name, rule)` when the whole leaf is a disc/part marker —
+    `cd1`/`Disc 2`/`disk_3` → `Disc N`, `pt1`/`Part.2` → `Part N`. The
+    spelled-out form is the "proper" one and stays detectable (so a second
+    pass is a no-op). None for anything that isn't purely such a marker."""
+    s = leaf.strip()
+    m = _DISC_FOLDER_RE.fullmatch(s)
+    if m:
+        return f"Disc {int(m.group(1))}", "disc_canonical"
+    m = _PART_FOLDER_RE.fullmatch(s)
+    if m:
+        return f"Part {int(m.group(1))}", "part_canonical"
+    return None
+
+
+def _tidy_folder_leaf(leaf: str, *, case: bool) -> tuple[str, tuple[str, ...]]:
+    """Clean a folder leaf the way `_transform_stem` cleans a filename, minus
+    the track-number / artist-segment stripping (a folder name *is* the
+    album/artist — there's nothing redundant to strip). Returns the new leaf
+    and the rule tags that fired."""
+    fired: list[str] = []
+    out = leaf
+    norm = _normalize_separators(out)
+    if norm != out:
+        fired.append(RULE_SEPARATORS)
+        out = norm
+    dejunked = _strip_junk(out)
+    if dejunked != out:
+        fired.append(RULE_JUNK)
+        out = dejunked
+    if case and out and (out.isupper() or out.islower()):
+        recased = _smart_title(out)
+        if recased != out:
+            fired.append(RULE_CASE)
+            out = recased
+    if fired:
+        out = _tidy(out)
+    return _sanitize_leaf(out), tuple(fired)
+
+
+@dataclass
+class _FolderClues:
+    album: str | None
+    artist: str | None
+    year: int | None
+
+
+def _single_or_dominant(values: list[str]) -> str | None:
+    cleaned = [v for v in values if v]
+    if not cleaned:
+        return None
+    if len(cleaned) == 1:
+        return cleaned[0]
+    return _dominant(cleaned)[0]
+
+
+def _folder_clues(folder: str, under: Sequence[TrackLike]) -> _FolderClues:
+    """The album/artist/year the tracks *under* a folder agree on — the raw
+    material for rebuilding an unusable folder name. Album candidates exclude
+    the same not-a-real-album values `_build_ctx` filters (disc/part folder
+    fallbacks, album == artist, album == this folder's name)."""
+    leaf = PurePosixPath(folder).name
+    album_candidates = [
+        t.album
+        for t in under
+        if t.album
+        and not _DISC_FOLDER_RE.fullmatch(t.album.strip())
+        and not _PART_FOLDER_RE.fullmatch(t.album.strip())
+        and not (t.artist and _loose_eq(t.album, t.artist))
+        and not _loose_eq(t.album, leaf)
+    ]
+    years = [t.year for t in under if t.year]
+    return _FolderClues(
+        album=_single_or_dominant(album_candidates),
+        artist=_single_or_dominant([t.artist for t in under if t.artist]),
+        year=years[0] if years and len(set(years)) == 1 else None,
+    )
+
+
+def _folder_name_usable(name: str, clues: _FolderClues) -> bool:
+    """Whether a (tidied) folder name is a real album identity. A storage
+    name, a bare number, or just the artist's name carries none — those are
+    the cases the user asked to rebuild from tags."""
+    if not name or _is_generic_name(name):
+        return False
+    if _PURE_NUM_RE.match(name.strip()):
+        return False
+    if len(_loose(name)) < 2:
+        return False
+    return not (clues.artist and _loose_eq(name, clues.artist))
+
+
+def _rebuild_folder_name(folder: str, clues: _FolderClues) -> str | None:
+    """A canonical `Album (Year)` / `Artist - Album (Year)` from the tracks'
+    shared tags. The artist is prepended only when it adds information — not
+    when it equals the album or is already the parent folder (an
+    Artist/Album layout doesn't want `Artist/Artist - Album`)."""
+    if not clues.album:
+        return None
+    name = clues.album
+    if clues.year:
+        name = f"{name} ({clues.year})"
+    parent_leaf = PurePosixPath(_parent(folder)).name if _parent(folder) else ""
+    if (
+        clues.artist
+        and not _loose_eq(clues.artist, clues.album)
+        and not _loose_eq(clues.artist, parent_leaf)
+    ):
+        name = f"{clues.artist} - {name}"
+    return _sanitize_leaf(name) or None
+
+
+def _plan_folder(
+    folder: str, under: Sequence[TrackLike], *, case: bool
+) -> FolderSuggestion | None:
+    leaf = PurePosixPath(folder).name
+    if not leaf:
+        return None
+
+    # Disc / part containers get the canonical spelled-out form. Structural,
+    # so high confidence — and checked before the generic guard (a disc
+    # folder is never "generic") and before any text tidy.
+    canon = _disc_part_canonical(leaf)
+    if canon is not None:
+        new, rule = canon
+        return None if new == leaf else FolderSuggestion(folder, leaf, new, (rule,), HIGH)
+
+    # Storage folders (Uploads, Music, Singles, …) are never renamed.
+    if _is_generic_name(leaf):
+        return None
+
+    clues = _folder_clues(folder, under)
+    tidied, fired = _tidy_folder_leaf(leaf, case=case)
+
+    # No real album identity left after tidying ("1", artist-name + junk) —
+    # rebuild from the tracks' shared tags. A bigger leap, so it ships low
+    # (default-unticked) and the operator reviews it.
+    if not _folder_name_usable(tidied, clues):
+        rebuilt = _rebuild_folder_name(folder, clues)
+        if rebuilt and rebuilt != leaf:
+            return FolderSuggestion(folder, leaf, rebuilt, ("rebuild_from_tags",), LOW)
+
+    if tidied and tidied != leaf:
+        return FolderSuggestion(folder, leaf, tidied, fired or (RULE_SEPARATORS,), HIGH)
+    return None
+
+
+def _folders_under(all_tracks: Sequence[TrackLike], folder: str) -> list[TrackLike]:
+    prefix = f"{folder}/"
+    return [t for t in all_tracks if t.path.startswith(prefix)]
+
+
+def _all_folder_paths(tracks: Sequence[TrackLike]) -> set[str]:
+    """Every distinct folder that appears as an ancestor of some track — the
+    set a proposed rename must not collide with."""
+    out: set[str] = set()
+    for t in tracks:
+        p = PurePosixPath(t.path).parent
+        while str(p) not in (".", "/", ""):
+            out.add(str(p))
+            p = p.parent
+    return out
+
+
+def analyze_folders(
+    scope_tracks: Sequence[TrackLike],
+    all_tracks: Sequence[TrackLike],
+    enabled: Collection[str] | None = None,
+) -> list[FolderSuggestion]:
+    """Propose folder renames for the folders the scoped tracks live in (plus
+    the album-parent of any disc/part container among them). Each rename is
+    leaf-only; the apply layer moves it with the index's `rename_folder` so
+    every track path follows. Pure — no disk or DB access."""
+    rules = frozenset(enabled) if enabled is not None else DEFAULT_RULES
+    if RULE_FOLDERS not in rules:
+        return []
+    case = RULE_CASE in rules
+
+    candidates: set[str] = set()
+    for folder in _group_by_folder(scope_tracks):
+        if not folder:
+            continue  # never rename the music root
+        candidates.add(folder)
+        # A disc/part subfolder's album-parent is worth tidying too, even
+        # though no track sits directly in it.
+        if _disc_part_canonical(PurePosixPath(folder).name) is not None:
+            parent = _parent(folder)
+            if parent:
+                candidates.add(parent)
+
+    suggestions = [
+        s
+        for folder in candidates
+        if (s := _plan_folder(folder, _folders_under(all_tracks, folder), case=case))
+        is not None
+    ]
+
+    # Collision pass (deepest first, so a child is decided before its parent):
+    # drop a target that already names another folder, or that two proposals
+    # would both land on. Case-only renames pass (target "exists" = itself).
+    existing_cf = {p.casefold() for p in _all_folder_paths(all_tracks)}
+    taken: set[str] = set()
+    kept: list[FolderSuggestion] = []
+    for s in sorted(suggestions, key=lambda s: s.path.count("/"), reverse=True):
+        parent = _parent(s.path)
+        new_path = f"{parent}/{s.new}" if parent else s.new
+        key = new_path.casefold()
+        if key != s.path.casefold() and (key in existing_cf or key in taken):
+            continue
+        taken.add(key)
+        kept.append(s)
+    kept.sort(key=lambda s: s.path)
+    return kept
+
+
 def pending_lookups(
     plans: Sequence[TrackPlan], verdicts: Verdicts | None = None
 ) -> list[str]:
@@ -1042,11 +1301,13 @@ def pending_lookups(
 __all__ = [
     "ALL_RULES",
     "DEFAULT_RULES",
+    "FolderSuggestion",
     "Suggestion",
     "TrackLike",
     "TrackPlan",
     "Verdicts",
     "analyze",
+    "analyze_folders",
     "loose_key",
     "pending_lookups",
     "verdict_kind",

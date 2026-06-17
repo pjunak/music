@@ -47,6 +47,7 @@ RuleId = Literal[
     "tag_album",
     "tag_number",
     "tag_year",
+    "rename_folders",
 ]
 
 # Tag fields apply will write. The engine only suggests a subset, but the
@@ -93,9 +94,21 @@ class CleanupTrackPlanOut(BaseModel):
     notes: list[str]
 
 
+class CleanupFolderOut(BaseModel):
+    op_id: str
+    path: str  # folder being renamed (relative; its leaf becomes `new`)
+    old: str
+    new: str
+    rules: list[str]
+    confidence: Literal["high", "low"]
+
+
 class AnalyzeResult(BaseModel):
     scanned: int
     plans: list[CleanupTrackPlanOut]
+    # Folder renames (leaf-only). Reviewed and applied alongside the
+    # per-track ops; rendered under their own folder section in the dialog.
+    folders: list[CleanupFolderOut]
     # Names an online lookup could still settle (deduped; not yet cached).
     # The client resolves them via POST /verify and re-analyzes — the
     # second pass picks the verdicts up from the cache.
@@ -104,10 +117,13 @@ class AnalyzeResult(BaseModel):
 
 class CleanupOpIn(BaseModel):
     track_id: int
-    kind: Literal["rename", "tag"]
+    kind: Literal["rename", "tag", "folder_rename"]
     field: str | None = None
     old: int | str | None = None
     new: int | str | None = None
+    # Set for folder_rename ops: the folder whose leaf is being renamed.
+    # track_id is unused there (sent as 0).
+    path: str = ""
 
 
 class ApplyRequest(BaseModel):
@@ -170,10 +186,14 @@ def _resolve_scope(db: DbSession, scope: CleanupScope) -> list[Track]:
             if scope.recursive:
                 return list(db.scalars(select(Track)).all())
             return list(db.scalars(select(Track).where(~Track.path.like("%/%"))).all())
-        prefix = f"{rel}/"
-        stmt = select(Track).where(Track.path.like(f"{prefix}%"))
+        # Escape LIKE metacharacters in the folder name: a path like
+        # "Skyrim_OST/…" must not over-match siblings ("SkyrimXOST/…") —
+        # underscores are exactly the residue this tool exists to clean.
+        prefix = library_index.like_escape(f"{rel}/")
+        esc = library_index.LIKE_ESCAPE_CHAR
+        stmt = select(Track).where(Track.path.like(f"{prefix}%", escape=esc))
         if not scope.recursive:
-            stmt = stmt.where(~Track.path.like(f"{prefix}%/%"))
+            stmt = stmt.where(~Track.path.like(f"{prefix}%/%", escape=esc))
         return list(db.scalars(stmt).all())
     return list(db.scalars(select(Track)).all())
 
@@ -194,6 +214,7 @@ def analyze(payload: AnalyzeRequest, _: CurrentUser, db: DbSession) -> AnalyzeRe
     enabled = set(payload.rules) if payload.rules is not None else engine.DEFAULT_RULES
     verdicts = _load_verdicts(db)
     plans = engine.analyze(scope_tracks, all_tracks, enabled, verdicts)
+    folders = engine.analyze_folders(scope_tracks, all_tracks, enabled)
     return AnalyzeResult(
         scanned=len(scope_tracks),
         # A plan may exist only to surface names worth looking up
@@ -221,6 +242,17 @@ def analyze(payload: AnalyzeRequest, _: CurrentUser, db: DbSession) -> AnalyzeRe
             )
             for p in plans
             if p.ops or p.notes
+        ],
+        folders=[
+            CleanupFolderOut(
+                op_id=f.op_id,
+                path=f.path,
+                old=f.old,
+                new=f.new,
+                rules=list(f.rules),
+                confidence=f.confidence,  # type: ignore[arg-type]
+            )
+            for f in folders
         ],
         pending_lookups=engine.pending_lookups(plans, verdicts),
     )
@@ -322,6 +354,46 @@ def _rename_in_place(db: DbSession, track: Track, new_stem: str) -> tuple[str, s
     return (path_before, path_after)
 
 
+def _valid_leaf(name: str) -> bool:
+    return bool(
+        name
+        and name == name.strip()
+        and not any(c in name for c in "/\\")
+        and not name.startswith(".")
+        and len(name) <= 200
+    )
+
+
+def _rename_folder_in_place(
+    db: DbSession, folder_rel: str, new_leaf: str
+) -> tuple[str, str] | str:
+    """Rename a folder's leaf, keeping every track path under it in sync (via
+    the index's `rename_folder`). Returns (path_before, path_after) on
+    success, a skip reason on failure."""
+    rel = folder_rel.strip("/").replace("\\", "/")
+    if not rel:
+        return "refusing to rename the music root"
+    if not _valid_leaf(new_leaf):
+        return f"invalid folder name: {new_leaf!r}"
+    src = library_index.to_absolute(rel)
+    if not src.is_dir():
+        return "folder missing on disk"
+    parent = str(PurePosixPath(rel).parent)
+    parent = "" if parent == "." else parent
+    dst_rel = f"{parent}/{new_leaf}" if parent else new_leaf
+    if dst_rel == rel:
+        return "no change"
+    try:
+        library_index.rename_folder(db, rel, dst_rel)
+    except FileExistsError:
+        return f"a folder named {new_leaf} already exists"
+    except FileNotFoundError:
+        return "folder missing on disk"
+    except (ValueError, OSError) as e:
+        return f"folder rename failed: {e}"
+    return (rel, dst_rel)
+
+
 def _values_match(current: Any, expected: Any) -> bool:
     if current == expected:
         return True
@@ -333,6 +405,22 @@ def _values_match(current: Any, expected: Any) -> bool:
 def _apply_op(db: DbSession, op: CleanupOpIn) -> dict[str, Any] | str:
     """Apply one accepted operation. Returns the journal item on success,
     a skip reason string on failure."""
+    if op.kind == "folder_rename":
+        folder = (op.path or "").strip("/").replace("\\", "/")
+        # Stale-check the leaf against current disk state. Folder ops apply
+        # deepest-first (see apply_cleanup), so no ancestor has moved yet.
+        if PurePosixPath(folder).name != (op.old or ""):
+            return "folder changed since analysis"
+        result = _rename_folder_in_place(db, folder, str(op.new or ""))
+        if isinstance(result, str):
+            return result
+        path_before, path_after = result
+        return {
+            "kind": "folder_rename",
+            "path_before": path_before,
+            "path_after": path_after,
+        }
+
     track = db.get(Track, op.track_id)
     if track is None:
         return "track not found"
@@ -394,9 +482,20 @@ def apply_cleanup(payload: ApplyRequest, _: CurrentUser, db: DbSession) -> Apply
                 detail="batch was already reverted; start a new cleanup run",
             )
 
+    # Folder renames go last and deepest-first: a child folder must be
+    # renamed before its parent's path shifts under it, and a file rename
+    # inside a folder must happen before the folder itself moves. (The
+    # client already orders ops this way; we re-assert it per chunk so a
+    # nested pair landing in one chunk is always safe.)
+    ordered = [o for o in payload.ops if o.kind != "folder_rename"] + sorted(
+        (o for o in payload.ops if o.kind == "folder_rename"),
+        key=lambda o: o.path.count("/"),
+        reverse=True,
+    )
+
     applied_items: list[dict[str, Any]] = []
     skipped: list[CleanupSkip] = []
-    for op in payload.ops:
+    for op in ordered:
         outcome = _apply_op(db, op)
         if isinstance(outcome, str):
             skipped.append(CleanupSkip(track_id=op.track_id, reason=outcome))
@@ -500,6 +599,27 @@ def _revert_item(db: DbSession, item: dict[str, Any]) -> str | None:
             with contextlib.suppress(Exception):
                 shutil.move(str(target), str(src))
             return f"index update failed: {e}"
+        return None
+
+    if kind == "folder_rename":
+        path_before, path_after = item.get("path_before"), item.get("path_after")
+        if not isinstance(path_before, str) or not isinstance(path_after, str):
+            return "malformed journal item"
+        # Reverse order means any parent renamed in this batch was already
+        # un-renamed, so `path_after` is where the folder actually sits now.
+        if not library_index.to_absolute(path_after).is_dir():
+            return "no folder at the recorded path (moved or removed since)"
+        case_only = path_before.casefold() == path_after.casefold()
+        if library_index.to_absolute(path_before).exists() and not case_only:
+            return f"original folder name {Path(path_before).name} is taken"
+        try:
+            library_index.rename_folder(db, path_after, path_before)
+        except FileExistsError:
+            return f"original folder name {Path(path_before).name} is taken"
+        except FileNotFoundError:
+            return "no folder at the recorded path (moved or removed since)"
+        except (ValueError, OSError) as e:
+            return f"folder rename failed: {e}"
         return None
 
     if kind == "tag":

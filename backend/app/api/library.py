@@ -285,14 +285,17 @@ def search(
     stmt = select(Track)
     count_stmt = select(func.count()).select_from(Track)
     if q:
-        needle = f"%{q.lower()}%"
+        # Escape LIKE metacharacters so a query like "AC_DC" or "50%" matches
+        # the literal text instead of treating _ / % as wildcards.
+        needle = f"%{library_index.like_escape(q.lower())}%"
+        esc = library_index.LIKE_ESCAPE_CHAR
         haystack = or_(
-            func.lower(Track.title).like(needle),
-            func.lower(Track.display_title).like(needle),
-            func.lower(Track.artist).like(needle),
-            func.lower(Track.album).like(needle),
-            func.lower(Track.origin).like(needle),
-            func.lower(Track.path).like(needle),
+            func.lower(Track.title).like(needle, escape=esc),
+            func.lower(Track.display_title).like(needle, escape=esc),
+            func.lower(Track.artist).like(needle, escape=esc),
+            func.lower(Track.album).like(needle, escape=esc),
+            func.lower(Track.origin).like(needle, escape=esc),
+            func.lower(Track.path).like(needle, escape=esc),
         )
         stmt = stmt.where(haystack)
         count_stmt = count_stmt.where(haystack)

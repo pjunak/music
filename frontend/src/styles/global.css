@@ -4904,6 +4904,18 @@ input.volume-slider::-moz-range-thumb {
   transform: translateY(1px);
 }
 
+/* Folder renames are structural (folder-level, not per-track) — mark them
+   with the authoring/structural accent so they read distinctly from the
+   per-track op rows under the same section. */
+.cleanup-op-folder {
+  border-left: 2px solid var(--accent2-soft);
+  padding-left: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.cleanup-op-folder .cleanup-op-kind {
+  color: var(--accent2-strong);
+}
+
 .cleanup-op-kind {
   font-size: var(--text-2xs);
   text-transform: uppercase;

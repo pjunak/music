@@ -124,6 +124,21 @@ def safe_join(parent_rel: str, name: str, root: Path | None = None) -> Path:
     return target
 
 
+LIKE_ESCAPE_CHAR = "\\"
+
+
+def like_escape(value: str) -> str:
+    r"""Escape SQL ``LIKE`` metacharacters so `value` matches literally.
+
+    SQLite's ``LIKE`` reads ``_`` as any single char and ``%`` as any run, so
+    a folder name interpolated raw into a prefix pattern over-matches: scoping
+    to ``Skyrim_OST`` would also pull in ``SkyrimXOST``. Escape the interpolated
+    span and pass ``escape=LIKE_ESCAPE_CHAR`` to ``.like()``; keep real
+    wildcards (the trailing ``%``) outside the escaped span. Backslash is
+    escaped first so the escapes we add aren't themselves re-escaped."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def is_audio_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS
 
@@ -590,9 +605,10 @@ def track_ids_under(db: Session, rel_path: str) -> list[int]:
     rel_clean = rel_path.strip("/").replace("\\", "/")
     stmt = select(Track.id)
     if rel_clean:
-        prefix = f"{rel_clean}/"
+        prefix = like_escape(f"{rel_clean}/")
         stmt = stmt.where(
-            (Track.path == rel_clean) | (Track.path.like(f"{prefix}%"))
+            (Track.path == rel_clean)
+            | (Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
         )
     stmt = stmt.order_by(Track.path)
     return [int(r) for r in db.scalars(stmt).all()]
@@ -634,7 +650,9 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
         sub_rel = to_relative(child, root)
         count = (
             db.scalar(
-                select(func.count(Track.id)).where(Track.path.like(f"{sub_rel}/%"))
+                select(func.count(Track.id)).where(
+                    Track.path.like(f"{like_escape(sub_rel)}/%", escape=LIKE_ESCAPE_CHAR)
+                )
             )
             or 0
         )
@@ -653,11 +671,11 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
     # filters server-side instead of dragging every row into Python on
     # every folder browse.
     if rel_clean:
-        prefix = f"{rel_clean}/"
+        prefix = like_escape(f"{rel_clean}/")
         tracks_query = (
             select(Track)
-            .where(Track.path.like(f"{prefix}%"))
-            .where(~Track.path.like(f"{prefix}%/%"))
+            .where(Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
+            .where(~Track.path.like(f"{prefix}%/%", escape=LIKE_ESCAPE_CHAR))
             .order_by(Track.path)
         )
     else:
@@ -748,10 +766,11 @@ def delete_folder(
 
     removed_rows = 0
     if db is not None:
-        prefix = f"{rel_clean}/"
+        prefix = like_escape(f"{rel_clean}/")
         rows = db.scalars(
             select(Track).where(
-                (Track.path == rel_clean) | (Track.path.like(f"{prefix}%"))
+                (Track.path == rel_clean)
+                | (Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
             )
         ).all()
         for row in rows:
@@ -789,18 +808,31 @@ def rename_folder(
     dst_abs.relative_to(base)
     if not src_abs.is_dir():
         raise FileNotFoundError(f"source folder not found: {src_clean}")
-    if dst_abs.exists():
+    # A case-only rename ("CD1" → "Cd1") looks like a collision on a
+    # case-insensitive filesystem (Windows/macOS) but is legal — route it
+    # through a temp name so the move doesn't refuse its own target.
+    case_only = (
+        src_clean.casefold() == dst_clean.casefold()
+        and src_abs.parent == dst_abs.parent
+    )
+    if dst_abs.exists() and not case_only:
         raise FileExistsError(f"destination already exists: {dst_clean}")
 
-    dst_abs.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(src_abs), str(dst_abs))
+    if case_only:
+        tmp_abs = src_abs.parent / f"{src_abs.name}.cleanup-tmp"
+        shutil.move(str(src_abs), str(tmp_abs))
+        shutil.move(str(tmp_abs), str(dst_abs))
+    else:
+        dst_abs.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src_abs), str(dst_abs))
 
     rewritten = 0
     if db is not None:
-        prefix = f"{src_clean}/"
+        prefix = like_escape(f"{src_clean}/")
         rows = db.scalars(
             select(Track).where(
-                (Track.path == src_clean) | (Track.path.like(f"{prefix}%"))
+                (Track.path == src_clean)
+                | (Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
             )
         ).all()
         for row in rows:

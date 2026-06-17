@@ -9,6 +9,7 @@ import { cleanupApi } from "@/core/api";
 import type {
   CleanupAnalyzeResult,
   CleanupBatchSummary,
+  CleanupFolderSuggestion,
   CleanupOp,
   CleanupOpIn,
   CleanupRuleId,
@@ -115,6 +116,17 @@ const RULE_GROUPS: { label: string; rules: RuleMeta[] }[] = [
       },
     ],
   },
+  {
+    label: "Folder names",
+    rules: [
+      {
+        id: "rename_folders",
+        label: "Rename messy folders",
+        hint: "Tidy folder names (underscores, junk), canonicalize disc/part folders to “Disc 1” / “Part 1”, and — when a name is unusable (“1”, artist + junk) — rebuild it from the tracks’ tags (a guess, starts unticked). Case follows the rule above.",
+        defaultOn: true,
+      },
+    ],
+  },
 ];
 
 const DEFAULT_RULES: CleanupRuleId[] = RULE_GROUPS.flatMap((g) =>
@@ -147,7 +159,7 @@ function opLabel(op: CleanupOp): string {
 }
 
 /** Stable display order for the by-field tick chips. */
-const LABEL_ORDER = ["File", "Title", "Artist", "Album", "Track #", "Disc #", "Year"];
+const LABEL_ORDER = ["Folder", "File", "Title", "Artist", "Album", "Track #", "Disc #", "Year"];
 
 function Value({ value }: { value: string | number | null }) {
   if (value === null || value === "") {
@@ -216,32 +228,60 @@ export function CleanupDialog({
         : "entire library";
 
   const plans: CleanupTrackPlan[] = useMemo(() => result?.plans ?? [], [result]);
-  const allOps = useMemo(() => plans.flatMap((p) => p.ops), [plans]);
-  // Ops grouped by display label (File / Title / Artist / …) for the
+  const folderSuggestions: CleanupFolderSuggestion[] = useMemo(
+    () => result?.folders ?? [],
+    [result],
+  );
+  const folderSuggByPath = useMemo(() => {
+    const m = new Map<string, CleanupFolderSuggestion>();
+    for (const f of folderSuggestions) m.set(f.path, f);
+    return m;
+  }, [folderSuggestions]);
+
+  // Every tickable change (track ops + folder renames) flattened to a common
+  // {op_id, confidence, label} shape — drives the count, the All/Confident/
+  // None controls, and the by-field chips. Folder renames carry "Folder".
+  const allItems = useMemo(
+    () => [
+      ...plans.flatMap((p) =>
+        p.ops.map((o) => ({ op_id: o.op_id, confidence: o.confidence, label: opLabel(o) })),
+      ),
+      ...folderSuggestions.map((f) => ({
+        op_id: f.op_id,
+        confidence: f.confidence,
+        label: "Folder",
+      })),
+    ],
+    [plans, folderSuggestions],
+  );
+  // Items grouped by display label (Folder / File / Title / …) for the
   // by-field tick chips — "I can see the artist column is always right,
   // tick them all at once".
   const labelGroups = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const o of allOps) {
-      const label = opLabel(o);
-      const arr = m.get(label);
-      if (arr) arr.push(o.op_id);
-      else m.set(label, [o.op_id]);
+    for (const it of allItems) {
+      const arr = m.get(it.label);
+      if (arr) arr.push(it.op_id);
+      else m.set(it.label, [it.op_id]);
     }
     return [...m.entries()].sort(
       (a, b) => LABEL_ORDER.indexOf(a[0]) - LABEL_ORDER.indexOf(b[0]),
     );
-  }, [allOps]);
+  }, [allItems]);
+  // Sections keyed by folder: seeded with the folders that have a rename
+  // (so a tidy-only folder whose files are already clean still shows up),
+  // then each track plan dropped into its parent folder's section.
   const folderGroups = useMemo(() => {
     const m = new Map<string, CleanupTrackPlan[]>();
+    for (const f of folderSuggestions) if (!m.has(f.path)) m.set(f.path, []);
     for (const p of plans) {
       const f = folderOf(p.path);
       const arr = m.get(f);
       if (arr) arr.push(p);
       else m.set(f, [p]);
     }
-    return [...m.entries()];
-  }, [plans]);
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [plans, folderSuggestions]);
 
   function toggleRule(id: CleanupRuleId) {
     setRules((prev) => {
@@ -253,7 +293,7 @@ export function CleanupDialog({
   }
 
   function prepareReview(r: CleanupAnalyzeResult): boolean {
-    if (r.plans.length === 0) {
+    if (r.plans.length === 0 && r.folders.length === 0) {
       toast.success(
         "Nothing to clean",
         `Scanned ${r.scanned} track${r.scanned === 1 ? "" : "s"} — no issues matched the enabled rules.`,
@@ -261,14 +301,15 @@ export function CleanupDialog({
       return false;
     }
     setResult(r);
-    // High-confidence suggestions start ticked; guesses start unticked
-    // so a quick "Apply" only ever commits the safe set.
+    // High-confidence suggestions start ticked; guesses (including folder
+    // rebuilds) start unticked so a quick "Apply" only commits the safe set.
     setTicked(
-      new Set(
-        r.plans.flatMap((p) =>
+      new Set([
+        ...r.plans.flatMap((p) =>
           p.ops.filter((o) => o.confidence === "high").map((o) => o.op_id),
         ),
-      ),
+        ...r.folders.filter((f) => f.confidence === "high").map((f) => f.op_id),
+      ]),
     );
     setStep("review");
     return true;
@@ -351,7 +392,7 @@ export function CleanupDialog({
   }
 
   async function runApply() {
-    const ops: CleanupOpIn[] = plans.flatMap((p) =>
+    const trackOps: CleanupOpIn[] = plans.flatMap((p) =>
       p.ops
         .filter((o) => ticked.has(o.op_id))
         .map((o) => ({
@@ -362,6 +403,23 @@ export function CleanupDialog({
           new: o.new,
         })),
     );
+    // Folder renames go last and deepest-first: a child folder must move
+    // before its parent's path shifts under it (the server re-asserts this
+    // per chunk, but ordering them here keeps a nested pair from splitting
+    // parent-before-child across a chunk boundary).
+    const folderOps: CleanupOpIn[] = folderSuggestions
+      .filter((f) => ticked.has(f.op_id))
+      .slice()
+      .sort((a, b) => b.path.split("/").length - a.path.split("/").length)
+      .map((f) => ({
+        track_id: 0,
+        kind: "folder_rename" as const,
+        field: null,
+        old: f.old,
+        new: f.new,
+        path: f.path,
+      }));
+    const ops = [...trackOps, ...folderOps];
     if (ops.length === 0) return;
     setStep("applying");
     setProgress({ done: 0, total: ops.length });
@@ -577,8 +635,15 @@ export function CleanupDialog({
     <>
       <div className="cleanup-review-controls">
         <span>
-          <strong>{allOps.length}</strong> proposed change{allOps.length === 1 ? "" : "s"} across{" "}
+          <strong>{allItems.length}</strong> proposed change{allItems.length === 1 ? "" : "s"} across{" "}
           <strong>{plans.length}</strong> track{plans.length === 1 ? "" : "s"}
+          {folderSuggestions.length > 0 ? (
+            <>
+              {" "}
+              and <strong>{folderSuggestions.length}</strong> folder
+              {folderSuggestions.length === 1 ? "" : "s"}
+            </>
+          ) : null}
           {result ? <span className="muted"> (scanned {result.scanned})</span> : null}
         </span>
         <span className="cleanup-review-spacer" />
@@ -586,7 +651,7 @@ export function CleanupDialog({
         <button
           type="button"
           className="btn-link"
-          onClick={() => setTicked(new Set(allOps.map((o) => o.op_id)))}
+          onClick={() => setTicked(new Set(allItems.map((it) => it.op_id)))}
         >
           All
         </button>
@@ -595,7 +660,7 @@ export function CleanupDialog({
           className="btn-link"
           onClick={() =>
             setTicked(
-              new Set(allOps.filter((o) => o.confidence === "high").map((o) => o.op_id)),
+              new Set(allItems.filter((it) => it.confidence === "high").map((it) => it.op_id)),
             )
           }
         >
@@ -630,9 +695,36 @@ export function CleanupDialog({
         </div>
       ) : null}
       <div className="cleanup-review">
-        {folderGroups.map(([folder, group]) => (
+        {folderGroups.map(([folder, group]) => {
+          const folderSugg = folderSuggByPath.get(folder);
+          return (
           <section key={folder || "(root)"}>
             <h3 className="section-label cleanup-folder">{folder || "(root)"}</h3>
+            {folderSugg ? (
+              <label className="cleanup-op cleanup-op-folder">
+                <input
+                  type="checkbox"
+                  checked={ticked.has(folderSugg.op_id)}
+                  onChange={() => toggleOp(folderSugg.op_id)}
+                />
+                <span className="cleanup-op-kind">Folder</span>
+                <span className="cleanup-diff">
+                  <span className="cleanup-old">{folderSugg.old}</span>
+                  <span className="cleanup-arrow" aria-hidden="true">
+                    →
+                  </span>
+                  <span className="cleanup-new">{folderSugg.new}</span>
+                  {folderSugg.confidence === "low" ? (
+                    <span
+                      className="badge badge-warn cleanup-conf"
+                      title={`A guess (${folderSugg.rules.join(", ")}) — verify before ticking`}
+                    >
+                      guess
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            ) : null}
             {group.map((plan) => (
               <div key={plan.track_id} className="cleanup-track">
                 <div className="cleanup-track-path" title={plan.path}>
@@ -683,7 +775,8 @@ export function CleanupDialog({
               </div>
             ))}
           </section>
-        ))}
+          );
+        })}
       </div>
     </>
   );
