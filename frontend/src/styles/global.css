@@ -3895,6 +3895,24 @@ kbd,
   font-size: var(--text-md);
 }
 
+/* Upload duplicate-conflict chooser (overwrite / skip / keep both). Reuses
+ * .modal; sized a touch wider than a confirm so the three actions + Cancel
+ * fit, and the actions wrap instead of overflowing on a narrow screen. */
+.conflict-dialog {
+  width: min(460px, 100%);
+}
+.conflict-dialog .modal-actions {
+  flex-wrap: wrap;
+}
+.conflict-names {
+  margin: 0;
+  padding-left: var(--space-6);
+  max-height: 8rem;
+  overflow-y: auto;
+  color: var(--muted-strong);
+  font-size: var(--text-base);
+}
+
 /* --- settings view --- */
 
 .settings-view {

@@ -48,6 +48,13 @@ import { wsClient } from "@/core/ws";
 
 type Root = "music" | "sfx";
 
+/** Stable key for an upload target. JSON-encoding the (dest, name) pair is
+ *  unambiguous — a space (or any char) in either half can't be mistaken for
+ *  a separator — so collision lookups never false-match across folders. */
+function collisionKey(dest: string, name: string): string {
+  return JSON.stringify([dest, name]);
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -1039,8 +1046,6 @@ function FolderBand({
           });
           if (choice === null) return; // cancelled — abort the whole drop
           conflict = choice;
-          // Key on (dest, name) — JSON encodes the pair unambiguously so a
-          // space in either half can't be mistaken for the separator.
           for (const c of collisions) collisionKeys.add(collisionKey(c.dest, c.name));
         }
       } catch {
@@ -1059,7 +1064,7 @@ function FolderBand({
           .map(([subDir, files]): [string, File[]] => {
             const groupDest = joinDest(subDir);
             const kept = files.filter(
-              (f) => !collisionKeys.has(`${groupDest} ${f.name}`),
+              (f) => !collisionKeys.has(collisionKey(groupDest, f.name)),
             );
             skippedCount += files.length - kept.length;
             return [subDir, kept];
