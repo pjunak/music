@@ -223,6 +223,18 @@ export interface SearchResponse {
 export interface UploadResult {
   saved: Track[];
   destination: string;
+  /** Filenames skipped because they already existed and conflict was "skip". */
+  skipped: string[];
+}
+
+/** How an upload handles a filename that already exists at the destination.
+ *  "rename" keeps both (foo.mp3 -> foo-1.mp3), "overwrite" replaces, "skip"
+ *  leaves the existing file untouched. */
+export type UploadConflict = "rename" | "overwrite" | "skip";
+
+export interface UploadCheckItem {
+  dest: string;
+  name: string;
 }
 
 export interface RescanResult {
@@ -300,12 +312,20 @@ export const libraryApi = {
     files: File[],
     dest: string,
     onProgress?: (loaded: number, total: number) => void,
+    conflict?: UploadConflict,
   ): Promise<UploadResult> =>
     uploadWithProgress<UploadResult>(
-      `/api/library/upload?dest=${encodeURIComponent(dest)}`,
+      `/api/library/upload?dest=${encodeURIComponent(dest)}${
+        conflict ? `&conflict=${conflict}` : ""
+      }`,
       files,
       onProgress,
     ),
+  /** Preflight: which of these (dest, name) targets already exist on disk. */
+  checkUpload: (items: UploadCheckItem[]) =>
+    api.post<{ collisions: UploadCheckItem[] }>("/api/library/upload/check", {
+      items,
+    }),
   rescan: () => api.post<RescanResult>("/api/library/rescan"),
   updateMetadata: (id: number, payload: MetadataUpdate) =>
     api.patch<Track>(`/api/library/tracks/${id}/metadata`, payload),
@@ -506,6 +526,7 @@ export interface SfxFoldersResponse {
 export interface SfxUploadResult {
   saved: SfxFile[];
   destination: string;
+  skipped: string[];
 }
 
 export const sfxApi = {
@@ -519,12 +540,17 @@ export const sfxApi = {
     files: File[],
     dest: string,
     onProgress?: (loaded: number, total: number) => void,
+    conflict?: UploadConflict,
   ): Promise<SfxUploadResult> =>
     uploadWithProgress<SfxUploadResult>(
-      `/api/sfx/upload?dest=${encodeURIComponent(dest)}`,
+      `/api/sfx/upload?dest=${encodeURIComponent(dest)}${
+        conflict ? `&conflict=${conflict}` : ""
+      }`,
       files,
       onProgress,
     ),
+  checkUpload: (items: UploadCheckItem[]) =>
+    api.post<{ collisions: UploadCheckItem[] }>("/api/sfx/upload/check", { items }),
   moveFile: (src: string, dstFolder: string, newFilename?: string) =>
     api.post<SfxFile>("/api/sfx/move", {
       src,

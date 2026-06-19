@@ -124,6 +124,32 @@ def safe_join(parent_rel: str, name: str, root: Path | None = None) -> Path:
     return target
 
 
+def resolve_conflict(target: Path, conflict: str) -> Path | None:
+    """Decide the final write path for an upload given an existing-file policy.
+
+    Returns the path to write to, or ``None`` when the policy says to skip
+    the file. ``conflict`` is one of:
+
+    - ``"overwrite"`` — write to ``target`` even if it exists (replace it).
+    - ``"skip"``      — leave the existing file; return ``None``.
+    - ``"rename"``    — keep both: ``foo.mp3`` -> ``foo-1.mp3``, ``foo-2.mp3``…
+                        (the default, and what happens when nothing collides).
+    """
+    if not target.exists():
+        return target
+    if conflict == "overwrite":
+        return target
+    if conflict == "skip":
+        return None
+    stem, suffix = target.stem, target.suffix
+    n = 1
+    while True:
+        candidate = target.with_name(f"{stem}-{n}{suffix}")
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 LIKE_ESCAPE_CHAR = "\\"
 
 

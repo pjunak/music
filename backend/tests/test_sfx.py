@@ -124,6 +124,59 @@ def test_upload_dedupes_collisions(auth_client: TestClient) -> None:
     assert r.json()["saved"][0]["path"] == "dups/dup-1.wav"
 
 
+def test_upload_conflict_overwrite_replaces_in_place(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("dup.wav", b"first", "audio/wav"))],
+        params={"dest": "over"},
+    )
+    r = auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("dup.wav", b"second", "audio/wav"))],
+        params={"dest": "over", "conflict": "overwrite"},
+    )
+    assert r.json()["saved"][0]["path"] == "over/dup.wav"
+    sfx_dir = Path(os.environ["SFX_LIBRARY_DIR"])
+    assert (sfx_dir / "over" / "dup.wav").read_bytes() == b"second"
+    assert not (sfx_dir / "over" / "dup-1.wav").exists()
+
+
+def test_upload_conflict_skip_keeps_existing(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("dup.wav", b"first", "audio/wav"))],
+        params={"dest": "skip"},
+    )
+    r = auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("dup.wav", b"second", "audio/wav"))],
+        params={"dest": "skip", "conflict": "skip"},
+    )
+    body = r.json()
+    assert body["saved"] == []
+    assert body["skipped"] == ["dup.wav"]
+    sfx_dir = Path(os.environ["SFX_LIBRARY_DIR"])
+    assert (sfx_dir / "skip" / "dup.wav").read_bytes() == b"first"
+
+
+def test_upload_check_reports_only_existing(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/sfx/upload",
+        files=[("files", ("a.wav", b"x", "audio/wav"))],
+        params={"dest": "chk"},
+    )
+    r = auth_client.post(
+        "/api/sfx/upload/check",
+        json={
+            "items": [
+                {"dest": "chk", "name": "a.wav"},
+                {"dest": "chk", "name": "b.wav"},
+            ]
+        },
+    )
+    assert r.json()["collisions"] == [{"dest": "chk", "name": "a.wav"}]
+
+
 def test_upload_rejects_traversal_in_dest(auth_client: TestClient) -> None:
     r = auth_client.post(
         "/api/sfx/upload",

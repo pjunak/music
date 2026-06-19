@@ -86,6 +86,26 @@ class SearchResponse(BaseModel):
 class UploadResult(BaseModel):
     saved: list[TrackOut]
     destination: str
+    # Names skipped because they already existed and conflict="skip" was set.
+    skipped: list[str] = Field(default_factory=list)
+
+
+# How an upload handles a filename that already exists at the destination.
+UploadConflict = Literal["rename", "overwrite", "skip"]
+
+
+class UploadCheckItem(BaseModel):
+    dest: str
+    name: str
+
+
+class UploadCheckRequest(BaseModel):
+    items: list[UploadCheckItem]
+
+
+class UploadCheckResponse(BaseModel):
+    # The subset of `items` that already exist on disk at their destination.
+    collisions: list[UploadCheckItem]
 
 
 class RescanResult(BaseModel):
@@ -655,20 +675,24 @@ async def upload(
     db: DbSession,
     files: Annotated[list[UploadFile], File()],
     dest: str = Query("Uploads", description="Destination folder under MUSIC_DIR"),
+    conflict: Annotated[
+        UploadConflict, Query(description="Policy for existing files")
+    ] = "rename",
 ) -> UploadResult:
-    """Stream files into `<MUSIC_DIR>/<dest>/<original-name>`, dedupe name
-    collisions, then index whatever just landed."""
+    """Stream files into `<MUSIC_DIR>/<dest>/<original-name>`, applying the
+    `conflict` policy on name collisions, then index whatever just landed."""
     if not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="no files provided"
         )
 
     try:
-        dest_dir = library_index.ensure_folder(dest)
+        library_index.ensure_folder(dest)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     written: list[Path] = []
+    skipped: list[str] = []
     for upload_file in files:
         if not upload_file.filename:
             continue
@@ -678,16 +702,11 @@ async def upload(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
             ) from e
-        # Dedupe name collisions: foo.mp3 -> foo-1.mp3, foo-2.mp3, ...
-        if target.exists():
-            stem, suffix = target.stem, target.suffix
-            n = 1
-            while True:
-                candidate = dest_dir / f"{stem}-{n}{suffix}"
-                if not candidate.exists():
-                    target = candidate
-                    break
-                n += 1
+        resolved = library_index.resolve_conflict(target, conflict)
+        if resolved is None:
+            skipped.append(upload_file.filename)
+            continue
+        target = resolved
         # Stream into a sibling .partial file, then atomic-rename to the
         # real path. If the upload is interrupted (network drop, server
         # restart), only the .partial is left behind — never a truncated
@@ -711,7 +730,25 @@ async def upload(
     return UploadResult(
         saved=[TrackOut.model_validate(t) for t in indexed],
         destination=dest.strip("/"),
+        skipped=skipped,
     )
+
+
+@router.post("/upload/check", response_model=UploadCheckResponse)
+def upload_check(payload: UploadCheckRequest, _: CurrentUser) -> UploadCheckResponse:
+    """Report which of the proposed (dest, name) targets already exist on disk,
+    so the client can ask the operator how to handle duplicates before sending
+    any bytes. Paths that fail traversal validation aren't collisions here —
+    the upload itself will reject them with a clear error."""
+    collisions: list[UploadCheckItem] = []
+    for item in payload.items:
+        try:
+            target = library_index.safe_join(item.dest, item.name)
+        except ValueError:
+            continue
+        if target.exists():
+            collisions.append(item)
+    return UploadCheckResponse(collisions=collisions)
 
 
 @router.post("/rescan", response_model=RescanResult)

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
+import { ConflictDialogHost } from "@/components/ConflictDialogHost";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { InputDialogHost } from "@/components/InputDialogHost";
 import { ShortcutSheet } from "@/components/ShortcutSheet";
@@ -208,6 +209,7 @@ export default function AppShell() {
       <Toaster />
       <LoginModal />
       <ConfirmDialogHost />
+      <ConflictDialogHost />
       <InputDialogHost />
       {shortcutSheetOpen ? (
         <ShortcutSheet onClose={() => setShortcutSheetOpen(false)} />

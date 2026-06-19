@@ -203,6 +203,61 @@ def test_upload_dedupe_collisions(auth_client: TestClient) -> None:
     assert r.json()["saved"][0]["path"] == "DupTest/dup-1.wav"
 
 
+def test_upload_conflict_overwrite_replaces_in_place(auth_client: TestClient) -> None:
+    files1 = [("files", ("dup.wav", _silent_wav(), "audio/wav"))]
+    auth_client.post("/api/library/upload", files=files1, params={"dest": "OverTest"})
+    files2 = [("files", ("dup.wav", _silent_wav(), "audio/wav"))]
+    r = auth_client.post(
+        "/api/library/upload",
+        files=files2,
+        params={"dest": "OverTest", "conflict": "overwrite"},
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["saved"][0]["path"] == "OverTest/dup.wav"
+    assert body["skipped"] == []
+    # No -1 copy was minted.
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert not (music_dir / "OverTest" / "dup-1.wav").exists()
+
+
+def test_upload_conflict_skip_keeps_existing(auth_client: TestClient) -> None:
+    files1 = [("files", ("dup.wav", _silent_wav(), "audio/wav"))]
+    auth_client.post("/api/library/upload", files=files1, params={"dest": "SkipTest"})
+    files2 = [("files", ("dup.wav", _silent_wav(), "audio/wav"))]
+    r = auth_client.post(
+        "/api/library/upload",
+        files=files2,
+        params={"dest": "SkipTest", "conflict": "skip"},
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["saved"] == []
+    assert body["skipped"] == ["dup.wav"]
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    assert (music_dir / "SkipTest" / "dup.wav").exists()
+    assert not (music_dir / "SkipTest" / "dup-1.wav").exists()
+
+
+def test_upload_check_reports_only_existing(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("a.wav", _silent_wav(), "audio/wav"))],
+        params={"dest": "CheckTest"},
+    )
+    r = auth_client.post(
+        "/api/library/upload/check",
+        json={
+            "items": [
+                {"dest": "CheckTest", "name": "a.wav"},
+                {"dest": "CheckTest", "name": "b.wav"},
+            ]
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["collisions"] == [{"dest": "CheckTest", "name": "a.wav"}]
+
+
 def test_upload_rejects_path_traversal(auth_client: TestClient) -> None:
     files = [("files", ("../escape.wav", _silent_wav(), "audio/wav"))]
     r = auth_client.post(

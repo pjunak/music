@@ -5,6 +5,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import type { BreadcrumbItem } from "@/components/Breadcrumb";
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { confirmDialog } from "@/components/confirmDialog";
+import { uploadConflictDialog } from "@/components/conflictDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { FolderPickerModal } from "@/components/FolderPickerModal";
 import { FolderTree } from "@/components/FolderTree";
@@ -29,7 +30,7 @@ import {
 import { inputDialog } from "@/components/inputDialog";
 import { TagInspector } from "@/components/TagInspector";
 import { libraryApi, sfxApi } from "@/core/api";
-import type { SfxFile } from "@/core/api";
+import type { SfxFile, UploadCheckItem, UploadConflict } from "@/core/api";
 import {
   collectEntries,
   entriesFromItems,
@@ -1010,63 +1011,125 @@ function FolderBand({
       return;
     }
     setBusy(true);
-    const totalBytes = collected.reduce((sum, c) => sum + c.file.size, 0);
-    setProgress({ loaded: 0, total: totalBytes });
-
-    const groups = groupByParent(collected);
-    let baseLoaded = 0;
     let savedTotal = 0;
-
-    // First top-level subfolder created by this drop (the first path
-    // segment of any non-empty group key). Used to navigate the operator
-    // into their freshly-uploaded folder afterwards. Null = drop was loose
-    // files only, so we stay put (they appear in the current track table).
-    let firstSubfolder: string | null = null;
-    for (const subDir of groups.keys()) {
-      if (subDir !== "") {
-        firstSubfolder = subDir.split("/")[0] ?? null;
-        break;
-      }
-    }
-
+    let skippedCount = 0;
     try {
-      for (const [subDir, files] of groups) {
+      const groups = groupByParent(collected);
+
+      // Preflight: does anything already exist at the target paths? Ask the
+      // operator how to handle it BEFORE sending bytes — so re-uploading
+      // after a half-failed upload doesn't silently mint "-1" copies.
+      const checkItems: UploadCheckItem[] = [];
+      for (const [subDir, files] of groups)
+        for (const f of files)
+          checkItems.push({ dest: joinDest(subDir), name: f.name });
+
+      let conflict: UploadConflict | undefined;
+      const collisionKeys = new Set<string>();
+      try {
+        const { collisions } =
+          root === "music"
+            ? await libraryApi.checkUpload(checkItems)
+            : await sfxApi.checkUpload(checkItems);
+        if (collisions.length > 0) {
+          const choice = await uploadConflictDialog({
+            count: collisions.length,
+            total: checkItems.length,
+            sampleNames: collisions.slice(0, 5).map((c) => c.name),
+          });
+          if (choice === null) return; // cancelled — abort the whole drop
+          conflict = choice;
+          // Key on (dest, name) — JSON encodes the pair unambiguously so a
+          // space in either half can't be mistaken for the separator.
+          for (const c of collisions) collisionKeys.add(collisionKey(c.dest, c.name));
+        }
+      } catch {
+        // Preflight failed (rare — same server). Fall through to a normal
+        // upload; the backend default keeps both, and any genuine failure
+        // surfaces via the upload's own error handling below.
+      }
+
+      // For "skip", drop colliding files client-side so we don't waste
+      // bandwidth re-sending bytes the server would discard. conflict=skip
+      // still goes to the backend to cover a file that appears between the
+      // check and the upload (race-safety).
+      let workGroups: Array<[string, File[]]> = [...groups];
+      if (conflict === "skip") {
+        workGroups = workGroups
+          .map(([subDir, files]): [string, File[]] => {
+            const groupDest = joinDest(subDir);
+            const kept = files.filter(
+              (f) => !collisionKeys.has(`${groupDest} ${f.name}`),
+            );
+            skippedCount += files.length - kept.length;
+            return [subDir, kept];
+          })
+          .filter(([, files]) => files.length > 0);
+      }
+
+      if (workGroups.length === 0) {
+        // Everything collided and the operator chose to skip — nothing left.
+        toast.info(
+          "Nothing to upload",
+          `All ${skippedCount} file${skippedCount === 1 ? "" : "s"} already exist.`,
+        );
+        return;
+      }
+
+      const totalBytes = workGroups.reduce(
+        (sum, [, files]) => sum + files.reduce((s, f) => s + f.size, 0),
+        0,
+      );
+      setProgress({ loaded: 0, total: totalBytes });
+
+      // First top-level subfolder this drop lands files in — used to navigate
+      // the operator into it afterwards (computed post-skip so we never jump
+      // into a folder that ended up empty). Null = loose files only, stay put.
+      let firstSubfolder: string | null = null;
+      for (const [subDir] of workGroups) {
+        if (subDir !== "") {
+          firstSubfolder = subDir.split("/")[0] ?? null;
+          break;
+        }
+      }
+
+      let baseLoaded = 0;
+      for (const [subDir, files] of workGroups) {
         const groupDest = joinDest(subDir);
         const groupBytes = files.reduce((s, f) => s + f.size, 0);
-        // libraryApi.upload reports (loaded, total) for that one group; we
-        // re-base it against the cumulative drop total so the progress bar
-        // moves monotonically across the whole multi-folder upload.
+        // upload reports (loaded) for that one group; re-base against the
+        // cumulative drop total so the bar moves monotonically.
         const onGroupProgress = (loaded: number) => {
           setProgress({ loaded: baseLoaded + loaded, total: totalBytes });
         };
-        if (root === "music") {
-          const r = await libraryApi.upload(files, groupDest, onGroupProgress);
-          savedTotal += r.saved.length;
-        } else {
-          const r = await sfxApi.upload(files, groupDest, onGroupProgress);
-          savedTotal += r.saved.length;
-        }
+        const r =
+          root === "music"
+            ? await libraryApi.upload(files, groupDest, onGroupProgress, conflict)
+            : await sfxApi.upload(files, groupDest, onGroupProgress, conflict);
+        savedTotal += r.saved.length;
+        skippedCount += r.skipped.length;
         baseLoaded += groupBytes;
       }
-      const folderCount = groups.size;
-      const detail =
+
+      const folderCount = workGroups.length;
+      const where =
         folderCount > 1
           ? `across ${folderCount} folders under "${dest || "(root)"}"`
           : `→ ${dest || "(root)"}`;
+      const detail =
+        skippedCount > 0 ? `${where} · skipped ${skippedCount} existing` : where;
       toast.success(`Uploaded ${savedTotal}`, detail);
-      // Always refresh (re-reads the index/tree so new folders + tracks
-      // show up). For a folder drop, also navigate INTO the uploaded
-      // folder so the result is immediately visible instead of hiding in
-      // a collapsed subfolder — that's what made it look like "nothing
-      // happened". Loose-file drops stay put; the files appear in the
-      // current track table directly.
+      // Refresh (re-reads the index/tree so new folders + tracks show up).
+      // For a folder drop, navigate INTO the uploaded folder so the result
+      // is visible instead of hiding in a collapsed subtree. Loose-file
+      // drops stay put; the files appear in the current track table.
       onUploaded();
       if (firstSubfolder !== null) {
         onNavigate(joinDest(firstSubfolder));
       }
     } catch (e) {
       // Partial uploads happen — some files may have landed before the
-      // failing request. Tell the operator both numbers so they know
+      // failing request. Tell the operator how many made it so they know
       // whether to retry from scratch or just re-drop the missing folder.
       toast.error(
         "Upload failed",

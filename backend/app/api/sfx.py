@@ -19,7 +19,7 @@ import contextlib
 import shutil
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
@@ -95,6 +95,25 @@ class SfxFoldersResponse(BaseModel):
 class SfxUploadResult(BaseModel):
     saved: list[SfxFileOut]
     destination: str
+    # Names skipped because they already existed and conflict="skip" was set.
+    skipped: list[str] = Field(default_factory=list)
+
+
+# How an upload handles a filename that already exists at the destination.
+UploadConflict = Literal["rename", "overwrite", "skip"]
+
+
+class UploadCheckItem(BaseModel):
+    dest: str
+    name: str
+
+
+class UploadCheckRequest(BaseModel):
+    items: list[UploadCheckItem]
+
+
+class UploadCheckResponse(BaseModel):
+    collisions: list[UploadCheckItem]
 
 
 class SfxMoveRequest(BaseModel):
@@ -280,6 +299,9 @@ async def upload(
     _: CurrentUser,
     files: Annotated[list[UploadFile], File()],
     dest: str = Query("", description="Destination folder under SFX_LIBRARY_DIR"),
+    conflict: Annotated[
+        UploadConflict, Query(description="Policy for existing files")
+    ] = "rename",
 ) -> SfxUploadResult:
     if not files:
         raise HTTPException(
@@ -287,11 +309,12 @@ async def upload(
         )
     root = sfx_root()
     try:
-        dest_dir = library_index.ensure_folder(dest, root=root)
+        library_index.ensure_folder(dest, root=root)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     saved: list[SfxFileOut] = []
+    skipped: list[str] = []
     for upload_file in files:
         if not upload_file.filename:
             continue
@@ -301,15 +324,11 @@ async def upload(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
             ) from e
-        if target.exists():
-            stem, suffix = target.stem, target.suffix
-            n = 1
-            while True:
-                candidate = dest_dir / f"{stem}-{n}{suffix}"
-                if not candidate.exists():
-                    target = candidate
-                    break
-                n += 1
+        resolved = library_index.resolve_conflict(target, conflict)
+        if resolved is None:
+            skipped.append(upload_file.filename)
+            continue
+        target = resolved
         partial = target.with_name(f".{target.name}.partial")
         try:
             with partial.open("wb") as out:
@@ -322,7 +341,23 @@ async def upload(
                     partial.unlink()
             raise
         saved.append(_stat_file(target, root))
-    return SfxUploadResult(saved=saved, destination=dest.strip("/"))
+    return SfxUploadResult(saved=saved, destination=dest.strip("/"), skipped=skipped)
+
+
+@router.post("/upload/check", response_model=UploadCheckResponse)
+def upload_check(payload: UploadCheckRequest, _: CurrentUser) -> UploadCheckResponse:
+    """Report which proposed (dest, name) targets already exist under the SFX
+    root, so the client can ask about duplicates before sending bytes."""
+    root = sfx_root()
+    collisions: list[UploadCheckItem] = []
+    for item in payload.items:
+        try:
+            target = library_index.safe_join(item.dest, item.name, root=root)
+        except ValueError:
+            continue
+        if target.exists():
+            collisions.append(item)
+    return UploadCheckResponse(collisions=collisions)
 
 
 @router.post("/move", response_model=SfxFileOut)
