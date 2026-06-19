@@ -167,6 +167,64 @@ def test_cover_404_when_no_artwork(
     assert r.status_code == 404
 
 
+# --- batch track fetch ---------------------------------------------------
+
+
+def test_tracks_batch_requires_ids(auth_client: TestClient) -> None:
+    # `ids` is required; omitting it is a client error, not an empty result.
+    assert auth_client.get("/api/library/tracks").status_code == 422
+
+
+def test_tracks_batch_returns_requested_in_order(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    ids = [extra_seeded_track_ids[1], seeded_track_id, extra_seeded_track_ids[0]]
+    r = auth_client.get(
+        "/api/library/tracks", params={"ids": ",".join(str(i) for i in ids)}
+    )
+    assert r.status_code == 200
+    assert [t["id"] for t in r.json()] == ids
+
+
+def test_tracks_batch_skips_unknown_and_dedups(
+    auth_client: TestClient, seeded_track_id: int
+) -> None:
+    r = auth_client.get(
+        "/api/library/tracks",
+        params={"ids": f"{seeded_track_id},999999,{seeded_track_id}"},
+    )
+    assert r.status_code == 200
+    # Unknown id dropped, duplicate collapsed to a single row.
+    assert [t["id"] for t in r.json()] == [seeded_track_id]
+
+
+def test_tracks_batch_empty_ids_returns_empty(auth_client: TestClient) -> None:
+    r = auth_client.get("/api/library/tracks", params={"ids": ""})
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_tracks_batch_rejects_non_integer(auth_client: TestClient) -> None:
+    r = auth_client.get("/api/library/tracks", params={"ids": "1,abc,3"})
+    assert r.status_code == 422
+
+
+def test_tracks_batch_rejects_too_many(auth_client: TestClient) -> None:
+    too_many = ",".join(str(i) for i in range(1, 502))  # 501 > 500 cap
+    assert auth_client.get(
+        "/api/library/tracks", params={"ids": too_many}
+    ).status_code == 422
+
+
+def test_tracks_batch_open_to_guests(client: TestClient, seeded_track_id: int) -> None:
+    # Matches the single-track endpoint's access level (guest-accessible).
+    r = client.get("/api/library/tracks", params={"ids": str(seeded_track_id)})
+    assert r.status_code == 200
+    assert [t["id"] for t in r.json()] == [seeded_track_id]
+
+
 # --- upload + rescan -----------------------------------------------------
 
 
