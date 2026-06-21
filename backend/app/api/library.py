@@ -339,6 +339,52 @@ def search(
     )
 
 
+@router.get("/tracks", response_model=list[TrackOut])
+def get_tracks_batch(
+    _: OptionalUser,
+    db: DbSession,
+    ids: str = Query(
+        ...,
+        description=(
+            "Comma-separated track ids, e.g. ?ids=1,2,3. Returns the matching "
+            "tracks in requested order; duplicate and unknown ids are dropped. "
+            "Max 500 ids per request."
+        ),
+    ),
+) -> list[TrackOut]:
+    """Resolve many tracks' metadata in one round trip. The queue/history in
+    PlayerState are id lists, so a client rendering them would otherwise fan
+    out into N calls to ``/tracks/{id}``. Order follows the request (first
+    occurrence wins); duplicate and unknown ids are dropped. Guest-accessible,
+    matching the single-track endpoint."""
+    seen: set[int] = set()
+    ordered_ids: list[int] = []
+    for raw in ids.split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        try:
+            track_id = int(token)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"invalid track id: {token!r}",
+            ) from None
+        if track_id not in seen:
+            seen.add(track_id)
+            ordered_ids.append(track_id)
+    if len(ordered_ids) > 500:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="too many ids (max 500 per request)",
+        )
+    if not ordered_ids:
+        return []
+    rows = db.scalars(select(Track).where(Track.id.in_(ordered_ids))).all()
+    by_id = {track.id: track for track in rows}
+    return [TrackOut.model_validate(by_id[tid]) for tid in ordered_ids if tid in by_id]
+
+
 @router.get("/tracks/{track_id}", response_model=TrackOut)
 def get_track(track_id: int, _: OptionalUser, db: DbSession) -> TrackOut:
     """Single-track metadata. Open to guests so a logged-out Player tab
