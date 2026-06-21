@@ -265,7 +265,7 @@ def _build_m3u(name: str, items: list[TrackInPlaylist]) -> str:
             # path (most players will warn on a missing file).
             lines.append(f"# missing track #{it.track_id}")
             continue
-        length = max(0, int(round(it.track.length_s)))
+        length = max(0, round(it.track.length_s))
         artist = it.track.artist or ""
         title = it.track.title or it.track.path.rsplit("/", 1)[-1]
         # `,` is the EXTINF separator; an artist or title with a comma

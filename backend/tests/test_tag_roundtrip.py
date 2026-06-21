@@ -64,7 +64,7 @@ def _float80(value: float) -> bytes:
     if value == 0:
         return struct.pack(">HQ", 0, 0)
     mant, exp = math.frexp(value)  # value == mant * 2**exp, 0.5 <= mant < 1
-    mant_int = int(round(mant * (1 << 64)))
+    mant_int = round(mant * (1 << 64))
     exp += 16382
     if mant_int == (1 << 64):  # rounding carried into the integer bit
         mant_int >>= 1
