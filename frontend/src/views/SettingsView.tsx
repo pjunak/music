@@ -7,6 +7,7 @@ import { Switch } from "@/components/Switch";
 import { authApi, devicesApi } from "@/core/api";
 import type { ActiveSession } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
+import { shortDeviceLabel } from "@/core/deviceLabel";
 import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import type { KnownDevice } from "@/core/types";
@@ -173,7 +174,7 @@ function DevicesPanel() {
             <li key={d.client_id} className="device-row">
               <div className="device-row-main">
                 <div className="device-row-name">
-                  {d.name || "(unnamed)"}
+                  {d.name ? shortDeviceLabel(d.name) : "(unnamed)"}
                   {d.client_id === myDeviceId ? (
                     <span className="badge"> this device</span>
                   ) : null}
@@ -219,7 +220,7 @@ function DevicesPanel() {
               <li key={d.client_id} className="device-row">
                 <div className="device-row-main">
                   <div className="device-row-name">
-                    {d.name || "(unnamed)"}
+                    {d.name ? shortDeviceLabel(d.name) : "(unnamed)"}
                     {d.client_id === myDeviceId ? (
                       <span className="badge"> this device</span>
                     ) : null}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuthStore } from "@/core/auth";
+import { shortDeviceLabel } from "@/core/deviceLabel";
 import { playbackEngine } from "@/core/playbackEngine";
 import {
   selectIsMyOutput,
@@ -174,7 +175,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
             </Link>
           </div>
           <SpeakerRow
-            name={`${thisDevice?.name ?? deviceName ?? "This device"} (this)`}
+            name={`${shortDeviceLabel(thisDevice?.name ?? deviceName ?? "This device")} (this)`}
             on={activeIds.includes(deviceId)}
             isDefault={thisDevice?.is_output ?? false}
             volume={deviceVolumes[deviceId] ?? 1}
@@ -184,7 +185,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
           {others.map((d) => (
             <SpeakerRow
               key={d.device_id}
-              name={d.name}
+              name={shortDeviceLabel(d.name)}
               on={activeIds.includes(d.device_id)}
               isDefault={d.is_output}
               volume={deviceVolumes[d.device_id] ?? 1}

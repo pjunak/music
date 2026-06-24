@@ -876,6 +876,21 @@
 
   // ---- Bootstrap --------------------------------------------------------
 
+  function hasTvParam() {
+    // ?tv (valueless) -> getQueryParam returns "" (present); absent -> null.
+    return getQueryParam("tv") !== null;
+  }
+
+  // Whether the SPA owns #root and tv-mode must stand down. True once the bundle
+  // has booted (or React has already painted) — EXCEPT under an explicit ?tv
+  // preview, where main.tsx injected us on purpose and tv-mode wins. This is
+  // what stops a watchdog-injected copy from racing a bundle that booted a beat
+  // after the watchdog fired.
+  function spaOwnsRoot() {
+    if (hasTvParam()) return false;
+    return reactMounted() || !!window.__SPA_BOOTED__;
+  }
+
   function activateTvMode() {
     // The only hard floor is XHR: a WebSocket-less browser still works over the
     // polling fallback (handled inside start()), so it's not dead-ended here.
@@ -886,19 +901,22 @@
     renderStartScreen(function () { start(); });
   }
 
-  // This script runs in exactly two situations, both of which mean the SPA
-  // will NOT render in this document:
-  //   1. <script nomodule> on a browser too old for ES modules — the
-  //      capability gate that decides "is TV mode needed?" (index.html). A
-  //      module-capable browser never even fetches this file.
-  //   2. main.tsx injecting it for the ?tv preview (React is skipped there).
-  // So activate immediately. The old "wait Nms for React, then claim #root"
-  // timer is gone: it was the engine of the black-screen / phantom-redirect
-  // reports (a crashed or merely slow SPA got kidnapped). The reactMounted()
-  // check is pure defence against an accidental double-injection — it must
-  // never clobber a live SPA.
+  // This script runs in three situations, all of which mean the SPA is NOT
+  // rendering in this document:
+  //   1. <script nomodule> on a browser too old for ES modules (index.html) —
+  //      the fast capability path; a module-capable browser never fetches this.
+  //   2. The index.html boot watchdog injecting it because the module bundle
+  //      errored or never booted (a module-capable-but-too-old TV that can't
+  //      parse the bundle's modern syntax) — the case `nomodule` alone misses.
+  //   3. main.tsx injecting it for the ?tv preview (React is skipped there).
+  // __TV_MODE_ACTIVE__ makes activation idempotent (paths 1 and 2 can both fire
+  // on the same old TV around DOMready). spaOwnsRoot() is the safety net: the
+  // old "wait Nms for React, then claim #root" paint timer that kidnapped a
+  // crashed/slow SPA is gone — we only ever take over when the bundle has
+  // demonstrably failed to run.
   whenReady(function () {
-    if (reactMounted()) return;
+    if (window.__TV_MODE_ACTIVE__ || spaOwnsRoot()) return;
+    window.__TV_MODE_ACTIVE__ = true;
     activateTvMode();
   });
 })();

@@ -9,13 +9,56 @@
     <div id="root"></div>
     <noscript><div style="padding:40px;font-family:sans-serif;color:#fff;background:#0a0a0a;">This app requires JavaScript.</div></noscript>
     <!-- tv-mode.js is the legacy fallback for browsers that can't run the
-         ES-module SPA (old Smart TVs). `nomodule` is a race-free capability
-         check: module-capable browsers ignore it entirely (so it can never
-         race React or masquerade as "TV mode"); browsers without module
-         support skip the module script below and run this instead. For an
-         explicit ?tv preview on a modern browser, main.tsx injects it on
-         demand. -->
+         ES-module SPA (old Smart TVs). `nomodule` is the FAST path: a browser
+         with no module support at all skips the module script below and runs
+         this immediately, no waiting. For an explicit ?tv preview on a modern
+         browser, main.tsx injects it on demand. -->
     <script nomodule src="/tv-mode.js"></script>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- SPA boot watchdog (classic script — runs on every browser, ES5 only).
+         `nomodule` above gates on *module support*, but that isn't the same as
+         *being able to run the bundle*: a 2017-era smart-TV browser supports
+         <script type=module> yet chokes on the bundle's modern syntax (e.g.
+         `??`), so the module fails to parse, main.tsx never runs, #root stays
+         empty, and `nomodule` was skipped — a blank screen with nothing to
+         recover it. This watchdog closes that gap: main.tsx sets
+         window.__SPA_BOOTED__ the instant it runs; if the bundle instead errors
+         (the capture-phase listener catches the parse-time SyntaxError / a
+         failed bundle fetch) or simply never boots, we load the TV fallback.
+         It keys on bundle *execution*, not React paint, so unlike the old paint
+         timer it can't steal #root from a capable-but-slow browser; a render
+         crash stays owned by the ErrorBoundary (which keeps #root populated). -->
+    <script>
+      (function () {
+        var rescued = false;
+        function rescueToTvMode() {
+          if (rescued || window.__SPA_BOOTED__ || window.__TV_MODE_ACTIVE__) return;
+          rescued = true;
+          var s = document.createElement("script");
+          s.src = "/tv-mode.js";
+          (document.body || document.documentElement).appendChild(s);
+        }
+        // Fast path: a script parse/eval error (the `??` SyntaxError) or a
+        // failed bundle fetch fires here before boot. Defer briefly so a
+        // transient error on an otherwise-booting bundle lets boot win the race.
+        window.addEventListener("error", function (e) {
+          if (window.__SPA_BOOTED__) return;
+          var t = e && e.target;
+          if ((t && t.tagName === "SCRIPT") || (e && e.message)) {
+            setTimeout(rescueToTvMode, 250);
+          }
+        }, true);
+        // Once the page finishes loading, the load-blocking module bundle has
+        // either executed (flag set -> no-op) or silently failed to (flag unset
+        // -> rescue, for TVs that don't surface a catchable parse error). A
+        // short grace absorbs any execution lag.
+        window.addEventListener("load", function () {
+          setTimeout(rescueToTvMode, 1500);
+        });
+        // Absolute backstop for the pathological "load never fires" hang (e.g. a
+        // module fetch that stalls without erroring).
+        setTimeout(rescueToTvMode, 10000);
+      })();
+    </script>
   </body>
 </html>
