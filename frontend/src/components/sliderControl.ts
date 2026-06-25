@@ -60,7 +60,7 @@ interface KeyOpts {
 export function handleSliderKey(e: KeyboardEvent, opts: KeyOpts): boolean {
   const { value, min, max, step, onChange } = opts;
   const big = Math.max(step, (max - min) / 10);
-  let next: number | null = null;
+  let next: number;
   switch (e.key) {
     case "ArrowUp":
     case "ArrowRight":

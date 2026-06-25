@@ -16,6 +16,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    // The boot-watchdog / tv-mode tests read repo files via node:fs; TS 6 no
+    // longer auto-includes @types/node, so name it explicitly.
+    "types": ["node"],
+
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -23,9 +27,8 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
 
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src"]

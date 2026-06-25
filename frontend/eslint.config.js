@@ -23,6 +23,12 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // v7 folded the React-Compiler rules into `recommended`. They flag
+      // intentional patterns (prop→local-state mirrors, etc.) across the app;
+      // keep the classic rules-of-hooks + exhaustive-deps contract and adopt
+      // these deliberately as their own refactor rather than as a lint bump.
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/use-memo": "off",
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/consistent-type-imports": "error",
       "local/stable-store-selector": "error",
