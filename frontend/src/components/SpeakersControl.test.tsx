@@ -109,7 +109,7 @@ describe("SpeakersControl", () => {
     seedAuthed({ designated: true });
     renderControl();
     await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
-    fireEvent.change(screen.getByLabelText("DM (this) volume"), {
+    fireEvent.change(screen.getByLabelText("DM volume"), {
       target: { value: "0.4" },
     });
     expect(wsClient.send).toHaveBeenCalledWith({
@@ -117,6 +117,15 @@ describe("SpeakersControl", () => {
       device_id: CID,
       volume: 0.4,
     });
+  });
+
+  it("marks this device with a subtle visual, not '(this)' text", async () => {
+    seedAuthed({ designated: false });
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    // The screen-reader marker is present; the old "(this)" suffix is gone.
+    expect(screen.getByText("This device")).toBeInTheDocument();
+    expect(screen.queryByText(/\(this\)/)).toBeNull();
   });
 
   it("gives guests a local-only toggle, no popover", () => {

@@ -2005,8 +2005,12 @@ kbd,
   bottom: calc(100% + 0.4rem);
   right: 0;
   z-index: 50;
-  width: min(320px, 80vw);
-  background: var(--surface);
+  /* Wider than before so device names fit and the per-device volume slider
+   *  has room for finer control. */
+  width: min(420px, 92vw);
+  /* A step up from --surface so the panel reads clearly against the dark
+   *  footer in dark mode (the old --surface blended in). */
+  background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
@@ -2028,27 +2032,47 @@ kbd,
 }
 .speaker-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 140px);
+  /* icon | name | volume | checkbox(right edge, near the cursor) */
+  grid-template-columns: auto minmax(0, 1fr) minmax(96px, 168px) auto;
   align-items: center;
   gap: var(--space-3);
-  padding: 0.35rem 0.3rem;
-  border-radius: 4px;
+  padding: 0.4rem 0.45rem;
+  border-radius: var(--radius-sm);
+  /* Reserve the "this device" frame at rest so toggling it adds no shift. */
+  box-shadow: inset 0 0 0 1px transparent;
 }
 .speaker-row.on {
   background: var(--accent-soft);
 }
-.speaker-row-toggle {
+/* "This device" marker — a subtle neutral frame + stronger icon/name instead
+ *  of the old "(this)" text. Visible at a glance, not intrusive, and it
+ *  doesn't borrow the reserved accent colours. */
+.speaker-row.is-this {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.speaker-row-icon {
+  font-size: 1.6rem;
+  color: var(--muted-strong);
+  flex-shrink: 0;
+}
+.speaker-row.is-this .speaker-row-icon {
+  color: var(--fg);
+}
+.speaker-row-name-wrap {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   min-width: 0;
-  cursor: pointer;
 }
 .speaker-row-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.88rem;
+  font-size: var(--text-base);
+}
+.speaker-row.is-this .speaker-row-name {
+  font-weight: 600;
+  color: var(--fg);
 }
 /* "default" badge — marks a device saved as output-by-default (auto-on on
  * connect). Teal = persistent/saved designation, distinct from the live
@@ -2075,6 +2099,15 @@ kbd,
   width: auto;
   min-width: 0;
   flex: 1 1 0;
+}
+.speaker-row-check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  justify-self: end;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
 }
 .speakers-empty {
   padding: var(--space-2) 0.3rem;
@@ -3946,12 +3979,30 @@ kbd,
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* Leading device-type icon — mirrors the footer Speakers popover so the two
+ * surfaces read the same (PC/phone/TV shell + OS logo, see DeviceIcon). */
+.device-row-icon {
+  font-size: 1.6rem;
+  color: var(--muted-strong);
+  flex-shrink: 0;
+}
+/* "This device" — same subtle neutral emphasis as the popover (stronger
+ * frame + bolder icon/name), instead of a "this device" text badge. */
+.device-row.is-this {
+  border-color: var(--border-strong);
+}
+.device-row.is-this .device-row-icon {
+  color: var(--fg);
+}
 .device-row-main {
   flex: 1 1 12rem;
   min-width: 0;
 }
 .device-row-name {
   font-weight: 500;
+}
+.device-row.is-this .device-row-name {
+  font-weight: 600;
 }
 .device-output-toggle {
   display: inline-flex;

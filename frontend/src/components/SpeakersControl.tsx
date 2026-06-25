@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuthStore } from "@/core/auth";
-import { shortDeviceLabel } from "@/core/deviceLabel";
+import { deviceDisplayName } from "@/core/deviceVisual";
 import { playbackEngine } from "@/core/playbackEngine";
 import {
   selectIsMyOutput,
@@ -12,6 +12,7 @@ import {
 import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
+import { DeviceIcon } from "./DeviceIcon";
 import { VolumeControl } from "./VolumeControl";
 import { VolumeIcon } from "./icons";
 
@@ -175,7 +176,8 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
             </Link>
           </div>
           <SpeakerRow
-            name={`${shortDeviceLabel(thisDevice?.name ?? deviceName ?? "This device")} (this)`}
+            rawName={thisDevice?.name ?? deviceName ?? "This device"}
+            isThis
             on={activeIds.includes(deviceId)}
             isDefault={thisDevice?.is_output ?? false}
             volume={deviceVolumes[deviceId] ?? 1}
@@ -185,7 +187,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
           {others.map((d) => (
             <SpeakerRow
               key={d.device_id}
-              name={shortDeviceLabel(d.name)}
+              rawName={d.name}
               on={activeIds.includes(d.device_id)}
               isDefault={d.is_output}
               volume={deviceVolumes[d.device_id] ?? 1}
@@ -200,28 +202,32 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
 }
 
 function SpeakerRow({
-  name,
+  rawName,
+  isThis = false,
   on,
   isDefault,
   volume,
   onToggle,
   onVolume,
 }: {
-  name: string;
+  /** Source device name — drives both the icon and the (trimmed) label. */
+  rawName: string;
+  /** The operator's own device — gets a subtle frame instead of "(this)" text. */
+  isThis?: boolean;
   on: boolean;
   isDefault?: boolean;
   volume: number;
   onToggle: (on: boolean) => void;
   onVolume: (v: number) => void;
 }) {
+  const name = deviceDisplayName(rawName);
   return (
-    <div className={`speaker-row${on ? " on" : ""}`}>
-      <label className="speaker-row-toggle">
-        <input
-          type="checkbox"
-          checked={on}
-          onChange={(e) => onToggle(e.target.checked)}
-        />
+    <div
+      className={`speaker-row${on ? " on" : ""}${isThis ? " is-this" : ""}`}
+      title={isThis ? "This device" : undefined}
+    >
+      <DeviceIcon name={rawName} className="speaker-row-icon" />
+      <span className="speaker-row-name-wrap">
         <span className="speaker-row-name">{name}</span>
         {isDefault ? (
           <span
@@ -231,13 +237,23 @@ function SpeakerRow({
             default
           </span>
         ) : null}
-      </label>
+        {isThis ? <span className="sr-only">This device</span> : null}
+      </span>
       <VolumeControl
         value={volume}
         onChange={onVolume}
         label={`${name} volume`}
         showIcon={false}
         className="speaker-row-vol"
+      />
+      {/* Checkbox on the right edge — closest to the cursor when the popover
+          opens above the footer pill. */}
+      <input
+        type="checkbox"
+        className="speaker-row-check"
+        checked={on}
+        aria-label={`${name} output`}
+        onChange={(e) => onToggle(e.target.checked)}
       />
     </div>
   );

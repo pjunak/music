@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { DeviceIcon } from "@/components/DeviceIcon";
 import { SettingsIcon } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
 import { Switch } from "@/components/Switch";
 import { authApi, devicesApi } from "@/core/api";
 import type { ActiveSession } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
-import { shortDeviceLabel } from "@/core/deviceLabel";
+import { deviceDisplayName } from "@/core/deviceVisual";
 import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 import type { KnownDevice } from "@/core/types";
@@ -171,12 +172,17 @@ function DevicesPanel() {
       ) : (
         <ul className="device-list">
           {saved.map((d) => (
-            <li key={d.client_id} className="device-row">
+            <li
+              key={d.client_id}
+              className={`device-row${d.client_id === myDeviceId ? " is-this" : ""}`}
+              title={d.client_id === myDeviceId ? "This device" : undefined}
+            >
+              <DeviceIcon name={d.name} className="device-row-icon" />
               <div className="device-row-main">
                 <div className="device-row-name">
-                  {d.name ? shortDeviceLabel(d.name) : "(unnamed)"}
+                  {d.name ? deviceDisplayName(d.name) : "(unnamed)"}
                   {d.client_id === myDeviceId ? (
-                    <span className="badge"> this device</span>
+                    <span className="sr-only"> This device</span>
                   ) : null}
                 </div>
                 <p>
@@ -217,12 +223,17 @@ function DevicesPanel() {
           <p className="muted small">Connected, not yet saved:</p>
           <ul className="device-list">
             {unsaved.map((d) => (
-              <li key={d.client_id} className="device-row">
+              <li
+                key={d.client_id}
+                className={`device-row${d.client_id === myDeviceId ? " is-this" : ""}`}
+                title={d.client_id === myDeviceId ? "This device" : undefined}
+              >
+                <DeviceIcon name={d.name} className="device-row-icon" />
                 <div className="device-row-main">
                   <div className="device-row-name">
-                    {d.name ? shortDeviceLabel(d.name) : "(unnamed)"}
+                    {d.name ? deviceDisplayName(d.name) : "(unnamed)"}
                     {d.client_id === myDeviceId ? (
-                      <span className="badge"> this device</span>
+                      <span className="sr-only"> This device</span>
                     ) : null}
                   </div>
                   <p>
