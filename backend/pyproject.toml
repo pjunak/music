@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Self-hosted music player and DnD session orchestrator — backend"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi==0.138.0",
+    "fastapi==0.139.0",
     # Held below 1.0 on purpose: Starlette 1.x's TestClient drops httpx for
     # httpx2 (flagged as a supply-chain/typosquat risk) — no gain for a
     # test-only transport. Lift once httpx2 is trusted or no longer required.
