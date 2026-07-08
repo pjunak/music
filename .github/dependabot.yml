@@ -4,6 +4,16 @@ updates:
     directory: "/backend"
     schedule:
       interval: "weekly"
+    ignore:
+      # starlette is deliberately pinned <1.0 — 1.x's TestClient swaps httpx
+      # for httpx2 (supply-chain concern; see backend/pyproject.toml). Drop
+      # this once the pin in pyproject.toml is lifted.
+      - dependency-name: "starlette"
+        versions: [">=1.0.0"]
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
