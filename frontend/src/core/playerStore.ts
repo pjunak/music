@@ -78,6 +78,20 @@ export function selectAmbientPositionMs(s: PlayerStore): number {
   return base + Math.max(0, elapsed);
 }
 
+/** Selector helper: dead-reckoned position of the audibly playing lane.
+ *  While an interrupt is active, its clock ticks regardless of `is_playing` —
+ *  pause only freezes ambient (see backend `set_is_playing`) — so we
+ *  dead-reckon from the interrupt's position unconditionally. The server
+ *  materializes `position_ms` in every broadcast, so the base is current at
+ *  `stateReceivedAt`. With no interrupt this is the ambient position. */
+export function selectActivePositionMs(s: PlayerStore): number {
+  if (s.state === null) return 0;
+  const interrupt = s.state.interrupt;
+  if (interrupt === null) return selectAmbientPositionMs(s);
+  const elapsed = Date.now() - s.stateReceivedAt;
+  return interrupt.position_ms + Math.max(0, elapsed);
+}
+
 /** Whichever lane is currently playing — interrupt wins over ambient. */
 export function selectActiveTrackId(s: PlayerStore): number | null {
   if (s.state === null) return null;

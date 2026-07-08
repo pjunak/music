@@ -21,7 +21,7 @@ import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import {
-  selectAmbientPositionMs,
+  selectActivePositionMs,
   usePlayerStore,
 } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
@@ -154,14 +154,15 @@ export function NowPlayingBar() {
   }, [displayId]);
 
   // Force re-renders twice a second while playing so the dead-reckoned
-  // ambient position (computed from `stateReceivedAt` in the player
+  // active-lane position (computed from `stateReceivedAt` in the player
   // store) advances visually without requiring a server-side update.
-  // Gated on hasTrack too: with no track loaded there's nothing to
-  // advance, and ticking would just spin the render loop for a clock
-  // that should read 0:00.
-  useTickWhile(isPlaying && hasTrack, 500);
+  // An active interrupt ticks even with is_playing=false (pause only
+  // freezes ambient), hence the interruptId term. Gated on hasTrack too:
+  // with no track loaded there's nothing to advance, and ticking would
+  // just spin the render loop for a clock that should read 0:00.
+  useTickWhile((isPlaying || interruptId !== null) && hasTrack, 500);
 
-  const positionMs = usePlayerStore(selectAmbientPositionMs);
+  const positionMs = usePlayerStore(selectActivePositionMs);
   const totalMs = track !== null ? Math.round(track.length_s * 1000) : 0;
 
   function play() {
