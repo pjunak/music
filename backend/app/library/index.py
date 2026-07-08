@@ -573,15 +573,16 @@ def write_tags(path: Path, fields: dict[str, Any]) -> None:
             wav_meta = AIFF(str(path))
         if wav_meta.tags is None:
             wav_meta.add_tags()
+        wav_tags: Any = wav_meta.tags
 
         for key, frame_class in _WAV_FRAME_CLASSES.items():
             if key not in fields:
                 continue
             value = fields[key]
             if value is None or value == "":
-                wav_meta.tags.delall(frame_class.__name__)
+                wav_tags.delall(frame_class.__name__)
             else:
-                wav_meta.tags.add(frame_class(encoding=3, text=str(value)))
+                wav_tags.add(frame_class(encoding=3, text=str(value)))
         wav_meta.save()
         return
 

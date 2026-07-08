@@ -26,6 +26,7 @@ dev = [
     "httpx==0.28.1",
     "ruff==0.15.19",
     "mypy==2.1.0",
+    "types-pyyaml==6.0.12.20260518",
 ]
 
 [project.scripts]

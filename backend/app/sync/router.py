@@ -609,7 +609,7 @@ async def _h_fire_cue(
         return
     mode = modes_loader.get_mode(mode_id)
     cue = mode.cues.get(action.cue_id) if mode is not None else None
-    if cue is None:
+    if mode is None or cue is None:
         await _send_error(
             websocket, f"unknown cue '{action.cue_id}' in mode '{mode_id}'"
         )
@@ -632,7 +632,8 @@ async def _h_fire_cue(
         if not track_ids:
             await _send_error(websocket, f"cue playlist '{cue.playlist}' is empty")
             return
-    for ref in [*cue.sfx, *cue.loops]:
+    refs: list[modes_loader.CueSfx | modes_loader.CueLoop] = [*cue.sfx, *cue.loops]
+    for ref in refs:
         err = _sfx_item_error(mode_id, ref.soundboard, ref.item)
         if err is not None:
             await _send_error(websocket, f"cue SFX: {err}")

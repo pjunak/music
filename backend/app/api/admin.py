@@ -37,9 +37,10 @@ def _sqlite_db_path() -> Path | None:
     url = make_url(get_settings().database_url)
     if not url.drivername.startswith("sqlite"):
         return None
-    if url.database in (None, "", ":memory:"):
+    database = url.database
+    if database is None or database in ("", ":memory:"):
         return None
-    return Path(url.database).resolve()
+    return Path(database).resolve()
 
 
 def _snapshot_sqlite(src: Path) -> bytes:

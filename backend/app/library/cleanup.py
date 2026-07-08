@@ -81,17 +81,27 @@ LOW = "low"
 
 class TrackLike(Protocol):
     """The slice of the Track row the engine reads. Tests can pass any
-    object with these attributes; the API passes ORM rows."""
+    object with these attributes; the API passes ORM rows. Read-only so
+    ORM descriptor attributes (`Mapped[...]`) satisfy the protocol."""
 
-    id: int
-    path: str
-    title: str
-    artist: str
-    album_artist: str
-    album: str
-    track_no: int | None
-    disc_no: int | None
-    year: int | None
+    @property
+    def id(self) -> int: ...
+    @property
+    def path(self) -> str: ...
+    @property
+    def title(self) -> str: ...
+    @property
+    def artist(self) -> str: ...
+    @property
+    def album_artist(self) -> str: ...
+    @property
+    def album(self) -> str: ...
+    @property
+    def track_no(self) -> int | None: ...
+    @property
+    def disc_no(self) -> int | None: ...
+    @property
+    def year(self) -> int | None: ...
 
 
 @dataclass
@@ -748,17 +758,17 @@ def _plan_track(track: TrackLike, ctx: _FolderCtx, enabled: Collection[str]) -> 
         # the same residue as a junky filename, often because the ripper
         # set title := filename).
         t_extraction = _Extraction()
-        candidate, t_fired = _transform_stem(
+        new_title, t_fired = _transform_stem(
             track.title, track, ctx, ALL_RULES if RULE_CASE in enabled else DEFAULT_RULES, t_extraction
         )
-        if t_fired and candidate and candidate != track.title:
+        if t_fired and new_title and new_title != track.title:
             plan.ops.append(
                 Suggestion(
                     track_id=track.id,
                     kind="tag",
                     field="title",
                     old=track.title,
-                    new=candidate,
+                    new=new_title,
                     rules=(RULE_TAG_TITLE,),
                     confidence=_worst(t_fired.values()),
                 )

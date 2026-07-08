@@ -5,12 +5,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import delete
+from sqlalchemy import CursorResult, delete
 from starlette.exceptions import HTTPException
 
 from app.api import (
@@ -191,8 +192,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Sweep expired auth sessions on boot. Resolve-time cleanup handles
         # the steady state, but a long downtime can leave stale rows nobody
         # ever revisits.
-        result = db.execute(
-            delete(AuthSession).where(AuthSession.expires_at <= datetime.now(UTC))
+        # Session.execute() is typed as Result, but DML always yields a
+        # CursorResult (the only Result with a rowcount).
+        result = cast(
+            "CursorResult[Any]",
+            db.execute(
+                delete(AuthSession).where(AuthSession.expires_at <= datetime.now(UTC))
+            ),
         )
         db.commit()
         if result.rowcount:
