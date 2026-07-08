@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,7 +41,7 @@ def _reset_sync_state():
     reset_sync_singletons()
 
 
-def _playing_state(position_ms: int = 10_000, anchored_at: float | None = None) -> object:
+def _playing_state(position_ms: int = 10_000, anchored_at: float | None = None) -> Any:
     return L.PlayerState(
         is_playing=True,
         ambient=L.AmbientState(
@@ -357,7 +358,7 @@ def test_advancer_plan_skips_frozen_and_unknown_length_lanes() -> None:
 
     adv = Advancer()
 
-    async def fake_length(_track_id: int) -> float | None:
+    async def fake_length(track_id: int) -> float | None:
         return None  # unknown duration
 
     adv._track_length_s = fake_length  # type: ignore[method-assign]

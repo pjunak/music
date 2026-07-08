@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -40,7 +41,7 @@ def row(path: str, **kw) -> Row:
     tag is absent the row carries title=stem / album=parent-folder-name."""
     p = PurePosixPath(path)
     parent = "" if str(p.parent) == "." else str(p.parent)
-    defaults = {
+    defaults: dict[str, Any] = {
         "title": p.stem,
         "album": PurePosixPath(parent).name if parent else "",
     }
@@ -801,7 +802,7 @@ def test_analyze_apply_revert_roundtrip(auth_client: TestClient):
     from mutagen.wave import WAVE
 
     reverted_tags = WAVE(str(music_dir / "CleanupRT" / "01 - Alpha.wav")).tags
-    assert not reverted_tags, f"expected no tags after revert, found {dict(reverted_tags)}"
+    assert not reverted_tags, f"expected no tags after revert, found {dict(reverted_tags or {})}"
 
     # A batch reverts once.
     r = auth_client.post(f"/api/library/cleanup/batches/{batch_id}/revert")
