@@ -10,7 +10,12 @@ export interface AmbientState {
   current_track_id: number | null;
   queue: number[];
   history: number[];
+  /** Always materialized to "now" by the server (it owns the playback
+   *  clock), so this is current in every snapshot/broadcast — not just
+   *  after a position report. */
   position_ms: number;
+  /** Server-internal clock anchor; clients must ignore it. */
+  position_anchored_at?: number | null;
   loop: LoopMode;
   shuffle: ShuffleMode;
   /** The playlist the lane was started from (for the Console's "now driving"
@@ -22,6 +27,8 @@ export interface InterruptState {
   current_track_id: number;
   queue: number[];
   position_ms: number;
+  /** Server-internal clock anchor; clients must ignore it. */
+  position_anchored_at?: number | null;
   return_to_ambient: boolean;
   fade_in_ms: number;
   fade_out_ms: number;
@@ -70,6 +77,11 @@ export interface KnownDevice {
 
 export interface PlayerState {
   revision: number;
+  /** Bumped ONLY on deliberate position moves (play/seek/skip/loop restart/
+   *  interrupt transitions). The client seek contract: seek the active lane
+   *  iff this changed; never infer seeks by comparing positions. Optional
+   *  only for skew with a pre-epoch server (a cached bundle mid-deploy). */
+  position_epoch?: number;
   is_playing: boolean;
   volume: number;
   active_mode_id: string | null;
@@ -266,7 +278,7 @@ export type WsAction =
   | { type: "ambient_set_queue"; track_ids: number[] }
   | { type: "ambient_enqueue"; track_id: number; position?: number }
   | { type: "ambient_clear_queue" }
-  | { type: "ambient_skip_next" }
+  | { type: "ambient_skip_next"; from_track_id?: number | null }
   | { type: "ambient_skip_prev" }
   | { type: "ambient_seek"; position_ms: number }
   | { type: "ambient_set_loop"; loop: LoopMode }
@@ -293,7 +305,7 @@ export type WsAction =
       fade_out_ms?: number;
       duck_to?: number | null;
     }
-  | { type: "interrupt_skip_next" }
+  | { type: "interrupt_skip_next"; from_track_id?: number | null }
   | { type: "interrupt_seek"; position_ms: number }
   | { type: "cancel_interrupt" }
   | { type: "fire_sfx"; soundboard_id: string; item_path: string; volume?: number }

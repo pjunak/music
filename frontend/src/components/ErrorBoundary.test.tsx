@@ -23,8 +23,9 @@ describe("ErrorBoundary", () => {
         <Boom />
       </ErrorBoundary>,
     );
-    // The whole point: #root is NOT left empty (which is what lets tv-mode.js
-    // masquerade as a TV redirect). A real, recoverable message is shown.
+    // The whole point: #root is NOT left empty (which is what lets
+    // compat-mode.js masquerade as a compatibility-mode redirect). A real,
+    // recoverable message is shown.
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
     expect(screen.getByText("kaboom")).toBeInTheDocument();

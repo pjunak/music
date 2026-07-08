@@ -16,8 +16,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    // The boot-watchdog / tv-mode tests read repo files via node:fs; TS 6 no
-    // longer auto-includes @types/node, so name it explicitly.
+    // The boot-watchdog / compat-mode tests read repo files via node:fs; TS 6
+    // no longer auto-includes @types/node, so name it explicitly.
     "types": ["node"],
 
     "strict": true,

@@ -34,12 +34,16 @@ export function AudioEngine() {
     playbackEngine.setAmbientElements(ambientARef.current, ambientBRef.current);
     playbackEngine.setInterruptElement(interruptRef.current);
     playbackEngine.setHandlers({
-      onSkipNext: () => wsClient.send({ type: "ambient_skip_next" }),
-      onInterruptSkipNext: () => wsClient.send({ type: "interrupt_skip_next" }),
-      // Returns whether the report reached the server — the engine uses that
-      // to gate its seek-detection baseline.
-      onPositionReport: (ms) =>
-        wsClient.send({ type: "position_report", position_ms: ms }),
+      // `from_track_id` is the idempotency token: the server drops the skip
+      // if the lane already advanced past that track, so duplicate `ended`
+      // events (multiple outputs, the server-side advancer) are harmless.
+      onSkipNext: (fromTrackId) =>
+        wsClient.send({ type: "ambient_skip_next", from_track_id: fromTrackId }),
+      onInterruptSkipNext: (fromTrackId) =>
+        wsClient.send({ type: "interrupt_skip_next", from_track_id: fromTrackId }),
+      onPositionReport: (ms) => {
+        wsClient.send({ type: "position_report", position_ms: ms });
+      },
     });
     return () => {
       playbackEngine.destroy();

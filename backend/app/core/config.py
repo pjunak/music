@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # under each mode now, so they ride along inside the modes seed.
     modes_seed_dir: Path | None = None
 
+    # Server-side end-of-track advancement (app/sync/advancer.py). On in
+    # production; the test suite switches it off globally so timing-based
+    # advances can't race unrelated assertions (a dedicated test re-enables it).
+    advancer_enabled: bool = True
+
     allowed_origins: str = "http://localhost:5173"
     session_cookie_secure: bool = False
     session_cookie_domain: str | None = None

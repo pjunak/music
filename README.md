@@ -16,9 +16,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
 - **Filesystem-driven library** — your folder tree under `MUSIC_DIR` *is* the library. Drag in
   a file or a whole album folder; tags are read via [mutagen], with a filename/parent-folder
   fallback. The index is a materialised view of the tree, rebuilt on boot and on upload.
-- **Server-as-reducer playback** — the server holds the canonical `PlayerState`; clients replace
-  their local state on every change and dead-reckon between updates. Repeat, shuffle, crossfade,
-  and a graphic-EQ effect chain are all there.
+- **Server-as-reducer playback** — the server holds the canonical `PlayerState`, owns the
+  playback clock (`position_ms` is live in every push), and advances the queue itself at end of
+  track; clients follow state and seek only when `position_epoch` changes. Repeat, shuffle,
+  crossfade, and a graphic-EQ effect chain are all there.
 - **Multi-device output** — any connected browser tab (or headless client) can be switched on as
   a live speaker, each with its own volume trim. A device can be saved as "output by default" so
   it auto-activates when it reconnects.

@@ -63,6 +63,10 @@ def _test_env() -> Iterator[None]:
     os.environ["SFX_LIBRARY_DIR"] = str(sfx_dir)
     os.environ["MODES_DIR"] = str(modes_dir)
     os.environ["DEVICES_FILE"] = str(tmp / "devices.json")
+    # Keep the end-of-track advancer out of unrelated tests: the seeded WAVs
+    # are 0.5 s long, so a playing lane would advance ~1.25 s into any test
+    # and inject unexpected broadcasts. test_advancer re-enables it locally.
+    os.environ["ADVANCER_ENABLED"] = "0"
 
     # Seed modes/dnd with theme + soundboards + EQ presets.
     dnd_dir = modes_dir / "dnd"

@@ -8,6 +8,21 @@ don't broadcast (clients dead-reckon from the most recent report).
 Mutators are pure functions `(state) -> state`. They return the same state
 instance to signal "no change" (state machine then skips persistence and
 broadcast).
+
+Playback clock
+--------------
+The server is the authoritative clock. Each lane stores a BASE position
+(`position_ms`) stamped at `position_anchored_at` (epoch seconds); a non-None
+anchor means the lane is ticking and its true position is
+`base + (now - anchor)`. Reads (snapshot / broadcast) materialize that sum
+into `position_ms` via `materialize_positions`, so every state a client sees
+carries a current position — with or without position reports. Reports are
+just drift corrections (they re-stamp base + anchor).
+
+Deliberate position moves (play / seek / skip / loop restart / interrupt
+transitions) additionally bump `PlayerState.position_epoch`. Clients seek the
+active lane iff the epoch changed and never compare positions — see
+docs/playback-sync-overhaul.md.
 """
 from __future__ import annotations
 
@@ -35,11 +50,75 @@ from app.sync.protocol import (
 logger = logging.getLogger(__name__)
 
 
+# --- playback clock helpers --------------------------------------------------
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _materialize_lane(lane: Any, now: float) -> Any:
+    """A copy of the lane with `position_ms` advanced to `now` (anchor
+    re-stamped), or the lane itself when its clock is stopped."""
+    if lane is None or lane.position_anchored_at is None:
+        return lane
+    elapsed_ms = int((now - lane.position_anchored_at) * 1000)
+    if elapsed_ms <= 0:
+        return lane
+    return lane.model_copy(
+        update={
+            "position_ms": lane.position_ms + elapsed_ms,
+            "position_anchored_at": now,
+        }
+    )
+
+
+def materialize_positions(state: PlayerState, now: float | None = None) -> PlayerState:
+    """Advance every ticking lane's `position_ms` to `now`. Pure. Applied on
+    the READ path only (snapshot / broadcast) — the stored state keeps the raw
+    base+anchor pair so repeated reads don't compound rounding."""
+    ts = _now() if now is None else now
+    ambient = _materialize_lane(state.ambient, ts)
+    interrupt = _materialize_lane(state.interrupt, ts)
+    if ambient is state.ambient and interrupt is state.interrupt:
+        return state
+    return state.model_copy(update={"ambient": ambient, "interrupt": interrupt})
+
+
+def _freeze_lane(lane: Any, now: float) -> Any:
+    """Stop a lane's clock: fold the elapsed time into the base and clear the
+    anchor. No-op for an already-frozen lane."""
+    if lane is None or lane.position_anchored_at is None:
+        return lane
+    elapsed_ms = max(0, int((now - lane.position_anchored_at) * 1000))
+    return lane.model_copy(
+        update={
+            "position_ms": lane.position_ms + elapsed_ms,
+            "position_anchored_at": None,
+        }
+    )
+
+
+def _ambient_anchor(
+    is_playing: bool, interrupt: InterruptState | None, now: float
+) -> float | None:
+    """The anchor a *repositioned* ambient lane should carry: ticking iff
+    playback is on and no pausing interrupt sits on top (a ducking interrupt —
+    duck_to set — keeps ambient audibly playing, so its clock runs too)."""
+    if is_playing and (interrupt is None or interrupt.duck_to is not None):
+        return now
+    return None
+
+
 class StateMachine:
     def __init__(self) -> None:
         self._state = PlayerState()
         self._lock = asyncio.Lock()
         self._loaded = False
+        # Fired after every applied mutation (including silent position
+        # reports). Late-bound by the track advancer so it can recompute its
+        # end-of-track deadline; None outside app lifespan (tests, CLI).
+        self.on_applied: Any = None
 
     async def load(self, db_factory: Any) -> None:
         """Hydrate state from the playback_state DB row, then prune dangling
@@ -72,13 +151,21 @@ class StateMachine:
 
     async def snapshot(self) -> PlayerState:
         async with self._lock:
-            return self._refresh_devices(self._state).model_copy(deep=True)
+            return materialize_positions(
+                self._refresh_devices(self._state)
+            ).model_copy(deep=True)
 
     def reset_for_tests(self) -> None:
         """Wipe the in-memory state. For test isolation only — never call
         in production. Doesn't touch the DB; tests use a throwaway DB anyway.
-        """
+
+        Also recreates the mutation lock: asyncio.Lock binds itself to the
+        running event loop on its first *contended* acquire, and every
+        TestClient runs its own loop — a lock that saw contention in one test
+        would wedge (or RuntimeError) every later test. Production has a
+        single loop for the process lifetime, so this can't happen there."""
         self._state = PlayerState()
+        self._lock = asyncio.Lock()
 
     def _refresh_devices(self, state: PlayerState) -> PlayerState:
         """Stamp current device registry into the state. Not persisted —
@@ -99,14 +186,22 @@ class StateMachine:
         async with self._lock:
             new_state = mutator(self._state)
             if new_state is self._state:
-                return (self._refresh_devices(new_state), False)
+                return (
+                    materialize_positions(self._refresh_devices(new_state)),
+                    False,
+                )
 
             if broadcast:
                 new_state = new_state.model_copy(update={"revision": self._state.revision + 1})
 
             self._state = new_state
             await self._persist(db_factory, new_state)
-            return (self._refresh_devices(new_state), True)
+            if self.on_applied is not None:
+                self.on_applied()
+            return (
+                materialize_positions(self._refresh_devices(new_state)),
+                True,
+            )
 
     async def _persist(self, db_factory: Any, state: PlayerState) -> None:
         payload = state.model_dump(mode="json")
@@ -161,16 +256,16 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
         ambient["current_track_id"] = _filter_track_id(ambient.get("current_track_id"))
         ambient["queue"] = _filter_track_list(ambient.get("queue"))
         ambient["history"] = _filter_track_list(ambient.get("history"))
+        # The clock did not tick while the server was down — the persisted
+        # anchor is meaningless now. Boot frozen at the stored base position.
+        ambient["position_anchored_at"] = None
         out["ambient"] = ambient
 
-    interrupt = out.get("interrupt")
-    if isinstance(interrupt, dict):
-        if _filter_track_id(interrupt.get("current_track_id")) is None:
-            out["interrupt"] = None
-        else:
-            interrupt = dict(interrupt)
-            interrupt["queue"] = _filter_track_list(interrupt.get("queue"))
-            out["interrupt"] = interrupt
+    # An interrupt is transient by definition — it never survives a restart
+    # (same no-auto-resume rule as active outputs and looping SFX below).
+    # Ambient's resume point is preserved because its position was frozen
+    # while the interrupt ran.
+    out["interrupt"] = None
 
     loaded_modes = modes_loader.all_modes()
     active_mode_id = out.get("active_mode_id")
@@ -208,18 +303,12 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
     # LOOPS panel with no timer behind it. Session-only, no auto-resume.
     out["looping_sfx"] = []
 
-    # Can't be "playing" with nothing loaded. If pruning emptied both lanes
-    # (deleted current track, no interrupt), force is_playing=false so
-    # clients don't dead-reckon a position clock against a phantom track on
-    # the next boot. Catches every "playing nothing" path, not just the
-    # ones we know about.
-    ambient_after = out.get("ambient") or {}
-    interrupt_after = out.get("interrupt")
-    nothing_loaded = (
-        ambient_after.get("current_track_id") is None and interrupt_after is None
-    )
-    if nothing_loaded and out.get("is_playing"):
-        out["is_playing"] = False
+    # Playback never auto-resumes across a restart: active outputs are wiped
+    # (above), so nothing would sound anyway — and with the server-side
+    # advancer, a phantom "playing" state would silently chew through the
+    # queue in an empty room. The ambient lane keeps its track + position;
+    # the operator presses Play when they're back.
+    out["is_playing"] = False
 
     return out
 
@@ -241,10 +330,23 @@ def set_volume(volume: float) -> Any:
 
 
 def set_is_playing(playing: bool) -> Any:
+    """Pause / resume. Stops or restarts the ambient clock; the interrupt
+    lane (if any) keeps ticking — clients don't pause interrupts on the
+    is_playing flag. No position_epoch bump: pause/resume isn't a seek, the
+    client element already sits at the right position."""
+
     def _mut(state: PlayerState) -> PlayerState:
         if state.is_playing == playing:
             return state
-        return state.model_copy(update={"is_playing": playing})
+        now = _now()
+        ambient = state.ambient
+        if not playing:
+            ambient = _freeze_lane(ambient, now)
+        elif ambient.current_track_id is not None:
+            anchor = _ambient_anchor(True, state.interrupt, now)
+            if anchor is not None:
+                ambient = ambient.model_copy(update={"position_anchored_at": anchor})
+        return state.model_copy(update={"is_playing": playing, "ambient": ambient})
 
     return _mut
 
@@ -409,18 +511,36 @@ def set_crossfade(crossfade_ms: int, crossfade_type: str | None) -> Any:
 
 
 def report_position(device_id: str, position_ms: int) -> Any:
-    """Stamp telemetry. Updates whichever lane is active."""
+    """Stamp telemetry. Updates whichever lane is active. Under the server
+    clock this is a drift *correction*: it re-bases the ticking lane at the
+    reported position (anchor re-stamped to now). A frozen lane keeps its
+    stopped clock — only the base moves. Never bumps position_epoch."""
 
     def _mut(state: PlayerState) -> PlayerState:
+        now = _now()
         report = PositionReport(
-            device_id=device_id, position_ms=position_ms, reported_at=time.time()
+            device_id=device_id, position_ms=position_ms, reported_at=now
         )
         if state.interrupt is not None:
-            interrupt = state.interrupt.model_copy(update={"position_ms": position_ms})
+            interrupt = state.interrupt.model_copy(
+                update={
+                    "position_ms": position_ms,
+                    "position_anchored_at": (
+                        now if state.interrupt.position_anchored_at is not None else None
+                    ),
+                }
+            )
             return state.model_copy(
                 update={"last_position_report": report, "interrupt": interrupt}
             )
-        ambient = state.ambient.model_copy(update={"position_ms": position_ms})
+        ambient = state.ambient.model_copy(
+            update={
+                "position_ms": position_ms,
+                "position_anchored_at": (
+                    now if state.ambient.position_anchored_at is not None else None
+                ),
+            }
+        )
         return state.model_copy(
             update={"last_position_report": report, "ambient": ambient}
         )
@@ -440,15 +560,23 @@ def ambient_play_track(track_id: int) -> Any:
     Implicitly sets is_playing=true."""
 
     def _mut(state: PlayerState) -> PlayerState:
+        now = _now()
         new_ambient = AmbientState(
             current_track_id=track_id,
             queue=[],
             history=[],
             position_ms=0,
+            position_anchored_at=_ambient_anchor(True, state.interrupt, now),
             loop=state.ambient.loop,
             shuffle=state.ambient.shuffle,
         )
-        return state.model_copy(update={"ambient": new_ambient, "is_playing": True})
+        return state.model_copy(
+            update={
+                "ambient": new_ambient,
+                "is_playing": True,
+                "position_epoch": state.position_epoch + 1,
+            }
+        )
 
     return _mut
 
@@ -491,22 +619,46 @@ def ambient_clear_queue() -> Any:
     return _mut
 
 
-def ambient_skip_next(follow_next_id: int | None = None) -> Any:
+def ambient_skip_next(
+    follow_next_id: int | None = None, *, expected_track_id: int | None = None
+) -> Any:
     """Advance to next track. Behavior at end of queue depends on loop mode.
 
     `follow_next_id` is the next library track the *handler* resolved for
     follow mode (the mutator can't touch the DB). It's only consulted when the
     queue is empty and `loop == "follow"`; None means no successor available,
-    so follow degrades to idle."""
+    so follow degrades to idle.
+
+    `expected_track_id` is the idempotency token from
+    AmbientSkipNextAction.from_track_id (also passed by the server-side
+    advancer): when set and the lane has already moved past that track, the
+    skip is a no-op — a duplicate `ended` from a second output (or a race
+    with the advancer) can no longer double-advance or stop the queue."""
 
     def _mut(state: PlayerState) -> PlayerState:
         amb = state.ambient
+        if (
+            expected_track_id is not None
+            and amb.current_track_id != expected_track_id
+        ):
+            return state  # someone already advanced past that track
         if amb.current_track_id is None and not amb.queue:
             return state  # nothing to skip from
 
+        now = _now()
+        epoch = state.position_epoch + 1
+        anchor = _ambient_anchor(state.is_playing, state.interrupt, now)
+
         if amb.loop == "track" and amb.current_track_id is not None:
             # Restart current.
-            return _replace_ambient(state, amb.model_copy(update={"position_ms": 0}))
+            return state.model_copy(
+                update={
+                    "ambient": amb.model_copy(
+                        update={"position_ms": 0, "position_anchored_at": anchor}
+                    ),
+                    "position_epoch": epoch,
+                }
+            )
 
         if amb.queue:
             # Normal advance. Shuffle (random/weighted) pulls a random entry
@@ -518,16 +670,19 @@ def ambient_skip_next(follow_next_id: int | None = None) -> Any:
             pick = random.randrange(len(amb.queue)) if amb.shuffle != "off" else 0
             new_current = amb.queue[pick]
             new_queue = [t for i, t in enumerate(amb.queue) if i != pick]
-            return _replace_ambient(
-                state,
-                amb.model_copy(
-                    update={
-                        "current_track_id": new_current,
-                        "queue": new_queue,
-                        "history": new_history,
-                        "position_ms": 0,
-                    }
-                ),
+            return state.model_copy(
+                update={
+                    "ambient": amb.model_copy(
+                        update={
+                            "current_track_id": new_current,
+                            "queue": new_queue,
+                            "history": new_history,
+                            "position_ms": 0,
+                            "position_anchored_at": anchor,
+                        }
+                    ),
+                    "position_epoch": epoch,
+                }
             )
 
         # Queue empty.
@@ -540,16 +695,19 @@ def ambient_skip_next(follow_next_id: int | None = None) -> Any:
                 full.append(amb.current_track_id)
             new_current = full[0]
             new_queue = full[1:]
-            return _replace_ambient(
-                state,
-                amb.model_copy(
-                    update={
-                        "current_track_id": new_current,
-                        "queue": new_queue,
-                        "history": [],
-                        "position_ms": 0,
-                    }
-                ),
+            return state.model_copy(
+                update={
+                    "ambient": amb.model_copy(
+                        update={
+                            "current_track_id": new_current,
+                            "queue": new_queue,
+                            "history": [],
+                            "position_ms": 0,
+                            "position_anchored_at": anchor,
+                        }
+                    ),
+                    "position_epoch": epoch,
+                }
             )
 
         if amb.loop == "follow" and follow_next_id is not None:
@@ -560,16 +718,19 @@ def ambient_skip_next(follow_next_id: int | None = None) -> Any:
             new_history = list(amb.history)
             if amb.current_track_id is not None:
                 new_history.append(amb.current_track_id)
-            return _replace_ambient(
-                state,
-                amb.model_copy(
-                    update={
-                        "current_track_id": follow_next_id,
-                        "queue": [],
-                        "history": new_history,
-                        "position_ms": 0,
-                    }
-                ),
+            return state.model_copy(
+                update={
+                    "ambient": amb.model_copy(
+                        update={
+                            "current_track_id": follow_next_id,
+                            "queue": [],
+                            "history": new_history,
+                            "position_ms": 0,
+                            "position_anchored_at": anchor,
+                        }
+                    ),
+                    "position_epoch": epoch,
+                }
             )
 
         # Loop off (or follow with no successor), end of queue: clear current
@@ -579,9 +740,14 @@ def ambient_skip_next(follow_next_id: int | None = None) -> Any:
         return state.model_copy(
             update={
                 "ambient": amb.model_copy(
-                    update={"current_track_id": None, "position_ms": 0}
+                    update={
+                        "current_track_id": None,
+                        "position_ms": 0,
+                        "position_anchored_at": None,
+                    }
                 ),
                 "is_playing": False,
+                "position_epoch": epoch,
             }
         )
 
@@ -593,12 +759,23 @@ def ambient_skip_prev() -> Any:
 
     def _mut(state: PlayerState) -> PlayerState:
         amb = state.ambient
+        now = _now()
+        epoch = state.position_epoch + 1
+        anchor = _ambient_anchor(state.is_playing, state.interrupt, now)
         if not amb.history:
             if amb.current_track_id is None:
                 return state
-            if amb.position_ms == 0:
-                return state
-            return _replace_ambient(state, amb.model_copy(update={"position_ms": 0}))
+            # Restart current from the top. (No "already at 0" short-circuit:
+            # the stored base is stale under the ticking clock, so equality
+            # against it says nothing about the real position.)
+            return state.model_copy(
+                update={
+                    "ambient": amb.model_copy(
+                        update={"position_ms": 0, "position_anchored_at": anchor}
+                    ),
+                    "position_epoch": epoch,
+                }
+            )
 
         # Move current back to queue head, pop history.
         new_queue = list(amb.queue)
@@ -606,16 +783,19 @@ def ambient_skip_prev() -> Any:
             new_queue.insert(0, amb.current_track_id)
         new_history = list(amb.history)
         new_current = new_history.pop()
-        return _replace_ambient(
-            state,
-            amb.model_copy(
-                update={
-                    "current_track_id": new_current,
-                    "queue": new_queue,
-                    "history": new_history,
-                    "position_ms": 0,
-                }
-            ),
+        return state.model_copy(
+            update={
+                "ambient": amb.model_copy(
+                    update={
+                        "current_track_id": new_current,
+                        "queue": new_queue,
+                        "history": new_history,
+                        "position_ms": 0,
+                        "position_anchored_at": anchor,
+                    }
+                ),
+                "position_epoch": epoch,
+            }
         )
 
     return _mut
@@ -623,10 +803,21 @@ def ambient_skip_prev() -> Any:
 
 def ambient_seek(position_ms: int) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
-        if state.ambient.position_ms == position_ms:
-            return state
-        return _replace_ambient(
-            state, state.ambient.model_copy(update={"position_ms": position_ms})
+        if state.ambient.current_track_id is None:
+            return state  # nothing loaded — a position would be meaningless
+        now = _now()
+        return state.model_copy(
+            update={
+                "ambient": state.ambient.model_copy(
+                    update={
+                        "position_ms": position_ms,
+                        "position_anchored_at": _ambient_anchor(
+                            state.is_playing, state.interrupt, now
+                        ),
+                    }
+                ),
+                "position_epoch": state.position_epoch + 1,
+            }
         )
 
     return _mut
@@ -664,9 +855,13 @@ def ambient_stop() -> Any:
             and state.ambient.position_ms == 0
         ):
             return state
-        return _replace_ambient(
-            state,
-            AmbientState(loop=state.ambient.loop, shuffle=state.ambient.shuffle),
+        return state.model_copy(
+            update={
+                "ambient": AmbientState(
+                    loop=state.ambient.loop, shuffle=state.ambient.shuffle
+                ),
+                "position_epoch": state.position_epoch + 1,
+            }
         )
 
     return _mut
@@ -688,16 +883,58 @@ def ambient_play_playlist(
             queue=list(track_ids[idx + 1 :]),
             history=list(track_ids[:idx]),
             position_ms=0,
+            position_anchored_at=_ambient_anchor(True, state.interrupt, _now()),
             loop=state.ambient.loop,
             shuffle=state.ambient.shuffle,
             source_playlist_id=source_playlist_id,
         )
-        return state.model_copy(update={"ambient": new_ambient, "is_playing": True})
+        return state.model_copy(
+            update={
+                "ambient": new_ambient,
+                "is_playing": True,
+                "position_epoch": state.position_epoch + 1,
+            }
+        )
 
     return _mut
 
 
 # --- Interrupt lane mutators -----------------------------------------------
+
+
+def _fire_interrupt(
+    state: PlayerState,
+    track_ids: list[int],
+    return_to_ambient: bool,
+    fade_in_ms: int,
+    fade_out_ms: int,
+    duck_to: float | None,
+) -> PlayerState:
+    """Shared body of the two fire_interrupt_* mutators. A pausing interrupt
+    (duck_to=None) freezes the ambient clock so the resume point is preserved;
+    a ducking one leaves ambient ticking (it keeps playing audibly)."""
+    now = _now()
+    new_interrupt = InterruptState(
+        current_track_id=track_ids[0],
+        queue=list(track_ids[1:]),
+        position_ms=0,
+        position_anchored_at=now,
+        return_to_ambient=return_to_ambient,
+        fade_in_ms=fade_in_ms,
+        fade_out_ms=fade_out_ms,
+        duck_to=duck_to,
+    )
+    ambient = state.ambient
+    if duck_to is None:
+        ambient = _freeze_lane(ambient, now)
+    return state.model_copy(
+        update={
+            "interrupt": new_interrupt,
+            "ambient": ambient,
+            "is_playing": True,
+            "position_epoch": state.position_epoch + 1,
+        }
+    )
 
 
 def fire_interrupt_track(
@@ -708,16 +945,9 @@ def fire_interrupt_track(
     duck_to: float | None = None,
 ) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
-        new_interrupt = InterruptState(
-            current_track_id=track_id,
-            queue=[],
-            position_ms=0,
-            return_to_ambient=return_to_ambient,
-            fade_in_ms=fade_in_ms,
-            fade_out_ms=fade_out_ms,
-            duck_to=duck_to,
+        return _fire_interrupt(
+            state, [track_id], return_to_ambient, fade_in_ms, fade_out_ms, duck_to
         )
-        return state.model_copy(update={"interrupt": new_interrupt, "is_playing": True})
 
     return _mut
 
@@ -734,38 +964,52 @@ def fire_interrupt_playlist(
     def _mut(state: PlayerState) -> PlayerState:
         if not track_ids:
             return state
-        new_interrupt = InterruptState(
-            current_track_id=track_ids[0],
-            queue=list(track_ids[1:]),
-            position_ms=0,
-            return_to_ambient=return_to_ambient,
-            fade_in_ms=fade_in_ms,
-            fade_out_ms=fade_out_ms,
-            duck_to=duck_to,
+        return _fire_interrupt(
+            state, track_ids, return_to_ambient, fade_in_ms, fade_out_ms, duck_to
         )
-        return state.model_copy(update={"interrupt": new_interrupt, "is_playing": True})
 
     return _mut
 
 
 def _end_interrupt(state: PlayerState) -> PlayerState:
-    """Clear the interrupt lane. If return_to_ambient=true, ambient takes
-    back over (its position_ms preserved by virtue of not being touched
-    during the interrupt). Otherwise stop playback."""
+    """Clear the interrupt lane. If return_to_ambient=true, ambient takes back
+    over — its clock restarts from the base a pausing interrupt froze (a
+    ducking one never stopped it). Otherwise stop playback."""
     if state.interrupt is None:
         return state
+    now = _now()
     return_to_ambient = state.interrupt.return_to_ambient
-    updates: dict = {"interrupt": None}
+    updates: dict = {
+        "interrupt": None,
+        "position_epoch": state.position_epoch + 1,
+    }
+    ambient = state.ambient
     if not return_to_ambient:
         updates["is_playing"] = False
+        ambient = _freeze_lane(ambient, now)
+    elif (
+        state.is_playing
+        and ambient.current_track_id is not None
+        and ambient.position_anchored_at is None
+    ):
+        ambient = ambient.model_copy(update={"position_anchored_at": now})
+    if ambient is not state.ambient:
+        updates["ambient"] = ambient
     return state.model_copy(update=updates)
 
 
-def interrupt_skip_next() -> Any:
-    """Advance to next interrupt track. If queue empty, auto-completes."""
+def interrupt_skip_next(*, expected_track_id: int | None = None) -> Any:
+    """Advance to next interrupt track. If queue empty, auto-completes.
+    `expected_track_id` carries the same idempotency contract as
+    ambient_skip_next."""
 
     def _mut(state: PlayerState) -> PlayerState:
         if state.interrupt is None:
+            return state
+        if (
+            expected_track_id is not None
+            and state.interrupt.current_track_id != expected_track_id
+        ):
             return state
         if state.interrupt.queue:
             new_current = state.interrupt.queue[0]
@@ -775,9 +1019,15 @@ def interrupt_skip_next() -> Any:
                     "current_track_id": new_current,
                     "queue": new_queue,
                     "position_ms": 0,
+                    "position_anchored_at": _now(),
                 }
             )
-            return state.model_copy(update={"interrupt": new_interrupt})
+            return state.model_copy(
+                update={
+                    "interrupt": new_interrupt,
+                    "position_epoch": state.position_epoch + 1,
+                }
+            )
         return _end_interrupt(state)
 
     return _mut
@@ -787,10 +1037,15 @@ def interrupt_seek(position_ms: int) -> Any:
     def _mut(state: PlayerState) -> PlayerState:
         if state.interrupt is None:
             return state
-        if state.interrupt.position_ms == position_ms:
-            return state
-        new_interrupt = state.interrupt.model_copy(update={"position_ms": position_ms})
-        return state.model_copy(update={"interrupt": new_interrupt})
+        new_interrupt = state.interrupt.model_copy(
+            update={"position_ms": position_ms, "position_anchored_at": _now()}
+        )
+        return state.model_copy(
+            update={
+                "interrupt": new_interrupt,
+                "position_epoch": state.position_epoch + 1,
+            }
+        )
 
     return _mut
 

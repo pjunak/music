@@ -7,8 +7,8 @@ old smart-TV browser whose root-CA store predates the chain root currently
 served by the reverse proxy: the user can dismiss the page-level cert
 warning by hand, after which page subresources (XHR/fetch) inherit the
 cert exception — but WebSocket handshakes get re-validated independently
-and silently rejected. `tv-mode.js` detects the dead WS and switches to
-polling this endpoint instead.
+and silently rejected. `compat-mode.js` (the compatibility-mode
+fallback) detects the dead WS and switches to polling this endpoint instead.
 
 Auth: `OptionalUser`, matching the WS endpoint's guest-friendly contract
 (the `/api/ws` handler in `app/sync/router.py`). A logged-out TV bookmark can still read state

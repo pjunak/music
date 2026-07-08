@@ -71,8 +71,12 @@ type Slot = "A" | "B";
 
 const POSITION_REPORT_INTERVAL_MS = 1000;
 
-/** Drift tolerance for remote-seek detection and snapping. */
-const REMOTE_SEEK_THRESHOLD_MS = 1500;
+/** Dead-band for APPLYING an epoch seek. Whether a seek happened is decided
+ *  entirely by `position_epoch` (the server bumps it on every deliberate
+ *  move); this only suppresses pointless micro-seeks when the element is
+ *  already at the target — e.g. a duck-interrupt ending while ambient kept
+ *  playing, where the server clock and the element agree to within ms. */
+const SEEK_APPLY_EPSILON_MS = 300;
 
 /** Minimum gap between two queue-advances. Stops a single track-end from
  *  being acted on twice when the `ended` event and the stall backstop race,
@@ -95,39 +99,37 @@ function clamp01(v: number): number {
 }
 
 /**
- * Decide whether an incoming server position represents a genuine remote
- * seek that the locally-playing element should snap to.
+ * Decide whether a same-track state update should snap the locally-playing
+ * element to the broadcast position.
  *
- * The output device is the source of truth for its own playback position.
- * Routine `state_changed` broadcasts (volume, queue edits, mode switches, …)
- * are NOT seeks — the server doesn't dead-reckon `position_ms`, so each one
- * carries back the position this device itself last *reported*. Comparing
- * that echo against the live element time would false-positive on every
- * unrelated change and yank playback backward — on a sluggish TV, all the
- * way to the start (its reports lag, so the echoed position is far behind).
+ * The server owns the playback clock and bumps `position_epoch` on every
+ * deliberate move (seek / skip / loop restart / interrupt transition), so
+ * "did a seek happen" is read straight off the protocol — no more inferring
+ * it by comparing positions, which is what used to restart songs on
+ * compatibility-mode devices whenever the volume changed. An unchanged epoch
+ * NEVER seeks, no matter what the positions look like; a changed one seeks
+ * unless the element already sits at the target (epsilon dead-band).
  *
- * So we gate on divergence from our OWN telemetry instead: a real seek (the
- * DM dragging the scrub bar, a `loop: track` restart) moves the server
- * position away from what we reported; an echo does not. `lastReportedMs`
- * only advances on reports that actually reached the wire, so a dropped send
- * during a reconnect can't make a later echo look like a seek.
+ * `prevEpoch === null` means "first state this engine has seen since
+ * (re)claiming the output role" — the track-change path positions the
+ * element then, so it's not a seek.
  */
-export function shouldApplyRemoteSeek(args: {
-  /** Server-broadcast position for the still-current track. */
-  targetMs: number;
-  /** Position this device last successfully reported to the server. */
-  lastReportedMs: number;
+export function shouldApplyEpochSeek(args: {
+  /** Epoch of the previous state this engine applied (null = none yet). */
+  prevEpoch: number | null;
+  /** Epoch of the incoming state. */
+  epoch: number;
   /** The element's live `currentTime`, in ms. */
   elapsedMs: number;
-  thresholdMs: number;
+  /** Server-broadcast position for the still-current track. */
+  targetMs: number;
+  epsilonMs: number;
 }): boolean {
-  const { targetMs, lastReportedMs, elapsedMs, thresholdMs } = args;
-  if (!Number.isFinite(elapsedMs)) return false;
-  // Gate: only a position that diverged from our telemetry is a real seek.
-  if (Math.abs(targetMs - lastReportedMs) <= thresholdMs) return false;
-  // Apply: skip the snap if the element already sits at the target, so a
-  // redundant broadcast doesn't cause a needless re-seek.
-  if (Math.abs(targetMs - elapsedMs) <= thresholdMs) return false;
+  const { prevEpoch, epoch, elapsedMs, targetMs, epsilonMs } = args;
+  if (prevEpoch === null || epoch === prevEpoch) return false;
+  if (Number.isFinite(elapsedMs) && Math.abs(targetMs - elapsedMs) <= epsilonMs) {
+    return false; // already there — don't blip the audio for nothing
+  }
   return true;
 }
 
@@ -206,12 +208,11 @@ export class PlaybackEngine {
    *  a torn-down + re-created engine re-arms it; re-armed on each fresh user
    *  gesture in `unlock`. */
   private autoplayBlockedReported = false;
-  /** Position this device last reported to the server *and the server
-   *  accepted* (i.e. the WS send actually went out). The baseline for
-   *  remote-seek detection — see `shouldApplyRemoteSeek`. Reset to 0 on
-   *  every fresh track load because the server zeroes `position_ms` on a
-   *  track change. */
-  private lastReportedMs = 0;
+  /** `position_epoch` of the last state this engine applied while being the
+   *  output, or null when it has none yet (fresh mount, just (re)claimed the
+   *  output role). Seeks fire iff the incoming epoch differs — see
+   *  `shouldApplyEpochSeek`. */
+  private lastEpoch: number | null = null;
   /** `performance.now()` of the last queue-advance we triggered. Debounces
    *  the `ended` event against the stall backstop. */
   private lastAdvanceAt = -Infinity;
@@ -235,12 +236,15 @@ export class PlaybackEngine {
 
   private reportTimer: number | null = null;
 
-  private onSkipNext: (() => void) | null = null;
-  private onInterruptSkipNext: (() => void) | null = null;
-  /** Reports the position upstream and returns whether it actually went out
-   *  (false if the socket is mid-reconnect). The return value gates
-   *  `lastReportedMs` so a dropped report doesn't desync seek detection. */
-  private onPositionReport: ((ms: number) => boolean) | null = null;
+  /** Queue-advance request. `fromTrackId` is the track whose end was
+   *  observed — the server drops the action if the lane already moved on, so
+   *  duplicate advances (second output, stall backstop, server advancer)
+   *  are harmless. */
+  private onSkipNext: ((fromTrackId: number | null) => void) | null = null;
+  private onInterruptSkipNext: ((fromTrackId: number | null) => void) | null = null;
+  /** Reports the element position upstream. Best-effort: the server clock
+   *  ticks on its own, reports only correct drift. */
+  private onPositionReport: ((ms: number) => void) | null = null;
 
   // ----- wiring -------------------------------------------------------
 
@@ -310,9 +314,9 @@ export class PlaybackEngine {
   }
 
   setHandlers(handlers: {
-    onSkipNext: () => void;
-    onInterruptSkipNext: () => void;
-    onPositionReport: (ms: number) => boolean;
+    onSkipNext: (fromTrackId: number | null) => void;
+    onInterruptSkipNext: (fromTrackId: number | null) => void;
+    onPositionReport: (ms: number) => void;
   }): void {
     this.onSkipNext = handlers.onSkipNext;
     this.onInterruptSkipNext = handlers.onInterruptSkipNext;
@@ -472,7 +476,7 @@ export class PlaybackEngine {
       this.lastAmbientId = null;
       this.lastInterruptId = null;
       this.lastIsPlaying = false;
-      this.lastReportedMs = 0;
+      this.lastEpoch = null;
       this.endStallTime = -1;
       return;
     }
@@ -482,10 +486,11 @@ export class PlaybackEngine {
     const newIsPlaying = state.is_playing;
     const prevAmbientId = this.lastAmbientId;
     const prevInterruptId = this.lastInterruptId;
-    // Set when a cinematic-duck interrupt just ended: ambient kept PLAYING
-    // (ducked) the whole time, so the server's frozen ambient.position_ms is
-    // stale and must NOT be applied as a seek (it would rewind the music).
-    let justEndedDuck = false;
+    // Optional only for a cached pre-epoch bundle mid-deploy; a missing field
+    // reads as a constant 0 → no epoch seeks, exactly the safe fallback.
+    const epoch = state.position_epoch ?? 0;
+    const prevEpoch = this.lastEpoch;
+    this.lastEpoch = epoch;
 
     if (state.interrupt) {
       this.lastInterruptFadeOut = state.interrupt.fade_out_ms ?? 0;
@@ -495,7 +500,10 @@ export class PlaybackEngine {
       if (newInterruptId !== null) {
         const fadeIn = state.interrupt?.fade_in_ms ?? 0;
         const duckTo = state.interrupt?.duck_to ?? null;
-        this.startInterrupt(newInterruptId, fadeIn);
+        // position_ms is 0 on a fresh fire but real on a mid-interrupt
+        // (re)join — a reconnected or re-claimed output starts where the
+        // interrupt actually is.
+        this.startInterrupt(newInterruptId, fadeIn, state.interrupt?.position_ms ?? 0);
         if (duckTo !== null) {
           // Cinematic mode: keep ambient playing, just lower its volume.
           this.duckAmbient(duckTo, fadeIn);
@@ -510,14 +518,12 @@ export class PlaybackEngine {
         if (this.currentDuckTo !== null) {
           this.unduckAmbient(this.lastInterruptFadeOut);
           this.currentDuckTo = null;
-          justEndedDuck = true;
         }
       } else {
         this.stopInterrupt();
         if (this.currentDuckTo !== null) {
           this.unduckAmbient(0);
           this.currentDuckTo = null;
-          justEndedDuck = true;
         }
       }
       this.lastInterruptId = newInterruptId;
@@ -537,7 +543,13 @@ export class PlaybackEngine {
             newIsPlaying &&
             this.crossfadeMs > 0 &&
             this.crossfadeType !== "cut";
-          this.swapAmbient(newAmbientId, useCrossfade ? this.crossfadeMs : 0);
+          // position_ms is 0 on a natural advance but real on a mid-track
+          // join (fresh page, output re-claim, reconnect) — start there.
+          this.swapAmbient(
+            newAmbientId,
+            useCrossfade ? this.crossfadeMs : 0,
+            state.ambient.position_ms,
+          );
         }
         this.lastAmbientId = newAmbientId;
       }
@@ -548,39 +560,41 @@ export class PlaybackEngine {
       }
     }
 
-    // Seek detection on a same-track broadcast. A genuine seek (operator drags
-    // the scrub bar, /loop seek action) moves the server position away from
-    // our telemetry; an unrelated change (volume, queue edit) just echoes the
-    // position we last reported. `maybeSeek` distinguishes the two — see
-    // `shouldApplyRemoteSeek` — so this no longer false-fires and restarts the
-    // track on every state change.
+    // Same-track updates: seeks are protocol events now. The server bumps
+    // position_epoch on every deliberate move and broadcasts materialized
+    // (always-current) positions, so: epoch changed → snap the active lane;
+    // epoch unchanged → never touch the element, whatever the numbers say.
+    // This is what makes volume changes / queue edits / device joins
+    // glitch-free (they don't bump the epoch), while scrub-bar seeks, cue
+    // start offsets, loop restarts and interrupt ends (which do) land
+    // everywhere at once.
     if (newInterruptId !== null && newInterruptId === prevInterruptId && state.interrupt) {
-      this.maybeSeek(this.interrupt?.el ?? null, state.interrupt.position_ms);
+      this.applyEpochSeek(
+        this.interrupt?.el ?? null,
+        prevEpoch,
+        epoch,
+        state.interrupt.position_ms,
+      );
     } else if (
       newInterruptId === null &&
       newAmbientId !== null &&
       newAmbientId === prevAmbientId
     ) {
-      if (justEndedDuck) {
-        // Don't snap to the stale frozen position — re-baseline our telemetry
-        // to where the still-playing ambient element actually is, so the next
-        // broadcast's divergence gate doesn't fire and rewind the music.
-        const el = this.currentChannel()?.el;
-        if (el && Number.isFinite(el.currentTime)) {
-          this.lastReportedMs = Math.floor(el.currentTime * 1000);
-        }
-      } else {
-        this.maybeSeek(this.currentChannel()?.el ?? null, state.ambient.position_ms);
-        // Same-track broadcast that says "playing" while our element sits
-        // paused = a loop restart (loop:track, or a single-track loop:queue
-        // wrap): the element fired `ended` and parked at 0. Neither the swap
-        // branch (id unchanged) nor the resume branch (is_playing unchanged)
-        // ran, so resume here — otherwise the track is silent while the clock
-        // ticks up. Gated on `prevInterruptId === null` so this doesn't touch
-        // the interrupt-end resume path (handled by stopInterrupt).
-        if (newIsPlaying && prevInterruptId === null) {
-          const ch = this.currentChannel();
-          if (ch && ch.el.paused) this.safePlay("ambient (loop restart)", ch.el);
+      const ch = this.currentChannel();
+      this.applyEpochSeek(ch?.el ?? null, prevEpoch, epoch, state.ambient.position_ms);
+      if (newIsPlaying && prevInterruptId === null && ch) {
+        if (ch.el.ended) {
+          // Our element finished this track but the server still shows it
+          // playing — the `ended` skip never got through (dropped send,
+          // reconnect). Re-fire the advance: it's idempotent server-side, so
+          // a duplicate is harmless. NEVER call play() on an ended element
+          // here — that would audibly restart the song from the top.
+          this.fireAmbientAdvance();
+        } else if (ch.el.paused) {
+          // Playing per the server, paused locally, and not ended: a loop
+          // restart (the epoch seek above just rewound us) or a resume this
+          // engine missed. Nudge playback.
+          this.safePlay("ambient (resume nudge)", ch.el);
         }
       }
     }
@@ -589,24 +603,26 @@ export class PlaybackEngine {
     this.scheduleReports();
   }
 
-  private maybeSeek(el: HTMLAudioElement | null, targetMs: number): void {
+  private applyEpochSeek(
+    el: HTMLAudioElement | null,
+    prevEpoch: number | null,
+    epoch: number,
+    targetMs: number,
+  ): void {
     if (el === null) return;
     const elapsedMs = Number.isFinite(el.currentTime) ? el.currentTime * 1000 : NaN;
     if (
-      !shouldApplyRemoteSeek({
-        targetMs,
-        lastReportedMs: this.lastReportedMs,
+      !shouldApplyEpochSeek({
+        prevEpoch,
+        epoch,
         elapsedMs,
-        thresholdMs: REMOTE_SEEK_THRESHOLD_MS,
+        targetMs,
+        epsilonMs: SEEK_APPLY_EPSILON_MS,
       })
     ) {
       return;
     }
     el.currentTime = Math.max(0, targetMs / 1000);
-    // The snap target is now where the server believes us to be, so treat it
-    // as our telemetry baseline — otherwise the seek's own echo in the next
-    // broadcast would re-trigger.
-    this.lastReportedMs = Math.floor(targetMs);
   }
 
   /** Ramp the ambient duck gain to `toLevel` over `ms`. `toLevel` of 0.3
@@ -673,7 +689,7 @@ export class PlaybackEngine {
     this.duckRampToken += 1;
     if (this.ambientDuck !== null) this.ambientDuck.gain.value = 1;
     this.currentDuckTo = null;
-    this.lastReportedMs = 0;
+    this.lastEpoch = null;
     this.endStallTime = -1;
   }
 
@@ -728,19 +744,37 @@ export class PlaybackEngine {
     }
   }
 
-  private swapAmbient(trackId: number, crossfadeMs: number): void {
+  /** Put an element at `startS`, tolerating the no-op case. Explicit even
+   *  for 0 because `loadInto` short-circuits a same-URL reload (a repeat-
+   *  queue A↔B wrap): the reused element still sits at its OLD position —
+   *  near the end of the track — and would otherwise resume there and
+   *  immediately re-fire `ended`. */
+  private positionElement(el: HTMLAudioElement, startS: number): void {
+    const cur = el.currentTime;
+    if (Number.isFinite(cur) && Math.abs(cur - startS) * 1000 <= SEEK_APPLY_EPSILON_MS) {
+      return;
+    }
+    el.currentTime = startS;
+  }
+
+  private swapAmbient(trackId: number, crossfadeMs: number, startAtMs = 0): void {
     const url = `/api/library/tracks/${trackId}/stream`;
     const current = this.currentChannel();
     const other = this.otherChannel();
     if (!current || !other) return;
 
-    // A track change zeroes the server's position_ms, and the element starts
-    // at 0 — reset the seek baseline and disarm the stall backstop to match.
-    this.lastReportedMs = 0;
+    // Disarm the stall backstop for the incoming track.
     this.endStallTime = -1;
+
+    // Where the incoming track starts: the server clock — 0 on a natural
+    // advance, the real position on a mid-track join (fresh page, output
+    // re-claim, reconnect). Setting currentTime before metadata is loaded is
+    // spec'd as the default start position — applied once duration is known.
+    const startS = startAtMs > SEEK_APPLY_EPSILON_MS ? startAtMs / 1000 : 0;
 
     if (crossfadeMs <= 0) {
       this.loadInto(current, url);
+      this.positionElement(current.el, startS);
       this.setGainNow(current, 1);
       this.setGainNow(other, 0);
       if (this.lastIsPlaying) this.safePlay("ambient", current.el);
@@ -748,6 +782,7 @@ export class PlaybackEngine {
     }
 
     this.loadInto(other, url);
+    this.positionElement(other.el, startS);
     this.safePlay("ambient (incoming)", other.el);
     this.rampGain(current, current.gainNode.gain.value, 0, crossfadeMs, () => {
       current.el.pause();
@@ -771,7 +806,6 @@ export class PlaybackEngine {
     this.pauseAmbient();
     if (this.ambientA) this.unloadElement(this.ambientA);
     if (this.ambientB) this.unloadElement(this.ambientB);
-    this.lastReportedMs = 0;
     this.endStallTime = -1;
   }
 
@@ -820,18 +854,20 @@ export class PlaybackEngine {
 
   // ----- interrupt ----------------------------------------------------
 
-  private startInterrupt(trackId: number, fadeInMs: number): void {
+  private startInterrupt(trackId: number, fadeInMs: number, startAtMs = 0): void {
     if (!this.interrupt) return;
-    // Reports now flow to the interrupt lane, which starts at 0 — reset the
-    // shared seek baseline so the first interrupt broadcast isn't read as a
-    // seek.
-    this.lastReportedMs = 0;
     const url = `/api/library/tracks/${trackId}/stream`;
     if (this.interrupt.loadedUrl !== url) {
       this.interrupt.el.src = url;
       this.interrupt.el.load();
       this.interrupt.loadedUrl = url;
     }
+    // 0 on a fresh fire (also covers re-firing the same still-loaded track
+    // mid-fade-out — restart from the top), real on a mid-interrupt (re)join.
+    this.positionElement(
+      this.interrupt.el,
+      startAtMs > SEEK_APPLY_EPSILON_MS ? startAtMs / 1000 : 0,
+    );
     this.rampInterrupt(0, 1, fadeInMs);
     this.safePlay("interrupt", this.interrupt.el);
   }
@@ -940,14 +976,9 @@ export class PlaybackEngine {
       if (!this.onPositionReport) return;
       const ms = this.currentPositionMs();
       if (!Number.isFinite(ms) || ms < 0) return;
-      const floored = Math.floor(ms);
-      // Only treat the position as "known to the server" once the report is
-      // actually on the wire. A mid-reconnect send is a silent no-op;
-      // advancing the baseline anyway would later make an unrelated broadcast
-      // (which echoes the server's stale position) look like a remote seek.
-      if (this.onPositionReport(floored)) {
-        this.lastReportedMs = floored;
-      }
+      // Best-effort drift correction for the server clock; a send that gets
+      // dropped mid-reconnect costs nothing (the clock ticks server-side).
+      this.onPositionReport(Math.floor(ms));
     }, POSITION_REPORT_INTERVAL_MS);
   }
 
@@ -987,14 +1018,15 @@ export class PlaybackEngine {
     this.endStallTime = now; // arm: re-check on the next poll
   }
 
-  /** Single funnel for advancing the ambient queue, debounced so the `ended`
-   *  event and the stall backstop can't double-skip a track (and so the
-   *  in-flight round-trip to load the next track doesn't get re-triggered). */
+  /** Single funnel for advancing the ambient queue. Debounced locally so the
+   *  `ended` event and the stall backstop can't spam; carries the finished
+   *  track's id so the server can drop it if the lane already advanced (a
+   *  second output, the server-side advancer). */
   private fireAmbientAdvance(): void {
     const now = performance.now();
     if (now - this.lastAdvanceAt < ADVANCE_DEBOUNCE_MS) return;
     this.lastAdvanceAt = now;
-    this.onSkipNext?.();
+    this.onSkipNext?.(this.lastAmbientId);
   }
 
   /** Send one immediate position report for whichever lane is playing, so the
@@ -1110,7 +1142,7 @@ export class PlaybackEngine {
     if (this.lastInterruptFadeOut > 0) {
       this.fadeOutInterrupt(this.lastInterruptFadeOut);
     }
-    this.onInterruptSkipNext?.();
+    this.onInterruptSkipNext?.(this.lastInterruptId);
   };
 }
 

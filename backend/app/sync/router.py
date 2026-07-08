@@ -31,6 +31,7 @@ from app.presets import loader as presets_loader
 from app.sync import commit_and_broadcast
 from app.sync import loops as loops_manager
 from app.sync import state as state_module
+from app.sync.advancer import resolve_follow_next
 from app.sync.connection import manager
 from app.sync.devices import registry
 from app.sync.protocol import (
@@ -167,31 +168,6 @@ async def _resolve_folder_track_ids(path: str) -> list[int]:
         db = SessionLocal()
         try:
             return library_index.track_ids_under(db, path)
-        finally:
-            db.close()
-
-    return await run_in_threadpool(_work)
-
-
-async def _resolve_follow_next() -> int | None:
-    """For follow ("Continue") mode: the next library track after the one
-    currently playing, or None when follow doesn't apply right now — a
-    different loop mode is set, the queue still has tracks (a normal advance
-    handles those), or nothing is playing. Snapshots the live state so the
-    skip handler can pass the successor into the pure mutator."""
-    snap = await state_module.machine.snapshot()
-    amb = snap.ambient
-    if amb.loop != "follow" or amb.queue or amb.current_track_id is None:
-        return None
-    current_id = amb.current_track_id
-
-    def _work() -> int | None:
-        db = SessionLocal()
-        try:
-            track = db.get(Track, current_id)
-            if track is None:
-                return None
-            return library_index.next_track_id_after(db, track.path)
         finally:
             db.close()
 
@@ -352,12 +328,16 @@ async def _h_ambient_clear_queue(
 
 
 async def _h_ambient_skip_next(
-    _a: AmbientSkipNextAction, _device_id: str, _ws: WebSocket
+    action: AmbientSkipNextAction, _device_id: str, _ws: WebSocket
 ) -> None:
     # Resolve the follow successor first (no-op unless we're in follow mode at
     # the end of the queue) so the pure mutator can advance into the library.
-    follow_next_id = await _resolve_follow_next()
-    await _apply_and_broadcast(state_module.ambient_skip_next(follow_next_id))
+    follow_next_id = await resolve_follow_next()
+    await _apply_and_broadcast(
+        state_module.ambient_skip_next(
+            follow_next_id, expected_track_id=action.from_track_id
+        )
+    )
 
 
 async def _h_ambient_skip_prev(
@@ -524,9 +504,11 @@ async def _h_fire_interrupt_playlist(
 
 
 async def _h_interrupt_skip_next(
-    _a: InterruptSkipNextAction, _device_id: str, _ws: WebSocket
+    action: InterruptSkipNextAction, _device_id: str, _ws: WebSocket
 ) -> None:
-    await _apply_and_broadcast(state_module.interrupt_skip_next())
+    await _apply_and_broadcast(
+        state_module.interrupt_skip_next(expected_track_id=action.from_track_id)
+    )
 
 
 async def _h_interrupt_seek(
@@ -829,9 +811,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 # below (or, for register, succeeds).
 
             # Guests can register themselves (so the device appears in the
-            # operator's device list and can be designated as an output) but
-            # nothing else.
-            if is_guest and not isinstance(action, RegisterAction):
+            # operator's device list and can be designated as an output) and
+            # report playback position — being toggled on as an output by the
+            # operator IS the authorization for telemetry, and the handler
+            # still enforces active-output membership. Everything else is
+            # rejected.
+            if is_guest and not isinstance(
+                action, RegisterAction | PositionReportAction
+            ):
                 await _send_error(
                     websocket, "guest sessions cannot mutate state — please sign in"
                 )

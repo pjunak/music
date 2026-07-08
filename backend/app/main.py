@@ -203,8 +203,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         db.close()
     await sync_state.machine.load(SessionLocal)
+    # Server-side end-of-track advancement — the watchdog that keeps the
+    # queue moving when no client can send (or successfully deliver) a skip.
+    from app.sync.advancer import advancer
+
+    if settings.advancer_enabled:
+        advancer.start()
     yield
-    # Shutdown: cancel any running looping-SFX timer tasks cleanly.
+    # Shutdown: stop the advancer and cancel any running looping-SFX timers.
+    await advancer.stop()
     from app.sync import loops as loops_manager
 
     loops_manager.stop_all()

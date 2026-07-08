@@ -6,8 +6,9 @@
  *  fully isolated (fresh closure + fresh listener registry + fresh timer set).
  *  The scenarios simulate the reported bug: an older TV that supports
  *  `<script type=module>` yet can't parse the bundle's modern syntax, so the
- *  module never boots and `#root` is left empty. The watchdog must load the TV
- *  fallback in exactly that case — and stand down whenever the bundle DID run. */
+ *  module never boots and `#root` is left empty. The watchdog must load the
+ *  compatibility fallback in exactly that case — and stand down whenever the
+ *  bundle DID run. */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -34,7 +35,7 @@ interface ErrorEventLike {
 }
 interface WatchdogWindow {
   __SPA_BOOTED__?: boolean;
-  __TV_MODE_ACTIVE__?: boolean;
+  __COMPAT_MODE_ACTIVE__?: boolean;
   addEventListener(
     type: string,
     fn: (e?: ErrorEventLike) => void,
@@ -59,7 +60,7 @@ function loadWatchdogSource(): string {
     throw new Error("inline watchdog <script> not found in index.html");
   }
   const source = match[1];
-  if (!source.includes("rescueToTvMode") || !source.includes("__SPA_BOOTED__")) {
+  if (!source.includes("rescueToCompatMode") || !source.includes("__SPA_BOOTED__")) {
     throw new Error("extracted <script> is not the boot watchdog");
   }
   return source;
@@ -75,7 +76,7 @@ interface Harness {
   run(): void;
 }
 
-function makeHarness(boot?: { spaBooted?: boolean; tvActive?: boolean }): Harness {
+function makeHarness(boot?: { spaBooted?: boolean; compatActive?: boolean }): Harness {
   const injected: InjectedScript[] = [];
   const listeners: Record<string, Array<(e?: ErrorEventLike) => void>> = {
     error: [],
@@ -87,7 +88,7 @@ function makeHarness(boot?: { spaBooted?: boolean; tvActive?: boolean }): Harnes
     },
   };
   if (boot?.spaBooted) win.__SPA_BOOTED__ = true;
-  if (boot?.tvActive) win.__TV_MODE_ACTIVE__ = true;
+  if (boot?.compatActive) win.__COMPAT_MODE_ACTIVE__ = true;
   const append = (node: InjectedScript): void => {
     injected.push(node);
   };
@@ -117,13 +118,13 @@ describe("boot watchdog (index.html)", () => {
     vi.useRealTimers();
   });
 
-  describe("activates the TV fallback when the bundle truly fails to run", () => {
-    it("injects tv-mode.js on a pre-boot parse error (the old-TV `??` SyntaxError)", () => {
+  describe("activates the compatibility fallback when the bundle truly fails to run", () => {
+    it("injects compat-mode.js on a pre-boot parse error (the old-TV `??` SyntaxError)", () => {
       const h = makeHarness();
       h.run();
       h.fireError({ message: "Uncaught SyntaxError: Unexpected token '?'" });
       vi.advanceTimersByTime(250);
-      expect(h.injected.map((s) => s.src)).toEqual(["/tv-mode.js"]);
+      expect(h.injected.map((s) => s.src)).toEqual(["/compat-mode.js"]);
     });
 
     it("injects when the bundle fails to fetch (resource error on the <script>)", () => {
@@ -169,8 +170,8 @@ describe("boot watchdog (index.html)", () => {
       expect(h.injected).toHaveLength(0);
     });
 
-    it("stays inert when tv-mode is already active (the nomodule path already ran)", () => {
-      const h = makeHarness({ tvActive: true });
+    it("stays inert when compat mode is already active (the nomodule path already ran)", () => {
+      const h = makeHarness({ compatActive: true });
       h.run();
       h.fireError({ message: "err" });
       h.fireLoad();

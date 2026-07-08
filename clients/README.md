@@ -55,7 +55,7 @@ Both return the **same** `PlayerState` shape. Both are reachable **without authe
    fully manual — nothing auto-designates). Once designated, that sticks to your `client_id`
    across restarts. (SFX events are broadcast to **every** connected socket regardless of
    designation — *you* decide whether to play them based on whether you're currently "on";
-   see [SFX events](#sfx-events). A guest output never reports position back to the server.)
+   see [SFX events](#sfx-events).)
 4. From then on the server pushes a **`state_changed`** on every change:
    ```json
    { "type": "state_changed", "state": { ...PlayerState } }
@@ -73,8 +73,9 @@ ping/pong is enough). Reconnect on close and repeat from step 2.
 |---|---|
 | `is_playing` | Whether the **ambient** lane should be playing |
 | `volume` | Master volume `0.0–1.0` (server-wide; informational for a guest) |
+| `position_epoch` | Bumped **only** on deliberate position moves (play/seek/skip/loop restart/interrupt transitions) — your seek trigger |
 | `ambient.current_track_id` | The track id to play (or `null` = nothing) |
-| `ambient.position_ms` | Where in that track playback should be |
+| `ambient.position_ms` | Where in that track playback is **right now** (the server owns the clock and materializes this into every push) |
 | `ambient.queue` / `ambient.history` | What's next / previous (only needed if you show a queue) |
 | `interrupt` | `null`, or an object `{ current_track_id, position_ms, … }` that **takes over** while present (alerts/stingers) |
 | `active_output_device_ids` | The device ids the operator has switched **on** |
@@ -90,10 +91,22 @@ am I "on"?    = (your client_id is in active_output_device_ids)   ← server/Con
 ```
 
 If you're "on" and `playing` and `active track` isn't `null`: ensure your player is loaded
-to `stream_url(active track)` and (on a track change or a >~1.5s jump) seek to `position`.
-Otherwise pause. The server only re-stamps `position_ms` on real actions (play/seek/skip),
-so don't re-seek on every frame — only when the track id changes or the position genuinely
-jumps.
+to `stream_url(active track)`, starting at `position` (it's the live server clock — real on
+a mid-track join, 0 on a natural advance). Otherwise pause.
+
+**The seek rule — `position_epoch` is the whole contract:**
+
+- Track id changed → (re)load and start at `position`.
+- Same track and `position_epoch` **changed** → seek to `position` (the operator scrubbed,
+  a cue started mid-song, a loop restarted, an interrupt began/ended).
+- Same track and `position_epoch` **unchanged** → do **nothing**, no matter how different
+  the broadcast position looks from your player's clock. Never infer seeks by comparing
+  positions — that heuristic is what used to restart songs on volume changes.
+
+The server also advances the queue itself when a track runs past its known length, so your
+client doesn't need (and shouldn't implement) end-of-track skip logic — just keep following
+state. `position_ms` stays current in every push because the server dead-reckons its own
+clock; position reports from outputs are optional drift corrections on top.
 
 ## Media URLs
 
@@ -133,9 +146,10 @@ state, you don't drive it. The narrow consequences:
   when you disconnect and never auto-resumes, so after a reboot the operator re-toggles you on
   in the Console. **Recommendation: keep a *local* on/off** (default on) so the box just plays
   regardless — see the reference client's `--respect-console` flag for the opposite behaviour.
-- **No position reporting back to the server.** Playback is fine (you follow `position_ms`);
-  only the server's *authoritative* scrub position won't be corrected by you. For ambient
-  background this is unnoticeable.
+- **Position reporting is allowed (and optional).** A guest that is currently an *active*
+  output may send `{"type": "position_report", "position_ms": …}` (~1 Hz) — being toggled on
+  by the operator is the authorization. It's a drift correction, not a requirement: the
+  server's clock ticks on its own either way.
 - **No master volume / transport from the client.** Use a **local** volume (how loud *this*
   speaker is). The reference client and the embed example both do this.
 

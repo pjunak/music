@@ -1,60 +1,57 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldApplyRemoteSeek } from "./playbackEngine";
+import { shouldApplyEpochSeek } from "./playbackEngine";
 
 /**
- * Guards the remote-seek gate that decides whether an incoming server
- * position should snap the locally-playing element. The bug this protects
- * against: an older TV (the audio output) restarting the current song every
- * time the DM changed the volume or edited the queue, because the broadcast
- * carried a stale `position_ms` that the old logic mistook for a seek.
+ * Guards the epoch seek gate. Seeks are protocol events now: the server bumps
+ * `position_epoch` on every deliberate move and broadcasts materialized
+ * (always-current) positions. The bug class this protects against: outputs
+ * restarting or yanking the current song on volume changes / queue edits /
+ * device joins, because those broadcasts carried positions the old heuristics
+ * mistook for seeks.
  */
 
-const THRESHOLD = 1500;
+const EPSILON = 300;
 const seek = (
-  targetMs: number,
-  lastReportedMs: number,
+  prevEpoch: number | null,
+  epoch: number,
   elapsedMs: number,
+  targetMs: number,
 ): boolean =>
-  shouldApplyRemoteSeek({ targetMs, lastReportedMs, elapsedMs, thresholdMs: THRESHOLD });
+  shouldApplyEpochSeek({ prevEpoch, epoch, elapsedMs, targetMs, epsilonMs: EPSILON });
 
-describe("shouldApplyRemoteSeek", () => {
-  it("ignores an unrelated broadcast that echoes our last report", () => {
-    // DM changed the volume 30s into the track. The server didn't touch
-    // position_ms, so it echoes back the 30s we last reported — not a seek.
-    expect(seek(30_000, 30_000, 30_400)).toBe(false);
+describe("shouldApplyEpochSeek", () => {
+  it("never seeks when the epoch is unchanged — whatever the positions say", () => {
+    // Volume change 30s in: same epoch, positions agree.
+    expect(seek(4, 4, 30_400, 30_450)).toBe(false);
+    // Same epoch but positions wildly apart (a lagging TV element): still no
+    // seek — drift correction is the report channel's job, not a yank.
+    expect(seek(4, 4, 30_000, 0)).toBe(false);
+    expect(seek(4, 4, 1_000, 120_000)).toBe(false);
   });
 
-  it("ignores a stale echo even when reports have lagged far behind", () => {
-    // The core "older TV" failure: reports stalled at the track start, so the
-    // server still has position_ms≈0 and echoes it while the element is 30s
-    // in. Comparing against the element time would yank it back to 0; comparing
-    // against our own (equally stale) telemetry correctly does nothing.
-    expect(seek(0, 0, 30_000)).toBe(false);
+  it("seeks when the epoch changed and the element is elsewhere", () => {
+    // Operator dragged the scrub bar to 60s.
+    expect(seek(4, 5, 5_200, 60_000)).toBe(true);
+    // loop:track restart back to 0 while the element sits at the very end.
+    expect(seek(4, 5, 179_000, 0)).toBe(true);
   });
 
-  it("snaps when the server position diverges from our telemetry (real seek)", () => {
-    // DM dragged the scrub bar to 60s while we were reporting ~5s.
-    expect(seek(60_000, 5_000, 5_200)).toBe(true);
+  it("suppresses the seek when the element already sits at the target", () => {
+    // A duck-interrupt ended: ambient kept playing and the server clock kept
+    // ticking alongside — the epoch bumped but there's nothing to correct.
+    expect(seek(4, 5, 60_050, 60_000)).toBe(false);
   });
 
-  it("snaps a loop:track restart back to zero", () => {
-    // Track ended, server reset position_ms to 0 on the same track id while
-    // the element is still sitting at the very end.
-    expect(seek(0, 178_000, 179_000)).toBe(true);
+  it("does not treat the first observed state as a seek", () => {
+    // Fresh engine / just claimed the output role: the track-change path
+    // positions the element; the epoch gate stays quiet.
+    expect(seek(null, 7, 0, 45_000)).toBe(false);
   });
 
-  it("does not re-seek when the element already sits at the target", () => {
-    // Server position diverged from telemetry, but the element is already
-    // there (a redundant broadcast after a seek already applied).
-    expect(seek(60_000, 5_000, 60_000)).toBe(false);
-  });
-
-  it("ignores sub-threshold nudges", () => {
-    expect(seek(2_000, 1_000, 2_000)).toBe(false);
-  });
-
-  it("never seeks on a non-finite element time", () => {
-    expect(seek(60_000, 0, Number.NaN)).toBe(false);
+  it("seeks on epoch change even when the element time is non-finite", () => {
+    // Element still loading (NaN currentTime): the epsilon dead-band can't
+    // apply, and the seek must land once metadata is there.
+    expect(seek(4, 5, Number.NaN, 60_000)).toBe(true);
   });
 });

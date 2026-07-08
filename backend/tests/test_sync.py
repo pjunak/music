@@ -30,6 +30,14 @@ def _register(ws, name: str = "device", client_id: str = "client-1") -> None:
     """Send a register action. Identity now flows through `client_id`."""
     ws.send_json({"type": "register", "name": name, "client_id": client_id})
 
+def _pos_near(actual: int, expected: int, slack_ms: int = 500) -> bool:
+    """Position assertion under the server-side playback clock: a ticking lane
+    materializes the few ms elapsed since the mutation into every broadcast,
+    so exact equality is wrong by design. The slack is far below any real
+    regression (wrong-lane stamps, resets to 0, whole-second desyncs)."""
+    return abs(actual - expected) <= slack_ms
+
+
 
 def _designate(client_id: str, value: bool = True) -> None:
     """Remember a device as a designated audio output straight in the file
@@ -660,7 +668,7 @@ def test_ambient_play_track(client: TestClient, seeded_track_id: int) -> None:
         amb = msg["state"]["ambient"]
         assert amb["current_track_id"] == seeded_track_id
         assert amb["queue"] == []
-        assert amb["position_ms"] == 0
+        assert _pos_near(amb["position_ms"], 0)
         assert msg["state"]["is_playing"] is True
 
 
@@ -727,7 +735,7 @@ def test_ambient_skip_next_advances_through_queue(
         assert amb["current_track_id"] == a
         assert amb["queue"] == [b]
         assert amb["history"] == [seeded_track_id]
-        assert amb["position_ms"] == 0
+        assert _pos_near(amb["position_ms"], 0)
 
 
 def test_ambient_skip_next_at_end_of_queue_loop_off(
@@ -741,7 +749,7 @@ def test_ambient_skip_next_at_end_of_queue_loop_off(
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
         assert amb["current_track_id"] is None
-        assert amb["position_ms"] == 0
+        assert _pos_near(amb["position_ms"], 0)
         # Running off the end of the queue stops playback — otherwise
         # clients dead-reckon the position clock against an empty lane.
         assert msg["state"]["is_playing"] is False
@@ -762,7 +770,7 @@ def test_ambient_skip_next_loop_track_replays(
         msg = ws.receive_json()
         amb = msg["state"]["ambient"]
         assert amb["current_track_id"] == seeded_track_id  # unchanged
-        assert amb["position_ms"] == 0  # reset
+        assert _pos_near(amb["position_ms"], 0)  # reset
 
 
 def test_ambient_skip_next_loop_queue_wraps(
@@ -819,7 +827,7 @@ def test_ambient_shuffle_advances_to_a_queue_member(
         assert amb["current_track_id"] in {a, b, c}
         assert sorted([*amb["queue"], amb["current_track_id"]]) == sorted([a, b, c])
         assert amb["history"] == [seeded_track_id]
-        assert amb["position_ms"] == 0
+        assert _pos_near(amb["position_ms"], 0)
 
 
 def test_ambient_skip_prev_with_history(
@@ -855,7 +863,7 @@ def test_ambient_skip_prev_no_history_seeks_to_start(
         ws.send_json({"type": "ambient_skip_prev"})
         msg = ws.receive_json()
         assert msg["state"]["ambient"]["current_track_id"] == seeded_track_id
-        assert msg["state"]["ambient"]["position_ms"] == 0
+        assert _pos_near(msg["state"]["ambient"]["position_ms"], 0)
 
 
 def test_ambient_seek(client: TestClient, seeded_track_id: int) -> None:
@@ -865,7 +873,7 @@ def test_ambient_seek(client: TestClient, seeded_track_id: int) -> None:
         ws.receive_json()
         ws.send_json({"type": "ambient_seek", "position_ms": 42000})
         msg = ws.receive_json()
-        assert msg["state"]["ambient"]["position_ms"] == 42000
+        assert _pos_near(msg["state"]["ambient"]["position_ms"], 42000)
 
 
 def test_ambient_set_loop(client: TestClient) -> None:
@@ -892,7 +900,7 @@ def test_ambient_stop_clears_lane(
         assert amb["current_track_id"] is None
         assert amb["queue"] == []
         assert amb["history"] == []
-        assert amb["position_ms"] == 0
+        assert _pos_near(amb["position_ms"], 0)
 
 
 def test_ambient_play_playlist_manual(
@@ -1152,7 +1160,7 @@ def test_position_report_stamps_ambient_position(
         b.send_json({"type": "set_volume", "volume": 0.55})
         a.receive_json()
         msg = b.receive_json()
-        assert msg["state"]["ambient"]["position_ms"] == 12345
+        assert _pos_near(msg["state"]["ambient"]["position_ms"], 12345)
 
 
 # --- interrupt lane -------------------------------------------------------
@@ -1181,7 +1189,7 @@ def test_fire_interrupt_track(
         assert msg["state"]["is_playing"] is True
         # Ambient state preserved.
         assert msg["state"]["ambient"]["current_track_id"] == seeded_track_id
-        assert msg["state"]["ambient"]["position_ms"] == 30000
+        assert _pos_near(msg["state"]["ambient"]["position_ms"], 30000)
 
 
 def test_fire_interrupt_track_validates_track_id(client: TestClient) -> None:
@@ -1249,7 +1257,7 @@ def test_interrupt_skip_next_advances_within_queue(
         intr = msg["state"]["interrupt"]
         assert intr["current_track_id"] == extra_seeded_track_ids[1]
         assert intr["queue"] == extra_seeded_track_ids[2:]
-        assert intr["position_ms"] == 0
+        assert _pos_near(intr["position_ms"], 0)
 
 
 def test_interrupt_skip_next_at_end_returns_to_ambient(
@@ -1269,7 +1277,7 @@ def test_interrupt_skip_next_at_end_returns_to_ambient(
         assert msg["state"]["interrupt"] is None
         # Ambient lane intact, position preserved.
         assert msg["state"]["ambient"]["current_track_id"] == seeded_track_id
-        assert msg["state"]["ambient"]["position_ms"] == 45000
+        assert _pos_near(msg["state"]["ambient"]["position_ms"], 45000)
         assert msg["state"]["is_playing"] is True
 
 
@@ -1303,7 +1311,7 @@ def test_interrupt_seek(
         ws.receive_json()
         ws.send_json({"type": "interrupt_seek", "position_ms": 8000})
         msg = ws.receive_json()
-        assert msg["state"]["interrupt"]["position_ms"] == 8000
+        assert _pos_near(msg["state"]["interrupt"]["position_ms"], 8000)
 
 
 def test_cancel_interrupt_returns_to_ambient(
@@ -1321,7 +1329,7 @@ def test_cancel_interrupt_returns_to_ambient(
         ws.send_json({"type": "cancel_interrupt"})
         msg = ws.receive_json()
         assert msg["state"]["interrupt"] is None
-        assert msg["state"]["ambient"]["position_ms"] == 12000
+        assert _pos_near(msg["state"]["ambient"]["position_ms"], 12000)
         assert msg["state"]["is_playing"] is True
 
 
@@ -1372,9 +1380,9 @@ def test_position_report_stamps_interrupt_when_active(
         # No broadcast for that. Trigger a broadcast and read back state.
         ws.send_json({"type": "set_volume", "volume": 0.77})
         msg = ws.receive_json()
-        assert msg["state"]["interrupt"]["position_ms"] == 4000
+        assert _pos_near(msg["state"]["interrupt"]["position_ms"], 4000)
         # Ambient position preserved as the resume point.
-        assert msg["state"]["ambient"]["position_ms"] == 25000
+        assert _pos_near(msg["state"]["ambient"]["position_ms"], 25000)
 
 
 def test_interrupt_actions_are_noops_when_no_interrupt(client: TestClient) -> None:

@@ -1,16 +1,16 @@
-/* TV-mode fallback for browsers that can't load the ES-module SPA
-   (old Samsung Smart TVs, etc.). Plain ES5 — no modules, no template
+/* Compatibility-mode fallback for browsers that can't load the ES-module
+   SPA (old Samsung Smart TVs, etc.). Plain ES5 — no modules, no template
    literals, no arrow functions, no optional chaining.
 
    Loaded as <script nomodule> (index.html): a module-capable browser
    skips it entirely, a module-incapable one runs it instead. That
-   capability split IS the "is TV mode needed?" decision — so there's no
-   timer and no race with React. main.tsx also injects it on demand for
-   the ?tv preview. In both cases the SPA won't render in this document,
-   so activation is immediate.
+   capability split IS the "is compatibility mode needed?" decision — so
+   there's no timer and no race with React. main.tsx also injects it on
+   demand for the ?compat preview (legacy alias: ?tv). In both cases the
+   SPA won't render in this document, so activation is immediate.
 
    Registers a stable client_id (exactly like the SPA) so the operator can
-   pick this TV as an output in the Speakers popover, set its per-device
+   pick this device as an output in the Speakers popover, set its per-device
    volume, and designate it output-by-default; it then plays whatever the
    controller routes to it. If the wss:// WebSocket can't be opened (the
    classic old-TV cert quirk — see makePollingClient) it falls back to
@@ -98,7 +98,7 @@
     clearNode(r);
     r.style.cssText = PAGE_STYLE;
     var wrap = el("div", "padding:80px 40px;");
-    wrap.appendChild(el("h1", "font-size:64px;margin:0 0 24px 0;", "TV speaker mode"));
+    wrap.appendChild(el("h1", "font-size:64px;margin:0 0 24px 0;", "Compatibility mode"));
     wrap.appendChild(el("p", "font-size:24px;margin:0 0 48px 0;color:#bbb;line-height:1.4;",
       "This screen plays whatever the controller selects. Press the button to allow audio."));
     var btn = el("button",
@@ -292,11 +292,39 @@
         var p = audioEl.play();
         if (p && typeof p["catch"] === "function") {
           p["catch"](function (err) {
-            try { console.warn("[tv-mode] play() rejected:", err); } catch (e) {}
+            try { console.warn("[compat-mode] play() rejected:", err); } catch (e) {}
           });
         }
       } catch (e) {
-        try { console.warn("[tv-mode] play() threw:", e); } catch (err) {}
+        try { console.warn("[compat-mode] play() threw:", e); } catch (err) {}
+      }
+    }
+
+    // Pending-seek plumbing. Old TV browsers throw INVALID_STATE_ERR when
+    // currentTime is set before the element has metadata, and the old
+    // try/catch just swallowed that — the seek was silently lost. Instead,
+    // park the target on the element and apply it on `loadedmetadata`. One
+    // persistent listener per element; the latest request wins (a new src
+    // load clears any stale target).
+    function attachPendingSeek(el) {
+      el.addEventListener("loadedmetadata", function () {
+        var t = el.__pendingSeekS;
+        el.__pendingSeekS = null;
+        if (t != null) {
+          try { el.currentTime = t; } catch (e) {}
+        }
+      });
+    }
+    attachPendingSeek(a);
+    attachPendingSeek(b);
+
+    function requestSeek(el, targetMs) {
+      var t = targetMs / 1000;
+      if (el.readyState >= 1) {  // HAVE_METADATA — safe to seek now
+        el.__pendingSeekS = null;
+        try { el.currentTime = t; } catch (e) { el.__pendingSeekS = t; }
+      } else {
+        el.__pendingSeekS = t;
       }
     }
 
@@ -312,20 +340,26 @@
       } catch (e) {}
     }
 
-    function swap(trackId, crossfadeMs, shouldPlay) {
+    // Load `trackId` into the player, optionally starting at `startMs`
+    // (a mid-track join or an interrupt (re)join; 0/absent = from the top).
+    function swap(trackId, crossfadeMs, shouldPlay, startMs) {
       stopRamp();
       var url = streamUrl(trackId);
       if (!useCrossfade || crossfadeMs < 50) {
         try { active.pause(); } catch (e) {}
+        active.__pendingSeekS = null;
         active.src = url;
         active.volume = masterVol;
+        if (startMs && startMs > 500) requestSeek(active, startMs);
         if (shouldPlay) safePlay(active);
         return;
       }
       var fromEl = active;
       var toEl = inactive;
+      toEl.__pendingSeekS = null;
       toEl.src = url;
       toEl.volume = 0;
+      if (startMs && startMs > 500) requestSeek(toEl, startMs);
       if (shouldPlay) safePlay(toEl);
       var startTime = nowMs();
       ramp = setInterval(function () {
@@ -358,11 +392,20 @@
     }
 
     // Unconditional seek. WHETHER to seek is decided entirely by applyState's
-    // deliberate-move gate, so there's a single coordinated threshold;
+    // position_epoch gate (the server's explicit "a seek happened" signal);
     // re-gating here against the element clock would open a dead-band that
     // silently drops small honest seeks the outer gate already admitted.
     function seek(targetMs) {
-      try { active.currentTime = targetMs / 1000; } catch (e) {}
+      requestSeek(active, targetMs);
+    }
+
+    // The active element's clock, for position reports. null when unknown.
+    function getPositionMs() {
+      try {
+        var t = active.currentTime;
+        if (typeof t === "number" && !isNaN(t)) return Math.floor(t * 1000);
+      } catch (e) {}
+      return null;
     }
 
     function clearAudio() {
@@ -377,6 +420,7 @@
       setPlaying: setPlaying,
       setVolume: setVolume,
       seek: seek,
+      getPositionMs: getPositionMs,
       clear: clearAudio
     };
   }
@@ -500,7 +544,7 @@
   // page-level exception and works, so we poll the same PlayerState that
   // the WS would have pushed as state_snapshot / state_changed.
   //
-  // Read-only: a polling TV doesn't register as a device. tv-mode audio
+  // Read-only: a polling device doesn't register. Compat-mode audio
   // is driven entirely by state.ambient, which is global, so playback
   // works without device registration. The TV simply won't appear in the
   // controller's output list — acceptable trade-off for an emergency
@@ -618,38 +662,55 @@
   // it. Keyed separately from the SPA (these browsers never run the SPA, so
   // the two can't collide). The operator's "output by default" designation
   // in Settings → Devices sticks to this id across reloads, and it's what
-  // makes the TV addressable in active_output_device_ids / device_volumes.
-  function getClientId() {
+  // makes the device addressable in active_output_device_ids / device_volumes.
+  //
+  // Key migration: this surface used to be called "TV mode" and persisted
+  // under "tv-mode.*". Read the legacy key as a fallback and re-save it under
+  // the new name, so an existing device keeps its identity (and therefore its
+  // output designation + per-device volume) across the rename.
+  function readPersisted(newKey, legacyKey) {
     try {
-      var stored = window.localStorage && localStorage.getItem("tv-mode.client_id");
+      if (!window.localStorage) return null;
+      var stored = localStorage.getItem(newKey);
       if (stored) return stored;
+      var legacy = localStorage.getItem(legacyKey);
+      if (legacy) {
+        try { localStorage.setItem(newKey, legacy); } catch (e) {}
+        return legacy;
+      }
     } catch (e) {}
-    var id = "tv-" + makeShortId() + makeShortId() + nowMs().toString(36);
-    try { window.localStorage && localStorage.setItem("tv-mode.client_id", id); }
+    return null;
+  }
+
+  function getClientId() {
+    var stored = readPersisted("compat-mode.client_id", "tv-mode.client_id");
+    if (stored) return stored;
+    var id = "compat-" + makeShortId() + makeShortId() + nowMs().toString(36);
+    try { window.localStorage && localStorage.setItem("compat-mode.client_id", id); }
     catch (e) {}
     return id;
   }
 
   // Device name resolution:
   //   1. ?name=... URL param (one-time setup — also persists to localStorage)
-  //   2. localStorage from a previous visit
+  //   2. localStorage from a previous visit (legacy "tv-mode.name" migrates)
   //   3. generated default "Old TV (xxxxx)" — minted once, then persisted so
-  //      the label (and the operator's device-list entry) is stable on reload
-  // Bookmark `https://music.example/?tv&name=Living%20Room` once to claim
+  //      the label (and the operator's device-list entry) is stable on reload.
+  //      ("Old TV" names the physical device, not this mode — it also drives
+  //      the TV glance icon in the device list.)
+  // Bookmark `https://music.example/?compat&name=Living%20Room` once to claim
   // a friendlier label that survives subsequent reloads.
   function getDeviceName() {
     var fromUrl = getQueryParam("name");
     if (fromUrl) {
-      try { window.localStorage && localStorage.setItem("tv-mode.name", fromUrl); }
+      try { window.localStorage && localStorage.setItem("compat-mode.name", fromUrl); }
       catch (e) {}
       return fromUrl;
     }
-    try {
-      var stored = window.localStorage && localStorage.getItem("tv-mode.name");
-      if (stored) return stored;
-    } catch (e) {}
+    var stored = readPersisted("compat-mode.name", "tv-mode.name");
+    if (stored) return stored;
     var generated = "Old TV (" + makeShortId() + ")";
-    try { window.localStorage && localStorage.setItem("tv-mode.name", generated); }
+    try { window.localStorage && localStorage.setItem("compat-mode.name", generated); }
     catch (e) {}
     return generated;
   }
@@ -664,13 +725,16 @@
 
   function start() {
     var crossfadeOk = supportsFractionalVolume();
-    try { console.log("[tv-mode] crossfade supported:", crossfadeOk); } catch (e) {}
+    try { console.log("[compat-mode] crossfade supported:", crossfadeOk); } catch (e) {}
     var ui = renderPlayer();
     var engine = makeAudioEngine(crossfadeOk);
     engine.prime();
 
     var lastTrackId = null;
     var lastIsPlaying = false;
+    // Whether the previously applied state had an interrupt active — drives
+    // the "hard cut on lane switch" rule in applyState.
+    var wasInterrupt = false;
     var clientId = getClientId();
     var deviceLabel = getDeviceName();
     ui.setDeviceName(deviceLabel);
@@ -683,22 +747,21 @@
     // isThisDeviceActive() return true so it still works as a passive
     // always-on speaker (the only useful behaviour when it can't be selected).
     // your_device_id from the snapshot is empty by design and ignored.
-    //
-    // The TV does NOT report position: it's a guest (a TV bookmark has no
-    // login) and the server rejects every guest action except register, so
-    // the server's position_ms is effectively frozen during playback — hence
-    // the deliberate-move seek gate in applyState below.
     var myDeviceId = null;
-    // Timeline state. Server pushes position_ms in every state broadcast
-    // (~every 2 s); we interpolate between pushes locally so the
+    // In WS mode, the send function (captured in onOpen) — used for the 1 Hz
+    // position reports below. null in polling mode (read-only transport).
+    var wsSend = null;
+    // Timeline state. The server owns the playback clock now, so position_ms
+    // is current in every push; we interpolate between pushes locally so the
     // progress bar moves smoothly. currentTrackLengthMs comes from
     // /api/library/tracks/<id> via fetchTrack on each track change.
     var currentTrackLengthMs = 0;
     var serverPositionMs = 0;
     var serverPositionTimestamp = nowMs();
-    // The previous server position_ms, to detect a *deliberate* remote seek
-    // vs. a frozen clock (see the same-track branch in applyState).
-    var lastServerPosMs = 0;
+    // position_epoch of the last applied state. The server bumps it ONLY on
+    // deliberate moves (seek / skip / loop restart / interrupt transitions);
+    // we seek iff it changed. null = no state applied yet.
+    var lastEpoch = null;
 
     function isThisDeviceActive(state) {
       if (myDeviceId === null) return true;
@@ -711,14 +774,24 @@
 
     function applyState(state) {
       if (!state) return;
+      // Lane pick: an interrupt takes over while present (alerts/stingers),
+      // ambient otherwise. duck_to layering (music quietly under the
+      // interrupt) needs two simultaneous streams — out of scope for this
+      // fallback, the interrupt simply replaces the music and ambient
+      // resumes at its server-preserved position afterwards.
+      var itr = state.interrupt || null;
       var amb = state.ambient || {};
-      var trackId = (amb.current_track_id == null) ? null : amb.current_track_id;
-      var posMs = amb.position_ms || 0;
+      var trackId = itr
+        ? itr.current_track_id
+        : ((amb.current_track_id == null) ? null : amb.current_track_id);
+      var posMs = (itr ? itr.position_ms : amb.position_ms) || 0;
+      var epoch = (typeof state.position_epoch === "number") ? state.position_epoch : 0;
       var trackChanged = trackId !== lastTrackId;
       // Gate playback on this device being a selected output (WS mode, where
       // we have an identity). In polling mode myDeviceId is null and
       // isThisDeviceActive() returns true — a passive always-on speaker.
-      var isPlaying = !!state.is_playing && isThisDeviceActive(state);
+      // An interrupt plays regardless of the pause flag (matching the SPA).
+      var isPlaying = (itr ? true : !!state.is_playing) && isThisDeviceActive(state);
       var master = (typeof state.volume === "number") ? state.volume : 1;
       // Per-device trim (master × this device's device_volumes entry), so the
       // operator can tame a too-loud TV from the Speakers popover without
@@ -729,7 +802,10 @@
           typeof state.device_volumes[myDeviceId] === "number") {
         trim = state.device_volumes[myDeviceId];
       }
-      var crossfadeMs = state.crossfade_ms || 0;
+      // Crossfade only applies to ambient→ambient track changes; interrupt
+      // transitions are hard cuts (an alert shouldn't fade in late).
+      var laneSwitched = (itr !== null) !== wasInterrupt;
+      var crossfadeMs = laneSwitched ? 0 : (state.crossfade_ms || 0);
 
       engine.setVolume(clamp01(master * trim));
       // Capture latest server position for the progress interpolator
@@ -746,12 +822,15 @@
           ui.setAlbumArt(null);
           currentTrackLengthMs = 0;
         } else {
-          engine.swap(trackId, crossfadeMs, isPlaying);
+          // posMs is 0 on a natural advance / fresh fire, and the real
+          // position on a mid-track join (page load, lane return, reconnect)
+          // — the pending-seek machinery lands it once metadata is in.
+          engine.swap(trackId, crossfadeMs, isPlaying, posMs);
           ui.setTitle("Track " + trackId);
           ui.setArtist("");
           ui.setAlbum("");
           // Backend serves /cover with the right MIME or 404s — the
-            // <img> onerror handler falls back to the placeholder glyph.
+          // <img> onerror handler falls back to the placeholder glyph.
           ui.setAlbumArt("/api/library/tracks/" + trackId + "/cover");
           currentTrackLengthMs = 0;
           fetchTrack(trackId, function (err, t) {
@@ -765,25 +844,17 @@
           });
         }
         lastTrackId = trackId;
-      } else if (trackId != null) {
-        // Correct the element clock only on a *deliberate* server-side move,
-        // never on every push. The server doesn't dead-reckon position_ms and
-        // the TV can't report it (guest), so during playback the broadcast
-        // position is effectively FROZEN; blindly seeking to it would yank the
-        // element back each update and loop the first seconds of the track
-        // forever. A genuine seek / skip / loop-restart / cue start instead
-        // *moves* the server position — a jump from the last value we saw is
-        // the signal. (Same idea as the SPA's shouldApplyRemoteSeek, with one
-        // coordinated threshold so there's no dead-band.) Because a track
-        // change resets lastServerPosMs to 0 (the element's real start), a
-        // cue's non-zero start_ms reads as a move here and is honored.
-        if (Math.abs(posMs - lastServerPosMs) > 1000) {
-          engine.seek(posMs);
-          // A loop:track restart broadcasts position_ms 0 with is_playing
-          // still true; if the element had ended (parked/paused) the seek
-          // alone won't restart it, so nudge playback when we should be on.
-          if (isPlaying) engine.setPlaying(true);
-        }
+      } else if (trackId != null && lastEpoch !== null && epoch !== lastEpoch) {
+        // Same track, epoch bumped: a deliberate server-side move (scrub-bar
+        // seek, loop restart, cue start) — snap to it. Epoch unchanged means
+        // NO seek, whatever the numbers say: volume changes, queue edits and
+        // device joins no longer touch the element (this used to restart the
+        // song on every such push, and re-seek every 2 s in polling mode).
+        engine.seek(posMs);
+        // A loop:track restart broadcasts position_ms 0 with is_playing
+        // still true; if the element had ended (parked/paused) the seek
+        // alone won't restart it, so nudge playback when we should be on.
+        if (isPlaying) engine.setPlaying(true);
       }
 
       if (isPlaying !== lastIsPlaying) {
@@ -791,10 +862,21 @@
         lastIsPlaying = isPlaying;
       }
       ui.setPlaying(isPlaying);
-      // After a track change the element restarts at 0, so anchor the seek
-      // gate there; otherwise track the latest server position.
-      lastServerPosMs = trackChanged ? 0 : posMs;
+      wasInterrupt = itr !== null;
+      lastEpoch = epoch;
     }
+
+    // Position reports (WS mode only): 1 Hz drift corrections for the
+    // server's playback clock, from the device that actually makes sound.
+    // The server accepts them from guests as long as the operator has this
+    // device toggled on as an output — self-gate on the same condition
+    // (lastIsPlaying already folds it in) so we never send a rejectable one.
+    setInterval(function () {
+      if (!wsSend || myDeviceId === null || !lastIsPlaying) return;
+      var pos = engine.getPositionMs();
+      if (pos == null) return;
+      wsSend({ type: "position_report", position_ms: pos });
+    }, 1000);
 
     // Progress bar interpolator. Server pushes position only on state
     // changes (~every 2 s + at every mutation), so the timeline would
@@ -829,8 +911,10 @@
       // so the server has already pruned it. Clearing myDeviceId makes
       // isThisDeviceActive() fall back to "always play" (passive speaker
       // mode), the only useful behaviour when we can't be selected as an
-      // output.
+      // output. No wsSend either — polling is read-only, so no position
+      // reports (the server clock ticks on its own regardless).
       myDeviceId = null;
+      wsSend = null;
       ui.setStatus("WebSocket blocked — switching to HTTP polling...", "#ffb74d");
       setTimeout(function () {
         makePollingClient({
@@ -860,6 +944,7 @@
         // against active_output_device_ids and lets the operator pick this TV
         // in the Speakers popover, trim its volume, and save it default-on.
         myDeviceId = clientId;
+        wsSend = send;
         send({ type: "register", name: deviceLabel, client_id: clientId });
       },
       onMessage: function (msg) {
@@ -876,22 +961,23 @@
 
   // ---- Bootstrap --------------------------------------------------------
 
-  function hasTvParam() {
-    // ?tv (valueless) -> getQueryParam returns "" (present); absent -> null.
-    return getQueryParam("tv") !== null;
+  function hasCompatParam() {
+    // ?compat (valueless) -> getQueryParam returns "" (present); absent ->
+    // null. ?tv is the legacy alias, kept so old bookmarks keep working.
+    return getQueryParam("compat") !== null || getQueryParam("tv") !== null;
   }
 
-  // Whether the SPA owns #root and tv-mode must stand down. True once the bundle
-  // has booted (or React has already painted) — EXCEPT under an explicit ?tv
-  // preview, where main.tsx injected us on purpose and tv-mode wins. This is
-  // what stops a watchdog-injected copy from racing a bundle that booted a beat
-  // after the watchdog fired.
+  // Whether the SPA owns #root and compat mode must stand down. True once the
+  // bundle has booted (or React has already painted) — EXCEPT under an explicit
+  // ?compat / ?tv preview, where main.tsx injected us on purpose and compat
+  // mode wins. This is what stops a watchdog-injected copy from racing a bundle
+  // that booted a beat after the watchdog fired.
   function spaOwnsRoot() {
-    if (hasTvParam()) return false;
+    if (hasCompatParam()) return false;
     return reactMounted() || !!window.__SPA_BOOTED__;
   }
 
-  function activateTvMode() {
+  function activateCompatMode() {
     // The only hard floor is XHR: a WebSocket-less browser still works over the
     // polling fallback (handled inside start()), so it's not dead-ended here.
     if (typeof XMLHttpRequest === "undefined") {
@@ -908,15 +994,16 @@
   //   2. The index.html boot watchdog injecting it because the module bundle
   //      errored or never booted (a module-capable-but-too-old TV that can't
   //      parse the bundle's modern syntax) — the case `nomodule` alone misses.
-  //   3. main.tsx injecting it for the ?tv preview (React is skipped there).
-  // __TV_MODE_ACTIVE__ makes activation idempotent (paths 1 and 2 can both fire
-  // on the same old TV around DOMready). spaOwnsRoot() is the safety net: the
-  // old "wait Nms for React, then claim #root" paint timer that kidnapped a
+  //   3. main.tsx injecting it for the ?compat / ?tv preview (React is skipped
+  //      there).
+  // __COMPAT_MODE_ACTIVE__ makes activation idempotent (paths 1 and 2 can both
+  // fire on the same old TV around DOMready). spaOwnsRoot() is the safety net:
+  // the old "wait Nms for React, then claim #root" paint timer that kidnapped a
   // crashed/slow SPA is gone — we only ever take over when the bundle has
   // demonstrably failed to run.
   whenReady(function () {
-    if (window.__TV_MODE_ACTIVE__ || spaOwnsRoot()) return;
-    window.__TV_MODE_ACTIVE__ = true;
-    activateTvMode();
+    if (window.__COMPAT_MODE_ACTIVE__ || spaOwnsRoot()) return;
+    window.__COMPAT_MODE_ACTIVE__ = true;
+    activateCompatMode();
   });
 })();

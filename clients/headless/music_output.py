@@ -11,7 +11,8 @@ What it does:
     (persisted), so the operator can designate this device as an audio output
     once and have it stick across restarts,
   - on every state change, plays the active track (interrupt lane wins over
-    ambient) at the reported position, pausing/seeking to match the server,
+    ambient) at the server-clock position, seeking only when the server's
+    position_epoch says a deliberate move happened,
   - plays fire-and-forget SFX (`sfx_fired`) layered over the music,
   - exposes a *local* on/off and volume (this speaker, not the server master),
   - optionally serves a tiny LAN HTTP control surface (on/off + volume +
@@ -64,10 +65,6 @@ except ImportError:  # pragma: no cover - import guard for a clearer message
         "(see requirements.txt / README.md)"
     )
 
-# A position delta larger than this between what the server reports and where
-# mpv actually is means a real seek happened (vs. normal playback drift), so we
-# snap to it. Mirrors the browser engine's seek threshold.
-SEEK_THRESHOLD_S = 1.5
 RECONNECT_SECONDS = 3
 
 
@@ -162,6 +159,12 @@ class Reconciler:
         self._lock = threading.Lock()
         self._state: dict[str, Any] | None = None
         self._loaded_url: str | None = None
+        # position_epoch of the last state we reconciled while playing. The
+        # server bumps it only on deliberate moves (seek/skip/interrupt), so
+        # "seek iff it changed" replaces the old local-drift compare — which
+        # used to yank playback back to a stale broadcast position on every
+        # unrelated state change (volume, device joins, ...).
+        self._last_epoch: int | None = None
         self._meta_cache: dict[int, dict[str, Any]] = {}
 
         self.local_on = local_on
@@ -233,17 +236,26 @@ class Reconciler:
 
         url = self.stream_url(track_id)
         start_s = position_ms / 1000.0
+        epoch = state.get("position_epoch", 0)
         with self._lock:
             loaded = self._loaded_url
+            last_epoch = self._last_epoch
         if url != loaded:
+            # Track change or first load: position_ms is the server clock —
+            # 0 on a natural advance, the real position on a mid-track join.
             self.player.play(url, start_s=start_s)
             with self._lock:
                 self._loaded_url = url
         else:
-            cur = self.player.time_pos
-            if cur is not None and abs(start_s - cur) > SEEK_THRESHOLD_S:
+            # Same track: seek iff the server says a deliberate move happened
+            # (epoch changed). NEVER seek because positions look different —
+            # the mpv clock is authoritative between epochs, and reports (or
+            # simply the server's own dead-reckoning) keep the server in sync.
+            if last_epoch is not None and epoch != last_epoch:
                 self.player.seek_abs(start_s)
             self.player.set_paused(False)
+        with self._lock:
+            self._last_epoch = epoch
 
     # -- control-surface helpers ------------------------------------------- #
 

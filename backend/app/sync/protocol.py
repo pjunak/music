@@ -89,6 +89,11 @@ class AmbientClearQueueAction(_Action):
 
 class AmbientSkipNextAction(_Action):
     type: Literal["ambient_skip_next"]
+    # Idempotency token: "I observed the end of THIS track". When set, the
+    # server drops the action if the ambient lane has already moved on (a
+    # second output's duplicate `ended`, or a race with the server-side
+    # advancer). Absent = an explicit operator skip, which always applies.
+    from_track_id: int | None = None
 
 
 class AmbientSkipPrevAction(_Action):
@@ -172,6 +177,8 @@ class FireInterruptPlaylistAction(_Action):
 
 class InterruptSkipNextAction(_Action):
     type: Literal["interrupt_skip_next"]
+    # Same idempotency contract as AmbientSkipNextAction.from_track_id.
+    from_track_id: int | None = None
 
 
 class InterruptSeekAction(_Action):
@@ -305,6 +312,13 @@ class AmbientState(BaseModel):
     queue: list[int] = Field(default_factory=list)
     history: list[int] = Field(default_factory=list)
     position_ms: int = 0
+    # Wall-clock (epoch seconds) at which `position_ms` was stamped, or None
+    # when the lane's clock is stopped (paused, empty, or frozen under a
+    # pausing interrupt). A non-None anchor means the lane is "ticking": its
+    # true position is `position_ms + (now - anchor)`. Server-internal
+    # bookkeeping — reads (snapshot/broadcast) always materialize the summed
+    # position into `position_ms`, so clients never need this field.
+    position_anchored_at: float | None = None
     loop: LoopMode = "off"
     shuffle: ShuffleMode = "off"
     # The playlist this lane was started from, so the Console can show which
@@ -331,6 +345,9 @@ class InterruptState(BaseModel):
     current_track_id: int
     queue: list[int] = Field(default_factory=list)
     position_ms: int = 0
+    # Playback-clock anchor; same semantics as AmbientState.position_anchored_at.
+    # Interrupts tick from the moment they fire.
+    position_anchored_at: float | None = None
     return_to_ambient: bool = True
     fade_in_ms: int = 0
     fade_out_ms: int = 0
@@ -358,6 +375,13 @@ class PlayerState(BaseModel):
     # stale-write is rejected on it. Don't bolt concurrency checks onto this
     # without designing the full protocol (client echo + reject path) first.
     revision: int = 0
+    # Monotonic counter bumped ONLY on deliberate position moves — play,
+    # seek, skip, loop restart, interrupt fire/advance/end. The client seek
+    # contract (docs/playback-sync-overhaul.md): seek the active lane iff
+    # this changed; NEVER infer seeks by comparing positions. Volume, queue
+    # edits, pause/resume, device changes etc. leave it untouched, which is
+    # what makes those actions glitch-free on every output.
+    position_epoch: int = 0
     is_playing: bool = False
     volume: float = 1.0
 
