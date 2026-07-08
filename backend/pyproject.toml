@@ -8,7 +8,7 @@ dependencies = [
     # Held below 1.0 on purpose: Starlette 1.x's TestClient drops httpx for
     # httpx2 (flagged as a supply-chain/typosquat risk) — no gain for a
     # test-only transport. Lift once httpx2 is trusted or no longer required.
-    "starlette==0.48.0",
+    "starlette==0.52.1",
     "uvicorn[standard]==0.49.0",
     "sqlalchemy==2.0.51",
     "pydantic==2.13.4",
