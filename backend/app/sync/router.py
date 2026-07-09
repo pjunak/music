@@ -32,7 +32,7 @@ from app.sync import commit_and_broadcast
 from app.sync import loops as loops_manager
 from app.sync import state as state_module
 from app.sync.advancer import resolve_follow_next
-from app.sync.connection import manager
+from app.sync.connection import guest_state_view, manager
 from app.sync.devices import registry
 from app.sync.protocol import (
     AmbientClearQueueAction,
@@ -768,13 +768,17 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
 
     device = registry.add()
-    manager.add(device.connection_id, websocket)
+    manager.add(device.connection_id, websocket, is_guest=is_guest)
 
     # The snapshot goes out before the client's `register` (which carries the
     # client_id), so the server can't name the device here. The client knows
     # its own stable client_id and self-assigns identity — your_device_id stays
-    # empty (see StateSnapshot).
+    # empty (see StateSnapshot). Guests get a redacted view (no other devices'
+    # client_ids / global active set) — the snapshot is otherwise a free leak
+    # of the capability tokens that gate output activation and position reports.
     snapshot_state = await state_module.machine.snapshot()
+    if is_guest:
+        snapshot_state = guest_state_view(snapshot_state, None)
     await _send(websocket, StateSnapshot(state=snapshot_state))
 
     try:
@@ -805,6 +809,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             ):
                 is_guest = True
                 session_expires_at = None
+                manager.set_guest(device.connection_id, True)
                 await _send_error(
                     websocket, "session expired — please sign in again"
                 )

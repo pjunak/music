@@ -153,15 +153,21 @@ def test_ws_session_expiry_mid_connection_downgrades_to_guest(
 
 def test_ws_guest_can_register_to_appear_in_outputs(client: TestClient) -> None:
     """Register is the one mutation a guest is allowed — so a logged-out
-    Player tab on a TV can show up in the operator's Outputs picker."""
-    with client.websocket_connect("/api/ws") as guest:
-        guest.receive_json()  # snapshot
-        _register(guest, "TV", "tv-client")
-        # Register is broadcast as a state_changed; receive it.
-        msg = guest.receive_json()
-        assert msg["type"] == "state_changed"
-        names = [d["name"] for d in msg["state"]["connected_devices"]]
-        assert "TV" in names
+    Player tab on a TV shows up in the operator's Outputs picker. The roster is
+    asserted from the OPERATOR socket: a guest's own broadcasts are redacted
+    (no connected_devices), which is where it's actually consumed anyway."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as operator:
+        operator.receive_json()  # snapshot
+        client.cookies.clear()  # next connect is a guest
+        with client.websocket_connect("/api/ws") as guest:
+            guest.receive_json()  # redacted snapshot
+            _register(guest, "TV", "tv-client")
+            guest.receive_json()  # guest's own (redacted) broadcast
+            op_msg = operator.receive_json()
+            assert op_msg["type"] == "state_changed"
+            names = [d["name"] for d in op_msg["state"]["connected_devices"]]
+            assert "TV" in names
 
 
 def test_ws_accepts_with_cookie_and_sends_snapshot(client: TestClient) -> None:

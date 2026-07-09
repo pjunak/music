@@ -299,6 +299,57 @@ def test_guest_active_output_may_report_position(
             assert frame["type"] != "error"
 
 
+def test_guest_snapshot_hides_other_devices(
+    client: TestClient, seeded_track_id: int
+) -> None:
+    """A guest must not learn other devices' client_ids or the global active-
+    output set. Those ids are the capability tokens that gate output activation
+    and position reports; leaking them (the connect snapshot did) let an
+    anonymous socket re-register under an active output's id and hijack the
+    shared playback clock. The guest still sees ITS OWN active membership so it
+    can decide whether to play."""
+    from tests.test_sync import _login
+
+    _login(client)
+    with client.websocket_connect("/api/ws") as operator:
+        operator.receive_json()  # snapshot (authed → full)
+        client.cookies.clear()  # every subsequent connect is a guest
+        with client.websocket_connect("/api/ws") as tv:
+            tv.receive_json()  # redacted snapshot
+            tv.send_json(
+                {"type": "register", "name": "Real TV", "client_id": "secret-tv-id"}
+            )
+            tv.receive_json()
+            operator.receive_json()
+
+            # The already-open operator socket stayed authed (WS auth is at
+            # upgrade). Activate the TV as an output.
+            operator.send_json(
+                {"type": "set_active_outputs", "device_ids": ["secret-tv-id"]}
+            )
+            op_frame = operator.receive_json()
+            tv_frame = tv.receive_json()
+
+            # Operator (authed) sees the full picture.
+            assert "secret-tv-id" in op_frame["state"]["active_output_device_ids"]
+            assert any(
+                d["client_id"] == "secret-tv-id"
+                for d in op_frame["state"]["connected_devices"]
+            )
+
+            # The TV guest sees ONLY its own membership and no device roster.
+            assert tv_frame["state"]["active_output_device_ids"] == ["secret-tv-id"]
+            assert tv_frame["state"]["connected_devices"] == []
+
+            # A fresh attacker guest learns nothing it could spoof.
+            with client.websocket_connect("/api/ws") as attacker:
+                snap = attacker.receive_json()
+                assert snap["type"] == "state_snapshot"
+                st = snap["state"]
+                assert st["connected_devices"] == []
+                assert st["active_output_device_ids"] == []
+
+
 def test_guest_still_cannot_mutate(client: TestClient) -> None:
     with client.websocket_connect("/api/ws") as guest:
         guest.receive_json()
