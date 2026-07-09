@@ -28,13 +28,13 @@ window.__SPA_BOOTED__ = true;
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("root element not found");
 
-// ?compat (legacy alias: ?tv) previews the compatibility fallback
-// (compat-mode.js) on a module-capable browser. compat-mode.js ships as
-// `<script nomodule>`, so a modern browser never auto-loads it (the race-free
-// capability split — see index.html). For an explicit preview we inject it on
-// demand and skip React, so the same URL drives both surfaces.
+// ?compat previews the compatibility fallback (compat-mode.js) on a
+// module-capable browser. compat-mode.js ships as `<script nomodule>`, so a
+// modern browser never auto-loads it (the race-free capability split — see
+// index.html). For an explicit preview we inject it on demand and skip React,
+// so the same URL drives both surfaces.
 const params = new URLSearchParams(window.location.search);
-if (params.has("compat") || params.has("tv")) {
+if (params.has("compat")) {
   const s = document.createElement("script");
   s.src = "/compat-mode.js";
   document.body.appendChild(s);

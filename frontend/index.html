@@ -12,8 +12,7 @@
          can't run the ES-module SPA (old Smart TVs). `nomodule` is the FAST
          path: a browser with no module support at all skips the module script
          below and runs this immediately, no waiting. For an explicit ?compat
-         (legacy: ?tv) preview on a modern browser, main.tsx injects it on
-         demand. -->
+         preview on a modern browser, main.tsx injects it on demand. -->
     <script nomodule src="/compat-mode.js"></script>
     <script type="module" src="/src/main.tsx"></script>
     <!-- SPA boot watchdog (classic script — runs on every browser, ES5 only).

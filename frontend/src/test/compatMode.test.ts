@@ -5,8 +5,7 @@
  *  env), then observe whether it took over `#root`. Compat mode must take over
  *  only when the SPA bundle genuinely isn't running — and must never clobber a
  *  booted or already-painted SPA, the regression that the old paint-timer
- *  caused. The `?compat` preview (legacy alias `?tv`) is the one deliberate
- *  exception. */
+ *  caused. The `?compat` preview is the one deliberate exception. */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -103,12 +102,12 @@ describe("compat-mode.js activation guard", () => {
     expect(root.textContent).toContain("Compatibility mode");
   });
 
-  it("still honors the legacy ?tv preview alias (old bookmarks)", () => {
+  it("ignores the retired ?tv alias (removed after the rename soak)", () => {
     const root = setRoot("empty");
-    window.__SPA_BOOTED__ = true;
+    window.__SPA_BOOTED__ = true; // SPA owns #root, so no takeover without ?compat
     setUrl("?tv");
     runCompatMode();
-    expect(root.textContent).toContain("Compatibility mode");
+    expect(root.textContent).not.toContain("Compatibility mode");
   });
 
   it("is idempotent: bails when compat mode is already active", () => {
@@ -128,20 +127,23 @@ describe("compat-mode.js activation guard", () => {
   });
 });
 
-describe("compat-mode.js identity migration", () => {
-  it("keeps a legacy tv-mode client_id and name, re-keyed under compat-mode.*", () => {
-    // A device that ran this surface before the rename must keep its stable
-    // identity — the operator's output designation and per-device volume are
-    // keyed on it server-side.
-    window.localStorage.setItem("tv-mode.client_id", "tv-legacy123");
-    window.localStorage.setItem("tv-mode.name", "Living Room TV");
-    const root = setRoot("empty");
+describe("compat-mode.js device identity", () => {
+  it("mints a client_id once and reuses it on later visits", () => {
+    // The operator's output designation and per-device volume are keyed on
+    // this id server-side — it must be stable across reloads.
+    let root = setRoot("empty");
     runCompatMode();
     // Press "Click / OK to start" so start() runs getClientId()/getDeviceName().
-    const startButton = root.querySelector("button");
-    expect(startButton).not.toBeNull();
-    startButton?.click();
-    expect(window.localStorage.getItem("compat-mode.client_id")).toBe("tv-legacy123");
-    expect(window.localStorage.getItem("compat-mode.name")).toBe("Living Room TV");
+    root.querySelector("button")?.click();
+    const minted = window.localStorage.getItem("compat-mode.client_id");
+    expect(minted).toBeTruthy();
+    expect(window.localStorage.getItem("compat-mode.name")).toBeTruthy();
+
+    // Second visit: fresh DOM and flags, same localStorage.
+    delete window.__COMPAT_MODE_ACTIVE__;
+    root = setRoot("empty");
+    runCompatMode();
+    root.querySelector("button")?.click();
+    expect(window.localStorage.getItem("compat-mode.client_id")).toBe(minted);
   });
 });

@@ -6,7 +6,7 @@
    skips it entirely, a module-incapable one runs it instead. That
    capability split IS the "is compatibility mode needed?" decision — so
    there's no timer and no race with React. main.tsx also injects it on
-   demand for the ?compat preview (legacy alias: ?tv). In both cases the
+   demand for the ?compat preview. In both cases the
    SPA won't render in this document, so activation is immediate.
 
    Registers a stable client_id (exactly like the SPA) so the operator can
@@ -664,26 +664,16 @@
   // in Settings → Devices sticks to this id across reloads, and it's what
   // makes the device addressable in active_output_device_ids / device_volumes.
   //
-  // Key migration: this surface used to be called "TV mode" and persisted
-  // under "tv-mode.*". Read the legacy key as a fallback and re-save it under
-  // the new name, so an existing device keeps its identity (and therefore its
-  // output designation + per-device volume) across the rename.
-  function readPersisted(newKey, legacyKey) {
+  function readPersisted(key) {
     try {
       if (!window.localStorage) return null;
-      var stored = localStorage.getItem(newKey);
-      if (stored) return stored;
-      var legacy = localStorage.getItem(legacyKey);
-      if (legacy) {
-        try { localStorage.setItem(newKey, legacy); } catch (e) {}
-        return legacy;
-      }
+      return localStorage.getItem(key);
     } catch (e) {}
     return null;
   }
 
   function getClientId() {
-    var stored = readPersisted("compat-mode.client_id", "tv-mode.client_id");
+    var stored = readPersisted("compat-mode.client_id");
     if (stored) return stored;
     var id = "compat-" + makeShortId() + makeShortId() + nowMs().toString(36);
     try { window.localStorage && localStorage.setItem("compat-mode.client_id", id); }
@@ -693,7 +683,7 @@
 
   // Device name resolution:
   //   1. ?name=... URL param (one-time setup — also persists to localStorage)
-  //   2. localStorage from a previous visit (legacy "tv-mode.name" migrates)
+  //   2. localStorage from a previous visit
   //   3. generated default "Old TV (xxxxx)" — minted once, then persisted so
   //      the label (and the operator's device-list entry) is stable on reload.
   //      ("Old TV" names the physical device, not this mode — it also drives
@@ -707,7 +697,7 @@
       catch (e) {}
       return fromUrl;
     }
-    var stored = readPersisted("compat-mode.name", "tv-mode.name");
+    var stored = readPersisted("compat-mode.name");
     if (stored) return stored;
     var generated = "Old TV (" + makeShortId() + ")";
     try { window.localStorage && localStorage.setItem("compat-mode.name", generated); }
@@ -963,13 +953,13 @@
 
   function hasCompatParam() {
     // ?compat (valueless) -> getQueryParam returns "" (present); absent ->
-    // null. ?tv is the legacy alias, kept so old bookmarks keep working.
-    return getQueryParam("compat") !== null || getQueryParam("tv") !== null;
+    // null.
+    return getQueryParam("compat") !== null;
   }
 
   // Whether the SPA owns #root and compat mode must stand down. True once the
   // bundle has booted (or React has already painted) — EXCEPT under an explicit
-  // ?compat / ?tv preview, where main.tsx injected us on purpose and compat
+  // ?compat preview, where main.tsx injected us on purpose and compat
   // mode wins. This is what stops a watchdog-injected copy from racing a bundle
   // that booted a beat after the watchdog fired.
   function spaOwnsRoot() {
@@ -994,7 +984,7 @@
   //   2. The index.html boot watchdog injecting it because the module bundle
   //      errored or never booted (a module-capable-but-too-old TV that can't
   //      parse the bundle's modern syntax) — the case `nomodule` alone misses.
-  //   3. main.tsx injecting it for the ?compat / ?tv preview (React is skipped
+  //   3. main.tsx injecting it for the ?compat preview (React is skipped
   //      there).
   // __COMPAT_MODE_ACTIVE__ makes activation idempotent (paths 1 and 2 can both
   // fire on the same old TV around DOMready). spaOwnsRoot() is the safety net:
