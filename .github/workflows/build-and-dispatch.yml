@@ -39,6 +39,7 @@ jobs:
           cd backend
           pip install -e .[dev]
           ruff check app tests
+          mypy app tests
           pytest
 
       - name: Set up Node

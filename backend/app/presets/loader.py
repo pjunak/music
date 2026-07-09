@@ -12,8 +12,6 @@ Audio graph (the backend only tracks which are active); plus optional
 """
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 # Effect types the frontend is expected to implement. Additions here must be
@@ -46,9 +44,6 @@ class EffectSpec(BaseModel):
             raise ValueError(
                 f"unknown effect type '{self.type}' (supported: {sorted(SUPPORTED_EFFECT_TYPES)})"
             )
-
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump()
 
 
 class PresetManifest(BaseModel):

@@ -25,6 +25,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   it auto-activates when it reconnects.
 - **TV / room display** — a read-only now-playing view at `/` for a screen in the room, usable
   **without logging in** (guest access), with cover art, up-next, and recently-played.
+- **Compatibility mode** — a dependency-free ES5 fallback player (`compat-mode.js`) for browsers
+  that can't run the SPA (old smart TVs). Loads via `<script nomodule>` or a boot watchdog when
+  the bundle fails to run; previewable on any browser with `?compat`. Same output protocol,
+  plain `<audio>` + XHR/WebSocket.
 - **Modes** — top-level campaign bundles (theme + soundboards + cues + EQ presets), authored as
   on-disk YAML and hot-reloadable.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.
@@ -92,13 +96,12 @@ regenerable from the filesystem).
 Backend (Python 3.11+) and frontend (Node 20) run as two processes in dev.
 
 ```bash
-# Backend
+# Backend — uv-managed (uv.lock is the pinned resolution)
 cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-cp .env.example .env                                # set SECRET_KEY (≥32 chars)
-music-cli create-user admin
-uvicorn app.main:app --reload                        # http://localhost:8000
+uv sync --extra dev                                  # creates .venv from uv.lock
+cp .env.example .env                                 # set SECRET_KEY (≥32 chars)
+uv run music-cli create-user admin
+uv run uvicorn app.main:app --reload                 # http://localhost:8000
 
 # Frontend (separate terminal)
 cd frontend
@@ -106,12 +109,17 @@ npm install
 npm run dev                                          # http://localhost:5173, proxies to the API
 ```
 
+No `uv`? `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"` works
+too — you just won't get the locked versions.
+
 Checks:
 
 ```bash
 # Backend
-cd backend && ./.venv/bin/pytest                    # tests
-./.venv/bin/ruff check app tests                    # lint
+cd backend
+uv run pytest                                        # tests
+uv run ruff check app tests                          # lint
+uv run mypy app tests                                # types
 
 # Frontend
 cd frontend
@@ -145,7 +153,7 @@ clients/   The documented guest output protocol + a reference headless appliance
 ## Tech stack
 
 FastAPI · SQLAlchemy 2.0 · Pydantic · argon2 · mutagen — React · TypeScript · Vite · Zustand ·
-Web Audio API. Packaged as a multi-stage Docker image (`node:20-alpine` build → `python:3.11-slim`
+Web Audio API. Packaged as a multi-stage Docker image (`node:20-alpine` build → `python:3.12-slim`
 runtime).
 
 [mutagen]: https://mutagen.readthedocs.io/

@@ -929,7 +929,7 @@
 
     // No WebSocket at all (a very old TV): the polling path needs only XHR, so
     // use it directly instead of dead-ending. renderUnsupported is reserved for
-    // browsers that can't even do XHR (see activateTvMode).
+    // browsers that can't even do XHR (see activateCompatMode).
     if (typeof WebSocket === "undefined") {
       startPolling();
       return;
