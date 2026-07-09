@@ -43,12 +43,27 @@ def _modes_root() -> Path:
 
 
 def _mode_dir_or_404(mode_id: str) -> Path:
-    mode_dir = _modes_root() / mode_id
+    # Containment guard. A percent-encoded traversal (`%2e%2e`) reaches this
+    # handler as `mode_id == ".."` (Starlette decodes the path before routing),
+    # and `.` maps to MODES_DIR itself — either would let delete_mode's rmtree
+    # or the CRUD writers act on a directory outside a single mode. Resolve
+    # first, then require the result to be a *direct child* of MODES_DIR, the
+    # resolve-then-relative_to pattern every other path helper already uses.
+    root = _modes_root()
+    mode_dir = (root / mode_id).resolve()
+    try:
+        rel = mode_dir.relative_to(root)
+    except ValueError:
+        rel = None
+    if rel is None or len(rel.parts) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"mode '{mode_id}' not found"
+        )
     if not mode_dir.is_dir():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"mode '{mode_id}' not found"
         )
-    return mode_dir.resolve()
+    return mode_dir
 
 
 def _write_yaml(path: Path, payload: dict) -> None:

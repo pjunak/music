@@ -1,7 +1,10 @@
 """Modes API: list, detail, active, reload, theme."""
 import os
+import shutil
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -407,3 +410,34 @@ def test_rename_mode(auth_client: TestClient) -> None:
 
 def test_rename_mode_404(auth_client: TestClient) -> None:
     assert auth_client.patch("/api/modes/nope", json={"name": "X"}).status_code == 404
+
+
+def test_mode_dir_guard_blocks_traversal(auth_client: TestClient) -> None:
+    """Regression for the arbitrary-directory-deletion bug: `_mode_dir_or_404`
+    had no containment check, so a percent-encoded `%2e%2e` (decoded to `..` by
+    the router) or `.` resolved to MODES_DIR's parent/self, and delete_mode's
+    rmtree — or the CRUD writers — would act there. In Docker that parent is
+    /data (app.db, music, sfx). The guard must resolve then require a direct
+    child of MODES_DIR."""
+    from app.api import modes as modes_api
+
+    root = modes_api._modes_root()
+    # A sibling of MODES_DIR — the directory the traversal would escape into.
+    sentinel = root.parent / "SENTINEL_do_not_delete"
+    sentinel.mkdir(exist_ok=True)
+    (sentinel / "keep.txt").write_text("x", encoding="utf-8")
+    try:
+        # The decoded forms the router hands the helper must all be refused.
+        for payload in ("..", ".", "../..", "../SENTINEL_do_not_delete"):
+            with pytest.raises(HTTPException) as ei:
+                modes_api._mode_dir_or_404(payload)
+            assert ei.value.status_code == 404
+        # A legitimate mode still resolves to its own child dir.
+        assert modes_api._mode_dir_or_404("dnd") == (root / "dnd").resolve()
+        # End to end: the destructive request leaves everything intact.
+        r = auth_client.delete("/api/modes/%2e%2e")
+        assert r.status_code in (404, 405)
+        assert sentinel.is_dir() and (sentinel / "keep.txt").exists()
+        assert root.is_dir()
+    finally:
+        shutil.rmtree(sentinel, ignore_errors=True)
