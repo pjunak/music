@@ -713,7 +713,13 @@
     return min + ":" + (sec < 10 ? "0" : "") + sec;
   }
 
+  var _started = false;
   function start() {
+    // Guard against a double-press on the "OK to start" button (easy on a TV
+    // remote): a second call would spin up a second audio engine, WS client,
+    // and timers, doubling playback and position reports until reload.
+    if (_started) return;
+    _started = true;
     var crossfadeOk = supportsFractionalVolume();
     try { console.log("[compat-mode] crossfade supported:", crossfadeOk); } catch (e) {}
     var ui = renderPlayer();

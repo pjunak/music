@@ -7,7 +7,11 @@ type StatusListener = (status: WsStatus) => void;
 
 export type WsStatus = "disconnected" | "connecting" | "connected";
 
-const RECONNECT_DELAY_MS = 1500;
+// Reconnect backoff: start fast (a transient blip recovers near-instantly),
+// then back off exponentially with jitter up to a ceiling so a server that's
+// down for a while isn't hammered every 1.5s by every open tab.
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
 
 function buildWsUrl(path: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -19,6 +23,7 @@ class WsClient {
   private listeners = new Set<Listener>();
   private statusListeners = new Set<StatusListener>();
   private reconnectTimeout: number | null = null;
+  private reconnectAttempts = 0;
   private intentionallyClosed = false;
   private status: WsStatus = "disconnected";
 
@@ -27,6 +32,7 @@ class WsClient {
     if (this.ws !== null && this.ws.readyState !== WebSocket.CLOSED) {
       return;
     }
+    this.reconnectAttempts = 0; // fresh intentional connect starts at base delay
     this.openSocket();
   }
 
@@ -88,6 +94,7 @@ class WsClient {
     this.ws = ws;
 
     ws.onopen = () => {
+      this.reconnectAttempts = 0; // recovered — reset the backoff
       this.setStatus("connected");
       this.sendRegister();
     };
@@ -121,9 +128,17 @@ class WsClient {
       this.ws = null;
       this.setStatus("disconnected");
       if (!this.intentionallyClosed) {
+        const backoff = Math.min(
+          RECONNECT_MAX_MS,
+          RECONNECT_BASE_MS * 2 ** this.reconnectAttempts,
+        );
+        // Full jitter: a random delay in [0, backoff] so N tabs reconnecting
+        // after a server restart don't all retry in lockstep.
+        const delay = Math.round(Math.random() * backoff);
+        this.reconnectAttempts += 1;
         this.reconnectTimeout = window.setTimeout(() => {
           this.openSocket();
-        }, RECONNECT_DELAY_MS);
+        }, delay);
       }
     };
 
