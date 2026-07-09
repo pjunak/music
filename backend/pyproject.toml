@@ -24,6 +24,9 @@ dependencies = [
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
+    # Hangs must fail loudly: asyncio primitives that bind to a dead loop
+    # (see StateMachine.reset_for_tests) wedge silently without a timeout.
+    "pytest-timeout==2.4.0",
     # TestClient transport for starlette 1.x (successor of classic httpx).
     "httpx2==2.5.0",
     "ruff==0.15.20",
@@ -63,3 +66,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["error"]
+# Per-test hang guard. Generous — the slowest tests run a real advancer
+# against wall-clock deadlines; a healthy test never gets near this.
+timeout = 60
