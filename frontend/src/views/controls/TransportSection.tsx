@@ -13,12 +13,11 @@ const LOOP_MODES: { value: LoopMode; label: string }[] = [
   { value: "track", label: "Repeat one" },
 ];
 
-// Shuffle picks a random queue entry on skip ("weighted" is planned — uniform
-// for now). Mirrors the footer's shuffle cycle and the backend ShuffleMode.
+// Shuffle picks a random queue entry on skip. Mirrors the footer's shuffle
+// cycle and the backend ShuffleMode.
 const SHUFFLE_MODES: { value: ShuffleMode; label: string }[] = [
   { value: "off", label: "Off" },
   { value: "random", label: "Random" },
-  { value: "weighted", label: "Weighted" },
 ];
 
 const CROSSFADE_TYPES: { value: string; label: string }[] = [

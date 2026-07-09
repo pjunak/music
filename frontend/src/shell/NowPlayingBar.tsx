@@ -10,7 +10,6 @@ import {
   RepeatIcon,
   RepeatOneIcon,
   ShuffleIcon,
-  ShuffleWeightedIcon,
   SkipNextIcon,
   SkipPrevIcon,
 } from "@/components/icons";
@@ -80,9 +79,6 @@ const CONTINUE_OPTIONS: ModeOption<LoopMode>[] = [
   },
 ];
 
-// Shuffle cycle: off → random → weighted. Weighted draws uniformly for now
-// (the weighting algorithm is still to be implemented), hence the "planned"
-// note in its legend.
 const SHUFFLE_OPTIONS: ModeOption<ShuffleMode>[] = [
   {
     value: "off",
@@ -94,14 +90,7 @@ const SHUFFLE_OPTIONS: ModeOption<ShuffleMode>[] = [
     value: "random",
     icon: <ShuffleIcon />,
     active: true,
-    legend: "Shuffle: random — click for weighted random",
-  },
-  {
-    value: "weighted",
-    icon: <ShuffleWeightedIcon />,
-    active: true,
-    legend:
-      "Shuffle: weighted random (planned — equal weights for now) — click to turn shuffle off",
+    legend: "Shuffle: random — click to turn shuffle off",
   },
 ];
 

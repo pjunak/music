@@ -223,21 +223,6 @@ export function ShuffleIcon(props: IconProps) {
   );
 }
 
-export function ShuffleWeightedIcon(props: IconProps) {
-  // Shuffle arrows with a filled centre dot — "loaded"/weighted random,
-  // distinct from plain shuffle at a glance.
-  return (
-    <svg {...baseProps} {...props}>
-      <path d="M16 3h5v5" {...stroke} />
-      <path d="M4 20L21 3" {...stroke} />
-      <path d="M21 16v5h-5" {...stroke} />
-      <path d="M15 15l6 6" {...stroke} />
-      <path d="M4 4l5 5" {...stroke} />
-      <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
 export function VolumeIcon(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>

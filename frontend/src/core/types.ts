@@ -4,7 +4,7 @@
 // "follow" continues into the rest of the library once the queue ends — the
 // "Continue / Autoplay (∞)" mode. Mutually exclusive with the repeat modes.
 export type LoopMode = "off" | "follow" | "queue" | "track";
-export type ShuffleMode = "off" | "random" | "weighted";
+export type ShuffleMode = "off" | "random";
 
 export interface AmbientState {
   current_track_id: number | null;

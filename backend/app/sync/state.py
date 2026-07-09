@@ -259,6 +259,10 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
         # The clock did not tick while the server was down — the persisted
         # anchor is meaningless now. Boot frozen at the stored base position.
         ambient["position_anchored_at"] = None
+        # "weighted" was removed from ShuffleMode in 2026-07 (it always drew
+        # uniformly); a state persisted before that must not fail validation.
+        if ambient.get("shuffle") == "weighted":
+            ambient["shuffle"] = "random"
         out["ambient"] = ambient
 
     # An interrupt is transient by definition — it never survives a restart
@@ -661,9 +665,8 @@ def ambient_skip_next(
             )
 
         if amb.queue:
-            # Normal advance. Shuffle (random/weighted) pulls a random entry
-            # instead of the head; "off" keeps deterministic queue order.
-            # Weighting is TODO — "weighted" draws uniformly for now.
+            # Normal advance. Shuffle pulls a random entry instead of the
+            # head; "off" keeps deterministic queue order.
             new_history = list(amb.history)
             if amb.current_track_id is not None:
                 new_history.append(amb.current_track_id)

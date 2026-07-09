@@ -508,6 +508,36 @@ def test_state_load_prunes_dangling_track_ids(
     assert snap.looping_sfx == []  # wiped on boot — timers don't survive restart
 
 
+def test_state_load_coerces_removed_weighted_shuffle(auth_client: TestClient) -> None:
+    """Shuffle mode "weighted" was removed from the protocol in 2026-07 (it
+    always drew uniformly). A state persisted before the removal must load as
+    "random" instead of failing PlayerState validation and taking boot down."""
+    from app.core.db import SessionLocal
+    from app.domain import playback_state as playback_state_domain
+    from app.sync.state import StateMachine
+
+    with SessionLocal() as db:
+        playback_state_domain.update_state(
+            db,
+            ambient={
+                "current_track_id": None,
+                "queue": [],
+                "history": [],
+                "position_ms": 0,
+                "loop": "off",
+                "shuffle": "weighted",
+            },
+        )
+
+    machine = StateMachine()
+    import asyncio
+
+    asyncio.run(machine.load(SessionLocal))
+    snap = asyncio.run(machine.snapshot())
+
+    assert snap.ambient.shuffle == "random"
+
+
 def test_state_load_after_track_deletion_clears_active_track(
     auth_client: TestClient, client: TestClient
 ) -> None:

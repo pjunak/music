@@ -112,9 +112,7 @@ class AmbientSetLoopAction(_Action):
 
 class AmbientSetShuffleAction(_Action):
     type: Literal["ambient_set_shuffle"]
-    # "weighted" picks randomly too for now — the weighting (by play count /
-    # recency) is the to-be-implemented refinement, not a separate behaviour.
-    shuffle: Literal["off", "random", "weighted"]
+    shuffle: Literal["off", "random"]
 
 
 class AmbientStopAction(_Action):
@@ -288,7 +286,11 @@ class PositionReport(BaseModel):
 # runs dry — the "Continue / Autoplay (∞)" mode. Mutually exclusive with the
 # repeat modes by construction (one enum), so repeat and follow can't both be on.
 LoopMode = Literal["off", "follow", "queue", "track"]
-ShuffleMode = Literal["off", "random", "weighted"]
+# A "weighted" value existed until 2026-07 but was removed before the
+# weighting algorithm ever landed (it drew uniformly, same as "random").
+# Persisted states holding it are coerced to "random" on load — see
+# `_prune_dangling_state`. Re-adding it is tracked in TODO.md.
+ShuffleMode = Literal["off", "random"]
 CrossfadeType = Literal["linear", "equal_power", "cut"]
 
 
@@ -303,9 +305,7 @@ class AmbientState(BaseModel):
     automatically.
 
     `shuffle` controls how `skip_next` picks the next track: "off" advances
-    sequentially (queue head); "random"/"weighted" pull a random queue entry.
-    Weighting is not yet implemented — "weighted" currently behaves as uniform
-    random, so the control is usable without the algorithm landing first.
+    sequentially (queue head); "random" pulls a random queue entry.
     """
 
     current_track_id: int | None = None
