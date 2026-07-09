@@ -23,6 +23,25 @@ from fastapi.testclient import TestClient
 TEST_USERNAME = "tester"
 TEST_PASSWORD = "test-password"
 
+# The env must point at the throwaway tmp dir BEFORE any app module can be
+# imported. Pytest imports test modules at collection time, and app imports
+# can happen there — directly (test_cleanup, test_tag_roundtrip) or by
+# accident (collection hooks getattr() module-level objects, which can fire
+# lazy importers). `app.core.db` binds its engine to settings AT IMPORT, so a
+# half-configured env at that moment silently points every test at the repo's
+# ./app.db. Module-level conftest code is the one thing guaranteed to run
+# before collection; the session fixture below does the seeding/schema work.
+_TMP = Path(tempfile.mkdtemp(prefix="music-test-"))
+os.environ["DATABASE_URL"] = f"sqlite:///{_TMP / 'app.db'}"
+os.environ["MUSIC_DIR"] = str(_TMP / "music")
+os.environ["SFX_LIBRARY_DIR"] = str(_TMP / "sfx")
+os.environ["MODES_DIR"] = str(_TMP / "modes")
+os.environ["DEVICES_FILE"] = str(_TMP / "devices.json")
+# Keep the end-of-track advancer out of unrelated tests: the seeded WAVs
+# are 0.5 s long, so a playing lane would advance ~1.25 s into any test
+# and inject unexpected broadcasts. test_advancer re-enables it locally.
+os.environ["ADVANCER_ENABLED"] = "0"
+
 
 def _silent_wav_bytes(seconds: float = 0.5, sample_rate: int = 8000) -> bytes:
     """Build a minimal valid WAV file in pure Python so we don't ship
@@ -48,25 +67,12 @@ def _silent_wav_bytes(seconds: float = 0.5, sample_rate: int = 8000) -> bytes:
 
 @pytest.fixture(autouse=True, scope="session")
 def _test_env() -> Iterator[None]:
-    tmp = Path(tempfile.mkdtemp(prefix="music-test-"))
-
-    music_dir = tmp / "music"
-    sfx_dir = tmp / "sfx"
-    modes_dir = tmp / "modes"
+    music_dir = _TMP / "music"
+    sfx_dir = _TMP / "sfx"
+    modes_dir = _TMP / "modes"
     music_dir.mkdir()
     sfx_dir.mkdir()
     modes_dir.mkdir()
-
-    os.environ["SECRET_KEY"] = "x" * 64
-    os.environ["DATABASE_URL"] = f"sqlite:///{tmp / 'app.db'}"
-    os.environ["MUSIC_DIR"] = str(music_dir)
-    os.environ["SFX_LIBRARY_DIR"] = str(sfx_dir)
-    os.environ["MODES_DIR"] = str(modes_dir)
-    os.environ["DEVICES_FILE"] = str(tmp / "devices.json")
-    # Keep the end-of-track advancer out of unrelated tests: the seeded WAVs
-    # are 0.5 s long, so a playing lane would advance ~1.25 s into any test
-    # and inject unexpected broadcasts. test_advancer re-enables it locally.
-    os.environ["ADVANCER_ENABLED"] = "0"
 
     # Seed modes/dnd with theme + soundboards + EQ presets.
     dnd_dir = modes_dir / "dnd"

@@ -53,7 +53,6 @@ docker build -t music .
 # Run it — one bind mount for music/, sfx/, modes/, and app.db
 docker run -d --name music \
   -p 8000:8000 \
-  -e SECRET_KEY="$(openssl rand -hex 32)" \
   -v /srv/music-data:/data \
   music
 
@@ -70,12 +69,12 @@ rollout itself is handled by a separate infra repository.
 ## Configuration
 
 Set via environment variables (see [`backend/.env.example`](backend/.env.example)). The
-Dockerfile pre-sets the storage paths under `/data`, so for a containerised run you typically
-only need `SECRET_KEY`.
+Dockerfile pre-sets the storage paths under `/data`, so a containerised run typically needs
+no environment variables at all. (There is no `SECRET_KEY`: sessions are opaque random
+DB-backed tokens, nothing is signed.)
 
 | Variable | Required | Default (in image) | Purpose |
 |---|---|---|---|
-| `SECRET_KEY` | **yes** | — | Session signing key, **≥ 32 chars** |
 | `MUSIC_DIR` | | `/data/music` | Root of the scanned music library |
 | `SFX_LIBRARY_DIR` | | `/data/sfx` | Root for soundboard SFX files |
 | `MODES_DIR` | | `/data/modes` | On-disk mode bundles (seeded on first boot) |
@@ -99,7 +98,7 @@ Backend (Python 3.11+) and frontend (Node 20) run as two processes in dev.
 # Backend — uv-managed (uv.lock is the pinned resolution)
 cd backend
 uv sync --extra dev                                  # creates .venv from uv.lock
-cp .env.example .env                                 # set SECRET_KEY (≥32 chars)
+cp .env.example .env                                 # dev defaults work as-is
 uv run music-cli create-user admin
 uv run uvicorn app.main:app --reload                 # http://localhost:8000
 

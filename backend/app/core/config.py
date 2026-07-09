@@ -1,7 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,7 +11,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    secret_key: str = Field(min_length=32)
+    # NOTE: there is deliberately no SECRET_KEY. Sessions are opaque random
+    # DB-backed tokens (app/core/security.py) — nothing is signed, so a
+    # signing key would be theatre. If signed cookies/links ever land, add
+    # the setting together with the feature.
 
     database_url: str = "sqlite:///./app.db"
 
@@ -59,4 +61,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
