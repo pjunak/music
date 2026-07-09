@@ -38,6 +38,15 @@ logger = logging.getLogger(__name__)
 # race (it fires at the true end, before us), keeping the advancer a backstop.
 GRACE_S = 0.75
 
+# Fallback deadline for an interrupt whose track has no readable duration.
+# Interrupts are brief takeovers, and a stuck one blocks ambient from ever
+# resuming when no client sends interrupt_skip_next (a compat/headless-only
+# room, or no active output at all). A healthy client's `ended` skip fires
+# long before this — it only bounds the genuinely-wedged case. Ambient has no
+# equivalent: an untagged ambient track simply doesn't auto-advance, which
+# blocks nothing.
+INTERRUPT_UNKNOWN_LENGTH_MAX_S = 300.0
+
 _LENGTH_CACHE_MAX = 4096
 
 
@@ -73,6 +82,9 @@ class Advancer:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._length_cache: dict[int, float | None] = {}
         self._warned_unknown_length: set[int] = set()
+        # Bumped on every cache invalidation so an in-flight length read that
+        # started before the invalidation doesn't write a now-stale value back.
+        self._cache_generation = 0
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -108,16 +120,21 @@ class Advancer:
         self._wake.set()
 
     def invalidate_lengths(self) -> None:
-        """Library index changed — cached `Track.length_s` values may be
-        stale (a rescan re-reads a replaced file's duration under the same
-        track id). Drop the cache and replan. Index writes run in worker
-        threads, so the wake is marshalled onto the advancer's loop instead
-        of touching the (thread-unsafe) Event directly."""
-        self._length_cache.clear()
-        self._warned_unknown_length.clear()
+        """Library index changed — cached `Track.length_s` values may be stale
+        (a rescan re-reads a replaced file's duration under the same track id).
+        Index writes run in worker threads, so marshal the ENTIRE invalidation
+        onto the advancer's loop: touching the cache dicts / Event directly from
+        a worker thread races `_track_length_s` on the loop. The loop-side
+        callback bumps the generation, clears the cache, and wakes the run."""
         loop = self._loop
         if loop is not None:
-            loop.call_soon_threadsafe(self._wake.set)
+            loop.call_soon_threadsafe(self._invalidate_on_loop)
+
+    def _invalidate_on_loop(self) -> None:
+        self._cache_generation += 1
+        self._length_cache.clear()
+        self._warned_unknown_length.clear()
+        self._wake.set()
 
     # -- scheduling ----------------------------------------------------------
 
@@ -135,7 +152,13 @@ class Advancer:
             finally:
                 db.close()
 
+        generation = self._cache_generation
         length = await run_in_threadpool(_work)
+        # If an index change invalidated the cache while this read was in
+        # flight, the value we just read may already be stale — return it for
+        # this scheduling pass but don't cache it (a fresh read will run next).
+        if generation != self._cache_generation:
+            return length
         if len(self._length_cache) >= _LENGTH_CACHE_MAX:
             self._length_cache.clear()
         self._length_cache[track_id] = length
@@ -157,9 +180,11 @@ class Advancer:
         interrupt = snap.interrupt
         if interrupt is not None and interrupt.position_anchored_at is not None:
             length = await self._track_length_s(interrupt.current_track_id)
-            if length is not None:
-                remaining = length - interrupt.position_ms / 1000.0 + GRACE_S
-                candidates.append((remaining, "interrupt", interrupt.current_track_id))
+            if length is None:
+                # Bound an unknown-length interrupt so it can't wedge ambient.
+                length = INTERRUPT_UNKNOWN_LENGTH_MAX_S
+            remaining = length - interrupt.position_ms / 1000.0 + GRACE_S
+            candidates.append((remaining, "interrupt", interrupt.current_track_id))
         ambient = snap.ambient
         if (
             ambient.current_track_id is not None

@@ -18,14 +18,24 @@ engine = create_engine(
 
 
 @event.listens_for(engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection: Any, _record: Any) -> None:
-    """SQLite ignores ``ondelete="CASCADE"`` unless this PRAGMA is set per
-    connection. Without it, ``FOREIGN KEY`` declarations are advisory only
-    and orphans accumulate silently."""
+def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
+    """Per-connection SQLite PRAGMAs.
+
+    - ``foreign_keys=ON``: SQLite ignores ``ondelete="CASCADE"`` otherwise, so
+      ``FOREIGN KEY`` declarations would be advisory only and orphans would
+      accumulate silently.
+    - ``journal_mode=WAL``: readers don't block the writer (and vice versa), so
+      a position-report write no longer contends with a concurrent search read.
+      DB-level and persistent once set; re-asserting per connection is cheap.
+    - ``busy_timeout=5000``: with ``check_same_thread=False`` and threadpool
+      workers each opening connections, a momentary write lock would otherwise
+      surface as an immediate ``database is locked`` error; wait up to 5 s."""
     if engine.dialect.name != "sqlite":
         return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
     cursor.close()
 
 

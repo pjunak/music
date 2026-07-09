@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, nullsfirst, nullslast, or_, select
 from sqlalchemy.sql import ColumnElement
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DbSession, OptionalUser
 from app.core.config import get_settings
@@ -809,7 +810,11 @@ async def upload(
             raise
         written.append(target)
 
-    indexed = library_index.scan_paths(db, written)
+    # scan_paths reads tags (mutagen) and writes SQLite — blocking work. This
+    # is an async handler, so run it in the threadpool; otherwise a large
+    # upload freezes the event loop, stalling every WebSocket broadcast and the
+    # advancer until indexing finishes.
+    indexed = await run_in_threadpool(library_index.scan_paths, db, written)
     return UploadResult(
         saved=[TrackOut.model_validate(t) for t in indexed],
         destination=dest.strip("/"),

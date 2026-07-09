@@ -429,6 +429,40 @@ def test_advancer_plan_skips_frozen_and_unknown_length_lanes() -> None:
     assert asyncio.run(adv._plan(frozen)) is None
 
 
+def test_advancer_bounds_unknown_length_interrupt() -> None:
+    """An unknown-length interrupt must still get a (bounded) deadline so it
+    can't block ambient from resuming forever when no client sends the skip.
+    Ambient with unknown length stays unscheduled — that blocks nothing."""
+    from app.sync.advancer import (
+        GRACE_S,
+        INTERRUPT_UNKNOWN_LENGTH_MAX_S,
+        Advancer,
+    )
+
+    adv = Advancer()
+
+    async def no_length(track_id: int) -> float | None:
+        return None
+
+    adv._track_length_s = no_length  # type: ignore[method-assign]
+
+    now = time.time()
+    snap = L.PlayerState(
+        is_playing=True,
+        ambient=L.AmbientState(
+            current_track_id=1, position_ms=0, position_anchored_at=None
+        ),
+        interrupt=L.InterruptState(
+            current_track_id=2, position_ms=0, position_anchored_at=now
+        ),
+    )
+    plan = asyncio.run(adv._plan(snap))
+    assert plan is not None
+    remaining, lane, track_id = plan
+    assert lane == "interrupt" and track_id == 2
+    assert 0 < remaining <= INTERRUPT_UNKNOWN_LENGTH_MAX_S + GRACE_S + 0.1
+
+
 async def test_index_writes_invalidate_advancer_length_cache(
     client: TestClient, db_session
 ) -> None:
@@ -448,10 +482,15 @@ async def test_index_writes_invalidate_advancer_length_cache(
         assert library_index.on_index_changed is not None
         adv._length_cache[123] = 45.0
         adv._warned_unknown_length.add(123)
+        gen_before = adv._cache_generation
         # A real (no-op) index write from the threadpool, like an upload does.
         await run_in_threadpool(library_index.scan_paths, db_session, [])
+        # Invalidation is marshalled onto the loop (thread-safe), so yield a
+        # loop turn for the scheduled callback to run before asserting.
+        await asyncio.sleep(0)
         assert adv._length_cache == {}
         assert adv._warned_unknown_length == set()
+        assert adv._cache_generation > gen_before
     finally:
         await adv.stop()
     # stop() must deregister — a stopped advancer shouldn't outlive its hook.
