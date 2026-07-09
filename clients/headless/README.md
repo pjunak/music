@@ -60,7 +60,9 @@ All flags have an environment-variable equivalent (handy for the systemd env fil
 |---|---|---|---|
 | `--server URL` | `MUSIC_SERVER_URL` | — (required) | The player's base URL |
 | `--name NAME` | `MUSIC_OUTPUT_NAME` | hostname | Name shown in the Console |
-| `--control-port N` | `MUSIC_CONTROL_PORT` | off | Serve the LAN control endpoint |
+| `--control-port N` | `MUSIC_CONTROL_PORT` | off | Serve the on/off+volume control endpoint |
+| `--control-bind ADDR` | `MUSIC_CONTROL_BIND` | `127.0.0.1` | Control bind address; `0.0.0.0` to expose on the LAN |
+| `--control-token TOKEN` | `MUSIC_CONTROL_TOKEN` | — | Require this token (`X-Control-Token`) on control requests |
 | `--volume V` | `MUSIC_VOLUME` | `1.0` | Initial local volume `0..1` |
 | `--start-off` | `MUSIC_START_ON=0` | off (boots playing) | Boot muted |
 | `--respect-console` | — | off | Only play when switched on in the Console (instead of the default local on/off) |
@@ -83,9 +85,12 @@ POST /control   {"on":false}            → toggle this speaker
 POST /control   {"volume":0.4}          → set this speaker's volume (0..1)
 ```
 
-It sends permissive CORS headers so a browser page on another LAN origin (e.g. the dnd-table
-`control.html`) can drive it directly — no player credential involved. Treat it as LAN-only;
-don't expose this port to the internet.
+**It binds to loopback (`127.0.0.1`) by default** — reachable only from the box itself. To let
+another device drive it (e.g. the dnd-table `control.html` on a different LAN origin), set
+`--control-bind 0.0.0.0`. When bound off-loopback the endpoint emits permissive CORS **and**
+you should set `--control-token`: pass the same value in an `X-Control-Token` header on each
+request. Without a token, anything on the network can toggle/mute this speaker (the appliance
+prints a warning at startup). Never expose this port to the internet.
 
 Example "Music" card for the dnd-table control panel:
 

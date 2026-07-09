@@ -15,9 +15,10 @@ What it does:
     position_epoch says a deliberate move happened,
   - plays fire-and-forget SFX (`sfx_fired`) layered over the music,
   - exposes a *local* on/off and volume (this speaker, not the server master),
-  - optionally serves a tiny LAN HTTP control surface (on/off + volume +
-    now-playing) so another device on the LAN — e.g. a dnd-table control panel
-    — can drive it without any server credential.
+  - optionally serves a tiny HTTP control surface (on/off + volume +
+    now-playing) so a dnd-table control panel can drive it. Bound to loopback
+    by default; expose it on the LAN with --control-bind 0.0.0.0 and protect
+    it with --control-token.
 
 It is deliberately a *dumb* player: ambient + SFX only, no crossfade/EQ/effect
 colouring (those live in the browser engine). That is the right trade-off for a
@@ -27,7 +28,9 @@ Config is via environment variables (or the matching CLI flags):
   MUSIC_SERVER_URL   required, e.g. http://192.168.1.50:8000 or https://music.example
   MUSIC_OUTPUT_NAME  device name shown in the Console (default: hostname)
   MUSIC_CLIENT_ID    stable identity (default: generated + persisted to a dotfile)
-  MUSIC_CONTROL_PORT if set, serve the LAN control endpoint on this port
+  MUSIC_CONTROL_PORT if set, serve the control endpoint on this port
+  MUSIC_CONTROL_BIND control bind address (default 127.0.0.1; 0.0.0.0 for LAN)
+  MUSIC_CONTROL_TOKEN require this token (X-Control-Token) on control requests
   MUSIC_START_ON     "0" to boot muted (default boots playing)
   MUSIC_VOLUME       initial local volume 0..1 (default 1.0)
 
@@ -39,6 +42,7 @@ Dependencies: `websocket-client` and `python-mpv` (libmpv). See requirements.txt
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 import socket
@@ -370,8 +374,13 @@ def run_ws(
 # --------------------------------------------------------------------------- #
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 class _ControlServer(ThreadingHTTPServer):
     reconciler: Reconciler
+    token: str | None = None
+    cors: bool = False  # only emit permissive CORS when bound off-loopback
 
 
 class _ControlHandler(BaseHTTPRequestHandler):
@@ -381,11 +390,22 @@ class _ControlHandler(BaseHTTPRequestHandler):
         pass
 
     def _cors(self) -> None:
-        # LAN-only single-user appliance: a wildcard origin lets the dnd-table
-        # control panel (a different LAN origin) read/drive it without a proxy.
+        # Off by default: on loopback the control panel is same-origin, so a
+        # wildcard would only let arbitrary web pages read this surface. When
+        # the operator explicitly binds off-loopback we emit it (and allow the
+        # token header) so a dnd-table panel on another LAN origin can drive it.
+        if not self.server.cors:
+            return
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Control-Token")
+
+    def _authorized(self) -> bool:
+        expected = self.server.token
+        if not expected:
+            return True
+        got = self.headers.get("X-Control-Token", "")
+        return hmac.compare_digest(got, expected)
 
     def _json(self, code: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode()
@@ -405,11 +425,17 @@ class _ControlHandler(BaseHTTPRequestHandler):
         if self.path.split("?", 1)[0] != "/control":
             self._json(404, {"error": "not found"})
             return
+        if not self._authorized():
+            self._json(401, {"error": "unauthorized"})
+            return
         self._json(200, self.server.reconciler.control_status())
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path.split("?", 1)[0] != "/control":
             self._json(404, {"error": "not found"})
+            return
+        if not self._authorized():
+            self._json(401, {"error": "unauthorized"})
             return
         length = int(self.headers.get("Content-Length", 0) or 0)
         try:
@@ -419,19 +445,35 @@ class _ControlHandler(BaseHTTPRequestHandler):
             return
         on = body.get("on")
         volume = body.get("volume")
+        try:
+            parsed_volume = float(volume) if volume is not None else None
+        except (TypeError, ValueError):
+            self._json(400, {"error": "volume must be a number"})
+            return
         self.server.reconciler.set_local(
             on=bool(on) if on is not None else None,
-            volume=float(volume) if volume is not None else None,
+            volume=parsed_volume,
         )
         self._json(200, self.server.reconciler.control_status())
 
 
-def start_control_server(port: int, reconciler: Reconciler) -> None:
-    server = _ControlServer(("0.0.0.0", port), _ControlHandler)
+def start_control_server(
+    port: int, reconciler: Reconciler, *, bind: str = "127.0.0.1", token: str | None = None
+) -> None:
+    server = _ControlServer((bind, port), _ControlHandler)
     server.reconciler = reconciler
+    server.token = token or None
+    server.cors = bind not in _LOOPBACK_HOSTS
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    print(f"[control] LAN control surface on http://0.0.0.0:{port}/control", flush=True)
+    scope = "LAN" if server.cors else "loopback"
+    print(f"[control] {scope} control surface on http://{bind}:{port}/control", flush=True)
+    if server.cors and not server.token:
+        print(
+            "[control] WARNING: bound off-loopback with no token — anyone on the "
+            "network can drive this output. Set MUSIC_CONTROL_TOKEN to require auth.",
+            flush=True,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -490,7 +532,19 @@ def parse_args() -> argparse.Namespace:
         default=int(os.environ["MUSIC_CONTROL_PORT"])
         if os.environ.get("MUSIC_CONTROL_PORT")
         else None,
-        help="serve the LAN on/off+volume endpoint on this port (env MUSIC_CONTROL_PORT)",
+        help="serve the on/off+volume endpoint on this port (env MUSIC_CONTROL_PORT)",
+    )
+    p.add_argument(
+        "--control-bind",
+        default=os.environ.get("MUSIC_CONTROL_BIND", "127.0.0.1"),
+        help="control-surface bind address; loopback by default. Set 0.0.0.0 to "
+        "expose it on the LAN — pair with --control-token (env MUSIC_CONTROL_BIND)",
+    )
+    p.add_argument(
+        "--control-token",
+        default=os.environ.get("MUSIC_CONTROL_TOKEN"),
+        help="require this token (X-Control-Token header) on control requests "
+        "(env MUSIC_CONTROL_TOKEN)",
     )
     p.add_argument(
         "--respect-console",
@@ -536,7 +590,12 @@ def main() -> int:
     )
 
     if args.control_port is not None:
-        start_control_server(args.control_port, reconciler)
+        start_control_server(
+            args.control_port,
+            reconciler,
+            bind=args.control_bind,
+            token=args.control_token,
+        )
 
     print(
         f"[output] {args.name!r} → {args.server} "
