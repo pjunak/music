@@ -82,7 +82,9 @@ DB-backed tokens, nothing is signed.)
 | `DATABASE_URL` | | `sqlite:////data/app.db` | App DB (auth, playlists, indexed tracks) |
 | `STATIC_DIR` | | `/app/static` | Built SPA served at `/` |
 | `ALLOWED_ORIGINS` | | — | CORS origins (only needed for split dev) |
-| `SESSION_COOKIE_SECURE` / `SESSION_COOKIE_DOMAIN` | | | Cookie hardening for HTTPS deploys |
+| `SESSION_COOKIE_SECURE` | | `true` | Send the session cookie over HTTPS only. Set `false` only for a plain-HTTP (no-TLS) deployment |
+| `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
+| `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 
 There are no migrations: the schema is created idempotently on boot, and new additive columns

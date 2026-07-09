@@ -47,10 +47,21 @@ class Settings(BaseSettings):
     advancer_enabled: bool = True
 
     allowed_origins: str = "http://localhost:5173"
-    session_cookie_secure: bool = False
+    # Secure by default: the documented deployment is HTTPS behind a reverse
+    # proxy, so the session cookie should never ride plaintext HTTP. Set to
+    # false only for a plain-HTTP LAN deployment with no TLS at all (modern
+    # browsers still accept Secure cookies on http://localhost, so local dev
+    # via the Vite proxy is unaffected).
+    session_cookie_secure: bool = True
     session_cookie_domain: str | None = None
     session_cookie_name: str = "music_session"
     session_ttl_days: int = 30
+
+    # Upload guard rails (per request). Generous enough for hi-res FLAC albums;
+    # they exist to stop an authenticated client from exhausting the volume
+    # backing MUSIC_DIR/SFX_LIBRARY_DIR with one unbounded request.
+    max_upload_files: int = 500
+    max_upload_file_bytes: int = 1024**3  # 1 GiB per file
 
     log_level: str = "info"
 

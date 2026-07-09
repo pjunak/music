@@ -20,6 +20,7 @@ from sqlalchemy import case, func, nullsfirst, nullslast, or_, select
 from sqlalchemy.sql import ColumnElement
 
 from app.api.deps import CurrentUser, DbSession, OptionalUser
+from app.core.config import get_settings
 from app.library import index as library_index
 from app.models.track import Track
 
@@ -403,6 +404,15 @@ def stream_track(track_id: int, _: OptionalUser, db: DbSession) -> FileResponse:
     return FileResponse(abs_path, content_disposition_type="inline")
 
 
+# Cover MIME comes from attacker-controllable embedded metadata (ID3 APIC /
+# FLAC picture / MP4 covr), so it's allow-listed to inert image types before
+# it becomes a response Content-Type — otherwise a crafted file could set
+# `text/html` and turn the guest-reachable cover URL into stored XSS.
+_SAFE_COVER_MIMES = frozenset(
+    {"image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"}
+)
+
+
 @router.get("/tracks/{track_id}/cover")
 def track_cover(track_id: int, _: OptionalUser, db: DbSession) -> Response:
     """Cover art. Guest-accessible — Player tab needs it for the room display."""
@@ -411,7 +421,18 @@ def track_cover(track_id: int, _: OptionalUser, db: DbSession) -> Response:
     if art is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no cover art")
     data, mime = art
-    return Response(content=data, media_type=mime)
+    # Unknown/hostile types are served as an inert download, never rendered as
+    # the browser's guess. The extra headers make even a mislabelled payload
+    # non-executable if the URL is opened directly (not via the app's <img>).
+    safe_mime = mime if mime in _SAFE_COVER_MIMES else "application/octet-stream"
+    return Response(
+        content=data,
+        media_type=safe_mime,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        },
+    )
 
 
 # --- file-manager actions -------------------------------------------------
@@ -731,6 +752,12 @@ async def upload(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="no files provided"
         )
+    settings = get_settings()
+    if len(files) > settings.max_upload_files:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"too many files in one request (max {settings.max_upload_files})",
+        )
 
     try:
         library_index.ensure_folder(dest)
@@ -761,8 +788,18 @@ async def upload(
         # an orphaned one won't be indexed.
         partial = target.with_name(f".{target.name}.partial")
         try:
+            size = 0
             with partial.open("wb") as out:
                 while chunk := await upload_file.read(library_index.UPLOAD_CHUNK):
+                    size += len(chunk)
+                    if size > settings.max_upload_file_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=(
+                                f"{upload_file.filename} exceeds the max upload "
+                                f"size ({settings.max_upload_file_bytes} bytes)"
+                            ),
+                        )
                     out.write(chunk)
             partial.replace(target)
         except Exception:

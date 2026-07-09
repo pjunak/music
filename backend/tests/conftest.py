@@ -41,6 +41,10 @@ os.environ["DEVICES_FILE"] = str(_TMP / "devices.json")
 # are 0.5 s long, so a playing lane would advance ~1.25 s into any test
 # and inject unexpected broadcasts. test_advancer re-enables it locally.
 os.environ["ADVANCER_ENABLED"] = "0"
+# The TestClient transport is http://testserver, and httpx won't resend a
+# Secure cookie over http — so opt tests into a non-Secure session cookie.
+# (Production defaults to Secure; see Settings.session_cookie_secure.)
+os.environ["SESSION_COOKIE_SECURE"] = "false"
 
 
 def _silent_wav_bytes(seconds: float = 0.5, sample_rate: int = 8000) -> bytes:

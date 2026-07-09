@@ -239,6 +239,19 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # Cheap defense-in-depth on every response. nosniff stops a browser
+        # from MIME-sniffing a served file into an executable type (e.g. a
+        # track whose bytes look like HTML); X-Frame-Options blocks the app
+        # being framed for clickjacking. A full CSP is deliberately left off
+        # the SPA (its inline boot watchdog would need nonces); the media
+        # endpoints that echo file-derived bytes set their own locked-down CSP.
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        return response
+
     # Single-user app — surface unhandled exception details in the response
     # so the operator (you) can debug from the browser without server logs.
     # FastAPI's HTTPException handler is more specific, so this only catches

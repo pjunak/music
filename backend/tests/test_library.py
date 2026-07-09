@@ -167,6 +167,51 @@ def test_cover_404_when_no_artwork(
     assert r.status_code == 404
 
 
+def test_cover_neutralizes_hostile_embedded_mime(auth_client: TestClient) -> None:
+    """The embedded cover MIME is attacker-controlled (ID3 APIC). A file whose
+    art claims text/html must NOT be served as text/html — the cover URL is
+    guest-reachable, so that would be stored XSS. It's coerced to an inert
+    type and served with nosniff + a locked-down CSP."""
+    from mutagen.id3 import APIC
+    from mutagen.wave import WAVE
+    from sqlalchemy import select
+
+    from app.core.db import SessionLocal
+    from app.library import index as library_index
+    from app.models.track import Track
+
+    music_dir = Path(os.environ["MUSIC_DIR"])
+    p = music_dir / "Demo" / "xss-cover.wav"
+    p.write_bytes(_silent_wav())
+    wav = WAVE(str(p))
+    wav.add_tags()
+    tags = wav.tags
+    assert tags is not None
+    tags.add(
+        APIC(
+            encoding=0,
+            mime="text/html",
+            type=3,
+            desc="",
+            data=b"<script>alert(document.cookie)</script>",
+        )
+    )
+    wav.save()
+
+    with SessionLocal() as db:
+        library_index.scan_paths(db, [p])
+    with SessionLocal() as db:
+        row = db.scalar(select(Track).where(Track.path == "Demo/xss-cover.wav"))
+        assert row is not None
+        tid = row.id
+
+    r = auth_client.get(f"/api/library/tracks/{tid}/cover")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/octet-stream"
+    assert r.headers.get("x-content-type-options") == "nosniff"
+    assert "default-src 'none'" in r.headers.get("content-security-policy", "")
+
+
 # --- batch track fetch ---------------------------------------------------
 
 
@@ -248,6 +293,41 @@ def test_upload_lands_in_destination_and_indexes(auth_client: TestClient) -> Non
         ).json()["tracks"]
     }
     assert "Uploads/uploaded-1.wav" in paths
+
+
+def test_upload_rejects_too_many_files(auth_client: TestClient, monkeypatch) -> None:
+    """The per-request file-count cap stops a client from flooding the volume
+    with one many-file request."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "max_upload_files", 2)
+    files = [
+        ("files", (f"flood-{i}.wav", _silent_wav(), "audio/wav")) for i in range(3)
+    ]
+    r = auth_client.post("/api/library/upload", files=files, params={"dest": "Flood"})
+    assert r.status_code == 413
+
+
+def test_upload_rejects_oversized_file(auth_client: TestClient, monkeypatch) -> None:
+    """The per-file byte cap aborts an oversized stream and leaves nothing on
+    disk / in the index (the .partial is unlinked)."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "max_upload_file_bytes", 100)
+    big = _silent_wav(seconds=1.0)  # ~16 KB, well over the 100-byte cap
+    r = auth_client.post(
+        "/api/library/upload",
+        files=[("files", ("toobig.wav", big, "audio/wav"))],
+        params={"dest": "Big"},
+    )
+    assert r.status_code == 413
+    found = {
+        t["path"]
+        for t in auth_client.get(
+            "/api/library/search", params={"q": "toobig"}
+        ).json()["tracks"]
+    }
+    assert "Big/toobig.wav" not in found
 
 
 def test_upload_dedupe_collisions(auth_client: TestClient) -> None:

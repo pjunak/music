@@ -307,6 +307,12 @@ async def upload(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="no files provided"
         )
+    settings = get_settings()
+    if len(files) > settings.max_upload_files:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"too many files in one request (max {settings.max_upload_files})",
+        )
     root = sfx_root()
     try:
         library_index.ensure_folder(dest, root=root)
@@ -331,8 +337,18 @@ async def upload(
         target = resolved
         partial = target.with_name(f".{target.name}.partial")
         try:
+            size = 0
             with partial.open("wb") as out:
                 while chunk := await upload_file.read(library_index.UPLOAD_CHUNK):
+                    size += len(chunk)
+                    if size > settings.max_upload_file_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=(
+                                f"{upload_file.filename} exceeds the max upload "
+                                f"size ({settings.max_upload_file_bytes} bytes)"
+                            ),
+                        )
                     out.write(chunk)
             partial.replace(target)
         except Exception:
