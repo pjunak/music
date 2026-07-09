@@ -34,7 +34,7 @@ RUN npm run build
 # Has the C toolchain + libffi-dev needed to compile argon2-cffi (and any
 # future cffi-backed wheel that doesn't ship a manylinux build for slim).
 # Output is just the wheels; the runtime stage stays compiler-free.
-FROM python:3.11-slim AS backend-builder
+FROM python:3.12-slim AS backend-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -55,7 +55,7 @@ RUN pip install --no-cache-dir --upgrade pip wheel && \
 # ============================================================================
 # Stage 3: python runtime
 # ============================================================================
-FROM python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 # Only runtime deps. ca-certificates for outbound TLS; that's it.
 # (build-essential + libffi-dev are in the builder stage above; they
@@ -116,4 +116,8 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
 # Schema is created (idempotently) by the FastAPI lifespan — no migrations
 # step. exec'ing uvicorn directly keeps signal handling clean (graceful
 # shutdown on SIGTERM from `docker stop`).
+#
+# MUST stay a single worker: the sync layer (state machine, device registry,
+# connection manager, track advancer) is process-local by design — a second
+# worker would split the playback universe. See app/sync/.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

@@ -94,7 +94,7 @@ Backend (Python 3.11+) and frontend (Node 20) run as two processes in dev.
 ```bash
 # Backend
 cd backend
-python -m venv .venv && ./.venv/Scripts/activate   # POSIX: source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 cp .env.example .env                                # set SECRET_KEY (≥32 chars)
 music-cli create-user admin
@@ -110,8 +110,8 @@ Checks:
 
 ```bash
 # Backend
-cd backend && ./.venv/Scripts/pytest.exe            # tests
-./.venv/Scripts/ruff.exe check app tests            # lint
+cd backend && ./.venv/bin/pytest                    # tests
+./.venv/bin/ruff check app tests                    # lint
 
 # Frontend
 cd frontend
