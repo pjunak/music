@@ -16,6 +16,42 @@ deleted here — no strikethrough graveyard.
   couple of weeks. Keep the `ended` → skip fast path — it's the low-latency
   half of the contract.
 
+## Security / correctness — deferred from the 2026-07-09 audit
+
+These surfaced in the full sweep and were left unfixed on purpose — each is
+either a design decision the operator should make or a subtle change whose risk
+outweighs its low severity. The high/critical findings from that sweep were all
+fixed (see git log around that date).
+
+- **Guest library enumeration (medium — NEEDS A DECISION).** The guest-reachable
+  `GET /api/library/tracks/{id}`, `/stream`, `/cover`, and the batch endpoint are
+  keyed on the sequential integer id, so anyone who can reach the server can walk
+  ids 1..N and download the whole library. This is inherent to the guest-output
+  design (a logged-out TV must fetch tracks by id to play). Options: (a) accept it
+  — it's a personal server meant to sit behind a proxy; (b) gate guest fetches to
+  ids present in the *current* PlayerState (current + queue + history + interrupt),
+  which blocks enumeration but risks a spurious 403 on the room display if an id
+  ages out of `history` mid-request; (c) signed/expiring per-track URLs. Not done
+  because (b)/(c) change the guest contract and the TV-display UX.
+- **Session tokens stored unhashed at rest (low, defense-in-depth).** The token is
+  the primary key of `auth_sessions`. Hashing it (`sha256`, look up by hash) would
+  break the Settings → Active Sessions list/revoke UI, which matches on token
+  *prefix*. Tokens are 384-bit and the snapshot leak that made them reachable is
+  fixed, so this is low-priority.
+- **Verbose exception handler (low, intentional).** `main.py`'s catch-all and the
+  WS dispatch return `{type}: {message}` to the client — a deliberate single-user
+  debugging aid, but it discloses paths/SQL to anonymous guests on an exposed
+  instance. Keep for now; revisit if the app is ever multi-user or public.
+- **Broadcast happens just outside the state lock (low, subtle).** Two concurrent
+  mutators can interleave their per-socket sends so a socket briefly sees an older
+  revision; it self-heals on the next broadcast. Fixing it (send under the lock, or
+  sequence per socket) is delicate — not worth the risk at single-operator scale.
+- **WS upgrade has no Origin check (low, defense-in-depth).** Cross-site WS hijack
+  is already blocked by SameSite=lax + the guest gate; an allowlisted-origin check
+  on upgrade would be belt-and-suspenders.
+- **Pin base images / CI actions by digest (low).** `Dockerfile` and the workflow
+  use mutable tags (`python:3.12-slim`, `actions/checkout@v7`).
+
 ## Someday
 
 - **Weighted shuffle** — re-add a `"weighted"` shuffle mode backed by an
