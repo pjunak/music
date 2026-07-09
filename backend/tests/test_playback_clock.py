@@ -19,6 +19,12 @@ class _Lazy:
     """Attribute-lazy façade over the app modules (import-on-first-use)."""
 
     def __getattr__(self, name: str):
+        # Collection hooks (anyio's pytest plugin) getattr() every module-
+        # level object for dunders like __test__. Importing app modules that
+        # early would bind app.core.db's engine before the test env exists —
+        # bail out before the import, not after.
+        if name.startswith("__"):
+            raise AttributeError(name)
         from app.sync import protocol, state
 
         for mod in (state, protocol):
@@ -370,6 +376,35 @@ def test_advancer_plan_skips_frozen_and_unknown_length_lanes() -> None:
         ),
     )
     assert asyncio.run(adv._plan(frozen)) is None
+
+
+async def test_index_writes_invalidate_advancer_length_cache(
+    client: TestClient, db_session
+) -> None:
+    """A rescan can change a track's duration under the same track id (file
+    replaced in place), so any index write must flush the advancer's length
+    cache — otherwise it keeps firing on the stale deadline until restart.
+    start() registers the hook; index writes run in worker threads, so the
+    notification is exercised off-loop here too."""
+    from starlette.concurrency import run_in_threadpool
+
+    from app.library import index as library_index
+    from app.sync.advancer import Advancer
+
+    adv = Advancer()
+    adv.start()
+    try:
+        assert library_index.on_index_changed is not None
+        adv._length_cache[123] = 45.0
+        adv._warned_unknown_length.add(123)
+        # A real (no-op) index write from the threadpool, like an upload does.
+        await run_in_threadpool(library_index.scan_paths, db_session, [])
+        assert adv._length_cache == {}
+        assert adv._warned_unknown_length == set()
+    finally:
+        await adv.stop()
+    # stop() must deregister — a stopped advancer shouldn't outlive its hook.
+    assert library_index.on_index_changed is None
 
 
 def test_advancer_advances_the_queue_end_to_end(monkeypatch) -> None:

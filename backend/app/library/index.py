@@ -58,6 +58,19 @@ _scan_lock = threading.Lock()
 # diagnostics endpoint so the operator can see how stale the index is.
 _last_scan_at: float | None = None
 
+# Fired after any index write commits (scans, deletes, renames). Lets a
+# holder of caches keyed on track rows — the advancer's length cache —
+# drop them when a row may have changed underneath (e.g. a file replaced
+# in place gets a new duration under the same track id). Registered by
+# `Advancer.start()`; may be invoked from a worker thread.
+on_index_changed: Callable[[], None] | None = None
+
+
+def _notify_index_changed() -> None:
+    hook = on_index_changed
+    if hook is not None:
+        hook()
+
 
 def last_scan_at() -> float | None:
     """Returns the unix timestamp of the most recent successful full scan,
@@ -453,6 +466,7 @@ def scan_full(db: Session) -> ScanSummary:
                 summary.removed += 1
 
         db.commit()
+        _notify_index_changed()
         elapsed = time.monotonic() - started
         global _last_scan_at
         _last_scan_at = time.time()
@@ -471,7 +485,7 @@ def scan_paths(db: Session, paths: Iterable[Path]) -> list[Track]:
     """Index/refresh a specific set of paths (e.g. just-uploaded files).
 
     Returns the resulting Track rows in the same order as input. Skips
-    non-audio files silently. Caller commits.
+    non-audio files silently. Commits before returning.
 
     Shares `_scan_lock` with `scan_full` — a parallel full scan that's
     snapshotting `existing` rows mustn't race a fresh insert here, or
@@ -495,6 +509,7 @@ def scan_paths(db: Session, paths: Iterable[Path]) -> list[Track]:
                 _refresh_track(existing, absolute, root)
                 out.append(existing)
         db.commit()
+        _notify_index_changed()
         return out
 
 
@@ -506,6 +521,7 @@ def remove_path(db: Session, rel: str) -> bool:
         return False
     db.delete(row)
     db.commit()
+    _notify_index_changed()
     return True
 
 
@@ -520,6 +536,7 @@ def update_path(db: Session, old_rel: str, new_rel: str) -> Track | None:
     if abs_path.is_file():
         _refresh_track(row, abs_path, music_root())
     db.commit()
+    _notify_index_changed()
     return row
 
 

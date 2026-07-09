@@ -70,6 +70,7 @@ class Advancer:
     def __init__(self) -> None:
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._length_cache: dict[int, float | None] = {}
         self._warned_unknown_length: set[int] = set()
 
@@ -83,26 +84,40 @@ class Advancer:
         if self._task is not None:
             return
         self._wake = asyncio.Event()
+        self._loop = asyncio.get_running_loop()
         state_module.machine.on_applied = self.poke
-        self._task = asyncio.get_running_loop().create_task(
-            self._run(), name="track-advancer"
-        )
+        library_index.on_index_changed = self.invalidate_lengths
+        self._task = self._loop.create_task(self._run(), name="track-advancer")
         logger.info("track advancer started (grace=%.2fs)", GRACE_S)
 
     async def stop(self) -> None:
         if self._task is None:
             return
         state_module.machine.on_applied = None
+        library_index.on_index_changed = None
         self._task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self._task
         self._task = None
+        self._loop = None
 
     def poke(self) -> None:
         """State changed — recompute the deadline. Called (via the state
         machine's on_applied hook) after every mutation, including silent
         position reports."""
         self._wake.set()
+
+    def invalidate_lengths(self) -> None:
+        """Library index changed — cached `Track.length_s` values may be
+        stale (a rescan re-reads a replaced file's duration under the same
+        track id). Drop the cache and replan. Index writes run in worker
+        threads, so the wake is marshalled onto the advancer's loop instead
+        of touching the (thread-unsafe) Event directly."""
+        self._length_cache.clear()
+        self._warned_unknown_length.clear()
+        loop = self._loop
+        if loop is not None:
+            loop.call_soon_threadsafe(self._wake.set)
 
     # -- scheduling ----------------------------------------------------------
 
