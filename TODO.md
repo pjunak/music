@@ -23,16 +23,15 @@ either a design decision the operator should make or a subtle change whose risk
 outweighs its low severity. The high/critical findings from that sweep were all
 fixed (see git log around that date).
 
-- **Guest library enumeration (medium — NEEDS A DECISION).** The guest-reachable
-  `GET /api/library/tracks/{id}`, `/stream`, `/cover`, and the batch endpoint are
-  keyed on the sequential integer id, so anyone who can reach the server can walk
-  ids 1..N and download the whole library. This is inherent to the guest-output
-  design (a logged-out TV must fetch tracks by id to play). Options: (a) accept it
-  — it's a personal server meant to sit behind a proxy; (b) gate guest fetches to
-  ids present in the *current* PlayerState (current + queue + history + interrupt),
-  which blocks enumeration but risks a spurious 403 on the room display if an id
-  ages out of `history` mid-request; (c) signed/expiring per-track URLs. Not done
-  because (b)/(c) change the guest contract and the TV-display UX.
+- **Guest library read-enumeration — ACCEPTED, won't fix.** The guest-reachable
+  `GET /api/library/tracks/{id}`, `/stream`, `/cover`, and the batch endpoint let
+  anyone who can reach the server read/download the library. The operator has
+  explicitly accepted read exposure (2026-07-09): it's a personal library, and
+  the boundary that matters is *write* access. Write access is fully locked down —
+  every filesystem/DB-mutating endpoint requires an authenticated session (audited
+  2026-07-09; the only unauthenticated mutation is `POST /login`), and the guest WS
+  surface is `register`/`position_report` only, neither of which writes to the
+  library. Do not re-open this as a finding.
 - **Session tokens stored unhashed at rest (low, defense-in-depth).** The token is
   the primary key of `auth_sessions`. Hashing it (`sha256`, look up by hash) would
   break the Settings → Active Sessions list/revoke UI, which matches on token
