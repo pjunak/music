@@ -12,6 +12,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
@@ -68,7 +69,6 @@ class FolderOut(BaseModel):
 
 class TreeResponse(BaseModel):
     path: str
-    folders: list[FolderOut]
     tracks: list[TrackOut]
 
 
@@ -258,20 +258,12 @@ def get_tree(
     db: DbSession,
     path: str = Query("", description="Folder path relative to MUSIC_DIR; empty for root"),
 ) -> TreeResponse:
-    """Direct contents of a folder: subfolder summaries (with recursive
-    track counts) plus the audio files immediately in this folder."""
-    folders, tracks = library_index.list_folder(db, path)
+    """The audio files immediately in this folder. The folder hierarchy
+    comes from `/folders` (one whole-tree response) — every client builds
+    the tree from that, so this endpoint returns only the track list."""
+    tracks = library_index.folder_tracks(db, path)
     return TreeResponse(
         path=path.strip("/"),
-        folders=[
-            FolderOut(
-                name=f.name,
-                path=f.path,
-                track_count=f.track_count,
-                has_children=f.has_children,
-            )
-            for f in folders
-        ],
         tracks=[TrackOut.model_validate(t) for t in tracks],
     )
 
@@ -603,21 +595,25 @@ def move_track_file(
             detail=f"a file already exists at {dest_dir.name}/{target_name}",
         )
 
-    shutil.move(str(src), str(target))
-    new_rel = library_index.to_relative(target)
-    try:
-        library_index.update_path(db, track.path, new_rel)
-    except Exception as e:
-        # DB write failed — the file already moved. Try to put it back so
-        # filesystem and index stay aligned. If the rollback also fails the
-        # caller gets the underlying error and the operator will need to
-        # rescan; we don't try to be cleverer than that.
-        with contextlib.suppress(Exception):
-            shutil.move(str(target), str(src))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"index update failed after move: {e}",
-        ) from e
+    # The disk move and the index update must be atomic w.r.t. a concurrent
+    # full scan — mid-walk, the scan could miss the file at both locations
+    # and prune the row (cascading away its playlist items).
+    with library_index.write_lock:
+        shutil.move(str(src), str(target))
+        new_rel = library_index.to_relative(target)
+        try:
+            library_index.update_path(db, track.path, new_rel)
+        except Exception as e:
+            # DB write failed — the file already moved. Try to put it back so
+            # filesystem and index stay aligned. If the rollback also fails the
+            # caller gets the underlying error and the operator will need to
+            # rescan; we don't try to be cleverer than that.
+            with contextlib.suppress(Exception):
+                shutil.move(str(target), str(src))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"index update failed after move: {e}",
+            ) from e
     db.refresh(track)
     return TrackOut.model_validate(track)
 
@@ -628,16 +624,17 @@ def delete_track(track_id: int, _: CurrentUser, db: DbSession) -> None:
     items referencing this track id cascade-delete (FK on playlist_items)."""
     track = _track_or_404(db, track_id)
     abs_path = library_index.to_absolute(track.path)
-    if abs_path.is_file():
-        try:
-            abs_path.unlink()
-        except OSError as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"file unlink failed: {e}",
-            ) from e
-    db.delete(track)
-    db.commit()
+    with library_index.write_lock:
+        if abs_path.is_file():
+            try:
+                abs_path.unlink()
+            except OSError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"file unlink failed: {e}",
+                ) from e
+        db.delete(track)
+        db.commit()
 
 
 @router.post("/tracks/bulk-move", response_model=BulkMoveResult)
@@ -682,17 +679,19 @@ def bulk_move_tracks(
                 )
             )
             continue
-        shutil.move(str(src), str(target))
-        new_rel = library_index.to_relative(target)
-        try:
-            library_index.update_path(db, track.path, new_rel)
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                shutil.move(str(target), str(src))
-            skipped.append(
-                BulkActionSkip(track_id=track_id, reason=f"index update failed: {e}")
-            )
-            continue
+        # Same disk-move + index-update atomicity as move_track_file.
+        with library_index.write_lock:
+            shutil.move(str(src), str(target))
+            new_rel = library_index.to_relative(target)
+            try:
+                library_index.update_path(db, track.path, new_rel)
+            except Exception as e:
+                with contextlib.suppress(Exception):
+                    shutil.move(str(target), str(src))
+                skipped.append(
+                    BulkActionSkip(track_id=track_id, reason=f"index update failed: {e}")
+                )
+                continue
         db.refresh(track)
         moved.append(TrackOut.model_validate(track))
 
@@ -710,25 +709,26 @@ def bulk_delete_tracks(
     after manually removing files. Playlist items cascade via FK."""
     deleted_ids: list[int] = []
     skipped: list[BulkActionSkip] = []
-    for track_id in payload.track_ids:
-        track = db.get(Track, track_id)
-        if track is None:
-            skipped.append(BulkActionSkip(track_id=track_id, reason="not found"))
-            continue
-        abs_path = library_index.to_absolute(track.path)
-        if abs_path.is_file():
-            try:
-                abs_path.unlink()
-            except OSError as e:
-                skipped.append(
-                    BulkActionSkip(
-                        track_id=track_id, reason=f"file unlink failed: {e}"
-                    )
-                )
+    with library_index.write_lock:
+        for track_id in payload.track_ids:
+            track = db.get(Track, track_id)
+            if track is None:
+                skipped.append(BulkActionSkip(track_id=track_id, reason="not found"))
                 continue
-        db.delete(track)
-        deleted_ids.append(track_id)
-    db.commit()
+            abs_path = library_index.to_absolute(track.path)
+            if abs_path.is_file():
+                try:
+                    abs_path.unlink()
+                except OSError as e:
+                    skipped.append(
+                        BulkActionSkip(
+                            track_id=track_id, reason=f"file unlink failed: {e}"
+                        )
+                    )
+                    continue
+            db.delete(track)
+            deleted_ids.append(track_id)
+        db.commit()
     return BulkDeleteResult(deleted_ids=deleted_ids, skipped=skipped)
 
 
@@ -786,28 +786,28 @@ async def upload(
         # restart), only the .partial is left behind — never a truncated
         # file at the real path that the indexer would pick up with bogus
         # tags. The .partial extension is outside AUDIO_EXTENSIONS so even
-        # an orphaned one won't be indexed.
-        partial = target.with_name(f".{target.name}.partial")
+        # an orphaned one won't be indexed. The copy runs in the threadpool
+        # (the body is already buffered) so a slow disk can't stall the
+        # event loop for the duration of a large file. The random infix
+        # keeps two concurrent uploads of the same filename from
+        # interleaving writes into one partial.
+        partial = target.with_name(f".{target.name}.{uuid4().hex[:8]}.partial")
         try:
-            size = 0
-            with partial.open("wb") as out:
-                while chunk := await upload_file.read(library_index.UPLOAD_CHUNK):
-                    size += len(chunk)
-                    if size > settings.max_upload_file_bytes:
-                        raise HTTPException(
-                            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                            detail=(
-                                f"{upload_file.filename} exceeds the max upload "
-                                f"size ({settings.max_upload_file_bytes} bytes)"
-                            ),
-                        )
-                    out.write(chunk)
-            partial.replace(target)
-        except Exception:
-            if partial.exists():
-                with contextlib.suppress(OSError):
-                    partial.unlink()
-            raise
+            await run_in_threadpool(
+                library_index.stream_upload,
+                upload_file.file,
+                partial,
+                target,
+                settings.max_upload_file_bytes,
+            )
+        except library_index.UploadTooLargeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=(
+                    f"{upload_file.filename} exceeds the max upload "
+                    f"size ({settings.max_upload_file_bytes} bytes)"
+                ),
+            ) from e
         written.append(target)
 
     # scan_paths reads tags (mutagen) and writes SQLite — blocking work. This

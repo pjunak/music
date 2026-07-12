@@ -78,13 +78,12 @@ def test_search_rejects_unknown_sort(auth_client: TestClient) -> None:
 # --- tree -----------------------------------------------------------------
 
 
-def test_tree_root_lists_seeded_folders(auth_client: TestClient, seeded_track_id: int) -> None:
-    body = auth_client.get("/api/library/tree").json()
-    folders = {f["name"] for f in body["folders"]}
-    assert "Demo" in folders
-    # The Demo folder contains the seeded track recursively.
+def test_folders_include_seeded(auth_client: TestClient, seeded_track_id: int) -> None:
+    # The folder hierarchy comes from /folders; /tree only carries tracks.
+    body = auth_client.get("/api/library/folders").json()
     demo = next(f for f in body["folders"] if f["name"] == "Demo")
     assert demo["path"] == "Demo"
+    # The Demo folder contains the seeded track recursively.
     assert demo["track_count"] >= 1
 
 
@@ -97,7 +96,6 @@ def test_tree_subfolder_lists_tracks(auth_client: TestClient, seeded_track_id: i
 
 def test_tree_unknown_path_is_empty(auth_client: TestClient) -> None:
     body = auth_client.get("/api/library/tree", params={"path": "NowhereLand"}).json()
-    assert body["folders"] == []
     assert body["tracks"] == []
 
 

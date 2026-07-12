@@ -11,6 +11,7 @@ All endpoints require a signed-in operator.
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentUser
@@ -78,7 +79,10 @@ async def save_device(client_id: str, payload: DevicePut, _: CurrentUser) -> Dev
     live right now keeps playing until it's turned off from the Speakers
     popover or disconnects. (Activation is independent — any connected device
     can be ticked on without being saved.)"""
-    record = device_store.put(client_id, payload.name, payload.is_output)
+    # The store write hits disk (fsync'd JSON) — keep it off the event loop.
+    record = await run_in_threadpool(
+        device_store.put, client_id, payload.name, payload.is_output
+    )
     registry.refresh_is_output(client_id, payload.is_output)
     registry.refresh_name(client_id, payload.name)
     await _broadcast_snapshot()
@@ -90,7 +94,7 @@ async def forget_device(client_id: str, _: CurrentUser) -> None:
     """Forget a device — drop it from the saved list (so it no longer
     auto-activates by default). If it's still connected it remains usable and,
     if it was a live output, keeps playing this session until turned off."""
-    if not device_store.delete(client_id):
+    if not await run_in_threadpool(device_store.delete, client_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")
     registry.refresh_is_output(client_id, False)
     await _broadcast_snapshot()

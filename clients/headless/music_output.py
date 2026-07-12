@@ -70,6 +70,13 @@ except ImportError:  # pragma: no cover - import guard for a clearer message
     )
 
 RECONNECT_SECONDS = 3
+# Client-side liveness: websocket-client sends NO pings unless ping_interval
+# is set, so a half-open connection (server power-loss, Wi-Fi drop with no
+# TCP FIN) would block in recv indefinitely and the appliance would silently
+# stop following state. With these, a dead peer trips ping_timeout and the
+# run_forever reconnect takes over.
+PING_INTERVAL_SECONDS = 20
+PING_TIMEOUT_SECONDS = 10
 
 
 def clamp01(v: float) -> float:
@@ -366,7 +373,11 @@ def run_ws(
     )
     # reconnect= retries on drop with a fixed backoff, so the appliance recovers
     # from server restarts / network blips on its own.
-    app.run_forever(reconnect=RECONNECT_SECONDS)
+    app.run_forever(
+        reconnect=RECONNECT_SECONDS,
+        ping_interval=PING_INTERVAL_SECONDS,
+        ping_timeout=PING_TIMEOUT_SECONDS,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -526,12 +537,23 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("MUSIC_CLIENT_ID"),
         help="stable identity (env MUSIC_CLIENT_ID; default: persisted dotfile)",
     )
+    # A malformed env value must not raise at parse time — under systemd's
+    # Restart=always that becomes a fast crash-loop that trips the start
+    # limit and leaves the appliance dead instead of merely control-less.
+    control_port_env: int | None = None
+    raw_control_port = os.environ.get("MUSIC_CONTROL_PORT")
+    if raw_control_port:
+        try:
+            control_port_env = int(raw_control_port)
+        except ValueError:
+            print(
+                f"[control] ignoring non-numeric MUSIC_CONTROL_PORT={raw_control_port!r}",
+                flush=True,
+            )
     p.add_argument(
         "--control-port",
         type=int,
-        default=int(os.environ["MUSIC_CONTROL_PORT"])
-        if os.environ.get("MUSIC_CONTROL_PORT")
-        else None,
+        default=control_port_env,
         help="serve the on/off+volume endpoint on this port (env MUSIC_CONTROL_PORT)",
     )
     p.add_argument(

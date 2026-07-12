@@ -142,9 +142,52 @@ def test_ws_session_expiry_mid_connection_downgrades_to_guest(
         err = ws.receive_json()
         assert err["type"] == "error"
         assert "expired" in err["detail"].lower()
+        # The machine-readable code is what triggers the SPA's re-login flow.
+        assert err["code"] == "session_expired"
 
         # Subsequent mutations take the standard guest-rejection path —
         # the connection is now downgraded for the rest of its life.
+        ws.send_json({"type": "set_volume", "volume": 0.7})
+        err2 = ws.receive_json()
+        assert err2["type"] == "error"
+        assert "guest" in err2["detail"].lower()
+        assert err2.get("code") is None
+
+
+def test_ws_session_revocation_mid_connection_downgrades_to_guest(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deleting the session row (Settings → Active Sessions revoke, or
+    logout) must evict the live socket's privileges, not just future page
+    loads — the whole point of revocation is killing a forgotten tab. The
+    dispatch loop re-verifies row existence every _SESSION_RECHECK_SECONDS;
+    forced to 0 here so the first action after deletion runs the check."""
+    from app.core.db import SessionLocal
+    from app.models.auth_session import AuthSession
+    from app.sync import router as sync_router
+
+    monkeypatch.setattr(sync_router, "_SESSION_RECHECK_SECONDS", 0.0)
+
+    _login(client)
+    token = client.cookies.get("music_session")
+    assert token is not None
+
+    with client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()  # snapshot — connection authenticated normally
+
+        with SessionLocal() as db:
+            row = db.get(AuthSession, token)
+            assert row is not None
+            db.delete(row)
+            db.commit()
+
+        ws.send_json({"type": "set_volume", "volume": 0.5})
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert "revoked" in err["detail"].lower()
+        assert err["code"] == "session_revoked"
+
+        # Downgraded for the rest of the connection's life.
         ws.send_json({"type": "set_volume", "volume": 0.7})
         err2 = ws.receive_json()
         assert err2["type"] == "error"

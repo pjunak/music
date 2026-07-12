@@ -37,14 +37,17 @@ export function PlaylistsView() {
     try {
       const list = await playlistsApi.list({ mode_id: activeModeId });
       setPlaylists(list);
-      // If our selected playlist disappeared, clear selection.
-      if (selected !== null && !list.some((p) => p.id === selected.id)) {
-        setSelected(null);
-      }
+      // If the selected playlist disappeared, clear the selection. Read it
+      // via the functional update — depending on `selected` here would
+      // re-mint refresh (and re-run the [refresh] effect = a full refetch)
+      // on every list click.
+      setSelected((sel) =>
+        sel !== null && !list.some((p) => p.id === sel.id) ? null : sel,
+      );
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
     }
-  }, [activeModeId, selected]);
+  }, [activeModeId]);
 
   // The modes list is only needed for the detail editor's "move to another
   // mode" picker.
@@ -225,6 +228,10 @@ function PlaylistDetail({
   const activeTrackId = usePlayerStore(selectActiveTrackId);
   const [tracks, setTracks] = useState<TrackInPlaylist[]>([]);
   const [loading, setLoading] = useState(false);
+  // Guards position-based mutations: a second reorder/remove issued before
+  // the refetch lands would be computed against stale positions and hit the
+  // wrong row.
+  const [mutating, setMutating] = useState(false);
 
   const refreshTracks = useCallback(async () => {
     setLoading(true);
@@ -243,20 +250,28 @@ function PlaylistDetail({
   }, [refreshTracks]);
 
   async function removeAt(position: number) {
+    if (mutating) return;
+    setMutating(true);
     try {
       await playlistsApi.removeTrack(playlist.id, position);
       await refreshTracks();
     } catch (e) {
       toast.error("Remove failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setMutating(false);
     }
   }
 
   async function moveTo(position: number, toPosition: number) {
+    if (mutating) return;
+    setMutating(true);
     try {
       await playlistsApi.moveTrack(playlist.id, position, toPosition);
       await refreshTracks();
     } catch (e) {
       toast.error("Reorder failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setMutating(false);
     }
   }
 
@@ -412,13 +427,13 @@ function PlaylistDetail({
                       label="Move up"
                       icon={<ArrowUpIcon />}
                       onClick={() => void moveTo(row.position, row.position - 1)}
-                      disabled={row.position === 0}
+                      disabled={mutating || row.position === 0}
                     />
                     <IconButton
                       label="Move down"
                       icon={<ArrowDownIcon />}
                       onClick={() => void moveTo(row.position, row.position + 1)}
-                      disabled={row.position === tracks.length - 1}
+                      disabled={mutating || row.position === tracks.length - 1}
                     />
                     <IconButton
                       label="Play this track"
@@ -432,6 +447,7 @@ function PlaylistDetail({
                       icon={<XIcon />}
                       variant="danger"
                       onClick={() => void removeAt(row.position)}
+                      disabled={mutating}
                     />
                   </div>
                 </li>

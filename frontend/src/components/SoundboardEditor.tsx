@@ -319,6 +319,7 @@ function ItemRow({
 }) {
   const [name, setName] = useState(item.name);
   const [hotkey, setHotkey] = useState(item.hotkey ?? "");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setName(item.name);
@@ -328,9 +329,15 @@ function ItemRow({
   const dirty = name !== item.name || (hotkey || null) !== (item.hotkey ?? null);
 
   async function save() {
-    const payload: { name?: string; hotkey?: string } = { name };
-    payload.hotkey = hotkey;
-    await onSave(payload);
+    if (saving) return;
+    setSaving(true);
+    try {
+      const payload: { name?: string; hotkey?: string } = { name };
+      payload.hotkey = hotkey;
+      await onSave(payload);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -365,7 +372,7 @@ function ItemRow({
           type="button"
           className={dirty ? "btn-primary" : ""}
           onClick={() => void save()}
-          disabled={!dirty}
+          disabled={!dirty || saving}
         >
           Save
         </button>

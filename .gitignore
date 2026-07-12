@@ -78,9 +78,12 @@ devices.json
 .devices.json.tmp
 
 # Media / runtime content (never commit user music or uploaded files).
-# Anchored to repo root so we don't shadow code dirs like backend/app/library/.
+# Anchored so we don't shadow code dirs like backend/app/library/. The
+# backend/ pair covers the dev defaults (MUSIC_DIR=./music run from backend/).
 /music/
 /sfx/
+/backend/music/
+/backend/sfx/
 modes/*/cache/
 
 # Testing & Coverage

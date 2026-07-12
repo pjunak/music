@@ -60,6 +60,10 @@ export function InterruptTemplatesEditor({
     if (!ok) return;
     try {
       await modesAdminApi.deleteInterrupt(modeId, idx);
+      // Interrupts are addressed by list index, so a delete shifts every
+      // later index — an editor left open would silently save over a
+      // *different* template. Close it.
+      setEditingIdx(null);
       toast.success("Interrupt deleted");
       await onChanged();
     } catch (e) {
@@ -143,9 +147,13 @@ export function InterruptTemplatesEditor({
         <p className="muted small">None yet. Click + Add to create one.</p>
       ) : (
         <ul className="simple-list">
+          {/* Key on index + name (there's no stable id — the API addresses
+              interrupts by position): if the list shifts, a row that now
+              holds a different template remounts instead of inheriting the
+              previous occupant's form state. */}
           {detail.interrupts.map((it, idx) =>
             editingIdx === idx ? (
-              <li key={idx}>
+              <li key={`${idx}-${it.name}`}>
                 <InterruptTemplateForm
                   modeId={modeId}
                   mode="edit"
@@ -160,7 +168,7 @@ export function InterruptTemplatesEditor({
                 />
               </li>
             ) : (
-              <li key={idx}>
+              <li key={`${idx}-${it.name}`}>
                 <div className="entity-row-main">
                   <strong>{it.name}</strong>
                   <div className="entity-row-meta">

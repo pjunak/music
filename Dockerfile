@@ -43,14 +43,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-COPY backend/pyproject.toml ./
+COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/app ./app
 
-# Build wheels for everything declared in pyproject.toml (transitively)
-# plus the project itself, into /wheels. The runtime stage installs from
-# this directory only — no network, no compiler.
-RUN pip install --no-cache-dir --upgrade pip wheel && \
-    pip wheel --no-cache-dir --wheel-dir /wheels .
+# Build wheels for the exact dependency set in uv.lock (direct deps are
+# pinned == in pyproject, but transitives would otherwise float to whatever
+# pip resolves at build time) plus the project itself, into /wheels. The
+# runtime stage installs from this directory only — no network, no compiler.
+# --locked errors out if pyproject drifted from the lockfile instead of
+# silently building an unlocked graph.
+RUN pip install --no-cache-dir --upgrade pip wheel uv && \
+    uv export --locked --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt && \
+    pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt . && \
+    rm /tmp/requirements.txt
 
 # ============================================================================
 # Stage 3: python runtime
@@ -120,4 +125,11 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
 # MUST stay a single worker: the sync layer (state machine, device registry,
 # connection manager, track advancer) is process-local by design — a second
 # worker would split the playback universe. See app/sync/.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+#
+# --proxy-headers: the documented deploy sits behind a reverse proxy, so
+# without X-Forwarded-For handling every client shares the proxy's address —
+# which turns the per-client login throttle into one global bucket (a
+# brute-forcer locks out the operator). Trusting any forwarder is fine when
+# port 8000 is only reachable via the proxy; a spoofed XFF on a directly
+# exposed port is backstopped by the global throttle bucket in api/auth.py.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--proxy-headers", "--forwarded-allow-ips", "*"]

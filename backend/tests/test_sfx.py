@@ -45,12 +45,12 @@ def test_tree_requires_auth(client: TestClient) -> None:
     assert client.get("/api/sfx/tree").status_code == 401
 
 
-def test_tree_root_lists_seeded(auth_client: TestClient) -> None:
-    """conftest seeds dnd/door.ogg under SFX_LIBRARY_DIR."""
-    r = auth_client.get("/api/sfx/tree")
+def test_folders_list_seeded(auth_client: TestClient) -> None:
+    """conftest seeds dnd/door.ogg under SFX_LIBRARY_DIR. The hierarchy comes
+    from /folders (one whole-tree response); /tree only carries files."""
+    r = auth_client.get("/api/sfx/folders")
     assert r.status_code == 200
-    body = r.json()
-    folder_paths = {f["path"] for f in body["folders"]}
+    folder_paths = {f["path"] for f in r.json()["folders"]}
     assert "dnd" in folder_paths
 
 

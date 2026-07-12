@@ -441,3 +441,7 @@ class SfxFired(BaseModel):
 class ErrorMessage(BaseModel):
     type: Literal["error"] = "error"
     detail: str
+    # Machine-readable discriminator for errors the client must react to
+    # programmatically (session loss triggers the SPA's re-login flow).
+    # None for ordinary rejected-action errors, which are toast-only.
+    code: Literal["session_expired", "session_revoked"] | None = None

@@ -330,6 +330,16 @@ export class PlaybackEngine {
     if (this.ambientB) this.ambientB.el.removeEventListener("ended", this.handleAmbientEnded);
     if (this.interrupt) this.interrupt.el.removeEventListener("ended", this.handleInterruptEnded);
     this.disposeEffects();
+    // The engine survives destroy() under StrictMode (mount → destroy →
+    // remount reuses this instance and its AudioContext). Restore the
+    // passthrough and forget the preset fingerprint, or the remount's
+    // setPresets() short-circuits on the unchanged signature and ambient
+    // audio dead-ends into the disposed chain — silent playback.
+    if (this.effectChainHead !== null && this.ambientDuck !== null) {
+      this.effectChainHead.disconnect();
+      this.effectChainHead.connect(this.ambientDuck);
+    }
+    this.lastPresetSignature = "";
   }
 
   /** Resume the AudioContext. Browsers require a user gesture before audio

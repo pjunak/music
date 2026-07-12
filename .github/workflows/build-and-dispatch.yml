@@ -12,9 +12,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Job-level minimum: only `build` needs to push packages (declared there).
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: build-${{ github.ref }}
@@ -26,6 +26,7 @@ jobs:
   verify:
     name: Lint and test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -34,13 +35,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      # uv sync --locked installs the exact transitive graph from uv.lock
+      # (and fails on pyproject/lock drift) — a plain `pip install -e .`
+      # would re-resolve transitives to whatever is newest at run time,
+      # testing a dependency set that was never locked.
       - name: Backend lint and tests
         run: |
           cd backend
-          pip install -e .[dev]
-          ruff check app tests
-          mypy app tests
-          pytest
+          pip install uv
+          uv sync --locked --extra dev
+          uv run ruff check app tests
+          uv run mypy app tests
+          uv run pytest
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -59,6 +65,10 @@ jobs:
     name: Build and push image
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
 
@@ -92,6 +102,7 @@ jobs:
     name: Dispatch deploy to infra repo
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verify dispatch config
         env:

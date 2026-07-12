@@ -1,14 +1,26 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.db import get_db
 from app.models.auth_session import AuthSession
 from app.models.user import User
 
 _LAST_SEEN_THROTTLE_SECONDS = 60
+
+
+def session_cookie_value(request: Request) -> str | None:
+    """The raw session token from the request, read under the *configured*
+    cookie name — a hardcoded `Cookie(alias=...)` here silently breaks every
+    endpoint when SESSION_COOKIE_NAME is customised (login sets the renamed
+    cookie, the dependencies keep reading the old name)."""
+    return request.cookies.get(get_settings().session_cookie_name)
+
+
+SessionCookie = Annotated[str | None, Depends(session_cookie_value)]
 
 
 def _resolve_user(
@@ -42,7 +54,7 @@ def _resolve_user(
 
 def get_current_user(
     db: Annotated[Session, Depends(get_db)],
-    session_cookie: Annotated[str | None, Cookie(alias="music_session")] = None,
+    session_cookie: SessionCookie = None,
 ) -> User:
     user = _resolve_user(db, session_cookie)
     if user is None:
@@ -54,7 +66,7 @@ def get_current_user(
 
 def get_optional_user(
     db: Annotated[Session, Depends(get_db)],
-    session_cookie: Annotated[str | None, Cookie(alias="music_session")] = None,
+    session_cookie: SessionCookie = None,
 ) -> User | None:
     """Soft auth — returns the user if logged in, None for guests. Used by
     Player-relevant endpoints (track stream, cover art, single-track

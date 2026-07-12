@@ -166,13 +166,16 @@ export function PresetsView() {
     try {
       const list = await presetsApi.list(activeModeId);
       setPresets(list);
-      if (selectedId !== null && !list.some((p) => p.id === selectedId)) {
-        setSelectedId(null);
-      }
+      // Functional update — depending on `selectedId` here would re-mint
+      // refresh (and re-run the [refresh] effect = a full refetch) on every
+      // list click.
+      setSelectedId((sel) =>
+        sel !== null && !list.some((p) => p.id === sel) ? null : sel,
+      );
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
     }
-  }, [selectedId, activeModeId]);
+  }, [activeModeId]);
 
   useEffect(() => {
     void refresh();

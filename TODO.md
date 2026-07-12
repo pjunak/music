@@ -51,6 +51,23 @@ fixed (see git log around that date).
 - **Pin base images / CI actions by digest (low).** `Dockerfile` and the workflow
   use mutable tags (`python:3.12-slim`, `actions/checkout@v7`).
 
+## Deferred from the 2026-07-11 sweep
+
+- **SPA-serving tests** — `SpaStaticFiles` (`app/main.py`) is only mounted when
+  `STATIC_DIR` exists, which it never does under tests, so the production
+  front door (index fallback for client routes, not shadowing `/api`) has
+  zero coverage. Needs a fixture that fabricates a static dir.
+- **WS-disconnect output-prune integration test** — only the pure mutator
+  `remove_active_output` is unit-tested; the disconnect handler that calls it
+  was dropped from integration tests over timing flakiness. Worth another
+  attempt with a deterministic clock.
+- **Library sidebar resizer keyboard support** — `SidebarRail`
+  (`LibraryView.tsx`) is pointer-only; `role="separator"` implies arrow-key
+  resizing.
+- **`verify_names` holds a DB session across paced MusicBrainz calls**
+  (~11 s worst case per request, `api/cleanup.py`). Harmless single-user;
+  restructure to fetch scores first, then write, if it ever matters.
+
 ## Someday
 
 - **Weighted shuffle** — re-add a `"weighted"` shuffle mode backed by an
@@ -58,8 +75,6 @@ fixed (see git log around that date).
   removed 2026-07-09 because it only ever drew uniformly (same as "random");
   persisted states coerce `"weighted"` → `"random"` on load
   (`_prune_dangling_state`), so re-adding is purely additive.
-- **Session-expiry UX** — when the operator session expires mid-use, the SPA
-  surfaces raw 401s; it needs a proper re-login flow.
 - **Headless client testability** — `clients/headless/music_output.py` has no
   unit tests; extract the state-reconcile logic from the GStreamer/socket
   plumbing so it can run under pytest.

@@ -24,7 +24,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
 from mutagen import File as MutagenFile  # type: ignore[import-untyped]
 from mutagen.id3 import (  # type: ignore[import-untyped]
@@ -39,7 +39,7 @@ from mutagen.id3 import (  # type: ignore[import-untyped]
     TRCK,
     Frame,
 )
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -48,11 +48,14 @@ from app.models.track import Track
 logger = logging.getLogger(__name__)
 
 # Serialises any index-write operation (full scan, incremental scan_paths
-# from uploads). Without this, two concurrent scans race the DB:
-# `scan_full` snapshots `existing` early, walks the disk, then deletes
-# everything not seen - if a parallel `scan_paths` adds a row in between,
-# the full scan's "delete unseen" step removes it again.
-_scan_lock = threading.Lock()
+# from uploads, moves, renames, deletes). Without this, two concurrent
+# writers race the DB: `scan_full` snapshots `existing` early, walks the
+# disk, then deletes everything not seen — if a parallel writer moves or
+# adds a file in between, the full scan's "delete unseen" step removes its
+# row again (cascading away playlist items). Re-entrant so an API handler
+# can hold it across a (disk move + update_path) pair while the helpers
+# below also acquire it when called standalone.
+write_lock = threading.RLock()
 
 # Wall-clock timestamp of the last scan_full completion. Read by the
 # diagnostics endpoint so the operator can see how stale the index is.
@@ -161,6 +164,35 @@ def resolve_conflict(target: Path, conflict: str) -> Path | None:
         if not candidate.exists():
             return candidate
         n += 1
+
+
+class UploadTooLargeError(Exception):
+    """Raised by `stream_upload` when the source exceeds the size cap."""
+
+
+def stream_upload(src: BinaryIO, partial: Path, target: Path, max_bytes: int) -> None:
+    """Blocking copy of an upload stream: write `src` into the sibling
+    `partial` file, then atomic-rename onto `target`. Cleans up the partial
+    on any failure.
+
+    Run this in a threadpool from the async upload handlers — the multipart
+    body is already buffered by the framework, so this is a disk-to-disk
+    copy, and doing it on the event loop would stall every WS broadcast and
+    the advancer for the duration of a large file."""
+    try:
+        size = 0
+        with partial.open("wb") as out:
+            while chunk := src.read(UPLOAD_CHUNK):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise UploadTooLargeError(f"exceeds {max_bytes} bytes")
+                out.write(chunk)
+        partial.replace(target)
+    except Exception:
+        if partial.exists():
+            with contextlib.suppress(OSError):
+                partial.unlink()
+        raise
 
 
 LIKE_ESCAPE_CHAR = "\\"
@@ -430,9 +462,10 @@ def _refresh_track(track: Track, path: Path, root: Path) -> bool:
 def scan_full(db: Session) -> ScanSummary:
     """Walk MUSIC_DIR end-to-end. Inserts new rows, updates rows whose
     mtime/size changed on disk, and deletes rows whose paths no longer
-    exist. Serialised with `_scan_lock` so a parallel upload-triggered
-    `scan_paths` can't race the "delete unseen" tail of this function."""
-    with _scan_lock:
+    exist. Serialised with `write_lock` so a parallel upload-triggered
+    `scan_paths` (or a move/rename) can't race the "delete unseen" tail of
+    this function."""
+    with write_lock:
         summary = ScanSummary()
         root = music_root()
 
@@ -487,12 +520,12 @@ def scan_paths(db: Session, paths: Iterable[Path]) -> list[Track]:
     Returns the resulting Track rows in the same order as input. Skips
     non-audio files silently. Commits before returning.
 
-    Shares `_scan_lock` with `scan_full` — a parallel full scan that's
+    Shares `write_lock` with `scan_full` — a parallel full scan that's
     snapshotting `existing` rows mustn't race a fresh insert here, or
     the new row will get pruned as "unseen on disk" (it was added after
     the snapshot) when the full scan finishes. The lock is short-held
     in this function (per-file flushes are fast)."""
-    with _scan_lock:
+    with write_lock:
         root = music_root()
         out: list[Track] = []
         for absolute in paths:
@@ -516,28 +549,34 @@ def scan_paths(db: Session, paths: Iterable[Path]) -> list[Track]:
 def remove_path(db: Session, rel: str) -> bool:
     """Drop the row for `rel` (e.g. after the file was deleted on disk).
     Returns True if a row existed."""
-    row = db.scalar(select(Track).where(Track.path == rel))
-    if row is None:
-        return False
-    db.delete(row)
-    db.commit()
-    _notify_index_changed()
-    return True
+    with write_lock:
+        row = db.scalar(select(Track).where(Track.path == rel))
+        if row is None:
+            return False
+        db.delete(row)
+        db.commit()
+        _notify_index_changed()
+        return True
 
 
 def update_path(db: Session, old_rel: str, new_rel: str) -> Track | None:
-    """Rename/move bookkeeping after a file has already moved on disk."""
-    row = db.scalar(select(Track).where(Track.path == old_rel))
-    if row is None:
-        return None
-    row.path = new_rel
-    # Re-read tags too, since album-fallback (= parent folder) may have changed.
-    abs_path = to_absolute(new_rel)
-    if abs_path.is_file():
-        _refresh_track(row, abs_path, music_root())
-    db.commit()
-    _notify_index_changed()
-    return row
+    """Rename/move bookkeeping after a file has already moved on disk.
+
+    Callers that do the disk move themselves must hold `write_lock` across
+    the (move + update_path) pair, or a concurrent `scan_full` can miss the
+    file at both locations and prune the row."""
+    with write_lock:
+        row = db.scalar(select(Track).where(Track.path == old_rel))
+        if row is None:
+            return None
+        row.path = new_rel
+        # Re-read tags too, since album-fallback (= parent folder) may have changed.
+        abs_path = to_absolute(new_rel)
+        if abs_path.is_file():
+            _refresh_track(row, abs_path, music_root())
+        db.commit()
+        _notify_index_changed()
+        return row
 
 
 def read_file_tags(path: Path) -> dict[str, Any]:
@@ -675,40 +714,18 @@ def next_track_id_after(db: Session, path: str, *, wrap: bool = True) -> int | N
     return int(first) if first is not None else None
 
 
-def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], list[Track]]:
-    """Direct contents of `rel_path`: subfolders and tracks immediately
-    under it (not recursive). Track counts on subfolders ARE recursive so
-    the tree gives a useful density signal."""
+def folder_tracks(db: Session, rel_path: str = "") -> list[Track]:
+    """Tracks immediately under `rel_path` (not recursive). The folder
+    hierarchy itself comes from `all_folders` — every tree UI builds it
+    client-side from that one response, so this deliberately returns no
+    subfolder listing."""
     root = music_root()
     rel_clean = rel_path.strip("/").replace("\\", "/")
     abs_dir = (root / rel_clean).resolve() if rel_clean else root
     abs_dir.relative_to(root)  # traversal guard
 
     if not abs_dir.is_dir():
-        return ([], [])
-
-    folders: list[FolderEntry] = []
-    for child in sorted(abs_dir.iterdir(), key=lambda p: p.name.lower()):
-        if not child.is_dir():
-            continue
-        sub_rel = to_relative(child, root)
-        count = (
-            db.scalar(
-                select(func.count(Track.id)).where(
-                    Track.path.like(f"{like_escape(sub_rel)}/%", escape=LIKE_ESCAPE_CHAR)
-                )
-            )
-            or 0
-        )
-        has_children = any(grandchild.is_dir() for grandchild in child.iterdir())
-        folders.append(
-            FolderEntry(
-                name=child.name,
-                path=sub_rel,
-                track_count=count,
-                has_children=has_children,
-            )
-        )
+        return []
 
     # Direct children only. "Skyrim/foo.mp3" is a child of Skyrim;
     # "Skyrim/sub/bar.mp3" isn't. Encoded as two LIKE clauses so SQLite
@@ -729,8 +746,7 @@ def list_folder(db: Session, rel_path: str = "") -> tuple[list[FolderEntry], lis
             .where(~Track.path.like("%/%"))
             .order_by(Track.path)
         )
-    tracks = list(db.scalars(tracks_query).all())
-    return (folders, tracks)
+    return list(db.scalars(tracks_query).all())
 
 
 def all_folders(db: Session) -> list[FolderEntry]:
@@ -794,41 +810,43 @@ def delete_folder(
     inside this folder; returns how many rows were dropped (callers can
     surface that in the UI). Pass `db=None` for non-indexed roots (SFX).
     """
-    base = root if root is not None else music_root()
-    rel_clean = rel_path.strip("/").replace("\\", "/")
-    if not rel_clean:
-        raise ValueError("refusing to delete the root directory")
-    target = (base / rel_clean).resolve()
-    target.relative_to(base)
-    if not target.exists():
-        raise FileNotFoundError(f"folder not found: {rel_clean}")
-    if not target.is_dir():
-        raise ValueError(f"not a folder: {rel_clean}")
+    with write_lock:
+        base = root if root is not None else music_root()
+        rel_clean = rel_path.strip("/").replace("\\", "/")
+        if not rel_clean:
+            raise ValueError("refusing to delete the root directory")
+        target = (base / rel_clean).resolve()
+        target.relative_to(base)
+        if not target.exists():
+            raise FileNotFoundError(f"folder not found: {rel_clean}")
+        if not target.is_dir():
+            raise ValueError(f"not a folder: {rel_clean}")
 
-    if not recursive and any(target.iterdir()):
-        raise ValueError("folder is not empty (pass recursive=true to force)")
+        if not recursive and any(target.iterdir()):
+            raise ValueError("folder is not empty (pass recursive=true to force)")
 
-    removed_rows = 0
-    if db is not None:
-        prefix = like_escape(f"{rel_clean}/")
-        rows = db.scalars(
-            select(Track).where(
-                (Track.path == rel_clean)
-                | (Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
-            )
-        ).all()
-        for row in rows:
-            db.delete(row)
-            removed_rows += 1
+        removed_rows = 0
+        if db is not None:
+            prefix = like_escape(f"{rel_clean}/")
+            rows = db.scalars(
+                select(Track).where(
+                    (Track.path == rel_clean)
+                    | (Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
+                )
+            ).all()
+            for row in rows:
+                db.delete(row)
+                removed_rows += 1
 
-    if recursive:
-        shutil.rmtree(target)
-    else:
-        target.rmdir()
+        if recursive:
+            shutil.rmtree(target)
+        else:
+            target.rmdir()
 
-    if db is not None and removed_rows > 0:
-        db.commit()
-    return removed_rows
+        if db is not None and removed_rows > 0:
+            db.commit()
+            _notify_index_changed()
+        return removed_rows
 
 
 def rename_folder(
@@ -840,51 +858,53 @@ def rename_folder(
     """Rename / move a folder. For the music root, also rewrites every
     `tracks.path` whose value lives under the renamed folder; returns the
     number of rewritten rows. Pass `db=None` for non-indexed roots (SFX)."""
-    base = root if root is not None else music_root()
-    src_clean = src_rel.strip("/").replace("\\", "/")
-    dst_clean = dst_rel.strip("/").replace("\\", "/")
-    if not src_clean or not dst_clean:
-        raise ValueError("source and destination must be non-empty paths")
+    with write_lock:
+        base = root if root is not None else music_root()
+        src_clean = src_rel.strip("/").replace("\\", "/")
+        dst_clean = dst_rel.strip("/").replace("\\", "/")
+        if not src_clean or not dst_clean:
+            raise ValueError("source and destination must be non-empty paths")
 
-    src_abs = (base / src_clean).resolve()
-    dst_abs = (base / dst_clean).resolve()
-    src_abs.relative_to(base)
-    dst_abs.relative_to(base)
-    if not src_abs.is_dir():
-        raise FileNotFoundError(f"source folder not found: {src_clean}")
-    # A case-only rename ("CD1" → "Cd1") looks like a collision on a
-    # case-insensitive filesystem (Windows/macOS) but is legal — route it
-    # through a temp name so the move doesn't refuse its own target.
-    case_only = (
-        src_clean.casefold() == dst_clean.casefold()
-        and src_abs.parent == dst_abs.parent
-    )
-    if dst_abs.exists() and not case_only:
-        raise FileExistsError(f"destination already exists: {dst_clean}")
+        src_abs = (base / src_clean).resolve()
+        dst_abs = (base / dst_clean).resolve()
+        src_abs.relative_to(base)
+        dst_abs.relative_to(base)
+        if not src_abs.is_dir():
+            raise FileNotFoundError(f"source folder not found: {src_clean}")
+        # A case-only rename ("CD1" → "Cd1") looks like a collision on a
+        # case-insensitive filesystem (Windows/macOS) but is legal — route it
+        # through a temp name so the move doesn't refuse its own target.
+        case_only = (
+            src_clean.casefold() == dst_clean.casefold()
+            and src_abs.parent == dst_abs.parent
+        )
+        if dst_abs.exists() and not case_only:
+            raise FileExistsError(f"destination already exists: {dst_clean}")
 
-    if case_only:
-        tmp_abs = src_abs.parent / f"{src_abs.name}.cleanup-tmp"
-        shutil.move(str(src_abs), str(tmp_abs))
-        shutil.move(str(tmp_abs), str(dst_abs))
-    else:
-        dst_abs.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src_abs), str(dst_abs))
+        if case_only:
+            tmp_abs = src_abs.parent / f"{src_abs.name}.cleanup-tmp"
+            shutil.move(str(src_abs), str(tmp_abs))
+            shutil.move(str(tmp_abs), str(dst_abs))
+        else:
+            dst_abs.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src_abs), str(dst_abs))
 
-    rewritten = 0
-    if db is not None:
-        prefix = like_escape(f"{src_clean}/")
-        rows = db.scalars(
-            select(Track).where(
-                (Track.path == src_clean)
-                | (Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
-            )
-        ).all()
-        for row in rows:
-            row.path = dst_clean + row.path[len(src_clean):]
-            rewritten += 1
-        if rewritten > 0:
-            db.commit()
-    return rewritten
+        rewritten = 0
+        if db is not None:
+            prefix = like_escape(f"{src_clean}/")
+            rows = db.scalars(
+                select(Track).where(
+                    (Track.path == src_clean)
+                    | (Track.path.like(f"{prefix}%", escape=LIKE_ESCAPE_CHAR))
+                )
+            ).all()
+            for row in rows:
+                row.path = dst_clean + row.path[len(src_clean):]
+                rewritten += 1
+            if rewritten > 0:
+                db.commit()
+                _notify_index_changed()
+        return rewritten
 
 
 def cover_art_for(track: Track) -> tuple[bytes, str] | None:
@@ -951,12 +971,13 @@ __all__ = [
     "WRITABLE_TAGS",
     "FolderEntry",
     "ScanSummary",
+    "UploadTooLargeError",
     "cover_art_for",
     "delete_folder",
     "ensure_folder",
+    "folder_tracks",
     "is_audio_file",
     "last_scan_at",
-    "list_folder",
     "metadata_for",
     "music_root",
     "next_track_id_after",
@@ -967,9 +988,11 @@ __all__ = [
     "safe_join",
     "scan_full",
     "scan_paths",
+    "stream_upload",
     "to_absolute",
     "to_relative",
     "track_ids_under",
     "update_path",
+    "write_lock",
     "write_tags",
 ]

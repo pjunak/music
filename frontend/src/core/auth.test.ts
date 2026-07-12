@@ -11,6 +11,7 @@ vi.mock("@/core/api", async (importActual) => {
 
 import { ApiError, api } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
+import { useUiTransient } from "@/core/uiTransient";
 
 const get = vi.mocked(api.get);
 
@@ -18,6 +19,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   useAuthStore.setState({ status: "unknown", user: null });
+  useUiTransient.setState({ loginOpen: false });
 });
 
 afterEach(() => {
@@ -58,5 +60,28 @@ describe("auth refresh resolution", () => {
     await useAuthStore.getState().refresh();
     expect(useAuthStore.getState().status).toBe("authenticated");
     expect(useAuthStore.getState().user).toEqual({ id: 7, username: "petr" });
+  });
+});
+
+describe("sessionLost (re-login flow)", () => {
+  it("flips an authenticated operator to anonymous and opens the login modal", () => {
+    useAuthStore.setState({ status: "authenticated", user: { id: 1, username: "dm" } });
+    useAuthStore.getState().sessionLost("expired");
+    expect(useAuthStore.getState().status).toBe("anonymous");
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useUiTransient.getState().loginOpen).toBe(true);
+  });
+
+  it("no-ops for anonymous viewers (a guest 401 is not a lost session)", () => {
+    useAuthStore.setState({ status: "anonymous", user: null });
+    useAuthStore.getState().sessionLost("expired");
+    expect(useAuthStore.getState().status).toBe("anonymous");
+    expect(useUiTransient.getState().loginOpen).toBe(false);
+  });
+
+  it("no-ops during the boot-time unknown window (the /me probe's 401)", () => {
+    useAuthStore.getState().sessionLost("revoked");
+    expect(useAuthStore.getState().status).toBe("unknown");
+    expect(useUiTransient.getState().loginOpen).toBe(false);
   });
 });

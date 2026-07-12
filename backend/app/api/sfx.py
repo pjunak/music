@@ -15,13 +15,14 @@ Two surfaces here:
 """
 from __future__ import annotations
 
-import contextlib
 import shutil
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -84,7 +85,6 @@ class SfxFolderOut(BaseModel):
 
 class SfxTreeResponse(BaseModel):
     path: str
-    folders: list[SfxFolderOut]
     files: list[SfxFileOut]
 
 
@@ -262,6 +262,9 @@ def list_tree(
     _: CurrentUser,
     path: str = Query("", description="Folder path relative to SFX_LIBRARY_DIR"),
 ) -> SfxTreeResponse:
+    """The SFX files immediately in this folder. The folder hierarchy comes
+    from `/folders` (one whole-tree response) — the client builds the tree
+    from that, so this endpoint returns only the file list."""
     root = sfx_root()
     rel_clean = path.strip("/").replace("\\", "/")
     if rel_clean:
@@ -272,24 +275,13 @@ def list_tree(
     else:
         abs_dir = root
     if not abs_dir.is_dir():
-        return SfxTreeResponse(path=rel_clean, folders=[], files=[])
+        return SfxTreeResponse(path=rel_clean, files=[])
 
-    folders: list[SfxFolderOut] = []
     files: list[SfxFileOut] = []
     for entry in sorted(abs_dir.iterdir(), key=lambda p: p.name.lower()):
-        if entry.is_dir():
-            has_children = any(grandchild.is_dir() for grandchild in entry.iterdir())
-            folders.append(
-                SfxFolderOut(
-                    name=entry.name,
-                    path=library_index.to_relative(entry, root),
-                    file_count=_count_files_recursive(entry),
-                    has_children=has_children,
-                )
-            )
-        elif entry.suffix.lower() in _SFX_EXTENSIONS:
+        if entry.is_file() and entry.suffix.lower() in _SFX_EXTENSIONS:
             files.append(_stat_file(entry, root))
-    return SfxTreeResponse(path=rel_clean, folders=folders, files=files)
+    return SfxTreeResponse(path=rel_clean, files=files)
 
 
 @router.post(
@@ -335,27 +327,25 @@ async def upload(
             skipped.append(upload_file.filename)
             continue
         target = resolved
-        partial = target.with_name(f".{target.name}.partial")
+        # Threadpooled disk copy + unique partial — same rationale as the
+        # library upload.
+        partial = target.with_name(f".{target.name}.{uuid4().hex[:8]}.partial")
         try:
-            size = 0
-            with partial.open("wb") as out:
-                while chunk := await upload_file.read(library_index.UPLOAD_CHUNK):
-                    size += len(chunk)
-                    if size > settings.max_upload_file_bytes:
-                        raise HTTPException(
-                            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                            detail=(
-                                f"{upload_file.filename} exceeds the max upload "
-                                f"size ({settings.max_upload_file_bytes} bytes)"
-                            ),
-                        )
-                    out.write(chunk)
-            partial.replace(target)
-        except Exception:
-            if partial.exists():
-                with contextlib.suppress(OSError):
-                    partial.unlink()
-            raise
+            await run_in_threadpool(
+                library_index.stream_upload,
+                upload_file.file,
+                partial,
+                target,
+                settings.max_upload_file_bytes,
+            )
+        except library_index.UploadTooLargeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=(
+                    f"{upload_file.filename} exceeds the max upload "
+                    f"size ({settings.max_upload_file_bytes} bytes)"
+                ),
+            ) from e
         saved.append(_stat_file(target, root))
     return SfxUploadResult(saved=saved, destination=dest.strip("/"), skipped=skipped)
 

@@ -559,16 +559,34 @@
     var inFlight = false;
     var hardFailed = false;
     var POLL_INTERVAL_MS = 2000;
+    var POLL_TIMEOUT_MS = 10000;
     var ERROR_THRESHOLD = 3;
 
     function poll() {
       if (stopped || inFlight) return;
       inFlight = true;
+      // `settled` guards double-settling: after ontimeout/onerror fire, many
+      // engines still deliver a readyState-4 readystatechange for the same
+      // request. Without the flag (and without timeout/onerror at all) a
+      // request that stalls without erroring — connection opens, response
+      // never arrives — would leave inFlight stuck true and wedge the
+      // poller permanently.
+      var settled = false;
+      function fail() {
+        if (settled) return;
+        settled = true;
+        inFlight = false;
+        registerError();
+      }
       try {
         var xhr = new XMLHttpRequest();
         xhr.open("GET", "/api/sync/state", true);
+        try { xhr.timeout = POLL_TIMEOUT_MS; } catch (e) {}
+        xhr.ontimeout = fail;
+        xhr.onerror = fail;
         xhr.onreadystatechange = function () {
-          if (xhr.readyState !== 4) return;
+          if (xhr.readyState !== 4 || settled) return;
+          settled = true;
           inFlight = false;
           if (xhr.status >= 200 && xhr.status < 300) {
             var state = null;
@@ -584,8 +602,7 @@
         };
         xhr.send(null);
       } catch (e) {
-        inFlight = false;
-        registerError();
+        fail();
       }
     }
 

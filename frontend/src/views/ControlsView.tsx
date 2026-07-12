@@ -122,10 +122,20 @@ function QuickPlaylists() {
   const [playlists, setPlaylists] = useState<PlaylistMeta[]>([]);
 
   useEffect(() => {
+    // Cancelled-flag so a fast mode switch (A→B) can't let response A land
+    // after B and show the wrong mode's playlists.
+    let cancelled = false;
     playlistsApi
       .list(activeModeId !== null ? { mode_id: activeModeId } : {})
-      .then(setPlaylists)
-      .catch(() => setPlaylists([]));
+      .then((list) => {
+        if (!cancelled) setPlaylists(list);
+      })
+      .catch(() => {
+        if (!cancelled) setPlaylists([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeModeId]);
 
   if (playlists.length === 0) {

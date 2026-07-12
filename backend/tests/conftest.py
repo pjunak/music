@@ -154,6 +154,10 @@ def _test_env() -> Iterator[None]:
 
     yield
 
+    # Close pooled SQLite connections; otherwise interpreter shutdown emits
+    # "ResourceWarning: unclosed database" after the suite passes.
+    engine.dispose()
+
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:

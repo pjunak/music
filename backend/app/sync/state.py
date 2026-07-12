@@ -99,6 +99,12 @@ def _freeze_lane(lane: Any, now: float) -> Any:
     )
 
 
+# How often silent position reports are flushed to the DB. In-memory state
+# is always current; the DB copy only matters for resume-after-restart, so a
+# crash loses at most this many seconds of playback position.
+_EPHEMERAL_PERSIST_INTERVAL_S = 5.0
+
+
 def _ambient_anchor(
     is_playing: bool, interrupt: InterruptState | None, now: float
 ) -> float | None:
@@ -114,6 +120,7 @@ class StateMachine:
     def __init__(self) -> None:
         self._state = PlayerState()
         self._lock = asyncio.Lock()
+        self._last_ephemeral_persist = 0.0
         self._loaded = False
         # Fired after every applied mutation (including silent position
         # reports). Late-bound by the track advancer so it can recompute its
@@ -166,6 +173,7 @@ class StateMachine:
         single loop for the process lifetime, so this can't happen there."""
         self._state = PlayerState()
         self._lock = asyncio.Lock()
+        self._last_ephemeral_persist = 0.0
 
     def _refresh_devices(self, state: PlayerState) -> PlayerState:
         """Stamp current device registry into the state. Not persisted —
@@ -195,7 +203,18 @@ class StateMachine:
                 new_state = new_state.model_copy(update={"revision": self._state.revision + 1})
 
             self._state = new_state
-            await self._persist(db_factory, new_state)
+            # Position reports (broadcast=False) arrive every second from
+            # every active output; the in-memory state is what live clients
+            # and mutators read, so the DB copy — which only matters for
+            # resuming after a restart — is throttled instead of committed
+            # (full model_dump + SQLite write, under this lock) per tick.
+            if broadcast:
+                await self._persist(db_factory, new_state)
+            else:
+                now = time.monotonic()
+                if now - self._last_ephemeral_persist >= _EPHEMERAL_PERSIST_INTERVAL_S:
+                    self._last_ephemeral_persist = now
+                    await self._persist(db_factory, new_state)
             if self.on_applied is not None:
                 self.on_applied()
             return (

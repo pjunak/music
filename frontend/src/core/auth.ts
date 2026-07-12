@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
-import { ApiError, api } from "@/core/api";
+import { ApiError, api, setUnauthorizedHandler } from "@/core/api";
+import { toast } from "@/core/toast";
+import { useUiTransient } from "@/core/uiTransient";
 
 export type AuthStatus = "unknown" | "authenticated" | "anonymous";
 
@@ -15,6 +17,13 @@ interface AuthState {
   refresh: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** The session died out from under an authenticated operator (expired or
+   *  revoked, detected via a 401 or a coded WS error frame). Flips the store
+   *  to anonymous — every `Protected` route swaps to its in-place LoginGate —
+   *  and opens the login modal so re-entry is one password away, exactly
+   *  where they were. No-op unless currently authenticated, so boot-time /me
+   *  probes and wrong-password 401s never trigger it. */
+  sessionLost: (kind: "expired" | "revoked") => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -54,10 +63,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Anonymous first: if the session is already dead server-side, the 401
+    // from this call routes through the unauthorized handler, and it must
+    // read as "already signed out" (no-op) — not pop the re-login modal in
+    // the middle of an intentional sign-out.
+    set({ status: "anonymous", user: null });
     try {
       await api.post("/api/auth/logout");
-    } finally {
-      set({ status: "anonymous", user: null });
+    } catch (err) {
+      // Local sign-out already took effect; the server-side row (if it even
+      // still exists) can be revoked from Settings → Active Sessions later.
+      console.warn("[auth] logout call failed (signed out locally)", err);
     }
   },
+
+  sessionLost: (kind) => {
+    if (get().status !== "authenticated") return;
+    set({ status: "anonymous", user: null });
+    useUiTransient.getState().setLoginOpen(true);
+    toast.warn(
+      "Signed out",
+      kind === "revoked"
+        ? "This session was revoked — sign in to continue."
+        : "Your session expired — sign in to continue.",
+    );
+  },
 }));
+
+// Every 401 the API layer sees routes here; sessionLost itself decides
+// whether it means anything (only when the operator was authenticated).
+setUnauthorizedHandler(() => {
+  useAuthStore.getState().sessionLost("expired");
+});

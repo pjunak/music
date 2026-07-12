@@ -69,11 +69,19 @@ export default function AppShell() {
     const unsubMsg = wsClient.subscribe(applyMessage);
     const unsubStatus = wsClient.onStatus(setStatus);
     // Surface server-side errors (e.g. "device(s) not designated as outputs",
-    // rejected actions, "guest cannot mutate") via the toast layer.
+    // rejected actions, "guest cannot mutate") via the toast layer. Session
+    // loss is the exception: the server tags those frames with a code, and
+    // they trigger the re-login flow (store → anonymous, login modal opens)
+    // instead of a dead-end error toast.
     const unsubErr = wsClient.subscribe((msg) => {
-      if (msg.type === "error") {
-        toast.error("Server rejected action", msg.detail);
+      if (msg.type !== "error") return;
+      if (msg.code === "session_expired" || msg.code === "session_revoked") {
+        useAuthStore
+          .getState()
+          .sessionLost(msg.code === "session_revoked" ? "revoked" : "expired");
+        return;
       }
+      toast.error("Server rejected action", msg.detail);
     });
     wsClient.connect();
     return () => {

@@ -58,6 +58,11 @@ export function validateWsMessage(raw: unknown): WsMessage | null {
       return raw as WsMessage;
     case "error":
       if (!isString(raw.detail)) return null;
+      // `code` is optional — absent/null on ordinary errors, a string
+      // discriminator on session-loss frames.
+      if (raw.code !== undefined && raw.code !== null && !isString(raw.code)) {
+        return null;
+      }
       return raw as WsMessage;
     default:
       return null;

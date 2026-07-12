@@ -15,6 +15,9 @@ export function PresetsSection() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Reset the error per load — a stale one from a previous mode would
+    // otherwise hide this panel forever (the render early-returns on it).
+    setError(null);
     if (activeModeId === null) {
       setPresets([]);
       return;

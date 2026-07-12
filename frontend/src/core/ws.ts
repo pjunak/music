@@ -1,3 +1,4 @@
+import { toast } from "@/core/toast";
 import type { WsAction, WsMessage } from "@/core/types";
 import { defaultDeviceName, useUiStore } from "@/core/uiStore";
 import { validateWsMessage } from "@/core/wsValidate";
@@ -13,6 +14,13 @@ export type WsStatus = "disconnected" | "connecting" | "connected";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
+// Actions whose loss during a disconnect is routine and self-healing —
+// register re-fires on reconnect, position reports resume next tick. Anything
+// else is an operator gesture (play, seek, fire cue…) that would otherwise
+// evaporate silently while the socket is down.
+const SILENT_DROP_TYPES = new Set<WsAction["type"]>(["register", "position_report"]);
+const DROP_TOAST_THROTTLE_MS = 3000;
+
 function buildWsUrl(path: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}${path}`;
@@ -26,9 +34,49 @@ class WsClient {
   private reconnectAttempts = 0;
   private intentionallyClosed = false;
   private status: WsStatus = "disconnected";
+  private lastDropToastAt = 0;
+
+  constructor() {
+    // Reconnect the moment the tab comes back to life instead of waiting
+    // out a backoff timer (which can sit at the 30s ceiling after a long
+    // minimize). Covers: tab re-shown (visibilitychange/pageshow) and the
+    // network coming back (online) — the "re-opened the app and the first
+    // seconds are dead" case.
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", this.wake);
+      window.addEventListener("pageshow", this.wake);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") this.wake();
+      });
+    }
+  }
+
+  private wake = (): void => {
+    if (this.intentionallyClosed) return; // deliberately offline — stay put
+    if (this.ws?.readyState === WebSocket.OPEN) return;
+    // A handshake that was in flight when the network went away can wedge in
+    // CONNECTING for tens of seconds. Abandon it (the identity guards in
+    // openSocket ignore its late events) and dial fresh right now.
+    const stale = this.ws;
+    this.ws = null;
+    if (stale !== null) {
+      try {
+        stale.close();
+      } catch {
+        /* already dead */
+      }
+    }
+    this.connect();
+  };
 
   connect(): void {
     this.intentionallyClosed = false;
+    // A reconnect timer scheduled before an intentional connect would open a
+    // second socket alongside this one — cancel it; we're connecting now.
+    if (this.reconnectTimeout !== null) {
+      window.clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
     if (this.ws !== null && this.ws.readyState !== WebSocket.CLOSED) {
       return;
     }
@@ -57,6 +105,16 @@ class WsClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(action));
       return true;
+    }
+    // Surface dropped operator gestures — a press during a reconnect window
+    // otherwise vanishes with zero feedback. Throttled so a key-repeat burst
+    // doesn't stack toasts.
+    if (!SILENT_DROP_TYPES.has(action.type)) {
+      const now = Date.now();
+      if (now - this.lastDropToastAt > DROP_TOAST_THROTTLE_MS) {
+        this.lastDropToastAt = now;
+        toast.error("Not connected", "action not sent — reconnecting to the server");
+      }
     }
     return false;
   }
@@ -93,13 +151,24 @@ class WsClient {
     const ws = new WebSocket(buildWsUrl("/api/ws"));
     this.ws = ws;
 
+    // Every handler below guards on `this.ws === ws`: a socket's close/open
+    // events fire asynchronously, so a disconnect()+connect() pair (e.g. the
+    // AppShell effect re-running on login state, or StrictMode's double
+    // mount) lets the OLD socket's onclose land AFTER the new socket exists —
+    // without the guard it would null the live reference and schedule a
+    // spurious extra reconnect.
     ws.onopen = () => {
+      if (this.ws !== ws) {
+        ws.close(); // superseded while the handshake was in flight
+        return;
+      }
       this.reconnectAttempts = 0; // recovered — reset the backoff
       this.setStatus("connected");
       this.sendRegister();
     };
 
     ws.onmessage = (event) => {
+      if (this.ws !== ws) return; // superseded socket flushing its last frames
       let raw: unknown;
       try {
         raw = JSON.parse(event.data);
@@ -125,6 +194,7 @@ class WsClient {
     };
 
     ws.onclose = () => {
+      if (this.ws !== ws) return; // a newer socket owns the state now
       this.ws = null;
       this.setStatus("disconnected");
       if (!this.intentionallyClosed) {

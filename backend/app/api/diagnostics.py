@@ -12,6 +12,7 @@ Auth: behind `CurrentUser` since it leaks operational detail.
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
@@ -50,7 +51,10 @@ class DiagnosticsResponse(BaseModel):
 
 @router.get("", response_model=DiagnosticsResponse)
 async def get_diagnostics(_: CurrentUser, db: DbSession) -> DiagnosticsResponse:
-    track_count = db.scalar(select(func.count(Track.id))) or 0
+    # async handler (for the snapshot await), so keep the DB query off the loop.
+    track_count = await run_in_threadpool(
+        lambda: db.scalar(select(func.count(Track.id))) or 0
+    )
 
     modes_result, modes_at = modes_loader.last_load()
     modes_status = LoaderStatus(

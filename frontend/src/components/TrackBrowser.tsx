@@ -41,15 +41,12 @@ interface Props {
   /** Track ids to hide from the result list (e.g. tracks already in
    *  the playlist being edited). */
   excludeIds?: number[];
-  /** Empty-state hint shown when the current view yields no tracks. */
-  emptyHint?: string;
 }
 
 export function TrackBrowser({
   onPickTrack,
   dragPayload,
   excludeIds,
-  emptyHint,
 }: Props) {
   const [folderPath, setFolderPath] = useState("");
   const [query, setQuery] = useState("");
@@ -153,9 +150,7 @@ export function TrackBrowser({
           {loading ? (
             <li className="muted small track-browser-empty">Loading…</li>
           ) : visible.length === 0 ? (
-            <li className="muted small track-browser-empty">
-              {emptyHint ?? "No tracks here."}
-            </li>
+            <li className="muted small track-browser-empty">No tracks here.</li>
           ) : (
             visible.map((t) => (
               <li

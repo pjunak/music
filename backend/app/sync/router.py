@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
@@ -80,30 +81,54 @@ router = APIRouter()
 
 async def _authenticate(
     websocket: WebSocket,
-) -> tuple[User | None, datetime | None]:
-    """Validate the session cookie. Returns (user, session_expires_at) on
-    success, (None, None) for missing / invalid / expired cookies. The
-    expiry timestamp is captured so the dispatch loop can re-check it
-    mid-connection without an extra DB roundtrip."""
+) -> tuple[User | None, datetime | None, str | None]:
+    """Validate the session cookie. Returns (user, session_expires_at,
+    session_token) on success, (None, None, None) for missing / invalid /
+    expired cookies. The expiry timestamp is captured so the dispatch loop
+    can re-check it per action without a DB roundtrip; the token lets the
+    loop periodically re-verify the session row still exists, so a revoked
+    session (Settings → Active Sessions, or logout) actually loses its
+    live WebSocket instead of keeping mutation rights until expiry."""
     cookie = websocket.cookies.get(get_settings().session_cookie_name)
     if not cookie:
-        return (None, None)
+        return (None, None, None)
     db = SessionLocal()
     try:
         session = db.get(AuthSession, cookie)
         if session is None or session.expires_at <= datetime.now(UTC):
-            return (None, None)
-        return (db.get(User, session.user_id), session.expires_at)
+            return (None, None, None)
+        return (db.get(User, session.user_id), session.expires_at, cookie)
     finally:
         db.close()
+
+
+# How stale a revoked session can be on an open WS before the next action
+# gets downgraded to guest. The existence re-check is a PK lookup run in the
+# threadpool at most this often, so mutation-heavy bursts don't pay per-action.
+_SESSION_RECHECK_SECONDS = 10.0
+
+
+async def _session_revoked(token: str) -> bool:
+    def _work() -> bool:
+        db = SessionLocal()
+        try:
+            return db.get(AuthSession, token) is None
+        finally:
+            db.close()
+
+    return await run_in_threadpool(_work)
 
 
 async def _send(websocket: WebSocket, payload: Any) -> None:
     await websocket.send_json(payload.model_dump(mode="json"))
 
 
-async def _send_error(websocket: WebSocket, detail: str) -> None:
-    await _send(websocket, ErrorMessage(detail=detail))
+async def _send_error(
+    websocket: WebSocket,
+    detail: str,
+    code: Literal["session_expired", "session_revoked"] | None = None,
+) -> None:
+    await _send(websocket, ErrorMessage(detail=detail, code=code))
 
 
 async def _track_exists(track_id: int) -> bool:
@@ -762,8 +787,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     # (TV bookmark) can act as an audio output, but any mutating action
     # they send is rejected. Keeps internet-exposed deployments from
     # giving anonymous viewers control over playback.
-    user, session_expires_at = await _authenticate(websocket)
+    user, session_expires_at, session_token = await _authenticate(websocket)
     is_guest = user is None
+    last_session_check = time.monotonic()
 
     await websocket.accept()
 
@@ -802,16 +828,35 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             # tabs, especially). Once expired, downgrade the connection
             # to guest mode so the next mutation surfaces the same
             # "guest cannot mutate" error path.
-            if (
+            expired = (
                 not is_guest
                 and session_expires_at is not None
                 and datetime.now(UTC) >= session_expires_at
+            )
+            # Also periodically re-verify the session row still exists —
+            # revoking a session (Settings → Active Sessions) or logging out
+            # deletes the row, and the whole point is evicting a forgotten
+            # tab's live socket, not just its future page loads.
+            revoked = False
+            if (
+                not is_guest
+                and not expired
+                and session_token is not None
+                and time.monotonic() - last_session_check >= _SESSION_RECHECK_SECONDS
             ):
+                last_session_check = time.monotonic()
+                revoked = await _session_revoked(session_token)
+            if expired or revoked:
                 is_guest = True
                 session_expires_at = None
+                session_token = None
                 manager.set_guest(device.connection_id, True)
                 await _send_error(
-                    websocket, "session expired — please sign in again"
+                    websocket,
+                    "session revoked — please sign in again"
+                    if revoked
+                    else "session expired — please sign in again",
+                    code="session_revoked" if revoked else "session_expired",
                 )
                 # Fall through so the action gets the standard guest rejection
                 # below (or, for register, succeeds).

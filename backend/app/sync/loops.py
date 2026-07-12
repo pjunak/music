@@ -46,15 +46,26 @@ async def _run(
             logger.exception("looping sfx '%s' broadcast failed", loop_id)
 
 
+def _on_done(loop_id: str, task: asyncio.Task) -> None:
+    # Cancellation is the normal exit; anything else killed the timer while
+    # its LOOPS-panel entry lives on — at least say so in the log.
+    if not task.cancelled() and task.exception() is not None:
+        logger.error(
+            "looping sfx '%s' timer died", loop_id, exc_info=task.exception()
+        )
+
+
 def start(
     loop_id: str, soundboard_id: str, item_path: str, interval_s: float, volume: float
 ) -> None:
     """(Re)start the timer for `loop_id`. Replaces any existing timer with the
     same id so a re-fire doesn't double up."""
     stop(loop_id)
-    _tasks[loop_id] = asyncio.create_task(
+    task = asyncio.create_task(
         _run(loop_id, soundboard_id, item_path, interval_s, volume)
     )
+    task.add_done_callback(lambda t: _on_done(loop_id, t))
+    _tasks[loop_id] = task
 
 
 def stop(loop_id: str) -> None:

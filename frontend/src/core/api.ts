@@ -26,6 +26,17 @@ export class ApiError extends Error {
   }
 }
 
+/** Called on every 401 response, before the ApiError is thrown to the
+ *  caller. Registered by the auth store (a direct import here would be a
+ *  cycle — auth already imports this module). The handler decides whether
+ *  the 401 means "session lost mid-use" (operator was authenticated) or
+ *  nothing (boot-time /me probe, wrong password on login). */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, credentials: "include" };
   if (body instanceof FormData) {
@@ -34,7 +45,19 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     init.headers = { "Content-Type": "application/json" };
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(`${BASE}${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${path}`, init);
+  } catch (err) {
+    // fetch() rejecting (vs an HTTP error) is a network-level failure — the
+    // classic case is the first request after the device wakes from
+    // minimize, while Wi-Fi/DNS are still coming back. GETs are idempotent,
+    // so retry once after a beat instead of surfacing a warning for a blip
+    // that self-heals a second later. Mutations still fail fast.
+    if (method !== "GET") throw err;
+    await new Promise((r) => setTimeout(r, 1000));
+    response = await fetch(`${BASE}${path}`, init);
+  }
 
   if (response.status === 204) {
     return undefined as T;
@@ -64,6 +87,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       (looksLikeJson
         ? response.statusText
         : `non-JSON response (${contentType || "no content-type"}): ${snippet}`);
+    if (response.status === 401) onUnauthorized?.();
     throw new ApiError(response.status, detail);
   }
 
@@ -513,9 +537,9 @@ export interface SfxFolder {
   has_children: boolean;
 }
 
+// Files immediately in one folder; the hierarchy comes from /api/sfx/folders.
 export interface SfxTreeResponse {
   path: string;
-  folders: SfxFolder[];
   files: SfxFile[];
 }
 

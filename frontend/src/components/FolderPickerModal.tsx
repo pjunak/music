@@ -14,7 +14,6 @@ export function FolderPickerModal({
   confirmVerb = "Move",
   loadAll,
   busy = false,
-  initialDest = "",
   disableDest,
   onCancel,
   onConfirm,
@@ -25,13 +24,12 @@ export function FolderPickerModal({
   confirmVerb?: string;
   loadAll: () => Promise<TreeFolder[]>;
   busy?: boolean;
-  initialDest?: string;
   /** Optional guard: return a reason string to block confirming for `dest`. */
   disableDest?: (dest: string) => string | null;
   onCancel: () => void;
   onConfirm: (dest: string) => void;
 }) {
-  const [dest, setDest] = useState(initialDest);
+  const [dest, setDest] = useState("");
   const blocked = disableDest ? disableDest(dest) : null;
 
   return (

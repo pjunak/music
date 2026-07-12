@@ -241,7 +241,6 @@ export interface TrackInPlaylist {
   track: TrackSummary | null;
 }
 
-// Library tree shape returned by /api/library/tree.
 export interface FolderEntry {
   name: string;
   path: string;
@@ -251,9 +250,10 @@ export interface FolderEntry {
   has_children: boolean;
 }
 
+// Tracks immediately in one folder, from /api/library/tree. The folder
+// hierarchy itself comes from /api/library/folders (FoldersResponse).
 export interface TreeResponse {
   path: string;
-  folders: FolderEntry[];
   tracks: Track[];
 }
 
@@ -327,4 +327,10 @@ export type WsMessage =
   | { type: "state_snapshot"; your_device_id: string; state: PlayerState }
   | { type: "state_changed"; state: PlayerState }
   | { type: "sfx_fired"; soundboard_id: string; item_path: string; volume: number }
-  | { type: "error"; detail: string };
+  | {
+      type: "error";
+      detail: string;
+      /** Set when the client must react programmatically (re-login flow);
+       *  absent/null on ordinary rejected-action errors. */
+      code?: "session_expired" | "session_revoked" | null;
+    };

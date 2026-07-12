@@ -51,3 +51,15 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+
+# Runtime state / media — never build-context material. `COPY modes` would
+# otherwise pull a local modes/*/cache/ into the seed baked in the image.
+music
+sfx
+backend/music
+backend/sfx
+modes/*/cache
+**/*.db
+**/*.db-wal
+**/*.db-shm
+devices.json

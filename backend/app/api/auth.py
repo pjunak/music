@@ -1,12 +1,11 @@
 import time
 from datetime import UTC, datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, SessionCookie
 from app.core.config import get_settings
 from app.core.security import (
     dummy_verify,
@@ -24,8 +23,18 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # never the operator on another address. This caps online guessing AND the
 # argon2 CPU/RAM-exhaustion DoS: once tripped, login rejects with 429 *before*
 # hashing, so an attacker can't force unbounded 64 MB argon2 computations.
+# The per-key bucket only isolates clients when the app sees real client
+# addresses — behind the documented reverse proxy that requires uvicorn's
+# --proxy-headers (set in the Dockerfile CMD); without it every client shares
+# the proxy's address. The global bucket below is the backstop either way:
+# it caps total argon2 work even when an attacker rotates addresses (or
+# spoofs X-Forwarded-For on a directly-exposed port).
 _THROTTLE_WINDOW_S = 60.0
 _THROTTLE_MAX_FAILS = 10
+_THROTTLE_GLOBAL_MAX_FAILS = 50
+# One-shot failures from rotating addresses would otherwise accumulate keys
+# forever (each key is only pruned when *it* is looked up again).
+_THROTTLE_MAX_KEYS = 1024
 _failed_logins: dict[str, list[float]] = {}
 
 
@@ -33,13 +42,29 @@ def _throttle_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _recent_failures(key: str, now: float) -> int:
+def _prune_stale_keys(now: float) -> None:
+    if len(_failed_logins) <= _THROTTLE_MAX_KEYS:
+        return
+    for key in [
+        k
+        for k, times in _failed_logins.items()
+        if not times or now - times[-1] >= _THROTTLE_WINDOW_S
+    ]:
+        _failed_logins.pop(key, None)
+
+
+def _recent_failures(key: str, now: float) -> tuple[int, int]:
+    """(failures for this key, failures across all keys) inside the window."""
     recent = [t for t in _failed_logins.get(key, []) if now - t < _THROTTLE_WINDOW_S]
     if recent:
         _failed_logins[key] = recent
     else:
         _failed_logins.pop(key, None)
-    return len(recent)
+    total = sum(
+        sum(1 for t in times if now - t < _THROTTLE_WINDOW_S)
+        for times in _failed_logins.values()
+    )
+    return (len(recent), total)
 
 
 def _reset_login_throttle_for_tests() -> None:
@@ -76,7 +101,8 @@ def login(
 ) -> UserInfo:
     key = _throttle_key(request)
     attempt_at = time.monotonic()
-    if _recent_failures(key, attempt_at) >= _THROTTLE_MAX_FAILS:
+    key_fails, total_fails = _recent_failures(key, attempt_at)
+    if key_fails >= _THROTTLE_MAX_FAILS or total_fails >= _THROTTLE_GLOBAL_MAX_FAILS:
         # Reject before touching argon2 — this is what stops the hash-flood DoS.
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -90,6 +116,7 @@ def login(
         dummy_verify()
     if user is None or not verify_password(user.password_hash, payload.password):
         _failed_logins.setdefault(key, []).append(attempt_at)
+        _prune_stale_keys(attempt_at)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
         )
@@ -144,7 +171,7 @@ class ActiveSession(BaseModel):
 def list_sessions(
     user: CurrentUser,
     db: DbSession,
-    session_cookie: Annotated[str | None, Cookie(alias="music_session")] = None,
+    session_cookie: SessionCookie = None,
 ) -> list[ActiveSession]:
     """Active sessions for the current user, newest first. Used by the
     Settings → Active sessions panel so the operator can see what's logged

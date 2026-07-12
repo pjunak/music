@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,9 +67,13 @@ class DeviceStore:
         path = self._path()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f".{path.name}.tmp")
-        tmp.write_text(
-            json.dumps(self._devices, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        # fsync before the rename: the rename is atomic, but without flushing
+        # the tmp file's data a power loss right after can leave an empty file
+        # at the final path — which load() reads as "no remembered devices".
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(self._devices, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
         tmp.replace(path)  # atomic on the same filesystem
 
     @staticmethod

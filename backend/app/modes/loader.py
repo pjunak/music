@@ -220,12 +220,13 @@ def _load_one(mode_dir: Path) -> ModeManifest:
 
 def load_all() -> LoadResult:
     """Read every mode under MODES_DIR. Replaces the in-memory registry."""
+    global _modes
     modes_dir = get_settings().modes_dir.resolve()
     result = LoadResult()
     if not modes_dir.exists():
         logger.warning("modes directory does not exist: %s", modes_dir)
         with _lock:
-            _modes.clear()
+            _modes = {}
         return result
 
     for child in sorted(modes_dir.iterdir()):
@@ -239,9 +240,12 @@ def load_all() -> LoadResult:
             continue
         result.loaded[manifest.id] = manifest
 
+    # Swap the whole dict reference — readers (`get_mode`, `all_modes`) run
+    # without the lock, and a clear-then-update pair has a window where a
+    # concurrent handler sees an empty registry and errors with a spurious
+    # "unknown mode".
     with _lock:
-        _modes.clear()
-        _modes.update(result.loaded)
+        _modes = dict(result.loaded)
 
     global _last_load_result, _last_load_at
     _last_load_result = result

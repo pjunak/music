@@ -343,14 +343,17 @@ def _rename_in_place(db: DbSession, track: Track, new_stem: str) -> tuple[str, s
         return f"a file named {target.name} already exists"
 
     path_before = track.path
-    shutil.move(str(src), str(target))
-    path_after = library_index.to_relative(target)
-    try:
-        library_index.update_path(db, path_before, path_after)
-    except Exception as e:
-        with contextlib.suppress(Exception):
-            shutil.move(str(target), str(src))
-        return f"index update failed after rename: {e}"
+    # Disk move + index update atomically w.r.t. a concurrent full scan
+    # (which could otherwise miss the file at both paths and prune the row).
+    with library_index.write_lock:
+        shutil.move(str(src), str(target))
+        path_after = library_index.to_relative(target)
+        try:
+            library_index.update_path(db, path_before, path_after)
+        except Exception as e:
+            with contextlib.suppress(Exception):
+                shutil.move(str(target), str(src))
+            return f"index update failed after rename: {e}"
     return (path_before, path_after)
 
 
@@ -450,14 +453,24 @@ def _apply_op(db: DbSession, op: CleanupOpIn) -> dict[str, Any] | str:
     # file's REAL pre-write tag goes to the journal too, so revert can
     # restore the exact tag state — deleting a tag that wasn't there
     # instead of materialising the fallback as an explicit tag.
-    file_old = library_index.read_file_tags(abs_path).get(op.field)
+    try:
+        file_old = library_index.read_file_tags(abs_path).get(op.field)
+    except Exception as e:
+        return f"tag read failed: {e}"
     try:
         library_index.write_tags(abs_path, {op.field: op.new})
     except ValueError as e:
         return f"unsupported format: {e}"
     except Exception as e:
         return f"tag write failed: {e}"
-    library_index.scan_paths(db, [abs_path])
+    # The tag is on disk now — a re-index failure must not abort the batch
+    # (that would 500 out of apply_cleanup before the journal row is
+    # written, leaving already-applied ops unrevertable). The row catches
+    # up on the next scan.
+    try:
+        library_index.scan_paths(db, [abs_path])
+    except Exception:
+        logger.exception("cleanup: re-index after tag write failed for %s", track.path)
     return {
         "kind": "tag",
         "track_id": track.id,
@@ -592,13 +605,14 @@ def _revert_item(db: DbSession, item: dict[str, Any]) -> str | None:
         )
         if target.exists() and not case_only:
             return f"original name {Path(path_before).name} is taken"
-        shutil.move(str(src), str(target))
-        try:
-            library_index.update_path(db, track.path, path_before)
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                shutil.move(str(target), str(src))
-            return f"index update failed: {e}"
+        with library_index.write_lock:
+            shutil.move(str(src), str(target))
+            try:
+                library_index.update_path(db, track.path, path_before)
+            except Exception as e:
+                with contextlib.suppress(Exception):
+                    shutil.move(str(target), str(src))
+                return f"index update failed: {e}"
         return None
 
     if kind == "folder_rename":
@@ -643,7 +657,12 @@ def _revert_item(db: DbSession, item: dict[str, Any]) -> str | None:
             library_index.write_tags(abs_path, {field: restore})
         except Exception as e:
             return f"tag write failed: {e}"
-        library_index.scan_paths(db, [abs_path])
+        # Same as apply: the tag is restored on disk; a re-index failure
+        # must not abort the rest of the revert walk.
+        try:
+            library_index.scan_paths(db, [abs_path])
+        except Exception:
+            logger.exception("cleanup: re-index after tag revert failed for %s", path)
         return None
 
     return f"unknown journal item kind: {kind!r}"

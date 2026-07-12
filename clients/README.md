@@ -61,8 +61,11 @@ Both return the **same** `PlayerState` shape. Both are reachable **without authe
    { "type": "state_changed", "state": { ...PlayerState } }
    ```
 
-No heartbeat/ping is required at the application level (the WS library's protocol-level
-ping/pong is enough). Reconnect on close and repeat from step 2.
+No application-level heartbeat is required, but DO enable your WS library's
+protocol-level ping (e.g. websocket-client sends none unless `ping_interval`
+is set) — without it a half-open connection (server power-loss, Wi-Fi drop
+with no TCP FIN) blocks in recv forever and the client silently stops
+following state. Reconnect on close and repeat from step 2.
 
 ## The fields you actually need
 
