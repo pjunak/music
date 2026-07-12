@@ -61,9 +61,6 @@ fixed (see git log around that date).
   `remove_active_output` is unit-tested; the disconnect handler that calls it
   was dropped from integration tests over timing flakiness. Worth another
   attempt with a deterministic clock.
-- **Library sidebar resizer keyboard support** — `SidebarRail`
-  (`LibraryView.tsx`) is pointer-only; `role="separator"` implies arrow-key
-  resizing.
 - **`verify_names` holds a DB session across paced MusicBrainz calls**
   (~11 s worst case per request, `api/cleanup.py`). Harmless single-user;
   restructure to fetch scores first, then write, if it ever matters.

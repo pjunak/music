@@ -525,6 +525,7 @@ const RAIL_MAX = 560;
  *  default. */
 function SidebarRail({ children }: { children: React.ReactNode }) {
   const setWidth = useUiStore((s) => s.setLibraryTreeWidth);
+  const storedWidth = useUiStore((s) => s.libraryTreeWidth);
   const asideRef = useRef<HTMLElement | null>(null);
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -556,6 +557,38 @@ function SidebarRail({ children }: { children: React.ReactNode }) {
     handle.addEventListener("pointercancel", onUp);
   }
 
+  // role="separator" implies keyboard operability: ←/→ nudge (Shift = coarse),
+  // Home/End snap to the limits, Delete/Backspace reset like double-click.
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const aside = asideRef.current;
+    if (!aside) return;
+    const current = Math.round(aside.getBoundingClientRect().width);
+    const step = e.shiftKey ? 64 : 16;
+    let next: number | null | undefined;
+    switch (e.key) {
+      case "ArrowLeft":
+        next = Math.max(RAIL_MIN, current - step);
+        break;
+      case "ArrowRight":
+        next = Math.min(RAIL_MAX, current + step);
+        break;
+      case "Home":
+        next = RAIL_MIN;
+        break;
+      case "End":
+        next = RAIL_MAX;
+        break;
+      case "Delete":
+      case "Backspace":
+        next = null; // reset to the stylesheet default
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    setWidth(next);
+  }
+
   return (
     <aside ref={asideRef} className="library-sidebar">
       {children}
@@ -564,9 +597,14 @@ function SidebarRail({ children }: { children: React.ReactNode }) {
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize the folder tree column"
-        title="Drag to resize — double-click to reset"
+        aria-valuemin={RAIL_MIN}
+        aria-valuemax={RAIL_MAX}
+        aria-valuenow={storedWidth ?? undefined}
+        tabIndex={0}
+        title="Drag to resize — double-click or Delete to reset; arrow keys when focused"
         onPointerDown={onPointerDown}
         onDoubleClick={() => setWidth(null)}
+        onKeyDown={onKeyDown}
       />
     </aside>
   );
