@@ -70,6 +70,7 @@ function makeState(epoch: number, overrides: LaneOverrides = {}, clientId = ""):
     position_epoch: epoch,
     is_playing: true,
     volume: 1,
+    default_device_volume: 1,
     active_mode_id: null,
     active_output_device_ids: clientId ? [clientId] : [],
     device_volumes: {},
@@ -166,10 +167,46 @@ describe("compat-mode.js epoch reconciliation", () => {
     // element's — the old gate would have yanked playback. Must be inert.
     ws.push({
       type: "state_changed",
-      state: makeState(3, { volume: 0.4, ambient: { position_ms: 95_000 } }, clientId),
+      state: makeState(
+        3,
+        { device_volumes: { [clientId]: 0.4 }, ambient: { position_ms: 95_000 } },
+        clientId,
+      ),
     });
     expect(el.currentTime).toBe(33);
     expect(el.src).toContain("/api/library/tracks/7/stream");
+  });
+
+  it("ignores a lower-revision state change", () => {
+    const { ws, clientId, audioEls } = bootCompatPlayer();
+    ws.push({
+      type: "state_snapshot",
+      state: makeState(0, { revision: 2, device_volumes: { [clientId]: 0.4 } }, clientId),
+    });
+    const el = activeEl(audioEls);
+
+    ws.push({
+      type: "state_changed",
+      state: makeState(0, { revision: 1, device_volumes: { [clientId]: 0.9 } }, clientId),
+    });
+    expect(el.volume).toBe(0.4);
+  });
+
+  it("uses legacy master times trim when the absolute-volume marker is absent", () => {
+    const { ws, clientId, audioEls } = bootCompatPlayer();
+    ws.push({
+      type: "state_snapshot",
+      state: makeState(
+        0,
+        {
+          volume: 0.2,
+          default_device_volume: undefined,
+          device_volumes: { [clientId]: 0.5 },
+        },
+        clientId,
+      ),
+    });
+    expect(activeEl(audioEls).volume).toBe(0.1);
   });
 
   it("seeks when the epoch bumps, via the pending-seek path", () => {

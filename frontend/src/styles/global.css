@@ -307,8 +307,7 @@ button.btn-secondary-soft:hover:not(:disabled) {
   align-items: center;
   gap: var(--space-3);
 }
-/* Read-only volume display (e.g. master volume shown to guests who can't
- * mutate server state). Cursor stays default; the slider thumb dims so
+/* Read-only volume display. Cursor stays default; the slider thumb dims so
  * the lock state is visually obvious. */
 .volume-row-readonly {
   cursor: default;
@@ -1991,11 +1990,7 @@ kbd,
   margin: 0 0 var(--space-4);
 }
 
-/* Slim "which devices are outputting audio" bar above the Console grid.
- * Replaces the old controls-strip (which also carried mode + master volume
- * — both moved out: mode to the header, master volume already in the
- * NowPlayingBar). What's left is the multi-device picker, which is still
- * a live concern (fanning audio out to multiple TVs mid-session). */
+/* Multi-device picker for fanning audio out to speakers mid-session. */
 /* --- footer Speakers control + popover (replaces the Outputs bar) --- */
 .speakers-control {
   position: relative;
@@ -4199,12 +4194,6 @@ kbd,
   font-size: 0.8rem;
 }
 
-/* Footer volume row — wraps <VolumeControl/>; only adds layout overrides
- * specific to the footer (right-align, smaller font on the percent). */
-.now-playing-volume {
-  justify-content: flex-end;
-  font-size: 0.8rem;
-}
 .now-playing-track-interrupt {
   color: var(--warn);
   display: inline-flex;
@@ -4651,10 +4640,7 @@ input.volume-slider::-moz-range-thumb {
     justify-content: flex-start;
     gap: var(--space-3);
   }
-  /* Compact output toggle on mobile — colour-only pill, no "Output ON"
-   * text. The dot + colour already carry the meaning, and dropping the
-   * label leaves room for the volume slider to actually be wide enough
-   * to use one-handed. */
+  /* Compact output toggle on mobile: colour-only pill, no "Output ON" text. */
   .output-toggle .output-toggle-label {
     display: none;
   }
@@ -4662,11 +4648,6 @@ input.volume-slider::-moz-range-thumb {
     padding: var(--space-2) 0.55rem;
     min-height: 2.4rem;
     flex: 0 0 auto;
-  }
-  .now-playing-volume {
-    flex: 1 1 auto;
-    justify-content: flex-start;
-    min-width: 0;
   }
   /* All volume / range inputs go full-width on mobile so they're easy
    * to drag with a thumb (the desktop clamp is too narrow to hit). */

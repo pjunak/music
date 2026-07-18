@@ -11,6 +11,8 @@ interface PlayerStore {
   /** Wall-clock timestamp (ms since epoch) when the latest state was received.
    *  Used by the player UI to dead-reckon the current playback position. */
   stateReceivedAt: number;
+  /** Whether this socket generation has delivered any state-bearing frame. */
+  hasStateThisConnection: boolean;
 
   applyMessage: (msg: WsMessage) => void;
   setStatus: (s: WsStatus) => void;
@@ -22,27 +24,39 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
   myDeviceId: null,
   wsStatus: "disconnected",
   stateReceivedAt: 0,
+  hasStateThisConnection: false,
 
   applyMessage: (msg) => {
-    if (msg.type === "state_snapshot") {
-      // Identity is the client's own stable client_id (the server sends an
-      // empty your_device_id — register arrives after the snapshot). This is
-      // the same value carried in `connected_devices[].device_id` and
-      // `active_output_device_ids`, so `selectIsMyOutput` matches correctly.
-      set({
-        state: msg.state,
-        myDeviceId: useUiStore.getState().clientId,
-        stateReceivedAt: Date.now(),
+    if (msg.type === "state_snapshot" || msg.type === "state_changed") {
+      set((current) => {
+        if (
+          current.hasStateThisConnection &&
+          current.state !== null &&
+          msg.state.revision < current.state.revision
+        ) {
+          return {};
+        }
+        return {
+          state: msg.state,
+          // Identity is our stable client_id; the pre-register snapshot cannot
+          // carry it. Preserve it on deltas.
+          ...(msg.type === "state_snapshot"
+            ? { myDeviceId: useUiStore.getState().clientId }
+            : {}),
+          stateReceivedAt: Date.now(),
+          hasStateThisConnection: true,
+        };
       });
-    } else if (msg.type === "state_changed") {
-      set({ state: msg.state, stateReceivedAt: Date.now() });
     }
     // sfx_fired / error handled by the audio engine and toast layer
     // respectively (not here — we only track PlayerState in this store).
   },
 
   setStatus: (s) => {
-    set({ wsStatus: s });
+    set({
+      wsStatus: s,
+      ...(s === "connecting" ? { hasStateThisConnection: false } : {}),
+    });
   },
 
   reset: () => {
@@ -51,6 +65,7 @@ export const usePlayerStore = create<PlayerStore>((set) => ({
       myDeviceId: null,
       wsStatus: "disconnected",
       stateReceivedAt: 0,
+      hasStateThisConnection: false,
     });
   },
 }));

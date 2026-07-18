@@ -25,10 +25,16 @@ class RegisterAction(_Action):
     # UUID / length) so the documented headless-output protocol
     # (clients/README.md) stays open to any stable string.
     client_id: str = Field(min_length=1, max_length=64)
+    # Version 2 clients understand default_device_volume and treat
+    # device_volumes as canonical absolute levels. Omission identifies a
+    # legacy master-volume/per-device-trim client.
+    protocol_version: int = Field(default=1, ge=1)
 
 
 class SetVolumeAction(_Action):
     type: Literal["set_volume"]
+    # Legacy group-volume action retained for older clients. New clients set
+    # one absolute output level with `set_device_volume` instead.
     volume: float = Field(ge=0.0, le=1.0)
 
 
@@ -52,9 +58,9 @@ class SetActiveOutputsAction(_Action):
 
 class SetDeviceVolumeAction(_Action):
     type: Literal["set_device_volume"]
-    # The output device whose per-device trim to set (a stable client_id).
+    # The output device whose absolute software volume to set (stable client_id).
     device_id: str = Field(min_length=1, max_length=64)
-    # 0..1 trim, multiplied by master volume on that device only. 1.0 = no trim.
+    # Canonical 0..1 output level. The server is the sole source of truth.
     volume: float = Field(ge=0.0, le=1.0)
 
 
@@ -337,8 +343,8 @@ class InterruptState(BaseModel):
 
     `duck_to` controls how ambient behaves *during* the interrupt:
     - `None` (default): ambient pauses - full cut, position frozen.
-    - `0.0`..`1.0`: ambient keeps playing at this volume multiplier
-      (relative to the master), creating a cinematic duck. Same fade
+    - `0.0`..`1.0`: ambient keeps playing at this multiplier relative to the
+      device's output level, creating a cinematic duck. Same fade
       durations as the interrupt's fade_in/out drive the ramp.
     """
 
@@ -383,13 +389,19 @@ class PlayerState(BaseModel):
     # what makes those actions glitch-free on every output.
     position_epoch: int = 0
     is_playing: bool = False
+    # Deprecated compatibility field. It stays at unity so older clients that
+    # multiply `volume * device_volumes[id]` still produce the canonical level.
     volume: float = 1.0
 
     active_mode_id: str | None = None
     active_output_device_ids: list[str] = Field(default_factory=list)
-    # Per-device volume trim (client_id → 0..1), applied on top of master
-    # `volume` on that device only. Absent = 1.0. Lets the operator tame a
-    # too-loud TV without touching master. Only non-unity trims are stored.
+    # Initial level materialized for a device the first time it registers.
+    # During migration this preserves the old master level for devices that
+    # were not connected or remembered at upgrade time.
+    default_device_volume: float = 1.0
+    # Canonical absolute software volume per stable client_id. Registered
+    # devices receive an explicit entry; clients use default_device_volume only
+    # during the snapshot-before-register window or for older server state.
     device_volumes: dict[str, float] = Field(default_factory=dict)
     active_soundboard_id: str | None = None
     active_preset_ids: list[str] = Field(default_factory=list)

@@ -19,5 +19,5 @@ async def commit_and_broadcast(mutator: Any) -> tuple[bool, Any]:
     to all connected clients. Returns (changed, new_state)."""
     new_state, changed = await machine.apply(mutator, SessionLocal)
     if changed:
-        await manager.broadcast_state(new_state)
+        await manager.broadcast_state()
     return (changed, new_state)

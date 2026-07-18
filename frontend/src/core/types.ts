@@ -83,11 +83,13 @@ export interface PlayerState {
    *  only for skew with a pre-epoch server (a cached bundle mid-deploy). */
   position_epoch?: number;
   is_playing: boolean;
+  /** Deprecated compatibility field. Current servers always emit 1.0. */
   volume: number;
   active_mode_id: string | null;
   active_output_device_ids: string[];
-  /** Per-device volume trim (client_id → 0..1), applied on top of master
-   *  `volume` on that device only. Absent entry = 1.0 (no trim). */
+  /** Initial server-owned level for devices without a materialized entry. */
+  default_device_volume?: number;
+  /** Canonical absolute software volume per stable client_id. */
   device_volumes: Record<string, number>;
   active_soundboard_id: string | null;
   active_preset_ids: string[];
@@ -144,7 +146,6 @@ export interface PresetManifest {
   name: string;
   description?: string;
   effects: PresetEffect[];
-  volume?: number | null;
   crossfade_ms?: number | null;
 }
 
@@ -266,7 +267,7 @@ export interface FoldersResponse {
 // --- WebSocket actions (client → server) ---------------------------------
 
 export type WsAction =
-  | { type: "register"; name: string; client_id: string }
+  | { type: "register"; name: string; client_id: string; protocol_version: 2 }
   | { type: "set_volume"; volume: number }
   | { type: "pause" }
   | { type: "resume" }

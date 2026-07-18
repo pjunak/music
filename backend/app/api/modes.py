@@ -781,7 +781,6 @@ class PresetBody(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: str | None = None
     effects: list[EffectSpecIn] = Field(default_factory=list)
-    volume: float | None = Field(default=None, ge=0.0, le=1.0)
     crossfade_ms: int | None = Field(default=None, ge=0, le=60000)
 
 
@@ -803,8 +802,6 @@ def _preset_yaml(preset_id: str, body: PresetBody) -> dict:
     if body.description:
         out["description"] = body.description
     out["effects"] = [e.model_dump() for e in body.effects]
-    if body.volume is not None:
-        out["volume"] = body.volume
     if body.crossfade_ms is not None:
         out["crossfade_ms"] = body.crossfade_ms
     return out

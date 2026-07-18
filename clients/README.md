@@ -49,8 +49,10 @@ Both return the **same** `PlayerState` shape. Both are reachable **without authe
 3. Send a **`register`** with your stable `client_id` so you appear in the operator's device
    list and can be designated as an output:
    ```json
-   { "type": "register", "name": "Living-room speaker", "client_id": "headless-7f3c…" }
+   { "type": "register", "name": "Living-room speaker", "client_id": "headless-7f3c…", "protocol_version": 2 }
    ```
+   `protocol_version: 2` selects canonical absolute per-device volumes. Omit it
+   only when implementing the legacy master × trim contract.
    The operator must then mark you as an **audio output** in Settings → Devices (output is
    fully manual — nothing auto-designates). Once designated, that sticks to your `client_id`
    across restarts. (SFX events are broadcast to **every** connected socket regardless of
@@ -75,7 +77,8 @@ following state. Reconnect on close and repeat from step 2.
 | Field | Meaning |
 |---|---|
 | `is_playing` | Whether the **ambient** lane should be playing |
-| `volume` | Master volume `0.0–1.0` (server-wide; informational for a guest) |
+| `default_device_volume` | Initial server-owned output level before this client has an explicit entry |
+| `device_volumes[client_id]` | This output's canonical software volume `0.0–1.0` |
 | `position_epoch` | Bumped **only** on deliberate position moves (play/seek/skip/loop restart/interrupt transitions) — your seek trigger |
 | `ambient.current_track_id` | The track id to play (or `null` = nothing) |
 | `ambient.position_ms` | Where in that track playback is **right now** (the server owns the clock and materializes this into every push) |
@@ -90,7 +93,8 @@ active track  = interrupt ? interrupt.current_track_id : ambient.current_track_i
 playing       = interrupt ? true : is_playing
 position      = interrupt ? interrupt.position_ms : ambient.position_ms
 am I "on"?    = (your client_id is in active_output_device_ids)   ← server/Console-driven
-                OR a local on/off you control yourself             ← see "On/off" below
+                 OR a local on/off you control yourself             ← see "On/off" below
+volume        = device_volumes[your client_id] ?? default_device_volume
 ```
 
 If you're "on" and `playing` and `active track` isn't `null`: ensure your player is loaded
@@ -128,8 +132,9 @@ client stays silent:
 ```json
 { "type": "sfx_fired", "soundboard_id": "tavern", "item_path": "dnd/door.ogg", "volume": 0.8 }
 ```
-Play `GET /api/sfx/file?path=<item_path>` once, at `volume × your-local-volume`, layered over
-the music. These are **not** part of `PlayerState` — they're transient, so just play and forget.
+Play `GET /api/sfx/file?path=<item_path>` once, at event `volume ×` this device's canonical
+server volume, optionally followed by a hardware-local gain. These are **not** part of
+`PlayerState` — they're transient, so just play and forget.
 
 ## Auth
 
@@ -153,10 +158,10 @@ state, you don't drive it. The narrow consequences:
   output may send `{"type": "position_report", "position_ms": …}` (~1 Hz) — being toggled on
   by the operator is the authorization. It's a drift correction, not a requirement: the
   server's clock ticks on its own either way.
-- **No master volume / transport from the client.** Use a **local** volume (how loud *this*
-  speaker is). The reference client and the embed example both do this.
+- **Volume is server-owned per device.** Read `device_volumes[client_id]`; a separate local
+  control is only a hardware/appliance gain that controllers cannot observe.
 
-If you later need persistent Console on/off, master-volume/transport from a third-party page,
+If you later need persistent Console on/off or transport from a third-party page,
 or position reporting **without** a browser login, that's the optional token layer described in
 the plan (`docs`/Phase 2) — not required for any of the above.
 
@@ -177,7 +182,10 @@ that's the browser *engine* feature; this is the simple output.)
   const el = document.getElementById("out");
   const btn = document.getElementById("toggle");
   const vol = document.getElementById("vol");
-  let on = false, state = null, loadedId = null;
+  let on = false, state = null, loadedId = null, localVolume = 1;
+  const clientId = localStorage.getItem("embed-client-id")
+    ?? (localStorage.setItem("embed-client-id", crypto.randomUUID()),
+        localStorage.getItem("embed-client-id"));
 
   const host = new URL(SERVER).host;
   const wsProto = SERVER.startsWith("https") ? "wss" : "ws";
@@ -189,6 +197,11 @@ that's the browser *engine* feature; this is the simple output.)
     if (!state) return;
     const id = activeTrack(state);
     const playing = state.interrupt ? true : state.is_playing;
+    const stored = state.device_volumes?.[clientId];
+    const serverVolume = state.default_device_volume === undefined
+      ? state.volume * (stored ?? 1)
+      : (stored ?? state.default_device_volume);
+    el.volume = Math.max(0, Math.min(1, serverVolume * localVolume));
     if (!on || id === null || !playing) { el.pause(); return; }
     if (id !== loadedId) { el.src = streamUrl(id); loadedId = id; }
     el.play().catch(() => {});   // first play needs a user gesture — the button click is it
@@ -199,17 +212,14 @@ that's the browser *engine* feature; this is the simple output.)
     const m = JSON.parse(e.data);
     if (m.type === "state_snapshot") {
       state = m.state;
-      // Stable identity, persisted so the operator's output designation sticks.
-      const clientId = localStorage.getItem("embed-client-id")
-        ?? (localStorage.setItem("embed-client-id", crypto.randomUUID()),
-            localStorage.getItem("embed-client-id"));
       ws.send(JSON.stringify(
-        { type: "register", name: "Web embed", client_id: clientId }));
+        { type: "register", name: "Web embed", client_id: clientId,
+          protocol_version: 2 }));
       apply();
     } else if (m.type === "state_changed") { state = m.state; apply(); }
   };
   btn.onclick = () => { on = !on; btn.textContent = `Music: ${on ? "ON" : "OFF"}`; apply(); };
-  vol.oninput = () => { el.volume = Number(vol.value); };   // local volume for this page only
+  vol.oninput = () => { localVolume = Number(vol.value); apply(); };
 </script>
 ```
 
@@ -235,7 +245,7 @@ Or watch the live socket with [`websocat`](https://github.com/vi/websocat):
 ```sh
 websocat wss://music.example/api/ws
 # → {"type":"state_snapshot","your_device_id":"","state":{…}}
-# then paste:  {"type":"register","name":"cli","client_id":"cli-pick-a-stable-string"}
+# then paste:  {"type":"register","name":"cli","client_id":"cli-pick-a-stable-string","protocol_version":2}
 ```
 
 The [reference Python client](headless/) is Recipe B done properly (reconnect, seek

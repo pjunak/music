@@ -550,7 +550,7 @@
   // controller's output list — acceptable trade-off for an emergency
   // fallback path.
 
-  function makePollingClient(handlers) {
+  function makePollingClient(handlers, clientId) {
     var stopped = false;
     var pollTimer = null;
     var statusTimer = null;
@@ -580,7 +580,7 @@
       }
       try {
         var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/api/sync/state", true);
+        xhr.open("GET", "/api/sync/state?client_id=" + encodeURIComponent(clientId), true);
         try { xhr.timeout = POLL_TIMEOUT_MS; } catch (e) {}
         xhr.ontimeout = fail;
         xhr.onerror = fail;
@@ -751,16 +751,15 @@
     var clientId = getClientId();
     var deviceLabel = getDeviceName();
     ui.setDeviceName(deviceLabel);
-    // This device's identity in PlayerState. In WebSocket mode it's our own
+    // This device's stable identity in PlayerState. In WebSocket mode it's our
     // stable client_id (set in onOpen, mirroring the SPA) so the TV is a
     // first-class, operator-selectable output — the operator ticks it on in
     // the Speakers popover and can trim its per-device volume / save it
-    // default-on. In polling mode it stays null — a poller can't register, so
-    // it can never appear in active_output_device_ids; null makes
-    // isThisDeviceActive() return true so it still works as a passive
-    // always-on speaker (the only useful behaviour when it can't be selected).
+    // default-on. Polling keeps the id for its server-owned volume, while a
+    // separate passive flag makes it always-on because it cannot register.
     // your_device_id from the snapshot is empty by design and ignored.
-    var myDeviceId = null;
+    var myDeviceId = clientId;
+    var passivePolling = false;
     // In WS mode, the send function (captured in onOpen) — used for the 1 Hz
     // position reports below. null in polling mode (read-only transport).
     var wsSend = null;
@@ -775,9 +774,11 @@
     // deliberate moves (seek / skip / loop restart / interrupt transitions);
     // we seek iff it changed. null = no state applied yet.
     var lastEpoch = null;
+    var lastRevision = -1;
+    var hasStateThisConnection = false;
 
     function isThisDeviceActive(state) {
-      if (myDeviceId === null) return true;
+      if (passivePolling) return true;
       var outputs = state.active_output_device_ids || [];
       for (var i = 0; i < outputs.length; i++) {
         if (outputs[i] === myDeviceId) return true;
@@ -787,6 +788,10 @@
 
     function applyState(state) {
       if (!state) return;
+      var revision = (typeof state.revision === "number") ? state.revision : 0;
+      if (hasStateThisConnection && revision < lastRevision) return;
+      lastRevision = revision;
+      hasStateThisConnection = true;
       // Lane pick: an interrupt takes over while present (alerts/stingers),
       // ambient otherwise. duck_to layering (music quietly under the
       // interrupt) needs two simultaneous streams — out of scope for this
@@ -800,27 +805,28 @@
       var posMs = (itr ? itr.position_ms : amb.position_ms) || 0;
       var epoch = (typeof state.position_epoch === "number") ? state.position_epoch : 0;
       var trackChanged = trackId !== lastTrackId;
-      // Gate playback on this device being a selected output (WS mode, where
-      // we have an identity). In polling mode myDeviceId is null and
-      // isThisDeviceActive() returns true — a passive always-on speaker.
+      // Gate playback on this device being a selected output in WS mode.
+      // Polling uses passivePolling and remains an always-on fallback speaker.
       // An interrupt plays regardless of the pause flag (matching the SPA).
       var isPlaying = (itr ? true : !!state.is_playing) && isThisDeviceActive(state);
-      var master = (typeof state.volume === "number") ? state.volume : 1;
-      // Per-device trim (master × this device's device_volumes entry), so the
-      // operator can tame a too-loud TV from the Speakers popover without
-      // touching master — same fold the SPA engine does. Only applies in WS
-      // mode (a poller has no addressable identity).
-      var trim = 1;
-      if (myDeviceId !== null && state.device_volumes &&
-          typeof state.device_volumes[myDeviceId] === "number") {
-        trim = state.device_volumes[myDeviceId];
+      // One canonical server-owned output level per stable device id. Polling
+      // includes the id in its request so the guest projection can return only
+      // this device's value.
+      var hasAbsoluteVolumes = typeof state.default_device_volume === "number";
+      var deviceVolume = 1;
+      if (state.device_volumes && typeof state.device_volumes[myDeviceId] === "number") {
+        deviceVolume = state.device_volumes[myDeviceId];
       }
+      var outputVolume = hasAbsoluteVolumes
+        ? ((state.device_volumes && typeof state.device_volumes[myDeviceId] === "number")
+            ? deviceVolume : state.default_device_volume)
+        : ((typeof state.volume === "number" ? state.volume : 1) * deviceVolume);
       // Crossfade only applies to ambient→ambient track changes; interrupt
       // transitions are hard cuts (an alert shouldn't fade in late).
       var laneSwitched = (itr !== null) !== wasInterrupt;
       var crossfadeMs = laneSwitched ? 0 : (state.crossfade_ms || 0);
 
-      engine.setVolume(clamp01(master * trim));
+      engine.setVolume(clamp01(outputVolume));
       // Capture latest server position for the progress interpolator
       // (runs on its own 250 ms timer below).
       serverPositionMs = posMs;
@@ -885,7 +891,7 @@
     // device toggled on as an output — self-gate on the same condition
     // (lastIsPlaying already folds it in) so we never send a rejectable one.
     setInterval(function () {
-      if (!wsSend || myDeviceId === null || !lastIsPlaying) return;
+      if (!wsSend || !lastIsPlaying) return;
       var pos = engine.getPositionMs();
       if (pos == null) return;
       wsSend({ type: "position_report", position_ms: pos });
@@ -920,13 +926,10 @@
     // page), switch to polling /api/sync/state. The 150ms delay lets the
     // operator see the "switching..." status transition on the TV screen.
     function startPolling() {
-      // Drop our WS identity — polling can't keep a registered device alive,
-      // so the server has already pruned it. Clearing myDeviceId makes
-      // isThisDeviceActive() fall back to "always play" (passive speaker
-      // mode), the only useful behaviour when we can't be selected as an
-      // output. No wsSend either — polling is read-only, so no position
-      // reports (the server clock ticks on its own regardless).
-      myDeviceId = null;
+      // Polling cannot keep a registered device active, so use passive playback
+      // while retaining the stable id for canonical per-device volume lookup.
+      passivePolling = true;
+      hasStateThisConnection = false;
       wsSend = null;
       ui.setStatus("WebSocket blocked — switching to HTTP polling...", "#ffb74d");
       setTimeout(function () {
@@ -936,7 +939,7 @@
           onHardFailure: function () {
             ui.setStatus("Cannot reach server — check network / cert", "#ff7373");
           }
-        });
+        }, clientId);
       }, 150);
     }
 
@@ -956,9 +959,16 @@
         // register arrives). This is what makes isThisDeviceActive() match
         // against active_output_device_ids and lets the operator pick this TV
         // in the Speakers popover, trim its volume, and save it default-on.
+        passivePolling = false;
+        hasStateThisConnection = false;
         myDeviceId = clientId;
         wsSend = send;
-        send({ type: "register", name: deviceLabel, client_id: clientId });
+        send({
+          type: "register",
+          name: deviceLabel,
+          client_id: clientId,
+          protocol_version: 2
+        });
       },
       onMessage: function (msg) {
         if (!msg || !msg.type) return;

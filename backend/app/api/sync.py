@@ -18,19 +18,26 @@ mutating endpoints — read-only here is safe.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 
 from app.api.deps import OptionalUser
 from app.sync import state as sync_state
+from app.sync.connection import guest_state_view
 from app.sync.protocol import PlayerState
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
 
 @router.get("/state", response_model=PlayerState)
-async def get_state(_: OptionalUser) -> PlayerState:
+async def get_state(
+    user: OptionalUser,
+    client_id: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+) -> PlayerState:
     """Return the current `PlayerState` — the same payload the WS endpoint
     pushes as a `state_snapshot` on open and as `state_changed` after every
     mutation. Polling clients call this every ~2s; the response is
     cheap (in-memory snapshot + Pydantic serialization, no DB hit)."""
-    return await sync_state.machine.snapshot()
+    state = await sync_state.machine.snapshot()
+    return state if user is not None else guest_state_view(state, client_id)

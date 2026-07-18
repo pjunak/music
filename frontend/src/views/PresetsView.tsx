@@ -334,10 +334,7 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
   const [effectState, setEffectState] = useState(() => buildEffectState(preset?.effects ?? []));
   const [activeTypes, setActiveTypes] = useState(() => buildActiveTypes(preset?.effects ?? []));
   const [extraEffects, setExtraEffects] = useState(() => buildExtraEffects(preset?.effects ?? []));
-  // Optional "when active" overrides — a toggle gates each control; null on save
-  // when off (= leave that global alone).
-  const [volumeOn, setVolumeOn] = useState(preset?.volume != null);
-  const [volume, setVolume] = useState(preset?.volume ?? 0.8);
+  // Optional "when active" crossfade override. Null leaves it unchanged.
   const [crossfadeOn, setCrossfadeOn] = useState(preset?.crossfade_ms != null);
   const [crossfadeMs, setCrossfadeMs] = useState(preset?.crossfade_ms ?? 2000);
   const [busy, setBusy] = useState(false);
@@ -354,8 +351,6 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
       setEffectState(buildEffectState(preset.effects));
       setActiveTypes(buildActiveTypes(preset.effects));
       setExtraEffects(buildExtraEffects(preset.effects));
-      setVolumeOn(preset.volume != null);
-      setVolume(preset.volume ?? 0.8);
       setCrossfadeOn(preset.crossfade_ms != null);
       setCrossfadeMs(preset.crossfade_ms ?? 2000);
     }
@@ -414,7 +409,6 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
           id: presetId,
           name: name.trim(),
           effects,
-          volume: volumeOn ? volume : null,
           crossfade_ms: crossfadeOn ? crossfadeMs : null,
         };
         const desc = description.trim();
@@ -425,7 +419,6 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
         const payload: Parameters<typeof presetsAdminApi.update>[2] = {
           name: name.trim(),
           effects,
-          volume: volumeOn ? volume : null,
           crossfade_ms: crossfadeOn ? crossfadeMs : null,
         };
         const desc = description.trim();
@@ -500,8 +493,8 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
         <p className="muted small">
           The full rack — flip a module's switch to enable it. Enabled effects
           (teal) apply top to bottom; bypassed ones (grey) keep their settings.
-          "When active" nudges master volume / crossfade when the preset is
-          switched on (last one on wins).
+          "When active" can override crossfade when the preset is switched on
+          (last one on wins).
         </p>
         <div className="effect-grid">
           {ADDABLE.filter((a) => a.type !== "eq").map((a) => {
@@ -574,24 +567,6 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
             </header>
             <div className="rack-body">
               <div className="override-knobs">
-                <div className={`override-knob${volumeOn ? "" : " override-off"}`}>
-                  <Switch
-                    checked={volumeOn}
-                    onChange={(e) => setVolumeOn(e.target.checked)}
-                    aria-label="Enable master-volume override"
-                  />
-                  <Knob
-                    label="Volume"
-                    value={volume}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    def={0.8}
-                    format={(v) => `${Math.round(v * 100)}%`}
-                    onChange={setVolume}
-                    disabled={!volumeOn}
-                  />
-                </div>
                 <div className={`override-knob${crossfadeOn ? "" : " override-off"}`}>
                   <Switch
                     checked={crossfadeOn}

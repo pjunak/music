@@ -20,10 +20,9 @@ import { TransportSection } from "./controls/TransportSection";
  *  dedicated tabs. Anything in here should be a thing the DM does mid-
  *  session: fire SFX, fire cues, fire interrupts, etc.
  *
- *  Mode picker moved to the header (reachable from any tab); master volume
- *  and the **Speakers** control (which devices output + per-device volume)
- *  live in the persistent NowPlayingBar footer. This tab is just the live
- *  action grid. */
+ *  Mode picker moved to the header (reachable from any tab); the **Speakers**
+ *  control (which devices output + each device's canonical volume) lives in
+ *  the persistent NowPlayingBar footer. This tab is just the live action grid. */
 export function ControlsView() {
   return (
     <div className="controls-view">

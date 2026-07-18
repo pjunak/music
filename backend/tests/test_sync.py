@@ -28,7 +28,14 @@ def _reset_sync_state():
 
 def _register(ws, name: str = "device", client_id: str = "client-1") -> None:
     """Send a register action. Identity now flows through `client_id`."""
-    ws.send_json({"type": "register", "name": name, "client_id": client_id})
+    ws.send_json(
+        {
+            "type": "register",
+            "name": name,
+            "client_id": client_id,
+            "protocol_version": 2,
+        }
+    )
 
 def _pos_near(actual: int, expected: int, slack_ms: int = 500) -> bool:
     """Position assertion under the server-side playback clock: a ticking lane
@@ -225,7 +232,8 @@ def test_ws_accepts_with_cookie_and_sends_snapshot(client: TestClient) -> None:
         state = msg["state"]
         assert "revision" in state
         assert state["is_playing"] is False
-        assert isinstance(state["volume"], int | float)
+        assert state["volume"] == 1.0  # legacy compatibility field is pinned
+        assert state["default_device_volume"] == 1.0
         assert state["connected_devices"] == []  # not registered yet
 
 
@@ -257,22 +265,60 @@ def test_register_appears_in_state_for_other_clients(client: TestClient) -> None
 # --- volume / pause / resume ------------------------------------------------
 
 
-def test_set_volume_broadcasts_new_state(client: TestClient) -> None:
+def test_legacy_set_volume_scales_server_owned_device_levels(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         snapshot = ws.receive_json()
         prev_revision = snapshot["state"]["revision"]
 
+        _register(ws, "TV", "tv-1")
+        ws.receive_json()
+        ws.send_json({"type": "set_device_volume", "device_id": "tv-1", "volume": 0.5})
+        ws.receive_json()
+
         ws.send_json({"type": "set_volume", "volume": 0.42})
         msg = ws.receive_json()
         assert msg["type"] == "state_changed"
-        assert msg["state"]["volume"] == 0.42
-        assert msg["state"]["revision"] == prev_revision + 1
+        assert msg["state"]["volume"] == 1.0
+        assert msg["state"]["default_device_volume"] == 0.42
+        assert msg["state"]["device_volumes"]["tv-1"] == 0.21
+        assert msg["state"]["revision"] == prev_revision + 3
+
+
+def test_legacy_volume_projection_and_action_share_the_same_master() -> None:
+    from app.sync.connection import legacy_state_view
+    from app.sync.protocol import PlayerState
+    from app.sync.state import set_volume
+
+    state = PlayerState(
+        default_device_volume=0.4,
+        device_volumes={"tv-1": 0.2, "phone-1": 0.6},
+    )
+    projected = legacy_state_view(state)
+    assert projected.volume == 0.6
+    assert projected.device_volumes["tv-1"] == pytest.approx(1 / 3)
+    assert projected.device_volumes["phone-1"] == 1.0
+
+    changed = set_volume(0.3)(state)
+    assert changed.default_device_volume == 0.3
+    assert changed.device_volumes == {"tv-1": 0.1, "phone-1": 0.3}
+
+
+def test_register_without_protocol_version_receives_legacy_projection(
+    client: TestClient,
+) -> None:
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "register", "name": "Old UI", "client_id": "old-ui"})
+        msg = ws.receive_json()
+        assert "default_device_volume" not in msg["state"]
+        assert msg["state"]["volume"] == 1.0
+        assert msg["state"]["device_volumes"]["old-ui"] == 1.0
 
 
 def test_set_volume_no_broadcast_when_unchanged(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         snapshot = ws.receive_json()
-        current_volume = snapshot["state"]["volume"]
+        current_volume = snapshot["state"]["default_device_volume"]
 
         ws.send_json({"type": "set_volume", "volume": current_volume})
         # No state_changed message expected. We can't easily assert "nothing
@@ -281,9 +327,10 @@ def test_set_volume_no_broadcast_when_unchanged(client: TestClient) -> None:
         ws.send_json({"type": "set_volume", "volume": 0.123})
         msg = ws.receive_json()
         assert msg["state"]["volume"] == 0.123
+        assert "default_device_volume" not in msg["state"]
 
 
-def test_set_device_volume_broadcasts_and_clears_at_unity(client: TestClient) -> None:
+def test_set_device_volume_broadcasts_absolute_level(client: TestClient) -> None:
     with _ws_authed(client) as ws:
         ws.receive_json()  # snapshot
 
@@ -292,10 +339,34 @@ def test_set_device_volume_broadcasts_and_clears_at_unity(client: TestClient) ->
         assert msg["type"] == "state_changed"
         assert msg["state"]["device_volumes"]["tv-1"] == 0.5
 
-        # Back to unity drops the entry — "absent = 1.0" keeps the map small.
+        # Unity remains explicit: registered device volume is canonical state.
         ws.send_json({"type": "set_device_volume", "device_id": "tv-1", "volume": 1.0})
         msg = ws.receive_json()
-        assert "tv-1" not in msg["state"]["device_volumes"]
+        assert msg["state"]["device_volumes"]["tv-1"] == 1.0
+
+
+def test_device_volume_is_identical_for_every_controller(client: TestClient) -> None:
+    _login(client)
+    with (
+        client.websocket_connect("/api/ws") as tv,
+        client.websocket_connect("/api/ws") as notebook,
+        client.websocket_connect("/api/ws") as baton,
+    ):
+        tv.receive_json()
+        notebook.receive_json()
+        baton.receive_json()
+        _register(tv, "Living Room TV", "tv-1")
+        for socket in (tv, notebook, baton):
+            socket.receive_json()
+
+        notebook.send_json(
+            {"type": "set_device_volume", "device_id": "tv-1", "volume": 0.4}
+        )
+        messages = [socket.receive_json() for socket in (tv, notebook, baton)]
+        assert {message["state"]["device_volumes"]["tv-1"] for message in messages} == {
+            0.4
+        }
+        assert len({message["state"]["revision"] for message in messages}) == 1
 
 
 def test_pause_resume_toggles_is_playing(client: TestClient) -> None:
@@ -587,6 +658,121 @@ def test_state_load_coerces_removed_weighted_shuffle(auth_client: TestClient) ->
     assert snap.ambient.shuffle == "random"
 
 
+def test_state_load_migrates_master_and_trims_to_absolute_device_volumes(
+    auth_client: TestClient,
+) -> None:
+    import asyncio
+
+    from app.core.db import SessionLocal
+    from app.devices.store import device_store
+    from app.sync.state import StateMachine
+
+    device_store.put("saved-tv", "Saved TV", True)
+    from app.models.playback_state import PlaybackState
+
+    with SessionLocal() as db:
+        row = db.get(PlaybackState, 1)
+        assert row is not None
+        # Replace rather than merge so this is a genuine pre-migration payload
+        # with no default_device_volume marker.
+        row.state_json = {
+            "volume": 0.4,
+            "device_volumes": {"saved-tv": 0.5},
+            "active_output_device_ids": ["active-phone"],
+        }
+        db.commit()
+
+    first = StateMachine()
+    asyncio.run(first.load(SessionLocal))
+    snap = asyncio.run(first.snapshot())
+    assert snap.volume == 1.0
+    assert snap.default_device_volume == 0.4
+    assert snap.device_volumes == {"saved-tv": 0.2, "active-phone": 0.4}
+
+    # The cleaned state is persisted and a second restart must not scale twice.
+    second = StateMachine()
+    asyncio.run(second.load(SessionLocal))
+    snap2 = asyncio.run(second.snapshot())
+    assert snap2.default_device_volume == 0.4
+    assert snap2.device_volumes == snap.device_volumes
+
+
+async def test_state_broadcast_uses_latest_snapshot_not_stale_argument(
+    auth_client: TestClient,
+) -> None:
+    from app.core.db import SessionLocal
+    from app.sync.connection import manager
+    from app.sync.protocol import PlayerState
+    from app.sync.state import machine, set_device_volume
+
+    class CaptureSocket:
+        def __init__(self) -> None:
+            self.messages: list[dict] = []
+
+        async def send_json(self, message: dict) -> None:
+            self.messages.append(message)
+
+        async def close(self) -> None:
+            return None
+
+    socket = CaptureSocket()
+    manager.add("capture", socket)  # type: ignore[arg-type]
+    stale = PlayerState(revision=0)
+    await machine.apply(set_device_volume("tv-1", 0.4), SessionLocal)
+
+    await manager.broadcast_state(stale)
+
+    sent = socket.messages[-1]["state"]
+    assert sent["revision"] == 1
+    assert sent["device_volumes"]["tv-1"] == 0.4
+
+
+async def test_initial_snapshot_is_ordered_before_concurrent_state_change(
+    auth_client: TestClient,
+) -> None:
+    import asyncio
+
+    from app.sync import commit_and_broadcast
+    from app.sync.connection import manager
+    from app.sync.state import set_device_volume
+
+    snapshot_started = asyncio.Event()
+    release_snapshot = asyncio.Event()
+
+    class BlockingSocket:
+        def __init__(self) -> None:
+            self.messages: list[dict] = []
+
+        async def send_json(self, message: dict) -> None:
+            self.messages.append(message)
+            if message["type"] == "state_snapshot":
+                snapshot_started.set()
+                await release_snapshot.wait()
+
+        async def close(self) -> None:
+            return None
+
+    socket = BlockingSocket()
+    initial = asyncio.create_task(
+        manager.add_with_snapshot("new-socket", socket)  # type: ignore[arg-type]
+    )
+    await snapshot_started.wait()
+    mutation = asyncio.create_task(
+        commit_and_broadcast(set_device_volume("tv-1", 0.4))
+    )
+    await asyncio.sleep(0)
+    assert [message["type"] for message in socket.messages] == ["state_snapshot"]
+
+    release_snapshot.set()
+    await asyncio.gather(initial, mutation)
+
+    assert [message["type"] for message in socket.messages] == [
+        "state_snapshot",
+        "state_changed",
+    ]
+    assert [message["state"]["revision"] for message in socket.messages] == [0, 1]
+
+
 def test_state_load_after_track_deletion_clears_active_track(
     auth_client: TestClient, client: TestClient
 ) -> None:
@@ -714,6 +900,7 @@ def test_position_report_does_not_broadcast(client: TestClient) -> None:
         msg_b = b.receive_json()
         assert msg_b["type"] == "state_changed"
         assert msg_b["state"]["volume"] == 0.999
+        assert "default_device_volume" not in msg_b["state"]
 
 
 # --- malformed input --------------------------------------------------------
@@ -1475,6 +1662,7 @@ def test_interrupt_actions_are_noops_when_no_interrupt(client: TestClient) -> No
         ws.send_json({"type": "set_volume", "volume": 0.111})
         msg = ws.receive_json()
         assert msg["state"]["volume"] == 0.111
+        assert "default_device_volume" not in msg["state"]
 
 
 # --- SFX firing -----------------------------------------------------------

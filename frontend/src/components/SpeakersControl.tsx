@@ -89,6 +89,9 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   const activeIds = usePlayerArray((s) => s.state?.active_output_device_ids);
   const deviceVolumes =
     usePlayerStore((s) => s.state?.device_volumes) ?? EMPTY_VOLUMES;
+  const defaultDeviceVolume = usePlayerStore((s) => s.state?.default_device_volume);
+  const legacyMasterVolume = usePlayerStore((s) => s.state?.volume ?? 1);
+  const connected = usePlayerStore((s) => s.wsStatus === "connected");
   const deviceName = useUiStore((s) => s.deviceName);
 
   useEffect(() => {
@@ -112,10 +115,18 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   const thisDevice = devices.find((d) => d.device_id === deviceId) ?? null;
   const others = devices.filter((d) => d.device_id !== deviceId);
 
+  function volumeFor(id: string): number {
+    const stored = deviceVolumes[id];
+    return defaultDeviceVolume === undefined
+      ? legacyMasterVolume * (stored ?? 1)
+      : (stored ?? defaultDeviceVolume);
+  }
+
   /** Turn a device on/off as a live output. No designation needed — any
    *  connected device can be activated. Reads the live active list to avoid
    *  clobbering a concurrent change. */
   function setOn(id: string, on: boolean) {
+    if (!connected) return;
     const player = usePlayerStore.getState();
     const current = player.state?.active_output_device_ids ?? [];
     const next = on
@@ -145,7 +156,41 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   }
 
   function setVol(id: string, v: number) {
-    wsClient.send({ type: "set_device_volume", device_id: id, volume: v });
+    if (!connected) return;
+    if (
+      defaultDeviceVolume === undefined &&
+      v > legacyMasterVolume
+    ) {
+      const knownIds = new Set([
+        id,
+        ...Object.keys(deviceVolumes),
+        ...devices.map((device) => device.device_id),
+      ]);
+      const previousLevels = new Map(
+        [...knownIds].map((deviceId) => [deviceId, volumeFor(deviceId)]),
+      );
+      wsClient.send({ type: "set_volume", volume: v });
+      for (const deviceId of knownIds) {
+        wsClient.send({
+          type: "set_device_volume",
+          device_id: deviceId,
+          volume:
+            deviceId === id
+              ? 1
+              : Math.min(1, (previousLevels.get(deviceId) ?? 0) / v),
+        });
+      }
+      return;
+    }
+    const wireVolume =
+      defaultDeviceVolume === undefined
+        ? legacyMasterVolume > 0
+          ? Math.min(1, v / legacyMasterVolume)
+          : v === 0
+            ? 0
+            : 1
+        : v;
+    wsClient.send({ type: "set_device_volume", device_id: id, volume: wireVolume });
   }
 
   return (
@@ -180,7 +225,8 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
             isThis
             on={activeIds.includes(deviceId)}
             isDefault={thisDevice?.is_output ?? false}
-            volume={deviceVolumes[deviceId] ?? 1}
+            volume={volumeFor(deviceId)}
+            disabled={!connected}
             onToggle={(on) => setOn(deviceId, on)}
             onVolume={(v) => setVol(deviceId, v)}
           />
@@ -190,7 +236,8 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
               rawName={d.name}
               on={activeIds.includes(d.device_id)}
               isDefault={d.is_output}
-              volume={deviceVolumes[d.device_id] ?? 1}
+              volume={volumeFor(d.device_id)}
+              disabled={!connected}
               onToggle={(on) => setOn(d.device_id, on)}
               onVolume={(v) => setVol(d.device_id, v)}
             />
@@ -207,6 +254,7 @@ function SpeakerRow({
   on,
   isDefault,
   volume,
+  disabled,
   onToggle,
   onVolume,
 }: {
@@ -217,6 +265,7 @@ function SpeakerRow({
   on: boolean;
   isDefault?: boolean;
   volume: number;
+  disabled: boolean;
   onToggle: (on: boolean) => void;
   onVolume: (v: number) => void;
 }) {
@@ -245,6 +294,8 @@ function SpeakerRow({
         label={`${name} volume`}
         showIcon={false}
         className="speaker-row-vol"
+        readOnly={disabled}
+        readOnlyTitle="Not connected"
       />
       {/* Checkbox on the right edge — closest to the cursor when the popover
           opens above the footer pill. */}
@@ -252,6 +303,7 @@ function SpeakerRow({
         type="checkbox"
         className="speaker-row-check"
         checked={on}
+        disabled={disabled}
         aria-label={`${name} output`}
         onChange={(e) => onToggle(e.target.checked)}
       />

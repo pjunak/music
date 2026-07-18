@@ -27,10 +27,7 @@ interface Props {
   prefix?: ReactNode;
   /** Optional className passed to the wrapping <label>, for layout overrides. */
   className?: string;
-  /** Render as a non-interactive display of the current value. Used for
-   *  guests viewing the master volume (server rejects their `set_volume`
-   *  with "guest sessions cannot mutate state" — letting the slider drag
-   *  fire an error per pixel is worse UX than just locking it). */
+  /** Render as a non-interactive display of the current value. */
   readOnly?: boolean;
   /** Tooltip shown when readOnly. Defaults to a generic explanation. */
   readOnlyTitle?: string;

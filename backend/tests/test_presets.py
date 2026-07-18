@@ -115,19 +115,20 @@ def test_delete_preset_removes_file(auth_client: TestClient) -> None:
     assert "delp" not in auth_client.get("/api/modes/dnd").json()["presets"]
 
 
-def test_preset_volume_crossfade_roundtrip_and_apply(auth_client: TestClient) -> None:
+def test_preset_crossfade_roundtrip_and_apply(auth_client: TestClient) -> None:
     r = auth_client.post(
         "/api/modes/dnd/presets",
         json={
             "id": "moody",
             "name": "Moody",
             "effects": [{"type": "lowpass", "frequency": 600}],
+            # Accepted as an ignored legacy field; presets no longer mutate output volume.
             "volume": 0.5,
             "crossfade_ms": 3000,
         },
     )
     assert r.status_code == 201, r.text
-    assert r.json()["volume"] == 0.5
+    assert "volume" not in r.json()
     assert r.json()["crossfade_ms"] == 3000
 
     with auth_client.websocket_connect("/api/ws") as ws:
@@ -137,26 +138,26 @@ def test_preset_volume_crossfade_roundtrip_and_apply(auth_client: TestClient) ->
         ws.send_json({"type": "set_active_presets", "preset_ids": ["moody"]})
         msg = ws.receive_json()
         assert msg["state"]["active_preset_ids"] == ["moody"]
-        assert msg["state"]["volume"] == 0.5
+        assert msg["state"]["volume"] == 1.0
         assert msg["state"]["crossfade_ms"] == 3000
 
 
-def test_preset_overrides_last_active_wins(auth_client: TestClient) -> None:
+def test_preset_crossfade_override_last_active_wins(auth_client: TestClient) -> None:
     auth_client.post(
         "/api/modes/dnd/presets",
-        json={"id": "loud", "name": "Loud", "effects": [], "volume": 0.9},
+        json={"id": "slow", "name": "Slow", "effects": [], "crossfade_ms": 9000},
     )
     auth_client.post(
         "/api/modes/dnd/presets",
-        json={"id": "soft", "name": "Soft", "effects": [], "volume": 0.2},
+        json={"id": "quick", "name": "Quick", "effects": [], "crossfade_ms": 200},
     )
     with auth_client.websocket_connect("/api/ws") as ws:
         ws.receive_json()
         ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
         ws.receive_json()
-        ws.send_json({"type": "set_active_presets", "preset_ids": ["loud", "soft"]})
+        ws.send_json({"type": "set_active_presets", "preset_ids": ["slow", "quick"]})
         msg = ws.receive_json()
-        assert msg["state"]["volume"] == 0.2  # last in the active list wins
+        assert msg["state"]["crossfade_ms"] == 200  # last in the active list wins
 
 
 def test_set_active_presets_requires_active_mode(auth_client: TestClient) -> None:

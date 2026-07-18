@@ -180,18 +180,15 @@ export class PlaybackEngine {
   /** Duck-control gain between the effect chain tail and `ambientMaster`.
    *  Stays at 1.0 in normal playback; ramps down to a partial level when
    *  an interrupt fires with `duck_to` set, so ambient music continues
-   *  quietly under the interrupt instead of pausing. Master volume stays
-   *  on `ambientMaster` so duck and master volume don't interfere. */
+   *  quietly under the interrupt instead of pausing. Device volume stays
+   *  on `ambientMaster` so ducking and output level remain independent. */
   private ambientDuck: GainNode | null = null;
-  /** Master ambient gain node — drives master volume and is the graph's
-   *  terminal node before `destination`. */
+  /** Ambient output gain node, terminal before `destination`. */
   private ambientMaster: GainNode | null = null;
   /** Master interrupt gain node — bypasses the effect chain. */
   private interruptMaster: GainNode | null = null;
 
-  /** This browser's stable client_id, so this device's per-device volume trim
-   *  (`PlayerState.device_volumes[clientId]`) can be folded into master gain.
-   *  Set once at mount via `setClientId`. */
+  /** Stable client_id used to select this output's canonical server volume. */
   private clientId = "";
 
   /** Currently inserted effect graphs. Disposed when presets change. */
@@ -466,11 +463,14 @@ export class PlaybackEngine {
     const t = state.crossfade_type;
     if (t === "linear" || t === "equal_power" || t === "cut") this.crossfadeType = t;
 
-    // Effective volume = master × this device's per-device trim (absent = 1.0),
-    // so the operator can tame a too-loud TV from the Console without touching
-    // master. Folded into lastVolume so SFX (which read it) scale too.
-    const trim = state.device_volumes?.[this.clientId] ?? 1;
-    const effective = clamp01(state.volume) * clamp01(trim);
+    // The marker is absent on old servers, where device_volumes are trims.
+    // This keeps rolling upgrades safe while new servers provide one absolute
+    // server-owned level per device. SFX read lastVolume and scale with it too.
+    const effective = clamp01(
+      state.default_device_volume === undefined
+        ? state.volume * (state.device_volumes?.[this.clientId] ?? 1)
+        : (state.device_volumes?.[this.clientId] ?? state.default_device_volume),
+    );
     if (effective !== this.lastVolume) {
       this.lastVolume = effective;
       this.applyMasterVolume();

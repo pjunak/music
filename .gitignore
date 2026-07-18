@@ -99,6 +99,7 @@ coverage/
 
 # Agent / AI tooling — agent-only, never published to GitHub.
 # README.md on GitHub is for humans; anything agent-facing stays local.
+AGENTS.md
 .claude/
 CLAUDE.md
 CLAUDE.local.md

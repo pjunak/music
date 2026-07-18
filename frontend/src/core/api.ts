@@ -727,7 +727,6 @@ export const presetsAdminApi = {
       name: string;
       description?: string;
       effects: PresetEffect[];
-      volume?: number | null;
       crossfade_ms?: number | null;
     },
   ) =>
@@ -742,7 +741,6 @@ export const presetsAdminApi = {
       name: string;
       description?: string;
       effects?: PresetEffect[];
-      volume?: number | null;
       crossfade_ms?: number | null;
     },
   ) =>

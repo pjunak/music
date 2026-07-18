@@ -128,6 +128,7 @@ class WsClient {
       type: "register",
       name: deviceName ?? defaultDeviceName(),
       client_id: clientId,
+      protocol_version: 2,
     });
   }
 

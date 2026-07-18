@@ -177,20 +177,32 @@ class Reconciler:
         # unrelated state change (volume, device joins, ...).
         self._last_epoch: int | None = None
         self._meta_cache: dict[int, dict[str, Any]] = {}
+        self._has_state_this_connection = False
 
         self.local_on = local_on
+        # Hardware-local gain remains available for appliance setup, but the
+        # canonical software level comes from PlayerState.device_volumes.
         self.local_volume = clamp01(local_volume)
 
     # -- inputs ------------------------------------------------------------- #
 
-    def on_snapshot(self, state: dict[str, Any]) -> None:
+    def begin_connection(self) -> None:
         with self._lock:
-            self._state = state
-        self._reconcile()
+            self._has_state_this_connection = False
+
+    def on_snapshot(self, state: dict[str, Any]) -> None:
+        self.on_state(state)
 
     def on_state(self, state: dict[str, Any]) -> None:
         with self._lock:
+            current_revision = (self._state or {}).get("revision", 0)
+            if (
+                self._has_state_this_connection
+                and state.get("revision", 0) < current_revision
+            ):
+                return
             self._state = state
+            self._has_state_this_connection = True
         self._reconcile()
 
     def set_local(self, *, on: bool | None = None, volume: float | None = None) -> None:
@@ -200,6 +212,20 @@ class Reconciler:
             if volume is not None:
                 self.local_volume = clamp01(volume)
         self._reconcile()
+
+    def output_volume(self, event_volume: float = 1.0) -> float:
+        """Canonical server volume folded with optional hardware-local gain."""
+        with self._lock:
+            state = self._state or {}
+            local_volume = self.local_volume
+            client_id = self._client_id
+        volumes = state.get("device_volumes") or {}
+        if "default_device_volume" in state:
+            server_volume = volumes.get(client_id, state["default_device_volume"])
+        else:
+            # Old servers expose a global master and per-device trims.
+            server_volume = state.get("volume", 1.0) * volumes.get(client_id, 1.0)
+        return clamp01(event_volume) * clamp01(server_volume) * local_volume
 
     # -- core --------------------------------------------------------------- #
 
@@ -211,7 +237,6 @@ class Reconciler:
             state = self._state
             client_id = self._client_id
             local_on = self.local_on
-            volume = self.local_volume
         if state is None:
             return
 
@@ -232,7 +257,7 @@ class Reconciler:
         if self.respect_console:
             on = on and client_id in (state.get("active_output_device_ids") or [])
 
-        self.player.set_volume(volume)
+        self.player.set_volume(self.output_volume())
 
         if not on or track_id is None or not playing:
             # Keep the loaded file so flipping back on resumes instantly; only a
@@ -334,8 +359,14 @@ def run_ws(
     url = ws_url_for(server_url)
 
     def on_open(ws: websocket.WebSocketApp) -> None:
+        reconciler.begin_connection()
         ws.send(json.dumps(
-            {"type": "register", "name": name, "client_id": client_id}
+            {
+                "type": "register",
+                "name": name,
+                "client_id": client_id,
+                "protocol_version": 2,
+            }
         ))
         print(f"[ws] connected to {url}, registered as {name!r}", flush=True)
 
@@ -353,7 +384,7 @@ def run_ws(
             path = urllib.parse.quote(msg.get("item_path", ""))
             sfx.fire(
                 f"{reconciler.server_url}/api/sfx/file?path={path}",
-                clamp01(msg.get("volume", 1.0)) * reconciler.local_volume,
+                reconciler.output_volume(msg.get("volume", 1.0)),
             )
         elif kind == "error":
             print(f"[ws] server error: {msg.get('detail')}", flush=True)

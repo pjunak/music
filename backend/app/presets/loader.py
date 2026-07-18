@@ -7,8 +7,8 @@ models, effect-type validation, and the override resolver; the modes loader and
 modes API drive the actual per-mode loading + CRUD.
 
 Each preset declares an ordered effect chain the frontend applies in its Web
-Audio graph (the backend only tracks which are active); plus optional
-"when active" master-volume / crossfade overrides.
+Audio graph (the backend only tracks which are active), plus an optional
+"when active" crossfade override.
 """
 from __future__ import annotations
 
@@ -51,27 +51,20 @@ class PresetManifest(BaseModel):
     name: str
     description: str | None = None
     effects: list[EffectSpec] = Field(default_factory=list)
-    # Optional "when active" overrides applied on activation. None = leave that
-    # global alone. When several active presets set one, last-active wins.
-    volume: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Optional "when active" override. None leaves crossfade unchanged; when
+    # several active presets set one, last-active wins.
     crossfade_ms: int | None = Field(default=None, ge=0, le=60000)
 
 
-def effective_overrides(
+def effective_crossfade_ms(
     presets: dict[str, PresetManifest], preset_ids: list[str]
-) -> tuple[float | None, int | None]:
-    """Resolve the master-volume / crossfade overrides for a set of active
-    presets, looked up in `presets` (the active mode's preset map). Among the
-    active presets in order, the last one that defines a value wins. Returns
-    (volume, crossfade_ms), each None when no active preset sets it."""
-    volume: float | None = None
+) -> int | None:
+    """Resolve the last active preset's crossfade override, if any."""
     crossfade_ms: int | None = None
     for pid in preset_ids:
         p = presets.get(pid)
         if p is None:
             continue
-        if p.volume is not None:
-            volume = p.volume
         if p.crossfade_ms is not None:
             crossfade_ms = p.crossfade_ms
-    return volume, crossfade_ms
+    return crossfade_ms

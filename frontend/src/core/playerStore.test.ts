@@ -123,3 +123,74 @@ describe("selectActivePositionMs", () => {
     expect(selectActivePositionMs(usePlayerStore.getState())).toBe(3_000);
   });
 });
+
+describe("applyMessage revision ordering", () => {
+  it("ignores an older state_changed frame", () => {
+    usePlayerStore.getState().applyMessage({
+      type: "state_snapshot",
+      your_device_id: "",
+      state: makeState({ revision: 5, device_volumes: { "tv-1": 0.4 } }),
+    });
+    const receivedAt = usePlayerStore.getState().stateReceivedAt;
+
+    vi.advanceTimersByTime(1_000);
+    usePlayerStore.getState().applyMessage({
+      type: "state_changed",
+      state: makeState({ revision: 4, device_volumes: {} }),
+    });
+
+    expect(usePlayerStore.getState().state?.device_volumes["tv-1"]).toBe(0.4);
+    expect(usePlayerStore.getState().stateReceivedAt).toBe(receivedAt);
+  });
+
+  it("accepts an equal revision for presence-only changes", () => {
+    usePlayerStore.getState().applyMessage({
+      type: "state_snapshot",
+      your_device_id: "",
+      state: makeState({ revision: 5 }),
+    });
+    usePlayerStore.getState().applyMessage({
+      type: "state_changed",
+      state: makeState({
+        revision: 5,
+        connected_devices: [
+          { device_id: "tv-1", client_id: "tv-1", name: "TV", is_output: false },
+        ],
+      }),
+    });
+
+    expect(usePlayerStore.getState().state?.connected_devices).toHaveLength(1);
+  });
+
+  it("ignores an older snapshot after a delta in the same connection", () => {
+    usePlayerStore.getState().setStatus("connecting");
+    usePlayerStore.getState().applyMessage({
+      type: "state_changed",
+      state: makeState({ revision: 5, device_volumes: { "tv-1": 0.4 } }),
+    });
+    usePlayerStore.getState().applyMessage({
+      type: "state_snapshot",
+      your_device_id: "",
+      state: makeState({ revision: 4, device_volumes: {} }),
+    });
+
+    expect(usePlayerStore.getState().state?.revision).toBe(5);
+    expect(usePlayerStore.getState().state?.device_volumes["tv-1"]).toBe(0.4);
+  });
+
+  it("accepts a lower first frame after a new connection starts", () => {
+    usePlayerStore.getState().applyMessage({
+      type: "state_snapshot",
+      your_device_id: "",
+      state: makeState({ revision: 5 }),
+    });
+    usePlayerStore.getState().setStatus("connecting");
+    usePlayerStore.getState().applyMessage({
+      type: "state_snapshot",
+      your_device_id: "",
+      state: makeState({ revision: 1 }),
+    });
+
+    expect(usePlayerStore.getState().state?.revision).toBe(1);
+  });
+});

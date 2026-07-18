@@ -33,7 +33,7 @@ from app.sync import commit_and_broadcast
 from app.sync import loops as loops_manager
 from app.sync import state as state_module
 from app.sync.advancer import resolve_follow_next
-from app.sync.connection import guest_state_view, manager
+from app.sync.connection import manager
 from app.sync.devices import registry
 from app.sync.protocol import (
     AmbientClearQueueAction,
@@ -70,7 +70,6 @@ from app.sync.protocol import (
     SetVolumeAction,
     SfxFired,
     StartLoopAction,
-    StateSnapshot,
     StopLoopAction,
     action_adapter,
 )
@@ -199,8 +198,8 @@ async def _resolve_folder_track_ids(path: str) -> list[int]:
     return await run_in_threadpool(_work)
 
 
-async def _apply_and_broadcast(mutator: Any) -> None:
-    await commit_and_broadcast(mutator)
+async def _apply_and_broadcast(mutator: Any) -> tuple[bool, Any]:
+    return await commit_and_broadcast(mutator)
 
 
 # --- per-action handlers ---------------------------------------------------
@@ -227,19 +226,21 @@ async def _h_register(
     # simply appears in `connected_devices` for the operator to tick on (or save
     # as default-on in Settings).
     default_on = device_store.is_output(action.client_id)
+    manager.set_protocol_version(device_id, action.protocol_version)
     registry.bind(
         device_id,
         client_id=action.client_id,
         name=action.name,
         is_output=default_on,
     )
-    if default_on:
-        # Additive mutator avoids the snapshot→set_active_outputs race where a
-        # concurrent register's stale snapshot would clobber the other's id.
-        await _apply_and_broadcast(state_module.add_active_output(action.client_id))
-    else:
-        snap = await state_module.machine.snapshot()
-        await manager.broadcast_state(snap)
+    # Materialize the canonical per-device volume on first registration and
+    # atomically auto-activate default-on outputs. If this connection adds no
+    # playback state, still broadcast so connected_devices refreshes.
+    changed, _ = await _apply_and_broadcast(
+        state_module.register_device(action.client_id, activate=default_on)
+    )
+    if not changed:
+        await manager.broadcast_state()
 
 
 async def _h_position_report(
@@ -266,6 +267,8 @@ async def _h_position_report(
 async def _h_set_volume(
     action: SetVolumeAction, _device_id: str, _ws: WebSocket
 ) -> None:
+    # Compatibility for older clients. New clients expose only absolute
+    # per-device volume controls.
     await _apply_and_broadcast(state_module.set_volume(action.volume))
 
 
@@ -471,10 +474,10 @@ async def _h_set_active_presets(
     if unknown:
         await _send_error(websocket, f"unknown preset(s): {unknown}")
         return
-    volume, crossfade_ms = presets_loader.effective_overrides(loaded, action.preset_ids)
+    crossfade_ms = presets_loader.effective_crossfade_ms(loaded, action.preset_ids)
     await _apply_and_broadcast(
         state_module.set_active_presets(
-            action.preset_ids, volume=volume, crossfade_ms=crossfade_ms
+            action.preset_ids, crossfade_ms=crossfade_ms
         )
     )
 
@@ -667,12 +670,10 @@ async def _h_fire_cue(
     # All valid — apply. Preset first (so its crossfade override is in place
     # before the playlist swap reads it), then the playlist, then loops.
     if cue.preset is not None:
-        volume, crossfade_ms = presets_loader.effective_overrides(
-            mode.presets, [cue.preset]
-        )
+        crossfade_ms = presets_loader.effective_crossfade_ms(mode.presets, [cue.preset])
         await _apply_and_broadcast(
             state_module.set_active_presets(
-                [cue.preset], volume=volume, crossfade_ms=crossfade_ms
+                [cue.preset], crossfade_ms=crossfade_ms
             )
         )
     if track_ids is not None:
@@ -794,18 +795,13 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
 
     device = registry.add()
-    manager.add(device.connection_id, websocket, is_guest=is_guest)
-
-    # The snapshot goes out before the client's `register` (which carries the
-    # client_id), so the server can't name the device here. The client knows
-    # its own stable client_id and self-assigns identity — your_device_id stays
-    # empty (see StateSnapshot). Guests get a redacted view (no other devices'
-    # client_ids / global active set) — the snapshot is otherwise a free leak
-    # of the capability tokens that gate output activation and position reports.
-    snapshot_state = await state_module.machine.snapshot()
-    if is_guest:
-        snapshot_state = guest_state_view(snapshot_state, None)
-    await _send(websocket, StateSnapshot(state=snapshot_state))
+    # Socket visibility and its baseline are serialized with state broadcasts:
+    # no mutation can deliver a newer delta followed by an older snapshot.
+    await manager.add_with_snapshot(
+        device.connection_id,
+        websocket,
+        is_guest=is_guest,
+    )
 
     try:
         while True:

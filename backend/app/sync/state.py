@@ -35,6 +35,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.devices.store import device_store
 from app.domain import playback_state as playback_state_domain
 from app.sync.devices import registry
 from app.sync.protocol import (
@@ -258,6 +259,49 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
 
     out = dict(raw)
 
+    # Volume model migration: older state stored a global master plus sparse
+    # per-device trims. Fold those into absolute per-device levels and pin the
+    # legacy master field to unity so old clients do not attenuate twice.
+    def _unit_interval(value: Any, fallback: float = 1.0) -> float:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return fallback
+        return max(0.0, min(1.0, float(value)))
+
+    legacy_master = _unit_interval(out.get("volume"))
+    had_absolute_model = "default_device_volume" in out
+    default_volume = _unit_interval(out.get("default_device_volume"))
+    raw_volumes = out.get("device_volumes")
+    volumes = {
+        str(device_id): _unit_interval(value)
+        for device_id, value in (raw_volumes.items() if isinstance(raw_volumes, dict) else [])
+    }
+    if not had_absolute_model:
+        default_volume = legacy_master
+        volumes = {
+            device_id: _unit_interval(legacy_master * trim)
+            for device_id, trim in volumes.items()
+        }
+    elif abs(legacy_master - 1.0) > 1e-9:
+        # A pre-upgrade client may have written the legacy field between deploy
+        # and restart. Preserve its group-volume intent without reviving a
+        # second runtime gain.
+        default_volume = _unit_interval(default_volume * legacy_master)
+        volumes = {
+            device_id: _unit_interval(level * legacy_master)
+            for device_id, level in volumes.items()
+        }
+
+    known_device_ids = set(volumes)
+    active_ids = out.get("active_output_device_ids")
+    if isinstance(active_ids, list):
+        known_device_ids.update(str(device_id) for device_id in active_ids)
+    known_device_ids.update(str(device["client_id"]) for device in device_store.list())
+    for device_id in known_device_ids:
+        volumes.setdefault(device_id, default_volume)
+    out["volume"] = 1.0
+    out["default_device_volume"] = default_volume
+    out["device_volumes"] = volumes
+
     valid_track_ids = {row[0] for row in db.query(Track.id).all()}
 
     def _filter_track_id(value: Any) -> Any:
@@ -344,10 +388,37 @@ machine = StateMachine()
 
 
 def set_volume(volume: float) -> Any:
+    """Compatibility group-volume action for older clients.
+
+    Scale every absolute device level relative to the previous default. New
+    clients never send this action; they update a specific device directly.
+    """
+    target = max(0.0, min(1.0, volume))
+
     def _mut(state: PlayerState) -> PlayerState:
-        if state.volume == volume:
+        # Legacy connections are shown the largest absolute level as their
+        # master, which represents every device with a trim in 0..1. Scale
+        # against that same displayed value when set_volume comes back.
+        previous = max(
+            [state.default_device_volume, *state.device_volumes.values()],
+            default=state.default_device_volume,
+        )
+        if abs(previous - target) < 1e-9:
             return state
-        return state.model_copy(update={"volume": volume})
+        if previous > 1e-9:
+            scaled = {
+                device_id: max(0.0, min(1.0, level * target / previous))
+                for device_id, level in state.device_volumes.items()
+            }
+        else:
+            scaled = {device_id: target for device_id in state.device_volumes}
+        return state.model_copy(
+            update={
+                "volume": 1.0,
+                "default_device_volume": target,
+                "device_volumes": scaled,
+            }
+        )
 
     return _mut
 
@@ -436,23 +507,43 @@ def remove_active_output(device_id: str) -> Any:
     return _mut
 
 
+def register_device(device_id: str, *, activate: bool) -> Any:
+    """Materialize one device's canonical volume and optionally activate it.
+
+    Registration is the point at which a previously unseen client_id becomes a
+    concrete output installation. Keeping this atomic avoids separate volume
+    and activation broadcasts during reconnect.
+    """
+
+    def _mut(state: PlayerState) -> PlayerState:
+        update: dict[str, Any] = {}
+        if device_id not in state.device_volumes:
+            update["device_volumes"] = {
+                **state.device_volumes,
+                device_id: state.default_device_volume,
+            }
+        if activate and device_id not in state.active_output_device_ids:
+            update["active_output_device_ids"] = [
+                *state.active_output_device_ids,
+                device_id,
+            ]
+        if not update:
+            return state
+        return state.model_copy(update=update)
+
+    return _mut
+
+
 def set_device_volume(device_id: str, volume: float) -> Any:
-    """Set one device's per-device volume trim. Stored only when non-unity, so
-    a trim of 1.0 just drops the entry (the map stays small and "absent = 1.0"
-    stays the invariant). No-op when the value is unchanged."""
+    """Set one device's canonical absolute software volume."""
 
     v = max(0.0, min(1.0, volume))
 
     def _mut(state: PlayerState) -> PlayerState:
         cur = dict(state.device_volumes)
-        if abs(v - 1.0) < 1e-9:
-            if device_id not in cur:
-                return state
-            cur.pop(device_id, None)
-        else:
-            if cur.get(device_id) == v:
-                return state
-            cur[device_id] = v
+        if cur.get(device_id, state.default_device_volume) == v and device_id in cur:
+            return state
+        cur[device_id] = v
         return state.model_copy(update={"device_volumes": cur})
 
     return _mut
@@ -470,13 +561,9 @@ def set_active_soundboard(soundboard_id: str | None) -> Any:
 def set_active_presets(
     preset_ids: list[str],
     *,
-    volume: float | None = None,
     crossfade_ms: int | None = None,
 ) -> Any:
-    """Set the active preset list, and optionally apply the master-volume /
-    crossfade overrides those presets declare (resolved last-wins by the
-    caller via `presets.loader.effective_overrides`). A None override leaves
-    that global untouched — there's no auto-revert when a preset turns off."""
+    """Set the active preset list and optional crossfade override."""
 
     def _mut(state: PlayerState) -> PlayerState:
         # De-duplicate while preserving order.
@@ -487,8 +574,6 @@ def set_active_presets(
         update: dict[str, Any] = {}
         if list(state.active_preset_ids) != deduped:
             update["active_preset_ids"] = deduped
-        if volume is not None and volume != state.volume:
-            update["volume"] = volume
         if crossfade_ms is not None and crossfade_ms != state.crossfade_ms:
             update["crossfade_ms"] = crossfade_ms
         if not update:

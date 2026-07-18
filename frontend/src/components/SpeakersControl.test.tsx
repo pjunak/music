@@ -35,8 +35,11 @@ function seedAuthed(opts: { designated?: boolean; active?: boolean } = {}) {
   useUiStore.setState({ clientId: CID, deviceName: "DM", forceLocalPlayback: false });
   usePlayerStore.setState({
     myDeviceId: CID,
+    wsStatus: "connected",
     stateReceivedAt: 1,
     state: {
+      volume: 1,
+      default_device_volume: 1,
       active_output_device_ids: opts.active ? [CID] : [],
       device_volumes: {},
       connected_devices: [
@@ -78,8 +81,11 @@ describe("SpeakersControl", () => {
     useUiStore.setState({ clientId: CID, deviceName: "DM", forceLocalPlayback: false });
     usePlayerStore.setState({
       myDeviceId: CID,
+      wsStatus: "connected",
       stateReceivedAt: 1,
       state: {
+        volume: 1,
+        default_device_volume: 1,
         active_output_device_ids: [],
         device_volumes: {},
         connected_devices: [
@@ -117,6 +123,108 @@ describe("SpeakersControl", () => {
       device_id: CID,
       volume: 0.4,
     });
+  });
+
+  it("renders another device's canonical server volume", async () => {
+    seedAuthed({ designated: true });
+    usePlayerStore.setState((current) => ({
+      state: current.state
+        ? {
+            ...current.state,
+            device_volumes: { "tv-1": 0.4 },
+            connected_devices: [
+              ...current.state.connected_devices,
+              {
+                device_id: "tv-1",
+                client_id: "tv-1",
+                name: "Living Room TV",
+                is_output: true,
+              },
+            ],
+          }
+        : null,
+    }));
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    expect(screen.getByLabelText("Living Room TV volume")).toHaveValue("0.4");
+  });
+
+  it("renders and submits effective volume for a legacy server", async () => {
+    seedAuthed({ designated: true });
+    usePlayerStore.setState((current) => {
+      if (current.state === null) return { state: null };
+      const state = {
+        ...current.state,
+        volume: 0.2,
+        device_volumes: { [CID]: 0.5 },
+      };
+      delete state.default_device_volume;
+      return { state };
+    });
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    const slider = screen.getByLabelText("DM volume");
+    expect(slider).toHaveValue("0.1");
+
+    fireEvent.change(slider, { target: { value: "0.05" } });
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_device_volume",
+      device_id: CID,
+      volume: 0.25,
+    });
+  });
+
+  it("raises a legacy master and preserves other effective device levels", async () => {
+    seedAuthed({ designated: true });
+    usePlayerStore.setState((current) => {
+      if (current.state === null) return { state: null };
+      const state = {
+        ...current.state,
+        volume: 0.2,
+        device_volumes: { [CID]: 0.5, "tv-1": 1 },
+        connected_devices: [
+          ...current.state.connected_devices,
+          {
+            device_id: "tv-1",
+            client_id: "tv-1",
+            name: "TV",
+            is_output: true,
+          },
+        ],
+      };
+      delete state.default_device_volume;
+      return { state };
+    });
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+
+    fireEvent.change(screen.getByLabelText("DM volume"), {
+      target: { value: "0.8" },
+    });
+
+    expect(wsClient.send).toHaveBeenNthCalledWith(1, {
+      type: "set_volume",
+      volume: 0.8,
+    });
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_device_volume",
+      device_id: CID,
+      volume: 1,
+    });
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_device_volume",
+      device_id: "tv-1",
+      volume: 0.25,
+    });
+  });
+
+  it("disables device controls while disconnected", async () => {
+    seedAuthed({ designated: true });
+    usePlayerStore.setState({ wsStatus: "disconnected" });
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    expect(screen.getByRole("slider", { name: "DM volume" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "DM output" })).toBeDisabled();
   });
 
   it("marks this device with a subtle visual, not '(this)' text", async () => {

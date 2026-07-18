@@ -37,7 +37,13 @@ export function DiagnosticsView() {
   // Stable array selectors via the helper (a fresh `?? []` inside would loop
   // useSyncExternalStore — React #185). `?? null` below is fine: a primitive.
   const activeOutputs = usePlayerArray((s) => s.state?.active_output_device_ids);
-  const masterVolumeFromState = usePlayerStore((s) => s.state?.volume ?? null);
+  const deviceVolumeFromState = usePlayerStore((s) => {
+    if (s.state === null || s.myDeviceId === null) return null;
+    const stored = s.state.device_volumes[s.myDeviceId];
+    return s.state.default_device_volume === undefined
+      ? s.state.volume * (stored ?? 1)
+      : (stored ?? s.state.default_device_volume);
+  });
   const connectedDevices = usePlayerArray((s) => s.state?.connected_devices);
   const authStatus = useAuthStore((s) => s.status);
 
@@ -71,7 +77,7 @@ export function DiagnosticsView() {
     const payload = {
       ws: { status: wsStatus, myDeviceId, isMyOutput, activeOutputs },
       connectedDevices,
-      masterVolumeFromState,
+      deviceVolumeFromState,
       engine: playbackEngine.getDiagnostics(),
       ua: navigator.userAgent,
       timestamp: new Date().toISOString(),
@@ -206,15 +212,15 @@ export function DiagnosticsView() {
         <h3>Engine state</h3>
         <ul className="diagnostics-summary">
           <li>
-            <span className="muted small">Master volume (state)</span>
+            <span className="muted small">This device volume (state)</span>
             <strong>
-              {masterVolumeFromState === null
+              {deviceVolumeFromState === null
                 ? "(no state yet)"
-                : `${Math.round(masterVolumeFromState * 100)}%`}
+                : `${Math.round(deviceVolumeFromState * 100)}%`}
             </strong>
           </li>
           <li>
-            <span className="muted small">Master volume (engine)</span>
+            <span className="muted small">Engine output gain</span>
             <strong>{Math.round(diagnostics.masterVolume * 100)}%</strong>
           </li>
           <li>

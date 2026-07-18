@@ -16,7 +16,6 @@ import {
 import type { ModeOption } from "@/components/ModeCycleButton";
 import { ModeCycleButton } from "@/components/ModeCycleButton";
 import { SpeakersControl } from "@/components/SpeakersControl";
-import { VolumeControl } from "@/components/VolumeControl";
 import { libraryApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import {
@@ -98,21 +97,20 @@ const SHUFFLE_OPTIONS: ModeOption<ShuffleMode>[] = [
  *
  *  Three rows on the inside, but visually a single bar:
  *    1. Track meta (title / artist) on the left, transport buttons centred,
- *       volume on the right.
+ *       speaker/output control on the right.
  *    2. A wide, easy-to-grab scrub bar with elapsed/total clocks bracketing
  *       it. The scrub bar is the headline interactive element here — taller
  *       than the inline volume slider so the two read as different controls.
  *
  *  Since this bar is mounted on every route, every shortcut path through
  *  the app has playback / volume / seek without having to leave the
- *  current view. */
+ *  current view. Per-device volume lives in the Speakers popover. */
 export function NowPlayingBar() {
   const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
   const currentId = usePlayerStore((s) => s.state?.ambient.current_track_id ?? null);
   const interruptId = usePlayerStore(
     (s) => s.state?.interrupt?.current_track_id ?? null,
   );
-  const volume = usePlayerStore((s) => s.state?.volume ?? 1);
   const loop = usePlayerStore((s) => s.state?.ambient.loop ?? "off");
   const shuffle = usePlayerStore((s) => s.state?.ambient.shuffle ?? "off");
   const isGuest = useAuthStore((s) => s.status !== "authenticated");
@@ -224,10 +222,6 @@ export function NowPlayingBar() {
     }
   }
 
-  function onVolumeChange(next: number) {
-    wsClient.send({ type: "set_volume", volume: next });
-  }
-
   const seekable = totalMs > 0;
   const fraction = seekable ? Math.min(1, positionMs / totalMs) : 0;
   // `hasTrack` (computed above) disables transport when nothing's loaded —
@@ -314,14 +308,6 @@ export function NowPlayingBar() {
 
         <div className="now-playing-right">
           <SpeakersControl />
-          <VolumeControl
-            value={volume}
-            onChange={onVolumeChange}
-            label="Master volume"
-            className="now-playing-volume"
-            readOnly={isGuest}
-            readOnlyTitle="Master volume — sign in to change"
-          />
         </div>
       </div>
 

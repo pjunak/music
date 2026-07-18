@@ -21,7 +21,14 @@ def _reset_sync_state():
 
 
 def _register(ws, name: str, client_id: str) -> None:
-    ws.send_json({"type": "register", "name": name, "client_id": client_id})
+    ws.send_json(
+        {
+            "type": "register",
+            "name": name,
+            "client_id": client_id,
+            "protocol_version": 2,
+        }
+    )
 
 
 def test_list_requires_auth(client: TestClient) -> None:
