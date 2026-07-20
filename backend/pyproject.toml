@@ -30,7 +30,7 @@ dev = [
     # TestClient transport for starlette 1.x (successor of classic httpx).
     "httpx2==2.5.0",
     "ruff==0.15.20",
-    "mypy==2.2.0",
+    "mypy==2.3.0",
     "types-pyyaml==6.0.12.20260518",
 ]
 
