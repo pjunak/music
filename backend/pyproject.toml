@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Self-hosted music player and DnD session orchestrator — backend"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi==0.139.0",
+    "fastapi==0.139.2",
     # Was held below 1.0 while `httpx2` (the 1.x TestClient transport) looked
     # like a possible typosquat. Hold lifted 2026-07: httpx2 is the official
     # successor — authored by Tom Christie (httpx's creator), hosted under
