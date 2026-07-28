@@ -479,6 +479,10 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
         liveSaveTimer.current = null;
       }
       setLiveSaveState("idle");
+      wsClient.send({
+        type: "set_active_presets",
+        preset_ids: activePresetIds.filter((id) => id !== presetId),
+      });
       return;
     }
     if (!activePresetIds.includes(presetId)) {

@@ -37,7 +37,7 @@ beforeEach(() => {
   usePlayerStore.setState({
     state: {
       active_mode_id: "dnd",
-      active_preset_ids: [],
+      active_preset_ids: ["hall"],
     } as unknown as PlayerState,
   });
 });
@@ -54,7 +54,7 @@ describe("Preset live tuning", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Live tuning" }));
     expect(wsClient.send).toHaveBeenCalledWith({
       type: "set_active_presets",
-      preset_ids: ["cave"],
+      preset_ids: ["hall", "cave"],
     });
     await waitFor(() => expect(presetsAdminApi.update).toHaveBeenCalledTimes(1));
 
@@ -68,5 +68,11 @@ describe("Preset live tuning", () => {
       expect.objectContaining({ effects: [] }),
     );
     expect(screen.getByRole("status")).toHaveTextContent("Applied");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Live tuning" }));
+    expect(wsClient.send).toHaveBeenLastCalledWith({
+      type: "set_active_presets",
+      preset_ids: ["hall"],
+    });
   });
 });
