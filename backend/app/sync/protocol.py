@@ -405,6 +405,10 @@ class PlayerState(BaseModel):
     device_volumes: dict[str, float] = Field(default_factory=dict)
     active_soundboard_id: str | None = None
     active_preset_ids: list[str] = Field(default_factory=list)
+    # Dedicated cache invalidation counter for preset manifests. Active
+    # outputs fetch manifests over HTTP, while playback state carries only
+    # their ids; authoring writes bump this even when the id list is unchanged.
+    preset_revision: int = 0
 
     crossfade_ms: int = 0
     crossfade_type: CrossfadeType = "linear"

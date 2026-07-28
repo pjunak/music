@@ -2963,6 +2963,30 @@ kbd,
   gap: var(--space-2);
   flex-wrap: wrap;
 }
+.live-tuning-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.live-tuning-control.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.live-tuning-control.active > .small {
+  color: var(--accent-strong);
+}
+.live-tuning-toggle > input:checked + .switch-track {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.live-tuning-toggle > input:checked + .switch-track::after {
+  background: var(--accent-strong);
+}
 .playlist-meta-editor {
   display: flex;
   flex-direction: column;

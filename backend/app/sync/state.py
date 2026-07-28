@@ -583,6 +583,32 @@ def set_active_presets(
     return _mut
 
 
+def presets_changed(
+    *,
+    active_preset_ids: list[str] | None = None,
+    crossfade_ms: int | None = None,
+) -> Any:
+    """Invalidate cached preset manifests on every connected output.
+
+    HTTP preset authoring changes content without changing the active preset
+    ids, so the ordinary state revision is not a useful cache key (it also
+    changes for unrelated playback actions). This dedicated counter lets
+    clients refetch exactly when preset content changes. Callers may also
+    prune deleted active ids and refresh a newly-edited crossfade override in
+    the same canonical mutation.
+    """
+
+    def _mut(state: PlayerState) -> PlayerState:
+        update: dict[str, Any] = {"preset_revision": state.preset_revision + 1}
+        if active_preset_ids is not None:
+            update["active_preset_ids"] = list(active_preset_ids)
+        if crossfade_ms is not None:
+            update["crossfade_ms"] = crossfade_ms
+        return state.model_copy(update=update)
+
+    return _mut
+
+
 def start_loop(loop: LoopingSfx) -> Any:
     """Add (or replace, by id) a looping SFX entry. The actual interval timer
     is owned by `sync/loops.py` — this only records it in the broadcast state

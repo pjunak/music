@@ -1,13 +1,17 @@
+import asyncio
+import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, OptionalUser
 from app.core.config import get_settings
 from app.modes import loader as modes_loader
 from app.modes.loader import (
@@ -17,11 +21,16 @@ from app.modes.loader import (
     ModeManifest,
     SoundboardManifest,
 )
-from app.presets.loader import SUPPORTED_EFFECT_TYPES, PresetManifest
+from app.presets.loader import (
+    SUPPORTED_EFFECT_TYPES,
+    PresetManifest,
+    effective_crossfade_ms,
+)
 from app.sync import commit_and_broadcast
 from app.sync import state as sync_state
 
 router = APIRouter(prefix="/api/modes", tags=["modes"])
+_preset_write_lock = asyncio.Lock()
 
 # Slugs are filesystem dirnames / filenames; constrain conservatively.
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -67,8 +76,22 @@ def _mode_dir_or_404(mode_id: str) -> Path:
 
 
 def _write_yaml(path: Path, payload: dict) -> None:
+    """Atomically replace a YAML document in its destination directory."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    fd, temp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", text=True
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as temp_file:
+            yaml.safe_dump(payload, temp_file, sort_keys=False)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _merge_partial(target: dict, payload: BaseModel) -> None:
@@ -189,8 +212,12 @@ async def set_active_mode(payload: SetActiveModeRequest, _: CurrentUser) -> Acti
 
 
 @router.post("/reload", response_model=ReloadResult)
-def reload_modes(_: CurrentUser) -> ReloadResult:
-    result = modes_loader.load_all()
+async def reload_modes(_: CurrentUser) -> ReloadResult:
+    async with _preset_write_lock:
+        result = await run_in_threadpool(modes_loader.load_all)
+        state = await sync_state.machine.snapshot()
+        if state.active_mode_id is not None:
+            await _broadcast_preset_change(state.active_mode_id)
     return ReloadResult(loaded=list(result.loaded.keys()), errors=result.errors)
 
 
@@ -211,7 +238,10 @@ def get_mode(mode_id: str, _: CurrentUser) -> ModeDetail:
 
 
 @router.get("/{mode_id}/presets", response_model=list[PresetManifest])
-def list_mode_presets(mode_id: str, _: CurrentUser) -> list[PresetManifest]:
+def list_mode_presets(mode_id: str, _: OptionalUser) -> list[PresetManifest]:
+    # Active browser outputs may be read-only guests. They need the effect
+    # manifests to render canonical playback, but all preset mutations remain
+    # authenticated below.
     manifest = modes_loader.get_mode(mode_id)
     if manifest is None:
         raise HTTPException(
@@ -810,15 +840,43 @@ def _preset_yaml(preset_id: str, body: PresetBody) -> dict:
 def _save_preset_yaml(
     path: Path, payload: dict, mode_id: str, preset_id: str
 ) -> PresetManifest:
+    # Validate the exact document before replacing the known-good file. This
+    # keeps a malformed authoring request from poisoning the on-disk mode.
+    candidate = PresetManifest.model_validate(payload)
+    for effect in candidate.effects:
+        effect.validate_type()
     _write_yaml(path, payload)
-    modes_loader.load_all()
-    manifest = modes_loader.get_mode(mode_id)
-    if manifest is None or preset_id not in manifest.presets:
+    try:
+        manifest = modes_loader.reload_mode(mode_id)
+    except (FileNotFoundError, ValueError, yaml.YAMLError) as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="preset saved but failed to reload",
+            detail=f"preset saved but mode failed to reload: {exc}",
+        ) from exc
+    if preset_id not in manifest.presets:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="preset saved but missing after reload",
         )
     return manifest.presets[preset_id]
+
+
+async def _broadcast_preset_change(mode_id: str) -> None:
+    """Invalidate manifests and reconcile active ids after an authoring write."""
+
+    state = await sync_state.machine.snapshot()
+    if state.active_mode_id != mode_id:
+        return
+    mode = modes_loader.get_mode(mode_id)
+    loaded = mode.presets if mode is not None else {}
+    active_ids = [preset_id for preset_id in state.active_preset_ids if preset_id in loaded]
+    crossfade_ms = effective_crossfade_ms(loaded, active_ids)
+    await commit_and_broadcast(
+        sync_state.presets_changed(
+            active_preset_ids=active_ids,
+            crossfade_ms=crossfade_ms,
+        )
+    )
 
 
 @router.post(
@@ -826,54 +884,70 @@ def _save_preset_yaml(
     response_model=PresetManifest,
     status_code=status.HTTP_201_CREATED,
 )
-def create_preset(
+async def create_preset(
     mode_id: str, payload: CreatePresetRequest, _: CurrentUser
 ) -> PresetManifest:
     _validate_slug(payload.id, "preset")
     _validate_effect_types(payload.effects)
     mode_dir = _mode_dir_or_404(mode_id)
     preset_path = mode_dir / "presets" / f"{payload.id}.yaml"
-    if preset_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"preset '{payload.id}' already exists in mode '{mode_id}'",
+    async with _preset_write_lock:
+        if preset_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"preset '{payload.id}' already exists in mode '{mode_id}'",
+            )
+        saved = await run_in_threadpool(
+            _save_preset_yaml,
+            preset_path,
+            _preset_yaml(payload.id, payload),
+            mode_id,
+            payload.id,
         )
-    return _save_preset_yaml(
-        preset_path, _preset_yaml(payload.id, payload), mode_id, payload.id
-    )
+        await _broadcast_preset_change(mode_id)
+    return saved
 
 
 @router.put("/{mode_id}/presets/{preset_id}", response_model=PresetManifest)
-def update_preset(
+async def update_preset(
     mode_id: str, preset_id: str, payload: PresetBody, _: CurrentUser
 ) -> PresetManifest:
     _validate_slug(preset_id, "preset")
     _validate_effect_types(payload.effects)
     mode_dir = _mode_dir_or_404(mode_id)
     preset_path = mode_dir / "presets" / f"{preset_id}.yaml"
-    if not preset_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"preset '{preset_id}' not found in mode '{mode_id}'",
+    async with _preset_write_lock:
+        if not preset_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"preset '{preset_id}' not found in mode '{mode_id}'",
+            )
+        saved = await run_in_threadpool(
+            _save_preset_yaml,
+            preset_path,
+            _preset_yaml(preset_id, payload),
+            mode_id,
+            preset_id,
         )
-    return _save_preset_yaml(
-        preset_path, _preset_yaml(preset_id, payload), mode_id, preset_id
-    )
+        await _broadcast_preset_change(mode_id)
+    return saved
 
 
 @router.delete(
     "/{mode_id}/presets/{preset_id}", status_code=status.HTTP_204_NO_CONTENT
 )
-def delete_preset(mode_id: str, preset_id: str, _: CurrentUser) -> None:
+async def delete_preset(mode_id: str, preset_id: str, _: CurrentUser) -> None:
     _validate_slug(preset_id, "preset")
     mode_dir = _mode_dir_or_404(mode_id)
     preset_path = mode_dir / "presets" / f"{preset_id}.yaml"
-    if not preset_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"preset '{preset_id}' not found",
-        )
-    preset_path.unlink()
-    modes_loader.load_all()
+    async with _preset_write_lock:
+        if not preset_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"preset '{preset_id}' not found",
+            )
+        await run_in_threadpool(preset_path.unlink)
+        await run_in_threadpool(modes_loader.reload_mode, mode_id)
+        await _broadcast_preset_change(mode_id)
 
 

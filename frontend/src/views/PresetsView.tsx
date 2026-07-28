@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
@@ -14,9 +14,10 @@ import { modesAdminApi, presetsAdminApi, presetsApi } from "@/core/api";
 import type { PresetEffect, PresetManifest } from "@/core/api";
 import { defaultEqBands, normalizeEqBands } from "@/core/eq";
 import type { EqBand } from "@/core/eq";
-import { usePlayerStore } from "@/core/playerStore";
+import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
+import { wsClient } from "@/core/ws";
 
 // Per-effect-type UI: a friendly label, a one-line blurb, and a control schema
 // for each numeric param. Param KEYS must match what the audio engine reads
@@ -141,6 +142,19 @@ function buildEffectState(effects: PresetEffect[]): Record<string, Record<string
     }
   }
   return state;
+}
+
+function composeEffectChain(
+  activeTypes: Set<string>,
+  effectState: Record<string, Record<string, unknown>>,
+  extraEffects: PresetEffect[],
+): PresetEffect[] {
+  const ordered = ADDABLE.filter((a) => activeTypes.has(a.type)).map((a) =>
+    a.type === "eq"
+      ? ({ type: "eq", bands: effectState.eq.bands as EqBand[] } as PresetEffect)
+      : ({ type: a.type, ...effectState[a.type] } as PresetEffect),
+  );
+  return [...ordered, ...extraEffects];
 }
 
 const buildActiveTypes = (effects: PresetEffect[]): Set<string> =>
@@ -287,6 +301,7 @@ export function PresetsView() {
           />
         ) : selected !== null ? (
           <PresetForm
+            key={selected.id}
             modeId={activeModeId}
             mode="edit"
             preset={selected}
@@ -338,11 +353,37 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
   const [crossfadeOn, setCrossfadeOn] = useState(preset?.crossfade_ms != null);
   const [crossfadeMs, setCrossfadeMs] = useState(preset?.crossfade_ms ?? 2000);
   const [busy, setBusy] = useState(false);
+  const [liveTuning, setLiveTuning] = useState(false);
+  const [liveSaveState, setLiveSaveState] = useState<
+    "idle" | "pending" | "saving" | "applied" | "error"
+  >("idle");
+  const activePresetIds = usePlayerArray((s) => s.state?.active_preset_ids);
+  const liveSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveVersion = useRef(0);
+  const liveErrorToasted = useRef(false);
 
   // Id is the on-disk slug — fixed in edit, derived from the name on create
   // (the operator never types it).
   const presetId =
     mode === "edit" ? (preset?.id ?? "") : uniqueSlug(name, existingIds, "preset");
+  const composedEffects = useMemo(
+    () => composeEffectChain(activeTypes, effectState, extraEffects),
+    [activeTypes, effectState, extraEffects],
+  );
+  const livePayload = useMemo<Parameters<typeof presetsAdminApi.update>[2]>(() => {
+    const payload: Parameters<typeof presetsAdminApi.update>[2] = {
+      name: name.trim(),
+      effects: composedEffects,
+      crossfade_ms: crossfadeOn ? crossfadeMs : null,
+    };
+    const desc = description.trim();
+    if (desc) payload.description = desc;
+    return payload;
+  }, [composedEffects, crossfadeMs, crossfadeOn, description, name]);
+  const livePayloadRef = useRef(livePayload);
+  useEffect(() => {
+    livePayloadRef.current = livePayload;
+  }, [livePayload]);
 
   useEffect(() => {
     if (mode === "edit" && preset) {
@@ -355,6 +396,49 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
       setCrossfadeMs(preset.crossfade_ms ?? 2000);
     }
   }, [mode, preset]);
+
+  // Live tuning persists the latest draft at a short throttle interval. The
+  // server bumps PlayerState.preset_revision after each write, so every active
+  // output refetches and rebuilds its effect chain even though the preset id
+  // itself did not change.
+  useEffect(() => {
+    if (!liveTuning || mode !== "edit" || !presetId || !name.trim()) return;
+    liveVersion.current += 1;
+    setLiveSaveState("pending");
+    if (liveSaveTimer.current !== null) return;
+    liveSaveTimer.current = setTimeout(() => {
+      liveSaveTimer.current = null;
+      const requestVersion = liveVersion.current;
+      setLiveSaveState("saving");
+      void presetsAdminApi
+        .update(modeId, presetId, livePayloadRef.current)
+        .then(() => {
+          if (requestVersion === liveVersion.current) {
+            setLiveSaveState("applied");
+          }
+          liveErrorToasted.current = false;
+        })
+        .catch((err: unknown) => {
+          if (requestVersion === liveVersion.current) {
+            setLiveSaveState("error");
+          }
+          if (!liveErrorToasted.current) {
+            toast.error(
+              "Live tuning failed",
+              err instanceof Error ? err.message : undefined,
+            );
+            liveErrorToasted.current = true;
+          }
+        });
+    }, 100);
+  }, [livePayload, liveTuning, mode, modeId, name, presetId]);
+
+  useEffect(
+    () => () => {
+      if (liveSaveTimer.current !== null) clearTimeout(liveSaveTimer.current);
+    },
+    [],
+  );
 
   function toggleEffect(type: string) {
     setActiveTypes((s) => {
@@ -387,28 +471,34 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
     setExtraEffects((es) => es.filter((_, i) => i !== idx));
   }
 
-  // Compose the saved chain: enabled modules in canonical order, then any
-  // preserved unsupported effects.
-  function composeEffects(): PresetEffect[] {
-    const ordered = ADDABLE.filter((a) => activeTypes.has(a.type)).map((a) =>
-      a.type === "eq"
-        ? ({ type: "eq", bands: effectState.eq.bands as EqBand[] } as PresetEffect)
-        : ({ type: a.type, ...effectState[a.type] } as PresetEffect),
-    );
-    return [...ordered, ...extraEffects];
+  function toggleLiveTuning(checked: boolean) {
+    setLiveTuning(checked);
+    if (!checked) {
+      if (liveSaveTimer.current !== null) {
+        clearTimeout(liveSaveTimer.current);
+        liveSaveTimer.current = null;
+      }
+      setLiveSaveState("idle");
+      return;
+    }
+    if (!activePresetIds.includes(presetId)) {
+      wsClient.send({
+        type: "set_active_presets",
+        preset_ids: [...activePresetIds, presetId],
+      });
+    }
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
-    const effects = composeEffects();
     try {
       if (mode === "create") {
         const payload: Parameters<typeof presetsAdminApi.create>[1] = {
           id: presetId,
           name: name.trim(),
-          effects,
+          effects: composedEffects,
           crossfade_ms: crossfadeOn ? crossfadeMs : null,
         };
         const desc = description.trim();
@@ -418,7 +508,7 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
       } else {
         const payload: Parameters<typeof presetsAdminApi.update>[2] = {
           name: name.trim(),
-          effects,
+          effects: composedEffects,
           crossfade_ms: crossfadeOn ? crossfadeMs : null,
         };
         const desc = description.trim();
@@ -457,6 +547,28 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
         <h2>{mode === "create" ? "New preset" : preset?.name}</h2>
         {mode === "edit" ? (
           <div className="playlist-detail-actions">
+            <div
+              className={`live-tuning-control${liveTuning ? " active" : ""}`}
+              title="Auto-save changes and apply them to every active output"
+            >
+              <Switch
+                className="live-tuning-toggle"
+                checked={liveTuning}
+                onChange={(e) => toggleLiveTuning(e.target.checked)}
+                label="Live tuning"
+              />
+              <span className="muted small" role="status" aria-live="polite">
+                {liveSaveState === "pending"
+                  ? "Queued"
+                  : liveSaveState === "saving"
+                    ? "Applying…"
+                    : liveSaveState === "applied"
+                      ? "Applied"
+                      : liveSaveState === "error"
+                        ? "Retry on next change"
+                        : "Auto-save & apply"}
+              </span>
+            </div>
             <IconButton
               label="Delete preset"
               icon={<TrashIcon />}

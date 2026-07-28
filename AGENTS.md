@@ -154,6 +154,9 @@ Runtime data lives outside the image.
 - Authored IDs are derived with `uniqueSlug`; do not add manual ID fields.
 - Preset effect types must stay aligned across backend validation, editor UI,
   frontend types, and the playback-engine switch.
+- Effect-aware outputs cache manifests by active mode/id and must invalidate
+  them when `PlayerState.preset_revision` changes. The guest-readable preset
+  list is an output surface; keep mutations authenticated.
 - Graphic EQ band definitions and response math live in `frontend/src/core/eq.ts`
   and are shared by the engine and editor visualization.
 - Presets may override crossfade; they do not override output volume.

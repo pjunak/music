@@ -85,6 +85,8 @@ following state. Reconnect on close and repeat from step 2.
 | `ambient.queue` / `ambient.history` | What's next / previous (only needed if you show a queue) |
 | `interrupt` | `null`, or an object `{ current_track_id, position_ms, … }` that **takes over** while present (alerts/stingers) |
 | `active_output_device_ids` | The device ids the operator has switched **on** |
+| `active_preset_ids` | Ordered effect-preset ids applied to ambient music; simple `<audio>` outputs may ignore these |
+| `preset_revision` | Bumped when stored preset content changes; effect-aware outputs must refetch active manifests even when their ids are unchanged |
 
 ### Deciding what to play
 
@@ -122,6 +124,7 @@ clock; position reports from outputs are optional drift corrections on top.
 | Audio stream | `GET /api/library/tracks/{id}/stream` | guest OK |
 | Cover art | `GET /api/library/tracks/{id}/cover` | guest OK |
 | Track metadata (title/artist/length…) | `GET /api/library/tracks/{id}` | guest OK |
+| EQ preset manifests | `GET /api/modes/{mode_id}/presets` | guest OK (needed by effect-aware outputs) |
 | SFX clip | `GET /api/sfx/file?path=<rel>` | guest OK (must be a path referenced by a loaded soundboard) |
 
 ## SFX events

@@ -93,6 +93,9 @@ export interface PlayerState {
   device_volumes: Record<string, number>;
   active_soundboard_id: string | null;
   active_preset_ids: string[];
+  /** Bumped when stored preset content changes so outputs invalidate their
+   *  manifest cache even when the active preset ids stay the same. */
+  preset_revision?: number;
   crossfade_ms: number;
   crossfade_type: string;
   ambient: AmbientState;

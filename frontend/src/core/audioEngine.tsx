@@ -97,12 +97,15 @@ export function AudioEngine() {
     const cache = new Map<string, PresetManifest>();
     let isMine = false;
     let cacheModeId: string | null = null;
+    let syncGeneration = 0;
 
     let toastedError = false;
     async function syncPresets(
       modeId: string | null,
       activeIds: string[],
+      forceRefresh: boolean,
     ): Promise<void> {
+      const generation = ++syncGeneration;
       // Presets are per-mode — drop the cache when the mode changes so ids
       // from the previous mode can't leak in.
       if (modeId !== cacheModeId) {
@@ -110,13 +113,15 @@ export function AudioEngine() {
         cacheModeId = modeId;
       }
       const missing = activeIds.filter((id) => !cache.has(id));
-      if (missing.length > 0 && modeId !== null) {
+      if ((forceRefresh || missing.length > 0) && modeId !== null) {
         try {
           const all = await presetsApi.list(modeId);
+          if (generation !== syncGeneration) return;
           cache.clear();
           for (const m of all) cache.set(m.id, m);
           toastedError = false;
         } catch (err) {
+          if (generation !== syncGeneration) return;
           // Surface once per consecutive failure run so the operator
           // notices that the active preset chain stopped tracking
           // server changes (otherwise this only ended up in console).
@@ -139,16 +144,20 @@ export function AudioEngine() {
     }
 
     let lastSig = "";
+    let lastPresetRevision = 0;
     const recompute = () => {
       const s = usePlayerStore.getState();
       if (s.state === null) return;
       isMine = isThisDevicePlaying();
       const modeId = s.state.active_mode_id;
       const ids = s.state.active_preset_ids;
-      const sig = `${isMine ? "1" : "0"}|${modeId ?? ""}|${ids.join(",")}`;
+      const presetRevision = s.state.preset_revision ?? 0;
+      const sig = `${isMine ? "1" : "0"}|${modeId ?? ""}|${ids.join(",")}|${presetRevision}`;
       if (sig === lastSig) return;
+      const forceRefresh = lastSig !== "" && presetRevision !== lastPresetRevision;
       lastSig = sig;
-      void syncPresets(modeId, ids);
+      lastPresetRevision = presetRevision;
+      void syncPresets(modeId, ids, forceRefresh);
     };
     const unsubPlayer = usePlayerStore.subscribe(recompute);
     const unsubUi = useUiStore.subscribe((s, prev) => {

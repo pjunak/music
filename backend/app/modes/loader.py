@@ -260,6 +260,29 @@ def load_all() -> LoadResult:
     return result
 
 
+def reload_mode(mode_id: str) -> ModeManifest:
+    """Reload one mode and atomically replace only its registry entry.
+
+    Authoring writes use this instead of rescanning every mode. Besides being
+    cheaper for rapid preset tuning, a parse error in an unrelated mode can no
+    longer make that mode disappear from the in-memory registry as a side
+    effect of saving this one.
+    """
+
+    global _modes
+    mode_dir = (get_settings().modes_dir.resolve() / mode_id).resolve()
+    manifest = _load_one(mode_dir)
+    if manifest.id != mode_id:
+        raise ValueError(
+            f"mode id '{manifest.id}' does not match requested mode '{mode_id}'"
+        )
+    with _lock:
+        updated = dict(_modes)
+        updated[mode_id] = manifest
+        _modes = updated
+    return manifest
+
+
 def all_modes() -> dict[str, ModeManifest]:
     return dict(_modes)
 

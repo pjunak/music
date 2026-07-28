@@ -25,6 +25,12 @@ def test_presets_appear_in_mode_detail(auth_client: TestClient) -> None:
     assert detail["presets"]["cave"]["effects"][0]["type"] == "reverb"
 
 
+def test_guest_output_can_read_preset_manifests(client: TestClient) -> None:
+    response = client.get("/api/modes/dnd/presets")
+    assert response.status_code == 200
+    assert any(preset["id"] == "cave" for preset in response.json())
+
+
 def test_create_preset_writes_yaml(auth_client: TestClient) -> None:
     r = auth_client.post(
         "/api/modes/dnd/presets",
@@ -107,12 +113,61 @@ def test_update_preset_replaces_effects(auth_client: TestClient) -> None:
     assert r.json()["effects"][0]["type"] == "highpass"
 
 
+def test_update_active_preset_broadcasts_manifest_revision(
+    auth_client: TestClient,
+) -> None:
+    """An unchanged active id must still invalidate output manifest caches."""
+
+    with auth_client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+        ws.send_json({"type": "set_active_presets", "preset_ids": ["cave"]})
+        active = ws.receive_json()["state"]
+
+        response = auth_client.put(
+            "/api/modes/dnd/presets/cave",
+            json={
+                "name": "Cave",
+                "effects": [{"type": "lowpass", "frequency": 432}],
+            },
+        )
+        assert response.status_code == 200, response.text
+
+        changed = ws.receive_json()["state"]
+        assert changed["active_preset_ids"] == ["cave"]
+        assert changed["preset_revision"] == active["preset_revision"] + 1
+        assert response.json()["effects"][0]["frequency"] == 432
+
+
 def test_delete_preset_removes_file(auth_client: TestClient) -> None:
     auth_client.post("/api/modes/dnd/presets", json={"id": "delp", "name": "Doomed"})
     assert auth_client.delete("/api/modes/dnd/presets/delp").status_code == 204
     presets_dir = Path(os.environ["MODES_DIR"]) / "dnd" / "presets"
     assert not (presets_dir / "delp.yaml").exists()
     assert "delp" not in auth_client.get("/api/modes/dnd").json()["presets"]
+
+
+def test_delete_active_preset_prunes_canonical_state(auth_client: TestClient) -> None:
+    auth_client.post(
+        "/api/modes/dnd/presets",
+        json={"id": "active-delete", "name": "Active delete", "effects": []},
+    )
+    with auth_client.websocket_connect("/api/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "set_active_mode", "mode_id": "dnd"})
+        ws.receive_json()
+        ws.send_json(
+            {"type": "set_active_presets", "preset_ids": ["cave", "active-delete"]}
+        )
+        active = ws.receive_json()["state"]
+
+        response = auth_client.delete("/api/modes/dnd/presets/active-delete")
+        assert response.status_code == 204
+
+        changed = ws.receive_json()["state"]
+        assert changed["active_preset_ids"] == ["cave"]
+        assert changed["preset_revision"] == active["preset_revision"] + 1
 
 
 def test_preset_crossfade_roundtrip_and_apply(auth_client: TestClient) -> None:
