@@ -19,7 +19,7 @@ sudo apt update && sudo apt install -y python3 python3-pip mpv libmpv2   # older
 # 2. the client + its python deps
 sudo mkdir -p /opt/music-output
 sudo cp music_output.py /opt/music-output/
-sudo pip3 install -r requirements.txt        # or: pip3 install --user websocket-client python-mpv
+sudo pip3 install -r requirements.txt
 ```
 
 ## Run it once to test
