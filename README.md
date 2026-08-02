@@ -156,7 +156,7 @@ clients/   The documented guest output protocol + a reference headless appliance
 ## Tech stack
 
 FastAPI · SQLAlchemy 2.0 · Pydantic · argon2 · mutagen — React · TypeScript · Vite · Zustand ·
-Web Audio API. Packaged as a multi-stage Docker image (`node:20-alpine` build → `python:3.12-slim`
+Web Audio API. Packaged as a multi-stage Docker image (`node:26-alpine` build → `python:3.12-slim`
 runtime).
 
 [mutagen]: https://mutagen.readthedocs.io/
