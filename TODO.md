@@ -5,11 +5,6 @@ deleted here — no strikethrough graveyard.
 
 ## Near-term
 
-- **Dependabot: ignore TypeScript 7.x** — comment `@dependabot ignore this
-  major version` on the open typescript-7 PR. typescript-eslint (every release
-  channel, canary included) peer-caps `typescript <6.1.0` and its parser
-  crashes under TS 7. Revisit when typescript-eslint declares support; until
-  then TS stays pinned at 6.0.3.
 - **Delete the SPA stall backstop** — `maybeAdvanceAtEnd` / `endStallTime` /
   `ADVANCE_DEBOUNCE_MS` in `frontend/src/core/playbackEngine.ts`, once the
   server-side advancer (`app/sync/advancer.py`) has soaked in production for a
