@@ -1,0 +1,7 @@
+usePlayerStore((state) => state.state?.value ?? []);
+useUiStore((state) => ({ first: state.first, second: state.second }));
+useStore((_state) => []);
+useDiagnosticsStore((state) => state.list || {});
+usePlayerStore((state) => {
+  return state.state?.value ?? [];
+});

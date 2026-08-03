@@ -1,0 +1,12 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "off"
+  },
+  "jsPlugins": [
+    "./local-plugin.js"
+  ],
+  "rules": {
+    "local/stable-store-selector": "error"
+  }
+}

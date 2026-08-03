@@ -1,20 +1,14 @@
 /**
- * Custom ESLint rule: `local/stable-store-selector`.
+ * Custom lint rule: `local/stable-store-selector`.
  *
  * Flags zustand selectors that return a freshly-built array/object on every
  * call — the exact footgun that loops `useSyncExternalStore` to React #185
  * ("Maximum update depth exceeded") when the underlying state is null:
  *
- *     usePlayerStore((s) => s.state?.x ?? [])     // ← fresh [] each call
- *     useUiStore((s) => ({ a: s.a, b: s.b }))     // ← fresh {} each call
+ *     usePlayerStore((s) => s.state?.x ?? [])     // fresh [] each call
+ *     useUiStore((s) => ({ a: s.a, b: s.b }))     // fresh {} each call
  *
- * The fix is to default OUTSIDE the selector (return the raw ref / a primitive,
- * apply `?? []` after the call) or wrap with `useShallow`. See the comment in
- * PlayerView.tsx and CLAUDE.md ("Stable zustand selectors").
- *
- * Precision over recall: we only flag the two unambiguous cases (a literal, or
- * a `??`/`||` whose default is a literal). A `useShallow(...)` first arg is a
- * CallExpression, not an arrow, so the safe shallow-equality pattern is allowed.
+ * The rule uses the ESLint-compatible plugin API implemented by Oxlint.
  */
 
 function unstableReturn(node) {
@@ -51,13 +45,14 @@ export default {
         context.report({ node: expr, messageId: "unstable", data: { kind } });
       }
     }
+
     return {
       CallExpression(node) {
         const callee = node.callee;
-        // Only `useXxxStore(...)` calls — the zustand hook convention.
         if (callee.type !== "Identifier" || !/^use.*Store$/.test(callee.name)) {
           return;
         }
+
         const arg = node.arguments[0];
         if (
           arg === undefined ||
@@ -66,13 +61,12 @@ export default {
         ) {
           return;
         }
+
         if (arg.body.type === "BlockStatement") {
-          // Explicit-return selector: check each top-level `return`.
-          for (const stmt of arg.body.body) {
-            if (stmt.type === "ReturnStatement") report(stmt.argument);
+          for (const statement of arg.body.body) {
+            if (statement.type === "ReturnStatement") report(statement.argument);
           }
         } else {
-          // Implicit-return arrow: the body IS the returned expression.
           report(arg.body);
         }
       },

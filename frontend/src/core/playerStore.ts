@@ -124,7 +124,7 @@ const EMPTY_ARRAY: readonly never[] = [];
  *
  *  Prefer this over `usePlayerStore((s) => s.state?.x ?? [])`, which mints a
  *  fresh `[]` on every call and is forbidden by the `local/stable-store-selector`
- *  ESLint rule. */
+ *  Oxlint rule. */
 export function usePlayerArray<T>(
   selector: (s: PlayerStore) => readonly T[] | undefined,
 ): readonly T[] {

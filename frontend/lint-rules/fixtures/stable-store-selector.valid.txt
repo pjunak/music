@@ -1,0 +1,7 @@
+usePlayerStore((state) => state.state?.value);
+usePlayerStore((state) => state.state?.value) ?? [];
+usePlayerStore(selectThing);
+usePlayerStore((state) => state.count ?? 0);
+useUiStore((state) => state.name ?? null);
+useStore(useShallow((state) => ({ first: state.first, second: state.second })));
+useMemo(() => [], []);
