@@ -8,8 +8,8 @@ for the protocol).
 
 What it does:
   - connects to ws(s)://<server>/api/ws, registers with a stable `client_id`
-    (persisted), so the operator can designate this device as an audio output
-    once and have it stick across restarts,
+    (persisted), so its server volume and optional output-by-default setting
+    stay attached across restarts,
   - on every state change, plays the active track (interrupt lane wins over
     ambient) at the server-clock position, seeking only when the server's
     position_epoch says a deliberate move happened,
@@ -33,9 +33,6 @@ Config is via environment variables (or the matching CLI flags):
   MUSIC_CONTROL_TOKEN require this token (X-Control-Token) on control requests
   MUSIC_START_ON     "0" to boot muted (default boots playing)
   MUSIC_VOLUME       initial local volume 0..1 (default 1.0)
-
-The operator must mark this device as an audio output in Settings → Devices
-before it can play (output is fully manual — see ../README.md).
 
 Dependencies: `websocket-client` and `python-mpv` (libmpv). See requirements.txt.
 """
@@ -526,8 +523,8 @@ def start_control_server(
 def load_or_create_client_id(explicit: str | None) -> str:
     """Resolve this appliance's stable identity. Precedence: --client-id /
     MUSIC_CLIENT_ID, else a generated id persisted to a dotfile so the
-    operator's output designation sticks across restarts. Falls back to an
-    ephemeral id if the dotfile can't be written."""
+    server volume and output-by-default setting stick across restarts. Falls
+    back to an ephemeral id if the dotfile can't be written."""
     if explicit:
         return explicit
     state_dir = Path(

@@ -357,12 +357,10 @@ def _prune_dangling_state(raw: dict[str, Any], db: Session) -> dict[str, Any]:
             p for p in active_preset_ids if isinstance(p, str) and p in loaded_presets
         ]
 
-    # Wipe active outputs on boot. Activation is fully manual — there is no
-    # auto-claim and no auto-resume across a restart. The persistent output
-    # *designation* lives in DEVICES_FILE (app/devices/store.py) and is
-    # untouched; the operator re-activates a designated device when they want
-    # sound. (The client_ids here would otherwise be a stale snapshot of who
-    # was live.)
+    # Wipe ephemeral active membership on boot; the client_ids would otherwise
+    # be a stale snapshot of who was live. Persistent output-by-default choices
+    # live in DEVICES_FILE and are untouched, so those devices can auto-activate
+    # when they register again. Playback itself is paused below.
     out["active_output_device_ids"] = []
 
     # Wipe looping SFX on boot for the same reason: the server-side timers that

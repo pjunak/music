@@ -79,11 +79,10 @@ export function SettingsView() {
   );
 }
 
-/** The remembered-devices registry: the operator's manually-curated list of
- *  which devices may act as audio outputs. Output is fully manual — a device
- *  only ever produces audio after being saved here AND marked as an output AND
- *  activated. Connected devices not yet saved are surfaced with an "Add"
- *  action; saved devices persist across reinstalls (server-side file). */
+/** The remembered-devices registry: the operator's manually curated names and
+ *  output-by-default choices. Any connected device can be activated without
+ *  first being saved. Connected devices not yet saved are surfaced with an
+ *  "Add" action; saved devices persist across reinstalls (server-side file). */
 function DevicesPanel() {
   const [saved, setSaved] = useState<KnownDevice[] | null>(null);
   const [error, setError] = useState<string | null>(null);

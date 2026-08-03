@@ -42,6 +42,10 @@ npm run test
 npm run build
 ```
 
+The frontend uses the native TypeScript 7 compiler and Oxlint. The local
+`local/stable-store-selector` rule is an Oxlint JS plugin under
+`frontend/lint-rules/`; keep its real-binary fixture test when changing it.
+
 Run locally:
 
 ```powershell

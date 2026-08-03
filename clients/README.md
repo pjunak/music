@@ -53,11 +53,12 @@ Both return the **same** `PlayerState` shape. Both are reachable **without authe
    ```
    `protocol_version: 2` selects canonical absolute per-device volumes. Omit it
    only when implementing the legacy master × trim contract.
-   The operator must then mark you as an **audio output** in Settings → Devices (output is
-   fully manual — nothing auto-designates). Once designated, that sticks to your `client_id`
-   across restarts. (SFX events are broadcast to **every** connected socket regardless of
-   designation — *you* decide whether to play them based on whether you're currently "on";
-   see [SFX events](#sfx-events).)
+   Registration is enough to make the device available in the Console's **Outputs** picker;
+   any connected device can be activated for the current session. Saving it in Settings →
+   Devices is optional. The saved **output by default** flag auto-activates that stable
+   `client_id` whenever it reconnects. SFX events are broadcast to every connected socket;
+   *you* still decide whether to play them using the same local/active gate as music (see
+   [SFX events](#sfx-events)).
 4. From then on the server pushes a **`state_changed`** on every change:
    ```json
    { "type": "state_changed", "state": { ...PlayerState } }
@@ -151,12 +152,11 @@ The whole output protocol works **as a guest** — no cookie, no token. A guest 
 A guest **cannot** mutate server state. For an output that's exactly right — you *follow*
 state, you don't drive it. The narrow consequences:
 
-- **Your *designation* persists; your live *on/off* does not.** Because you keep a stable
-  `client_id`, the operator only has to mark you as an output once — that sticks across
-  reboots. But activation is fully manual by design: the server clears `active_output_device_ids`
-  when you disconnect and never auto-resumes, so after a reboot the operator re-toggles you on
-  in the Console. **Recommendation: keep a *local* on/off** (default on) so the box just plays
-  regardless — see the reference client's `--respect-console` flag for the opposite behaviour.
+- **Identity and default-on survive reconnects; live membership does not.** The server removes a
+  disconnected socket from `active_output_device_ids`. On reconnect, a remembered **output by
+  default** device is auto-activated; any other connected device can be enabled from the Console.
+  An appliance may instead keep a local on/off (the reference client's default) and ignore live
+  membership unless `--respect-console` is set.
 - **Position reporting is allowed (and optional).** A guest that is currently an *active*
   output may send `{"type": "position_report", "position_ms": …}` (~1 Hz) — being toggled on
   by the operator is the authorization. It's a drift correction, not a requirement: the
@@ -164,9 +164,7 @@ state, you don't drive it. The narrow consequences:
 - **Volume is server-owned per device.** Read `device_volumes[client_id]`; a separate local
   control is only a hardware/appliance gain that controllers cannot observe.
 
-If you later need persistent Console on/off or transport from a third-party page,
-or position reporting **without** a browser login, that's the optional token layer described in
-the plan (`docs`/Phase 2) — not required for any of the above.
+Transport and other canonical state mutations still require an authenticated operator session.
 
 ---
 
@@ -226,10 +224,10 @@ that's the browser *engine* feature; this is the simple output.)
 </script>
 ```
 
-Cross-origin is fine: the `<audio>` element streams media from the player's origin without
-CORS restrictions, and browser WebSocket connections aren't subject to CORS. The only gotcha
-is the browser autoplay policy — audio won't start until a user gesture, which the on/off
-button provides.
+Cross-origin media playback is fine, and browser WebSocket handshakes are not governed by CORS.
+Deployments may still enforce an explicit WebSocket `Origin` allowlist. The browser autoplay
+policy remains the practical gotcha: audio will not start until a user gesture, which the
+on/off button provides.
 
 ## Recipe B — any language, no WebSocket
 

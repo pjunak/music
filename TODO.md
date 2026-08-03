@@ -1,72 +1,43 @@
-# TODO
+# Backlog
 
-Deferred work, roughly in priority order. Items graduate into commits and get
-deleted here — no strikethrough graveyard.
+Only actionable, deliberately deferred work belongs here. Completed items are
+deleted; accepted product/security decisions live in `README.md` or `AGENTS.md`.
 
-## Near-term
+## Next
 
-- **Delete the SPA stall backstop** — `maybeAdvanceAtEnd` / `endStallTime` /
-  `ADVANCE_DEBOUNCE_MS` in `frontend/src/core/playbackEngine.ts`, once the
-  server-side advancer (`app/sync/advancer.py`) has soaked in production for a
-  couple of weeks. Keep the `ended` → skip fast path — it's the low-latency
-  half of the contract.
+- **Remove the SPA end-of-track stall backstop.** The server-side advancer has
+  existed since 2026-07-08. Once its production behavior is confirmed, delete
+  `maybeAdvanceAtEnd`, `endStallTime`, and `ADVANCE_DEBOUNCE_MS` from
+  `frontend/src/core/playbackEngine.ts`. Preserve the low-latency `ended` → skip
+  path.
+- **Cover the production SPA mount.** Add a fixture that provides `STATIC_DIR`
+  and tests index fallback for client routes without shadowing `/api`.
+- **Restore the WebSocket disconnect/output-prune integration test.** Exercise
+  the router path that calls `remove_active_output` with deterministic timing;
+  the pure state mutator already has coverage.
 
-## Security / correctness — deferred from the 2026-07-09 audit
+## Hardening
 
-These surfaced in the full sweep and were left unfixed on purpose — each is
-either a design decision the operator should make or a subtle change whose risk
-outweighs its low severity. The high/critical findings from that sweep were all
-fixed (see git log around that date).
+- **Hash session tokens at rest.** This requires replacing the Settings UI's
+  token-prefix identity with a separate stable session identifier.
+- **Sequence broadcasts per socket.** Concurrent commits can currently deliver
+  an older revision immediately after a newer one; clients self-heal on the next
+  snapshot, but strict ordering would remove the transient regression.
+- **Validate WebSocket origins.** Add an allowlist check as defense in depth on
+  top of SameSite cookies and the guest mutation gate.
+- **Pin container bases and CI actions by digest** if supply-chain
+  reproducibility becomes more important than automatic patch updates.
 
-- **Guest library read-enumeration — ACCEPTED, won't fix.** The guest-reachable
-  `GET /api/library/tracks/{id}`, `/stream`, `/cover`, and the batch endpoint let
-  anyone who can reach the server read/download the library. The operator has
-  explicitly accepted read exposure (2026-07-09): it's a personal library, and
-  the boundary that matters is *write* access. Write access is fully locked down —
-  every filesystem/DB-mutating endpoint requires an authenticated session (audited
-  2026-07-09; the only unauthenticated mutation is `POST /login`), and the guest WS
-  surface is `register`/`position_report` only, neither of which writes to the
-  library. Do not re-open this as a finding.
-- **Session tokens stored unhashed at rest (low, defense-in-depth).** The token is
-  the primary key of `auth_sessions`. Hashing it (`sha256`, look up by hash) would
-  break the Settings → Active Sessions list/revoke UI, which matches on token
-  *prefix*. Tokens are 384-bit and the snapshot leak that made them reachable is
-  fixed, so this is low-priority.
-- **Verbose exception handler (low, intentional).** `main.py`'s catch-all and the
-  WS dispatch return `{type}: {message}` to the client — a deliberate single-user
-  debugging aid, but it discloses paths/SQL to anonymous guests on an exposed
-  instance. Keep for now; revisit if the app is ever multi-user or public.
-- **Broadcast happens just outside the state lock (low, subtle).** Two concurrent
-  mutators can interleave their per-socket sends so a socket briefly sees an older
-  revision; it self-heals on the next broadcast. Fixing it (send under the lock, or
-  sequence per socket) is delicate — not worth the risk at single-operator scale.
-- **WS upgrade has no Origin check (low, defense-in-depth).** Cross-site WS hijack
-  is already blocked by SameSite=lax + the guest gate; an allowlisted-origin check
-  on upgrade would be belt-and-suspenders.
-- **Pin base images / CI actions by digest (low).** `Dockerfile` and the workflow
-  use mutable tags (`python:3.12-slim`, `actions/checkout@v7`).
+## Maintenance
 
-## Deferred from the 2026-07-11 sweep
+- **Release the database session during MusicBrainz lookups.** `verify_names`
+  can hold a session for roughly 11 seconds while paced remote calls run;
+  separate scoring from the final write transaction.
+- **Make the headless reconciler independently testable.** Extract playback
+  state reconciliation from mpv/WebSocket plumbing and add unit tests.
 
-- **SPA-serving tests** — `SpaStaticFiles` (`app/main.py`) is only mounted when
-  `STATIC_DIR` exists, which it never does under tests, so the production
-  front door (index fallback for client routes, not shadowing `/api`) has
-  zero coverage. Needs a fixture that fabricates a static dir.
-- **WS-disconnect output-prune integration test** — only the pure mutator
-  `remove_active_output` is unit-tested; the disconnect handler that calls it
-  was dropped from integration tests over timing flakiness. Worth another
-  attempt with a deterministic clock.
-- **`verify_names` holds a DB session across paced MusicBrainz calls**
-  (~11 s worst case per request, `api/cleanup.py`). Harmless single-user;
-  restructure to fetch scores first, then write, if it ever matters.
+## Future feature
 
-## Someday
-
-- **Weighted shuffle** — re-add a `"weighted"` shuffle mode backed by an
-  actual weighting algorithm (play count / recency). The enum value was
-  removed 2026-07-09 because it only ever drew uniformly (same as "random");
-  persisted states coerce `"weighted"` → `"random"` on load
-  (`_prune_dangling_state`), so re-adding is purely additive.
-- **Headless client testability** — `clients/headless/music_output.py` has no
-  unit tests; extract the state-reconcile logic from the GStreamer/socket
-  plumbing so it can run under pytest.
+- **Weighted shuffle.** Reintroduce `"weighted"` only with a real play-count or
+  recency algorithm. Persisted legacy values already coerce to `"random"`, so
+  the protocol addition can remain additive.

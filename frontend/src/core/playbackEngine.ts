@@ -725,7 +725,7 @@ export class PlaybackEngine {
   // ----- volume / master gain -----------------------------------------
 
   /** Tell the engine this browser's client_id so it can apply this device's
-   *  per-device volume trim. Idempotent; safe to call on every mount. */
+   *  canonical per-device software volume. Idempotent; safe to call on every mount. */
   setClientId(id: string): void {
     this.clientId = id;
   }

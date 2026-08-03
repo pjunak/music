@@ -28,11 +28,10 @@ sudo pip3 install -r requirements.txt
 MUSIC_SERVER_URL=http://192.168.1.50:8000 python3 /opt/music-output/music_output.py
 ```
 
-You should see it connect and register. It shows up in **Settings → Devices** under the name
-you gave it (default: the hostname). Mark it as an **audio output** there once — that
-designation sticks to this box across restarts (it persists a stable `client_id`). Then start
-playback and audio comes out of this box; it also appears in the Console's **Outputs** picker
-to switch on/off mid-session.
+You should see it connect and register under the supplied name (default: the hostname). It
+immediately appears in the Console's **Outputs** picker. Saving it in Settings → Devices is
+optional; enabling **output by default** there makes the server auto-activate its stable
+`client_id` whenever it reconnects.
 
 ## Run it forever (systemd)
 
@@ -54,12 +53,14 @@ journalctl -u music-output -f          # watch it
 
 ## Options
 
-All flags have an environment-variable equivalent (handy for the systemd env file):
+Most options also have an environment-variable equivalent (handy for the systemd env file):
 
 | Flag | Env | Default | Meaning |
 |---|---|---|---|
 | `--server URL` | `MUSIC_SERVER_URL` | — (required) | The player's base URL |
 | `--name NAME` | `MUSIC_OUTPUT_NAME` | hostname | Name shown in the Console |
+| `--client-id ID` | `MUSIC_CLIENT_ID` | persisted generated id | Override the stable identity |
+| — | `MUSIC_STATE_DIR` | `~/.config/music-output` | Directory for the generated client id |
 | `--control-port N` | `MUSIC_CONTROL_PORT` | off | Serve the on/off+volume control endpoint |
 | `--control-bind ADDR` | `MUSIC_CONTROL_BIND` | `127.0.0.1` | Control bind address; `0.0.0.0` to expose on the LAN |
 | `--control-token TOKEN` | `MUSIC_CONTROL_TOKEN` | — | Require this token (`X-Control-Token`) on control requests |
@@ -71,9 +72,10 @@ All flags have an environment-variable equivalent (handy for the systemd env fil
 ### On/off model
 
 By default the box has its **own** on/off (on at boot) and plays whenever the server is
-playing — reliable for an appliance, because guest connections get a fresh device id each
-reconnect, so *Console*-driven on/off wouldn't survive a reboot. Pass `--respect-console`
-if you'd rather the operator switch this output on/off from the player's Outputs picker.
+playing. Its generated client id is persisted under
+`$MUSIC_STATE_DIR/client-id` (default `~/.config/music-output/client-id`), so server volume and
+the optional output-by-default setting remain attached across reconnects. Pass
+`--respect-console` if the appliance should also require live activation in the Console.
 
 ### Local control surface (for the dnd-table panel, or anything on the LAN)
 

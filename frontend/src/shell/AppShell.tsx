@@ -68,8 +68,8 @@ export default function AppShell() {
   useEffect(() => {
     const unsubMsg = wsClient.subscribe(applyMessage);
     const unsubStatus = wsClient.onStatus(setStatus);
-    // Surface server-side errors (e.g. "device(s) not designated as outputs",
-    // rejected actions, "guest cannot mutate") via the toast layer. Session
+    // Surface server-side errors (e.g. rejected actions or "guest cannot
+    // mutate") via the toast layer. Session
     // loss is the exception: the server tags those frames with a code, and
     // they trigger the re-login flow (store → anonymous, login modal opens)
     // instead of a dead-end error toast.

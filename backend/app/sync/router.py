@@ -889,8 +889,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         # Prune the disconnecting device from active_output_device_ids — but
         # only when its *last* tab closes. Closing one tab of a device that has
         # another output tab open shouldn't silence it. The persistent
-        # is_output designation is untouched; on reconnect the device sits
-        # inactive (fully-manual: no auto-resume) until re-activated.
+        # output-by-default setting is untouched; registration will
+        # auto-activate it again on reconnect when that setting is enabled.
         if client_id is not None and not registry.has_other_connection(
             client_id, device.connection_id
         ):

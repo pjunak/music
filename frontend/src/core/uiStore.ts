@@ -6,8 +6,8 @@ import { persist } from "zustand/middleware";
 export const DEFAULT_SFX_VOLUME = 0.8;
 
 /** Stable per-install identity. Generated once and persisted, so the server
- *  can recognise this browser across refreshes/restarts and the operator's
- *  audio-output designation sticks to it. Falls back to a non-crypto id in
+ *  can recognise this browser across refreshes/restarts while saved device
+ *  settings and canonical volume stay attached. Falls back to a non-crypto id in
  *  non-secure contexts (e.g. an old TV reached over plain http on a LAN),
  *  where `crypto.randomUUID` is unavailable. */
 function generateClientId(): string {
@@ -39,8 +39,7 @@ interface UiStore {
   /** Local-only override that forces the playback engine to treat this device
    *  as an active output regardless of `active_output_device_ids`. Lets a
    *  guest (who can't mutate server state) hear audio on this tab. Deliberately
-   *  NOT persisted — output is fully manual, so a refresh never auto-resumes
-   *  local playback. */
+   *  NOT persisted, so a refresh never auto-resumes local playback. */
   forceLocalPlayback: boolean;
   setForceLocalPlayback: (v: boolean) => void;
 

@@ -21,7 +21,7 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   track; clients follow state and seek only when `position_epoch` changes. Repeat, shuffle,
   crossfade, and a graphic-EQ effect chain are all there.
 - **Multi-device output** — any connected browser tab (or headless client) can be switched on as
-  a live speaker, each with its own volume trim. A device can be saved as "output by default" so
+  a live speaker, each with its own canonical software volume. A device can be saved as "output by default" so
   it auto-activates when it reconnects.
 - **TV / room display** — a read-only now-playing view at `/` for a screen in the room, usable
   **without logging in** (guest access), with cover art, up-next, and recently-played.
@@ -83,32 +83,32 @@ DB-backed tokens, nothing is signed.)
 | `DEVICES_FILE` | | `/data/devices.json` | Remembered output-device registry |
 | `DATABASE_URL` | | `sqlite:////data/app.db` | App DB (auth, playlists, indexed tracks) |
 | `STATIC_DIR` | | `/app/static` | Built SPA served at `/` |
-| `ALLOWED_ORIGINS` | | — | CORS origins (only needed for split dev) |
+| `ALLOWED_ORIGINS` | | `http://localhost:5173` | Comma-separated CORS origins (only needed for split dev) |
 | `SESSION_COOKIE_SECURE` | | `true` | Send the session cookie over HTTPS only. Set `false` only for a plain-HTTP (no-TLS) deployment |
 | `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 
-There are no migrations: the schema is created idempotently on boot, and new additive columns
-are applied automatically. Incompatible schema changes mean wiping `app.db` and re-creating the
-user — the persistent state worth keeping is your auth account and playlists (the track index is
-regenerable from the filesystem).
+There is no general migration framework: the schema is created idempotently on boot, and
+compatible additive columns are applied automatically. Renames, drops, and type changes require
+a deliberate migration or a documented database reset. The track index remains regenerable from
+the filesystem.
 
 ## Development
 
-Backend (Python 3.11+) and frontend (Node 20) run as two processes in dev.
+Backend (Python 3.11+) and frontend (Node 26+) run as two processes in development.
 
 ```bash
 # Backend — uv-managed (uv.lock is the pinned resolution)
 cd backend
-uv sync --extra dev                                  # creates .venv from uv.lock
+uv sync --locked --extra dev                         # creates .venv from uv.lock
 cp .env.example .env                                 # dev defaults work as-is
 uv run music-cli create-user admin
 uv run uvicorn app.main:app --reload                 # http://localhost:8000
 
 # Frontend (separate terminal)
 cd frontend
-npm install
+npm ci
 npm run dev                                          # http://localhost:5173, proxies to the API
 ```
 
@@ -153,9 +153,19 @@ clients/   The documented guest output protocol + a reference headless appliance
   client-side routing.
 - **Unhandled exceptions return JSON** with the error class + message — a single-user debug aid.
 
+## Security model
+
+- Authoring and every filesystem/database mutation require the operator session.
+- Playback state, track streams, cover art, metadata, and registered output clients are
+  intentionally guest-readable so room displays and speaker appliances work without credentials.
+- Guest WebSockets may register and follow state. Their only mutation exception is an optional
+  position report while that same client is an active output.
+- Sessions are opaque, random, revocable database tokens stored in an HTTP-only cookie. There is
+  no signing secret because no client-side session data is trusted.
+
 ## Tech stack
 
-FastAPI · SQLAlchemy 2.0 · Pydantic · argon2 · mutagen — React · TypeScript · Vite · Zustand ·
+FastAPI · SQLAlchemy 2.0 · Pydantic · argon2 · mutagen — React · TypeScript 7 · Vite · Zustand · Oxlint ·
 Web Audio API. Packaged as a multi-stage Docker image (`node:26-alpine` build → `python:3.12-slim`
 runtime).
 
