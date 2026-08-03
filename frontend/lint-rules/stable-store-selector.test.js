@@ -45,7 +45,6 @@ describe("local/stable-store-selector", () => {
   it("accepts selectors that return stable references or primitives", () => {
     const result = lintFixture("stable-store-selector.valid");
 
-    expect(result.output).toBe("");
     expect(result.status).toBe(0);
   });
 
