@@ -563,6 +563,45 @@ def test_two_tabs_same_client_id_single_device_entry(client: TestClient) -> None
         assert len(tv_entries) == 1
 
 
+def test_shared_client_id_stays_active_until_last_socket_disconnects(
+    client: TestClient,
+) -> None:
+    """Closing one tab must not silence another tab with the same stable id;
+    closing the final tab must prune that id from live output membership."""
+    _login(client)
+    with client.websocket_connect("/api/ws") as first:
+        first.receive_json()
+        _register(first, "Phone", "shared-phone")
+        first.receive_json()
+
+        with client.websocket_connect("/api/ws") as second:
+            second.receive_json()
+            _register(second, "Phone", "shared-phone")
+            first.receive_json()
+            second.receive_json()
+
+            first.send_json(
+                {"type": "set_active_outputs", "device_ids": ["shared-phone"]}
+            )
+            assert first.receive_json()["state"]["active_output_device_ids"] == [
+                "shared-phone"
+            ]
+            second.receive_json()
+
+        # The second socket is gone, but the first still represents this stable
+        # client id. Disconnect cleanup broadcasts a fresh snapshot without
+        # pruning the live output.
+        after_one_close = first.receive_json()
+        assert after_one_close["state"]["active_output_device_ids"] == [
+            "shared-phone"
+        ]
+
+    # The final socket has now closed. A new observer receives the pruned state.
+    with client.websocket_connect("/api/ws") as observer:
+        snapshot = observer.receive_json()
+        assert "shared-phone" not in snapshot["state"]["active_output_device_ids"]
+
+
 def test_state_load_prunes_dangling_track_ids(
     auth_client: TestClient,
     seeded_track_id: int,

@@ -10,11 +10,6 @@ deleted; accepted product/security decisions live in `README.md` or `AGENTS.md`.
   `maybeAdvanceAtEnd`, `endStallTime`, and `ADVANCE_DEBOUNCE_MS` from
   `frontend/src/core/playbackEngine.ts`. Preserve the low-latency `ended` → skip
   path.
-- **Cover the production SPA mount.** Add a fixture that provides `STATIC_DIR`
-  and tests index fallback for client routes without shadowing `/api`.
-- **Restore the WebSocket disconnect/output-prune integration test.** Exercise
-  the router path that calls `remove_active_output` with deterministic timing;
-  the pure state mutator already has coverage.
 
 ## Hardening
 
