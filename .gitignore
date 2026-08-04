@@ -64,6 +64,14 @@ dmypy.json
 .env
 .env.*
 !.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
 
 # Databases (app.db is runtime state)
 *.db
