@@ -280,6 +280,7 @@ export type WsAction =
   | { type: "position_report"; position_ms: number }
   | { type: "ambient_play_track"; track_id: number }
   | { type: "ambient_set_queue"; track_ids: number[] }
+  | { type: "ambient_jump_queue"; position: number }
   | { type: "ambient_enqueue"; track_id: number; position?: number }
   | { type: "ambient_clear_queue" }
   | { type: "ambient_skip_next"; from_track_id?: number | null }

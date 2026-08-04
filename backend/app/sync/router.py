@@ -38,6 +38,7 @@ from app.sync.devices import registry
 from app.sync.protocol import (
     AmbientClearQueueAction,
     AmbientEnqueueAction,
+    AmbientJumpQueueAction,
     AmbientPlayFolderAction,
     AmbientPlayPlaylistAction,
     AmbientPlayTrackAction,
@@ -336,6 +337,12 @@ async def _h_ambient_set_queue(
     action: AmbientSetQueueAction, _device_id: str, _ws: WebSocket
 ) -> None:
     await _apply_and_broadcast(state_module.ambient_set_queue(action.track_ids))
+
+
+async def _h_ambient_jump_queue(
+    action: AmbientJumpQueueAction, _device_id: str, _ws: WebSocket
+) -> None:
+    await _apply_and_broadcast(state_module.ambient_jump_queue(action.position))
 
 
 async def _h_ambient_enqueue(
@@ -744,6 +751,7 @@ _DISPATCH: dict[type, Any] = {
     SetDeviceVolumeAction: _h_set_device_volume,
     AmbientPlayTrackAction: _h_ambient_play_track,
     AmbientSetQueueAction: _h_ambient_set_queue,
+    AmbientJumpQueueAction: _h_ambient_jump_queue,
     AmbientEnqueueAction: _h_ambient_enqueue,
     AmbientClearQueueAction: _h_ambient_clear_queue,
     AmbientSkipNextAction: _h_ambient_skip_next,

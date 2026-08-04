@@ -165,6 +165,10 @@ state, you don't drive it. The narrow consequences:
   control is only a hardware/appliance gain that controllers cannot observe.
 
 Transport and other canonical state mutations still require an authenticated operator session.
+Authenticated controllers that let an operator choose a queued slot should send
+`{"type":"ambient_jump_queue","position":N}`. The server performs that jump atomically: the
+selected zero-based slot becomes current, earlier unplayed slots are discarded, and the queue tail
+is preserved. Do not synthesize the jump from separate play and queue actions.
 
 ---
 

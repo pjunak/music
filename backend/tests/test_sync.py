@@ -995,6 +995,47 @@ def test_ambient_set_queue(
         assert msg["state"]["ambient"]["queue"] == extra_seeded_track_ids
 
 
+def test_ambient_jump_queue_selects_exact_slot_and_preserves_tail(
+    client: TestClient, seeded_track_id: int, extra_seeded_track_ids: list[int]
+) -> None:
+    a, b, c = extra_seeded_track_ids
+    with _ws_authed(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "ambient_play_track", "track_id": seeded_track_id})
+        before = ws.receive_json()["state"]
+        ws.send_json({"type": "ambient_set_queue", "track_ids": [a, b, c]})
+        ws.receive_json()
+        # An explicit slot choice must ignore random shuffle selection.
+        ws.send_json({"type": "ambient_set_shuffle", "shuffle": "random"})
+        ws.receive_json()
+
+        ws.send_json({"type": "ambient_jump_queue", "position": 1})
+        state = ws.receive_json()["state"]
+        ambient = state["ambient"]
+
+        assert ambient["current_track_id"] == b
+        assert ambient["queue"] == [c]
+        assert ambient["history"] == [seeded_track_id]
+        assert _pos_near(ambient["position_ms"], 0)
+        assert state["position_epoch"] == before["position_epoch"] + 1
+        assert state["is_playing"] is True
+
+
+def test_ambient_jump_queue_uses_position_for_duplicate_ids() -> None:
+    from app.sync.protocol import AmbientState, PlayerState
+    from app.sync.state import ambient_jump_queue
+
+    state = PlayerState(
+        ambient=AmbientState(current_track_id=10, queue=[20, 20, 30])
+    )
+
+    jumped = ambient_jump_queue(1)(state)
+
+    assert jumped.ambient.current_track_id == 20
+    assert jumped.ambient.queue == [30]
+    assert jumped.ambient.history == [10]
+
+
 def test_ambient_enqueue_appends_and_inserts(
     client: TestClient, extra_seeded_track_ids: list[int]
 ) -> None:

@@ -730,6 +730,44 @@ def ambient_set_queue(track_ids: list[int]) -> Any:
     return _mut
 
 
+def ambient_jump_queue(position: int) -> Any:
+    """Play one exact queue slot, discarding earlier unplayed entries.
+
+    Unlike ``skip_next``, this explicit operator choice ignores shuffle. The
+    previously playing track joins history, while skipped queue entries do not;
+    the untouched tail remains queued in its authored order.
+    """
+
+    def _mut(state: PlayerState) -> PlayerState:
+        amb = state.ambient
+        if position not in range(len(amb.queue)):
+            return state
+
+        history = list(amb.history)
+        if amb.current_track_id is not None:
+            history.append(amb.current_track_id)
+        now = _now()
+        return state.model_copy(
+            update={
+                "ambient": amb.model_copy(
+                    update={
+                        "current_track_id": amb.queue[position],
+                        "queue": list(amb.queue[position + 1 :]),
+                        "history": history,
+                        "position_ms": 0,
+                        "position_anchored_at": _ambient_anchor(
+                            True, state.interrupt, now
+                        ),
+                    }
+                ),
+                "is_playing": True,
+                "position_epoch": state.position_epoch + 1,
+            }
+        )
+
+    return _mut
+
+
 def ambient_enqueue(track_id: int, position: int | None) -> Any:
     """Add a track to the queue at `position` (default: append)."""
 

@@ -83,6 +83,13 @@ class AmbientSetQueueAction(_Action):
     track_ids: list[int] = Field(default_factory=list)
 
 
+class AmbientJumpQueueAction(_Action):
+    """Play an exact queue slot now and keep only the entries after it."""
+
+    type: Literal["ambient_jump_queue"]
+    position: int = Field(ge=0)
+
+
 class AmbientEnqueueAction(_Action):
     type: Literal["ambient_enqueue"]
     track_id: int
@@ -239,6 +246,7 @@ Action = Annotated[
     | PositionReportAction
     | AmbientPlayTrackAction
     | AmbientSetQueueAction
+    | AmbientJumpQueueAction
     | AmbientEnqueueAction
     | AmbientClearQueueAction
     | AmbientSkipNextAction
