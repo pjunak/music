@@ -207,5 +207,5 @@ Runtime data lives outside the image.
   their contracts change.
 
 Do not commit media, databases, device registries, secrets, generated builds,
-or local agent configuration. Do not commit, push, deploy, or release unless
-explicitly requested.
+or local tool configuration. The global Codex instructions govern task
+commits. Never push, deploy, or release unless explicitly requested.

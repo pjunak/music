@@ -1,6 +1,6 @@
 """Operator-only admin endpoints: backup/export of persistent state.
 
-The "persistent state worth caring about" (per CLAUDE.md) is:
+The persistent state worth caring about (per `AGENTS.md`) is:
 
   - `app.db`: auth users, playlists, DB-only metadata (display_title, origin)
   - `MODES_DIR`: mode bundles (manifests, soundboards, cues, EQ presets)

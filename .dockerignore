@@ -10,8 +10,6 @@
 .idea
 
 # AI tooling working files
-.claude
-CLAUDE.md
 AGENTS.md
 .aider*
 .cursorrules

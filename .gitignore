@@ -106,9 +106,6 @@ coverage/
 *.tsbuildinfo
 
 # Local AI-tool state; shared project guidance lives in tracked AGENTS.md.
-.claude/
-CLAUDE.md
-CLAUDE.local.md
 .aider*
 .cursor/
 .continue/
