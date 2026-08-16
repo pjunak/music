@@ -28,7 +28,7 @@ dev = [
     # (see StateMachine.reset_for_tests) wedge silently without a timeout.
     "pytest-timeout==2.4.0",
     # TestClient transport for starlette 1.x (successor of classic httpx).
-    "httpx2==2.9.1",
+    "httpx2==2.10.0",
     "ruff==0.16.1",
     "mypy==2.3.0",
     "types-pyyaml==6.0.12.20260724",
