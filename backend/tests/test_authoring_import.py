@@ -120,6 +120,11 @@ def test_preview_is_read_only_and_describes_every_authoring_kind(
     )
 
     preview = _preview(auth_client, source_id, target_id)
+    assert preview["source"] == {
+        "type": "mode",
+        "id": source_id,
+        "name": "Source Mode",
+    }
     assert preview["source_mode"] == {"id": source_id, "name": "Source Mode"}
     assert preview["target_mode"] == {"id": target_id, "name": "Target Mode"}
     assert {item["kind"] for item in preview["items"]} == {

@@ -155,9 +155,11 @@ Runtime data lives outside the image.
 ## Modes, authoring, and effects
 
 - Playlists, soundboards, cues, and EQ presets belong to exactly one mode.
-- Cross-mode authoring import is preview -> explicit selection -> atomic commit. It is
-  create-only: conflicts are skipped, playlist tracks are re-resolved by library path,
-  and referenced resources are imported only when the operator selects them.
+- Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
+  versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
+  skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue
+  or interrupt cannot commit unless its source-side dependencies are also selected (or already
+  exist in the target). Keep the v1 contract in `clients/authoring-import-v1.md` backward compatible.
 - Authored IDs are derived with `uniqueSlug`; do not add manual ID fields.
 - Preset effect types must stay aligned across backend validation, editor UI,
   frontend types, and the playback-engine switch.

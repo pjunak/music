@@ -3964,7 +3964,7 @@ kbd,
   font-size: var(--text-base);
 }
 
-/* Authoring import — a review-first, create-only transfer between modes. */
+/* Authoring import — a review-first, create-only transfer from modes or JSON. */
 .authoring-import-modal {
   width: min(720px, 100%);
 }
@@ -3976,8 +3976,92 @@ kbd,
 .authoring-import-body > * + * {
   margin-top: 0;
 }
-.authoring-import-source {
-  max-width: 22rem;
+.authoring-import-source-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.authoring-import-source-picker > legend {
+  margin-bottom: var(--space-2);
+  color: var(--muted-strong);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.authoring-import-source-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.authoring-import-source-options > label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.authoring-import-source-options > label:hover {
+  border-color: var(--border-strong);
+}
+.authoring-import-source-options > label.is-active {
+  border-color: var(--accent2-strong);
+  box-shadow: inset 0 0 0 1px var(--accent2-strong);
+}
+.authoring-import-source-options input {
+  margin-top: 0.15rem;
+}
+.authoring-import-source-options span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.authoring-import-source-options strong,
+.authoring-import-source-options small {
+  overflow-wrap: anywhere;
+}
+.authoring-import-source-options small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+.authoring-import-source-panel,
+.authoring-import-paste {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.authoring-import-mode-select {
+  width: min(100%, 22rem);
+}
+.authoring-import-file {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.authoring-import-file.is-dragging {
+  border-color: var(--accent2-strong);
+  background: var(--surface-3);
+}
+.authoring-import-file .field,
+.authoring-import-paste .field {
+  width: 100%;
+}
+.authoring-import-paste textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 10rem;
+  font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: var(--text-sm);
 }
 .authoring-import-route {
   display: grid;
@@ -4047,7 +4131,8 @@ kbd,
 .authoring-import-item:hover {
   background: var(--surface-2);
 }
-.authoring-import-item.is-conflict {
+.authoring-import-item--conflict,
+.authoring-import-item--invalid {
   cursor: not-allowed;
   opacity: 0.7;
 }
@@ -4061,13 +4146,41 @@ kbd,
 .authoring-import-item-copy span {
   overflow-wrap: anywhere;
 }
-.authoring-import-existing {
+.authoring-import-issues {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.authoring-import-issue {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.authoring-import-issue.is-warning {
+  color: var(--warning, #d6a64b);
+}
+.authoring-import-issue.is-error {
+  color: var(--danger, #e06b75);
+}
+.authoring-import-status {
   padding: 0.1rem var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   color: var(--muted);
   font-size: var(--text-xs);
   white-space: nowrap;
+}
+.authoring-import-status.is-invalid {
+  color: var(--danger, #e06b75);
+}
+.authoring-import-dependency-alert {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--warning, #d6a64b) 45%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--warning, #d6a64b);
+  background: color-mix(in srgb, var(--warning, #d6a64b) 8%, transparent);
+  font-size: var(--text-sm);
 }
 
 /* --- settings view --- */
@@ -4582,6 +4695,9 @@ input.volume-slider::-moz-range-thumb {
   .authoring-import-route {
     grid-template-columns: 1fr;
   }
+  .authoring-import-source-options {
+    grid-template-columns: 1fr;
+  }
   .authoring-import-arrow {
     transform: rotate(90deg);
     justify-self: start;
@@ -4589,7 +4705,7 @@ input.volume-slider::-moz-range-thumb {
   .authoring-import-item {
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .authoring-import-existing {
+  .authoring-import-status {
     grid-column: 2;
     justify-self: start;
   }

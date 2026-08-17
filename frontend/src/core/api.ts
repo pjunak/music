@@ -79,7 +79,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (!response.ok || (text && !looksLikeJson)) {
     const fromJson =
       parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
-        ? String((parsed as { detail: unknown }).detail)
+        ? formatApiDetail((parsed as { detail: unknown }).detail)
         : null;
     const snippet = text.slice(0, 200).replace(/\s+/g, " ").trim();
     const detail =
@@ -160,12 +160,45 @@ export interface AuthoringImportItem {
   resource_id: string;
   name: string;
   summary: string;
-  status: "ready" | "conflict";
+  status: "ready" | "conflict" | "invalid";
   reason: string | null;
+  issues: AuthoringImportIssue[];
+}
+
+export interface AuthoringImportIssue {
+  code: string;
+  severity: "warning" | "error";
+  message: string;
+  related_item: AuthoringImportSelection | null;
+}
+
+function formatApiDetail(detail: unknown): string | null {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const candidate = entry as { loc?: unknown; msg?: unknown };
+      if (typeof candidate.msg !== "string") return [];
+      const location = Array.isArray(candidate.loc)
+        ? candidate.loc.filter((part) => part !== "body").join(".")
+        : "";
+      return [`${location ? `${location}: ` : ""}${candidate.msg}`];
+    });
+    if (messages.length > 0) return messages.slice(0, 4).join(" · ");
+  }
+  if (detail && typeof detail === "object") {
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return null;
+    }
+  }
+  return detail == null ? null : String(detail);
 }
 
 export interface AuthoringImportPreview {
-  source_mode: { id: string; name: string };
+  source: { type: "mode" | "document"; id: string; name: string };
+  source_mode?: { id: string; name: string } | null;
   target_mode: { id: string; name: string };
   items: AuthoringImportItem[];
 }
@@ -182,12 +215,12 @@ export interface AuthoringImportResult {
 }
 
 export const authoringImportApi = {
-  preview: (sourceModeId: string, targetModeId: string) =>
+  previewMode: (sourceModeId: string, targetModeId: string) =>
     api.post<AuthoringImportPreview>("/api/authoring/import/preview", {
       source_mode_id: sourceModeId,
       target_mode_id: targetModeId,
     }),
-  commit: (
+  commitMode: (
     sourceModeId: string,
     targetModeId: string,
     items: AuthoringImportSelection[],
@@ -195,6 +228,28 @@ export const authoringImportApi = {
     api.post<AuthoringImportResult>("/api/authoring/import/commit", {
       source_mode_id: sourceModeId,
       target_mode_id: targetModeId,
+      items,
+    }),
+  previewDocument: (
+    targetModeId: string,
+    document: unknown,
+    sourceName?: string,
+  ) =>
+    api.post<AuthoringImportPreview>("/api/authoring/import/document/preview", {
+      target_mode_id: targetModeId,
+      source_name: sourceName,
+      document,
+    }),
+  commitDocument: (
+    targetModeId: string,
+    document: unknown,
+    items: AuthoringImportSelection[],
+    sourceName?: string,
+  ) =>
+    api.post<AuthoringImportResult>("/api/authoring/import/document/commit", {
+      target_mode_id: targetModeId,
+      source_name: sourceName,
+      document,
       items,
     }),
 };
