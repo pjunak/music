@@ -26,12 +26,12 @@ import { PresetsView } from "@/views/PresetsView";
 import { SettingsView } from "@/views/SettingsView";
 import { SoundboardsView } from "@/views/SoundboardsView";
 
+import { AuthoringShell } from "./AuthoringShell";
 import { Header } from "./Header";
 import { indexTarget } from "./indexTarget";
 import { LoginModal } from "./LoginModal";
 import { NowPlayingBar } from "./NowPlayingBar";
 import { LoginRedirect, Protected, RouteSpinner } from "./routeGuards";
-import { SectionNav } from "./SectionNav";
 
 // Old paths kept alive for bookmarks/external links — each redirects into the
 // new IA. The Modes sub-tab is gone (mode CRUD moved to the header popup), so
@@ -160,31 +160,7 @@ export default function AppShell() {
             path="authoring"
             element={
               <Protected>
-                <SectionNav
-                  ariaLabel="Authoring sections"
-                  items={[
-                    { to: "playlists", label: "Playlists" },
-                    { to: "soundboards", label: "Soundboards" },
-                    { to: "interrupts", label: "Interrupts" },
-                    { to: "presets", label: "EQ Presets" },
-                    { to: "cues", label: "Cues" },
-                  ]}
-                  action={
-                    <button
-                      type="button"
-                      className="btn-ghost section-nav-import"
-                      onClick={() =>
-                        toast.info(
-                          "Import",
-                          "Importing from another mode isn't available yet.",
-                        )
-                      }
-                      title="Import items from another mode (coming soon)"
-                    >
-                      ⬇ Import
-                    </button>
-                  }
-                />
+                <AuthoringShell />
               </Protected>
             }
           >

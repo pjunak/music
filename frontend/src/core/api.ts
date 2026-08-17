@@ -148,6 +148,57 @@ export const modesApi = {
   get: (id: string) => api.get<ModeDetail>(`/api/modes/${encodeURIComponent(id)}`),
 };
 
+export type AuthoringImportKind =
+  | "playlist"
+  | "soundboard"
+  | "interrupt"
+  | "preset"
+  | "cue";
+
+export interface AuthoringImportItem {
+  kind: AuthoringImportKind;
+  resource_id: string;
+  name: string;
+  summary: string;
+  status: "ready" | "conflict";
+  reason: string | null;
+}
+
+export interface AuthoringImportPreview {
+  source_mode: { id: string; name: string };
+  target_mode: { id: string; name: string };
+  items: AuthoringImportItem[];
+}
+
+export interface AuthoringImportSelection {
+  kind: AuthoringImportKind;
+  resource_id: string;
+}
+
+export interface AuthoringImportResult {
+  imported: AuthoringImportItem[];
+  skipped: AuthoringImportItem[];
+  missing_track_paths: string[];
+}
+
+export const authoringImportApi = {
+  preview: (sourceModeId: string, targetModeId: string) =>
+    api.post<AuthoringImportPreview>("/api/authoring/import/preview", {
+      source_mode_id: sourceModeId,
+      target_mode_id: targetModeId,
+    }),
+  commit: (
+    sourceModeId: string,
+    targetModeId: string,
+    items: AuthoringImportSelection[],
+  ) =>
+    api.post<AuthoringImportResult>("/api/authoring/import/commit", {
+      source_mode_id: sourceModeId,
+      target_mode_id: targetModeId,
+      items,
+    }),
+};
+
 export interface ActiveSession {
   token_prefix: string;
   created_at: string;

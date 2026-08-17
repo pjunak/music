@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException
 from app.api import (
     admin,
     auth,
+    authoring,
     cleanup,
     devices,
     diagnostics,
@@ -266,6 +267,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(authoring.router)
     app.include_router(library.router)
     app.include_router(cleanup.router)
     app.include_router(modes.router)

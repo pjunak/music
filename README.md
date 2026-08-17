@@ -31,6 +31,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   plain `<audio>` + XHR/WebSocket.
 - **Modes** — top-level campaign bundles (theme + soundboards + cues + EQ presets), authored as
   on-disk YAML and hot-reloadable.
+- **Authoring import** — preview and selectively copy playlists, soundboards, interrupts, EQ
+  presets, and cues from one mode into the active mode. Imports are create-only: existing names
+  and IDs are reported and skipped rather than overwritten.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.

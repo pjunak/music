@@ -1169,7 +1169,14 @@ kbd,
   padding-bottom: 0.3rem;
 }
 .section-nav-import {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: 0.82rem;
+}
+.section-nav-import svg {
+  width: 1em;
+  height: 1em;
 }
 /* Single-editor Authoring sub-tabs (Interrupts) — just pad the body. */
 .authoring-single {
@@ -3957,6 +3964,112 @@ kbd,
   font-size: var(--text-base);
 }
 
+/* Authoring import — a review-first, create-only transfer between modes. */
+.authoring-import-modal {
+  width: min(720px, 100%);
+}
+.authoring-import-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.authoring-import-body > * + * {
+  margin-top: 0;
+}
+.authoring-import-source {
+  max-width: 22rem;
+}
+.authoring-import-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.authoring-import-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.authoring-import-mode strong {
+  overflow-wrap: anywhere;
+}
+.authoring-import-arrow {
+  color: var(--accent2-strong);
+  font-size: var(--text-lg);
+}
+.authoring-import-review,
+.authoring-import-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.authoring-import-review-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  color: var(--muted-strong);
+  font-size: var(--text-sm);
+}
+.authoring-import-selection-count {
+  color: var(--accent2-strong);
+  white-space: nowrap;
+}
+.authoring-import-group {
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.authoring-import-group > legend {
+  padding-right: var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.authoring-import-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.authoring-import-item:hover {
+  background: var(--surface-2);
+}
+.authoring-import-item.is-conflict {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.authoring-import-item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.authoring-import-item-copy strong,
+.authoring-import-item-copy span {
+  overflow-wrap: anywhere;
+}
+.authoring-import-existing {
+  padding: 0.1rem var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
 /* --- settings view --- */
 
 .settings-view {
@@ -4465,6 +4578,20 @@ input.volume-slider::-moz-range-thumb {
   .section-nav-tab {
     padding: 0.45rem var(--space-4);
     font-size: var(--text-base);
+  }
+  .authoring-import-route {
+    grid-template-columns: 1fr;
+  }
+  .authoring-import-arrow {
+    transform: rotate(90deg);
+    justify-self: start;
+  }
+  .authoring-import-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .authoring-import-existing {
+    grid-column: 2;
+    justify-self: start;
   }
 
   /* Header: device name compact, tabs hide → hamburger shows.
