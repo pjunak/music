@@ -563,6 +563,33 @@ def test_two_tabs_same_client_id_single_device_entry(client: TestClient) -> None
         assert len(tv_entries) == 1
 
 
+def test_device_registry_detects_other_connection_for_shared_client_id() -> None:
+    from app.sync.devices import DeviceRegistry
+
+    local_registry = DeviceRegistry()
+    first = local_registry.add()
+    second = local_registry.add()
+    local_registry.bind(
+        first.connection_id,
+        client_id="shared-phone",
+        name="Phone",
+        is_output=False,
+    )
+    local_registry.bind(
+        second.connection_id,
+        client_id="shared-phone",
+        name="Phone",
+        is_output=False,
+    )
+
+    assert local_registry.has_other_connection("shared-phone", first.connection_id)
+    assert local_registry.has_other_connection("shared-phone", second.connection_id)
+
+    local_registry.remove(second.connection_id)
+    assert not local_registry.has_other_connection("shared-phone", first.connection_id)
+
+
+@pytest.mark.timeout(10)
 def test_shared_client_id_stays_active_until_last_socket_disconnects(
     client: TestClient,
 ) -> None:
@@ -589,17 +616,81 @@ def test_shared_client_id_stays_active_until_last_socket_disconnects(
             second.receive_json()
 
         # The second socket is gone, but the first still represents this stable
-        # client id. Disconnect cleanup broadcasts a fresh snapshot without
-        # pruning the live output.
+        # client id. Prove it remains usable with a real mutation rather than
+        # waiting for a redundant disconnect broadcast with no visible change.
+        first.send_json(
+            {
+                "type": "set_device_volume",
+                "device_id": "shared-phone",
+                "volume": 0.42,
+            }
+        )
         after_one_close = first.receive_json()
+        assert after_one_close["state"]["device_volumes"]["shared-phone"] == 0.42
         assert after_one_close["state"]["active_output_device_ids"] == [
             "shared-phone"
         ]
+        assert any(
+            device["client_id"] == "shared-phone"
+            for device in after_one_close["state"]["connected_devices"]
+        )
 
     # The final socket has now closed. A new observer receives the pruned state.
     with client.websocket_connect("/api/ws") as observer:
         snapshot = observer.receive_json()
         assert "shared-phone" not in snapshot["state"]["active_output_device_ids"]
+        assert all(
+            device["client_id"] != "shared-phone"
+            for device in snapshot["state"]["connected_devices"]
+        )
+
+
+@pytest.mark.timeout(5)
+async def test_disconnect_cleanup_finishes_state_commit_when_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anyio
+
+    from app.core.db import SessionLocal
+    from app.sync import router as sync_router
+    from app.sync.devices import registry
+    from app.sync.state import machine, set_active_outputs
+
+    await machine.apply(set_active_outputs(["cancelled-phone"]), SessionLocal)
+
+    connection = registry.add()
+    registry.bind(
+        connection.connection_id,
+        client_id="cancelled-phone",
+        name="Phone",
+        is_output=False,
+    )
+
+    persist_started = anyio.Event()
+    release_persist = anyio.Event()
+    persist_finished = anyio.Event()
+
+    async def _blocking_persist(_db_factory, _state) -> None:
+        persist_started.set()
+        await release_persist.wait()
+        persist_finished.set()
+
+    monkeypatch.setattr(machine, "_persist", _blocking_persist)
+
+    async with anyio.create_task_group() as tasks:
+        tasks.start_soon(
+            sync_router._cleanup_disconnected_connection,
+            connection.connection_id,
+        )
+        with anyio.fail_after(1):
+            await persist_started.wait()
+        tasks.cancel_scope.cancel()
+        release_persist.set()
+
+    assert persist_finished.is_set()
+    assert registry.get(connection.connection_id) is None
+    snapshot = await machine.snapshot()
+    assert "cancelled-phone" not in snapshot.active_output_device_ids
 
 
 def test_state_load_prunes_dangling_track_ids(

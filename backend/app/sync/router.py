@@ -7,7 +7,6 @@ disconnect, removes the device from the registry.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 from datetime import UTC, datetime
@@ -33,7 +32,7 @@ from app.sync import commit_and_broadcast
 from app.sync import loops as loops_manager
 from app.sync import state as state_module
 from app.sync.advancer import resolve_follow_next
-from app.sync.connection import manager
+from app.sync.connection import CLOSE_TIMEOUT_S, manager
 from app.sync.devices import registry
 from app.sync.protocol import (
     AmbientClearQueueAction,
@@ -77,6 +76,8 @@ from app.sync.protocol import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_DISCONNECT_COMMIT_TIMEOUT_S = 5.0
 
 
 async def _authenticate(
@@ -789,6 +790,34 @@ async def _dispatch(action: Any, device_id: str, websocket: WebSocket) -> None:
     await handler(action, device_id, websocket)
 
 
+async def _cleanup_disconnected_connection(connection_id: str) -> None:
+    """Remove one socket and prune live output state when its client is gone.
+
+    Registry removal is synchronous, so cancellation cannot leave a dead
+    socket registered. Only the state-machine apply/persist phase for the final
+    socket is cancellation-shielded; its broadcast remains cancelable and is
+    already bounded by the connection manager's send deadline.
+    """
+    client_id = registry.client_id_for(connection_id)
+    has_other_connection = client_id is not None and registry.has_other_connection(
+        client_id, connection_id
+    )
+
+    manager.remove(connection_id)
+    registry.remove(connection_id)
+
+    if client_id is None or has_other_connection:
+        return
+
+    # The final registered socket disappearing is always a visible presence
+    # change, even when the client was not active and the mutator is a no-op.
+    await commit_and_broadcast(
+        state_module.remove_active_output(client_id),
+        force_broadcast=True,
+        shield_commit_timeout_s=_DISCONNECT_COMMIT_TIMEOUT_S,
+    )
+
+
 @router.websocket("/api/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
     # Guests (no/invalid session cookie) get a read-only socket — they
@@ -891,28 +920,24 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     websocket, f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
                 )
     finally:
-        client_id = registry.client_id_for(device.connection_id)
-        manager.remove(device.connection_id)
-        registry.remove(device.connection_id)
-        # Prune the disconnecting device from active_output_device_ids — but
-        # only when its *last* tab closes. Closing one tab of a device that has
-        # another output tab open shouldn't silence it. The persistent
-        # output-by-default setting is untouched; registration will
-        # auto-activate it again on reconnect when that setting is enabled.
-        if client_id is not None and not registry.has_other_connection(
-            client_id, device.connection_id
-        ):
-            with contextlib.suppress(Exception):
-                await commit_and_broadcast(
-                    state_module.remove_active_output(client_id)
-                )
-        with contextlib.suppress(Exception):
-            new_state = await state_module.machine.snapshot()
-            await manager.broadcast_state(new_state)
-        await asyncio.sleep(0)
+        try:
+            await _cleanup_disconnected_connection(device.connection_id)
+        except Exception:
+            logger.exception(
+                "disconnect cleanup failed for connection %s",
+                device.connection_id,
+            )
         if websocket.client_state not in (
             WebSocketState.DISCONNECTED,
             WebSocketState.RESPONSE,
         ):
-            with contextlib.suppress(Exception):
-                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+            try:
+                await asyncio.wait_for(
+                    websocket.close(code=status.WS_1000_NORMAL_CLOSURE),
+                    timeout=CLOSE_TIMEOUT_S,
+                )
+            except Exception:
+                logger.exception(
+                    "websocket close failed for connection %s",
+                    device.connection_id,
+                )
