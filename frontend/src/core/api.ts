@@ -271,6 +271,8 @@ export interface PlaylistSuggestionCandidate {
   album: string;
   origin: string;
   genre: string;
+  manual_tags: string[];
+  analysis_tags: string[];
   length_s: number;
   bpm: number | null;
   match_score: number;
@@ -334,6 +336,37 @@ export interface LibraryAnalysisSummary {
   last_updated_at: string | null;
 }
 
+export interface StarterTagGroup {
+  key: string;
+  label: string;
+  tags: string[];
+}
+
+export interface ManualTagCatalog {
+  starter_groups: StarterTagGroup[];
+  used_tags: string[];
+}
+
+export interface LibraryTagTrack {
+  track_id: number;
+  path: string;
+  title: string;
+  display_title: string;
+  artist: string;
+  album: string;
+  manual_tags: string[];
+  analysis_analyzer: string | null;
+  analysis_tags: string[];
+  analysis_confidence: "high" | "medium" | "low" | null;
+}
+
+export interface LibraryTagPage {
+  items: LibraryTagTrack[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export const jobsApi = {
   list: (
     params: {
@@ -364,6 +397,29 @@ export const assistantApi = {
     api.post<BackgroundJob>("/api/assistant/library-analysis/jobs", { force }),
   getLibraryAnalysisSummary: () =>
     api.get<LibraryAnalysisSummary>("/api/assistant/library-analysis/summary"),
+  getManualTagCatalog: () =>
+    api.get<ManualTagCatalog>("/api/assistant/library-tags/catalog"),
+  listLibraryTags: (
+    params: {
+      search?: string;
+      tag?: string;
+      offset?: number;
+      limit?: number;
+    } = {},
+  ) => {
+    const query = new URLSearchParams();
+    if (params.search) query.set("search", params.search);
+    if (params.tag) query.set("tag", params.tag);
+    if (params.offset !== undefined) query.set("offset", String(params.offset));
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return api.get<LibraryTagPage>(`/api/assistant/library-tags${suffix}`);
+  },
+  patchManualTags: (trackId: number, add: string[], remove: string[]) =>
+    api.patch<LibraryTagTrack>(
+      `/api/assistant/library-tags/${encodeURIComponent(trackId)}`,
+      { add, remove },
+    ),
 };
 
 export interface ActiveSession {

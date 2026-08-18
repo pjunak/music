@@ -16,6 +16,7 @@ from app.assistant.schemas import (
     PlaylistSuggestionRequest,
     PlaylistSuggestionResponse,
 )
+from app.assistant.tags import load_manual_tags
 from app.jobs.runner import job_runner
 from app.jobs.schemas import BackgroundJobOut, job_out
 from app.jobs.service import enqueue_unique_active_job
@@ -34,7 +35,13 @@ def suggest_playlist(
 ) -> PlaylistSuggestionResponse:
     tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
     profiles = load_current_metadata_profiles(db, tracks)
-    return playlist_suggestion_engine.suggest(tracks, payload, profiles)
+    manual_tags = load_manual_tags(db, [track.id for track in tracks])
+    return playlist_suggestion_engine.suggest(
+        tracks,
+        payload,
+        profiles,
+        manual_tags,
+    )
 
 
 @router.post(

@@ -4698,6 +4698,217 @@ kbd,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.assistant-tag-workspace {
+  width: min(100%, 1180px);
+  margin: var(--space-5) auto 0;
+}
+.assistant-tag-workspace .assistant-section-heading p {
+  max-width: 720px;
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.assistant-tag-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.35fr);
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+.assistant-tag-toolbar form,
+.assistant-custom-tag {
+  display: flex;
+  gap: var(--space-2);
+}
+.assistant-tag-toolbar input,
+.assistant-custom-tag input {
+  min-width: 0;
+  flex: 1;
+}
+.assistant-tag-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.assistant-tag-toolbar label > span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-tag-layout {
+  display: grid;
+  grid-template-columns: minmax(270px, 0.65fr) minmax(0, 1.35fr);
+  min-height: 560px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.assistant-tag-track-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.assistant-tag-track-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+.assistant-tag-track-list > button {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  text-align: left;
+  background: transparent;
+}
+.assistant-tag-track-list > button:hover,
+.assistant-tag-track-list > button.is-selected {
+  background: var(--surface-3);
+}
+.assistant-tag-track-list > button.is-selected {
+  box-shadow: inset 3px 0 0 var(--accent2);
+}
+.assistant-tag-track-list strong,
+.assistant-tag-track-list span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-tag-track-list span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-track-tag-preview {
+  color: var(--accent2-strong) !important;
+}
+.assistant-tag-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-tag-editor {
+  min-width: 0;
+  padding: var(--space-5);
+  overflow: auto;
+}
+.assistant-tag-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.assistant-tag-editor-heading h3 {
+  margin: 0;
+}
+.assistant-tag-editor-heading > div > span {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-unsaved {
+  color: var(--accent2-strong);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.assistant-tag-source {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.assistant-tag-source.is-manual {
+  border-left: 3px solid var(--accent2);
+}
+.assistant-tag-source.is-analysis {
+  border-left: 3px solid var(--muted);
+  background: var(--surface-2);
+}
+.assistant-tag-source > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.assistant-tag-source > div:first-child > span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-editable-tags,
+.assistant-readonly-tags,
+.assistant-starter-tags > div > div,
+.assistant-candidate-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.assistant-editable-tags,
+.assistant-readonly-tags {
+  min-height: 2rem;
+  margin: var(--space-3) 0;
+}
+.assistant-editable-tags button,
+.assistant-readonly-tags > span:not(.muted),
+.assistant-candidate-tag-row > span:not(:first-child) {
+  padding: 0.2rem var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+}
+.assistant-editable-tags button {
+  border-color: var(--accent2);
+  color: var(--accent2-strong);
+  background: var(--accent2-soft);
+}
+.assistant-starter-tags {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.assistant-starter-tags > div > strong {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--muted-strong);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.assistant-tag-save-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.assistant-candidate-tag-row {
+  align-items: center;
+  margin-top: var(--space-1);
+}
+.assistant-candidate-tag-row > span:first-child {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-candidate-tag-row.is-manual > span:not(:first-child) {
+  border-color: var(--accent2);
+  color: var(--accent2-strong);
+  background: var(--accent2-soft);
+}
+.assistant-candidate-tag-row.is-analysis > span:not(:first-child) {
+  color: var(--muted-strong);
+  background: var(--surface-2);
+}
 
 /* --- settings view --- */
 
@@ -5174,6 +5385,14 @@ input.volume-slider::-moz-range-thumb {
   .assistant-analysis-grid {
     grid-template-columns: 1fr;
   }
+  .assistant-tag-layout {
+    grid-template-columns: 1fr;
+  }
+  .assistant-tag-track-panel {
+    max-height: 360px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
   .assistant-workbench {
     grid-template-columns: 1fr;
   }
@@ -5239,6 +5458,16 @@ input.volume-slider::-moz-range-thumb {
   .assistant-job-history-row > span:nth-child(3),
   .assistant-job-history-row > span:nth-child(4) {
     grid-column: 2;
+  }
+  .assistant-tag-toolbar {
+    grid-template-columns: 1fr;
+  }
+  .assistant-tag-toolbar form,
+  .assistant-custom-tag {
+    flex-direction: column;
+  }
+  .assistant-tag-editor {
+    padding: var(--space-4);
   }
   /* Section-nav sub-tabs at narrow widths: tighter padding so the 4
    * Authoring sub-tabs (Playlists / Soundboards / Modes / Presets) come

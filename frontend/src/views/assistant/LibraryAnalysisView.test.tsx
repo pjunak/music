@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
-import type { BackgroundJob, LibraryAnalysisSummary } from "@/core/api";
+import type {
+  BackgroundJob,
+  LibraryAnalysisSummary,
+  LibraryTagPage,
+  ManualTagCatalog,
+} from "@/core/api";
 
 vi.mock("@/core/api", async (importActual) => {
   const actual = await importActual<typeof ApiModule>();
@@ -13,6 +18,9 @@ vi.mock("@/core/api", async (importActual) => {
       ...actual.assistantApi,
       startLibraryAnalysis: vi.fn(),
       getLibraryAnalysisSummary: vi.fn(),
+      getManualTagCatalog: vi.fn(),
+      listLibraryTags: vi.fn(),
+      patchManualTags: vi.fn(),
     },
     jobsApi: {
       list: vi.fn(),
@@ -45,6 +53,18 @@ const summary: LibraryAnalysisSummary = {
   last_updated_at: "2026-08-18T10:00:00Z",
 };
 
+const emptyTagPage: LibraryTagPage = {
+  items: [],
+  total: 0,
+  offset: 0,
+  limit: 50,
+};
+
+const tagCatalog: ManualTagCatalog = {
+  starter_groups: [],
+  used_tags: [],
+};
+
 function job(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
   return {
     id: "job-1",
@@ -70,6 +90,8 @@ function job(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(assistantApi.getLibraryAnalysisSummary).mockResolvedValue(summary);
+  vi.mocked(assistantApi.getManualTagCatalog).mockResolvedValue(tagCatalog);
+  vi.mocked(assistantApi.listLibraryTags).mockResolvedValue(emptyTagPage);
   vi.mocked(jobsApi.list).mockResolvedValue([]);
 });
 

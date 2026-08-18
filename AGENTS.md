@@ -164,6 +164,10 @@ Runtime data lives outside the image.
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a
   profile is absent, stale, or malformed.
+- Manual playlist tags are operator-owned rows in `track_user_tags`, independent from file tags and
+  generated analysis. Update them with additive/removal deltas, display their source explicitly,
+  and pass them separately to suggestion engines. An analyzer or provider must never overwrite or
+  silently promote its output into manual tags.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue

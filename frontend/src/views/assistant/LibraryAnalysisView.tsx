@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/EmptyState";
 import {
@@ -9,6 +9,11 @@ import {
   jobsApi,
 } from "@/core/api";
 import { toast } from "@/core/toast";
+
+const LibraryTagEditor = lazy(async () => {
+  const module = await import("./LibraryTagEditor");
+  return { default: module.LibraryTagEditor };
+});
 
 const ANALYSIS_JOB_KIND = "assistant.library-analysis";
 const ACTIVE_STATUSES = new Set<BackgroundJobStatus>([
@@ -296,6 +301,16 @@ export function LibraryAnalysisView() {
           </p>
         </section>
       </div>
+
+      <Suspense
+        fallback={
+          <section className="surface-card assistant-tag-workspace">
+            <p className="muted">Loading manual tag editor…</p>
+          </section>
+        }
+      >
+        <LibraryTagEditor />
+      </Suspense>
 
       <section className="surface-card assistant-analysis-history">
         <div className="assistant-section-heading">

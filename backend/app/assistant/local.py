@@ -107,6 +107,13 @@ _MOODS: tuple[MoodProfile, ...] = (
         0.18,
     ),
     MoodProfile(
+        "festive",
+        frozenset({"celebration", "dance", "dancing", "feast", "festive", "festival"}),
+        0.72,
+        0.82,
+        0.12,
+    ),
+    MoodProfile(
         "exploration",
         frozenset({"adventure", "exploration", "journey", "travel", "wilderness"}),
         0.46,
@@ -135,6 +142,7 @@ _GENRE_ENERGY: dict[str, float] = {
 class _Intent:
     public: PlaylistIntent
     tokens: frozenset[str]
+    match_terms: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -143,6 +151,8 @@ class _RankedTrack:
     score: float
     confidence: Literal["high", "medium", "low"]
     reasons: tuple[str, ...]
+    manual_tags: tuple[str, ...]
+    analysis_tags: tuple[str, ...]
 
 
 def _tokens(value: str) -> frozenset[str]:
@@ -180,7 +190,10 @@ def interpret_prompt(prompt: str) -> PlaylistIntent:
     )
 
 
-def _track_field_tokens(track: TrackLike) -> dict[str, frozenset[str]]:
+def _track_field_tokens(
+    track: TrackLike,
+    manual_tags: Sequence[str] = (),
+) -> dict[str, frozenset[str]]:
     return {
         "title": _tokens(f"{track.display_title} {track.title}"),
         "genre": _tokens(track.genre),
@@ -188,6 +201,9 @@ def _track_field_tokens(track: TrackLike) -> dict[str, frozenset[str]]:
         "album": _tokens(track.album),
         "artist": _tokens(track.artist),
         "path": _tokens(track.path),
+        "manual_tags": frozenset(
+            token for tag in manual_tags for token in _tokens(tag)
+        ),
     }
 
 
@@ -257,6 +273,7 @@ def _semantic_match(
         "album": 0.9,
         "artist": 0.6,
         "path": 0.5,
+        "manual_tags": 2.0,
     }
     matched: list[str] = []
     total = 0.0
@@ -268,23 +285,49 @@ def _semantic_match(
         if best > 0:
             matched.append(term)
             total += best
-    return _clamp(total / (len(terms) * max(weights.values()))), tuple(matched)
+    # Keep the original metadata scale (1.4) while allowing an explicit
+    # operator tag to saturate the score instead of diluting existing matches.
+    return _clamp(total / (len(terms) * 1.4)), tuple(matched)
 
 
 def _rank_track(
     track: TrackLike,
     intent: _Intent,
     profile: TrackAnalysisProfile | None = None,
+    manual_tags: Sequence[str] = (),
 ) -> _RankedTrack:
-    field_tokens = _track_field_tokens(track)
-    profile = profile or _metadata_track_profile(track, field_tokens)
+    metadata_field_tokens = _track_field_tokens(track)
+    field_tokens = _track_field_tokens(track, manual_tags)
+    profile = profile or _metadata_track_profile(track, metadata_field_tokens)
     energy = profile.energy
     brightness = profile.brightness
     tension = profile.tension
     track_moods = profile.moods
     semantic_score, matched_terms = _semantic_match(intent.tokens, field_tokens)
+    manual_tokens = field_tokens["manual_tags"]
+    manual_matches = tuple(sorted(intent.match_terms & manual_tokens))
+    manual_moods = {
+        mood.name for mood in _MOODS if mood.aliases & manual_tokens
+    }
+    manual_mood_matches = tuple(
+        sorted(set(intent.public.matched_moods) & manual_moods)
+    )
 
     weighted_scores: list[tuple[float, float]] = []
+    manual_signal_score: float | None = None
+    if manual_matches or manual_mood_matches:
+        exact_score = (
+            len(manual_matches) / len(intent.match_terms)
+            if intent.match_terms
+            else 0.0
+        )
+        mood_tag_score = (
+            len(manual_mood_matches) / len(intent.public.matched_moods)
+            if intent.public.matched_moods
+            else 0.0
+        )
+        manual_signal_score = max(exact_score, mood_tag_score)
+        weighted_scores.append((manual_signal_score, 0.75))
     if intent.public.matched_moods:
         mood_score = _mean(
             [
@@ -293,24 +336,44 @@ def _rank_track(
                 1.0 - abs(intent.public.tension - tension),
             ]
         )
-        weighted_scores.append((mood_score, 0.68))
+        weighted_scores.append((mood_score, 0.55 if weighted_scores else 0.68))
     if intent.tokens:
-        weighted_scores.append((semantic_score, 0.32 if weighted_scores else 1.0))
+        weighted_scores.append((semantic_score, 0.3 if weighted_scores else 1.0))
     if not weighted_scores:
         weighted_scores.append((0.5, 1.0))
 
     score = sum(value * weight for value, weight in weighted_scores) / sum(
         weight for _, weight in weighted_scores
     )
-    evidence_count = len(matched_terms) + len(track_moods)
+    evidence_count = (
+        len(matched_terms)
+        + len(track_moods)
+        + len(manual_matches)
+        + len(manual_mood_matches)
+    )
     if track.bpm is not None and intent.public.matched_moods:
         evidence_count += 1
     if track.genre:
         evidence_count += 1
     reliability = min(1.0, evidence_count / 3)
     score = _clamp(score * (0.88 + 0.12 * reliability))
+    if manual_signal_score is not None:
+        # Exact human classification is authoritative context. A partial tag
+        # match helps without drowning out the remaining requested terms.
+        score = max(score, 0.65 + 0.35 * manual_signal_score)
 
     reasons: list[str] = []
+    if manual_matches or manual_mood_matches:
+        matched_manual = tuple(
+            tag
+            for tag in manual_tags
+            if _tokens(tag) & intent.match_terms
+            or any(
+                mood.name in manual_mood_matches and mood.aliases & _tokens(tag)
+                for mood in _MOODS
+            )
+        )
+        reasons.append(f"Your tags: {', '.join(matched_manual[:3])}")
     if matched_terms:
         reasons.append(f"Metadata matches: {', '.join(matched_terms[:3])}")
     if track_moods:
@@ -334,6 +397,8 @@ def _rank_track(
         score=score,
         confidence=confidence,
         reasons=tuple(reasons[:3]),
+        manual_tags=tuple(manual_tags),
+        analysis_tags=track_moods,
     )
 
 
@@ -386,12 +451,22 @@ def suggest_local_playlist(
     tracks: Sequence[TrackLike],
     request: PlaylistSuggestionRequest,
     profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+    manual_tags: Mapping[int, Sequence[str]] | None = None,
 ) -> PlaylistSuggestionResponse:
     public_intent = interpret_prompt(request.prompt)
-    intent = _Intent(public=public_intent, tokens=frozenset(public_intent.search_terms))
+    intent = _Intent(
+        public=public_intent,
+        tokens=frozenset(public_intent.search_terms),
+        match_terms=_tokens(request.prompt) - _STOP_WORDS,
+    )
     eligible = [track for track in tracks if _eligible(track, request)]
     ranked = [
-        _rank_track(track, intent, profiles.get(track.id) if profiles is not None else None)
+        _rank_track(
+            track,
+            intent,
+            profiles.get(track.id) if profiles is not None else None,
+            manual_tags.get(track.id, ()) if manual_tags is not None else (),
+        )
         for track in eligible
     ]
     diversified = _diversify(ranked, request.candidate_limit)
@@ -413,6 +488,8 @@ def suggest_local_playlist(
                 album=item.track.album,
                 origin=item.track.origin,
                 genre=item.track.genre,
+                manual_tags=list(item.manual_tags),
+                analysis_tags=list(item.analysis_tags),
                 length_s=max(0.0, item.track.length_s),
                 bpm=item.track.bpm,
                 match_score=round(item.score, 4),
@@ -441,8 +518,9 @@ class LocalMetadataPlaylistEngine:
         tracks: Sequence[TrackLike],
         request: PlaylistSuggestionRequest,
         profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
     ) -> PlaylistSuggestionResponse:
-        return suggest_local_playlist(tracks, request, profiles)
+        return suggest_local_playlist(tracks, request, profiles, manual_tags)
 
 
 local_metadata_playlist_engine = LocalMetadataPlaylistEngine()

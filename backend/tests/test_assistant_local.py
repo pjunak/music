@@ -94,6 +94,30 @@ def test_current_analysis_profiles_feed_the_local_ranker() -> None:
     assert result.candidates[0].track_id == 2
 
 
+def test_manual_tags_are_ranked_separately_from_analysis_tags() -> None:
+    tracks = [
+        StubTrack(1, "neutral-one.flac", "Neutral One"),
+        StubTrack(2, "neutral-two.flac", "Neutral Two"),
+    ]
+    profiles = {
+        1: TrackAnalysisProfile(0.5, 0.5, 0.5, ("dark",), ("cached",), "low"),
+        2: TrackAnalysisProfile(0.5, 0.5, 0.5, ("dark",), ("cached",), "low"),
+    }
+    manual_tags = {2: ("medieval", "tavern", "dancing")}
+
+    result = suggest_local_playlist(
+        tracks,
+        request("medieval tavern dancing"),
+        profiles,
+        manual_tags,
+    )
+
+    assert result.candidates[0].track_id == 2
+    assert result.candidates[0].manual_tags == ["medieval", "tavern", "dancing"]
+    assert result.candidates[0].analysis_tags == ["dark"]
+    assert result.candidates[0].reasons[0].startswith("Your tags:")
+
+
 def test_assistant_endpoint_requires_auth(client: TestClient) -> None:
     response = client.post(
         "/api/assistant/playlists/suggest",

@@ -140,6 +140,25 @@ export function PlaylistSuggestionResults({
                     <span className="assistant-reasons">
                       {candidate.reasons.join(" · ")}
                     </span>
+                    {candidate.manual_tags.length > 0 ? (
+                      <span className="assistant-candidate-tag-row is-manual">
+                        <span>Your tags</span>
+                        {candidate.manual_tags.slice(0, 5).map((tag) => (
+                          <span key={tag}>{tag}</span>
+                        ))}
+                        {candidate.manual_tags.length > 5 ? (
+                          <span>+{candidate.manual_tags.length - 5}</span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    {candidate.analysis_tags.length > 0 ? (
+                      <span className="assistant-candidate-tag-row is-analysis">
+                        <span>Analysis</span>
+                        {candidate.analysis_tags.map((tag) => (
+                          <span key={tag}>{tag}</span>
+                        ))}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="assistant-match">
                     <strong>{Math.round(candidate.match_score * 100)}%</strong>

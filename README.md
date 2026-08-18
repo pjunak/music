@@ -44,6 +44,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. The current analyzer is metadata-only;
   audio-signal analysis remains an explicit later layer.
+- **Manual playlist tags** — attach operator-owned context such as `medieval`, `tavern`, `dancing`,
+  or any custom tag without modifying the audio file. Manual and generated tags remain visibly and
+  structurally separate, while local playlist ranking gives explicit manual matches priority.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.

@@ -52,6 +52,8 @@ class PlaylistCandidate(StrictAssistantModel):
     album: str
     origin: str
     genre: str
+    manual_tags: list[str]
+    analysis_tags: list[str]
     length_s: float = Field(ge=0.0)
     bpm: int | None
     match_score: float = Field(ge=0.0, le=1.0)

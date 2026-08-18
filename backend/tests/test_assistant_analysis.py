@@ -82,12 +82,13 @@ def test_analysis_profiles_library_and_reuses_current_results(
 
     first = _start_and_wait(auth_client)
     assert first["status"] == "succeeded", first
-    assert first["progress_current"] == first["progress_total"] == 1
+    library_tracks = first["result"]["tracks"]
+    assert first["progress_current"] == first["progress_total"] == library_tracks
     assert first["result"] == {
-        "tracks": 1,
-        "updated": 1,
+        "tracks": library_tracks,
+        "updated": library_tracks,
         "unchanged": 0,
-        "current_profiles": 1,
+        "current_profiles": library_tracks,
         "analyzer": LOCAL_METADATA_ANALYZER_ID,
     }
 
@@ -119,18 +120,18 @@ def test_analysis_profiles_library_and_reuses_current_results(
     unchanged = _start_and_wait(auth_client)
     assert unchanged["status"] == "succeeded", unchanged
     assert unchanged["result"]["updated"] == 0
-    assert unchanged["result"]["unchanged"] == 1
+    assert unchanged["result"]["unchanged"] == library_tracks
 
     summary = auth_client.get("/api/assistant/library-analysis/summary")
     assert summary.status_code == 200, summary.text
     payload = summary.json()
-    assert payload["library_tracks"] == 1
-    assert payload["analyzed_tracks"] == 1
+    assert payload["library_tracks"] == library_tracks
+    assert payload["analyzed_tracks"] == library_tracks
     assert (
         payload["high_confidence"]
         + payload["medium_confidence"]
         + payload["low_confidence"]
-        == 1
+        == library_tracks
     )
     assert payload["last_updated_at"] is not None
 
@@ -160,4 +161,4 @@ def test_analysis_refreshes_changed_metadata_and_force_rebuilds(
 
     forced = _start_and_wait(auth_client, force=True)
     assert forced["status"] == "succeeded", forced
-    assert forced["result"]["updated"] == 1
+    assert forced["result"]["updated"] == forced["result"]["tracks"]

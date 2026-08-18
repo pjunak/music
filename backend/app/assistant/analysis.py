@@ -57,9 +57,12 @@ def load_current_metadata_profiles(
     """Load only valid profiles whose source metadata has not changed."""
 
     track_by_id = {track.id: track for track in tracks}
+    if not track_by_id:
+        return {}
     rows = db.scalars(
         select(TrackAnalysis).where(
-            TrackAnalysis.analyzer_id == LOCAL_METADATA_ANALYZER_ID
+            TrackAnalysis.analyzer_id == LOCAL_METADATA_ANALYZER_ID,
+            TrackAnalysis.track_id.in_(track_by_id),
         )
     ).all()
     profiles: dict[int, TrackAnalysisProfile] = {}

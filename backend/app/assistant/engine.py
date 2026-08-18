@@ -44,4 +44,5 @@ class PlaylistSuggestionEngine(Protocol):
         tracks: Sequence[TrackLike],
         request: PlaylistSuggestionRequest,
         profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
     ) -> PlaylistSuggestionResponse: ...

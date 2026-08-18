@@ -54,6 +54,8 @@ const suggestion: PlaylistSuggestion = {
       album: "City Mysteries",
       origin: "Scores",
       genre: "soundtrack",
+      manual_tags: ["investigation"],
+      analysis_tags: ["tense", "dark"],
       length_s: 240,
       bpm: 92,
       match_score: 0.91,
@@ -70,6 +72,8 @@ const suggestion: PlaylistSuggestion = {
       album: "City Mysteries",
       origin: "Scores",
       genre: "ambient",
+      manual_tags: [],
+      analysis_tags: ["calm"],
       length_s: 180,
       bpm: null,
       match_score: 0.73,
@@ -135,6 +139,8 @@ describe("PlaylistBuilderView", () => {
     await user.click(screen.getByRole("button", { name: "Find matching songs" }));
 
     expect(await screen.findByText("Rainy Alley")).toBeInTheDocument();
+    expect(screen.getByText("Your tags")).toBeInTheDocument();
+    expect(screen.getAllByText("Analysis")).toHaveLength(2);
     expect(screen.getByText("Distant Footsteps")).toBeInTheDocument();
     expect(screen.getByRole("meter", { name: "Tension" })).toHaveAttribute(
       "aria-valuenow",
