@@ -28,6 +28,20 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
     assert client.get("/api/assistant/library-tags").status_code == 401
     assert client.get("/api/assistant/library-tags/catalog").status_code == 401
     assert (
+        client.post(
+            "/api/assistant/library-tags/bulk",
+            json={"track_ids": [1], "add": ["tavern"], "remove": []},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/assistant/library-tags/catalog/rename",
+            json={"source": "tavern", "target": "inn"},
+        ).status_code
+        == 401
+    )
+    assert (
         client.patch(
             "/api/assistant/library-tags/1",
             json={"add": ["tavern"], "remove": []},
@@ -59,6 +73,11 @@ def test_catalog_has_dnd_starters_and_tracks_custom_usage(
     refreshed = auth_client.get("/api/assistant/library-tags/catalog")
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()["used_tags"] == ["custom scene", "medieval", "tavern"]
+    assert refreshed.json()["tag_usage"] == [
+        {"tag": "custom scene", "track_count": 1},
+        {"tag": "medieval", "track_count": 1},
+        {"tag": "tavern", "track_count": 1},
+    ]
 
 
 def test_manual_and_analysis_tags_remain_separate(
@@ -157,3 +176,110 @@ def test_playlist_endpoint_prioritizes_operator_tags(
     assert first["track_id"] == tagged_track_id
     assert first["manual_tags"] == ["dancing", "medieval", "tavern"]
     assert first["reasons"][0].startswith("Your tags:")
+
+
+def test_bulk_tagging_updates_valid_tracks_and_reports_missing_ones(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    track_ids = [seeded_track_id, extra_seeded_track_ids[0], 999999]
+    response = auth_client.post(
+        "/api/assistant/library-tags/bulk",
+        json={
+            "track_ids": track_ids,
+            "add": ["tavern", "medieval"],
+            "remove": [],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["requested_tracks"] == 3
+    assert payload["matched_tracks"] == 2
+    assert payload["changed_track_ids"] == sorted(track_ids[:2])
+    assert payload["missing_track_ids"] == [999999]
+    assert payload["failures"] == []
+
+    listing = auth_client.get(
+        "/api/assistant/library-tags",
+        params={"tag": "tavern", "limit": 100},
+    )
+    assert listing.status_code == 200, listing.text
+    assert listing.json()["total"] == 2
+
+
+def test_bulk_tagging_skips_only_tracks_that_would_exceed_limit(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    full = [f"tag-{index}" for index in range(32)]
+    seeded = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": full, "remove": []},
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    other_id = extra_seeded_track_ids[0]
+    response = auth_client.post(
+        "/api/assistant/library-tags/bulk",
+        json={
+            "track_ids": [seeded_track_id, other_id],
+            "add": ["overflow"],
+            "remove": [],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["changed_track_ids"] == [other_id]
+    assert payload["failures"] == [
+        {
+            "track_id": seeded_track_id,
+            "error": "track would exceed the 32-tag limit",
+        }
+    ]
+
+
+def test_rename_merges_existing_tag_and_updates_usage_counts(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    first_extra, second_extra = extra_seeded_track_ids[:2]
+    for track_id, tags in (
+        (seeded_track_id, ["tavern", "medieval"]),
+        (first_extra, ["tavern"]),
+        (second_extra, ["medieval"]),
+    ):
+        response = auth_client.patch(
+            f"/api/assistant/library-tags/{track_id}",
+            json={"add": tags, "remove": []},
+        )
+        assert response.status_code == 200, response.text
+
+    renamed = auth_client.post(
+        "/api/assistant/library-tags/catalog/rename",
+        json={"source": "TAVERN", "target": "medieval"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json() == {
+        "source": "tavern",
+        "target": "medieval",
+        "affected_tracks": 2,
+        "merged": True,
+    }
+
+    catalog = auth_client.get("/api/assistant/library-tags/catalog")
+    assert catalog.status_code == 200, catalog.text
+    assert catalog.json()["used_tags"] == ["medieval"]
+    assert catalog.json()["tag_usage"] == [
+        {"tag": "medieval", "track_count": 3}
+    ]
+
+    missing = auth_client.post(
+        "/api/assistant/library-tags/catalog/rename",
+        json={"source": "tavern", "target": "inn"},
+    )
+    assert missing.status_code == 404

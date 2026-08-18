@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,8 @@ vi.mock("@/core/api", async (importActual) => {
       getManualTagCatalog: vi.fn(),
       listLibraryTags: vi.fn(),
       patchManualTags: vi.fn(),
+      patchManualTagsBulk: vi.fn(),
+      renameManualTag: vi.fn(),
     },
   };
 });
@@ -40,6 +42,7 @@ const catalog: ManualTagCatalog = {
     { key: "scene", label: "Scene", tags: ["dancing", "combat"] },
   ],
   used_tags: ["medieval"],
+  tag_usage: [{ tag: "medieval", track_count: 1 }],
 };
 
 const track: LibraryTagTrack = {
@@ -124,5 +127,30 @@ describe("LibraryTagEditor", () => {
       expect(assistantApi.patchManualTags).toHaveBeenCalledWith(7, [], ["medieval"]),
     );
     expect(screen.getByText("festive")).toBeInTheDocument();
+  });
+
+  it("applies chosen tags to a multi-track selection", async () => {
+    vi.mocked(assistantApi.patchManualTagsBulk).mockResolvedValue({
+      requested_tracks: 1,
+      matched_tracks: 1,
+      changed_track_ids: [7],
+      missing_track_ids: [],
+      failures: [],
+    });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(
+      screen.getByRole("checkbox", { name: "Select Tavern Dance for bulk tagging" }),
+    );
+    const bulkEditor = screen.getByRole("region", { name: "Bulk tag editor" });
+    await user.click(within(bulkEditor).getByRole("button", { name: "dancing" }));
+    await user.click(within(bulkEditor).getByRole("button", { name: "Add to selected" }));
+
+    await waitFor(() =>
+      expect(assistantApi.patchManualTagsBulk).toHaveBeenCalledWith([7], ["dancing"], []),
+    );
+    expect(toast.success).toHaveBeenCalledWith("Tags added", "1 track was updated.");
   });
 });

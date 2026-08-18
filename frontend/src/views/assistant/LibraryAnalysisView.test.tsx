@@ -21,6 +21,8 @@ vi.mock("@/core/api", async (importActual) => {
       getManualTagCatalog: vi.fn(),
       listLibraryTags: vi.fn(),
       patchManualTags: vi.fn(),
+      patchManualTagsBulk: vi.fn(),
+      renameManualTag: vi.fn(),
     },
     jobsApi: {
       list: vi.fn(),
@@ -63,6 +65,7 @@ const emptyTagPage: LibraryTagPage = {
 const tagCatalog: ManualTagCatalog = {
   starter_groups: [],
   used_tags: [],
+  tag_usage: [],
 };
 
 function job(overrides: Partial<BackgroundJob> = {}): BackgroundJob {

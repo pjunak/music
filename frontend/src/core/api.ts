@@ -345,6 +345,32 @@ export interface StarterTagGroup {
 export interface ManualTagCatalog {
   starter_groups: StarterTagGroup[];
   used_tags: string[];
+  tag_usage: ManualTagUsage[];
+}
+
+export interface ManualTagUsage {
+  tag: string;
+  track_count: number;
+}
+
+export interface BulkManualTagFailure {
+  track_id: number;
+  error: string;
+}
+
+export interface BulkManualTagResult {
+  requested_tracks: number;
+  matched_tracks: number;
+  changed_track_ids: number[];
+  missing_track_ids: number[];
+  failures: BulkManualTagFailure[];
+}
+
+export interface ManualTagRenameResult {
+  source: string;
+  target: string;
+  affected_tracks: number;
+  merged: boolean;
 }
 
 export interface LibraryTagTrack {
@@ -419,6 +445,17 @@ export const assistantApi = {
     api.patch<LibraryTagTrack>(
       `/api/assistant/library-tags/${encodeURIComponent(trackId)}`,
       { add, remove },
+    ),
+  patchManualTagsBulk: (trackIds: number[], add: string[], remove: string[]) =>
+    api.post<BulkManualTagResult>("/api/assistant/library-tags/bulk", {
+      track_ids: trackIds,
+      add,
+      remove,
+    }),
+  renameManualTag: (source: string, target: string) =>
+    api.post<ManualTagRenameResult>(
+      "/api/assistant/library-tags/catalog/rename",
+      { source, target },
     ),
 };
 

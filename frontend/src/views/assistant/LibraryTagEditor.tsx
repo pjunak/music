@@ -9,6 +9,8 @@ import {
 } from "@/core/api";
 import { toast } from "@/core/toast";
 
+import { TagCatalogManager } from "./TagCatalogManager";
+
 const PAGE_SIZE = 50;
 const MAX_TAGS = 32;
 const MAX_TAG_LENGTH = 64;
@@ -42,10 +44,14 @@ export function LibraryTagEditor() {
   const [tagFilter, setTagFilter] = useState("");
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedTrackIds, setSelectedTrackIds] = useState<Set<number>>(new Set());
   const [draftTags, setDraftTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState("");
+  const [bulkTags, setBulkTags] = useState<string[]>([]);
+  const [bulkCustomTag, setBulkCustomTag] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -131,6 +137,7 @@ export function LibraryTagEditor() {
     event.preventDefault();
     setOffset(0);
     setSearch(searchDraft.trim());
+    setSelectedTrackIds(new Set());
   }
 
   function toggleTag(tag: string) {
@@ -162,6 +169,87 @@ export function LibraryTagEditor() {
     }
     setDraftTags(next);
     setCustomTag("");
+  }
+
+  function addBulkCustomTags(event: FormEvent) {
+    event.preventDefault();
+    const additions = bulkCustomTag
+      .split(",")
+      .map(normalizeTag)
+      .filter(Boolean);
+    if (additions.length === 0) return;
+    if (additions.some((tag) => tag.length > MAX_TAG_LENGTH)) {
+      toast.error(
+        "Tag is too long",
+        `Each manual tag can contain at most ${MAX_TAG_LENGTH} characters.`,
+      );
+      return;
+    }
+    const next = sortedUnique([...bulkTags, ...additions]);
+    if (next.length > MAX_TAGS) {
+      toast.error("Too many tags", `Choose at most ${MAX_TAGS} tags at once.`);
+      return;
+    }
+    setBulkTags(next);
+    setBulkCustomTag("");
+  }
+
+  function toggleTrackSelection(trackId: number) {
+    setSelectedTrackIds((current) => {
+      const next = new Set(current);
+      if (next.has(trackId)) next.delete(trackId);
+      else next.add(trackId);
+      return next;
+    });
+  }
+
+  function selectCurrentPage() {
+    setSelectedTrackIds((current) => {
+      const next = new Set(current);
+      for (const track of page.items) next.add(track.track_id);
+      return next;
+    });
+  }
+
+  async function applyBulk(mode: "add" | "remove") {
+    if (selectedTrackIds.size === 0 || bulkTags.length === 0) return;
+    setBulkSaving(true);
+    try {
+      const result = await assistantApi.patchManualTagsBulk(
+        [...selectedTrackIds],
+        mode === "add" ? bulkTags : [],
+        mode === "remove" ? bulkTags : [],
+      );
+      const skipped = result.missing_track_ids.length + result.failures.length;
+      if (skipped > 0) {
+        const skippedIds = [
+          ...result.missing_track_ids,
+          ...result.failures.map((failure) => failure.track_id),
+        ];
+        const visibleIds = skippedIds.slice(0, 5).join(", ");
+        const remainder = skippedIds.length > 5 ? `, +${skippedIds.length - 5} more` : "";
+        toast.error(
+          "Bulk tagging partly applied",
+          `${result.changed_track_ids.length} tracks changed; ${skipped} skipped (IDs ${visibleIds}${remainder}).`,
+        );
+      } else {
+        toast.success(
+          mode === "add" ? "Tags added" : "Tags removed",
+          result.changed_track_ids.length === 0
+            ? "The selected tracks were already up to date."
+            : `${result.changed_track_ids.length} ${result.changed_track_ids.length === 1 ? "track was" : "tracks were"} updated.`,
+        );
+      }
+      setBulkTags([]);
+      setReloadKey((value) => value + 1);
+    } catch (error) {
+      toast.error(
+        "Bulk tags could not be applied",
+        error instanceof Error ? error.message : undefined,
+      );
+    } finally {
+      setBulkSaving(false);
+    }
   }
 
   async function save() {
@@ -242,6 +330,7 @@ export function LibraryTagEditor() {
             onChange={(event) => {
               setTagFilter(event.target.value);
               setOffset(0);
+              setSelectedTrackIds(new Set());
             }}
           >
             <option value="">All manual tags</option>
@@ -263,6 +352,88 @@ export function LibraryTagEditor() {
         </div>
       ) : null}
 
+      {selectedTrackIds.size > 0 ? (
+        <div className="assistant-bulk-tags" role="region" aria-label="Bulk tag editor">
+          <div className="assistant-bulk-tags-heading">
+            <div>
+              <strong>{selectedTrackIds.size} tracks selected</strong>
+              <span>Choose tags, then add or remove them across the selection.</span>
+            </div>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setSelectedTrackIds(new Set())}
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="assistant-editable-tags">
+            {bulkTags.length === 0 ? (
+              <span className="muted small">No bulk tags chosen yet.</span>
+            ) : (
+              bulkTags.map((tag) => (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBulkTags((current) => current.filter((item) => item !== tag))
+                  }
+                  aria-label={`Remove bulk tag ${tag}`}
+                  key={tag}
+                >
+                  {tag} <span aria-hidden="true">×</span>
+                </button>
+              ))
+            )}
+          </div>
+          <form className="assistant-custom-tag" onSubmit={addBulkCustomTags}>
+            <input
+              value={bulkCustomTag}
+              onChange={(event) => setBulkCustomTag(event.target.value)}
+              aria-label="Choose custom bulk tags"
+              placeholder="Tags for this batch, separated by commas"
+              maxLength={256}
+            />
+            <button type="submit">Choose tags</button>
+          </form>
+          <div className="assistant-bulk-starters">
+            {catalog?.starter_groups.flatMap((group) => group.tags).map((tag) => (
+              <button
+                type="button"
+                className="btn-toggle"
+                aria-pressed={bulkTags.includes(tag)}
+                onClick={() =>
+                  setBulkTags((current) =>
+                    current.includes(tag)
+                      ? current.filter((item) => item !== tag)
+                      : sortedUnique([...current, tag]),
+                  )
+                }
+                key={tag}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+          <div className="assistant-bulk-actions">
+            <button
+              type="button"
+              disabled={bulkTags.length === 0 || bulkSaving}
+              onClick={() => void applyBulk("remove")}
+            >
+              Remove from selected
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={bulkTags.length === 0 || bulkSaving}
+              onClick={() => void applyBulk("add")}
+            >
+              {bulkSaving ? "Applying…" : "Add to selected"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="assistant-tag-layout">
         <div className="assistant-tag-track-panel">
           {loading ? (
@@ -272,24 +443,32 @@ export function LibraryTagEditor() {
               Clear the search or tag filter to see more of the library.
             </EmptyState>
           ) : (
-            <div className="assistant-tag-track-list" role="listbox" aria-label="Tracks">
+            <div className="assistant-tag-track-list" role="list" aria-label="Tracks">
               {page.items.map((track) => (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={track.track_id === selectedId}
-                  className={track.track_id === selectedId ? "is-selected" : ""}
-                  onClick={() => setSelectedId(track.track_id)}
+                <div
+                  className={`assistant-tag-track-row${track.track_id === selectedId ? " is-focused" : ""}`}
                   key={track.track_id}
                 >
-                  <strong>{displayName(track)}</strong>
-                  <span>{track.artist || track.album || track.path}</span>
-                  <span className="assistant-track-tag-preview">
-                    {track.manual_tags.length > 0
-                      ? track.manual_tags.join(" · ")
-                      : "No manual tags"}
-                  </span>
-                </button>
+                  <input
+                    type="checkbox"
+                    checked={selectedTrackIds.has(track.track_id)}
+                    onChange={() => toggleTrackSelection(track.track_id)}
+                    aria-label={`Select ${displayName(track)} for bulk tagging`}
+                  />
+                  <button
+                    type="button"
+                    className="assistant-tag-track-main"
+                    onClick={() => setSelectedId(track.track_id)}
+                  >
+                    <strong>{displayName(track)}</strong>
+                    <span>{track.artist || track.album || track.path}</span>
+                    <span className="assistant-track-tag-preview">
+                      {track.manual_tags.length > 0
+                        ? track.manual_tags.join(" · ")
+                        : "No manual tags"}
+                    </span>
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -313,6 +492,15 @@ export function LibraryTagEditor() {
               Next
             </button>
           </div>
+          {page.items.length > 0 ? (
+            <button
+              type="button"
+              className="btn-ghost assistant-select-page"
+              onClick={selectCurrentPage}
+            >
+              Select this page
+            </button>
+          ) : null}
         </div>
 
         <div className="assistant-tag-editor">
@@ -426,6 +614,16 @@ export function LibraryTagEditor() {
           )}
         </div>
       </div>
+
+      <TagCatalogManager
+        catalog={catalog}
+        onChanged={() => {
+          setTagFilter("");
+          setOffset(0);
+          setSelectedTrackIds(new Set());
+          setReloadKey((value) => value + 1);
+        }}
+      />
     </section>
   );
 }

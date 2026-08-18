@@ -11,19 +11,28 @@ from app.assistant.analysis import (
     load_current_metadata_profiles,
 )
 from app.assistant.tag_schemas import (
+    BulkManualTagFailure,
+    BulkManualTagPatch,
+    BulkManualTagResult,
     LibraryTagPage,
     LibraryTagTrack,
     ManualTagCatalog,
     ManualTagPatch,
+    ManualTagRenameRequest,
+    ManualTagRenameResult,
+    ManualTagUsage,
     StarterTagGroupOut,
 )
 from app.assistant.tags import (
     DND_STARTER_TAG_GROUPS,
     TagLimitError,
+    TagNotFoundError,
     load_manual_tags,
+    manual_tag_usage,
     normalize_manual_tag,
     patch_manual_tags,
-    used_manual_tags,
+    patch_manual_tags_bulk,
+    rename_manual_tag,
 )
 from app.models.track import Track
 from app.models.track_user_tag import TrackUserTag
@@ -56,6 +65,7 @@ def _track_out(
 
 @router.get("/catalog", response_model=ManualTagCatalog)
 def tag_catalog(_user: CurrentUser, db: DbSession) -> ManualTagCatalog:
+    usage = manual_tag_usage(db)
     return ManualTagCatalog(
         starter_groups=[
             StarterTagGroupOut(
@@ -65,7 +75,55 @@ def tag_catalog(_user: CurrentUser, db: DbSession) -> ManualTagCatalog:
             )
             for group in DND_STARTER_TAG_GROUPS
         ],
-        used_tags=list(used_manual_tags(db)),
+        used_tags=[item.tag for item in usage],
+        tag_usage=[
+            ManualTagUsage(tag=item.tag, track_count=item.track_count)
+            for item in usage
+        ],
+    )
+
+
+@router.post("/catalog/rename", response_model=ManualTagRenameResult)
+def rename_library_tag(
+    payload: ManualTagRenameRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> ManualTagRenameResult:
+    try:
+        outcome = rename_manual_tag(db, payload.source, payload.target)
+    except TagNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ManualTagRenameResult(
+        source=outcome.source,
+        target=outcome.target,
+        affected_tracks=outcome.affected_tracks,
+        merged=outcome.merged,
+    )
+
+
+@router.post("/bulk", response_model=BulkManualTagResult)
+def update_library_tags_bulk(
+    payload: BulkManualTagPatch,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BulkManualTagResult:
+    outcome = patch_manual_tags_bulk(
+        db,
+        payload.track_ids,
+        add=payload.add,
+        remove=payload.remove,
+    )
+    return BulkManualTagResult(
+        requested_tracks=outcome.requested_tracks,
+        matched_tracks=outcome.matched_tracks,
+        changed_track_ids=list(outcome.changed_track_ids),
+        missing_track_ids=list(outcome.missing_track_ids),
+        failures=[
+            BulkManualTagFailure(track_id=item.track_id, error=item.error)
+            for item in outcome.failures
+        ],
     )
 
 

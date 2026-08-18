@@ -167,7 +167,8 @@ Runtime data lives outside the image.
 - Manual playlist tags are operator-owned rows in `track_user_tags`, independent from file tags and
   generated analysis. Update them with additive/removal deltas, display their source explicitly,
   and pass them separately to suggestion engines. An analyzer or provider must never overwrite or
-  silently promote its output into manual tags.
+  silently promote its output into manual tags. Bulk updates commit valid tracks together and
+  report missing/limited tracks; library-wide rename merges duplicate target rows atomically.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue
