@@ -93,6 +93,36 @@ class ManualTagRenameResult(StrictTagModel):
     merged: bool
 
 
+class AnalysisTagSuggestionOut(StrictTagModel):
+    tag: str
+    analyzer_id: str
+    source_signature: str
+    confidence: Literal["high", "medium", "low"]
+    evidence: list[str]
+    status: Literal["pending", "accepted", "rejected"]
+
+
+class AnalysisTagReviewRequest(StrictTagModel):
+    tag: str
+    analyzer_id: str = Field(min_length=1, max_length=128)
+    source_signature: str = Field(min_length=1, max_length=128)
+    decision: Literal["pending", "accepted", "rejected"]
+
+    @field_validator("tag")
+    @classmethod
+    def normalize_tag(cls, value: str) -> str:
+        return normalize_manual_tags([value])[0]
+
+
+class AnalysisTagReviewResult(StrictTagModel):
+    track_id: int
+    tag: str
+    analyzer_id: str
+    source_signature: str
+    decision: Literal["pending", "accepted", "rejected"]
+    manual_tags: list[str]
+
+
 class LibraryTagTrack(StrictTagModel):
     track_id: int
     path: str
@@ -104,6 +134,7 @@ class LibraryTagTrack(StrictTagModel):
     analysis_analyzer: str | None
     analysis_tags: list[str]
     analysis_confidence: Literal["high", "medium", "low"] | None
+    analysis_suggestions: list[AnalysisTagSuggestionOut]
 
 
 class LibraryTagPage(StrictTagModel):

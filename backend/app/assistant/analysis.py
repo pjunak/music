@@ -15,6 +15,7 @@ from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.models.base import utcnow
 from app.models.track import Track
 from app.models.track_analysis import TrackAnalysis
+from app.models.track_analysis_tag_review import TrackAnalysisTagReview
 
 ANALYSIS_JOB_KIND = "assistant.library-analysis"
 LOCAL_METADATA_ANALYZER_ID = "local-metadata/v1"
@@ -65,6 +66,21 @@ def load_current_metadata_profiles(
             TrackAnalysis.track_id.in_(track_by_id),
         )
     ).all()
+    rejected_rows = db.execute(
+        select(
+            TrackAnalysisTagReview.track_id,
+            TrackAnalysisTagReview.source_signature,
+            TrackAnalysisTagReview.tag,
+        ).where(
+            TrackAnalysisTagReview.analyzer_id == LOCAL_METADATA_ANALYZER_ID,
+            TrackAnalysisTagReview.track_id.in_(track_by_id),
+            TrackAnalysisTagReview.decision == "rejected",
+        )
+    ).all()
+    rejected_tags = {
+        (track_id, source_signature, tag)
+        for track_id, source_signature, tag in rejected_rows
+    }
     profiles: dict[int, TrackAnalysisProfile] = {}
     for row in rows:
         track = track_by_id.get(row.track_id)
@@ -77,11 +93,16 @@ def load_current_metadata_profiles(
         if row.confidence not in {"high", "medium", "low"}:
             continue
         confidence = cast("Literal['high', 'medium', 'low']", row.confidence)
+        visible_moods = tuple(
+            tag
+            for tag in moods
+            if (row.track_id, row.source_signature, tag) not in rejected_tags
+        )
         profiles[row.track_id] = TrackAnalysisProfile(
             energy=row.energy,
             brightness=row.brightness,
             tension=row.tension,
-            moods=moods,
+            moods=visible_moods,
             evidence=evidence,
             confidence=confidence,
         )

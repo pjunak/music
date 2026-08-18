@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -8,12 +7,12 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.assistant.tag_lock import tag_write_lock
 from app.models.track import Track
 from app.models.track_user_tag import TrackUserTag
 
 MAX_TAGS_PER_TRACK = 32
 MAX_TAG_LENGTH = 64
-_tag_write_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -201,7 +200,7 @@ def patch_manual_tags_bulk(
 
     requested = tuple(dict.fromkeys(track_ids))
     add_tags, remove_tags = _normalized_changes(add, remove)
-    with _tag_write_lock:
+    with tag_write_lock:
         existing_ids = set(
             db.scalars(select(Track.id).where(Track.id.in_(requested))).all()
         )
@@ -255,7 +254,7 @@ def patch_manual_tags(
     """Apply an idempotent delta so concurrent additions are not overwritten."""
 
     add_tags, remove_tags = _normalized_changes(add, remove)
-    with _tag_write_lock:
+    with tag_write_lock:
         rows = list(
             db.scalars(
                 select(TrackUserTag).where(TrackUserTag.track_id == track_id)
@@ -281,7 +280,7 @@ def rename_manual_tag(db: Session, source: str, target: str) -> RenameTagOutcome
     if source_tag == target_tag:
         raise ValueError("source and target tags must be different")
 
-    with _tag_write_lock:
+    with tag_write_lock:
         source_rows = list(
             db.scalars(
                 select(TrackUserTag).where(TrackUserTag.tag == source_tag)

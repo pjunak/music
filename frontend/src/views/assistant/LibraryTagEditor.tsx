@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { EmptyState } from "@/components/EmptyState";
 import {
+  type AnalysisTagReviewResult,
   type LibraryTagPage,
   type LibraryTagTrack,
   type ManualTagCatalog,
@@ -9,6 +10,7 @@ import {
 } from "@/core/api";
 import { toast } from "@/core/toast";
 
+import { AnalysisTagReview } from "./AnalysisTagReview";
 import { TagCatalogManager } from "./TagCatalogManager";
 
 const PAGE_SIZE = 50;
@@ -17,6 +19,12 @@ const MAX_TAG_LENGTH = 64;
 
 function displayName(track: LibraryTagTrack): string {
   return track.display_title || track.title || track.path;
+}
+
+function pendingSuggestionCount(track: LibraryTagTrack): number {
+  return track.analysis_suggestions.filter(
+    (suggestion) => suggestion.status === "pending",
+  ).length;
 }
 
 function normalizeTag(value: string): string {
@@ -299,6 +307,40 @@ export function LibraryTagEditor() {
     }
   }
 
+  function handleAnalysisReviewed(result: AnalysisTagReviewResult) {
+    setPage((current) => ({
+      ...current,
+      items: current.items.map((track) =>
+        track.track_id === result.track_id
+          ? {
+              ...track,
+              manual_tags: sortedUnique(result.manual_tags),
+              analysis_suggestions: track.analysis_suggestions.map((suggestion) =>
+                suggestion.analyzer_id === result.analyzer_id &&
+                suggestion.source_signature === result.source_signature &&
+                suggestion.tag === result.tag
+                  ? { ...suggestion, status: result.decision }
+                  : suggestion,
+              ),
+            }
+          : track,
+      ),
+    }));
+    if (result.decision === "accepted") {
+      void assistantApi
+        .getManualTagCatalog()
+        .then((refreshed) => {
+          setCatalog(refreshed);
+          setCatalogError(null);
+        })
+        .catch((error: unknown) => {
+          setCatalogError(
+            error instanceof Error ? error.message : "Tag catalog is unavailable.",
+          );
+        });
+    }
+  }
+
   return (
     <section className="surface-card assistant-tag-workspace">
       <div className="assistant-section-heading">
@@ -467,6 +509,11 @@ export function LibraryTagEditor() {
                         ? track.manual_tags.join(" · ")
                         : "No manual tags"}
                     </span>
+                    {pendingSuggestionCount(track) > 0 ? (
+                      <span className="assistant-track-review-count">
+                        {pendingSuggestionCount(track)} to review
+                      </span>
+                    ) : null}
                   </button>
                 </div>
               ))}
@@ -575,22 +622,12 @@ export function LibraryTagEditor() {
                 ))}
               </div>
 
-              <div className="assistant-tag-source is-analysis">
-                <div>
-                  <strong>Analysis / AI tags</strong>
-                  <span>
-                    Read-only output from {selected.analysis_analyzer ?? "no analyzer yet"};
-                    rerunning analysis never changes your tags.
-                  </span>
-                </div>
-                <div className="assistant-readonly-tags">
-                  {selected.analysis_tags.length > 0 ? (
-                    selected.analysis_tags.map((tag) => <span key={tag}>{tag}</span>)
-                  ) : (
-                    <span className="muted small">No analysis tags available.</span>
-                  )}
-                </div>
-              </div>
+              <AnalysisTagReview
+                trackId={selected.track_id}
+                suggestions={selected.analysis_suggestions}
+                disabled={dirty || saving}
+                onReviewed={handleAnalysisReviewed}
+              />
 
               <div className="assistant-tag-save-row">
                 <button

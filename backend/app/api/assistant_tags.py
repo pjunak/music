@@ -10,7 +10,17 @@ from app.assistant.analysis import (
     LOCAL_METADATA_ANALYZER_ID,
     load_current_metadata_profiles,
 )
+from app.assistant.tag_reviews import (
+    AnalysisSuggestionNotFoundError,
+    AnalysisTagSuggestion,
+    StaleAnalysisSuggestionError,
+    load_current_analysis_tag_suggestions,
+    review_analysis_tag,
+)
 from app.assistant.tag_schemas import (
+    AnalysisTagReviewRequest,
+    AnalysisTagReviewResult,
+    AnalysisTagSuggestionOut,
     BulkManualTagFailure,
     BulkManualTagPatch,
     BulkManualTagResult,
@@ -46,6 +56,7 @@ def _track_out(
     *,
     analysis_tags: list[str],
     analysis_confidence: Literal["high", "medium", "low"] | None,
+    analysis_suggestions: list[AnalysisTagSuggestion],
 ) -> LibraryTagTrack:
     return LibraryTagTrack(
         track_id=track.id,
@@ -60,6 +71,17 @@ def _track_out(
         ),
         analysis_tags=analysis_tags,
         analysis_confidence=analysis_confidence,
+        analysis_suggestions=[
+            AnalysisTagSuggestionOut(
+                tag=suggestion.tag,
+                analyzer_id=suggestion.analyzer_id,
+                source_signature=suggestion.source_signature,
+                confidence=suggestion.confidence,
+                evidence=list(suggestion.evidence),
+                status=suggestion.status,
+            )
+            for suggestion in analysis_suggestions
+        ],
     )
 
 
@@ -183,6 +205,7 @@ def list_library_tags(
     track_ids = [track.id for track in tracks]
     manual_by_track = load_manual_tags(db, track_ids)
     profiles = load_current_metadata_profiles(db, tracks)
+    suggestions = load_current_analysis_tag_suggestions(db, tracks)
     items: list[LibraryTagTrack] = []
     for track in tracks:
         profile = profiles.get(track.id)
@@ -192,6 +215,7 @@ def list_library_tags(
                 list(manual_by_track.get(track.id, ())),
                 analysis_tags=list(profile.moods) if profile is not None else [],
                 analysis_confidence=(profile.confidence if profile is not None else None),
+                analysis_suggestions=list(suggestions.get(track.id, ())),
             )
         )
     return LibraryTagPage(items=items, total=total, offset=offset, limit=limit)
@@ -222,4 +246,39 @@ def update_library_tags(
         list(manual_tags),
         analysis_tags=list(profile.moods) if profile is not None else [],
         analysis_confidence=profile.confidence if profile is not None else None,
+        analysis_suggestions=list(
+            load_current_analysis_tag_suggestions(db, [track]).get(track.id, ())
+        ),
+    )
+
+
+@router.put("/{track_id}/analysis-tags/review", response_model=AnalysisTagReviewResult)
+def update_analysis_tag_review(
+    track_id: int,
+    payload: AnalysisTagReviewRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> AnalysisTagReviewResult:
+    try:
+        outcome = review_analysis_tag(
+            db,
+            track_id,
+            analyzer_id=payload.analyzer_id,
+            source_signature=payload.source_signature,
+            tag=payload.tag,
+            decision=payload.decision,
+        )
+    except AnalysisSuggestionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except StaleAnalysisSuggestionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (TagLimitError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return AnalysisTagReviewResult(
+        track_id=outcome.track_id,
+        tag=outcome.tag,
+        analyzer_id=outcome.analyzer_id,
+        source_signature=outcome.source_signature,
+        decision=outcome.decision,
+        manual_tags=list(outcome.manual_tags),
     )

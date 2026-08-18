@@ -169,6 +169,10 @@ Runtime data lives outside the image.
   and pass them separately to suggestion engines. An analyzer or provider must never overwrite or
   silently promote its output into manual tags. Bulk updates commit valid tracks together and
   report missing/limited tracks; library-wide rename merges duplicate target rows atomically.
+  Generated-tag decisions live in `track_analysis_tag_reviews` and bind to the reviewed source
+  signature. Acceptance atomically adds the manual tag; rejection and reopening never remove or
+  rewrite manual tags, and a changed analysis signature returns the suggestion to pending review.
+  Current-profile consumers omit rejected tag labels without deleting the analyzer's stored profile.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue

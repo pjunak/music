@@ -20,6 +20,7 @@ vi.mock("@/core/api", async (importActual) => {
       patchManualTags: vi.fn(),
       patchManualTagsBulk: vi.fn(),
       renameManualTag: vi.fn(),
+      reviewAnalysisTag: vi.fn(),
     },
   };
 });
@@ -56,6 +57,24 @@ const track: LibraryTagTrack = {
   analysis_analyzer: "local-metadata/v1",
   analysis_tags: ["tavern", "festive"],
   analysis_confidence: "medium",
+  analysis_suggestions: [
+    {
+      tag: "tavern",
+      analyzer_id: "local-metadata/v1",
+      source_signature: "a".repeat(64),
+      confidence: "medium",
+      evidence: ["Mood metadata: tavern, festive"],
+      status: "pending",
+    },
+    {
+      tag: "festive",
+      analyzer_id: "local-metadata/v1",
+      source_signature: "a".repeat(64),
+      confidence: "medium",
+      evidence: ["Mood metadata: tavern, festive"],
+      status: "rejected",
+    },
+  ],
 };
 
 const page: LibraryTagPage = {
@@ -72,13 +91,17 @@ beforeEach(() => {
 });
 
 describe("LibraryTagEditor", () => {
-  it("keeps editable manual tags separate from read-only analysis tags", async () => {
+  it("keeps editable manual tags separate from reviewable analysis tags", async () => {
     render(<LibraryTagEditor />);
 
     expect(await screen.findByRole("heading", { name: "Tavern Dance" })).toBeInTheDocument();
     expect(screen.getByText("Your tags")).toBeInTheDocument();
-    expect(screen.getByText("Analysis / AI tags")).toBeInTheDocument();
+    expect(screen.getByText("Analysis suggestions")).toBeInTheDocument();
     expect(screen.getByText("festive")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Accept tavern as manual tag" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
     expect(
       await screen.findByRole("button", { name: "Remove tag medieval" }),
     ).toBeInTheDocument();
@@ -127,6 +150,70 @@ describe("LibraryTagEditor", () => {
       expect(assistantApi.patchManualTags).toHaveBeenCalledWith(7, [], ["medieval"]),
     );
     expect(screen.getByText("festive")).toBeInTheDocument();
+  });
+
+  it("accepts one generated suggestion into manual tags", async () => {
+    vi.mocked(assistantApi.reviewAnalysisTag).mockResolvedValue({
+      track_id: 7,
+      tag: "tavern",
+      analyzer_id: "local-metadata/v1",
+      source_signature: "a".repeat(64),
+      decision: "accepted",
+      manual_tags: ["medieval", "tavern"],
+    });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(
+      screen.getByRole("button", { name: "Accept tavern as manual tag" }),
+    );
+
+    await waitFor(() =>
+      expect(assistantApi.reviewAnalysisTag).toHaveBeenCalledWith(
+        7,
+        track.analysis_suggestions[0],
+        "accepted",
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Remove tag tavern" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Accepted")).toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith(
+      "Tag added",
+      "“tavern” is now one of your manual tags.",
+    );
+  });
+
+  it("reopens a rejected suggestion without removing manual tags", async () => {
+    vi.mocked(assistantApi.reviewAnalysisTag).mockResolvedValue({
+      track_id: 7,
+      tag: "festive",
+      analyzer_id: "local-metadata/v1",
+      source_signature: "a".repeat(64),
+      decision: "pending",
+      manual_tags: ["medieval"],
+    });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(screen.getByRole("button", { name: "Review festive again" }));
+
+    await waitFor(() =>
+      expect(assistantApi.reviewAnalysisTag).toHaveBeenCalledWith(
+        7,
+        track.analysis_suggestions[1],
+        "pending",
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Accept festive as manual tag" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove tag medieval" }),
+    ).toBeInTheDocument();
   });
 
   it("applies chosen tags to a multi-track selection", async () => {

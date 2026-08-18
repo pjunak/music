@@ -4,24 +4,58 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 
 
 @pytest.fixture(autouse=True)
 def _isolate_tag_state(client: TestClient) -> Iterator[None]:
     from app.core.db import SessionLocal
     from app.models.track_analysis import TrackAnalysis
+    from app.models.track_analysis_tag_review import TrackAnalysisTagReview
     from app.models.track_user_tag import TrackUserTag
 
     with SessionLocal() as db:
+        db.execute(delete(TrackAnalysisTagReview))
         db.execute(delete(TrackUserTag))
         db.execute(delete(TrackAnalysis))
         db.commit()
     yield
     with SessionLocal() as db:
+        db.execute(delete(TrackAnalysisTagReview))
         db.execute(delete(TrackUserTag))
         db.execute(delete(TrackAnalysis))
         db.commit()
+
+
+def _seed_analysis(track_id: int, moods_json: str = '["dark", "tense"]') -> str:
+    from app.assistant.analysis import (
+        LOCAL_METADATA_ANALYZER_ID,
+        track_source_signature,
+    )
+    from app.core.db import SessionLocal
+    from app.models.track import Track
+    from app.models.track_analysis import TrackAnalysis
+
+    with SessionLocal() as db:
+        track = db.get(Track, track_id)
+        assert track is not None
+        signature = track_source_signature(track)
+        db.add(
+            TrackAnalysis(
+                track_id=track.id,
+                analyzer_id=LOCAL_METADATA_ANALYZER_ID,
+                source_signature=signature,
+                job_id="a" * 32,
+                energy=0.4,
+                brightness=0.2,
+                tension=0.8,
+                moods_json=moods_json,
+                evidence_json='["Mood metadata: dark, tense"]',
+                confidence="medium",
+            )
+        )
+        db.commit()
+    return signature
 
 
 def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
@@ -38,6 +72,18 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
         client.post(
             "/api/assistant/library-tags/catalog/rename",
             json={"source": "tavern", "target": "inn"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.put(
+            "/api/assistant/library-tags/1/analysis-tags/review",
+            json={
+                "tag": "dark",
+                "analyzer_id": "local-metadata/v1",
+                "source_signature": "a" * 64,
+                "decision": "accepted",
+            },
         ).status_code
         == 401
     )
@@ -86,30 +132,9 @@ def test_manual_and_analysis_tags_remain_separate(
 ) -> None:
     from app.assistant.analysis import (
         LOCAL_METADATA_ANALYZER_ID,
-        track_source_signature,
     )
-    from app.core.db import SessionLocal
-    from app.models.track import Track
-    from app.models.track_analysis import TrackAnalysis
 
-    with SessionLocal() as db:
-        track = db.scalar(select(Track).where(Track.id == seeded_track_id))
-        assert track is not None
-        db.add(
-            TrackAnalysis(
-                track_id=track.id,
-                analyzer_id=LOCAL_METADATA_ANALYZER_ID,
-                source_signature=track_source_signature(track),
-                job_id="a" * 32,
-                energy=0.4,
-                brightness=0.2,
-                tension=0.8,
-                moods_json='["dark", "tense"]',
-                evidence_json='["metadata"]',
-                confidence="medium",
-            )
-        )
-        db.commit()
+    signature = _seed_analysis(seeded_track_id)
 
     update = auth_client.patch(
         f"/api/assistant/library-tags/{seeded_track_id}",
@@ -121,6 +146,17 @@ def test_manual_and_analysis_tags_remain_separate(
     assert payload["analysis_analyzer"] == LOCAL_METADATA_ANALYZER_ID
     assert payload["analysis_tags"] == ["dark", "tense"]
     assert payload["analysis_confidence"] == "medium"
+    assert payload["analysis_suggestions"] == [
+        {
+            "tag": tag,
+            "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+            "source_signature": signature,
+            "confidence": "medium",
+            "evidence": ["Mood metadata: dark, tense"],
+            "status": "pending",
+        }
+        for tag in ("dark", "tense")
+    ]
 
     listing = auth_client.get(
         "/api/assistant/library-tags",
@@ -137,6 +173,143 @@ def test_manual_and_analysis_tags_remain_separate(
     )
     assert changed.status_code == 200, changed.text
     assert changed.json()["manual_tags"] == ["feast", "tavern"]
+
+
+def test_analysis_tag_reviews_are_durable_and_keep_manual_tags_independent(
+    auth_client: TestClient,
+    seeded_track_id: int,
+) -> None:
+    from app.assistant.analysis import LOCAL_METADATA_ANALYZER_ID
+    from app.core.db import SessionLocal
+    from app.models.track_analysis import TrackAnalysis
+
+    signature = _seed_analysis(seeded_track_id)
+    endpoint = f"/api/assistant/library-tags/{seeded_track_id}/analysis-tags/review"
+    base = {
+        "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+        "source_signature": signature,
+    }
+
+    accepted = auth_client.put(
+        endpoint,
+        json={**base, "tag": "DARK", "decision": "accepted"},
+    )
+    rejected = auth_client.put(
+        endpoint,
+        json={**base, "tag": "tense", "decision": "rejected"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["manual_tags"] == ["dark"]
+    assert accepted.json()["decision"] == "accepted"
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["manual_tags"] == ["dark"]
+
+    listing = auth_client.get("/api/assistant/library-tags")
+    suggestions = listing.json()["items"][0]["analysis_suggestions"]
+    assert {item["tag"]: item["status"] for item in suggestions} == {
+        "dark": "accepted",
+        "tense": "rejected",
+    }
+    playlist = auth_client.post(
+        "/api/assistant/playlists/suggest",
+        json={"prompt": "dark tense", "candidate_limit": 10},
+    )
+    assert playlist.status_code == 200, playlist.text
+    candidate = next(
+        item
+        for item in playlist.json()["candidates"]
+        if item["track_id"] == seeded_track_id
+    )
+    assert candidate["manual_tags"] == ["dark"]
+    assert candidate["analysis_tags"] == ["dark"]
+
+    reopened = auth_client.put(
+        endpoint,
+        json={**base, "tag": "dark", "decision": "pending"},
+    )
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["manual_tags"] == ["dark"]
+
+    refreshed = auth_client.get("/api/assistant/library-tags")
+    refreshed_suggestions = refreshed.json()["items"][0]["analysis_suggestions"]
+    assert {item["tag"]: item["status"] for item in refreshed_suggestions} == {
+        "dark": "pending",
+        "tense": "rejected",
+    }
+    with SessionLocal() as db:
+        analysis = db.get(
+            TrackAnalysis,
+            (seeded_track_id, LOCAL_METADATA_ANALYZER_ID),
+        )
+        assert analysis is not None
+        assert analysis.moods_json == '["dark", "tense"]'
+
+
+def test_analysis_tag_review_rejects_stale_profiles(
+    auth_client: TestClient,
+    seeded_track_id: int,
+) -> None:
+    from app.assistant.analysis import LOCAL_METADATA_ANALYZER_ID
+    from app.core.db import SessionLocal
+    from app.models.track import Track
+
+    signature = _seed_analysis(seeded_track_id)
+    with SessionLocal() as db:
+        track = db.get(Track, seeded_track_id)
+        assert track is not None
+        original_genre = track.genre
+        track.genre = "changed after analysis"
+        db.commit()
+
+    try:
+        response = auth_client.put(
+            f"/api/assistant/library-tags/{seeded_track_id}/analysis-tags/review",
+            json={
+                "tag": "dark",
+                "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+                "source_signature": signature,
+                "decision": "accepted",
+            },
+        )
+    finally:
+        with SessionLocal() as db:
+            track = db.get(Track, seeded_track_id)
+            assert track is not None
+            track.genre = original_genre
+            db.commit()
+    assert response.status_code == 409
+
+
+def test_failed_analysis_tag_acceptance_records_no_decision(
+    auth_client: TestClient,
+    seeded_track_id: int,
+) -> None:
+    from app.assistant.analysis import LOCAL_METADATA_ANALYZER_ID
+    from app.core.db import SessionLocal
+    from app.models.track_analysis_tag_review import TrackAnalysisTagReview
+
+    signature = _seed_analysis(seeded_track_id)
+    full = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": [f"tag-{index}" for index in range(32)], "remove": []},
+    )
+    assert full.status_code == 200, full.text
+
+    response = auth_client.put(
+        f"/api/assistant/library-tags/{seeded_track_id}/analysis-tags/review",
+        json={
+            "tag": "dark",
+            "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+            "source_signature": signature,
+            "decision": "accepted",
+        },
+    )
+    assert response.status_code == 422
+    with SessionLocal() as db:
+        assert db.get(
+            TrackAnalysisTagReview,
+            (seeded_track_id, LOCAL_METADATA_ANALYZER_ID, "dark"),
+        ) is None
 
 
 def test_manual_tag_patch_validates_conflicts_and_missing_tracks(

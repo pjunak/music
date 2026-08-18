@@ -373,6 +373,26 @@ export interface ManualTagRenameResult {
   merged: boolean;
 }
 
+export type AnalysisTagReviewDecision = "pending" | "accepted" | "rejected";
+
+export interface AnalysisTagSuggestion {
+  tag: string;
+  analyzer_id: string;
+  source_signature: string;
+  confidence: "high" | "medium" | "low";
+  evidence: string[];
+  status: AnalysisTagReviewDecision;
+}
+
+export interface AnalysisTagReviewResult {
+  track_id: number;
+  tag: string;
+  analyzer_id: string;
+  source_signature: string;
+  decision: AnalysisTagReviewDecision;
+  manual_tags: string[];
+}
+
 export interface LibraryTagTrack {
   track_id: number;
   path: string;
@@ -384,6 +404,7 @@ export interface LibraryTagTrack {
   analysis_analyzer: string | null;
   analysis_tags: string[];
   analysis_confidence: "high" | "medium" | "low" | null;
+  analysis_suggestions: AnalysisTagSuggestion[];
 }
 
 export interface LibraryTagPage {
@@ -456,6 +477,23 @@ export const assistantApi = {
     api.post<ManualTagRenameResult>(
       "/api/assistant/library-tags/catalog/rename",
       { source, target },
+    ),
+  reviewAnalysisTag: (
+    trackId: number,
+    suggestion: Pick<
+      AnalysisTagSuggestion,
+      "tag" | "analyzer_id" | "source_signature"
+    >,
+    decision: AnalysisTagReviewDecision,
+  ) =>
+    api.put<AnalysisTagReviewResult>(
+      `/api/assistant/library-tags/${encodeURIComponent(trackId)}/analysis-tags/review`,
+      {
+        tag: suggestion.tag,
+        analyzer_id: suggestion.analyzer_id,
+        source_signature: suggestion.source_signature,
+        decision,
+      },
     ),
 };
 

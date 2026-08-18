@@ -48,7 +48,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   or any custom tag without modifying the audio file. Manual and generated tags remain visibly and
   structurally separate, while local playlist ranking gives explicit manual matches priority.
   Multi-select actions apply tags across a batch, and usage-aware rename can merge overlapping tags
-  without leaving duplicates.
+  without leaving duplicates. Generated tags expose their analyzer, confidence, and evidence for
+  per-tag review; accepting copies one into manual tags, while rejection remains a separate durable
+  decision, removes that label from current playlist evidence, and never mutates authored data.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.
