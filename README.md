@@ -36,6 +36,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   suitable for assistant-generated drafts. Imports are create-only: invalid references and existing
   names or IDs are reported for review rather than overwritten. See
   [`clients/authoring-import-v1.md`](clients/authoring-import-v1.md).
+- **Local playlist Assistant** — describe a mood or scene and get explainable, deterministic song
+  suggestions based on the library's existing metadata and BPM. You choose the final tracks, then
+  the playlist goes through the same preview and create-only Authoring import transaction. This
+  baseline runs locally and makes no external model calls or audio-content claims.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.

@@ -7,12 +7,13 @@ interface TabDef {
   end?: boolean;
 }
 
-/** Top-level authed tabs. Four groups:
+/** Top-level authed tabs. Five groups:
  *
  *    Console   — the DM's live workspace (cues, soundboard, transport).
  *    Library   — file management + tag editing (one screen).
  *    Authoring — everything you set up before a session (Playlists /
  *                Soundboards / Interrupts / EQ Presets / Cues sub-tabs).
+ *    Assistant — local, review-first help for preparing Authoring content.
  *    Settings  — preferences, sessions, backup, diagnostics link.
  *
  *  The TV (`/` index) is intentionally not in this list — it's the
@@ -21,12 +22,13 @@ interface TabDef {
  *  or `/tv`) still works; AppShell redirects authed visitors from `/` back
  *  to /console.
  *
- *  Library and Authoring use `startsWith` matching so the top-level tab
+ *  Nested sections use `startsWith` matching so the top-level tab
  *  stays highlighted while you're on a sub-route. */
 const TABS: TabDef[] = [
   { to: "/console", label: "Console" },
   { to: "/library", label: "Library" },
   { to: "/authoring", label: "Authoring" },
+  { to: "/assistant", label: "Assistant" },
   { to: "/settings", label: "Settings" },
 ];
 

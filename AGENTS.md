@@ -63,6 +63,7 @@ build use the locked graph.
 
 ```text
 backend/app/
+  assistant/     provider-independent suggestion contracts and local engines
   api/           HTTP routes and dependencies
   core/          settings, database, security
   devices/       file-backed remembered-device registry
@@ -75,7 +76,7 @@ backend/app/
 frontend/src/
   core/          API/WS clients, stores, audio engine, shared pure helpers
   shell/         routing, auth gates, app shell, footer
-  views/         Console, Library, Authoring, Settings, Diagnostics
+  views/         Console, Library, Authoring, Assistant, Settings, Diagnostics
   components/    reusable controls, dialogs, editors, primitives
 clients/         documented guest output protocol and headless reference client
 modes/           seed mode bundles and per-mode authored resources
@@ -155,6 +156,9 @@ Runtime data lives outside the image.
 ## Modes, authoring, and effects
 
 - Playlists, soundboards, cues, and EQ presets belong to exactly one mode.
+- Assistant suggestions are read-only drafts until the operator explicitly previews and commits
+  them through Authoring import. Keep local heuristics and future model providers behind the same
+  suggestion contracts; never let a ranking engine write playlists or mutate the library directly.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue

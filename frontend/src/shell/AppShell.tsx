@@ -25,7 +25,11 @@ import { PlaylistsView } from "@/views/PlaylistsView";
 import { PresetsView } from "@/views/PresetsView";
 import { SettingsView } from "@/views/SettingsView";
 import { SoundboardsView } from "@/views/SoundboardsView";
+import { AssistantCleanupView } from "@/views/assistant/AssistantCleanupView";
+import { LibraryAnalysisView } from "@/views/assistant/LibraryAnalysisView";
+import { PlaylistBuilderView } from "@/views/assistant/PlaylistBuilderView";
 
+import { AssistantShell } from "./AssistantShell";
 import { AuthoringShell } from "./AuthoringShell";
 import { Header } from "./Header";
 import { indexTarget } from "./indexTarget";
@@ -170,6 +174,22 @@ export default function AppShell() {
             <Route path="interrupts" element={<InterruptsView />} />
             <Route path="presets" element={<PresetsView />} />
             <Route path="cues" element={<CuesView />} />
+          </Route>
+          {/* Assistant is deliberately separate from the direct Authoring
+              editors. Its suggestions stay review-first and use Authoring's
+              existing import transaction for all writes. */}
+          <Route
+            path="assistant"
+            element={
+              <Protected>
+                <AssistantShell />
+              </Protected>
+            }
+          >
+            <Route index element={<Navigate to="playlists" replace />} />
+            <Route path="playlists" element={<PlaylistBuilderView />} />
+            <Route path="analysis" element={<LibraryAnalysisView />} />
+            <Route path="cleanup" element={<AssistantCleanupView />} />
           </Route>
           {/* Legacy routes — old top-level paths keep working for bookmarks
               and external links by redirecting into the new IA. */}

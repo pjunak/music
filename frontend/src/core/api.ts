@@ -254,6 +254,54 @@ export const authoringImportApi = {
     }),
 };
 
+export interface PlaylistSuggestionIntent {
+  matched_moods: string[];
+  search_terms: string[];
+  energy: number;
+  brightness: number;
+  tension: number;
+}
+
+export interface PlaylistSuggestionCandidate {
+  track_id: number;
+  path: string;
+  title: string;
+  display_title: string;
+  artist: string;
+  album: string;
+  origin: string;
+  genre: string;
+  length_s: number;
+  bpm: number | null;
+  match_score: number;
+  confidence: "high" | "medium" | "low";
+  reasons: string[];
+  default_selected: boolean;
+}
+
+export interface PlaylistSuggestion {
+  engine: string;
+  library_tracks: number;
+  eligible_tracks: number;
+  intent: PlaylistSuggestionIntent;
+  candidates: PlaylistSuggestionCandidate[];
+}
+
+export interface PlaylistSuggestionRequest {
+  prompt: string;
+  target_minutes: number;
+  candidate_limit?: number;
+  min_bpm?: number;
+  max_bpm?: number;
+  include_unknown_bpm?: boolean;
+  exclude_track_ids?: number[];
+}
+
+export const assistantApi = {
+  suggestPlaylist: (payload: PlaylistSuggestionRequest) =>
+    api.post<PlaylistSuggestion>("/api/assistant/playlists/suggest", payload),
+};
+
 export interface ActiveSession {
   token_prefix: string;
   created_at: string;
