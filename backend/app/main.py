@@ -23,6 +23,7 @@ from app.api import (
     devices,
     diagnostics,
     health,
+    jobs,
     library,
     modes,
     playlists,
@@ -32,6 +33,7 @@ from app.api import (
 from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.devices.store import device_store
+from app.jobs.runner import job_runner
 from app.library import index as library_index
 from app.models import Base
 from app.models.auth_session import AuthSession
@@ -217,8 +219,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if settings.advancer_enabled:
         advancer.start()
+    await job_runner.start()
     yield
-    # Shutdown: stop the advancer and cancel any running looping-SFX timers.
+    # Shutdown: cooperatively checkpoint background work, stop the advancer,
+    # and cancel any running looping-SFX timers.
+    await job_runner.stop()
     await advancer.stop()
     from app.sync import loops as loops_manager
 
@@ -268,6 +273,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(jobs.router)
     app.include_router(assistant.router)
     app.include_router(authoring.router)
     app.include_router(library.router)

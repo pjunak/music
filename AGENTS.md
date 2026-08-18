@@ -68,6 +68,7 @@ backend/app/
   core/          settings, database, security
   devices/       file-backed remembered-device registry
   domain/        playlist and persisted playback helpers
+  jobs/          durable background-job registry, runner, and lifecycle
   library/       filesystem index, metadata, cleanup
   models/        SQLAlchemy models
   modes/         mode bundle loader
@@ -195,6 +196,10 @@ Runtime data lives outside the image.
 
 ## Persistence and deployment
 
+- Long-running server work uses the durable background-job runner. Enqueue the
+  database row before waking the worker, report cooperative progress/cancellation,
+  and declare restartability explicitly. Job handlers run outside the event loop
+  and must be idempotent or checkpointed before they may be restartable.
 - SQLite schema creation is idempotent. `_apply_additive_columns()` handles
   only additive compatible columns; renames, drops, and type changes require a
   deliberate migration or documented reset.

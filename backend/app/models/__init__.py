@@ -2,6 +2,7 @@
 `Base.metadata.create_all` in the lifespan picks up every table without
 each caller having to import each model individually."""
 from app.models.auth_session import AuthSession
+from app.models.background_job import BackgroundJob
 from app.models.base import Base
 from app.models.cleanup_batch import CleanupBatch
 from app.models.cleanup_lookup import CleanupNameLookup
@@ -12,6 +13,7 @@ from app.models.user import User
 
 __all__ = [
     "AuthSession",
+    "BackgroundJob",
     "Base",
     "CleanupBatch",
     "CleanupNameLookup",
