@@ -104,7 +104,8 @@ const SHUFFLE_OPTIONS: ModeOption<ShuffleMode>[] = [
  *
  *  Since this bar is mounted on every route, every shortcut path through
  *  the app has playback / volume / seek without having to leave the
- *  current view. Per-device volume lives in the Speakers popover. */
+ *  current view. A sole output's volume is exposed inline; multi-output
+ *  balancing remains in the Speakers popover. */
 export function NowPlayingBar() {
   const isPlaying = usePlayerStore((s) => s.state?.is_playing ?? false);
   const currentId = usePlayerStore((s) => s.state?.ambient.current_track_id ?? null);

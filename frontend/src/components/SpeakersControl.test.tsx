@@ -8,7 +8,11 @@ import type { PlayerState } from "@/core/types";
 
 vi.mock("@/core/ws", () => ({ wsClient: { send: vi.fn() } }));
 vi.mock("@/core/playbackEngine", () => ({
-  playbackEngine: { unlock: vi.fn(), applyState: vi.fn() },
+  playbackEngine: {
+    unlock: vi.fn(),
+    applyState: vi.fn(),
+    flushPositionReport: vi.fn(),
+  },
 }));
 vi.mock("@/core/toast", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -67,7 +71,7 @@ describe("SpeakersControl", () => {
     seedAuthed({ designated: true });
     renderControl();
     await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
-    const checkbox = screen.getByRole("checkbox");
+    const checkbox = screen.getByRole("checkbox", { name: "DM output" });
     expect(checkbox).not.toBeChecked();
     await userEvent.click(checkbox);
     expect(wsClient.send).toHaveBeenCalledWith({
@@ -102,9 +106,10 @@ describe("SpeakersControl", () => {
     expect(screen.getByText("Living Room TV")).toBeInTheDocument();
     expect(screen.getByText("default")).toBeInTheDocument();
 
-    const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes).toHaveLength(2); // this device + the TV
-    await userEvent.click(checkboxes[1]); // activate the TV — no PUT/designation
+    const tvOutput = screen.getByRole("checkbox", {
+      name: "Living Room TV output",
+    });
+    await userEvent.click(tvOutput); // activate the TV — no PUT/designation
     expect(wsClient.send).toHaveBeenCalledWith({
       type: "set_active_outputs",
       device_ids: ["tv-1"],
@@ -122,6 +127,137 @@ describe("SpeakersControl", () => {
       type: "set_device_volume",
       device_id: CID,
       volume: 0.4,
+    });
+  });
+
+  it("shows a remote sole output's volume beside the Speakers button", () => {
+    seedAuthed();
+    usePlayerStore.setState((current) => ({
+      state: current.state
+        ? {
+            ...current.state,
+            active_output_device_ids: ["tv-1"],
+            device_volumes: { "tv-1": 0.42 },
+            connected_devices: [
+              ...current.state.connected_devices,
+              {
+                device_id: "tv-1",
+                client_id: "tv-1",
+                name: "Living Room TV",
+                is_output: true,
+              },
+            ],
+          }
+        : null,
+    }));
+    renderControl();
+
+    expect(
+      screen.getByLabelText("Living Room TV volume in player bar"),
+    ).toHaveValue("0.42");
+  });
+
+  it("changes the sole output volume without opening the popover", () => {
+    seedAuthed({ active: true });
+    renderControl();
+
+    fireEvent.change(screen.getByLabelText("DM volume in player bar"), {
+      target: { value: "0.65" },
+    });
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_device_volume",
+      device_id: CID,
+      volume: 0.65,
+    });
+  });
+
+  it("replaces the current output when Multiple is off", async () => {
+    seedAuthed({ active: true });
+    usePlayerStore.setState((current) => ({
+      state: current.state
+        ? {
+            ...current.state,
+            connected_devices: [
+              ...current.state.connected_devices,
+              {
+                device_id: "tv-1",
+                client_id: "tv-1",
+                name: "TV",
+                is_output: false,
+              },
+            ],
+          }
+        : null,
+    }));
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "TV output" }));
+
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_active_outputs",
+      device_ids: ["tv-1"],
+    });
+  });
+
+  it("adds another output when Multiple is enabled", async () => {
+    seedAuthed({ active: true });
+    usePlayerStore.setState((current) => ({
+      state: current.state
+        ? {
+            ...current.state,
+            connected_devices: [
+              ...current.state.connected_devices,
+              {
+                device_id: "tv-1",
+                client_id: "tv-1",
+                name: "TV",
+                is_output: false,
+              },
+            ],
+          }
+        : null,
+    }));
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Multiple" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "TV output" }));
+
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_active_outputs",
+      device_ids: [CID, "tv-1"],
+    });
+  });
+
+  it("collapses an existing multi-output session when Multiple is disabled", async () => {
+    seedAuthed({ active: true });
+    usePlayerStore.setState((current) => ({
+      state: current.state
+        ? {
+            ...current.state,
+            active_output_device_ids: [CID, "tv-1"],
+            connected_devices: [
+              ...current.state.connected_devices,
+              {
+                device_id: "tv-1",
+                client_id: "tv-1",
+                name: "TV",
+                is_output: false,
+              },
+            ],
+          }
+        : null,
+    }));
+    renderControl();
+    expect(screen.queryByLabelText(/volume in player bar/)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    const multiple = screen.getByRole("checkbox", { name: "Multiple" });
+    expect(multiple).toBeChecked();
+    await userEvent.click(multiple);
+
+    expect(wsClient.send).toHaveBeenCalledWith({
+      type: "set_active_outputs",
+      device_ids: [CID],
     });
   });
 

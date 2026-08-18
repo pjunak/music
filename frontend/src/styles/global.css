@@ -2001,6 +2001,11 @@ kbd,
 /* --- footer Speakers control + popover (replaces the Outputs bar) --- */
 .speakers-control {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-width: 0;
 }
 .speakers-popover {
   position: absolute;
@@ -2022,15 +2027,37 @@ kbd,
   gap: var(--space-1);
 }
 .speakers-popover-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-3);
   padding: 0.2rem 0.3rem var(--space-2);
   border-bottom: 1px solid var(--border);
   font-size: var(--text-xs);
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+.speakers-popover-head .btn-link-external {
+  justify-self: end;
+}
+.speakers-multiple-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.speakers-multiple-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.speakers-multiple-toggle:has(input:disabled) {
+  color: var(--muted);
+  cursor: default;
 }
 .speaker-row {
   display: grid;
@@ -2114,6 +2141,13 @@ kbd,
 .speakers-empty {
   padding: var(--space-2) 0.3rem;
   margin: 0;
+}
+.single-speaker-volume {
+  min-width: 0;
+  padding: 0 var(--space-1);
+}
+.single-speaker-volume input[type="range"] {
+  width: clamp(96px, 11vw, 132px);
 }
 .controls-grid {
   display: grid;
@@ -4364,8 +4398,8 @@ kbd,
 .now-playing-controls button.is-active:hover:not(:disabled) {
   color: var(--accent-strong);
 }
-/* "Is this device an audio output?" pill — sits next to the volume slider
- * on the right side of the footer.
+/* "Are any speakers active?" pill — sits next to the sole output's volume
+ * slider on the right side of the footer.
  *
  * State colour rules — designed so the operator can read the pill across
  * the room:
@@ -4906,6 +4940,12 @@ input.volume-slider::-moz-range-thumb {
     grid-column: 1;
     justify-content: flex-start;
     gap: var(--space-3);
+  }
+  .speakers-control {
+    width: 100%;
+  }
+  .single-speaker-volume {
+    flex: 1 1 auto;
   }
   /* Compact output toggle on mobile: colour-only pill, no "Output ON" text. */
   .output-toggle .output-toggle-label {

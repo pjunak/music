@@ -4,11 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuthStore } from "@/core/auth";
 import { deviceDisplayName } from "@/core/deviceVisual";
 import { playbackEngine } from "@/core/playbackEngine";
-import {
-  selectIsMyOutput,
-  usePlayerArray,
-  usePlayerStore,
-} from "@/core/playerStore";
+import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
@@ -20,19 +16,18 @@ import { VolumeIcon } from "./icons";
 // local/stable-store-selector lint rule).
 const EMPTY_VOLUMES: Record<string, number> = {};
 
-/** Footer "Speakers" control — the single place to pick which devices output
- *  audio and balance their volumes (the Sonos model). Replaces the old
- *  single-pill OutputToggle *and* the Console's separate Outputs bar.
+/** Footer "Speakers" control — pick the current output and control its volume.
+ *  Single-output use stays directly accessible in the footer; multi-output is
+ *  an explicit option in the popover.
  *
  *   - Connecting (no snapshot yet) → a muted pill.
  *   - Guest → a local-only on/off (the server rejects output changes from guest
  *     sockets) via `forceLocalPlayback`; no multi-device popover.
- *   - Authed → a pill showing how many speakers are on (green when THIS device
- *     is one) that opens a popover listing EVERY connected device with an
- *     on/off toggle + per-device volume. Ticking a device on makes it a live
- *     output for this session — no pre-designation needed. A "default" badge
- *     marks devices saved as output-by-default (Settings → Devices), which
- *     auto-activate when they connect. */
+ *   - Authed → a pill showing how many speakers are on. With exactly one active
+ *     output, its volume is exposed beside the pill. The popover lists every
+ *     connected device; selecting one replaces the current output unless
+ *     "Multiple" is enabled. A "default" badge marks devices saved as
+ *     output-by-default (Settings → Devices), which auto-activate on connect. */
 export function SpeakersControl() {
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
   const isGuest = useAuthStore((s) => s.status) !== "authenticated";
@@ -84,15 +79,22 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  const isMyOutput = usePlayerStore(selectIsMyOutput);
   const devices = usePlayerArray((s) => s.state?.connected_devices);
   const activeIds = usePlayerArray((s) => s.state?.active_output_device_ids);
+  const [multiple, setMultiple] = useState(() => activeIds.length > 1);
   const deviceVolumes =
     usePlayerStore((s) => s.state?.device_volumes) ?? EMPTY_VOLUMES;
   const defaultDeviceVolume = usePlayerStore((s) => s.state?.default_device_volume);
   const legacyMasterVolume = usePlayerStore((s) => s.state?.volume ?? 1);
   const connected = usePlayerStore((s) => s.wsStatus === "connected");
   const deviceName = useUiStore((s) => s.deviceName);
+
+  // A second controller or an output-by-default connection can create a
+  // multi-output session outside this popover. Reflect that canonical state
+  // instead of presenting it as single-output mode.
+  useEffect(() => {
+    if (activeIds.length > 1) setMultiple(true);
+  }, [activeIds]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,6 +116,11 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
 
   const thisDevice = devices.find((d) => d.device_id === deviceId) ?? null;
   const others = devices.filter((d) => d.device_id !== deviceId);
+  const singleOutputId = activeIds.length === 1 ? activeIds[0] : null;
+  const singleOutput =
+    singleOutputId === null
+      ? null
+      : devices.find((device) => device.device_id === singleOutputId) ?? null;
 
   function volumeFor(id: string): number {
     const stored = deviceVolumes[id];
@@ -122,37 +129,57 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
       : (stored ?? defaultDeviceVolume);
   }
 
-  /** Turn a device on/off as a live output. No designation needed — any
-   *  connected device can be activated. Reads the live active list to avoid
-   *  clobbering a concurrent change. */
-  function setOn(id: string, on: boolean) {
+  /** Commit output membership and immediately reconcile this browser's audio
+   *  when the change also adds or removes this device. */
+  function setActiveOutputs(next: string[]) {
     if (!connected) return;
     const player = usePlayerStore.getState();
     const current = player.state?.active_output_device_ids ?? [];
-    const next = on
-      ? current.includes(id)
-        ? current
-        : [...current, id]
-      : current.filter((d) => d !== id);
-    // Optimistic for THIS device so its audio reacts on the click.
-    if (id === deviceId) {
+    const wasThisDevice = current.includes(deviceId);
+    const isThisDevice = next.includes(deviceId);
+
+    // Optimistic for this device so its audio reacts on the click, including
+    // when choosing a different single output replaces this browser.
+    if (wasThisDevice !== isThisDevice) {
       playbackEngine.unlock();
       // Turning our own output off: flush a final position report while we're
       // still an active output (queued before set_active_outputs on the same
       // ordered socket, so the server accepts it) — otherwise its position_ms
       // stays frozen at the last 1s report and a quick off→on resumes from that
       // stale second (a small backward jump / replaying the same second).
-      if (!next.includes(deviceId)) {
+      if (!isThisDevice) {
         playbackEngine.flushPositionReport();
       }
       if (player.state !== null) {
         playbackEngine.applyState(
           { ...player.state, active_output_device_ids: next },
-          next.includes(deviceId),
+          isThisDevice,
         );
       }
     }
     wsClient.send({ type: "set_active_outputs", device_ids: next });
+  }
+
+  /** Turn a device on/off as a live output. In the default single-output mode,
+   *  turning one device on replaces the current output. */
+  function setOn(id: string, on: boolean) {
+    const current = usePlayerStore.getState().state?.active_output_device_ids ?? [];
+    const next = on
+      ? multiple
+        ? current.includes(id)
+          ? current
+          : [...current, id]
+        : [id]
+      : current.filter((activeId) => activeId !== id);
+    setActiveOutputs(next);
+  }
+
+  function setMultipleOutputs(enabled: boolean) {
+    setMultiple(enabled);
+    if (enabled) return;
+
+    const current = usePlayerStore.getState().state?.active_output_device_ids ?? [];
+    if (current.length > 1) setActiveOutputs([current[0]]);
   }
 
   function setVol(id: string, v: number) {
@@ -195,9 +222,20 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
 
   return (
     <div className="speakers-control" ref={rootRef}>
+      {singleOutputId !== null ? (
+        <VolumeControl
+          value={volumeFor(singleOutputId)}
+          onChange={(value) => setVol(singleOutputId, value)}
+          label={`${deviceDisplayName(singleOutput?.name ?? singleOutputId)} volume in player bar`}
+          showIcon={false}
+          className="single-speaker-volume"
+          readOnly={!connected}
+          readOnlyTitle="Not connected"
+        />
+      ) : null}
       <button
         type="button"
-        className={`output-toggle ${isMyOutput ? "output-toggle-on" : "output-toggle-off"}`}
+        className={`output-toggle ${activeIds.length > 0 ? "output-toggle-on" : "output-toggle-off"}`}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -212,6 +250,18 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
         <div className="speakers-popover" role="dialog" aria-label="Speakers">
           <div className="speakers-popover-head">
             <span>Speakers</span>
+            <label
+              className="speakers-multiple-toggle"
+              title="Allow more than one speaker to play at the same time"
+            >
+              <input
+                type="checkbox"
+                checked={multiple}
+                disabled={!connected}
+                onChange={(event) => setMultipleOutputs(event.target.checked)}
+              />
+              <span>Multiple</span>
+            </label>
             <Link
               to="/settings"
               className="btn-link-external"
