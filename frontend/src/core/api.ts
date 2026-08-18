@@ -297,9 +297,73 @@ export interface PlaylistSuggestionRequest {
   exclude_track_ids?: number[];
 }
 
+export type BackgroundJobStatus =
+  | "queued"
+  | "running"
+  | "cancel_requested"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export interface BackgroundJob {
+  id: string;
+  kind: string;
+  status: BackgroundJobStatus;
+  parameters: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  progress_current: number;
+  progress_total: number | null;
+  progress_phase: string;
+  progress_message: string;
+  attempts: number;
+  retry_of_id: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface LibraryAnalysisSummary {
+  analyzer: string;
+  library_tracks: number;
+  analyzed_tracks: number;
+  high_confidence: number;
+  medium_confidence: number;
+  low_confidence: number;
+  last_updated_at: string | null;
+}
+
+export const jobsApi = {
+  list: (
+    params: {
+      kind?: string;
+      status?: BackgroundJobStatus;
+      limit?: number;
+    } = {},
+  ) => {
+    const query = new URLSearchParams();
+    if (params.kind !== undefined) query.set("kind", params.kind);
+    if (params.status !== undefined) query.set("status", params.status);
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return api.get<BackgroundJob[]>(`/api/jobs${suffix}`);
+  },
+  get: (jobId: string) =>
+    api.get<BackgroundJob>(`/api/jobs/${encodeURIComponent(jobId)}`),
+  cancel: (jobId: string) =>
+    api.post<BackgroundJob>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`),
+  retry: (jobId: string) =>
+    api.post<BackgroundJob>(`/api/jobs/${encodeURIComponent(jobId)}/retry`),
+};
+
 export const assistantApi = {
   suggestPlaylist: (payload: PlaylistSuggestionRequest) =>
     api.post<PlaylistSuggestion>("/api/assistant/playlists/suggest", payload),
+  startLibraryAnalysis: (force = false) =>
+    api.post<BackgroundJob>("/api/assistant/library-analysis/jobs", { force }),
+  getLibraryAnalysisSummary: () =>
+    api.get<LibraryAnalysisSummary>("/api/assistant/library-analysis/summary"),
 };
 
 export interface ActiveSession {

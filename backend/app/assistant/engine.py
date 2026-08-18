@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Protocol
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Literal, Protocol
 
 from app.assistant.schemas import PlaylistSuggestionRequest, PlaylistSuggestionResponse
 
@@ -21,6 +22,18 @@ class TrackLike(Protocol):
     bpm: int | None
 
 
+@dataclass(frozen=True)
+class TrackAnalysisProfile:
+    """Analyzer-neutral mood axes available to suggestion engines."""
+
+    energy: float
+    brightness: float
+    tension: float
+    moods: tuple[str, ...]
+    evidence: tuple[str, ...]
+    confidence: Literal["high", "medium", "low"]
+
+
 class PlaylistSuggestionEngine(Protocol):
     """Provider-independent boundary used by the authenticated API."""
 
@@ -30,4 +43,5 @@ class PlaylistSuggestionEngine(Protocol):
         self,
         tracks: Sequence[TrackLike],
         request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
     ) -> PlaylistSuggestionResponse: ...

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from app.assistant.engine import TrackLike
+from app.assistant.engine import TrackAnalysisProfile, TrackLike
 from app.assistant.schemas import (
     PlaylistCandidate,
     PlaylistIntent,
@@ -212,6 +212,39 @@ def _track_axes(
     )
 
 
+def _metadata_track_profile(
+    track: TrackLike,
+    field_tokens: dict[str, frozenset[str]],
+) -> TrackAnalysisProfile:
+    energy, brightness, tension, moods = _track_axes(track, field_tokens)
+    evidence: list[str] = []
+    if moods:
+        evidence.append(f"Mood metadata: {', '.join(moods[:3])}")
+    if track.bpm is not None:
+        evidence.append(f"Tempo metadata: {track.bpm} BPM")
+    if track.genre:
+        evidence.append(f"Genre metadata: {track.genre}")
+    confidence: Literal["high", "medium", "low"] = (
+        "high" if len(evidence) >= 3 else "medium" if evidence else "low"
+    )
+    if not evidence:
+        evidence.append("No explicit mood, genre, or tempo metadata")
+    return TrackAnalysisProfile(
+        energy=energy,
+        brightness=brightness,
+        tension=tension,
+        moods=moods,
+        evidence=tuple(evidence),
+        confidence=confidence,
+    )
+
+
+def analyze_track_metadata(track: TrackLike) -> TrackAnalysisProfile:
+    """Build the versioned local profile persisted by library analysis."""
+
+    return _metadata_track_profile(track, _track_field_tokens(track))
+
+
 def _semantic_match(
     terms: frozenset[str], field_tokens: dict[str, frozenset[str]]
 ) -> tuple[float, tuple[str, ...]]:
@@ -238,9 +271,17 @@ def _semantic_match(
     return _clamp(total / (len(terms) * max(weights.values()))), tuple(matched)
 
 
-def _rank_track(track: TrackLike, intent: _Intent) -> _RankedTrack:
+def _rank_track(
+    track: TrackLike,
+    intent: _Intent,
+    profile: TrackAnalysisProfile | None = None,
+) -> _RankedTrack:
     field_tokens = _track_field_tokens(track)
-    energy, brightness, tension, track_moods = _track_axes(track, field_tokens)
+    profile = profile or _metadata_track_profile(track, field_tokens)
+    energy = profile.energy
+    brightness = profile.brightness
+    tension = profile.tension
+    track_moods = profile.moods
     semantic_score, matched_terms = _semantic_match(intent.tokens, field_tokens)
 
     weighted_scores: list[tuple[float, float]] = []
@@ -342,12 +383,17 @@ def _diversify(ranked: list[_RankedTrack], limit: int) -> list[_RankedTrack]:
 
 
 def suggest_local_playlist(
-    tracks: Sequence[TrackLike], request: PlaylistSuggestionRequest
+    tracks: Sequence[TrackLike],
+    request: PlaylistSuggestionRequest,
+    profiles: Mapping[int, TrackAnalysisProfile] | None = None,
 ) -> PlaylistSuggestionResponse:
     public_intent = interpret_prompt(request.prompt)
     intent = _Intent(public=public_intent, tokens=frozenset(public_intent.search_terms))
     eligible = [track for track in tracks if _eligible(track, request)]
-    ranked = [_rank_track(track, intent) for track in eligible]
+    ranked = [
+        _rank_track(track, intent, profiles.get(track.id) if profiles is not None else None)
+        for track in eligible
+    ]
     diversified = _diversify(ranked, request.candidate_limit)
 
     target_seconds = request.target_minutes * 60
@@ -394,8 +440,9 @@ class LocalMetadataPlaylistEngine:
         self,
         tracks: Sequence[TrackLike],
         request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
     ) -> PlaylistSuggestionResponse:
-        return suggest_local_playlist(tracks, request)
+        return suggest_local_playlist(tracks, request, profiles)
 
 
 local_metadata_playlist_engine = LocalMetadataPlaylistEngine()

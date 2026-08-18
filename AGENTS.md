@@ -160,6 +160,10 @@ Runtime data lives outside the image.
 - Assistant suggestions are read-only drafts until the operator explicitly previews and commits
   them through Authoring import. Keep local heuristics and future model providers behind the same
   suggestion contracts; never let a ranking engine write playlists or mutate the library directly.
+- Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
+  evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
+  coexist. Suggestion engines may consume only current profiles and must fall back safely when a
+  profile is absent, stale, or malformed.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue

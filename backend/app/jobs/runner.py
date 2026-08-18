@@ -26,9 +26,17 @@ class JobRunnerStopping(Exception):
 
 
 class JobContext(JobExecutionContext):
-    def __init__(self, job_id: str, stopping: threading.Event) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        stopping: threading.Event,
+        progress_current: int,
+        progress_total: int | None,
+    ) -> None:
         self.job_id = job_id
         self._stopping = stopping
+        self.progress_current = progress_current
+        self.progress_total = progress_total
 
     def update_progress(
         self,
@@ -51,6 +59,8 @@ class JobContext(JobExecutionContext):
             job.updated_at = utcnow()
             cancellation_requested = job.status == "cancel_requested"
             db.commit()
+        self.progress_current = current
+        self.progress_total = total
         if cancellation_requested:
             raise JobCancelled
         if self._stopping.is_set():
@@ -190,6 +200,8 @@ class BackgroundJobRunner:
             if job is None:
                 return
             registration = get_job_handler(job.kind)
+            progress_current = job.progress_current
+            progress_total = job.progress_total
             try:
                 parameters = json.loads(job.parameters_json)
             except (TypeError, json.JSONDecodeError):
@@ -202,7 +214,12 @@ class BackgroundJobRunner:
             self._finish_failed(job_id, "Stored job parameters are invalid.")
             return
 
-        context = JobContext(job_id, self._stopping)
+        context = JobContext(
+            job_id,
+            self._stopping,
+            progress_current,
+            progress_total,
+        )
         try:
             result = registration.handler(context, parameters)
             context.check_cancelled()

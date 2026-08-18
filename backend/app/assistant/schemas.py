@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -65,3 +66,17 @@ class PlaylistSuggestionResponse(StrictAssistantModel):
     eligible_tracks: int
     intent: PlaylistIntent
     candidates: list[PlaylistCandidate]
+
+
+class LibraryAnalysisStartRequest(StrictAssistantModel):
+    force: bool = False
+
+
+class LibraryAnalysisSummary(StrictAssistantModel):
+    analyzer: str
+    library_tracks: int = Field(ge=0)
+    analyzed_tracks: int = Field(ge=0)
+    high_confidence: int = Field(ge=0)
+    medium_confidence: int = Field(ge=0)
+    low_confidence: int = Field(ge=0)
+    last_updated_at: datetime | None

@@ -40,6 +40,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   suggestions based on the library's existing metadata and BPM. You choose the final tracks, then
   the playlist goes through the same preview and create-only Authoring import transaction. This
   baseline runs locally and makes no external model calls or audio-content claims.
+- **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
+  stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
+  and keeps outputs from different analyzers side by side. The current analyzer is metadata-only;
+  audio-signal analysis remains an explicit later layer.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.

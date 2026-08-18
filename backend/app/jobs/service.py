@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, cast
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from app.models.base import utcnow
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "cancel_requested")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "cancelled")
+_enqueue_lock = threading.Lock()
 
 
 def enqueue_job(
@@ -47,6 +49,24 @@ def find_active_job(db: Session, kind: str) -> BackgroundJob | None:
         )
         .order_by(BackgroundJob.created_at.desc())
     )
+
+
+def enqueue_unique_active_job(
+    db: Session,
+    kind: str,
+    parameters: dict[str, Any],
+) -> tuple[BackgroundJob, bool]:
+    """Return the active job of this kind, or atomically enqueue one.
+
+    The product runs as one FastAPI process; this lock closes the only race
+    between simultaneous operator requests without introducing a second queue.
+    """
+
+    with _enqueue_lock:
+        active = find_active_job(db, kind)
+        if active is not None:
+            return active, False
+        return enqueue_job(db, kind, parameters), True
 
 
 def request_cancellation(

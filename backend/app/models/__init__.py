@@ -9,6 +9,7 @@ from app.models.cleanup_lookup import CleanupNameLookup
 from app.models.playback_state import PlaybackState
 from app.models.playlist import Playlist, PlaylistItem
 from app.models.track import Track
+from app.models.track_analysis import TrackAnalysis
 from app.models.user import User
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "Playlist",
     "PlaylistItem",
     "Track",
+    "TrackAnalysis",
     "User",
 ]

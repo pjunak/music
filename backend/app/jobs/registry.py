@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 class JobExecutionContext(Protocol):
     job_id: str
+    progress_current: int
+    progress_total: int | None
 
     def update_progress(
         self,

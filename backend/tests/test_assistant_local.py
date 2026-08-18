@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from fastapi.testclient import TestClient
 
+from app.assistant.engine import TrackAnalysisProfile
 from app.assistant.local import interpret_prompt, suggest_local_playlist
 from app.assistant.schemas import PlaylistSuggestionRequest
 
@@ -76,6 +77,21 @@ def test_filters_exclusions_and_default_duration_selection() -> None:
     assert [candidate.track_id for candidate in result.candidates] == [2]
     assert result.candidates[0].default_selected is True
     assert result.eligible_tracks == 1
+
+
+def test_current_analysis_profiles_feed_the_local_ranker() -> None:
+    tracks = [
+        StubTrack(1, "neutral-one.flac", "Neutral One"),
+        StubTrack(2, "neutral-two.flac", "Neutral Two"),
+    ]
+    profiles = {
+        1: TrackAnalysisProfile(0.2, 0.6, 0.1, ("calm",), ("cached",), "high"),
+        2: TrackAnalysisProfile(0.9, 0.48, 0.76, ("combat",), ("cached",), "high"),
+    }
+
+    result = suggest_local_playlist(tracks, request("intense combat"), profiles)
+
+    assert result.candidates[0].track_id == 2
 
 
 def test_assistant_endpoint_requires_auth(client: TestClient) -> None:

@@ -4539,6 +4539,165 @@ kbd,
 .assistant-placeholder-card {
   width: min(100%, 620px);
 }
+.assistant-analysis-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6);
+}
+.assistant-analysis-header,
+.assistant-analysis-grid,
+.assistant-analysis-history,
+.assistant-analysis-error {
+  width: min(100%, 1180px);
+  margin-right: auto;
+  margin-left: auto;
+}
+.assistant-analysis-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: var(--space-5);
+}
+.assistant-analysis-current,
+.assistant-analysis-summary {
+  min-width: 0;
+}
+.assistant-analysis-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--danger) 50%, var(--border));
+  border-radius: var(--radius);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.assistant-job-status {
+  padding: 0.15rem var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: var(--surface-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.assistant-job-status.is-running,
+.assistant-job-status.is-succeeded {
+  border-color: var(--accent2);
+  color: var(--accent2-strong);
+  background: var(--accent2-soft);
+}
+.assistant-job-status.is-failed {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.assistant-job-status.is-cancel_requested {
+  color: var(--warning, #d6a64b);
+}
+.assistant-job-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 8rem;
+}
+.assistant-job-progress-label {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.assistant-job-progress-label span,
+.assistant-job-progress p {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.assistant-job-progress p {
+  margin: 0;
+}
+.assistant-job-progress progress {
+  width: 100%;
+  height: 0.65rem;
+  accent-color: var(--accent2);
+}
+.assistant-analysis-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.assistant-analysis-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.assistant-analysis-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.assistant-analysis-stats strong {
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+}
+.assistant-analysis-stats span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-analysis-coverage {
+  height: 7px;
+  margin-top: var(--space-4);
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+.assistant-analysis-coverage span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent2);
+}
+.assistant-analysis-note {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--accent2);
+  color: var(--muted-strong);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+.assistant-analysis-history {
+  margin-top: var(--space-5);
+}
+.assistant-job-history-list {
+  display: flex;
+  flex-direction: column;
+}
+.assistant-job-history-row {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 48px;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+  color: var(--muted-strong);
+  font-size: var(--text-sm);
+}
+.assistant-job-history-row > span:not(.assistant-job-status) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* --- settings view --- */
 
@@ -5012,6 +5171,9 @@ input.volume-slider::-moz-range-thumb {
  * Every change is reversible — wider widths get the desktop layout. */
 
 @media (max-width: 900px) {
+  .assistant-analysis-grid {
+    grid-template-columns: 1fr;
+  }
   .assistant-workbench {
     grid-template-columns: 1fr;
   }
@@ -5044,6 +5206,7 @@ input.volume-slider::-moz-range-thumb {
 
 @media (max-width: 700px) {
   .assistant-playlist-view,
+  .assistant-analysis-view,
   .assistant-placeholder {
     padding: var(--space-4);
   }
@@ -5069,6 +5232,13 @@ input.volume-slider::-moz-range-thumb {
   }
   .assistant-candidate-copy > span {
     white-space: normal;
+  }
+  .assistant-job-history-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .assistant-job-history-row > span:nth-child(3),
+  .assistant-job-history-row > span:nth-child(4) {
+    grid-column: 2;
   }
   /* Section-nav sub-tabs at narrow widths: tighter padding so the 4
    * Authoring sub-tabs (Playlists / Soundboards / Modes / Presets) come
