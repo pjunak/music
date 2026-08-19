@@ -8,6 +8,9 @@ export const PLAYLIST_QUALITY_JOB_KIND =
 export const MUSIC_TAGGER_ROLE_ID = "music_tagger";
 export const MUSIC_TAGGING_QUALITY_JOB_KIND =
   "assistant.model-evaluation.music-tagging-quality-v1";
+export const TAG_CLEANUP_ROLE_ID = "tag_cleanup";
+export const TAG_CLEANUP_QUALITY_JOB_KIND =
+  "assistant.model-evaluation.tag-cleanup-quality-v1";
 
 export const MODEL_QUALITY_TARGETS = [
   {
@@ -17,6 +20,10 @@ export const MODEL_QUALITY_TARGETS = [
   {
     roleId: MUSIC_TAGGER_ROLE_ID,
     jobKind: MUSIC_TAGGING_QUALITY_JOB_KIND,
+  },
+  {
+    roleId: TAG_CLEANUP_ROLE_ID,
+    jobKind: TAG_CLEANUP_QUALITY_JOB_KIND,
   },
 ] as const;
 

@@ -45,7 +45,7 @@ MODEL_ROLES = (
         id="tag_cleanup",
         label="Song-tag cleanup",
         description=(
-            "Reserved for a future review-only tool for consistent names and merges."
+            "Suggests review-only consistent names and merges from the manual tag catalog."
         ),
     ),
     ModelRoleDefinition(

@@ -19,7 +19,6 @@ import { ModelQualityEvaluationCard } from "./ModelQualityEvaluationCard";
 import {
   isModelEvaluationJobActive,
   MODEL_QUALITY_TARGETS,
-  MUSIC_TAGGER_ROLE_ID,
 } from "./modelEvaluationJobs";
 import { ProviderConnectionCard } from "./ProviderConnectionCard";
 import {
@@ -291,14 +290,21 @@ export function AssistantAiSetupView() {
   }
 
   async function startQualityEvaluation(evaluation: ModelQualityEvaluation) {
-    const isMusicTagging = evaluation.role_id === MUSIC_TAGGER_ROLE_ID;
+    const isMusicTagging = evaluation.role_id === "music_tagger";
+    const isTagCleanup = evaluation.role_id === "tag_cleanup";
     const confirmed = await confirmDialog({
       title: isMusicTagging
         ? "Run music tagging model quality check?"
-        : "Run playlist model quality check?",
+        : isTagCleanup
+          ? "Run song-tag cleanup model quality check?"
+          : "Run playlist model quality check?",
       body:
         `The provider will receive fixed synthetic ${
-          isMusicTagging ? "music metadata cases" : "playlist scenarios"
+          isMusicTagging
+            ? "music metadata cases"
+            : isTagCleanup
+              ? "tag-catalog cleanup cases"
+              : "playlist scenarios"
         }. ` +
         "No songs or live library data are sent, but repeated model calls may incur cost.",
       confirmLabel: "Run quality check",
