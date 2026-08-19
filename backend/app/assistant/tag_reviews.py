@@ -12,6 +12,10 @@ from app.assistant.analysis import (
     LOCAL_METADATA_ANALYZER_ID,
     track_source_signature,
 )
+from app.assistant.audio_analysis import (
+    CurrentAudioProfile,
+    load_current_audio_profiles,
+)
 from app.assistant.model_tagger import MODEL_TAG_ANALYZER_ID
 from app.assistant.model_tagging import (
     MODEL_TAGGING_ROLE_ID,
@@ -148,6 +152,7 @@ def load_current_analysis_tag_suggestions(
         db,
         MODEL_TAGGING_ROLE_ID,
     )
+    audio_profiles = load_current_audio_profiles(db, list(track_by_id.values()))
     suggestions: dict[int, list[AnalysisTagSuggestion]] = {}
     for row in rows:
         track = track_by_id.get(row.track_id)
@@ -158,6 +163,7 @@ def load_current_analysis_tag_suggestions(
                 track,
                 row.analyzer_id,
                 model_role_fingerprint,
+                audio_profiles.get(track.id),
             )
         ):
             continue
@@ -202,13 +208,18 @@ def _current_source_signature(
     track: Track,
     analyzer_id: str,
     model_role_fingerprint: str | None,
+    audio_profile: CurrentAudioProfile | None,
 ) -> str | None:
     if analyzer_id == LOCAL_METADATA_ANALYZER_ID:
         return track_source_signature(track)
     if analyzer_id == MODEL_TAG_ANALYZER_ID:
         if model_role_fingerprint is None:
             return None
-        return model_tag_source_signature(track, model_role_fingerprint)
+        return model_tag_source_signature(
+            track,
+            model_role_fingerprint,
+            audio_profile,
+        )
     return None
 
 
@@ -318,6 +329,7 @@ def review_analysis_tags_bulk(
             db,
             MODEL_TAGGING_ROLE_ID,
         )
+        audio_profiles = load_current_audio_profiles(db, list(tracks.values()))
         for target in canonical:
             track = tracks.get(target.track_id)
             row = analyses.get((target.track_id, target.analyzer_id))
@@ -342,6 +354,7 @@ def review_analysis_tags_bulk(
                 track,
                 target.analyzer_id,
                 model_role_fingerprint,
+                audio_profiles.get(track.id),
             ):
                 failures.append(
                     _failure(

@@ -141,7 +141,7 @@ describe("LibraryTagEditor", () => {
             {
               ...track.analysis_suggestions[0],
               tag: "dancing",
-              analyzer_id: "model-metadata-tagger/v1",
+              analyzer_id: "model-evidence-tagger/v2",
               evidence: ["Title and genre support a dancing scene."],
             },
           ],
@@ -151,7 +151,7 @@ describe("LibraryTagEditor", () => {
     render(<LibraryTagEditor />);
 
     expect(
-      await screen.findByText(/model-metadata-tagger\/v1/),
+      await screen.findByText(/model-evidence-tagger\/v2/),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Accept dancing as manual tag" }),

@@ -8,7 +8,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
+from sqlalchemy.orm import Session
 
+from app.assistant.audio_analysis import (
+    LOCAL_AUDIO_ANALYZER_ID,
+    audio_source_signature,
+)
 from app.assistant.model_evaluation import TAGGING_QUALITY_JOB_KIND
 from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
@@ -36,7 +41,7 @@ from app.models.track_analysis import TrackAnalysis
 from app.models.track_analysis_tag_review import TrackAnalysisTagReview
 from app.models.track_user_tag import TrackUserTag
 
-DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v1"
+DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v2"
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +55,9 @@ def _clean_model_tagging_configuration() -> Iterator[None]:
             )
             db.execute(
                 delete(TrackAnalysis).where(
-                    TrackAnalysis.analyzer_id == MODEL_TAG_ANALYZER_ID
+                    TrackAnalysis.analyzer_id.in_(
+                        [MODEL_TAG_ANALYZER_ID, LOCAL_AUDIO_ANALYZER_ID]
+                    )
                 )
             )
             db.execute(delete(AssistantModelEvaluation))
@@ -222,6 +229,24 @@ def _start_payload(force: bool = False) -> dict[str, object]:
     }
 
 
+def _add_current_audio_profile(db: Session, track: Track) -> None:
+    db.add(
+        TrackAnalysis(
+            track_id=track.id,
+            analyzer_id=LOCAL_AUDIO_ANALYZER_ID,
+            source_signature=audio_source_signature(track),
+            job_id="audio-evidence-test",
+            energy=0.82,
+            brightness=0.64,
+            tension=0.76,
+            moods_json="[]",
+            evidence_json="[]",
+            metrics_json='{"schema":"local-audio/v1","tempo_bpm":128.0}',
+            confidence="high",
+        )
+    )
+
+
 def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
     tracks = [
         ModelTagTrackInput(
@@ -276,7 +301,7 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v1",
+            "schema_version": "assistant-music-tagger-evaluation/v2",
             "id": "confidence-evidence-boundary",
             "cases": [
                 {
@@ -362,9 +387,14 @@ def test_tagging_quality_gate_and_disclosure_status(
     assert payload["connection_name"] == "Tagging models"
     assert payload["model_id"] == "tagger-small"
     assert payload["disclosure"]["tracks_per_request"] == 20
+    assert payload["tracks_with_audio_evidence"] == 0
     assert "tavern" in payload["disclosure"]["allowed_tags"]
     assert any(
         "Filesystem" in item for item in payload["disclosure"]["never_shared"]
+    )
+    assert any(
+        "local audio-signal proxies" in item
+        for item in payload["disclosure"]["shared_with_provider"]
     )
     assert evaluations.status_code == 200
     assert evaluations.json()[0]["evaluation_id"] == "music-tagging-quality-v1"
@@ -403,6 +433,7 @@ def test_model_tagging_is_path_free_durable_and_review_only(
         track.album = "Medieval Tavern Dances"
         track.genre = "folk"
         track.bpm = 122
+        _add_current_audio_profile(db, track)
         db.commit()
     _configure_quality_passed_tagger(auth_client, monkeypatch)
     observed: list[dict[str, Any]] = []
@@ -445,6 +476,14 @@ def test_model_tagging_is_path_free_durable_and_review_only(
     assert "path" not in provider_track
     assert "manual_tags" not in provider_track
     assert "analysis_tags" not in provider_track
+    assert provider_track["audio_evidence"] == {
+        "analyzer_id": "local-audio/v1",
+        "energy": 0.82,
+        "brightness": 0.64,
+        "tension": 0.76,
+        "tempo_bpm": 128.0,
+        "confidence": "high",
+    }
 
     listing = auth_client.get("/api/assistant/library-tags")
     assert listing.status_code == 200
@@ -527,6 +566,56 @@ def test_model_tagging_skips_current_profiles_without_provider_calls(
     assert finished["result"]["updated_profiles"] == 0
     assert finished["result"]["unchanged_profiles"] == 1
     assert finished["result"]["usage"]["attempted_requests"] == 0
+
+
+def test_current_audio_evidence_invalidates_and_enriches_model_profile(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+) -> None:
+    _configure_quality_passed_tagger(auth_client, monkeypatch)
+    observed_tracks: list[dict[str, Any]] = []
+
+    def execute(
+        target: object,
+        request: StructuredModelRequest,
+    ) -> StructuredModelResult:
+        observed_tracks.extend(json.loads(request.user_prompt)["tracks"])
+        return _reference_music_tagger(target, request)
+
+    monkeypatch.setattr(
+        "app.assistant.model_tagging.execute_structured_model_request",
+        execute,
+    )
+    first = auth_client.post(
+        "/api/assistant/library-tags/model-jobs",
+        json=_start_payload(),
+    )
+    _wait_for_job(auth_client, first.json()["id"], {"succeeded"})
+    assert observed_tracks[-1]["audio_evidence"] is None
+
+    with SessionLocal() as db:
+        track = db.get(Track, seeded_track_id)
+        assert track is not None
+        _add_current_audio_profile(db, track)
+        db.commit()
+
+    availability = auth_client.get(
+        "/api/assistant/library-tags/model-status"
+    ).json()
+    assert availability["tracks_with_audio_evidence"] == 1
+    assert availability["tracks_needing_tags"] == 1
+    second = auth_client.post(
+        "/api/assistant/library-tags/model-jobs",
+        json=_start_payload(),
+    )
+    finished = _wait_for_job(auth_client, second.json()["id"], {"succeeded"})
+
+    assert finished["result"]["updated_profiles"] == 1
+    audio_evidence = observed_tracks[-1]["audio_evidence"]
+    assert isinstance(audio_evidence, dict)
+    assert audio_evidence["analyzer_id"] == LOCAL_AUDIO_ANALYZER_ID
+    assert audio_evidence["energy"] == 0.82
 
 
 def test_failed_model_tagging_retains_attempted_provider_usage(

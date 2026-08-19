@@ -1,4 +1,4 @@
-# ADR-006: Review-only model metadata tagging
+# ADR-006: Review-only model evidence tagging
 
 **Status:** Accepted
 
@@ -19,10 +19,14 @@ observable after the browser closes without silently repeating uncertain calls.
 ## Decision
 
 - Reuse `track_analyses` and `track_analysis_tag_reviews` with the versioned
-  analyzer ID `model-metadata-tagger/v1`. Do not create a parallel AI-tag store.
+  analyzer ID `model-evidence-tagger/v2`. Do not create a parallel AI-tag store.
 - Limit model input to numeric track ID, indexed title, display title, artist,
-  album, origin, genre, duration, and BPM. Do not send paths, audio, signal
+  album, origin, genre, duration, BPM, and an optional bounded projection of a
+  current `local-audio/v1` profile: energy, brightness, tension, tempo estimate,
+  and confidence. Do not send paths, audio, waveforms, detailed signal
   measurements, manual tags, local generated tags, playlists, or review history.
+  Numeric signal evidence may refine generic mood and activity judgments but is
+  never proof of an instrument, genre, setting, scene, or D&D context.
 - Send at most 20 tracks per provider request. Treat every metadata string as
   untrusted prompt data and require one output profile for every input ID.
 - Restrict output to zero through eight tags from the existing D&D starter
@@ -33,9 +37,11 @@ observable after the browser closes without silently repeating uncertain calls.
   versioned disclosure confirmation before enqueueing live work. Recheck the
   role fingerprint and quality gate around every provider batch and database
   commit.
-- Bind each profile source signature to the consumed track metadata and exact
-  model-role runtime fingerprint. Changed metadata or model settings make old
-  suggestions stale rather than silently current.
+- Bind each profile source signature to the consumed track metadata, optional
+  local-audio source signature, input-contract version, and exact model-role
+  runtime fingerprint. Changed metadata, audio evidence, or model settings make
+  old suggestions stale rather than silently current. Adding a first current
+  audio profile also invalidates a metadata-only model result.
 - Run the library pass as a durable, non-restartable job. Commit completed
   batches, skip unchanged profiles, and do not automatically repeat a provider
   call after a server restart. A deliberate later run safely skips committed
@@ -83,5 +89,6 @@ Selected.
 - Closing or refreshing the page does not stop the server job. A server restart
   ends an uncertain job, but already committed batches are reused by the next
   deliberate run.
-- Specialized audio models require a separate capability, file disclosure,
+- Models still receive JSON evidence, not audio. Specialized models that ingest
+  audio files require the separate `audio-input/v1` capability, file disclosure,
   quality suite, and cost decision later.

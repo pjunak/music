@@ -12,6 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.assistant.analysis import track_source_signature
+from app.assistant.audio_analysis import (
+    CurrentAudioProfile,
+    load_current_audio_profiles,
+)
 from app.assistant.model_evaluation import (
     TAGGING_QUALITY_EVALUATION_ID,
     prepare_quality_gated_role_execution,
@@ -20,6 +24,7 @@ from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
     MODEL_TAG_BATCH_SIZE,
     MODEL_TAG_VOCABULARY,
+    ModelTagAudioEvidence,
     ModelTagTrackInput,
     tag_tracks,
 )
@@ -55,11 +60,15 @@ MODEL_TAGGING_DISCLOSURE = ModelTaggingDisclosure(
     shared_with_provider=[
         "Indexed titles, display titles, artists, albums, origins, and genres",
         "Track durations and BPM values when available",
+        (
+            "Current local audio-signal proxies when available: energy, brightness, "
+            "tension, tempo estimate, and confidence"
+        ),
         "A server-assigned numeric track ID used only to match the response",
         "The fixed D&D tag vocabulary the model is allowed to choose from",
     ],
     never_shared=[
-        "Audio files, waveform measurements, or cover artwork",
+        "Audio files, waveforms, detailed signal measurements, or cover artwork",
         "Filesystem or library-relative paths",
         "Your manual tags or local generated tags",
         "Playlists, review decisions, and provider credentials",
@@ -75,16 +84,26 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v1"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v2"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     force: bool
 
 
-def model_tag_source_signature(track: Track, role_fingerprint: str) -> str:
-    """Bind a generated profile to exact metadata and model runtime."""
+def model_tag_source_signature(
+    track: Track,
+    role_fingerprint: str,
+    audio_profile: CurrentAudioProfile | None,
+) -> str:
+    """Bind a generated profile to exact metadata, optional audio evidence, and runtime."""
 
-    payload = f"{role_fingerprint}\0{track_source_signature(track)}"
+    audio_signature = (
+        audio_profile.source_signature if audio_profile is not None else "no-audio-evidence"
+    )
+    payload = (
+        f"{MODEL_TAG_ANALYZER_ID}\0{role_fingerprint}\0"
+        f"{track_source_signature(track)}\0{audio_signature}"
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -92,6 +111,7 @@ def _current_profile_count(
     db: Session,
     tracks: list[Track],
     fingerprint: str | None,
+    audio_profiles: dict[int, CurrentAudioProfile],
 ) -> int:
     if not tracks or fingerprint is None:
         return 0
@@ -106,7 +126,11 @@ def _current_profile_count(
     return sum(
         rows.get(track.id) is not None
         and rows[track.id].source_signature
-        == model_tag_source_signature(track, fingerprint)
+        == model_tag_source_signature(
+            track,
+            fingerprint,
+            audio_profiles.get(track.id),
+        )
         for track in tracks
     )
 
@@ -119,6 +143,7 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
         else None
     )
     tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
+    audio_profiles = load_current_audio_profiles(db, tracks)
     reason_code: str | None = None
     fingerprint: str | None = None
     try:
@@ -131,7 +156,7 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
     except ProviderServiceError as exc:
         reason_code = exc.code
         fingerprint = current_role_runtime_fingerprint(db, MODEL_TAGGING_ROLE_ID)
-    current = _current_profile_count(db, tracks, fingerprint)
+    current = _current_profile_count(db, tracks, fingerprint, audio_profiles)
     needed = max(0, len(tracks) - current)
     return ModelTaggingAvailability(
         available=reason_code is None,
@@ -142,6 +167,7 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
         quality_evaluation_id=TAGGING_QUALITY_EVALUATION_ID,
         job_kind=MODEL_TAGGING_JOB_KIND,
         library_tracks=len(tracks),
+        tracks_with_audio_evidence=len(audio_profiles),
         current_profiles=current,
         tracks_needing_tags=needed,
         estimated_provider_requests=math.ceil(needed / MODEL_TAG_BATCH_SIZE),
@@ -182,7 +208,22 @@ def _require_unchanged_quality_gate(
         )
 
 
-def _track_input(track: Track) -> ModelTagTrackInput:
+def _track_input(
+    track: Track,
+    audio_profile: CurrentAudioProfile | None,
+) -> ModelTagTrackInput:
+    audio_evidence = (
+        ModelTagAudioEvidence(
+            analyzer_id=audio_profile.analyzer_id,
+            energy=audio_profile.energy,
+            brightness=audio_profile.brightness,
+            tension=audio_profile.tension,
+            tempo_bpm=audio_profile.tempo_bpm,
+            confidence=audio_profile.confidence,
+        )
+        if audio_profile is not None
+        else None
+    )
     return ModelTagTrackInput(
         track_id=track.id,
         title=track.title,
@@ -193,6 +234,7 @@ def _track_input(track: Track) -> ModelTagTrackInput:
         genre=track.genre,
         length_s=track.length_s,
         bpm=track.bpm,
+        audio_evidence=audio_evidence,
     )
 
 
@@ -222,9 +264,14 @@ def run_model_music_tagging(
                 )
             ).all()
         }
+        audio_profiles = load_current_audio_profiles(db, tracks)
 
     signatures = {
-        track.id: model_tag_source_signature(track, parameters.role_fingerprint)
+        track.id: model_tag_source_signature(
+            track,
+            parameters.role_fingerprint,
+            audio_profiles.get(track.id),
+        )
         for track in tracks
     }
     work = [
@@ -271,7 +318,13 @@ def run_model_music_tagging(
             context.checkpoint_result(usage.checkpoint())
             return result
 
-        profiles = tag_tracks([_track_input(track) for track in batch], execute)
+        profiles = tag_tracks(
+            [
+                _track_input(track, audio_profiles.get(track.id))
+                for track in batch
+            ],
+            execute,
+        )
         context.check_cancelled()
         with SessionLocal() as db:
             _require_unchanged_quality_gate(db, parameters)
@@ -284,12 +337,25 @@ def run_model_music_tagging(
                     )
                 ).all()
             }
+            current_tracks = {
+                snapshot.id: current_track
+                for snapshot in batch
+                if (current_track := db.get(Track, snapshot.id)) is not None
+            }
+            current_audio_profiles = load_current_audio_profiles(
+                db,
+                list(current_tracks.values()),
+            )
             for snapshot in batch:
-                current_track = db.get(Track, snapshot.id)
+                current_track = current_tracks.get(snapshot.id)
                 if (
                     current_track is None
-                    or track_source_signature(current_track)
-                    != track_source_signature(snapshot)
+                    or model_tag_source_signature(
+                        current_track,
+                        parameters.role_fingerprint,
+                        current_audio_profiles.get(snapshot.id),
+                    )
+                    != signatures[snapshot.id]
                 ):
                     skipped_changed += 1
                     continue
@@ -311,6 +377,8 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v1",
+                        "input_contract": "assistant-music-tagger-input/v2",
+                        "used_audio_evidence": snapshot.id in audio_profiles,
                         "role_fingerprint": parameters.role_fingerprint,
                     },
                     separators=(",", ":"),
@@ -327,7 +395,7 @@ def run_model_music_tagging(
         )
 
     return ModelTaggingJobResult(
-        schema_version="assistant-model-music-tagging-job-result/v1",
+        schema_version="assistant-model-music-tagging-job-result/v2",
         disclosure_version=parameters.disclosure_version,
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,

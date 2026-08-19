@@ -170,7 +170,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Music tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "dnd-metadata-tagging-baseline-v2",
+  suite_id: "dnd-evidence-tagging-baseline-v3",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,

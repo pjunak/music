@@ -1,6 +1,6 @@
 {
-  "schema_version": "assistant-music-tagger-evaluation/v1",
-  "id": "dnd-metadata-tagging-baseline-v2",
+  "schema_version": "assistant-music-tagger-evaluation/v2",
+  "id": "dnd-evidence-tagging-baseline-v3",
   "cases": [
     {
       "id": "medieval-tavern-dance",
@@ -133,6 +133,33 @@
       "required_tags": ["seafaring", "combat", "tense"],
       "forbidden_tags": ["calm", "romantic", "rest"],
       "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "signal-evidence-does-not-invent-context",
+      "description": "Uses numeric signal evidence conservatively without inventing a D&D setting",
+      "track": {
+        "track_id": 9,
+        "title": "Untitled Signal Study",
+        "display_title": "",
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 180.0,
+        "bpm": null,
+        "audio_evidence": {
+          "analyzer_id": "local-audio/v1",
+          "energy": 0.86,
+          "brightness": 0.71,
+          "tension": 0.82,
+          "tempo_bpm": 132.0,
+          "confidence": "high"
+        }
+      },
+      "required_tags": [],
+      "forbidden_tags": ["medieval", "tavern", "combat", "castle", "dungeon", "temple"],
+      "allowed_confidences": ["low"],
       "minimum_evidence_items": 1
     },
     {

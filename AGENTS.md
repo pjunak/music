@@ -199,10 +199,12 @@ Runtime data lives outside the image.
   `assistant.model-music-tagging`. Require the exact current
   `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider
   request, and keep jobs non-restartable. Provider input is limited to indexed descriptive metadata,
-  duration, BPM, numeric track IDs, and the fixed D&D vocabulary; never send paths, audio, manual
-  tags, local generated tags, playlists, or review history. Store output under
-  `model-metadata-tagger/v1` in `track_analyses`, bind its source signature to metadata plus the role
-  fingerprint, and expose it only through the existing generated-tag review surface. The model may
+  duration, BPM, numeric track IDs, the fixed D&D vocabulary, and—when current—bounded
+  `local-audio/v1` energy, brightness, tension, tempo, and confidence values. Never send paths,
+  audio, waveforms, detailed signal metrics, manual tags, local generated tags, playlists, or review
+  history. Store output under `model-evidence-tagger/v2` in `track_analyses`, bind its source
+  signature to metadata, the optional local-audio source signature, and the role fingerprint, and
+  expose it only through the existing generated-tag review surface. The model may
   never add a `track_user_tags` row directly. Accepted suggestions become manual tags only through
   the existing explicit single or bulk review transaction.
 - Optional model-assisted manual-tag cleanup may run only through

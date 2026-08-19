@@ -55,6 +55,7 @@ const availability: ModelTaggingAvailability = {
   quality_evaluation_id: "music-tagging-quality-v1",
   job_kind: "assistant.model-music-tagging",
   library_tracks: 45,
+  tracks_with_audio_evidence: 32,
   current_profiles: 5,
   tracks_needing_tags: 40,
   estimated_provider_requests: 2,
@@ -128,7 +129,7 @@ describe("ModelTaggingPanel", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Suggest D&D tags from metadata",
+        name: "Suggest D&D tags from library evidence",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Filesystem paths")).toBeInTheDocument();
@@ -138,7 +139,7 @@ describe("ModelTaggingPanel", () => {
 
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Send library metadata to your tagging model?",
+        title: "Send library evidence to your tagging model?",
         confirmLabel: "Suggest tags",
       }),
     );
@@ -223,8 +224,8 @@ describe("ModelTaggingPanel", () => {
       status: "succeeded",
       progress_current: 40,
       result: {
-        schema_version: "assistant-model-music-tagging-job-result/v1",
-        analyzer_id: "model-metadata-tagger/v1",
+        schema_version: "assistant-model-music-tagging-job-result/v2",
+        analyzer_id: "model-evidence-tagger/v2",
         library_tracks: 45,
         updated_profiles: 40,
         unchanged_profiles: 5,

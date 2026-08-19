@@ -75,7 +75,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates and returns a draft. Music tagging sends metadata
   in batches of at most 20, may choose only from the fixed D&D vocabulary, and stores suggestions
-  under `model-metadata-tagger/v1` for explicit per-tag review. Neither path can write a playlist or
+  under `model-evidence-tagger/v2` for explicit per-tag review. When current local signal analysis
+  exists, tagging may also send its bounded energy, brightness, tension, tempo, and confidence
+  values; audio files, waveforms, paths, and detailed measurements remain on the server. Neither
+  path can write a playlist or
   manual tag directly. Tag cleanup sends only normalized manual tag names, their usage counts, and
   the fixed D&D starter vocabulary in one bounded request; its stored proposal remains inert until
   the user selects specific renames, and stale proposals are rejected. Quality, playlist, tagging,

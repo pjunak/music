@@ -347,7 +347,7 @@ export interface ModelPlaylistAvailability {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v1" as const;
+  "assistant-model-music-tagging-disclosure/v2" as const;
 
 export interface ModelTaggingDisclosure {
   version: typeof MODEL_TAGGING_DISCLOSURE_VERSION;
@@ -367,6 +367,7 @@ export interface ModelTaggingAvailability {
   quality_evaluation_id: "music-tagging-quality-v1";
   job_kind: string;
   library_tracks: number;
+  tracks_with_audio_evidence: number;
   current_profiles: number;
   tracks_needing_tags: number;
   estimated_provider_requests: number;

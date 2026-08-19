@@ -12,17 +12,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.assistant.providers.execution import StructuredModelRequest, StructuredModelResult
 from app.assistant.tags import DND_STARTER_TAG_GROUPS
 
-MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v1"] = (
-    "assistant-music-tagger-input/v1"
+MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v2"] = (
+    "assistant-music-tagger-input/v2"
 )
 MODEL_TAGGER_OUTPUT_CONTRACT: Literal["assistant-music-tagger-output/v1"] = (
     "assistant-music-tagger-output/v1"
 )
 MODEL_TAGGING_EVALUATION_CONTRACT: Literal[
-    "assistant-music-tagger-evaluation/v1"
-] = "assistant-music-tagger-evaluation/v1"
-MODEL_TAG_ANALYZER_ID: Literal["model-metadata-tagger/v1"] = (
-    "model-metadata-tagger/v1"
+    "assistant-music-tagger-evaluation/v2"
+] = "assistant-music-tagger-evaluation/v2"
+MODEL_TAG_ANALYZER_ID: Literal["model-evidence-tagger/v2"] = (
+    "model-evidence-tagger/v2"
 )
 MODEL_TAG_BATCH_SIZE = 20
 MAX_MODEL_TAGS_PER_TRACK = 8
@@ -47,6 +47,15 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ModelTagAudioEvidence(_StrictModel):
+    analyzer_id: Literal["local-audio/v1"]
+    energy: float = Field(ge=0.0, le=1.0)
+    brightness: float = Field(ge=0.0, le=1.0)
+    tension: float = Field(ge=0.0, le=1.0)
+    tempo_bpm: float | None = Field(default=None, gt=0.0, le=999.0)
+    confidence: TagConfidence
+
+
 class ModelTagTrackInput(_StrictModel):
     track_id: int = Field(gt=0)
     title: BoundedText
@@ -57,10 +66,11 @@ class ModelTagTrackInput(_StrictModel):
     genre: str = Field(max_length=128)
     length_s: float = Field(ge=0.0)
     bpm: int | None = Field(default=None, ge=1, le=999)
+    audio_evidence: ModelTagAudioEvidence | None = None
 
 
 class ModelTaggerInput(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-input/v1"]
+    schema_version: Literal["assistant-music-tagger-input/v2"]
     allowed_tags: list[str] = Field(min_length=1, max_length=64)
     tracks: list[ModelTagTrackInput] = Field(min_length=1, max_length=20)
 
@@ -125,7 +135,7 @@ class TagQualityCase(_StrictModel):
 
 
 class TagQualitySuite(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-evaluation/v1"]
+    schema_version: Literal["assistant-music-tagger-evaluation/v2"]
     id: str = Field(min_length=1, max_length=128)
     cases: list[TagQualityCase] = Field(min_length=1, max_length=100)
 
@@ -186,9 +196,13 @@ def tag_tracks(
                 "track_id exactly once and no other IDs. For each track return only "
                 "track_id, tags, energy, brightness, tension, confidence, and evidence. "
                 "Use only tags from allowed_tags, use no more than 8 tags, and prefer an "
-                "empty tag list with low confidence when metadata is insufficient. "
+                "empty tag list with low confidence when the supplied evidence is "
+                "insufficient. Optional audio_evidence contains only local numeric "
+                "signal proxies, never audio. It may refine energy, brightness, tension, "
+                "tempo-related, and generic mood judgments, but it does not prove an "
+                "instrument, genre, setting, scene, or D&D context. "
                 "Numeric axes must be between 0 and 1. Evidence must briefly cite only "
-                "the supplied metadata. The schema_version must be "
+                "the supplied metadata or numeric signal evidence. The schema_version must be "
                 f"{MODEL_TAGGER_OUTPUT_CONTRACT}."
             ),
             user_prompt=model_input.model_dump_json(),

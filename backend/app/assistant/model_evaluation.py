@@ -100,10 +100,10 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
     role_id="music_tagger",
     label="Music tagging quality",
     description=(
-        "Runs fixed synthetic D&D metadata-tagging cases through this model. "
+        "Runs fixed synthetic D&D metadata and signal-evidence tagging cases. "
         "No songs or live library data are sent."
     ),
-    suite_id="dnd-metadata-tagging-baseline-v2",
+    suite_id="dnd-evidence-tagging-baseline-v3",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -387,7 +387,7 @@ def run_tagging_quality_evaluation(
         0,
         len(suite.cases),
         phase="Preparing evaluation",
-        message="Loading fixed synthetic metadata-tagging cases",
+        message="Loading fixed synthetic evidence-tagging cases",
     )
 
     with SessionLocal() as db:

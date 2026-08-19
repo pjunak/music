@@ -109,11 +109,12 @@ const modelTaggingUnavailable: ModelTaggingAvailability = {
   quality_evaluation_id: "music-tagging-quality-v1",
   job_kind: "assistant.model-music-tagging",
   library_tracks: 120,
+  tracks_with_audio_evidence: 0,
   current_profiles: 0,
   tracks_needing_tags: 120,
   estimated_provider_requests: 6,
   disclosure: {
-    version: "assistant-model-music-tagging-disclosure/v1",
+    version: "assistant-model-music-tagging-disclosure/v2",
     shared_with_provider: [],
     never_shared: [],
     allowed_tags: ["medieval", "tavern"],

@@ -144,14 +144,14 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
   async function start() {
     if (availability === null || !availability.available) return;
     const confirmed = await confirmDialog({
-      title: "Send library metadata to your tagging model?",
+      title: "Send library evidence to your tagging model?",
       body:
         `${requestPlan.tracks} track${requestPlan.tracks === 1 ? "" : "s"} will be ` +
         `processed in about ${requestPlan.requests} provider request${
           requestPlan.requests === 1 ? "" : "s"
         }. Indexed titles, artists, albums, origins, genres, durations, and BPM ` +
-        "may be sent with a numeric matching ID and the fixed vocabulary. " +
-        "Audio, paths, manual tags, local suggestions, and review decisions stay on this server. Provider usage may incur cost.",
+        "may be sent with a numeric matching ID and the fixed vocabulary. When current local audio analysis exists, bounded energy, brightness, tension, tempo, and confidence values may also be sent. " +
+        "Audio files, waveforms, paths, manual tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
       confirmLabel: requestPlan.tracks === 0 ? "Check current tags" : "Suggest tags",
       tone: "primary",
     });
@@ -199,7 +199,7 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       <div className="assistant-analyzer-heading">
         <div>
           <p className="assistant-eyebrow">Optional connected model</p>
-          <h2>Suggest D&amp;D tags from metadata</h2>
+          <h2>Suggest D&amp;D tags from library evidence</h2>
           <p>
             Add a second, clearly labelled source of suggestions. Results remain
             generated evidence until you accept individual tags below.
@@ -242,6 +242,10 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
             <div>
               <strong>{availability.estimated_provider_requests}</strong>
               <span>Estimated requests</span>
+            </div>
+            <div>
+              <strong>{availability.tracks_with_audio_evidence}</strong>
+              <span>With local signal evidence</span>
             </div>
           </div>
 

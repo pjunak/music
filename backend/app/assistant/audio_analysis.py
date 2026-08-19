@@ -20,13 +20,14 @@ from app.models.track_analysis import TrackAnalysis
 from app.models.track_analysis_failure import TrackAnalysisFailure
 
 AUDIO_ANALYSIS_JOB_KIND = "assistant.library-audio-analysis"
-LOCAL_AUDIO_ANALYZER_ID = "local-audio/v1"
+LOCAL_AUDIO_ANALYZER_ID: Literal["local-audio/v1"] = "local-audio/v1"
 _FAILURE_SAMPLE_LIMIT = 20
 
 
 @dataclass(frozen=True)
 class CurrentAudioProfile:
-    analyzer_id: str
+    analyzer_id: Literal["local-audio/v1"]
+    source_signature: str
     energy: float
     brightness: float
     tension: float
@@ -101,6 +102,7 @@ def load_current_audio_profiles(
         )
         profiles[row.track_id] = CurrentAudioProfile(
             analyzer_id=LOCAL_AUDIO_ANALYZER_ID,
+            source_signature=row.source_signature,
             energy=row.energy,
             brightness=row.brightness,
             tension=row.tension,
