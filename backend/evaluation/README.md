@@ -103,3 +103,13 @@ live-library suggestion. That separate durable job requires the current
 versioned disclosure and explicit consent, sends only the same bounded path-free
 candidate contract, and returns a draft that cannot write a playlist. Evaluation
 success does not bypass the normal review and Authoring import preview.
+
+## EQ draft evaluation
+
+`evaluation/eq-assistant-v1.json` checks the optional EQ role with synthetic warm-tavern,
+harshness-reduction, and clarity goals. The provider must return exactly ten bounded gains in the
+fixed band order; the harness also checks conservative request-specific directions. Passing the
+suite certifies only that exact role fingerprint. A live EQ request still needs the current
+disclosure and returns an inert draft that the operator must preview and select through Authoring
+import. No songs, audio, library metadata, paths, or existing presets are used by either the suite
+or the live EQ request.

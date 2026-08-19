@@ -1,0 +1,33 @@
+{
+  "schema_version": "assistant-eq-quality/v1",
+  "id": "graphic-eq-safety-baseline-v1",
+  "cases": [
+    {
+      "id": "warm-tavern",
+      "description": "A warm tavern request adds body without boosting harsh highs.",
+      "goal": "Warm, intimate medieval tavern ambience with more wooden body and less brittle brightness.",
+      "expectations": [
+        {"frequency_hz": 250, "minimum_gain_db": 0.5, "maximum_gain_db": 4.0},
+        {"frequency_hz": 8000, "minimum_gain_db": -4.0, "maximum_gain_db": 0.0}
+      ]
+    },
+    {
+      "id": "reduce-harshness",
+      "description": "A harsh recording request cuts the presence region conservatively.",
+      "goal": "Reduce piercing harshness and listening fatigue while keeping speech and melody understandable.",
+      "expectations": [
+        {"frequency_hz": 4000, "minimum_gain_db": -5.0, "maximum_gain_db": -0.5},
+        {"frequency_hz": 16000, "minimum_gain_db": -4.0, "maximum_gain_db": 1.0}
+      ]
+    },
+    {
+      "id": "clarity-with-headroom",
+      "description": "A clarity request avoids extreme low-end boosts and uses modest presence changes.",
+      "goal": "Improve dialogue and acoustic-instrument clarity without making the result thin or much louder.",
+      "expectations": [
+        {"frequency_hz": 2000, "minimum_gain_db": 0.0, "maximum_gain_db": 4.0},
+        {"frequency_hz": 32, "minimum_gain_db": -3.0, "maximum_gain_db": 1.0}
+      ]
+    }
+  ]
+}

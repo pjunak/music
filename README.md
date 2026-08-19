@@ -55,6 +55,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   removed, and the model may return only known track IDs. A current pass is required before that
   exact model configuration can be selected for a live-library suggestion.
   See [`backend/evaluation/README.md`](backend/evaluation/README.md).
+- **Review-first EQ Assistant** — connect a separately chosen structured-text model and describe
+  the sound you want. The task can return only ten fixed graphic-EQ bands with gains from -12 to
+  +12 dB in 0.5 dB steps; frequencies and the final preset document are constructed locally. A
+  current synthetic EQ quality pass and an explicit per-request disclosure are required. Jobs are
+  durable across browser refreshes, and results remain inert until the operator previews and
+  explicitly commits the preset through the normal create-only Authoring import.
 - **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
   dedicated Assistant tab, verify it from the server, and assign a model independently to each
   declared role. A connection owns one key: several roles can deliberately reuse it, or specialized
@@ -69,9 +75,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   supported transports such as structured text or future bounded audio input; verification records
   the capabilities actually confirmed, and tasks accept only compatible verified connections.
   Reserved future tasks remain visible as planned work but cannot be configured before their
-  feature-specific input, quality, consent, and review contracts exist. The playlist
-  playlist planner, metadata music tagger, and manual-tag cleanup reviewer are the first optional
-  live-library integrations.
+  feature-specific input, quality, consent, and review contracts exist. The playlist planner,
+  metadata music tagger, manual-tag cleanup reviewer, and EQ draft assistant are the implemented
+  optional model tasks.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates and returns a draft. Music tagging sends metadata
   in batches of at most 20, may choose only from the fixed D&D vocabulary, and stores suggestions
@@ -88,8 +94,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   after each provider attempt, so a failed or cancelled job still shows what was already reported.
   It does not estimate charges because provider pricing is not part of the portable model contract.
   The Library Analysis screen restores tagging and cleanup progress after refresh or reopen and
-  shows model output beside local tools without merging their ownership. EQ and specialized audio
-  model workflows remain local until they receive their own reviewed contracts.
+  shows model output beside local tools without merging their ownership. The EQ workflow sends only
+  the operator's goal and fixed band limits; specialized audio-model workflows remain locked until
+  a concrete bounded audio transport receives its own reviewed contract.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable

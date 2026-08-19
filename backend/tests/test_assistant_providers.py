@@ -400,6 +400,10 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         "structured-text/v1"
     ]
     assert roles["playlist_planner"]["configuration_available"] is True
+    assert roles["eq_assistant"]["required_capability_ids"] == [
+        "structured-text/v1"
+    ]
+    assert roles["eq_assistant"]["configuration_available"] is True
     assert roles["audio_analyzer"]["required_capability_ids"] == [
         "audio-input/v1"
     ]
@@ -407,9 +411,9 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
     assert "Reserved" not in descriptions["playlist_planner"]
     assert "Reserved" not in descriptions["music_tagger"]
     assert "Reserved" not in descriptions["tag_cleanup"]
+    assert "Reserved" not in descriptions["eq_assistant"]
     for role_id in (
         "library_cleanup",
-        "eq_assistant",
         "audio_analyzer",
     ):
         assert descriptions[role_id].startswith("Reserved for")
@@ -750,14 +754,14 @@ def test_reserved_roles_cannot_be_configured_or_tested(
     created = _create_connection(auth_client)
 
     configured = auth_client.put(
-        "/api/assistant/providers/roles/eq_assistant",
+        "/api/assistant/providers/roles/library_cleanup",
         json={
             "connection_id": created["id"],
             "model_id": "future-eq-model",
             "enabled": False,
         },
     )
-    tested = auth_client.post("/api/assistant/providers/roles/eq_assistant/test")
+    tested = auth_client.post("/api/assistant/providers/roles/library_cleanup/test")
 
     assert configured.status_code == 409
     assert configured.json()["detail"]["code"] == "role_not_available"

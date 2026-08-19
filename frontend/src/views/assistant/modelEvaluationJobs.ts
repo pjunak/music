@@ -11,6 +11,8 @@ export const MUSIC_TAGGING_QUALITY_JOB_KIND =
 export const TAG_CLEANUP_ROLE_ID = "tag_cleanup";
 export const TAG_CLEANUP_QUALITY_JOB_KIND =
   "assistant.model-evaluation.tag-cleanup-quality-v1";
+export const EQ_ASSISTANT_ROLE_ID = "eq_assistant";
+export const EQ_QUALITY_JOB_KIND = "assistant.model-evaluation.eq-quality-v1";
 
 export const MODEL_QUALITY_TARGETS = [
   {
@@ -24,6 +26,10 @@ export const MODEL_QUALITY_TARGETS = [
   {
     roleId: TAG_CLEANUP_ROLE_ID,
     jobKind: TAG_CLEANUP_QUALITY_JOB_KIND,
+  },
+  {
+    roleId: EQ_ASSISTANT_ROLE_ID,
+    jobKind: EQ_QUALITY_JOB_KIND,
   },
 ] as const;
 

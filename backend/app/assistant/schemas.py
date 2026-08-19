@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.assistant.model_eq import EqPresetDraft
 from app.assistant.providers.schemas import ProviderUsageSummary
 
 
@@ -129,6 +130,55 @@ class ModelPlaylistSuggestionJobResult(StrictAssistantModel):
     role_id: Literal["playlist_planner"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     suggestion: PlaylistSuggestionResponse
+    usage: ProviderUsageSummary
+
+
+MODEL_EQ_DISCLOSURE_VERSION: Literal["assistant-eq-draft-disclosure/v1"] = (
+    "assistant-eq-draft-disclosure/v1"
+)
+
+
+class EqDraftRequest(StrictAssistantModel):
+    name: str = Field(min_length=1, max_length=128)
+    goal: str = Field(min_length=2, max_length=1000)
+
+    @field_validator("name", "goal", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class ModelEqDisclosure(StrictAssistantModel):
+    version: Literal["assistant-eq-draft-disclosure/v1"]
+    shared_with_provider: list[str]
+    never_shared: list[str]
+    may_incur_cost: bool
+
+
+class ModelEqAvailability(StrictAssistantModel):
+    available: bool
+    reason_code: str | None
+    role_id: Literal["eq_assistant"]
+    connection_name: str | None
+    model_id: str | None
+    quality_evaluation_id: Literal["eq-quality-v1"]
+    job_kind: str
+    disclosure: ModelEqDisclosure
+
+
+class ModelEqDraftStartRequest(StrictAssistantModel):
+    request: EqDraftRequest
+    disclosure_version: Literal["assistant-eq-draft-disclosure/v1"]
+    consent: Literal[True]
+
+
+class ModelEqDraftJobResult(StrictAssistantModel):
+    schema_version: Literal["assistant-eq-draft-job-result/v1"]
+    disclosure_version: Literal["assistant-eq-draft-disclosure/v1"]
+    role_id: Literal["eq_assistant"]
+    role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    engine_id: Literal["model-graphic-eq/v1"]
+    draft: EqPresetDraft
     usage: ProviderUsageSummary
 
 

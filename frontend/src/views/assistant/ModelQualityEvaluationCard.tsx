@@ -95,13 +95,17 @@ export function ModelQualityEvaluationCard({
       ? "music tagging"
       : evaluation.role_id === "tag_cleanup"
         ? "song-tag cleanup"
-        : "playlist planning";
+        : evaluation.role_id === "eq_assistant"
+          ? "EQ drafting"
+          : "playlist planning";
   const progressLabel =
     evaluation.role_id === "music_tagger"
       ? "Music tagging model quality progress"
       : evaluation.role_id === "tag_cleanup"
         ? "Song-tag cleanup model quality progress"
-        : "Playlist model quality progress";
+        : evaluation.role_id === "eq_assistant"
+          ? "EQ model quality progress"
+          : "Playlist model quality progress";
   const latest = history[0];
   const active = isModelEvaluationJobActive(latest);
   const reportJob =

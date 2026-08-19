@@ -17,6 +17,11 @@ from app.assistant.audio_analysis import (
 )
 from app.assistant.engine import PlaylistSuggestionEngine
 from app.assistant.local import local_playlist_planner
+from app.assistant.model_eq_job import (
+    MODEL_EQ_DRAFT_JOB_KIND,
+    model_eq_availability,
+    model_eq_job_parameters,
+)
 from app.assistant.model_suggestions import (
     MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
     model_playlist_availability,
@@ -26,6 +31,8 @@ from app.assistant.providers.service import ProviderServiceError
 from app.assistant.schemas import (
     LibraryAnalysisStartRequest,
     LibraryAnalysisSummary,
+    ModelEqAvailability,
+    ModelEqDraftStartRequest,
     ModelPlaylistAvailability,
     ModelPlaylistSuggestionStartRequest,
     PlaylistSuggestionRequest,
@@ -106,6 +113,50 @@ def start_model_playlist_suggestion(
                 "message": (
                     "Another model playlist suggestion is already running. "
                     "Wait for it to finish or cancel it first."
+                ),
+            },
+        )
+    if created:
+        job_runner.wake()
+    return output
+
+
+@router.get("/eq/model-status", response_model=ModelEqAvailability)
+def model_eq_status(
+    _user: CurrentUser,
+    db: DbSession,
+) -> ModelEqAvailability:
+    return model_eq_availability(db)
+
+
+@router.post(
+    "/eq/drafts/jobs",
+    response_model=BackgroundJobOut,
+    status_code=202,
+)
+def start_model_eq_draft(
+    payload: ModelEqDraftStartRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BackgroundJobOut:
+    try:
+        parameters = model_eq_job_parameters(db, payload.request)
+    except ProviderServiceError as exc:
+        _raise_provider_error(exc)
+    job, created = enqueue_unique_active_job(
+        db,
+        MODEL_EQ_DRAFT_JOB_KIND,
+        parameters,
+    )
+    output = job_out(job)
+    if not created and output.parameters != parameters:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "eq_draft_in_progress",
+                "message": (
+                    "Another EQ draft is already running. Wait for it to finish "
+                    "or cancel it first."
                 ),
             },
         )

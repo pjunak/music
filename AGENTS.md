@@ -195,6 +195,13 @@ Runtime data lives outside the image.
   response from the local candidate snapshot. Model results remain drafts and must use the existing
   Authoring import preview/select/commit path. Configured-model CLI evaluation separately requires
   the explicit `--send-suite-to-provider` disclosure flag.
+- The optional EQ assistant may run only through `assistant.model-eq-draft`. Require the exact
+  current `eq-quality-v1` pass and disclosure consent, make jobs non-restartable, and send only the
+  operator's sound goal plus the fixed ten-band frequencies and gain limits. Accept exactly ten
+  gains from -12 to +12 dB in 0.5 dB steps; construct every frequency and Authoring field locally.
+  The result is a review-only draft and may create a preset only through the existing Authoring
+  import preview/select/commit transaction. Never send songs, audio, library metadata, paths,
+  playlists, existing presets, or credentials to the EQ role.
 - The optional metadata music tagger may run only through
   `assistant.model-music-tagging`. Require the exact current
   `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider

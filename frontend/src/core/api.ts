@@ -346,6 +346,35 @@ export interface ModelPlaylistAvailability {
   disclosure: ModelPlaylistDisclosure;
 }
 
+export const MODEL_EQ_DISCLOSURE_VERSION =
+  "assistant-eq-draft-disclosure/v1" as const;
+
+export interface ModelEqDisclosure {
+  version: typeof MODEL_EQ_DISCLOSURE_VERSION;
+  shared_with_provider: string[];
+  never_shared: string[];
+  may_incur_cost: boolean;
+}
+
+export interface ModelEqAvailability {
+  available: boolean;
+  reason_code: string | null;
+  role_id: "eq_assistant";
+  connection_name: string | null;
+  model_id: string | null;
+  quality_evaluation_id: "eq-quality-v1";
+  job_kind: string;
+  disclosure: ModelEqDisclosure;
+}
+
+export interface EqPresetDraft {
+  name: string;
+  goal: string;
+  bands: Array<{ frequency: number; gain: number }>;
+  rationale: string;
+  cautions: string[];
+}
+
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
   "assistant-model-music-tagging-disclosure/v2" as const;
 
@@ -620,6 +649,17 @@ export const assistantApi = {
   ) =>
     api.post<BackgroundJob>("/api/assistant/playlists/model-suggestions/jobs", {
       request: payload,
+      disclosure_version: disclosureVersion,
+      consent: true,
+    }),
+  getModelEqAvailability: () =>
+    api.get<ModelEqAvailability>("/api/assistant/eq/model-status"),
+  startModelEqDraft: (
+    request: { name: string; goal: string },
+    disclosureVersion: typeof MODEL_EQ_DISCLOSURE_VERSION,
+  ) =>
+    api.post<BackgroundJob>("/api/assistant/eq/drafts/jobs", {
+      request,
       disclosure_version: disclosureVersion,
       consent: true,
     }),

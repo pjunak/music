@@ -98,9 +98,9 @@ MODEL_ROLES = (
     ModelRoleDefinition(
         id="eq_assistant",
         label="EQ assistance",
-        description="Reserved for future validated EQ drafts in Authoring.",
+        description="Creates bounded graphic-EQ drafts for explicit Authoring review.",
         required_capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
-        configuration_available=False,
+        configuration_available=True,
     ),
     ModelRoleDefinition(
         id="audio_analyzer",

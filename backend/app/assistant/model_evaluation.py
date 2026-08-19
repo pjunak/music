@@ -13,6 +13,12 @@ from app.assistant.evaluation import (
     evaluate_playlist_engine,
     load_evaluation_suite,
 )
+from app.assistant.model_eq import (
+    EQ_DRAFT_ENGINE_ID,
+    EqQualityEvaluationResult,
+    evaluate_eq_model,
+    load_eq_quality_suite,
+)
 from app.assistant.model_playlist import ModelPlaylistPlanner
 from app.assistant.model_tag_cleanup import (
     MODEL_TAG_CLEANUP_ENGINE_ID,
@@ -60,6 +66,8 @@ TAG_CLEANUP_QUALITY_EVALUATION_ID: Literal["tag-cleanup-quality-v1"] = (
     "tag-cleanup-quality-v1"
 )
 TAG_CLEANUP_QUALITY_JOB_KIND = "assistant.model-evaluation.tag-cleanup-quality-v1"
+EQ_QUALITY_EVALUATION_ID: Literal["eq-quality-v1"] = "eq-quality-v1"
+EQ_QUALITY_JOB_KIND = "assistant.model-evaluation.eq-quality-v1"
 _PLAYLIST_SUITE_PATH = (
     Path(__file__).resolve().parents[2] / "evaluation" / "playlist-local-v1.json"
 )
@@ -68,6 +76,9 @@ _TAGGING_SUITE_PATH = (
 )
 _TAG_CLEANUP_SUITE_PATH = (
     Path(__file__).resolve().parents[2] / "evaluation" / "tag-cleanup-v1.json"
+)
+_EQ_SUITE_PATH = (
+    Path(__file__).resolve().parents[2] / "evaluation" / "eq-assistant-v1.json"
 )
 
 
@@ -120,11 +131,24 @@ TAG_CLEANUP_QUALITY_EVALUATION = ModelEvaluationDefinition(
     suite_path=_TAG_CLEANUP_SUITE_PATH,
     job_kind=TAG_CLEANUP_QUALITY_JOB_KIND,
 )
+EQ_QUALITY_EVALUATION = ModelEvaluationDefinition(
+    id=EQ_QUALITY_EVALUATION_ID,
+    role_id="eq_assistant",
+    label="EQ draft quality",
+    description=(
+        "Runs fixed synthetic sound goals through this model and checks bounded, "
+        "conservative graphic-EQ behavior. No songs or live presets are sent."
+    ),
+    suite_id="graphic-eq-safety-baseline-v1",
+    suite_path=_EQ_SUITE_PATH,
+    job_kind=EQ_QUALITY_JOB_KIND,
+)
 
 _EVALUATIONS_BY_ROLE: dict[str, tuple[ModelEvaluationDefinition, ...]] = {
     PLAYLIST_QUALITY_EVALUATION.role_id: (PLAYLIST_QUALITY_EVALUATION,),
     TAGGING_QUALITY_EVALUATION.role_id: (TAGGING_QUALITY_EVALUATION,),
     TAG_CLEANUP_QUALITY_EVALUATION.role_id: (TAG_CLEANUP_QUALITY_EVALUATION,),
+    EQ_QUALITY_EVALUATION.role_id: (EQ_QUALITY_EVALUATION,),
 }
 
 
@@ -513,6 +537,77 @@ def run_tag_cleanup_quality_evaluation(
     ).model_dump(mode="json")
 
 
+def run_eq_quality_evaluation(
+    context: JobExecutionContext,
+    raw_parameters: dict[str, Any],
+) -> dict[str, Any]:
+    parameters = _EvaluationJobParameters.model_validate(raw_parameters)
+    definition = require_evaluation_definition(
+        parameters.role_id,
+        parameters.evaluation_id,
+    )
+    if definition.id != EQ_QUALITY_EVALUATION_ID:
+        raise ValueError("EQ quality handler received the wrong evaluation.")
+    suite = load_eq_quality_suite(definition.suite_path)
+    if suite.id != definition.suite_id:
+        raise RuntimeError("Configured EQ quality suite ID does not match.")
+    context.update_progress(
+        0,
+        len(suite.cases),
+        phase="Preparing evaluation",
+        message="Loading fixed synthetic EQ goals",
+    )
+    with SessionLocal() as db:
+        resolved = prepare_role_execution_details(db, parameters.role_id)
+    if resolved.fingerprint != parameters.role_fingerprint:
+        raise ProviderServiceError(
+            "role_changed",
+            "The model role changed before evaluation started. Run it again.",
+            409,
+        )
+    usage = ProviderUsageAccumulator()
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        context.check_cancelled()
+        result = usage.record(
+            execute_structured_model_request(resolved.execution, request)
+        )
+        context.checkpoint_result(usage.checkpoint())
+        return result
+
+    def case_complete(current: int, total: int) -> None:
+        context.update_progress(
+            current,
+            total,
+            phase="Evaluating EQ model",
+            message=f"Completed {current} of {total} synthetic goals",
+        )
+
+    result: EqQualityEvaluationResult = evaluate_eq_model(
+        execute,
+        suite,
+        on_case_complete=case_complete,
+    )
+    context.check_cancelled()
+    _record_result(
+        context,
+        parameters,
+        passed=result.passed,
+        suite_id=result.suite_id,
+        engine_id=EQ_DRAFT_ENGINE_ID,
+        passed_cases=result.passed_cases,
+        total_cases=result.total_cases,
+    )
+    return ModelQualityJobResult(
+        schema_version="assistant-model-quality-result/v1",
+        role_id=parameters.role_id,
+        evaluation_id=parameters.evaluation_id,
+        role_fingerprint=parameters.role_fingerprint,
+        evaluation=result.model_dump(mode="json"),
+        usage=usage.summary(),
+    ).model_dump(mode="json")
+
+
 register_job_handler(
     PLAYLIST_QUALITY_JOB_KIND,
     run_playlist_quality_evaluation,
@@ -526,5 +621,10 @@ register_job_handler(
 register_job_handler(
     TAG_CLEANUP_QUALITY_JOB_KIND,
     run_tag_cleanup_quality_evaluation,
+    restartable=False,
+)
+register_job_handler(
+    EQ_QUALITY_JOB_KIND,
+    run_eq_quality_evaluation,
     restartable=False,
 )
