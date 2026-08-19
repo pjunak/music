@@ -8,11 +8,18 @@ import {
 } from "@/core/api";
 import { toast } from "@/core/toast";
 
+import { analysisTagSuggestionKey } from "./analysisTagSelection";
+
 interface AnalysisTagReviewProps {
   trackId: number;
   suggestions: AnalysisTagSuggestion[];
+  selectedSuggestionKeys: ReadonlySet<string>;
   disabled?: boolean;
   onReviewed: (result: AnalysisTagReviewResult) => void;
+  onSelectionChange: (
+    suggestion: AnalysisTagSuggestion,
+    selected: boolean,
+  ) => void;
 }
 
 function statusLabel(status: AnalysisTagReviewDecision): string {
@@ -24,8 +31,10 @@ function statusLabel(status: AnalysisTagReviewDecision): string {
 export function AnalysisTagReview({
   trackId,
   suggestions,
+  selectedSuggestionKeys,
   disabled = false,
   onReviewed,
+  onSelectionChange,
 }: AnalysisTagReviewProps) {
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
@@ -33,7 +42,7 @@ export function AnalysisTagReview({
     suggestion: AnalysisTagSuggestion,
     decision: AnalysisTagReviewDecision,
   ) {
-    const key = `${suggestion.analyzer_id}:${suggestion.tag}`;
+    const key = analysisTagSuggestionKey(trackId, suggestion);
     setSavingKey(key);
     try {
       const result = await assistantApi.reviewAnalysisTag(
@@ -87,7 +96,7 @@ export function AnalysisTagReview({
       ) : (
         <div className="assistant-analysis-review-list">
           {suggestions.map((suggestion) => {
-            const key = `${suggestion.analyzer_id}:${suggestion.tag}`;
+            const key = analysisTagSuggestionKey(trackId, suggestion);
             const saving = savingKey === key;
             return (
               <article
@@ -114,6 +123,20 @@ export function AnalysisTagReview({
                       ))}
                     </ul>
                   </details>
+                ) : null}
+                {suggestion.status === "pending" ? (
+                  <label className="assistant-review-select">
+                    <input
+                      type="checkbox"
+                      checked={selectedSuggestionKeys.has(key)}
+                      disabled={disabled || savingKey !== null}
+                      aria-label={`Select ${suggestion.tag} suggestion for bulk review`}
+                      onChange={(event) =>
+                        onSelectionChange(suggestion, event.target.checked)
+                      }
+                    />
+                    <span>Select for a bulk decision</span>
+                  </label>
                 ) : null}
                 <div className="assistant-analysis-review-actions">
                   {suggestion.status === "pending" ? (

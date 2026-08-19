@@ -21,6 +21,7 @@ from app.models.track_analysis_tag_review import TrackAnalysisTagReview
 from app.models.track_user_tag import TrackUserTag
 
 ReviewStatus = Literal["pending", "accepted", "rejected"]
+ReviewFailureCode = Literal["not_found", "stale", "tag_limit"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,40 @@ class AnalysisTagReviewOutcome:
     source_signature: str
     decision: ReviewStatus
     manual_tags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AnalysisTagReviewTarget:
+    track_id: int
+    tag: str
+    analyzer_id: str
+    source_signature: str
+
+
+@dataclass(frozen=True)
+class AnalysisTagReviewApplied:
+    track_id: int
+    tag: str
+    analyzer_id: str
+    source_signature: str
+    decision: ReviewStatus
+
+
+@dataclass(frozen=True)
+class AnalysisTagReviewFailure:
+    track_id: int
+    tag: str
+    analyzer_id: str
+    source_signature: str
+    code: ReviewFailureCode
+    error: str
+
+
+@dataclass(frozen=True)
+class BulkAnalysisTagReviewOutcome:
+    requested_items: int
+    applied: tuple[AnalysisTagReviewApplied, ...]
+    failures: tuple[AnalysisTagReviewFailure, ...]
 
 
 class AnalysisSuggestionNotFoundError(ValueError):
@@ -146,6 +181,232 @@ def load_current_analysis_tag_suggestions(
     return suggestions
 
 
+def filter_tracks_by_review_status(
+    db: Session,
+    tracks: Sequence[Track],
+    status: ReviewStatus,
+) -> tuple[Track, ...]:
+    """Return tracks with at least one current suggestion in ``status``."""
+
+    matched: list[Track] = []
+    for start in range(0, len(tracks), 500):
+        chunk = tracks[start : start + 500]
+        suggestions = load_current_analysis_tag_suggestions(db, chunk)
+        matched.extend(
+            track
+            for track in chunk
+            if any(
+                suggestion.status == status
+                for suggestion in suggestions.get(track.id, ())
+            )
+        )
+    return tuple(matched)
+
+
+def _failure(
+    target: AnalysisTagReviewTarget,
+    code: ReviewFailureCode,
+    error: str,
+) -> AnalysisTagReviewFailure:
+    return AnalysisTagReviewFailure(
+        track_id=target.track_id,
+        tag=target.tag,
+        analyzer_id=target.analyzer_id,
+        source_signature=target.source_signature,
+        code=code,
+        error=error,
+    )
+
+
+def review_analysis_tags_bulk(
+    db: Session,
+    targets: Sequence[AnalysisTagReviewTarget],
+    *,
+    decision: ReviewStatus,
+) -> BulkAnalysisTagReviewOutcome:
+    """Apply one explicit decision to selected suggestions in one transaction."""
+
+    if decision not in {"pending", "accepted", "rejected"}:
+        raise ValueError("invalid analysis tag review decision")
+    canonical: list[AnalysisTagReviewTarget] = []
+    seen: set[tuple[int, str, str, str]] = set()
+    for target in targets:
+        normalized = AnalysisTagReviewTarget(
+            track_id=target.track_id,
+            tag=normalize_manual_tag(target.tag),
+            analyzer_id=target.analyzer_id,
+            source_signature=target.source_signature,
+        )
+        key = (
+            normalized.track_id,
+            normalized.analyzer_id,
+            normalized.source_signature,
+            normalized.tag,
+        )
+        if key not in seen:
+            seen.add(key)
+            canonical.append(normalized)
+    if not canonical:
+        return BulkAnalysisTagReviewOutcome(0, (), ())
+
+    track_ids = {target.track_id for target in canonical}
+    with tag_write_lock:
+        tracks = {
+            track.id: track
+            for track in db.scalars(
+                select(Track).where(Track.id.in_(track_ids))
+            ).all()
+        }
+        analyses = {
+            (row.track_id, row.analyzer_id): row
+            for row in db.scalars(
+                select(TrackAnalysis).where(TrackAnalysis.track_id.in_(track_ids))
+            ).all()
+        }
+        manual_rows = list(
+            db.scalars(
+                select(TrackUserTag).where(TrackUserTag.track_id.in_(track_ids))
+            ).all()
+        )
+        manual_tags: dict[int, set[str]] = {track_id: set() for track_id in track_ids}
+        for manual in manual_rows:
+            manual_tags[manual.track_id].add(manual.tag)
+        reviews = {
+            (review.track_id, review.analyzer_id, review.tag): review
+            for review in db.scalars(
+                select(TrackAnalysisTagReview).where(
+                    TrackAnalysisTagReview.track_id.in_(track_ids)
+                )
+            ).all()
+        }
+
+        valid: list[AnalysisTagReviewTarget] = []
+        failures: list[AnalysisTagReviewFailure] = []
+        profile_tags: dict[tuple[int, str], tuple[str, ...] | None] = {}
+        current_signatures = {
+            track_id: track_source_signature(track)
+            for track_id, track in tracks.items()
+        }
+        for target in canonical:
+            track = tracks.get(target.track_id)
+            row = analyses.get((target.track_id, target.analyzer_id))
+            if track is None:
+                failures.append(_failure(target, "not_found", "Track not found"))
+                continue
+            if row is None or target.analyzer_id != LOCAL_METADATA_ANALYZER_ID:
+                failures.append(
+                    _failure(target, "not_found", "Analysis profile not found")
+                )
+                continue
+            if row.source_signature != target.source_signature:
+                failures.append(
+                    _failure(
+                        target,
+                        "stale",
+                        "Analysis changed; refresh before reviewing this tag",
+                    )
+                )
+                continue
+            if row.source_signature != current_signatures[target.track_id]:
+                failures.append(
+                    _failure(
+                        target,
+                        "stale",
+                        "Track metadata changed; rerun analysis before reviewing this tag",
+                    )
+                )
+                continue
+            row_key = (row.track_id, row.analyzer_id)
+            tags = profile_tags.setdefault(row_key, _profile_tags(row))
+            if tags is None or target.tag not in tags:
+                failures.append(
+                    _failure(
+                        target,
+                        "not_found",
+                        "Tag is not present in the current analysis profile",
+                    )
+                )
+                continue
+            valid.append(target)
+
+        overflow_tracks: set[int] = set()
+        if decision == "accepted":
+            additions: dict[int, set[str]] = {}
+            for target in valid:
+                if target.tag not in manual_tags[target.track_id]:
+                    additions.setdefault(target.track_id, set()).add(target.tag)
+            overflow_tracks = {
+                track_id
+                for track_id, tags in additions.items()
+                if len(manual_tags[track_id]) + len(tags) > MAX_TAGS_PER_TRACK
+            }
+
+        applied: list[AnalysisTagReviewApplied] = []
+        try:
+            for target in valid:
+                if (
+                    decision == "accepted"
+                    and target.track_id in overflow_tracks
+                    and target.tag not in manual_tags[target.track_id]
+                ):
+                    failures.append(
+                        _failure(
+                            target,
+                            "tag_limit",
+                            (
+                                "selected suggestions would exceed the "
+                                f"{MAX_TAGS_PER_TRACK}-tag limit"
+                            ),
+                        )
+                    )
+                    continue
+                review_key = (target.track_id, target.analyzer_id, target.tag)
+                review = reviews.get(review_key)
+                if decision == "pending":
+                    if review is not None:
+                        db.delete(review)
+                        reviews.pop(review_key)
+                else:
+                    if (
+                        decision == "accepted"
+                        and target.tag not in manual_tags[target.track_id]
+                    ):
+                        db.add(
+                            TrackUserTag(track_id=target.track_id, tag=target.tag)
+                        )
+                        manual_tags[target.track_id].add(target.tag)
+                    if review is None:
+                        review = TrackAnalysisTagReview(
+                            track_id=target.track_id,
+                            analyzer_id=target.analyzer_id,
+                            tag=target.tag,
+                        )
+                        db.add(review)
+                        reviews[review_key] = review
+                    review.source_signature = target.source_signature
+                    review.decision = decision
+                    review.reviewed_at = utcnow()
+                applied.append(
+                    AnalysisTagReviewApplied(
+                        track_id=target.track_id,
+                        tag=target.tag,
+                        analyzer_id=target.analyzer_id,
+                        source_signature=target.source_signature,
+                        decision=decision,
+                    )
+                )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+    return BulkAnalysisTagReviewOutcome(
+        requested_items=len(canonical),
+        applied=tuple(applied),
+        failures=tuple(failures),
+    )
+
+
 def review_analysis_tag(
     db: Session,
     track_id: int,
@@ -157,71 +418,31 @@ def review_analysis_tag(
 ) -> AnalysisTagReviewOutcome:
     """Persist one explicit decision and atomically promote accepted tags."""
 
-    normalized_tag = normalize_manual_tag(tag)
-    if decision not in {"pending", "accepted", "rejected"}:
-        raise ValueError("invalid analysis tag review decision")
-
-    with tag_write_lock:
-        track = db.get(Track, track_id)
-        if track is None:
-            raise AnalysisSuggestionNotFoundError("Track not found")
-        row = db.get(TrackAnalysis, (track_id, analyzer_id))
-        if row is None or analyzer_id != LOCAL_METADATA_ANALYZER_ID:
-            raise AnalysisSuggestionNotFoundError("Analysis profile not found")
-        if row.source_signature != source_signature:
-            raise StaleAnalysisSuggestionError(
-                "Analysis changed; refresh before reviewing this tag"
-            )
-        if row.source_signature != track_source_signature(track):
-            raise StaleAnalysisSuggestionError(
-                "Track metadata changed; rerun analysis before reviewing this tag"
-            )
-        profile_tags = _profile_tags(row)
-        if profile_tags is None or normalized_tag not in profile_tags:
-            raise AnalysisSuggestionNotFoundError(
-                "Tag is not present in the current analysis profile"
-            )
-
-        manual_rows = list(
-            db.scalars(
-                select(TrackUserTag).where(TrackUserTag.track_id == track_id)
-            ).all()
-        )
-        manual_tags = {manual.tag for manual in manual_rows}
-        review = db.get(
-            TrackAnalysisTagReview,
-            (track_id, analyzer_id, normalized_tag),
-        )
-        try:
-            if decision == "pending":
-                if review is not None:
-                    db.delete(review)
-            else:
-                if decision == "accepted" and normalized_tag not in manual_tags:
-                    if len(manual_tags) >= MAX_TAGS_PER_TRACK:
-                        raise TagLimitError(
-                            f"a track cannot have more than {MAX_TAGS_PER_TRACK} manual tags"
-                        )
-                    db.add(TrackUserTag(track_id=track_id, tag=normalized_tag))
-                    manual_tags.add(normalized_tag)
-                if review is None:
-                    review = TrackAnalysisTagReview(
-                        track_id=track_id,
-                        analyzer_id=analyzer_id,
-                        tag=normalized_tag,
-                    )
-                    db.add(review)
-                review.source_signature = source_signature
-                review.decision = decision
-                review.reviewed_at = utcnow()
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
+    target = AnalysisTagReviewTarget(
+        track_id=track_id,
+        tag=tag,
+        analyzer_id=analyzer_id,
+        source_signature=source_signature,
+    )
+    result = review_analysis_tags_bulk(db, [target], decision=decision)
+    if result.failures:
+        failure = result.failures[0]
+        if failure.code == "stale":
+            raise StaleAnalysisSuggestionError(failure.error)
+        if failure.code == "tag_limit":
+            raise TagLimitError(failure.error)
+        raise AnalysisSuggestionNotFoundError(failure.error)
+    manual_tags = tuple(
+        db.scalars(
+            select(TrackUserTag.tag)
+            .where(TrackUserTag.track_id == track_id)
+            .order_by(TrackUserTag.tag)
+        ).all()
+    )
 
     return AnalysisTagReviewOutcome(
         track_id=track_id,
-        tag=normalized_tag,
+        tag=normalize_manual_tag(tag),
         analyzer_id=analyzer_id,
         source_signature=source_signature,
         decision=decision,

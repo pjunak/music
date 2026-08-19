@@ -12,15 +12,22 @@ from app.assistant.analysis import (
 )
 from app.assistant.tag_reviews import (
     AnalysisSuggestionNotFoundError,
+    AnalysisTagReviewTarget,
     AnalysisTagSuggestion,
     StaleAnalysisSuggestionError,
+    filter_tracks_by_review_status,
     load_current_analysis_tag_suggestions,
     review_analysis_tag,
+    review_analysis_tags_bulk,
 )
 from app.assistant.tag_schemas import (
     AnalysisTagReviewRequest,
     AnalysisTagReviewResult,
     AnalysisTagSuggestionOut,
+    BulkAnalysisTagReviewApplied,
+    BulkAnalysisTagReviewFailure,
+    BulkAnalysisTagReviewRequest,
+    BulkAnalysisTagReviewResult,
     BulkManualTagFailure,
     BulkManualTagPatch,
     BulkManualTagResult,
@@ -149,12 +156,61 @@ def update_library_tags_bulk(
     )
 
 
+@router.post(
+    "/analysis-tags/reviews/bulk",
+    response_model=BulkAnalysisTagReviewResult,
+)
+def update_analysis_tag_reviews_bulk(
+    payload: BulkAnalysisTagReviewRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BulkAnalysisTagReviewResult:
+    outcome = review_analysis_tags_bulk(
+        db,
+        [
+            AnalysisTagReviewTarget(
+                track_id=item.track_id,
+                tag=item.tag,
+                analyzer_id=item.analyzer_id,
+                source_signature=item.source_signature,
+            )
+            for item in payload.items
+        ],
+        decision=payload.decision,
+    )
+    return BulkAnalysisTagReviewResult(
+        requested_items=outcome.requested_items,
+        applied=[
+            BulkAnalysisTagReviewApplied(
+                track_id=item.track_id,
+                tag=item.tag,
+                analyzer_id=item.analyzer_id,
+                source_signature=item.source_signature,
+                decision=payload.decision,
+            )
+            for item in outcome.applied
+        ],
+        failures=[
+            BulkAnalysisTagReviewFailure(
+                track_id=item.track_id,
+                tag=item.tag,
+                analyzer_id=item.analyzer_id,
+                source_signature=item.source_signature,
+                code=item.code,
+                error=item.error,
+            )
+            for item in outcome.failures
+        ],
+    )
+
+
 @router.get("", response_model=LibraryTagPage)
 def list_library_tags(
     _user: CurrentUser,
     db: DbSession,
     search: str = Query(default="", max_length=128),
     tag: str | None = Query(default=None, max_length=64),
+    review: Literal["pending", "accepted", "rejected"] | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
 ) -> LibraryTagPage:
@@ -189,19 +245,35 @@ def list_library_tags(
         query = query.where(*filters)
         count_query = count_query.where(*filters)
 
-    total = int(db.scalar(count_query) or 0)
-    tracks = list(
-        db.scalars(
-            query.order_by(
-                func.lower(
-                    func.coalesce(func.nullif(Track.display_title, ""), Track.title)
-                ),
-                Track.id,
-            )
-            .offset(offset)
-            .limit(limit)
-        ).all()
-    )
+    if review is not None:
+        reviewable = filter_tracks_by_review_status(
+            db,
+            list(db.scalars(query).all()),
+            review,
+        )
+        ordered = sorted(
+            reviewable,
+            key=lambda track: (
+                (track.display_title or track.title).casefold(),
+                track.id,
+            ),
+        )
+        total = len(ordered)
+        tracks = ordered[offset : offset + limit]
+    else:
+        total = int(db.scalar(count_query) or 0)
+        tracks = list(
+            db.scalars(
+                query.order_by(
+                    func.lower(
+                        func.coalesce(func.nullif(Track.display_title, ""), Track.title)
+                    ),
+                    Track.id,
+                )
+                .offset(offset)
+                .limit(limit)
+            ).all()
+        )
     track_ids = [track.id for track in tracks]
     manual_by_track = load_manual_tags(db, track_ids)
     profiles = load_current_metadata_profiles(db, tracks)

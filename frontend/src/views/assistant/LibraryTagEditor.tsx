@@ -1,8 +1,13 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
+import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import {
+  type AnalysisTagReviewDecision,
   type AnalysisTagReviewResult,
+  type AnalysisTagReviewTarget,
+  type AnalysisTagSuggestion,
+  type BulkAnalysisTagReviewDecision,
   type LibraryTagPage,
   type LibraryTagTrack,
   type ManualTagCatalog,
@@ -11,11 +16,13 @@ import {
 import { toast } from "@/core/toast";
 
 import { AnalysisTagReview } from "./AnalysisTagReview";
+import { analysisTagSuggestionKey } from "./analysisTagSelection";
 import { TagCatalogManager } from "./TagCatalogManager";
 
 const PAGE_SIZE = 50;
 const MAX_TAGS = 32;
 const MAX_TAG_LENGTH = 64;
+const MAX_BULK_REVIEW_ITEMS = 1000;
 
 function displayName(track: LibraryTagTrack): string {
   return track.display_title || track.title || track.path;
@@ -50,9 +57,15 @@ export function LibraryTagEditor() {
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [reviewFilter, setReviewFilter] = useState<
+    "" | AnalysisTagReviewDecision
+  >("");
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedTrackIds, setSelectedTrackIds] = useState<Set<number>>(new Set());
+  const [selectedReviewItems, setSelectedReviewItems] = useState<
+    Map<string, AnalysisTagReviewTarget>
+  >(new Map());
   const [draftTags, setDraftTags] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState("");
   const [bulkTags, setBulkTags] = useState<string[]>([]);
@@ -60,6 +73,7 @@ export function LibraryTagEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkReviewSaving, setBulkReviewSaving] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -93,6 +107,7 @@ export function LibraryTagEditor() {
       .listLibraryTags({
         ...(search ? { search } : {}),
         ...(tagFilter ? { tag: tagFilter } : {}),
+        ...(reviewFilter ? { review: reviewFilter } : {}),
         offset,
         limit: PAGE_SIZE,
       })
@@ -119,7 +134,7 @@ export function LibraryTagEditor() {
     return () => {
       disposed = true;
     };
-  }, [offset, reloadKey, search, tagFilter]);
+  }, [offset, reloadKey, reviewFilter, search, tagFilter]);
 
   const selected = useMemo(
     () => page.items.find((track) => track.track_id === selectedId),
@@ -140,12 +155,17 @@ export function LibraryTagEditor() {
   );
   const dirty = selected !== undefined && !sameTags(draftTags, originalTags);
   const loadError = listError ?? catalogError;
+  const selectedReviewKeys = useMemo(
+    () => new Set(selectedReviewItems.keys()),
+    [selectedReviewItems],
+  );
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     setOffset(0);
     setSearch(searchDraft.trim());
     setSelectedTrackIds(new Set());
+    setSelectedReviewItems(new Map());
   }
 
   function toggleTag(tag: string) {
@@ -217,6 +237,92 @@ export function LibraryTagEditor() {
       for (const track of page.items) next.add(track.track_id);
       return next;
     });
+  }
+
+  function selectAnalysisSuggestion(
+    trackId: number,
+    suggestion: AnalysisTagSuggestion,
+    isSelected: boolean,
+  ) {
+    const key = analysisTagSuggestionKey(trackId, suggestion);
+    setSelectedReviewItems((current) => {
+      if (
+        isSelected &&
+        !current.has(key) &&
+        current.size >= MAX_BULK_REVIEW_ITEMS
+      ) {
+        toast.error(
+          "Bulk review selection is full",
+          `Review at most ${MAX_BULK_REVIEW_ITEMS} suggestions in one batch.`,
+        );
+        return current;
+      }
+      const next = new Map(current);
+      if (isSelected) {
+        next.set(key, {
+          track_id: trackId,
+          tag: suggestion.tag,
+          analyzer_id: suggestion.analyzer_id,
+          source_signature: suggestion.source_signature,
+        });
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  }
+
+  async function applyBulkReview(decision: BulkAnalysisTagReviewDecision) {
+    if (selectedReviewItems.size === 0 || dirty) return;
+    const count = selectedReviewItems.size;
+    const confirmed = await confirmDialog({
+      title:
+        decision === "accepted"
+          ? "Add selected suggestions to your tags?"
+          : "Reject selected suggestions?",
+      body:
+        decision === "accepted"
+          ? `${count} selected ${count === 1 ? "suggestion" : "suggestions"} will be copied into your manual tags.`
+          : `${count} selected ${count === 1 ? "suggestion" : "suggestions"} will stop contributing tag labels to playlist matches. You can reopen decisions later.`,
+      confirmLabel: decision === "accepted" ? "Add selected tags" : "Reject selected",
+    });
+    if (!confirmed) return;
+
+    setBulkReviewSaving(true);
+    try {
+      const result = await assistantApi.reviewAnalysisTagsBulk(
+        [...selectedReviewItems.values()],
+        decision,
+      );
+      if (result.failures.length > 0) {
+        const details = result.failures
+          .slice(0, 3)
+          .map((failure) => `#${failure.track_id} “${failure.tag}”: ${failure.error}`)
+          .join("; ");
+        const remainder =
+          result.failures.length > 3
+            ? `; +${result.failures.length - 3} more`
+            : "";
+        toast.error(
+          "Bulk review partly applied",
+          `${result.applied.length} applied; ${result.failures.length} skipped. ${details}${remainder}`,
+        );
+      } else {
+        toast.success(
+          decision === "accepted" ? "Suggestions accepted" : "Suggestions rejected",
+          `${result.applied.length} ${result.applied.length === 1 ? "decision was" : "decisions were"} saved.`,
+        );
+      }
+      setSelectedReviewItems(new Map());
+      setReloadKey((value) => value + 1);
+    } catch (error) {
+      toast.error(
+        "Bulk review could not be saved",
+        error instanceof Error ? error.message : undefined,
+      );
+    } finally {
+      setBulkReviewSaving(false);
+    }
   }
 
   async function applyBulk(mode: "add" | "remove") {
@@ -308,6 +414,11 @@ export function LibraryTagEditor() {
   }
 
   function handleAnalysisReviewed(result: AnalysisTagReviewResult) {
+    setSelectedReviewItems((current) => {
+      const next = new Map(current);
+      next.delete(analysisTagSuggestionKey(result.track_id, result));
+      return next;
+    });
     setPage((current) => ({
       ...current,
       items: current.items.map((track) =>
@@ -339,6 +450,7 @@ export function LibraryTagEditor() {
           );
         });
     }
+    if (reviewFilter) setReloadKey((value) => value + 1);
   }
 
   return (
@@ -373,6 +485,7 @@ export function LibraryTagEditor() {
               setTagFilter(event.target.value);
               setOffset(0);
               setSelectedTrackIds(new Set());
+              setSelectedReviewItems(new Map());
             }}
           >
             <option value="">All manual tags</option>
@@ -383,6 +496,23 @@ export function LibraryTagEditor() {
             ))}
           </select>
         </label>
+        <label>
+          <span>Filter analysis review</span>
+          <select
+            value={reviewFilter}
+            onChange={(event) => {
+              setReviewFilter(event.target.value as "" | AnalysisTagReviewDecision);
+              setOffset(0);
+              setSelectedTrackIds(new Set());
+              setSelectedReviewItems(new Map());
+            }}
+          >
+            <option value="">All review states</option>
+            <option value="pending">Needs review</option>
+            <option value="accepted">Accepted suggestions</option>
+            <option value="rejected">Rejected suggestions</option>
+          </select>
+        </label>
       </div>
 
       {loadError !== null ? (
@@ -391,6 +521,52 @@ export function LibraryTagEditor() {
           <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
             Retry
           </button>
+        </div>
+      ) : null}
+
+      {selectedReviewItems.size > 0 ? (
+        <div
+          className="assistant-bulk-reviews"
+          role="region"
+          aria-label="Bulk analysis review"
+        >
+          <div>
+            <strong>{selectedReviewItems.size} suggestions selected</strong>
+            <span>
+              Apply one explicit decision to this selection. Invalid or stale items
+              will be reported without blocking valid ones.
+            </span>
+          </div>
+          {dirty ? (
+            <p className="assistant-review-note">
+              Save or discard the open manual-tag edits before applying this batch.
+            </p>
+          ) : null}
+          <div className="assistant-bulk-actions">
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={bulkReviewSaving}
+              onClick={() => setSelectedReviewItems(new Map())}
+            >
+              Clear selection
+            </button>
+            <button
+              type="button"
+              disabled={dirty || bulkReviewSaving}
+              onClick={() => void applyBulkReview("rejected")}
+            >
+              Reject selected
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={dirty || bulkReviewSaving}
+              onClick={() => void applyBulkReview("accepted")}
+            >
+              {bulkReviewSaving ? "Applying…" : "Add selected to my tags"}
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -625,8 +801,16 @@ export function LibraryTagEditor() {
               <AnalysisTagReview
                 trackId={selected.track_id}
                 suggestions={selected.analysis_suggestions}
+                selectedSuggestionKeys={selectedReviewKeys}
                 disabled={dirty || saving}
                 onReviewed={handleAnalysisReviewed}
+                onSelectionChange={(suggestion, isSelected) =>
+                  selectAnalysisSuggestion(
+                    selected.track_id,
+                    suggestion,
+                    isSelected,
+                  )
+                }
               />
 
               <div className="assistant-tag-save-row">

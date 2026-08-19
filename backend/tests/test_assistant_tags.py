@@ -88,6 +88,23 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
         == 401
     )
     assert (
+        client.post(
+            "/api/assistant/library-tags/analysis-tags/reviews/bulk",
+            json={
+                "items": [
+                    {
+                        "track_id": 1,
+                        "tag": "dark",
+                        "analyzer_id": "local-metadata/v1",
+                        "source_signature": "a" * 64,
+                    }
+                ],
+                "decision": "accepted",
+            },
+        ).status_code
+        == 401
+    )
+    assert (
         client.patch(
             "/api/assistant/library-tags/1",
             json={"add": ["tavern"], "remove": []},
@@ -310,6 +327,188 @@ def test_failed_analysis_tag_acceptance_records_no_decision(
             TrackAnalysisTagReview,
             (seeded_track_id, LOCAL_METADATA_ANALYZER_ID, "dark"),
         ) is None
+
+
+def test_review_filter_returns_tracks_with_matching_current_decisions(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    from app.assistant.analysis import LOCAL_METADATA_ANALYZER_ID
+
+    accepted_id, rejected_id, pending_id = [
+        seeded_track_id,
+        *extra_seeded_track_ids[:2],
+    ]
+    signatures = {
+        track_id: _seed_analysis(track_id, '["dark"]')
+        for track_id in (accepted_id, rejected_id, pending_id)
+    }
+    endpoint = "/api/assistant/library-tags/{}/analysis-tags/review"
+    for track_id, decision in (
+        (accepted_id, "accepted"),
+        (rejected_id, "rejected"),
+    ):
+        response = auth_client.put(
+            endpoint.format(track_id),
+            json={
+                "tag": "dark",
+                "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+                "source_signature": signatures[track_id],
+                "decision": decision,
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    expected = {
+        "pending": pending_id,
+        "accepted": accepted_id,
+        "rejected": rejected_id,
+    }
+    for status, track_id in expected.items():
+        listing = auth_client.get(
+            "/api/assistant/library-tags",
+            params={"review": status},
+        )
+        assert listing.status_code == 200, listing.text
+        assert listing.json()["total"] == 1
+        assert [item["track_id"] for item in listing.json()["items"]] == [track_id]
+
+    invalid = auth_client.get(
+        "/api/assistant/library-tags",
+        params={"review": "unknown"},
+    )
+    assert invalid.status_code == 422
+
+
+def test_bulk_review_applies_valid_items_and_reports_each_invalid_item(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    from app.assistant.analysis import LOCAL_METADATA_ANALYZER_ID
+
+    other_id = extra_seeded_track_ids[0]
+    seeded_signature = _seed_analysis(seeded_track_id)
+    other_signature = _seed_analysis(other_id)
+    items = [
+        {
+            "track_id": seeded_track_id,
+            "tag": "dark",
+            "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+            "source_signature": seeded_signature,
+        },
+        {
+            "track_id": other_id,
+            "tag": "tense",
+            "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+            "source_signature": other_signature,
+        },
+        {
+            "track_id": seeded_track_id,
+            "tag": "tense",
+            "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+            "source_signature": "stale-signature",
+        },
+        {
+            "track_id": 999999,
+            "tag": "dark",
+            "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+            "source_signature": "missing-track",
+        },
+    ]
+    response = auth_client.post(
+        "/api/assistant/library-tags/analysis-tags/reviews/bulk",
+        json={"items": items, "decision": "accepted"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["requested_items"] == 4
+    assert {
+        (item["track_id"], item["tag"], item["decision"])
+        for item in payload["applied"]
+    } == {
+        (seeded_track_id, "dark", "accepted"),
+        (other_id, "tense", "accepted"),
+    }
+    assert {
+        (item["track_id"], item["tag"], item["code"])
+        for item in payload["failures"]
+    } == {
+        (seeded_track_id, "tense", "stale"),
+        (999999, "dark", "not_found"),
+    }
+
+    seeded = auth_client.get(
+        "/api/assistant/library-tags",
+        params={"search": "test-song"},
+    )
+    assert seeded.json()["items"][0]["manual_tags"] == ["dark"]
+
+
+def test_bulk_accept_skips_all_new_tags_for_a_track_that_would_overflow(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    from app.assistant.analysis import LOCAL_METADATA_ANALYZER_ID
+
+    other_id = extra_seeded_track_ids[0]
+    seeded_signature = _seed_analysis(seeded_track_id)
+    other_signature = _seed_analysis(other_id, '["dark"]')
+    full = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": [f"tag-{index}" for index in range(31)], "remove": []},
+    )
+    assert full.status_code == 200, full.text
+
+    response = auth_client.post(
+        "/api/assistant/library-tags/analysis-tags/reviews/bulk",
+        json={
+            "items": [
+                {
+                    "track_id": seeded_track_id,
+                    "tag": tag,
+                    "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+                    "source_signature": seeded_signature,
+                }
+                for tag in ("dark", "tense")
+            ]
+            + [
+                {
+                    "track_id": other_id,
+                    "tag": "dark",
+                    "analyzer_id": LOCAL_METADATA_ANALYZER_ID,
+                    "source_signature": other_signature,
+                }
+            ],
+            "decision": "accepted",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [(item["track_id"], item["tag"]) for item in payload["applied"]] == [
+        (other_id, "dark")
+    ]
+    assert {
+        (item["track_id"], item["tag"], item["code"])
+        for item in payload["failures"]
+    } == {
+        (seeded_track_id, "dark", "tag_limit"),
+        (seeded_track_id, "tense", "tag_limit"),
+    }
+    listing = auth_client.get(
+        "/api/assistant/library-tags",
+        params={"search": "test-song"},
+    )
+    item = listing.json()["items"][0]
+    assert "dark" not in item["manual_tags"]
+    assert "tense" not in item["manual_tags"]
+    assert {suggestion["status"] for suggestion in item["analysis_suggestions"]} == {
+        "pending"
+    }
 
 
 def test_manual_tag_patch_validates_conflicts_and_missing_tracks(

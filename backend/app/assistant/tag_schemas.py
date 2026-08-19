@@ -102,16 +102,19 @@ class AnalysisTagSuggestionOut(StrictTagModel):
     status: Literal["pending", "accepted", "rejected"]
 
 
-class AnalysisTagReviewRequest(StrictTagModel):
+class AnalysisTagReviewTargetIn(StrictTagModel):
     tag: str
     analyzer_id: str = Field(min_length=1, max_length=128)
     source_signature: str = Field(min_length=1, max_length=128)
-    decision: Literal["pending", "accepted", "rejected"]
 
     @field_validator("tag")
     @classmethod
     def normalize_tag(cls, value: str) -> str:
         return normalize_manual_tags([value])[0]
+
+
+class AnalysisTagReviewRequest(AnalysisTagReviewTargetIn):
+    decision: Literal["pending", "accepted", "rejected"]
 
 
 class AnalysisTagReviewResult(StrictTagModel):
@@ -121,6 +124,47 @@ class AnalysisTagReviewResult(StrictTagModel):
     source_signature: str
     decision: Literal["pending", "accepted", "rejected"]
     manual_tags: list[str]
+
+
+class BulkAnalysisTagReviewItem(AnalysisTagReviewTargetIn):
+    track_id: int = Field(gt=0)
+
+
+class BulkAnalysisTagReviewRequest(StrictTagModel):
+    items: list[BulkAnalysisTagReviewItem] = Field(min_length=1, max_length=1000)
+    decision: Literal["accepted", "rejected"]
+
+    @model_validator(mode="after")
+    def unique_items(self) -> BulkAnalysisTagReviewRequest:
+        keys = {
+            (item.track_id, item.analyzer_id, item.source_signature, item.tag)
+            for item in self.items
+        }
+        if len(keys) != len(self.items):
+            raise ValueError("items must not contain duplicate suggestions")
+        return self
+
+
+class AnalysisTagReviewTargetOut(StrictTagModel):
+    track_id: int
+    tag: str
+    analyzer_id: str
+    source_signature: str
+
+
+class BulkAnalysisTagReviewApplied(AnalysisTagReviewTargetOut):
+    decision: Literal["accepted", "rejected"]
+
+
+class BulkAnalysisTagReviewFailure(AnalysisTagReviewTargetOut):
+    code: Literal["not_found", "stale", "tag_limit"]
+    error: str
+
+
+class BulkAnalysisTagReviewResult(StrictTagModel):
+    requested_items: int = Field(ge=0)
+    applied: list[BulkAnalysisTagReviewApplied]
+    failures: list[BulkAnalysisTagReviewFailure]
 
 
 class LibraryTagTrack(StrictTagModel):

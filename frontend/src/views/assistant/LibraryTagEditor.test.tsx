@@ -21,9 +21,14 @@ vi.mock("@/core/api", async (importActual) => {
       patchManualTagsBulk: vi.fn(),
       renameManualTag: vi.fn(),
       reviewAnalysisTag: vi.fn(),
+      reviewAnalysisTagsBulk: vi.fn(),
     },
   };
 });
+
+vi.mock("@/components/confirmDialog", () => ({
+  confirmDialog: vi.fn(),
+}));
 
 vi.mock("@/core/toast", () => ({
   toast: {
@@ -34,6 +39,7 @@ vi.mock("@/core/toast", () => ({
 
 import { assistantApi } from "@/core/api";
 import { toast } from "@/core/toast";
+import { confirmDialog } from "@/components/confirmDialog";
 
 import { LibraryTagEditor } from "./LibraryTagEditor";
 
@@ -88,6 +94,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(assistantApi.getManualTagCatalog).mockResolvedValue(catalog);
   vi.mocked(assistantApi.listLibraryTags).mockResolvedValue(page);
+  vi.mocked(confirmDialog).mockResolvedValue(true);
 });
 
 describe("LibraryTagEditor", () => {
@@ -214,6 +221,144 @@ describe("LibraryTagEditor", () => {
     expect(
       screen.getByRole("button", { name: "Remove tag medieval" }),
     ).toBeInTheDocument();
+  });
+
+  it("filters the library to tracks with pending analysis review", async () => {
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.selectOptions(
+      screen.getByLabelText("Filter analysis review"),
+      "pending",
+    );
+
+    await waitFor(() =>
+      expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
+        review: "pending",
+        offset: 0,
+        limit: 50,
+      }),
+    );
+  });
+
+  it("applies an explicit bulk decision to selected suggestions", async () => {
+    vi.mocked(assistantApi.reviewAnalysisTagsBulk).mockResolvedValue({
+      requested_items: 1,
+      applied: [
+        {
+          track_id: 7,
+          tag: "tavern",
+          analyzer_id: "local-metadata/v1",
+          source_signature: "a".repeat(64),
+          decision: "accepted",
+        },
+      ],
+      failures: [],
+    });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Select tavern suggestion for bulk review",
+      }),
+    );
+    const bulkReview = screen.getByRole("region", {
+      name: "Bulk analysis review",
+    });
+    await user.click(
+      within(bulkReview).getByRole("button", {
+        name: "Add selected to my tags",
+      }),
+    );
+
+    expect(confirmDialog).toHaveBeenCalledWith({
+      title: "Add selected suggestions to your tags?",
+      body: "1 selected suggestion will be copied into your manual tags.",
+      confirmLabel: "Add selected tags",
+    });
+    await waitFor(() =>
+      expect(assistantApi.reviewAnalysisTagsBulk).toHaveBeenCalledWith(
+        [
+          {
+            track_id: 7,
+            tag: "tavern",
+            analyzer_id: "local-metadata/v1",
+            source_signature: "a".repeat(64),
+          },
+        ],
+        "accepted",
+      ),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Suggestions accepted",
+      "1 decision was saved.",
+    );
+  });
+
+  it("reports skipped suggestions after a partial bulk decision", async () => {
+    const bothPending: LibraryTagTrack = {
+      ...track,
+      analysis_suggestions: track.analysis_suggestions.map((suggestion) => ({
+        ...suggestion,
+        status: "pending",
+      })),
+    };
+    vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({
+      ...page,
+      items: [bothPending],
+    });
+    vi.mocked(assistantApi.reviewAnalysisTagsBulk).mockResolvedValue({
+      requested_items: 2,
+      applied: [
+        {
+          track_id: 7,
+          tag: "tavern",
+          analyzer_id: "local-metadata/v1",
+          source_signature: "a".repeat(64),
+          decision: "rejected",
+        },
+      ],
+      failures: [
+        {
+          track_id: 7,
+          tag: "festive",
+          analyzer_id: "local-metadata/v1",
+          source_signature: "a".repeat(64),
+          code: "stale",
+          error: "Analysis changed",
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Select tavern suggestion for bulk review",
+      }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Select festive suggestion for bulk review",
+      }),
+    );
+    await user.click(
+      within(screen.getByRole("region", { name: "Bulk analysis review" })).getByRole(
+        "button",
+        { name: "Reject selected" },
+      ),
+    );
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Bulk review partly applied",
+        "1 applied; 1 skipped. #7 “festive”: Analysis changed",
+      ),
+    );
   });
 
   it("applies chosen tags to a multi-track selection", async () => {

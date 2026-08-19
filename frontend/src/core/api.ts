@@ -393,6 +393,33 @@ export interface AnalysisTagReviewResult {
   manual_tags: string[];
 }
 
+export type BulkAnalysisTagReviewDecision = Exclude<
+  AnalysisTagReviewDecision,
+  "pending"
+>;
+
+export interface AnalysisTagReviewTarget {
+  track_id: number;
+  tag: string;
+  analyzer_id: string;
+  source_signature: string;
+}
+
+export interface BulkAnalysisTagReviewApplied extends AnalysisTagReviewTarget {
+  decision: BulkAnalysisTagReviewDecision;
+}
+
+export interface BulkAnalysisTagReviewFailure extends AnalysisTagReviewTarget {
+  code: "not_found" | "stale" | "tag_limit";
+  error: string;
+}
+
+export interface BulkAnalysisTagReviewResult {
+  requested_items: number;
+  applied: BulkAnalysisTagReviewApplied[];
+  failures: BulkAnalysisTagReviewFailure[];
+}
+
 export interface LibraryTagTrack {
   track_id: number;
   path: string;
@@ -450,6 +477,7 @@ export const assistantApi = {
     params: {
       search?: string;
       tag?: string;
+      review?: AnalysisTagReviewDecision;
       offset?: number;
       limit?: number;
     } = {},
@@ -457,6 +485,7 @@ export const assistantApi = {
     const query = new URLSearchParams();
     if (params.search) query.set("search", params.search);
     if (params.tag) query.set("tag", params.tag);
+    if (params.review) query.set("review", params.review);
     if (params.offset !== undefined) query.set("offset", String(params.offset));
     if (params.limit !== undefined) query.set("limit", String(params.limit));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
@@ -494,6 +523,14 @@ export const assistantApi = {
         source_signature: suggestion.source_signature,
         decision,
       },
+    ),
+  reviewAnalysisTagsBulk: (
+    items: AnalysisTagReviewTarget[],
+    decision: BulkAnalysisTagReviewDecision,
+  ) =>
+    api.post<BulkAnalysisTagReviewResult>(
+      "/api/assistant/library-tags/analysis-tags/reviews/bulk",
+      { items, decision },
     ),
 };
 

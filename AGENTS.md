@@ -173,6 +173,8 @@ Runtime data lives outside the image.
   signature. Acceptance atomically adds the manual tag; rejection and reopening never remove or
   rewrite manual tags, and a changed analysis signature returns the suggestion to pending review.
   Current-profile consumers omit rejected tag labels without deleting the analyzer's stored profile.
+  Bulk review applies only explicitly selected suggestions, commits valid decisions together, and
+  reports stale, missing, or tag-limited items individually. Never add a select-all implicit write.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue
