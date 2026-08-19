@@ -45,9 +45,14 @@ vi.mock("@/core/toast", () => ({
   },
 }));
 
+vi.mock("@/core/ws", () => ({
+  wsClient: { send: vi.fn() },
+}));
+
 import { confirmDialog } from "@/components/confirmDialog";
 import { assistantApi, authoringImportApi, jobsApi } from "@/core/api";
 import { toast } from "@/core/toast";
+import { wsClient } from "@/core/ws";
 
 import { PlaylistBuilderView } from "./PlaylistBuilderView";
 
@@ -337,6 +342,59 @@ describe("PlaylistBuilderView", () => {
 
     expect(await screen.findByText("Library index is unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Find matching songs" })).toBeEnabled();
+  });
+
+  it("auditions draft songs through canonical playback without changing selection", async () => {
+    const user = userEvent.setup();
+    renderView();
+
+    await user.type(screen.getByLabelText("Mood or scene"), "dark rainy alley");
+    await user.click(screen.getByRole("button", { name: "Find matching songs" }));
+
+    const includeRainy = await screen.findByRole("checkbox", {
+      name: "Include Rainy Alley",
+    });
+    expect(includeRainy).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Play Rainy Alley" }));
+    expect(wsClient.send).toHaveBeenLastCalledWith({
+      type: "ambient_play_track",
+      track_id: 11,
+    });
+    expect(includeRainy).toBeChecked();
+
+    act(() => {
+      usePlayerStore.setState({
+        state: {
+          active_mode_id: "dnd",
+          is_playing: true,
+          ambient: { current_track_id: 11 },
+        } as unknown as PlayerState,
+      });
+    });
+    expect(screen.getByText("Playing now")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Pause Rainy Alley" }));
+    expect(wsClient.send).toHaveBeenLastCalledWith({ type: "pause" });
+
+    act(() => {
+      usePlayerStore.setState({
+        state: {
+          active_mode_id: "dnd",
+          is_playing: false,
+          ambient: { current_track_id: 11 },
+        } as unknown as PlayerState,
+      });
+    });
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Resume Rainy Alley" }));
+    expect(wsClient.send).toHaveBeenLastCalledWith({ type: "resume" });
+
+    await user.click(
+      screen.getByRole("button", { name: "Play Distant Footsteps" }),
+    );
+    expect(wsClient.send).toHaveBeenLastCalledWith({
+      type: "ambient_play_track",
+      track_id: 12,
+    });
   });
 
   it("confirms the disclosure, persists progress, and restores the model draft", async () => {

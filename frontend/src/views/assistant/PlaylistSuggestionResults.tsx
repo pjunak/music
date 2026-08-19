@@ -1,4 +1,6 @@
 import { EmptyState } from "@/components/EmptyState";
+import { IconButton } from "@/components/IconButton";
+import { PauseIcon, PlayIcon } from "@/components/icons";
 import type {
   PlaylistEnergyCurve,
   PlaylistSuggestion,
@@ -16,7 +18,10 @@ interface Props {
   suggestion: PlaylistSuggestion | null;
   planningMethod: "local" | "model";
   selectedTrackIds: ReadonlySet<number>;
+  activeTrackId: number | null;
+  playbackRunning: boolean;
   onToggleTrack: (trackId: number) => void;
+  onAuditionTrack: (trackId: number) => void;
   onSelectAll: () => void;
   onClearSelection: () => void;
 }
@@ -51,7 +56,10 @@ export function PlaylistSuggestionResults({
   suggestion,
   planningMethod,
   selectedTrackIds,
+  activeTrackId,
+  playbackRunning,
   onToggleTrack,
+  onAuditionTrack,
   onSelectAll,
   onClearSelection,
 }: Props) {
@@ -130,6 +138,10 @@ export function PlaylistSuggestionResults({
             </button>
           </div>
         </div>
+        <p className="assistant-candidate-audition-note">
+          Play buttons replace the current ambient song. Auditioning does not
+          change which songs are selected for the playlist.
+        </p>
         {suggestion.candidates.length === 0 ? (
           <EmptyState title="No songs passed these filters">
             Widen the BPM range, include tracks without BPM, or try a broader mood
@@ -139,79 +151,101 @@ export function PlaylistSuggestionResults({
           <div className="assistant-candidate-list">
             {suggestion.candidates.map((candidate, index) => {
               const checked = selectedTrackIds.has(candidate.track_id);
+              const current = activeTrackId === candidate.track_id;
+              const playing = current && playbackRunning;
+              const name = displayName(candidate);
               return (
-                <label
-                  className={`assistant-candidate${checked ? " is-selected" : ""}`}
+                <div
+                  className={`assistant-candidate${checked ? " is-selected" : ""}${
+                    current ? " is-current" : ""
+                  }`}
                   key={candidate.track_id}
                 >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => onToggleTrack(candidate.track_id)}
-                    aria-label={`Include ${displayName(candidate)}`}
-                  />
-                  <span
-                    className="assistant-rank"
-                    title={
-                      candidate.sequence_position === null
-                        ? "Alternate suggestion"
-                        : `Planned position ${candidate.sequence_position}`
-                    }
-                  >
-                    {candidate.sequence_position ?? index + 1}
-                  </span>
-                  <span className="assistant-candidate-copy">
-                    <strong>{displayName(candidate)}</strong>
-                    <span className="assistant-candidate-meta">
-                      {candidate.artist || "Unknown artist"}
-                      {candidate.album ? ` · ${candidate.album}` : ""}
-                      {candidate.bpm !== null ? ` · ${candidate.bpm} BPM` : ""}
-                      {` · ${Math.round(candidate.planning_energy * 100)}% planned energy`}
+                  <label className="assistant-candidate-choice">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => onToggleTrack(candidate.track_id)}
+                      aria-label={`Include ${name}`}
+                    />
+                    <span
+                      className="assistant-rank"
+                      title={
+                        candidate.sequence_position === null
+                          ? "Alternate suggestion"
+                          : `Planned position ${candidate.sequence_position}`
+                      }
+                    >
+                      {candidate.sequence_position ?? index + 1}
                     </span>
-                    <span className="assistant-reasons">
-                      {candidate.reasons.join(" · ")}
-                    </span>
-                    {candidate.manual_tags.length > 0 ? (
-                      <span className="assistant-candidate-tag-row is-manual">
-                        <span>Your tags</span>
-                        {candidate.manual_tags.slice(0, 5).map((tag) => (
-                          <span key={tag}>{tag}</span>
-                        ))}
-                        {candidate.manual_tags.length > 5 ? (
-                          <span>+{candidate.manual_tags.length - 5}</span>
-                        ) : null}
+                    <span className="assistant-candidate-copy">
+                      <strong>{name}</strong>
+                      <span className="assistant-candidate-meta">
+                        {candidate.artist || "Unknown artist"}
+                        {candidate.album ? ` · ${candidate.album}` : ""}
+                        {candidate.bpm !== null ? ` · ${candidate.bpm} BPM` : ""}
+                        {` · ${Math.round(candidate.planning_energy * 100)}% planned energy`}
                       </span>
-                    ) : null}
-                    {candidate.analysis_tags.length > 0 ? (
-                      <span className="assistant-candidate-tag-row is-analysis">
-                        <span>Analysis</span>
-                        {candidate.analysis_tags.map((tag) => (
-                          <span key={tag}>{tag}</span>
-                        ))}
+                      <span className="assistant-reasons">
+                        {candidate.reasons.join(" · ")}
                       </span>
-                    ) : null}
-                    {candidate.audio_signal !== null ? (
-                      <span className="assistant-candidate-tag-row is-signal">
-                        <span>Audio signal</span>
-                        <span>
-                          {Math.round(candidate.audio_signal.energy * 100)}% energy
+                      {candidate.manual_tags.length > 0 ? (
+                        <span className="assistant-candidate-tag-row is-manual">
+                          <span>Your tags</span>
+                          {candidate.manual_tags.slice(0, 5).map((tag) => (
+                            <span key={tag}>{tag}</span>
+                          ))}
+                          {candidate.manual_tags.length > 5 ? (
+                            <span>+{candidate.manual_tags.length - 5}</span>
+                          ) : null}
                         </span>
-                        {candidate.audio_signal.tempo_bpm !== null ? (
+                      ) : null}
+                      {candidate.analysis_tags.length > 0 ? (
+                        <span className="assistant-candidate-tag-row is-analysis">
+                          <span>Analysis</span>
+                          {candidate.analysis_tags.map((tag) => (
+                            <span key={tag}>{tag}</span>
+                          ))}
+                        </span>
+                      ) : null}
+                      {candidate.audio_signal !== null ? (
+                        <span className="assistant-candidate-tag-row is-signal">
+                          <span>Audio signal</span>
                           <span>
-                            ≈{Math.round(candidate.audio_signal.tempo_bpm)} BPM
+                            {Math.round(candidate.audio_signal.energy * 100)}% energy
                           </span>
-                        ) : null}
-                        <span>{candidate.audio_signal.confidence} confidence</span>
+                          {candidate.audio_signal.tempo_bpm !== null ? (
+                            <span>
+                              ≈{Math.round(candidate.audio_signal.tempo_bpm)} BPM
+                            </span>
+                          ) : null}
+                          <span>{candidate.audio_signal.confidence} confidence</span>
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="assistant-match">
+                      <strong>{Math.round(candidate.match_score * 100)}%</strong>
+                      <span className={`assistant-confidence is-${candidate.confidence}`}>
+                        {candidate.confidence}
+                      </span>
+                    </span>
+                  </label>
+                  <div className="assistant-candidate-audition">
+                    {current ? (
+                      <span className="assistant-candidate-playback-state" role="status">
+                        {playing ? "Playing now" : "Paused"}
                       </span>
                     ) : null}
-                  </span>
-                  <span className="assistant-match">
-                    <strong>{Math.round(candidate.match_score * 100)}%</strong>
-                    <span className={`assistant-confidence is-${candidate.confidence}`}>
-                      {candidate.confidence}
-                    </span>
-                  </span>
-                </label>
+                    <IconButton
+                      className="assistant-candidate-play-button"
+                      label={`${playing ? "Pause" : current ? "Resume" : "Play"} ${name}`}
+                      icon={playing ? <PauseIcon /> : <PlayIcon />}
+                      variant={current ? "primary" : "ghost"}
+                      aria-pressed={playing}
+                      onClick={() => onAuditionTrack(candidate.track_id)}
+                    />
+                  </div>
+                </div>
               );
             })}
           </div>

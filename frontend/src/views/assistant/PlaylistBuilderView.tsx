@@ -24,6 +24,7 @@ import {
 } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
+import { wsClient } from "@/core/ws";
 
 import { PlaylistSuggestionResults } from "./PlaylistSuggestionResults";
 import { ModelUsageSummary } from "./ModelUsageSummary";
@@ -81,6 +82,12 @@ function modelUnavailableMessage(reasonCode: string | null): string {
 
 export function PlaylistBuilderView() {
   const activeModeId = usePlayerStore((state) => state.state?.active_mode_id ?? null);
+  const ambientTrackId = usePlayerStore(
+    (state) => state.state?.ambient?.current_track_id ?? null,
+  );
+  const ambientIsPlaying = usePlayerStore(
+    (state) => state.state?.is_playing ?? false,
+  );
   const [prompt, setPrompt] = useState("");
   const [targetMinutes, setTargetMinutes] = useState(60);
   const [energyCurve, setEnergyCurve] = useState<PlaylistEnergyCurve>("steady");
@@ -394,6 +401,14 @@ export function PlaylistBuilderView() {
   function clearSelection() {
     setSelectedTrackIds(new Set());
     invalidatePreview();
+  }
+
+  function auditionTrack(trackId: number) {
+    if (ambientTrackId !== trackId) {
+      wsClient.send({ type: "ambient_play_track", track_id: trackId });
+      return;
+    }
+    wsClient.send({ type: ambientIsPlaying ? "pause" : "resume" });
   }
 
   async function reviewPlaylist() {
@@ -804,7 +819,10 @@ export function PlaylistBuilderView() {
           suggestion={suggestion}
           planningMethod={planningMethod}
           selectedTrackIds={selectedTrackIds}
+          activeTrackId={ambientTrackId}
+          playbackRunning={ambientIsPlaying}
           onToggleTrack={toggleTrack}
+          onAuditionTrack={auditionTrack}
           onSelectAll={selectAll}
           onClearSelection={clearSelection}
         />

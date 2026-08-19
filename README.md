@@ -41,8 +41,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   explainable planner remains the default and makes no external calls. An explicitly selected,
   quality-certified provider model can optionally rerank a locally filtered pool after a versioned
   disclosure and confirmation. Both methods produce the same read-only draft: you choose the final
-  tracks, then use the existing preview and create-only Authoring import transaction. Signal
-  measurements remain numeric evidence and never become semantic mood tags automatically.
+  tracks, can audition each suggested song through the normal canonical playback controls without
+  changing the selection, then use the existing preview and create-only Authoring import
+  transaction. Signal measurements remain numeric evidence and never become semantic mood tags
+  automatically.
 - **Playlist quality evaluation** — run versioned, synthetic D&D playlist scenarios through the
   provider-neutral suggestion contract. The harness measures relevance, required selection,
   ordering, explanations, determinism, and invented or excluded tracks, with explicit thresholds
