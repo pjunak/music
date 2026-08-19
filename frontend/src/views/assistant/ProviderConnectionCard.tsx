@@ -22,6 +22,7 @@ interface Props {
     payload: ProviderConnectionUpdate,
   ) => Promise<void>;
   onVerify: (connectionId: string) => Promise<void>;
+  onDeleteCredential: (connection: ProviderConnection) => Promise<void>;
   onDelete: (connection: ProviderConnection) => Promise<void>;
 }
 
@@ -33,6 +34,7 @@ export function ProviderConnectionCard({
   busy,
   onUpdate,
   onVerify,
+  onDeleteCredential,
   onDelete,
 }: Props) {
   const [editing, setEditing] = useState(false);
@@ -81,10 +83,30 @@ export function ProviderConnectionCard({
           </span>
           <h3>{connection.name}</h3>
         </div>
-        <code>{connection.key_hint}</code>
       </div>
 
       <p className="assistant-provider-url">{connection.base_url}</p>
+      <div
+        className={`assistant-provider-credential${
+          connection.credential_saved ? " is-saved" : " is-missing"
+        }`}
+      >
+        <div>
+          <strong>
+            {connection.credential_saved ? "API key saved" : "No API key saved"}
+          </strong>
+          <p>
+            {connection.credential_saved
+              ? connection.verification_status === "verified"
+                ? "Encrypted on this server and verified for this connection."
+                : "Encrypted on this server. Verification is still required before use."
+              : "Add a key under Change, then verify this connection before use."}
+          </p>
+        </div>
+        {connection.credential_saved && connection.key_hint ? (
+          <code>{connection.key_hint}</code>
+        ) : null}
+      </div>
       <p className="field-hint">
         {assignedRoleLabels.length > 0
           ? `Used by: ${assignedRoleLabels.join(" · ")}`
@@ -102,7 +124,11 @@ export function ProviderConnectionCard({
         {models.length > 0 ? (
           <p title={models.join(", ")}>{models.slice(0, 3).join(" · ")}</p>
         ) : (
-          <p>Verify this connection to load its model list.</p>
+          <p>
+            {connection.credential_saved
+              ? "Verify this connection to load its model list."
+              : "Save an API key before loading models."}
+          </p>
         )}
       </div>
 
@@ -110,7 +136,9 @@ export function ProviderConnectionCard({
         <button
           className="btn-secondary"
           type="button"
-          disabled={busy || !credentialStorageReady}
+          disabled={
+            busy || !credentialStorageReady || !connection.credential_saved
+          }
           onClick={() => void onVerify(connection.id)}
         >
           {busy ? "Working…" : "Verify connection"}
@@ -124,6 +152,16 @@ export function ProviderConnectionCard({
         >
           {editing ? "Close changes" : "Change"}
         </button>
+        {connection.credential_saved ? (
+          <button
+            className="btn-ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => void onDeleteCredential(connection)}
+          >
+            Delete API key
+          </button>
+        ) : null}
         <button
           className="btn-danger"
           type="button"
@@ -169,14 +207,20 @@ export function ProviderConnectionCard({
             />
           </label>
           <label className="field">
-            <span className="field-label">Replace API key</span>
+            <span className="field-label">
+              {connection.credential_saved ? "Replace API key" : "API key"}
+            </span>
             <input
               type="password"
               value={apiKey}
               maxLength={4096}
               autoComplete="new-password"
               disabled={!credentialStorageReady}
-              placeholder="Leave empty to keep the current key"
+              placeholder={
+                connection.credential_saved
+                  ? "Leave empty to keep the current key"
+                  : "Enter a key to enable verification"
+              }
               onChange={(event) => setApiKey(event.target.value)}
             />
           </label>
@@ -189,8 +233,8 @@ export function ProviderConnectionCard({
             <span>Allow a provider on my private network</span>
           </label>
           <p className="field-hint">
-            Changing the address, key, connection type, or network access requires
-            verification again.
+            Saving or replacing a key—or changing the address, connection type, or
+            network access—requires verification again.
           </p>
           <button
             className="btn-primary"

@@ -148,13 +148,36 @@ def _verification_status(
     )
 
 
+def _credential_saved(row: AssistantProviderConnection) -> bool:
+    return bool(row.encrypted_api_key and row.api_key_nonce)
+
+
+def _connection_credential(row: AssistantProviderConnection) -> str:
+    if not _credential_saved(row):
+        raise ProviderServiceError(
+            "credential_missing",
+            "Save an API key for this provider connection before using it.",
+            409,
+        )
+    try:
+        return _vault().decrypt(
+            row.id,
+            row.encrypted_api_key,
+            row.api_key_nonce,
+        )
+    except CredentialVaultError as exc:
+        raise _service_error_from_vault(exc) from None
+
+
 def connection_out(row: AssistantProviderConnection) -> ProviderConnectionOut:
+    credential_saved = _credential_saved(row)
     return ProviderConnectionOut(
         id=row.id,
         name=row.name,
         adapter_id=row.adapter_id,
         base_url=row.base_url,
-        key_hint=row.api_key_hint,
+        credential_saved=credential_saved,
+        key_hint=row.api_key_hint if credential_saved else None,
         allow_private_network=row.allow_private_network,
         verification_status=_verification_status(row.verification_status),
         verification_error_code=row.verification_error_code,
@@ -337,6 +360,25 @@ def delete_connection(db: Session, connection_id: str) -> None:
     db.commit()
 
 
+def delete_connection_credential(
+    db: Session,
+    connection_id: str,
+) -> ProviderConnectionOut:
+    row = get_connection(db, connection_id)
+    row.encrypted_api_key = ""
+    row.api_key_nonce = ""
+    row.api_key_hint = ""
+    row.verification_status = "never"
+    row.verification_error_code = None
+    row.verified_models_json = "[]"
+    row.last_verified_at = None
+    row.updated_at = utcnow()
+    _reset_role_conformance_for_connection(db, row.id)
+    db.commit()
+    db.refresh(row)
+    return connection_out(row)
+
+
 def _connection_fingerprint(row: AssistantProviderConnection) -> str:
     payload = "\0".join(
         (
@@ -353,14 +395,7 @@ def _connection_fingerprint(row: AssistantProviderConnection) -> str:
 
 def prepare_verification(db: Session, connection_id: str) -> VerificationTarget:
     row = get_connection(db, connection_id)
-    try:
-        api_key = _vault().decrypt(
-            row.id,
-            row.encrypted_api_key,
-            row.api_key_nonce,
-        )
-    except CredentialVaultError as exc:
-        raise _service_error_from_vault(exc) from None
+    api_key = _connection_credential(row)
     return VerificationTarget(
         connection_id=row.id,
         adapter_id=row.adapter_id,
@@ -540,6 +575,8 @@ def list_model_roles(db: Session) -> list[ModelRoleOut]:
         vault = None
     if vault is not None:
         for connection in connections.values():
+            if not _credential_saved(connection):
+                continue
             try:
                 vault.decrypt(
                     connection.id,
@@ -580,14 +617,7 @@ def update_model_role(
             409,
         )
     if payload.enabled:
-        try:
-            _vault().decrypt(
-                connection.id,
-                connection.encrypted_api_key,
-                connection.api_key_nonce,
-            )
-        except CredentialVaultError as exc:
-            raise _service_error_from_vault(exc) from None
+        _connection_credential(connection)
     row = db.get(AssistantModelRole, role_id)
     runtime_changed = (
         row is None
@@ -644,14 +674,7 @@ def _execution_target(
     row: AssistantModelRole,
     connection: AssistantProviderConnection,
 ) -> ProviderExecutionTarget:
-    try:
-        api_key = _vault().decrypt(
-            connection.id,
-            connection.encrypted_api_key,
-            connection.api_key_nonce,
-        )
-    except CredentialVaultError as exc:
-        raise _service_error_from_vault(exc) from None
+    api_key = _connection_credential(connection)
     return ProviderExecutionTarget(
         adapter_id=connection.adapter_id,
         base_url=connection.base_url,

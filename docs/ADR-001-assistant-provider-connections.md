@@ -30,6 +30,11 @@ network calls must not block playback or weaken the local fallback.
   an explicit authenticated action with a bounded timeout, response-size cap,
   no redirects, safe error codes, and private-network destinations blocked
   unless the operator deliberately opts in.
+- Report credential presence explicitly and return only a masked hint, never the
+  credential. The operator may remove the credential without deleting the
+  connection or its role assignments. Removal or replacement resets connection
+  verification and every dependent model gate; configured roles remain stored
+  but cannot execute until a newly saved credential passes those gates again.
 - Role configuration remains inactive until its connection has verified. This
   slice stores configuration only; local analyzers and `local-planner/v2`
   remain the sole runtime engines.

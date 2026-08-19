@@ -61,7 +61,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   roles can choose separate connections and keys even when they use the same provider. Every
   assignment must pass a fixed synthetic structured-output test before it can be enabled; changing
   its connection, model, timeout, or response limit invalidates that test.
-  API keys are encrypted at rest and never returned to the browser. The shared execution harness
+  API keys are encrypted at rest and never returned to the browser. AI Setup shows only whether a
+  key is saved plus a masked hint. A saved key can be deleted without deleting its connection or
+  role drafts; deletion and replacement both invalidate verification and model-quality gates until
+  the operator explicitly completes them again. The shared execution harness
   is bounded and provider-neutral, but it is not exposed as a general prompt API. The playlist
   playlist planner, metadata music tagger, and manual-tag cleanup reviewer are the first optional
   live-library integrations.
@@ -182,7 +185,10 @@ be decrypted and must be entered again.
 
 The first adapter verifies OpenAI-compatible providers by requesting their model list. Public
 addresses require HTTPS. Private-network providers are opt-in per connection. Verification uses
-strict time and response-size limits and does not send songs, tags, prompts, or audio.
+strict time and response-size limits and does not send songs, tags, prompts, or audio. The UI reports
+saved-key presence separately from verification. Removing a saved key keeps the connection and its
+role choices, but prevents use until a new key is saved, the connection is verified, and the exact
+model configuration passes its tests again.
 
 There is no general migration framework: the schema is created idempotently on boot, and
 compatible additive columns are applied automatically. Renames, drops, and type changes require

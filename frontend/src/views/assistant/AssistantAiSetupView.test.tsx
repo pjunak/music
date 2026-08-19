@@ -35,6 +35,7 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
       createConnection: vi.fn(),
       updateConnection: vi.fn(),
       deleteConnection: vi.fn(),
+      deleteConnectionCredential: vi.fn(),
       verifyConnection: vi.fn(),
       listRoles: vi.fn(),
       updateRole: vi.fn(),
@@ -86,6 +87,7 @@ const connection: ProviderConnection = {
   name: "Hosted models",
   adapter_id: "openai-compatible/v1",
   base_url: "https://models.example/v1",
+  credential_saved: true,
   key_hint: "••••1234",
   allow_private_network: false,
   verification_status: "verified",
@@ -288,6 +290,52 @@ describe("AssistantAiSetupView", () => {
     expect(toast.success).toHaveBeenCalledWith(
       "Connection verified",
       "2 models available.",
+    );
+  });
+
+  it("shows, deletes, and gates use of a saved API key", async () => {
+    const user = userEvent.setup();
+    const connectionWithoutKey: ProviderConnection = {
+      ...connection,
+      credential_saved: false,
+      key_hint: null,
+      verification_status: "never",
+      verified_models: [],
+      last_verified_at: null,
+    };
+    vi.mocked(assistantProvidersApi.listConnections)
+      .mockResolvedValueOnce([connection])
+      .mockResolvedValue([connectionWithoutKey]);
+    vi.mocked(
+      assistantProvidersApi.deleteConnectionCredential,
+    ).mockResolvedValue(connectionWithoutKey);
+    render(<AssistantAiSetupView />);
+
+    expect(await screen.findByText("API key saved")).toBeInTheDocument();
+    expect(screen.getByText("••••1234")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Delete API key" }));
+
+    expect(confirmDialog).toHaveBeenCalledWith({
+      title: "Delete saved API key?",
+      body: expect.stringContaining("cannot run until you save and verify a new key"),
+      confirmLabel: "Delete API key",
+      tone: "danger",
+    });
+    await waitFor(() =>
+      expect(
+        assistantProvidersApi.deleteConnectionCredential,
+      ).toHaveBeenCalledWith("connection-1"),
+    );
+    expect(await screen.findByText("No API key saved")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Verify connection" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("heading", { name: "Hosted models" }),
+    ).toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith(
+      "API key deleted",
+      "The connection was kept. Save and verify a new key before using it again.",
     );
   });
 

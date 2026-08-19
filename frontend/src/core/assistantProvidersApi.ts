@@ -32,7 +32,8 @@ export interface ProviderConnection {
   name: string;
   adapter_id: string;
   base_url: string;
-  key_hint: string;
+  credential_saved: boolean;
+  key_hint: string | null;
   allow_private_network: boolean;
   verification_status: ProviderVerificationStatus;
   verification_error_code: string | null;
@@ -125,6 +126,10 @@ export const assistantProvidersApi = {
   deleteConnection: (connectionId: string) =>
     api.delete<void>(
       `/api/assistant/providers/connections/${encodeURIComponent(connectionId)}`,
+    ),
+  deleteConnectionCredential: (connectionId: string) =>
+    api.delete<ProviderConnection>(
+      `/api/assistant/providers/connections/${encodeURIComponent(connectionId)}/credential`,
     ),
   verifyConnection: (connectionId: string) =>
     api.post<ProviderVerification>(

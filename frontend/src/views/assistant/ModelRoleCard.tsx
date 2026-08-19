@@ -54,6 +54,7 @@ export function ModelRoleCard({
     credentialStorageReady &&
     configured &&
     configurationMatches &&
+    connection?.credential_saved === true &&
     connection?.verification_status === "verified";
   const canEnable =
     canTest && role.conformance_status === "passed";
@@ -78,7 +79,9 @@ export function ModelRoleCard({
   const stateLabel = role.effective_enabled
     ? "Enabled"
     : role.enabled
-      ? role.verification_status !== "verified"
+      ? connection?.credential_saved !== true
+        ? "API key removed"
+        : role.verification_status !== "verified"
         ? "Waiting for verification"
         : role.conformance_status !== "passed"
           ? "Needs model test"
@@ -117,8 +120,12 @@ export function ModelRoleCard({
             <option value="">Choose a connection</option>
             {connections.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.name} · {item.key_hint}
-                {item.verification_status === "verified" ? " · verified" : ""}
+                {item.name} · {item.credential_saved && item.key_hint
+                  ? item.key_hint
+                  : "no key saved"}
+                {item.credential_saved && item.verification_status === "verified"
+                  ? " · verified"
+                  : ""}
               </option>
             ))}
           </select>
@@ -162,8 +169,10 @@ export function ModelRoleCard({
         </label>
         {!canEnable && connectionId ? (
           <p className="field-hint">
-            {connection?.verification_status !== "verified"
-              ? "Verify the selected connection before enabling it."
+            {connection?.credential_saved !== true
+              ? "Save an API key on the selected connection before enabling it."
+              : connection.verification_status !== "verified"
+                ? "Verify the selected connection before enabling it."
               : role.conformance_status !== "passed" || !configurationMatches
                 ? "Save and pass the model test before enabling this task."
                 : "Encrypted credential storage is unavailable."}

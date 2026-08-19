@@ -5757,10 +5757,6 @@ kbd,
   margin: var(--space-1) 0 0;
   font-size: var(--text-lg);
 }
-.assistant-provider-card-heading code {
-  color: var(--muted-strong);
-  font-size: var(--text-xs);
-}
 .assistant-provider-status,
 .assistant-role-state {
   display: inline-flex;
@@ -5793,6 +5789,33 @@ kbd,
   font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
+}
+.assistant-provider-credential {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.assistant-provider-credential strong {
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.assistant-provider-credential.is-saved strong {
+  color: var(--ok);
+}
+.assistant-provider-credential p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-provider-credential code {
+  flex: 0 0 auto;
+  color: var(--muted-strong);
+  font-size: var(--text-xs);
 }
 .assistant-provider-problem {
   margin: 0;

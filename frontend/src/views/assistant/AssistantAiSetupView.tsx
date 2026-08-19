@@ -234,6 +234,35 @@ export function AssistantAiSetupView() {
     }
   }
 
+  async function deleteConnectionCredential(connection: ProviderConnection) {
+    const confirmed = await confirmDialog({
+      title: "Delete saved API key?",
+      body: `${connection.name} will remain, but its model tasks cannot run until you save and verify a new key.`,
+      confirmLabel: "Delete API key",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+    setBusyItem(`connection:${connection.id}`);
+    try {
+      const updated = await assistantProvidersApi.deleteConnectionCredential(
+        connection.id,
+      );
+      setConnections((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      toast.success(
+        "API key deleted",
+        "The connection was kept. Save and verify a new key before using it again.",
+      );
+      refresh();
+      refreshQuality();
+    } catch (error) {
+      toast.error("API key could not be deleted", errorMessage(error));
+    } finally {
+      setBusyItem(null);
+    }
+  }
+
   async function saveRole(roleId: string, payload: ModelRoleUpdate) {
     setBusyItem(`role:${roleId}`);
     try {
@@ -568,6 +597,7 @@ export function AssistantAiSetupView() {
                   busy={busyItem === `connection:${connection.id}`}
                   onUpdate={updateConnection}
                   onVerify={verifyConnection}
+                  onDeleteCredential={deleteConnectionCredential}
                   onDelete={deleteConnection}
                 />
               ))

@@ -169,6 +169,10 @@ Runtime data lives outside the image.
   connection owns exactly one credential; roles reference connections so tasks may deliberately
   reuse one credential or choose separate connections, including separate keys for the same
   provider. Never store a credential directly on a role.
+  Credential presence is an explicit server-derived state; never infer it from a masked hint.
+  Removing or replacing a connection credential keeps role drafts but resets verification,
+  conformance, and quality results, so enabled roles remain ineffective until the new credential is
+  saved and every gate passes again.
   Never return or log a provider key, never infer provider capabilities from a saved URL, and never
   enable a role until the operator explicitly verifies its connection and its exact runtime
   configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the

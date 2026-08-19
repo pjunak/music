@@ -95,7 +95,8 @@ class ProviderConnectionOut(StrictProviderModel):
     name: str
     adapter_id: str
     base_url: str
-    key_hint: str
+    credential_saved: bool
+    key_hint: str | None
     allow_private_network: bool
     verification_status: Literal["never", "verified", "failed"]
     verification_error_code: str | None

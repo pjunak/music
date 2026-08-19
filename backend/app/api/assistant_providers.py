@@ -29,6 +29,7 @@ from app.assistant.providers.service import (
     ProviderServiceError,
     create_connection,
     delete_connection,
+    delete_connection_credential,
     delete_model_role,
     finish_role_conformance,
     finish_verification,
@@ -105,6 +106,21 @@ def remove_connection(
 ) -> None:
     try:
         delete_connection(db, connection_id)
+    except ProviderServiceError as exc:
+        _raise_http(exc)
+
+
+@router.delete(
+    "/connections/{connection_id}/credential",
+    response_model=ProviderConnectionOut,
+)
+def remove_connection_credential(
+    connection_id: str,
+    _user: CurrentUser,
+    db: DbSession,
+) -> ProviderConnectionOut:
+    try:
+        return delete_connection_credential(db, connection_id)
     except ProviderServiceError as exc:
         _raise_http(exc)
 

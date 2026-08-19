@@ -192,6 +192,9 @@ def test_provider_endpoints_require_authentication(client: TestClient) -> None:
             "/api/assistant/providers/connections",
             json=_connection_payload(),
         ),
+        client.delete(
+            "/api/assistant/providers/connections/connection-1/credential"
+        ),
         client.get("/api/assistant/providers/roles"),
         client.post("/api/assistant/providers/roles/playlist_planner/test"),
         client.get(
@@ -390,6 +393,7 @@ def test_connection_secret_is_encrypted_and_never_returned(
     secret = "secret-provider-key-1234"
     created = _create_connection(auth_client, api_key=secret)
 
+    assert created["credential_saved"] is True
     assert created["key_hint"] == "••••1234"
     assert secret not in str(created)
     assert "encrypted_api_key" not in created
@@ -520,6 +524,94 @@ def test_changing_connection_inputs_resets_verification(
     assert response.json()["verification_status"] == "never"
     assert response.json()["verified_models"] == []
     assert response.json()["last_verified_at"] is None
+
+
+def test_connection_credential_can_be_deleted_and_replaced(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _create_connection(auth_client)
+    _verify_success(monkeypatch)
+    assert auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    ).status_code == 200
+    role_payload = {
+        "connection_id": created["id"],
+        "model_id": "planner-large",
+        "enabled": False,
+    }
+    assert auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json=role_payload,
+    ).status_code == 200
+    _conformance_success(monkeypatch)
+    assert auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/test"
+    ).status_code == 200
+    assert auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={**role_payload, "enabled": True},
+    ).json()["effective_enabled"] is True
+
+    deleted = auth_client.delete(
+        f"/api/assistant/providers/connections/{created['id']}/credential"
+    )
+
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["credential_saved"] is False
+    assert deleted.json()["key_hint"] is None
+    assert deleted.json()["verification_status"] == "never"
+    assert deleted.json()["verified_models"] == []
+    assert deleted.json()["last_verified_at"] is None
+    with SessionLocal() as db:
+        row = db.get(AssistantProviderConnection, created["id"])
+        assert row is not None
+        assert row.encrypted_api_key == ""
+        assert row.api_key_nonce == ""
+        assert row.api_key_hint == ""
+
+    roles = auth_client.get("/api/assistant/providers/roles")
+    planner = next(
+        role for role in roles.json() if role["role_id"] == "playlist_planner"
+    )
+    assert planner["enabled"] is True
+    assert planner["effective_enabled"] is False
+    assert planner["verification_status"] == "never"
+    assert planner["conformance_status"] == "never"
+    missing = auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    )
+    assert missing.status_code == 409
+    assert missing.json()["detail"]["code"] == "credential_missing"
+
+    replacement = auth_client.put(
+        f"/api/assistant/providers/connections/{created['id']}",
+        json={"api_key": "replacement-provider-key-9999"},
+    )
+    assert replacement.status_code == 200, replacement.text
+    assert replacement.json()["credential_saved"] is True
+    assert replacement.json()["key_hint"] == "••••9999"
+    assert replacement.json()["verification_status"] == "never"
+
+    observed: dict[str, object] = {}
+
+    def verify(*args: object, **kwargs: object) -> ProviderVerificationResult:
+        observed["args"] = args
+        return ProviderVerificationResult(True, None, ("planner-large",))
+
+    monkeypatch.setattr(
+        "app.api.assistant_providers.verify_provider_connection",
+        verify,
+    )
+    verified = auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    )
+    assert verified.status_code == 200
+    assert observed["args"] == (
+        "openai-compatible/v1",
+        "https://models.example.test/v1",
+        "replacement-provider-key-9999",
+    )
 
 
 def test_verification_result_is_rejected_if_connection_changed_mid_request(
