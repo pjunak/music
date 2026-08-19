@@ -1,6 +1,7 @@
 """Importing this module registers all ORM mappers on Base.metadata, so
 `Base.metadata.create_all` in the lifespan picks up every table without
 each caller having to import each model individually."""
+from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.auth_session import AuthSession
@@ -18,6 +19,7 @@ from app.models.track_user_tag import TrackUserTag
 from app.models.user import User
 
 __all__ = [
+    "AssistantModelEvaluation",
     "AssistantModelRole",
     "AssistantProviderConnection",
     "AuthSession",

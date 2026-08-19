@@ -6,7 +6,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,7 @@ from app.assistant.providers.verification import (
     ProviderVerificationResult,
     normalize_provider_base_url,
 )
+from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.base import utcnow
@@ -68,6 +69,13 @@ class ConformanceTarget:
     role_id: str
     execution: ProviderExecutionTarget
     challenge: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class ResolvedRoleExecution:
+    role_id: str
+    execution: ProviderExecutionTarget
     fingerprint: str
 
 
@@ -399,12 +407,20 @@ def _reset_role_conformance(row: AssistantModelRole) -> None:
 
 
 def _reset_role_conformance_for_connection(db: Session, connection_id: str) -> None:
-    for role in db.scalars(
+    roles = db.scalars(
         select(AssistantModelRole).where(
             AssistantModelRole.connection_id == connection_id
         )
-    ).all():
+    ).all()
+    for role in roles:
         _reset_role_conformance(role)
+    role_ids = [role.role_id for role in roles]
+    if role_ids:
+        db.execute(
+            delete(AssistantModelEvaluation).where(
+                AssistantModelEvaluation.role_id.in_(role_ids)
+            )
+        )
 
 
 def _role_runtime_fingerprint(
@@ -421,6 +437,18 @@ def _role_runtime_fingerprint(
         )
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def current_role_runtime_fingerprint(db: Session, role_id: str) -> str | None:
+    """Return the current non-secret runtime identity without resolving credentials."""
+
+    row = db.get(AssistantModelRole, role_id)
+    if row is None:
+        return None
+    connection = db.get(AssistantProviderConnection, row.connection_id)
+    if connection is None:
+        return None
+    return _role_runtime_fingerprint(row, connection)
 
 
 def _conformance_status(
@@ -592,6 +620,11 @@ def update_model_role(
     row.max_output_tokens = payload.max_output_tokens
     if runtime_changed:
         _reset_role_conformance(row)
+        db.execute(
+            delete(AssistantModelEvaluation).where(
+                AssistantModelEvaluation.role_id == role_id
+            )
+        )
     row.updated_at = utcnow()
     db.commit()
     db.refresh(row)
@@ -633,6 +666,15 @@ def _execution_target(
 def prepare_role_execution(db: Session, role_id: str) -> ProviderExecutionTarget:
     """Resolve one enabled, verified, conformant role for future feature code."""
 
+    return prepare_role_execution_details(db, role_id).execution
+
+
+def prepare_role_execution_details(
+    db: Session,
+    role_id: str,
+) -> ResolvedRoleExecution:
+    """Resolve execution plus the exact runtime fingerprint used by quality gates."""
+
     if role_id not in MODEL_ROLE_BY_ID:
         raise ProviderServiceError("role_not_found", "Model role not found.", 404)
     row = db.get(AssistantModelRole, role_id)
@@ -655,7 +697,11 @@ def prepare_role_execution(db: Session, role_id: str) -> ProviderExecutionTarget
             "Test this model configuration before using the role.",
             409,
         )
-    return _execution_target(row, connection)
+    return ResolvedRoleExecution(
+        role_id=role_id,
+        execution=_execution_target(row, connection),
+        fingerprint=_role_runtime_fingerprint(row, connection),
+    )
 
 
 def prepare_role_conformance(db: Session, role_id: str) -> ConformanceTarget:

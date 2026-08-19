@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import base64
+import json
+import time
 from collections.abc import Iterator
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import delete
 
-from app.assistant.providers.execution import ProviderConformanceResult
+from app.assistant.model_playlist import MODEL_PLAYLIST_OUTPUT_CONTRACT
+from app.assistant.providers.execution import (
+    ProviderConformanceResult,
+    StructuredModelRequest,
+    StructuredModelResult,
+)
 from app.assistant.providers.schemas import ProviderConnectionUpdate
 from app.assistant.providers.service import (
     ProviderServiceError,
@@ -24,6 +32,8 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
+
+PLAYLIST_QUALITY_JOB_KIND = "assistant.model-evaluation.playlist-quality-v1"
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +88,101 @@ def _conformance_success(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _reference_playlist_model(
+    _target: object,
+    request: StructuredModelRequest,
+) -> StructuredModelResult:
+    payload = json.loads(request.user_prompt)
+    candidates = payload["candidates"]
+    ranked = candidates[: payload["request"]["candidate_limit"]]
+    selected: list[dict[str, Any]] = []
+    selected_seconds = 0.0
+    target_seconds = payload["request"]["target_minutes"] * 60
+    for candidate in ranked:
+        if selected_seconds >= target_seconds:
+            break
+        selected.append(candidate)
+        selected_seconds += candidate["length_s"] or 180.0
+    curve = payload["request"]["energy_curve"]
+    if curve == "rising":
+        selected.sort(key=lambda item: cast(float, item["planning_energy"]))
+    elif curve == "falling":
+        selected.sort(key=lambda item: -cast(float, item["planning_energy"]))
+    return StructuredModelResult(
+        True,
+        None,
+        {
+            "schema_version": MODEL_PLAYLIST_OUTPUT_CONTRACT,
+            "ranked_track_ids": [item["track_id"] for item in ranked],
+            "selected_track_ids": [item["track_id"] for item in selected],
+        },
+    )
+
+
+def _empty_playlist_model(
+    _target: object,
+    _request: StructuredModelRequest,
+) -> StructuredModelResult:
+    return StructuredModelResult(
+        True,
+        None,
+        {
+            "schema_version": MODEL_PLAYLIST_OUTPUT_CONTRACT,
+            "ranked_track_ids": [],
+            "selected_track_ids": [],
+        },
+    )
+
+
+def _enabled_playlist_role(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+    connection = _create_connection(client)
+    _verify_success(monkeypatch)
+    verified = client.post(
+        f"/api/assistant/providers/connections/{connection['id']}/verify"
+    )
+    assert verified.status_code == 200
+    payload = {
+        "connection_id": connection["id"],
+        "model_id": "planner-large",
+        "enabled": False,
+    }
+    assert client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json=payload,
+    ).status_code == 200
+    _conformance_success(monkeypatch)
+    assert client.post(
+        "/api/assistant/providers/roles/playlist_planner/test"
+    ).status_code == 200
+    payload["enabled"] = True
+    enabled = client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json=payload,
+    )
+    assert enabled.status_code == 200
+    return enabled.json()
+
+
+def _wait_for_job(
+    client: TestClient,
+    job_id: str,
+    expected: set[str],
+) -> dict[str, Any]:
+    deadline = time.monotonic() + 5
+    latest: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/jobs/{job_id}")
+        assert response.status_code == 200
+        latest = response.json()
+        if latest["status"] in expected:
+            return latest
+        time.sleep(0.02)
+    raise AssertionError(f"job did not reach {expected}; latest={latest}")
+
+
 def test_provider_endpoints_require_authentication(client: TestClient) -> None:
     requests = [
         client.get("/api/assistant/providers/status"),
@@ -88,8 +193,132 @@ def test_provider_endpoints_require_authentication(client: TestClient) -> None:
         ),
         client.get("/api/assistant/providers/roles"),
         client.post("/api/assistant/providers/roles/playlist_planner/test"),
+        client.get(
+            "/api/assistant/providers/roles/playlist_planner/evaluations"
+        ),
+        client.post(
+            "/api/assistant/providers/roles/playlist_planner/"
+            "evaluations/playlist-quality-v1/jobs"
+        ),
     ]
     assert {response.status_code for response in requests} == {401}
+
+
+def test_playlist_model_quality_job_persists_progress_and_current_gate(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enabled_playlist_role(auth_client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_evaluation.execute_structured_model_request",
+        _reference_playlist_model,
+    )
+
+    started = auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/"
+        "evaluations/playlist-quality-v1/jobs"
+    )
+
+    assert started.status_code == 202, started.text
+    job_id = started.json()["id"]
+    finished = _wait_for_job(auth_client, job_id, {"succeeded"})
+    assert finished["kind"] == PLAYLIST_QUALITY_JOB_KIND
+    assert finished["progress_current"] == 5
+    assert finished["progress_total"] == 5
+    assert finished["result"]["evaluation"]["passed"] is True
+    assert finished["result"]["evaluation"]["summary"]["passed_cases"] == 5
+    assert "secret-provider-key-1234" not in json.dumps(finished)
+    assert "path" not in json.dumps(finished["parameters"])
+
+    restored = auth_client.get(
+        "/api/jobs",
+        params={"kind": PLAYLIST_QUALITY_JOB_KIND},
+    )
+    quality = auth_client.get(
+        "/api/assistant/providers/roles/playlist_planner/evaluations"
+    )
+    assert restored.status_code == 200
+    assert restored.json()[0]["id"] == job_id
+    assert quality.status_code == 200
+    assert quality.json() == [
+        {
+            "evaluation_id": "playlist-quality-v1",
+            "role_id": "playlist_planner",
+            "label": "Playlist planning quality",
+            "description": (
+                "Runs fixed synthetic D&D playlist scenarios through this model. "
+                "No songs or live library data are sent."
+            ),
+            "status": "passed",
+            "suite_id": "local-dnd-playlist-baseline",
+            "passed_cases": 5,
+            "total_cases": 5,
+            "last_job_id": job_id,
+            "last_evaluated_at": quality.json()[0]["last_evaluated_at"],
+        }
+    ]
+    assert quality.json()[0]["last_evaluated_at"] is not None
+
+
+def test_playlist_quality_gate_is_invalidated_by_runtime_change(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    role = _enabled_playlist_role(auth_client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_evaluation.execute_structured_model_request",
+        _reference_playlist_model,
+    )
+    started = auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/"
+        "evaluations/playlist-quality-v1/jobs"
+    )
+    _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+
+    changed = auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={
+            "connection_id": role["connection_id"],
+            "model_id": role["model_id"],
+            "enabled": False,
+            "timeout_seconds": 45,
+            "max_output_tokens": role["max_output_tokens"],
+        },
+    )
+    quality = auth_client.get(
+        "/api/assistant/providers/roles/playlist_planner/evaluations"
+    )
+
+    assert changed.status_code == 200
+    assert changed.json()["conformance_status"] == "never"
+    assert quality.json()[0]["status"] == "never"
+    assert quality.json()[0]["last_job_id"] is None
+
+
+def test_failed_playlist_quality_is_a_completed_report_not_a_broken_job(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enabled_playlist_role(auth_client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_evaluation.execute_structured_model_request",
+        _empty_playlist_model,
+    )
+
+    started = auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/"
+        "evaluations/playlist-quality-v1/jobs"
+    )
+    finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+    quality = auth_client.get(
+        "/api/assistant/providers/roles/playlist_planner/evaluations"
+    ).json()[0]
+
+    assert finished["result"]["evaluation"]["passed"] is False
+    assert finished["result"]["evaluation"]["summary"]["failed_cases"] == 5
+    assert quality["status"] == "failed"
+    assert quality["passed_cases"] == 0
+    assert quality["total_cases"] == 5
 
 
 def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> None:

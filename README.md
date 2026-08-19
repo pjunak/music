@@ -46,18 +46,21 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
 - **Playlist quality evaluation** — run versioned, synthetic D&D playlist scenarios through the
   provider-neutral suggestion contract. The harness measures relevance, required selection,
   ordering, explanations, determinism, and invented or excluded tracks, with explicit thresholds
-  that fail regressions. The configured playlist model can be evaluated only through an explicit
-  CLI disclosure flag: local filtering first reduces each case to at most 100 candidates, paths
-  are removed, and the model may return only known track IDs. The live Assistant remains local.
+  that fail regressions. A configured playlist model can be evaluated either through an explicit
+  CLI disclosure flag or an explicit durable job in AI Setup. The server stores progress and the
+  exact model-configuration fingerprint, so refreshes can restore the run and changed settings
+  invalidate its result. Local filtering reduces each case to at most 100 candidates, paths are
+  removed, and the model may return only known track IDs. The live Assistant remains local.
   See [`backend/evaluation/README.md`](backend/evaluation/README.md).
 - **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
   dedicated Assistant tab, verify it from the server, and assign a model independently to each
   future task. Every assignment must pass a fixed synthetic structured-output test before it can
   be enabled; changing its connection, model, timeout, or response limit invalidates that test.
   API keys are encrypted at rest and never returned to the browser. The shared execution harness
-  is bounded and provider-neutral, but it is not exposed as a general prompt API. Only an
-  explicitly selected synthetic playlist evaluation suite can currently be sent to a configured
-  provider; no live playlist, track, cleanup, EQ, audio, or library workflow uses it. Local tools
+  is bounded and provider-neutral, but it is not exposed as a general prompt API. Only the fixed,
+  synthetic playlist quality suite can currently be sent to a configured provider through an
+  explicit evaluation action; no live playlist, track, cleanup, EQ, audio, or library workflow
+  uses it. Local tools
   remain the active implementations until each future model feature gets its own reviewed contract.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,

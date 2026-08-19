@@ -29,6 +29,14 @@ calls the model twice. The command may therefore incur provider cost. The flag
 is deliberately required each time; do not use it with a suite containing data
 you are unwilling to disclose.
 
+The AI Setup screen can run the checked-in suite as a durable server job after
+the playlist model role is verified, tested, and enabled. Its progress and safe
+report survive browser refreshes and reopening. The current pass/fail result is
+bound to the exact connection, model, timeout, and response limit; changing or
+reverifying that runtime invalidates the result. Evaluation jobs do not restart
+automatically after a server restart because repeating model calls may duplicate
+provider cost. A deliberate new run remains available from AI Setup.
+
 Use `--json` for the complete `playlist-evaluation-result/v1` result. The JSON
 includes per-case metrics, selected and top-ranked track IDs, failures, and a
 stable response fingerprint suitable for CI artifacts or before/after diffs.

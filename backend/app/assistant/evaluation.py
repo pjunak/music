@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -460,13 +460,18 @@ def _engine_error_result(
 def evaluate_playlist_engine(
     engine: PlaylistSuggestionEngine,
     suite: PlaylistEvaluationSuite,
+    *,
+    on_case_complete: Callable[[int, int], None] | None = None,
 ) -> PlaylistEvaluationResult:
     cases: list[EvaluationCaseResult] = []
-    for case in suite.cases:
+    total_cases = len(suite.cases)
+    for index, case in enumerate(suite.cases, start=1):
         try:
             cases.append(_evaluate_case(engine, case))
         except Exception as exc:
             cases.append(_engine_error_result(case, exc))
+        if on_case_complete is not None:
+            on_case_complete(index, total_cases)
     passed_cases = sum(case.passed for case in cases)
     required_recall = _mean(
         case.metrics.required_selected_recall

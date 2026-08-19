@@ -180,6 +180,10 @@ Runtime data lives outside the image.
   fields, tags, scores, reasons, or evidence; reconstruct the public response from the local
   candidate snapshot. Configured-model CLI evaluation requires the explicit
   `--send-suite-to-provider` disclosure flag. The live API remains `local-planner/v2`.
+- Task-specific model quality checks run as durable, non-restartable jobs and persist their current
+  certification separately from job history. Bind every result to the exact model-role runtime
+  fingerprint, clear it after connection reverification or runtime changes, and keep historical
+  reports synthetic and secret-free. A quality pass does not authorize live-library access.
 - Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a

@@ -9,9 +9,14 @@ from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DbSession
+from app.assistant.model_evaluation import (
+    evaluation_job_parameters,
+    list_role_evaluations,
+)
 from app.assistant.providers.execution import run_provider_conformance
 from app.assistant.providers.schemas import (
     ModelConformanceOut,
+    ModelQualityEvaluationOut,
     ModelRoleOut,
     ModelRoleUpdate,
     ProviderConnectionCreate,
@@ -36,6 +41,9 @@ from app.assistant.providers.service import (
     update_model_role,
 )
 from app.assistant.providers.verification import verify_provider_connection
+from app.jobs.runner import job_runner
+from app.jobs.schemas import BackgroundJobOut, job_out
+from app.jobs.service import enqueue_unique_active_job
 
 router = APIRouter(prefix="/api/assistant/providers", tags=["assistant"])
 
@@ -141,6 +149,50 @@ async def verify_connection(
 @router.get("/roles", response_model=list[ModelRoleOut])
 def get_roles(_user: CurrentUser, db: DbSession) -> list[ModelRoleOut]:
     return list_model_roles(db)
+
+
+@router.get(
+    "/roles/{role_id}/evaluations",
+    response_model=list[ModelQualityEvaluationOut],
+)
+def get_role_evaluations(
+    role_id: str,
+    _user: CurrentUser,
+    db: DbSession,
+) -> list[ModelQualityEvaluationOut]:
+    try:
+        return list_role_evaluations(db, role_id)
+    except ProviderServiceError as exc:
+        _raise_http(exc)
+
+
+@router.post(
+    "/roles/{role_id}/evaluations/{evaluation_id}/jobs",
+    response_model=BackgroundJobOut,
+    status_code=202,
+)
+def start_role_evaluation(
+    role_id: str,
+    evaluation_id: str,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BackgroundJobOut:
+    try:
+        definition, parameters = evaluation_job_parameters(
+            db,
+            role_id,
+            evaluation_id,
+        )
+    except ProviderServiceError as exc:
+        _raise_http(exc)
+    job, created = enqueue_unique_active_job(
+        db,
+        definition.job_kind,
+        parameters,
+    )
+    if created:
+        job_runner.wake()
+    return job_out(job)
 
 
 @router.put("/roles/{role_id}", response_model=ModelRoleOut)

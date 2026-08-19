@@ -112,3 +112,16 @@ class ModelConformanceOut(StrictProviderModel):
     role: ModelRoleOut
     passed: bool
     error_code: str | None
+
+
+class ModelQualityEvaluationOut(StrictProviderModel):
+    evaluation_id: str
+    role_id: str
+    label: str
+    description: str
+    status: Literal["never", "passed", "failed", "stale"]
+    suite_id: str
+    passed_cases: int
+    total_cases: int
+    last_job_id: str | None
+    last_evaluated_at: datetime | None
