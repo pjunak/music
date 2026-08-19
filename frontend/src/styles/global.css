@@ -5910,6 +5910,24 @@ kbd,
   font-size: var(--text-sm);
   line-height: var(--leading-base);
 }
+.assistant-role-card.is-planned {
+  align-content: start;
+}
+.assistant-role-planned-note {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.assistant-role-planned-note strong {
+  font-size: var(--text-sm);
+}
+.assistant-role-planned-note p {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}
 .assistant-role-card form {
   display: flex;
   flex: 1;

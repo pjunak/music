@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.assistant.providers.definitions import OPENAI_COMPATIBLE_ADAPTER
+from app.assistant.providers.definitions import (
+    OPENAI_COMPATIBLE_ADAPTER,
+    STRUCTURED_TEXT_CAPABILITY,
+)
 from app.assistant.providers.transport import (
     ProviderTransportError,
     ProviderUrlError,
@@ -28,6 +31,7 @@ class ProviderVerificationResult:
     verified: bool
     error_code: str | None
     models: tuple[str, ...] = ()
+    capability_ids: tuple[str, ...] = ()
 
 
 def _verify_openai_compatible(
@@ -73,7 +77,12 @@ def _verify_openai_compatible(
             models.append(model_id)
         if len(models) >= _MAX_VERIFIED_MODELS:
             break
-    return ProviderVerificationResult(True, None, tuple(models))
+    return ProviderVerificationResult(
+        True,
+        None,
+        tuple(models),
+        (STRUCTURED_TEXT_CAPABILITY,),
+    )
 
 
 def verify_provider_connection(

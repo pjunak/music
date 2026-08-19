@@ -26,6 +26,11 @@ network calls must not block playback or weaken the local fallback.
 - Ship one initial adapter, `openai-compatible/v1`, behind a registry boundary.
   Supporting a provider means implementing an adapter, not adding provider
   fields to playlist or tag code.
+- Give adapters versioned transport capabilities and roles explicit capability
+  requirements. Verification persists the capabilities actually confirmed by
+  the adapter. Role configuration, conformance testing, enablement, and
+  execution fail closed when those requirements are not satisfied; provider
+  and model names are never capability evidence.
 - Saving a connection never verifies, enables, or invokes it. Verification is
   an explicit authenticated action with a bounded timeout, response-size cap,
   no redirects, safe error codes, and private-network destinations blocked
@@ -38,6 +43,9 @@ network calls must not block playback or weaken the local fallback.
 - Role configuration remains inactive until its connection has verified. This
   slice stores configuration only; local analyzers and `local-planner/v2`
   remain the sole runtime engines.
+- A reserved role is not a usable feature flag. Roles remain unavailable for
+  configuration until their feature-specific transport, quality evaluation,
+  disclosure, consent, and review/commit boundaries are implemented.
 - Provider calls run outside the FastAPI event loop. Future longer model work
   must use the durable background-job runner and the established review-first
   Authoring boundary.
@@ -78,3 +86,6 @@ connection serve several roles. Selected.
 - OpenAI-compatible verification is the first adapter, not a claim that all
   providers expose identical capabilities. Specialized audio providers will
   require their own adapter and verification contract.
+- Capability IDs are versioned contracts. Adding one requires enforcement and
+  regression tests at every setup and execution boundary, not merely a new UI
+  label.

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type {
   ProviderAdapter,
+  ProviderCapability,
   ProviderConnection,
   ProviderConnectionUpdate,
 } from "@/core/assistantProvidersApi";
@@ -15,6 +16,7 @@ interface Props {
   connection: ProviderConnection;
   assignedRoleLabels: string[];
   adapters: ProviderAdapter[];
+  capabilities: ProviderCapability[];
   credentialStorageReady: boolean;
   busy: boolean;
   onUpdate: (
@@ -30,6 +32,7 @@ export function ProviderConnectionCard({
   connection,
   assignedRoleLabels,
   adapters,
+  capabilities,
   credentialStorageReady,
   busy,
   onUpdate,
@@ -72,6 +75,11 @@ export function ProviderConnectionCard({
   }
 
   const models = connection.verified_models;
+  const verifiedCapabilityLabels = connection.verified_capability_ids.map(
+    (capabilityId) =>
+      capabilities.find((capability) => capability.id === capabilityId)?.label ??
+      capabilityId,
+  );
   return (
     <article className="surface-card assistant-provider-card">
       <div className="assistant-provider-card-heading">
@@ -98,7 +106,11 @@ export function ProviderConnectionCard({
           <p>
             {connection.credential_saved
               ? connection.verification_status === "verified"
-                ? "Encrypted on this server and verified for this connection."
+                ? verifiedCapabilityLabels.length > 0
+                  ? `Encrypted on this server. Verified for: ${verifiedCapabilityLabels.join(
+                      " · ",
+                    )}.`
+                  : "Encrypted on this server, but no supported task capability was confirmed."
                 : "Encrypted on this server. Verification is still required before use."
               : "Add a key under Change, then verify this connection before use."}
           </p>
@@ -115,6 +127,13 @@ export function ProviderConnectionCard({
       {connection.verification_status === "failed" ? (
         <p className="assistant-provider-problem" role="status">
           {verificationFailureMessage(connection.verification_error_code)}
+        </p>
+      ) : null}
+      {connection.verification_status === "verified" &&
+      verifiedCapabilityLabels.length === 0 ? (
+        <p className="assistant-provider-problem" role="status">
+          This connection cannot be assigned to a model task until verification
+          confirms a compatible capability.
         </p>
       ) : null}
 

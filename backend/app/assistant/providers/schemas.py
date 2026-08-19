@@ -45,21 +45,31 @@ class ProviderUsageSummary(StrictProviderModel):
         return self
 
 
+class ProviderCapabilityOut(StrictProviderModel):
+    id: str
+    label: str
+    description: str
+
+
 class ProviderAdapterOut(StrictProviderModel):
     id: str
     label: str
     description: str
+    capability_ids: list[str]
 
 
 class ModelRoleDefinitionOut(StrictProviderModel):
     id: str
     label: str
     description: str
+    required_capability_ids: list[str]
+    configuration_available: bool
 
 
 class ProviderFrameworkStatusOut(StrictProviderModel):
     credential_storage_ready: bool
     credential_storage_error: str | None
+    capabilities: list[ProviderCapabilityOut]
     adapters: list[ProviderAdapterOut]
     roles: list[ModelRoleDefinitionOut]
 
@@ -101,6 +111,7 @@ class ProviderConnectionOut(StrictProviderModel):
     verification_status: Literal["never", "verified", "failed"]
     verification_error_code: str | None
     verified_models: list[str]
+    verified_capability_ids: list[str]
     last_verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -130,6 +141,8 @@ class ModelRoleOut(StrictProviderModel):
     role_id: str
     label: str
     description: str
+    required_capability_ids: list[str]
+    configuration_available: bool
     connection_id: str | None
     connection_name: str | None
     model_id: str

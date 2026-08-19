@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import type {
   ModelRole,
   ModelRoleUpdate,
+  ProviderAdapter,
+  ProviderCapability,
   ProviderConnection,
 } from "@/core/assistantProvidersApi";
 
@@ -11,6 +13,8 @@ import { modelTestFailureMessage, roleConnection } from "./providerUi";
 interface Props {
   role: ModelRole;
   connections: ProviderConnection[];
+  adapters: ProviderAdapter[];
+  capabilities: ProviderCapability[];
   credentialStorageReady: boolean;
   busy: boolean;
   testing: boolean;
@@ -19,9 +23,42 @@ interface Props {
   onRemove: (roleId: string) => Promise<void>;
 }
 
+function includesEveryCapability(
+  availableIds: string[] | undefined,
+  requiredIds: string[],
+): boolean {
+  return (
+    availableIds !== undefined &&
+    requiredIds.every((capabilityId) => availableIds.includes(capabilityId))
+  );
+}
+
+function roleStateLabel(
+  role: ModelRole,
+  configured: boolean,
+  credentialSaved: boolean,
+  capabilitiesSatisfied: boolean,
+): string {
+  if (!role.configuration_available) return "Planned";
+  if (role.effective_enabled) return "Enabled";
+  if (role.enabled) {
+    if (!credentialSaved) return "API key removed";
+    if (role.verification_status !== "verified") return "Waiting for verification";
+    if (!capabilitiesSatisfied) return "Capability unavailable";
+    if (role.conformance_status !== "passed") return "Needs model test";
+    return "Stored key unavailable";
+  }
+  if (!configured) return "Not configured";
+  if (role.conformance_status === "passed") return "Tested, switched off";
+  if (role.conformance_status === "failed") return "Model test failed";
+  return "Configured, not tested";
+}
+
 export function ModelRoleCard({
   role,
   connections,
+  adapters,
+  capabilities,
   credentialStorageReady,
   busy,
   testing,
@@ -44,6 +81,22 @@ export function ModelRoleCard({
   }, [role]);
 
   const connection = roleConnection(connections, connectionId);
+  const connectionAdapter = adapters.find(
+    (adapter) => adapter.id === connection?.adapter_id,
+  );
+  const adapterSupportsRole = includesEveryCapability(
+    connectionAdapter?.capability_ids,
+    role.required_capability_ids,
+  );
+  const verifiedCapabilitiesSatisfied = includesEveryCapability(
+    connection?.verified_capability_ids,
+    role.required_capability_ids,
+  );
+  const requiredCapabilityLabels = role.required_capability_ids.map(
+    (capabilityId) =>
+      capabilities.find((capability) => capability.id === capabilityId)?.label ??
+      capabilityId,
+  );
   const configured = role.connection_id !== null;
   const configurationMatches =
     connectionId === (role.connection_id ?? "") &&
@@ -54,15 +107,17 @@ export function ModelRoleCard({
     credentialStorageReady &&
     configured &&
     configurationMatches &&
+    role.configuration_available &&
     connection?.credential_saved === true &&
-    connection?.verification_status === "verified";
+    connection?.verification_status === "verified" &&
+    verifiedCapabilitiesSatisfied;
   const canEnable =
     canTest && role.conformance_status === "passed";
   const listId = `assistant-models-${role.role_id}`;
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    if (!connectionId || !modelId.trim()) return;
+    if (!role.configuration_available || !connectionId || !modelId.trim()) return;
     try {
       await onSave(role.role_id, {
         connection_id: connectionId,
@@ -76,23 +131,44 @@ export function ModelRoleCard({
     }
   }
 
-  const stateLabel = role.effective_enabled
-    ? "Enabled"
-    : role.enabled
-      ? connection?.credential_saved !== true
-        ? "API key removed"
-        : role.verification_status !== "verified"
-        ? "Waiting for verification"
-        : role.conformance_status !== "passed"
-          ? "Needs model test"
-          : "Stored key unavailable"
-      : configured
-        ? role.conformance_status === "passed"
-          ? "Tested, switched off"
-          : role.conformance_status === "failed"
-            ? "Model test failed"
-            : "Configured, not tested"
-        : "Not configured";
+  const stateLabel = roleStateLabel(
+    role,
+    configured,
+    connection?.credential_saved === true,
+    verifiedCapabilitiesSatisfied,
+  );
+
+  if (!role.configuration_available) {
+    return (
+      <article className="surface-card assistant-role-card is-planned">
+        <div className="assistant-role-heading">
+          <div>
+            <span className="assistant-role-state">{stateLabel}</span>
+            <h3>{role.label}</h3>
+          </div>
+        </div>
+        <p>{role.description}</p>
+        <div className="assistant-role-planned-note">
+          <strong>Not configurable yet</strong>
+          <p>
+            This task will require: {requiredCapabilityLabels.join(" · ")}. Its
+            input, verification, quality, and review contracts must be implemented
+            before a model can be assigned.
+          </p>
+        </div>
+        {configured ? (
+          <button
+            className="btn-ghost"
+            type="button"
+            disabled={busy || testing}
+            onClick={() => void onRemove(role.role_id)}
+          >
+            Clear old draft
+          </button>
+        ) : null}
+      </article>
+    );
+  }
 
   return (
     <article className="surface-card assistant-role-card">
@@ -118,16 +194,27 @@ export function ModelRoleCard({
             }}
           >
             <option value="">Choose a connection</option>
-            {connections.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} · {item.credential_saved && item.key_hint
-                  ? item.key_hint
-                  : "no key saved"}
-                {item.credential_saved && item.verification_status === "verified"
-                  ? " · verified"
-                  : ""}
-              </option>
-            ))}
+            {connections.map((item) => {
+              const adapter = adapters.find(
+                (candidate) => candidate.id === item.adapter_id,
+              );
+              const compatible = includesEveryCapability(
+                adapter?.capability_ids,
+                role.required_capability_ids,
+              );
+              return (
+                <option key={item.id} value={item.id} disabled={!compatible}>
+                  {item.name} · {item.credential_saved && item.key_hint
+                    ? item.key_hint
+                    : "no key saved"}
+                  {!compatible
+                    ? " · incompatible connection type"
+                    : item.credential_saved && item.verification_status === "verified"
+                      ? " · verified"
+                      : ""}
+                </option>
+              );
+            })}
           </select>
           <span className="field-hint">
             This choice applies only to {role.label.toLocaleLowerCase()}. Other
@@ -171,8 +258,16 @@ export function ModelRoleCard({
           <p className="field-hint">
             {connection?.credential_saved !== true
               ? "Save an API key on the selected connection before enabling it."
-              : connection.verification_status !== "verified"
+              : !adapterSupportsRole
+                ? `Choose a connection that supports ${requiredCapabilityLabels.join(
+                    " and ",
+                  )}.`
+                : connection.verification_status !== "verified"
                 ? "Verify the selected connection before enabling it."
+                : !verifiedCapabilitiesSatisfied
+                  ? `Verification did not confirm ${requiredCapabilityLabels.join(
+                      " and ",
+                    )} for this connection.`
               : role.conformance_status !== "passed" || !configurationMatches
                 ? "Save and pass the model test before enabling this task."
                 : "Encrypted credential storage is unavailable."}

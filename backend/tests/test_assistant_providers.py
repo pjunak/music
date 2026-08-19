@@ -78,6 +78,7 @@ def _verify_success(monkeypatch: pytest.MonkeyPatch) -> None:
             True,
             None,
             ("planner-large", "tagger-small"),
+            ("structured-text/v1",),
         ),
     )
 
@@ -367,6 +368,24 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
     assert [adapter["id"] for adapter in payload["adapters"]] == [
         "openai-compatible/v1"
     ]
+    assert payload["capabilities"] == [
+        {
+            "id": "structured-text/v1",
+            "label": "Structured text",
+            "description": (
+                "Sends text instructions and receives a validated "
+                "machine-readable result."
+            ),
+        },
+        {
+            "id": "audio-input/v1",
+            "label": "Audio input",
+            "description": (
+                "Accepts bounded audio content through a dedicated provider adapter."
+            ),
+        },
+    ]
+    assert payload["adapters"][0]["capability_ids"] == ["structured-text/v1"]
     assert {role["id"] for role in payload["roles"]} == {
         "music_tagger",
         "playlist_planner",
@@ -376,6 +395,15 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         "audio_analyzer",
     }
     descriptions = {role["id"]: role["description"] for role in payload["roles"]}
+    roles = {role["id"]: role for role in payload["roles"]}
+    assert roles["playlist_planner"]["required_capability_ids"] == [
+        "structured-text/v1"
+    ]
+    assert roles["playlist_planner"]["configuration_available"] is True
+    assert roles["audio_analyzer"]["required_capability_ids"] == [
+        "audio-input/v1"
+    ]
+    assert roles["audio_analyzer"]["configuration_available"] is False
     assert "Reserved" not in descriptions["playlist_planner"]
     assert "Reserved" not in descriptions["music_tagger"]
     assert "Reserved" not in descriptions["tag_cleanup"]
@@ -395,6 +423,7 @@ def test_connection_secret_is_encrypted_and_never_returned(
 
     assert created["credential_saved"] is True
     assert created["key_hint"] == "••••1234"
+    assert created["verified_capability_ids"] == []
     assert secret not in str(created)
     assert "encrypted_api_key" not in created
     listed = auth_client.get("/api/assistant/providers/connections")
@@ -482,6 +511,7 @@ def test_verification_records_models_without_returning_key(
             True,
             None,
             ("planner-large", "tagger-small"),
+            ("structured-text/v1",),
         )
 
     monkeypatch.setattr(
@@ -496,6 +526,9 @@ def test_verification_records_models_without_returning_key(
     assert response.json()["verified"] is True
     assert response.json()["models"] == ["planner-large", "tagger-small"]
     assert response.json()["connection"]["verification_status"] == "verified"
+    assert response.json()["connection"]["verified_capability_ids"] == [
+        "structured-text/v1"
+    ]
     assert observed["args"] == (
         "openai-compatible/v1",
         "https://models.example.test/v1",
@@ -523,6 +556,7 @@ def test_changing_connection_inputs_resets_verification(
     assert response.status_code == 200
     assert response.json()["verification_status"] == "never"
     assert response.json()["verified_models"] == []
+    assert response.json()["verified_capability_ids"] == []
     assert response.json()["last_verified_at"] is None
 
 
@@ -562,6 +596,7 @@ def test_connection_credential_can_be_deleted_and_replaced(
     assert deleted.json()["key_hint"] is None
     assert deleted.json()["verification_status"] == "never"
     assert deleted.json()["verified_models"] == []
+    assert deleted.json()["verified_capability_ids"] == []
     assert deleted.json()["last_verified_at"] is None
     with SessionLocal() as db:
         row = db.get(AssistantProviderConnection, created["id"])
@@ -569,6 +604,7 @@ def test_connection_credential_can_be_deleted_and_replaced(
         assert row.encrypted_api_key == ""
         assert row.api_key_nonce == ""
         assert row.api_key_hint == ""
+        assert row.verified_capabilities_json == "[]"
 
     roles = auth_client.get("/api/assistant/providers/roles")
     planner = next(
@@ -597,7 +633,12 @@ def test_connection_credential_can_be_deleted_and_replaced(
 
     def verify(*args: object, **kwargs: object) -> ProviderVerificationResult:
         observed["args"] = args
-        return ProviderVerificationResult(True, None, ("planner-large",))
+        return ProviderVerificationResult(
+            True,
+            None,
+            ("planner-large",),
+            ("structured-text/v1",),
+        )
 
     monkeypatch.setattr(
         "app.api.assistant_providers.verify_provider_connection",
@@ -631,7 +672,12 @@ def test_verification_result_is_rejected_if_connection_changed_mid_request(
         finish_verification(
             db,
             target,
-            ProviderVerificationResult(True, None, ("stale-model",)),
+            ProviderVerificationResult(
+                True,
+                None,
+                ("stale-model",),
+                ("structured-text/v1",),
+            ),
         )
 
     assert error.value.code == "connection_changed"
@@ -696,6 +742,71 @@ def test_role_requires_verified_connection_and_model_test_before_enablement(
         target = prepare_role_execution(db, "playlist_planner")
     assert target.model_id == "planner-large"
     assert target.api_key == "secret-provider-key-1234"
+
+
+def test_reserved_roles_cannot_be_configured_or_tested(
+    auth_client: TestClient,
+) -> None:
+    created = _create_connection(auth_client)
+
+    configured = auth_client.put(
+        "/api/assistant/providers/roles/eq_assistant",
+        json={
+            "connection_id": created["id"],
+            "model_id": "future-eq-model",
+            "enabled": False,
+        },
+    )
+    tested = auth_client.post("/api/assistant/providers/roles/eq_assistant/test")
+
+    assert configured.status_code == 409
+    assert configured.json()["detail"]["code"] == "role_not_available"
+    assert tested.status_code == 409
+    assert tested.json()["detail"]["code"] == "role_not_available"
+
+
+def test_role_fails_closed_when_verification_does_not_confirm_capability(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _create_connection(auth_client)
+    monkeypatch.setattr(
+        "app.api.assistant_providers.verify_provider_connection",
+        lambda *args, **kwargs: ProviderVerificationResult(
+            True,
+            None,
+            ("planner-large",),
+            (),
+        ),
+    )
+    verified = auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    )
+    role_payload = {
+        "connection_id": created["id"],
+        "model_id": "planner-large",
+        "enabled": False,
+    }
+    saved = auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json=role_payload,
+    )
+    tested = auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/test"
+    )
+    enabled = auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={**role_payload, "enabled": True},
+    )
+
+    assert verified.status_code == 200
+    assert verified.json()["connection"]["verified_capability_ids"] == []
+    assert saved.status_code == 200
+    assert saved.json()["effective_enabled"] is False
+    assert tested.status_code == 409
+    assert tested.json()["detail"]["code"] == "incompatible_connection"
+    assert enabled.status_code == 409
+    assert enabled.json()["detail"]["code"] == "incompatible_connection"
 
 
 def test_failed_reverification_disables_role_effectively_but_keeps_draft(

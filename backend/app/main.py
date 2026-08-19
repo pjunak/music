@@ -85,6 +85,11 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("assistant_model_roles", "conformance_error_code", "VARCHAR(64)"),
     ("assistant_model_roles", "conformance_fingerprint", "VARCHAR(64)"),
     ("assistant_model_roles", "last_conformance_at", "DATETIME"),
+    (
+        "assistant_provider_connections",
+        "verified_capabilities_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    ),
 ]
 
 

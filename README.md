@@ -64,8 +64,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   API keys are encrypted at rest and never returned to the browser. AI Setup shows only whether a
   key is saved plus a masked hint. A saved key can be deleted without deleting its connection or
   role drafts; deletion and replacement both invalidate verification and model-quality gates until
-  the operator explicitly completes them again. The shared execution harness
-  is bounded and provider-neutral, but it is not exposed as a general prompt API. The playlist
+  the operator explicitly completes them again. The shared execution harness is bounded and
+  provider-neutral, but it is not exposed as a general prompt API. Provider adapters declare
+  supported transports such as structured text or future bounded audio input; verification records
+  the capabilities actually confirmed, and tasks accept only compatible verified connections.
+  Reserved future tasks remain visible as planned work but cannot be configured before their
+  feature-specific input, quality, consent, and review contracts exist. The playlist
   playlist planner, metadata music tagger, and manual-tag cleanup reviewer are the first optional
   live-library integrations.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
@@ -189,6 +193,11 @@ strict time and response-size limits and does not send songs, tags, prompts, or 
 saved-key presence separately from verification. Removing a saved key keeps the connection and its
 role choices, but prevents use until a new key is saved, the connection is verified, and the exact
 model configuration passes its tests again.
+
+Connection types and model tasks are linked through versioned capabilities rather than provider or
+model-name guesses. The initial OpenAI-compatible adapter verifies `structured-text/v1`. Future
+audio-capable adapters must implement and verify their own bounded `audio-input/v1` transport before
+the specialized audio-analysis role can be configured.
 
 There is no general migration framework: the schema is created idempotently on boot, and
 compatible additive columns are applied automatically. Renames, drops, and type changes require

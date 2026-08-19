@@ -83,6 +83,7 @@ def test_verification_accepts_unique_bounded_model_ids(
 
     assert result.verified is True
     assert result.models == ("model-b", "model-a")
+    assert result.capability_ids == ("structured-text/v1",)
 
 
 def test_verification_does_not_follow_redirects(

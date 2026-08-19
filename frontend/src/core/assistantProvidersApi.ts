@@ -8,21 +8,31 @@ export type ModelQualityEvaluationStatus =
   | "failed"
   | "stale";
 
+export interface ProviderCapability {
+  id: string;
+  label: string;
+  description: string;
+}
+
 export interface ProviderAdapter {
   id: string;
   label: string;
   description: string;
+  capability_ids: string[];
 }
 
 export interface ModelRoleDefinition {
   id: string;
   label: string;
   description: string;
+  required_capability_ids: string[];
+  configuration_available: boolean;
 }
 
 export interface ProviderFrameworkStatus {
   credential_storage_ready: boolean;
   credential_storage_error: string | null;
+  capabilities: ProviderCapability[];
   adapters: ProviderAdapter[];
   roles: ModelRoleDefinition[];
 }
@@ -38,6 +48,7 @@ export interface ProviderConnection {
   verification_status: ProviderVerificationStatus;
   verification_error_code: string | null;
   verified_models: string[];
+  verified_capability_ids: string[];
   last_verified_at: string | null;
   created_at: string;
   updated_at: string;
@@ -70,6 +81,8 @@ export interface ModelRole {
   role_id: string;
   label: string;
   description: string;
+  required_capability_ids: string[];
+  configuration_available: boolean;
   connection_id: string | null;
   connection_name: string | null;
   model_id: string;

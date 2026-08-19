@@ -66,11 +66,24 @@ import { AssistantAiSetupView } from "./AssistantAiSetupView";
 const frameworkStatus: ProviderFrameworkStatus = {
   credential_storage_ready: true,
   credential_storage_error: null,
+  capabilities: [
+    {
+      id: "structured-text/v1",
+      label: "Structured text",
+      description: "Sends text and receives a validated structured result.",
+    },
+    {
+      id: "audio-input/v1",
+      label: "Audio input",
+      description: "Accepts bounded audio through a dedicated adapter.",
+    },
+  ],
   adapters: [
     {
       id: "openai-compatible/v1",
       label: "OpenAI-compatible API",
       description: "Connects to a provider with a compatible models endpoint.",
+      capability_ids: ["structured-text/v1"],
     },
   ],
   roles: [
@@ -78,6 +91,8 @@ const frameworkStatus: ProviderFrameworkStatus = {
       id: "playlist_planner",
       label: "Playlist planner",
       description: "Plans candidate playlists from reviewed library information.",
+      required_capability_ids: ["structured-text/v1"],
+      configuration_available: true,
     },
   ],
 };
@@ -93,6 +108,7 @@ const connection: ProviderConnection = {
   verification_status: "verified",
   verification_error_code: null,
   verified_models: ["planner-large", "tagger-small"],
+  verified_capability_ids: ["structured-text/v1"],
   last_verified_at: "2026-08-19T10:00:00Z",
   created_at: "2026-08-19T09:00:00Z",
   updated_at: "2026-08-19T10:00:00Z",
@@ -102,6 +118,8 @@ const role: ModelRole = {
   role_id: "playlist_planner",
   label: "Playlist planner",
   description: "Plans candidate playlists from reviewed library information.",
+  required_capability_ids: ["structured-text/v1"],
+  configuration_available: true,
   connection_id: null,
   connection_name: null,
   model_id: "",
@@ -220,6 +238,67 @@ describe("AssistantAiSetupView", () => {
         /other tasks may reuse this key or choose a different connection/i,
       ),
     ).toHaveLength(2);
+    expect(screen.getByText(/Verified for: Structured text/i)).toBeInTheDocument();
+  });
+
+  it("keeps future capability-bound tasks visibly planned and locked", async () => {
+    const plannedAudioRole: ModelRole = {
+      ...role,
+      role_id: "audio_analyzer",
+      label: "Specialized audio analysis",
+      description: "Reserved for a future audio-capable adapter.",
+      required_capability_ids: ["audio-input/v1"],
+      configuration_available: false,
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      role,
+      plannedAudioRole,
+    ]);
+    render(<AssistantAiSetupView />);
+
+    const heading = await screen.findByRole("heading", {
+      name: "Specialized audio analysis",
+    });
+    const card = heading.closest("article");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("Planned")).toBeInTheDocument();
+    expect(
+      within(card as HTMLElement).getByText("Not configurable yet"),
+    ).toBeInTheDocument();
+    expect(
+      within(card as HTMLElement).getByText(/This task will require: Audio input/),
+    ).toBeInTheDocument();
+    expect(
+      within(card as HTMLElement).queryByRole("button", { name: "Save task" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not allow testing when verification lacks the required capability", async () => {
+    const capabilityMissingConnection: ProviderConnection = {
+      ...connection,
+      verified_capability_ids: [],
+    };
+    const configuredRole: ModelRole = {
+      ...role,
+      connection_id: connection.id,
+      connection_name: connection.name,
+      model_id: "planner-large",
+      verification_status: "verified",
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([
+      capabilityMissingConnection,
+    ]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([configuredRole]);
+    render(<AssistantAiSetupView />);
+
+    expect(
+      await screen.findByText(/no supported task capability was confirmed/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Test model" })).toBeDisabled();
+    expect(
+      screen.getByText(/Verification did not confirm Structured text/),
+    ).toBeInTheDocument();
   });
 
   it("saves a provider connection and clears the API key from the form", async () => {
@@ -228,6 +307,7 @@ describe("AssistantAiSetupView", () => {
       ...connection,
       verification_status: "never",
       verified_models: [],
+      verified_capability_ids: [],
       last_verified_at: null,
     });
     render(<AssistantAiSetupView />);
@@ -267,6 +347,7 @@ describe("AssistantAiSetupView", () => {
         ...connection,
         verification_status: "never",
         verified_models: [],
+        verified_capability_ids: [],
         last_verified_at: null,
       },
     ]);
@@ -301,6 +382,7 @@ describe("AssistantAiSetupView", () => {
       key_hint: null,
       verification_status: "never",
       verified_models: [],
+      verified_capability_ids: [],
       last_verified_at: null,
     };
     vi.mocked(assistantProvidersApi.listConnections)

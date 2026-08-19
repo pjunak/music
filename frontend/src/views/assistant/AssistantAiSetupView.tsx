@@ -523,6 +523,17 @@ export function AssistantAiSetupView() {
                   {status.adapters.find((adapter) => adapter.id === adapterId)
                     ?.description ?? "Choose how this provider exposes its models."}
                 </span>
+                <span className="field-hint">
+                  Supports: {status.adapters
+                    .find((adapter) => adapter.id === adapterId)
+                    ?.capability_ids.map(
+                      (capabilityId) =>
+                        status.capabilities.find(
+                          (capability) => capability.id === capabilityId,
+                        )?.label ?? capabilityId,
+                    )
+                    .join(" · ") || "No model-task capabilities"}
+                </span>
               </label>
               <label className="field">
                 <span className="field-label">Provider address</span>
@@ -593,6 +604,7 @@ export function AssistantAiSetupView() {
                     .filter((role) => role.connection_id === connection.id)
                     .map((role) => role.label)}
                   adapters={status.adapters}
+                  capabilities={status.capabilities}
                   credentialStorageReady={status.credential_storage_ready}
                   busy={busyItem === `connection:${connection.id}`}
                   onUpdate={updateConnection}
@@ -613,8 +625,10 @@ export function AssistantAiSetupView() {
             <p>
               Each task independently chooses a connection and model. Several tasks
               may reuse one connection, while specialized tasks may use separate
-              keys. Every saved model must pass a synthetic structured-output test
-              before you can enable it.
+              keys. The server permits only compatible, verified connections. Every
+              available model task must also pass its own synthetic test before you
+              can enable it; planned tasks remain locked until their complete safety
+              and review contract exists.
             </p>
           </div>
           <span>{roles.filter((role) => role.effective_enabled).length} enabled</span>
@@ -631,6 +645,8 @@ export function AssistantAiSetupView() {
                 key={role.role_id}
                 role={role}
                 connections={connections}
+                adapters={status.adapters}
+                capabilities={status.capabilities}
                 credentialStorageReady={status.credential_storage_ready}
                 busy={busyItem === `role:${role.role_id}`}
                 testing={busyItem === `role-test:${role.role_id}`}

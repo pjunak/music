@@ -173,6 +173,11 @@ Runtime data lives outside the image.
   Removing or replacing a connection credential keeps role drafts but resets verification,
   conformance, and quality results, so enabled roles remain ineffective until the new credential is
   saved and every gate passes again.
+  Adapters declare transport capabilities, successful verification persists the capabilities
+  actually confirmed, and roles declare their required capabilities. Enforce compatibility again
+  during role save, testing, enablement, and execution; never infer it from provider or model names.
+  Roles without a complete feature, quality, consent, and review contract stay explicitly
+  unavailable for configuration even if their future role ID is already reserved.
   Never return or log a provider key, never infer provider capabilities from a saved URL, and never
   enable a role until the operator explicitly verifies its connection and its exact runtime
   configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the

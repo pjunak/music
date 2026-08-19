@@ -165,6 +165,7 @@ def _configure_quality_passed_tagger(
             True,
             None,
             ("tagger-small",),
+            ("structured-text/v1",),
         ),
     )
     assert client.post(

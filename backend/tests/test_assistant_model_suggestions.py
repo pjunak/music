@@ -126,6 +126,7 @@ def _configure_quality_passed_model(
             True,
             None,
             ("planner-large",),
+            ("structured-text/v1",),
         ),
     )
     assert client.post(

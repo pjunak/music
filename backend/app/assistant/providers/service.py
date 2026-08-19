@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -20,6 +21,9 @@ from app.assistant.providers.definitions import (
     MODEL_ROLES,
     PROVIDER_ADAPTER_BY_ID,
     PROVIDER_ADAPTERS,
+    PROVIDER_CAPABILITIES,
+    PROVIDER_CAPABILITY_BY_ID,
+    ModelRoleDefinition,
 )
 from app.assistant.providers.execution import (
     ProviderConformanceResult,
@@ -30,6 +34,7 @@ from app.assistant.providers.schemas import (
     ModelRoleOut,
     ModelRoleUpdate,
     ProviderAdapterOut,
+    ProviderCapabilityOut,
     ProviderConnectionCreate,
     ProviderConnectionOut,
     ProviderConnectionUpdate,
@@ -115,6 +120,26 @@ def _adapter_exists(adapter_id: str) -> None:
         )
 
 
+def _configurable_role(role_id: str) -> ModelRoleDefinition:
+    definition = MODEL_ROLE_BY_ID.get(role_id)
+    if definition is None:
+        raise ProviderServiceError("role_not_found", "Model role not found.", 404)
+    if not definition.configuration_available:
+        raise ProviderServiceError(
+            "role_not_available",
+            "This model task is planned but is not available yet.",
+            409,
+        )
+    return definition
+
+
+def _capabilities_satisfy(
+    available_ids: Iterable[str],
+    required_ids: Iterable[str],
+) -> bool:
+    return set(required_ids).issubset(available_ids)
+
+
 def _unique_name(db: Session, name: str, *, excluding_id: str | None = None) -> None:
     statement = select(AssistantProviderConnection.id).where(
         func.lower(AssistantProviderConnection.name) == name.casefold()
@@ -129,14 +154,41 @@ def _unique_name(db: Session, name: str, *, excluding_id: str | None = None) -> 
         )
 
 
-def _models(row: AssistantProviderConnection) -> list[str]:
+def _bounded_json_strings(value_json: str, *, limit: int) -> list[str]:
     try:
-        value = json.loads(row.verified_models_json)
+        value = json.loads(value_json)
     except json.JSONDecodeError:
         return []
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, str) and 0 < len(item) <= 256]
+    result: list[str] = []
+    for item in value:
+        if (
+            isinstance(item, str)
+            and 0 < len(item) <= 256
+            and item not in result
+        ):
+            result.append(item)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _models(row: AssistantProviderConnection) -> list[str]:
+    return _bounded_json_strings(row.verified_models_json, limit=200)
+
+
+def _verified_capability_ids(row: AssistantProviderConnection) -> list[str]:
+    if row.verification_status != "verified":
+        return []
+    return [
+        capability_id
+        for capability_id in _bounded_json_strings(
+            row.verified_capabilities_json,
+            limit=len(PROVIDER_CAPABILITIES),
+        )
+        if capability_id in PROVIDER_CAPABILITY_BY_ID
+    ]
 
 
 def _verification_status(
@@ -182,6 +234,7 @@ def connection_out(row: AssistantProviderConnection) -> ProviderConnectionOut:
         verification_status=_verification_status(row.verification_status),
         verification_error_code=row.verification_error_code,
         verified_models=_models(row),
+        verified_capability_ids=_verified_capability_ids(row),
         last_verified_at=row.last_verified_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -193,11 +246,20 @@ def framework_status() -> ProviderFrameworkStatusOut:
     return ProviderFrameworkStatusOut(
         credential_storage_ready=ready,
         credential_storage_error=error,
+        capabilities=[
+            ProviderCapabilityOut(
+                id=capability.id,
+                label=capability.label,
+                description=capability.description,
+            )
+            for capability in PROVIDER_CAPABILITIES
+        ],
         adapters=[
             ProviderAdapterOut(
                 id=adapter.id,
                 label=adapter.label,
                 description=adapter.description,
+                capability_ids=list(adapter.capability_ids),
             )
             for adapter in PROVIDER_ADAPTERS
         ],
@@ -206,6 +268,8 @@ def framework_status() -> ProviderFrameworkStatusOut:
                 id=role.id,
                 label=role.label,
                 description=role.description,
+                required_capability_ids=list(role.required_capability_ids),
+                configuration_available=role.configuration_available,
             )
             for role in MODEL_ROLES
         ],
@@ -327,6 +391,7 @@ def update_connection(
         row.verification_status = "never"
         row.verification_error_code = None
         row.verified_models_json = "[]"
+        row.verified_capabilities_json = "[]"
         row.last_verified_at = None
         _reset_role_conformance_for_connection(db, row.id)
     row.updated_at = utcnow()
@@ -371,6 +436,7 @@ def delete_connection_credential(
     row.verification_status = "never"
     row.verification_error_code = None
     row.verified_models_json = "[]"
+    row.verified_capabilities_json = "[]"
     row.last_verified_at = None
     row.updated_at = utcnow()
     _reset_role_conformance_for_connection(db, row.id)
@@ -387,6 +453,7 @@ def _connection_fingerprint(row: AssistantProviderConnection) -> str:
             row.base_url,
             row.encrypted_api_key,
             row.api_key_nonce,
+            row.verified_capabilities_json,
             "1" if row.allow_private_network else "0",
         )
     )
@@ -423,6 +490,19 @@ def finish_verification(
     row.verification_error_code = result.error_code
     row.verified_models_json = json.dumps(
         list(result.models) if result.verified else [],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    adapter = PROVIDER_ADAPTER_BY_ID.get(row.adapter_id)
+    supported_capabilities = set(adapter.capability_ids) if adapter is not None else set()
+    verified_capability_ids = [
+        capability_id
+        for capability_id in result.capability_ids
+        if capability_id in supported_capabilities
+        and capability_id in PROVIDER_CAPABILITY_BY_ID
+    ]
+    row.verified_capabilities_json = json.dumps(
+        verified_capability_ids if result.verified else [],
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -516,10 +596,19 @@ def _role_out(
         else None
     )
     conformance_status = _conformance_status(row, connection)
+    verified_capabilities = (
+        set(_verified_capability_ids(connection)) if connection is not None else set()
+    )
+    capabilities_satisfied = _capabilities_satisfy(
+        verified_capabilities,
+        definition.required_capability_ids,
+    )
     return ModelRoleOut(
         role_id=definition.id,
         label=definition.label,
         description=definition.description,
+        required_capability_ids=list(definition.required_capability_ids),
+        configuration_available=definition.configuration_available,
         connection_id=row.connection_id if row is not None else None,
         connection_name=connection.name if connection is not None else None,
         model_id=row.model_id if row is not None else "",
@@ -527,6 +616,8 @@ def _role_out(
         effective_enabled=(
             row is not None
             and row.enabled
+            and definition.configuration_available
+            and capabilities_satisfied
             and verification_status == "verified"
             and conformance_status == "passed"
             and credential_available
@@ -607,13 +698,32 @@ def update_model_role(
     role_id: str,
     payload: ModelRoleUpdate,
 ) -> ModelRoleOut:
-    if role_id not in MODEL_ROLE_BY_ID:
-        raise ProviderServiceError("role_not_found", "Model role not found.", 404)
+    definition = _configurable_role(role_id)
     connection = get_connection(db, payload.connection_id)
+    adapter = PROVIDER_ADAPTER_BY_ID.get(connection.adapter_id)
+    supported_capabilities = set(adapter.capability_ids) if adapter is not None else set()
+    if not _capabilities_satisfy(
+        supported_capabilities,
+        definition.required_capability_ids,
+    ):
+        raise ProviderServiceError(
+            "incompatible_connection",
+            "This connection type does not support the capabilities required by this task.",
+            409,
+        )
     if payload.enabled and connection.verification_status != "verified":
         raise ProviderServiceError(
             "connection_not_verified",
             "Verify this provider connection before enabling the role.",
+            409,
+        )
+    if payload.enabled and not _capabilities_satisfy(
+        _verified_capability_ids(connection),
+        definition.required_capability_ids,
+    ):
+        raise ProviderServiceError(
+            "incompatible_connection",
+            "Verify a provider connection with the capabilities required by this task.",
             409,
         )
     if payload.enabled:
@@ -698,8 +808,7 @@ def prepare_role_execution_details(
 ) -> ResolvedRoleExecution:
     """Resolve execution plus the exact runtime fingerprint used by quality gates."""
 
-    if role_id not in MODEL_ROLE_BY_ID:
-        raise ProviderServiceError("role_not_found", "Model role not found.", 404)
+    definition = _configurable_role(role_id)
     row = db.get(AssistantModelRole, role_id)
     if row is None or not row.enabled:
         raise ProviderServiceError(
@@ -712,6 +821,15 @@ def prepare_role_execution_details(
         raise ProviderServiceError(
             "connection_not_verified",
             "Verify this provider connection before using the role.",
+            409,
+        )
+    if not _capabilities_satisfy(
+        _verified_capability_ids(connection),
+        definition.required_capability_ids,
+    ):
+        raise ProviderServiceError(
+            "incompatible_connection",
+            "The provider connection lacks a capability required by this task.",
             409,
         )
     if _conformance_status(row, connection) != "passed":
@@ -728,8 +846,7 @@ def prepare_role_execution_details(
 
 
 def prepare_role_conformance(db: Session, role_id: str) -> ConformanceTarget:
-    if role_id not in MODEL_ROLE_BY_ID:
-        raise ProviderServiceError("role_not_found", "Model role not found.", 404)
+    definition = _configurable_role(role_id)
     row = db.get(AssistantModelRole, role_id)
     if row is None:
         raise ProviderServiceError(
@@ -742,6 +859,15 @@ def prepare_role_conformance(db: Session, role_id: str) -> ConformanceTarget:
         raise ProviderServiceError(
             "connection_not_verified",
             "Verify this provider connection before testing the model.",
+            409,
+        )
+    if not _capabilities_satisfy(
+        _verified_capability_ids(connection),
+        definition.required_capability_ids,
+    ):
+        raise ProviderServiceError(
+            "incompatible_connection",
+            "The provider connection lacks a capability required by this task.",
             409,
         )
     return ConformanceTarget(

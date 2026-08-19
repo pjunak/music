@@ -139,6 +139,7 @@ def _configure_enabled_cleanup_role(
             True,
             None,
             ("cleanup-small",),
+            ("structured-text/v1",),
         ),
     )
     assert client.post(
