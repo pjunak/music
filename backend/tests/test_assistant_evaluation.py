@@ -121,8 +121,8 @@ def test_checked_in_playlist_evaluation_suite_passes() -> None:
 
     assert result.passed is True
     assert result.engine_id == "local-planner/v2"
-    assert result.summary.cases == 5
-    assert result.summary.passed_cases == 5
+    assert result.summary.cases == 8
+    assert result.summary.passed_cases == 8
     assert result.summary.mean_precision_at_k == 1.0
     assert result.summary.mean_recall_at_k == 1.0
     assert result.summary.mean_order_pair_accuracy == 1.0
@@ -197,8 +197,8 @@ def test_playlist_evaluation_cli_supports_human_and_json_output(
 ) -> None:
     assert cli_main(["evaluate-playlists", str(SUITE_PATH)]) == 0
     human = capsys.readouterr().out
-    assert "PASS local-dnd-playlist-baseline" in human
-    assert "5/5 cases passed" in human
+    assert "PASS local-dnd-playlist-baseline-v2" in human
+    assert "8/8 cases passed" in human
 
     assert cli_main(["evaluate-playlists", str(SUITE_PATH), "--json"]) == 0
     output = capsys.readouterr().out

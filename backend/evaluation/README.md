@@ -36,6 +36,8 @@ bound to the exact connection, model, timeout, and response limit; changing or
 reverifying that runtime invalidates the result. Evaluation jobs do not restart
 automatically after a server restart because repeating model calls may duplicate
 provider cost. A deliberate new run remains available from AI Setup.
+Suite IDs are certification versions: changing cases or expectations requires a
+new ID so every pass against the prior suite becomes stale and must be rerun.
 
 Use `--json` for the complete `playlist-evaluation-result/v1` result. The JSON
 includes per-case metrics, selected and top-ranked track IDs, failures, and a
@@ -77,6 +79,16 @@ when an operator can state which tracks are acceptable and why, especially for:
 Do not copy private library paths, credentials, or media into the suite. Use
 synthetic names and evidence. Keep relevant sets broad enough that the harness
 measures playlist quality instead of freezing one accidental exact ranking.
+
+## Music metadata tagging evaluation
+
+`evaluation/music-tagging-v1.json` applies the same versioned quality-gate rule
+to the optional metadata tagger. Its synthetic cases cover explicit tavern,
+dungeon, castle, travel, seafaring, and temple contexts; sparse metadata;
+instructions embedded in untrusted metadata; forbidden tags; and the confidence
+and evidence expected for reviewable suggestions. The tagger must return every
+numeric track ID exactly once, use only the fixed D&D vocabulary, and avoid
+inventing confident context when the metadata is insufficient.
 
 The configured model is a hybrid ranker behind the same
 `PlaylistSuggestionEngine` contract. It may return only ranked and selected

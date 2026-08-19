@@ -15,6 +15,8 @@ from app.assistant.model_tagger import (
     MODEL_TAGGER_OUTPUT_CONTRACT,
     ModelTaggerError,
     ModelTagTrackInput,
+    TagQualitySuite,
+    evaluate_music_tagger,
     tag_tracks,
 )
 from app.assistant.model_tagging import MODEL_TAGGING_JOB_KIND
@@ -96,6 +98,9 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
         "crypt": ["dungeon", "dark", "eerie"],
         "crown guard": ["castle", "heroic"],
         "green hills": ["travel", "wilderness", "calm"],
+        "quiet tavern lullaby": ["tavern", "rest", "calm"],
+        "black sails": ["seafaring", "combat", "tense"],
+        "temple vigil": ["medieval", "temple", "mysterious"],
     }
     for marker, values in mapping.items():
         if marker in text:
@@ -265,6 +270,64 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
     with pytest.raises(ModelTaggerError) as incomplete:
         tag_tracks(tracks, missing)
     assert incomplete.value.code == "model_output_schema_invalid"
+
+
+def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
+    suite = TagQualitySuite.model_validate(
+        {
+            "schema_version": "assistant-music-tagger-evaluation/v1",
+            "id": "confidence-evidence-boundary",
+            "cases": [
+                {
+                    "id": "explicit-tavern",
+                    "description": "Explicit metadata needs supported confidence",
+                    "track": {
+                        "track_id": 1,
+                        "title": "Tavern Song",
+                        "display_title": "",
+                        "artist": "",
+                        "album": "",
+                        "origin": "",
+                        "genre": "folk",
+                        "length_s": 180,
+                        "bpm": None,
+                    },
+                    "required_tags": ["tavern"],
+                    "forbidden_tags": [],
+                    "allowed_confidences": ["high", "medium"],
+                    "minimum_evidence_items": 1,
+                }
+            ],
+        }
+    )
+
+    def weak_result(_request: StructuredModelRequest) -> StructuredModelResult:
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tags": ["tavern"],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                ],
+            },
+        )
+
+    result = evaluate_music_tagger(weak_result, suite)
+
+    assert result.passed is False
+    assert result.cases[0].failures == [
+        "Returned disallowed confidence: low",
+        "Returned too little evidence: expected at least 1 item(s)",
+    ]
 
 
 def test_model_tagging_endpoints_require_authentication(client: TestClient) -> None:

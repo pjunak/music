@@ -312,6 +312,6 @@ def test_reference_model_planner_passes_provider_neutral_suite() -> None:
 
     assert result.passed is True
     assert result.engine_id == "model-playlist-planner/v1"
-    assert result.summary.passed_cases == 5
+    assert result.summary.passed_cases == 8
     assert all(case.metrics.contract_valid for case in result.cases)
     assert all(case.metrics.deterministic is True for case in result.cases)

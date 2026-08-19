@@ -36,6 +36,11 @@ _MODEL_TAG_SET = frozenset(MODEL_TAG_VOCABULARY)
 
 BoundedText = Annotated[str, Field(max_length=512)]
 BoundedEvidence = Annotated[str, Field(min_length=1, max_length=512)]
+TagConfidence = Literal["high", "medium", "low"]
+
+
+def _all_tag_confidences() -> list[TagConfidence]:
+    return ["high", "medium", "low"]
 
 
 class _StrictModel(BaseModel):
@@ -68,7 +73,7 @@ class ModelTagTrackOutput(_StrictModel):
     energy: float = Field(ge=0.0, le=1.0)
     brightness: float = Field(ge=0.0, le=1.0)
     tension: float = Field(ge=0.0, le=1.0)
-    confidence: Literal["high", "medium", "low"]
+    confidence: TagConfidence
     evidence: list[BoundedEvidence] = Field(max_length=4)
 
     @model_validator(mode="after")
@@ -100,6 +105,12 @@ class TagQualityCase(_StrictModel):
     track: ModelTagTrackInput
     required_tags: list[str] = Field(max_length=MAX_MODEL_TAGS_PER_TRACK)
     forbidden_tags: list[str] = Field(max_length=MAX_MODEL_TAGS_PER_TRACK)
+    allowed_confidences: list[TagConfidence] = Field(
+        default_factory=_all_tag_confidences,
+        min_length=1,
+        max_length=3,
+    )
+    minimum_evidence_items: int = Field(default=0, ge=0, le=4)
 
     @model_validator(mode="after")
     def valid_expectations(self) -> TagQualityCase:
@@ -108,6 +119,8 @@ class TagQualityCase(_StrictModel):
             raise ValueError("evaluation tags must use the controlled vocabulary")
         if set(self.required_tags) & set(self.forbidden_tags):
             raise ValueError("required and forbidden tags must be disjoint")
+        if len(set(self.allowed_confidences)) != len(self.allowed_confidences):
+            raise ValueError("allowed confidences must be unique")
         return self
 
 
@@ -221,6 +234,15 @@ def evaluate_music_tagger(
                 failures.append(f"Missing required tags: {', '.join(missing)}")
             if forbidden:
                 failures.append(f"Returned forbidden tags: {', '.join(forbidden)}")
+            if profile.confidence not in case.allowed_confidences:
+                failures.append(
+                    f"Returned disallowed confidence: {profile.confidence}"
+                )
+            if len(profile.evidence) < case.minimum_evidence_items:
+                failures.append(
+                    "Returned too little evidence: "
+                    f"expected at least {case.minimum_evidence_items} item(s)"
+                )
         except ModelTaggerError as exc:
             failures.append(f"Tagger error: {exc.code}")
         results.append(

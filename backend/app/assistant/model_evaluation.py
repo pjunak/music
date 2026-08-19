@@ -77,7 +77,7 @@ PLAYLIST_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic D&D playlist scenarios through this model. "
         "No songs or live library data are sent."
     ),
-    suite_id="local-dnd-playlist-baseline",
+    suite_id="local-dnd-playlist-baseline-v2",
     suite_path=_PLAYLIST_SUITE_PATH,
     job_kind=PLAYLIST_QUALITY_JOB_KIND,
 )
@@ -90,7 +90,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic D&D metadata-tagging cases through this model. "
         "No songs or live library data are sent."
     ),
-    suite_id="dnd-metadata-tagging-baseline",
+    suite_id="dnd-metadata-tagging-baseline-v2",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -153,7 +153,10 @@ def evaluation_out(
     status: Literal["never", "passed", "failed", "stale"] = "never"
     if row is not None:
         current_fingerprint = _current_role_fingerprint(db, definition.role_id)
-        if current_fingerprint != row.role_fingerprint:
+        if (
+            current_fingerprint != row.role_fingerprint
+            or row.suite_id != definition.suite_id
+        ):
             status = "stale"
         elif row.status in {"passed", "failed"}:
             status = cast(
@@ -166,7 +169,7 @@ def evaluation_out(
         label=definition.label,
         description=definition.description,
         status=status,
-        suite_id=row.suite_id if row is not None else definition.suite_id,
+        suite_id=definition.suite_id,
         passed_cases=row.passed_cases if row is not None else 0,
         total_cases=row.total_cases if row is not None else 0,
         last_job_id=row.job_id if row is not None else None,

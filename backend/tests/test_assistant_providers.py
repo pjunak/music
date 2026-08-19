@@ -30,6 +30,7 @@ from app.assistant.providers.service import (
 from app.assistant.providers.verification import ProviderVerificationResult
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
 
@@ -223,10 +224,10 @@ def test_playlist_model_quality_job_persists_progress_and_current_gate(
     job_id = started.json()["id"]
     finished = _wait_for_job(auth_client, job_id, {"succeeded"})
     assert finished["kind"] == PLAYLIST_QUALITY_JOB_KIND
-    assert finished["progress_current"] == 5
-    assert finished["progress_total"] == 5
+    assert finished["progress_current"] == 8
+    assert finished["progress_total"] == 8
     assert finished["result"]["evaluation"]["passed"] is True
-    assert finished["result"]["evaluation"]["summary"]["passed_cases"] == 5
+    assert finished["result"]["evaluation"]["summary"]["passed_cases"] == 8
     assert "secret-provider-key-1234" not in json.dumps(finished)
     assert "path" not in json.dumps(finished["parameters"])
 
@@ -250,9 +251,9 @@ def test_playlist_model_quality_job_persists_progress_and_current_gate(
                 "No songs or live library data are sent."
             ),
             "status": "passed",
-            "suite_id": "local-dnd-playlist-baseline",
-            "passed_cases": 5,
-            "total_cases": 5,
+            "suite_id": "local-dnd-playlist-baseline-v2",
+            "passed_cases": 8,
+            "total_cases": 8,
             "last_job_id": job_id,
             "last_evaluated_at": quality.json()[0]["last_evaluated_at"],
         }
@@ -295,6 +296,39 @@ def test_playlist_quality_gate_is_invalidated_by_runtime_change(
     assert quality.json()[0]["last_job_id"] is None
 
 
+def test_playlist_quality_status_is_stale_when_suite_version_changes(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enabled_playlist_role(auth_client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_evaluation.execute_structured_model_request",
+        _reference_playlist_model,
+    )
+    started = auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/"
+        "evaluations/playlist-quality-v1/jobs"
+    )
+    finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+    with SessionLocal() as db:
+        row = db.get(
+            AssistantModelEvaluation,
+            ("playlist_planner", "playlist-quality-v1"),
+        )
+        assert row is not None
+        row.suite_id = "local-dnd-playlist-baseline-v1"
+        db.commit()
+
+    quality = auth_client.get(
+        "/api/assistant/providers/roles/playlist_planner/evaluations"
+    )
+
+    assert quality.status_code == 200
+    assert quality.json()[0]["status"] == "stale"
+    assert quality.json()[0]["suite_id"] == "local-dnd-playlist-baseline-v2"
+    assert quality.json()[0]["last_job_id"] == finished["id"]
+
+
 def test_failed_playlist_quality_is_a_completed_report_not_a_broken_job(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -315,10 +349,10 @@ def test_failed_playlist_quality_is_a_completed_report_not_a_broken_job(
     ).json()[0]
 
     assert finished["result"]["evaluation"]["passed"] is False
-    assert finished["result"]["evaluation"]["summary"]["failed_cases"] == 5
+    assert finished["result"]["evaluation"]["summary"]["failed_cases"] == 8
     assert quality["status"] == "failed"
     assert quality["passed_cases"] == 0
-    assert quality["total_cases"] == 5
+    assert quality["total_cases"] == 8
 
 
 def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> None:

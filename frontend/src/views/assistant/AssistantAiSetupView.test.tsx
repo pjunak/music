@@ -123,7 +123,7 @@ const qualityEvaluation: ModelQualityEvaluation = {
     "No songs or live library data are sent."
   ),
   status: "never",
-  suite_id: "local-dnd-playlist-baseline",
+  suite_id: "local-dnd-playlist-baseline-v2",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -150,7 +150,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Music tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "local-dnd-music-tagging-baseline",
+  suite_id: "dnd-metadata-tagging-baseline-v2",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
