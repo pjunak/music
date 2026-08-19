@@ -34,6 +34,28 @@ class TrackAnalysisProfile:
     confidence: Literal["high", "medium", "low"]
 
 
+class TrackSignalProfile(Protocol):
+    """Current signal evidence supplied independently from semantic tags."""
+
+    @property
+    def analyzer_id(self) -> str: ...
+
+    @property
+    def energy(self) -> float: ...
+
+    @property
+    def brightness(self) -> float: ...
+
+    @property
+    def tension(self) -> float: ...
+
+    @property
+    def tempo_bpm(self) -> float | None: ...
+
+    @property
+    def confidence(self) -> Literal["high", "medium", "low"]: ...
+
+
 class PlaylistSuggestionEngine(Protocol):
     """Provider-independent boundary used by the authenticated API."""
 
@@ -45,4 +67,5 @@ class PlaylistSuggestionEngine(Protocol):
         request: PlaylistSuggestionRequest,
         profiles: Mapping[int, TrackAnalysisProfile] | None = None,
         manual_tags: Mapping[int, Sequence[str]] | None = None,
+        signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
     ) -> PlaylistSuggestionResponse: ...

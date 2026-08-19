@@ -34,7 +34,7 @@ import { toast } from "@/core/toast";
 import { PlaylistBuilderView } from "./PlaylistBuilderView";
 
 const suggestion: PlaylistSuggestion = {
-  engine: "local-metadata/v1",
+  engine: "local-planner/v2",
   library_tracks: 24,
   eligible_tracks: 22,
   intent: {
@@ -43,6 +43,12 @@ const suggestion: PlaylistSuggestion = {
     energy: 0.48,
     brightness: 0.21,
     tension: 0.86,
+  },
+  plan: {
+    energy_curve: "rising",
+    selected_tracks: 2,
+    selected_duration_s: 420,
+    audio_profile_tracks: 1,
   },
   candidates: [
     {
@@ -62,6 +68,16 @@ const suggestion: PlaylistSuggestion = {
       confidence: "high",
       reasons: ["Metadata matches: rainy", "92 BPM supports the requested pace"],
       default_selected: true,
+      sequence_position: 1,
+      planning_energy: 0.48,
+      audio_signal: {
+        analyzer_id: "local-audio/v1",
+        energy: 0.44,
+        brightness: 0.2,
+        tension: 0.8,
+        tempo_bpm: 91.8,
+        confidence: "high",
+      },
     },
     {
       track_id: 12,
@@ -80,6 +96,9 @@ const suggestion: PlaylistSuggestion = {
       confidence: "medium",
       reasons: ["Genre metadata: ambient"],
       default_selected: true,
+      sequence_position: 2,
+      planning_energy: 0.61,
+      audio_signal: null,
     },
   ],
 };
@@ -136,11 +155,18 @@ describe("PlaylistBuilderView", () => {
     renderView();
 
     await user.type(screen.getByLabelText("Mood or scene"), "dark rainy investigation");
+    await user.selectOptions(screen.getByLabelText("Playlist flow"), "rising");
     await user.click(screen.getByRole("button", { name: "Find matching songs" }));
 
     expect(await screen.findByText("Rainy Alley")).toBeInTheDocument();
+    expect(assistantApi.suggestPlaylist).toHaveBeenCalledWith(
+      expect.objectContaining({ energy_curve: "rising" }),
+    );
     expect(screen.getByText("Your tags")).toBeInTheDocument();
     expect(screen.getAllByText("Analysis")).toHaveLength(2);
+    expect(screen.getByText("Audio signal")).toBeInTheDocument();
+    expect(screen.getByText("≈92 BPM")).toBeInTheDocument();
+    expect(screen.getByText(/Rising intensity/)).toBeInTheDocument();
     expect(screen.getByText("Distant Footsteps")).toBeInTheDocument();
     expect(screen.getByRole("meter", { name: "Tension" })).toHaveAttribute(
       "aria-valuenow",

@@ -5188,6 +5188,11 @@ kbd,
   color: var(--muted-strong);
   background: var(--surface-2);
 }
+.assistant-candidate-tag-row.is-signal > span:not(:first-child) {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
 
 /* --- settings view --- */
 

@@ -1,8 +1,16 @@
 import { EmptyState } from "@/components/EmptyState";
 import type {
+  PlaylistEnergyCurve,
   PlaylistSuggestion,
   PlaylistSuggestionCandidate,
 } from "@/core/api";
+
+const ENERGY_CURVE_LABELS: Record<PlaylistEnergyCurve, string> = {
+  steady: "Steady flow",
+  rising: "Rising intensity",
+  falling: "Falling intensity",
+  arc: "Build and resolve arc",
+};
 
 interface Props {
   suggestion: PlaylistSuggestion | null;
@@ -50,9 +58,8 @@ export function PlaylistSuggestionResults({
       <div className="assistant-results">
         <div className="surface-card assistant-results-empty">
           <EmptyState title="Your library stays private and local">
-            Start with a mood. This first engine makes no remote calls and does not
-            claim to hear the audio; it explains which metadata and tempo signals
-            influenced each match.
+            Start with a mood. The local planner makes no remote calls and clearly
+            separates your tags, metadata, and measured audio-signal evidence.
           </EmptyState>
         </div>
       </div>
@@ -68,6 +75,7 @@ export function PlaylistSuggestionResults({
             <h2>Mood profile</h2>
           </div>
           <span>
+            {ENERGY_CURVE_LABELS[suggestion.plan.energy_curve]} ·{" "}
             {suggestion.eligible_tracks} of {suggestion.library_tracks} tracks eligible
           </span>
         </div>
@@ -129,13 +137,23 @@ export function PlaylistSuggestionResults({
                     onChange={() => onToggleTrack(candidate.track_id)}
                     aria-label={`Include ${displayName(candidate)}`}
                   />
-                  <span className="assistant-rank">{index + 1}</span>
+                  <span
+                    className="assistant-rank"
+                    title={
+                      candidate.sequence_position === null
+                        ? "Alternate suggestion"
+                        : `Planned position ${candidate.sequence_position}`
+                    }
+                  >
+                    {candidate.sequence_position ?? index + 1}
+                  </span>
                   <span className="assistant-candidate-copy">
                     <strong>{displayName(candidate)}</strong>
                     <span className="assistant-candidate-meta">
                       {candidate.artist || "Unknown artist"}
                       {candidate.album ? ` · ${candidate.album}` : ""}
                       {candidate.bpm !== null ? ` · ${candidate.bpm} BPM` : ""}
+                      {` · ${Math.round(candidate.planning_energy * 100)}% planned energy`}
                     </span>
                     <span className="assistant-reasons">
                       {candidate.reasons.join(" · ")}
@@ -157,6 +175,20 @@ export function PlaylistSuggestionResults({
                         {candidate.analysis_tags.map((tag) => (
                           <span key={tag}>{tag}</span>
                         ))}
+                      </span>
+                    ) : null}
+                    {candidate.audio_signal !== null ? (
+                      <span className="assistant-candidate-tag-row is-signal">
+                        <span>Audio signal</span>
+                        <span>
+                          {Math.round(candidate.audio_signal.energy * 100)}% energy
+                        </span>
+                        {candidate.audio_signal.tempo_bpm !== null ? (
+                          <span>
+                            ≈{Math.round(candidate.audio_signal.tempo_bpm)} BPM
+                          </span>
+                        ) : null}
+                        <span>{candidate.audio_signal.confidence} confidence</span>
                       </span>
                     ) : null}
                   </span>

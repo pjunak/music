@@ -262,6 +262,24 @@ export interface PlaylistSuggestionIntent {
   tension: number;
 }
 
+export type PlaylistEnergyCurve = "steady" | "rising" | "falling" | "arc";
+
+export interface PlaylistSuggestionAudioSignal {
+  analyzer_id: string;
+  energy: number;
+  brightness: number;
+  tension: number;
+  tempo_bpm: number | null;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface PlaylistSuggestionPlan {
+  energy_curve: PlaylistEnergyCurve;
+  selected_tracks: number;
+  selected_duration_s: number;
+  audio_profile_tracks: number;
+}
+
 export interface PlaylistSuggestionCandidate {
   track_id: number;
   path: string;
@@ -279,6 +297,9 @@ export interface PlaylistSuggestionCandidate {
   confidence: "high" | "medium" | "low";
   reasons: string[];
   default_selected: boolean;
+  sequence_position: number | null;
+  planning_energy: number;
+  audio_signal: PlaylistSuggestionAudioSignal | null;
 }
 
 export interface PlaylistSuggestion {
@@ -286,6 +307,7 @@ export interface PlaylistSuggestion {
   library_tracks: number;
   eligible_tracks: number;
   intent: PlaylistSuggestionIntent;
+  plan: PlaylistSuggestionPlan;
   candidates: PlaylistSuggestionCandidate[];
 }
 
@@ -297,6 +319,7 @@ export interface PlaylistSuggestionRequest {
   max_bpm?: number;
   include_unknown_bpm?: boolean;
   exclude_track_ids?: number[];
+  energy_curve?: PlaylistEnergyCurve;
 }
 
 export type BackgroundJobStatus =

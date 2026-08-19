@@ -18,6 +18,7 @@ class PlaylistSuggestionRequest(StrictAssistantModel):
     max_bpm: int | None = Field(default=None, ge=1, le=999)
     include_unknown_bpm: bool = True
     exclude_track_ids: list[int] = Field(default_factory=list, max_length=5000)
+    energy_curve: Literal["steady", "rising", "falling", "arc"] = "steady"
 
     @field_validator("prompt", mode="before")
     @classmethod
@@ -43,6 +44,22 @@ class PlaylistIntent(StrictAssistantModel):
     tension: float = Field(ge=0.0, le=1.0)
 
 
+class PlaylistAudioSignal(StrictAssistantModel):
+    analyzer_id: str
+    energy: float = Field(ge=0.0, le=1.0)
+    brightness: float = Field(ge=0.0, le=1.0)
+    tension: float = Field(ge=0.0, le=1.0)
+    tempo_bpm: float | None = Field(default=None, gt=0.0, le=999.0)
+    confidence: Literal["high", "medium", "low"]
+
+
+class PlaylistPlan(StrictAssistantModel):
+    energy_curve: Literal["steady", "rising", "falling", "arc"]
+    selected_tracks: int = Field(ge=0)
+    selected_duration_s: float = Field(ge=0.0)
+    audio_profile_tracks: int = Field(ge=0)
+
+
 class PlaylistCandidate(StrictAssistantModel):
     track_id: int
     path: str
@@ -60,6 +77,9 @@ class PlaylistCandidate(StrictAssistantModel):
     confidence: Literal["high", "medium", "low"]
     reasons: list[str]
     default_selected: bool
+    sequence_position: int | None = Field(default=None, ge=1)
+    planning_energy: float = Field(ge=0.0, le=1.0)
+    audio_signal: PlaylistAudioSignal | None
 
 
 class PlaylistSuggestionResponse(StrictAssistantModel):
@@ -67,6 +87,7 @@ class PlaylistSuggestionResponse(StrictAssistantModel):
     library_tracks: int
     eligible_tracks: int
     intent: PlaylistIntent
+    plan: PlaylistPlan
     candidates: list[PlaylistCandidate]
 
 

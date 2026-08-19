@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Field } from "@/components/Field";
 import {
   type AuthoringImportPreview,
+  type PlaylistEnergyCurve,
   type PlaylistSuggestion,
   assistantApi,
   authoringImportApi,
@@ -45,6 +46,7 @@ export function PlaylistBuilderView() {
   const activeModeId = usePlayerStore((state) => state.state?.active_mode_id ?? null);
   const [prompt, setPrompt] = useState("");
   const [targetMinutes, setTargetMinutes] = useState(60);
+  const [energyCurve, setEnergyCurve] = useState<PlaylistEnergyCurve>("steady");
   const [minBpm, setMinBpm] = useState("");
   const [maxBpm, setMaxBpm] = useState("");
   const [includeUnknownBpm, setIncludeUnknownBpm] = useState(true);
@@ -97,6 +99,7 @@ export function PlaylistBuilderView() {
         prompt: prompt.trim(),
         target_minutes: Math.min(600, Math.max(5, targetMinutes || 60)),
         candidate_limit: 40,
+        energy_curve: energyCurve,
         include_unknown_bpm: includeUnknownBpm,
         ...(minimumBpm === undefined ? {} : { min_bpm: minimumBpm }),
         ...(maximumBpm === undefined ? {} : { max_bpm: maximumBpm }),
@@ -211,12 +214,13 @@ export function PlaylistBuilderView() {
           <p className="assistant-eyebrow">Local · explainable · review-first</p>
           <h1>Build a playlist from a mood</h1>
           <p>
-            Describe the scene or atmosphere. The local engine ranks songs from
-            existing metadata and BPM, then you decide exactly what gets created.
+            Describe the scene or atmosphere. The local planner combines your tags,
+            current metadata profiles, and available audio measurements, then you
+            decide exactly what gets created.
           </p>
         </div>
         <span className="assistant-algorithm">
-          {suggestion?.engine ?? "local-metadata/v1"}
+          {suggestion?.engine ?? "local-planner/v2"}
         </span>
       </header>
 
@@ -248,6 +252,23 @@ export function PlaylistBuilderView() {
                 />
                 <span>minutes</span>
               </div>
+            </Field>
+            <Field
+              label="Playlist flow"
+              hint="Controls the order of the initially selected songs; you can still change every selection."
+            >
+              <select
+                aria-label="Playlist flow"
+                value={energyCurve}
+                onChange={(event) =>
+                  setEnergyCurve(event.target.value as PlaylistEnergyCurve)
+                }
+              >
+                <option value="steady">Steady — keep a consistent atmosphere</option>
+                <option value="rising">Rising — build intensity</option>
+                <option value="falling">Falling — wind down gradually</option>
+                <option value="arc">Arc — build to a peak, then resolve</option>
+              </select>
             </Field>
             <details className="assistant-filters">
               <summary>Optional tempo filters</summary>

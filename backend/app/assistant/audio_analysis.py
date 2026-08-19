@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -26,6 +27,10 @@ _FAILURE_SAMPLE_LIMIT = 20
 @dataclass(frozen=True)
 class CurrentAudioProfile:
     analyzer_id: str
+    energy: float
+    brightness: float
+    tension: float
+    tempo_bpm: float | None
     confidence: Literal["high", "medium", "low"]
     evidence: tuple[str, ...]
     metrics: dict[str, str | int | float | None]
@@ -73,14 +78,33 @@ def load_current_audio_profiles(
         if not all(
             value is None
             or isinstance(value, str)
-            or (isinstance(value, (int, float)) and not isinstance(value, bool))
+            or (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+            )
             for value in metrics.values()
         ):
             continue
+        axes = (row.energy, row.brightness, row.tension)
+        if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in axes):
+            continue
         if row.confidence not in {"high", "medium", "low"}:
             continue
+        tempo_value = metrics.get("tempo_bpm")
+        tempo_bpm = (
+            float(tempo_value)
+            if isinstance(tempo_value, (int, float))
+            and not isinstance(tempo_value, bool)
+            and 0.0 < tempo_value <= 999.0
+            else None
+        )
         profiles[row.track_id] = CurrentAudioProfile(
             analyzer_id=LOCAL_AUDIO_ANALYZER_ID,
+            energy=row.energy,
+            brightness=row.brightness,
+            tension=row.tension,
+            tempo_bpm=tempo_bpm,
             confidence=cast(
                 "Literal['high', 'medium', 'low']",
                 row.confidence,

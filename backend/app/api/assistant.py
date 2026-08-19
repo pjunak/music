@@ -11,9 +11,10 @@ from app.assistant.analysis import (
 from app.assistant.audio_analysis import (
     AUDIO_ANALYSIS_JOB_KIND,
     audio_analysis_summary,
+    load_current_audio_profiles,
 )
 from app.assistant.engine import PlaylistSuggestionEngine
-from app.assistant.local import local_metadata_playlist_engine
+from app.assistant.local import local_playlist_planner
 from app.assistant.schemas import (
     LibraryAnalysisStartRequest,
     LibraryAnalysisSummary,
@@ -27,7 +28,7 @@ from app.jobs.service import enqueue_unique_active_job
 from app.models.track import Track
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
-playlist_suggestion_engine: PlaylistSuggestionEngine = local_metadata_playlist_engine
+playlist_suggestion_engine: PlaylistSuggestionEngine = local_playlist_planner
 
 
 @router.post("/playlists/suggest", response_model=PlaylistSuggestionResponse)
@@ -38,12 +39,14 @@ def suggest_playlist(
 ) -> PlaylistSuggestionResponse:
     tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
     profiles = load_current_metadata_profiles(db, tracks)
+    signal_profiles = load_current_audio_profiles(db, tracks)
     manual_tags = load_manual_tags(db, [track.id for track in tracks])
     return playlist_suggestion_engine.suggest(
         tracks,
         payload,
-        profiles,
-        manual_tags,
+        profiles=profiles,
+        manual_tags=manual_tags,
+        signal_profiles=signal_profiles,
     )
 
 

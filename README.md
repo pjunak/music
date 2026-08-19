@@ -37,9 +37,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   names or IDs are reported for review rather than overwritten. See
   [`clients/authoring-import-v1.md`](clients/authoring-import-v1.md).
 - **Local playlist Assistant** — describe a mood or scene and get explainable, deterministic song
-  suggestions based on the library's existing metadata and BPM. You choose the final tracks, then
-  the playlist goes through the same preview and create-only Authoring import transaction. This
-  baseline runs locally and makes no external model calls or audio-content claims.
+  suggestions from your manual tags, current metadata profiles, and any available measured audio
+  signals. Choose a steady, rising, falling, or build-and-resolve flow; the planner ranks tracks,
+  orders the default selection, and leaves the final track choice to you. The reviewed playlist
+  then goes through the same preview and create-only Authoring import transaction. This baseline
+  runs locally and makes no external model calls; signal measurements remain numeric evidence and
+  never become semantic mood tags automatically.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
