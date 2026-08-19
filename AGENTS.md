@@ -165,7 +165,10 @@ Runtime data lives outside the image.
   explicit thresholds without copying private library data or freezing one incidental exact
   ranking. Future model providers must pass the same unknown-track, source-integrity, exclusion,
   selection-plan, and candidate-limit checks before UI integration.
-- Optional model providers use separate encrypted connection records and per-task role mappings.
+- Optional model providers use encrypted connection records and per-task role mappings. Each
+  connection owns exactly one credential; roles reference connections so tasks may deliberately
+  reuse one credential or choose separate connections, including separate keys for the same
+  provider. Never store a credential directly on a role.
   Never return or log a provider key, never infer provider capabilities from a saved URL, and never
   enable a role until the operator explicitly verifies its connection and its exact runtime
   configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the

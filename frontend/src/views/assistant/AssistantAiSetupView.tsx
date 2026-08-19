@@ -370,9 +370,10 @@ export function AssistantAiSetupView() {
           <p className="assistant-eyebrow">Optional model routing</p>
           <h1>AI connections</h1>
           <p>
-            Store provider access once, verify what the server can reach, then keep
-            each Assistant role on its own tested model. Playlist planning and music
-            tagging are live; reserved roles remain unused until their tools exist.
+            Each connection stores one provider key. Reuse a connection when tasks
+            should share that key, or create separate connections—even for the same
+            provider—when a task needs its own key or account. Every Assistant task
+            then chooses and tests its own connection and model.
           </p>
         </div>
         <span className="assistant-algorithm">local tools stay active</span>
@@ -410,7 +411,11 @@ export function AssistantAiSetupView() {
         <div className="assistant-section-heading">
           <div>
             <h2>Provider connections</h2>
-            <p>Keys are encrypted by the server and are never shown again.</p>
+            <p>
+              Keys are encrypted by the server and are never shown again. Connection
+              names help distinguish separate credentials, billing scopes, or model
+              services.
+            </p>
           </div>
           <span>{connections.length} saved</span>
         </div>
@@ -549,6 +554,9 @@ export function AssistantAiSetupView() {
                 <ProviderConnectionCard
                   key={connection.id}
                   connection={connection}
+                  assignedRoleLabels={roles
+                    .filter((role) => role.connection_id === connection.id)
+                    .map((role) => role.label)}
                   adapters={status.adapters}
                   credentialStorageReady={status.credential_storage_ready}
                   busy={busyItem === `connection:${connection.id}`}
@@ -567,8 +575,10 @@ export function AssistantAiSetupView() {
           <div>
             <h2>Model tasks</h2>
             <p>
-              A verified connection can serve several tasks. Each saved model must
-              pass a synthetic structured-output test before you can enable it.
+              Each task independently chooses a connection and model. Several tasks
+              may reuse one connection, while specialized tasks may use separate
+              keys. Every saved model must pass a synthetic structured-output test
+              before you can enable it.
             </p>
           </div>
           <span>{roles.filter((role) => role.effective_enabled).length} enabled</span>

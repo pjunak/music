@@ -193,6 +193,33 @@ beforeEach(() => {
 });
 
 describe("AssistantAiSetupView", () => {
+  it("explains per-task keys and shows which tasks reuse a connection", async () => {
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      {
+        ...role,
+        connection_id: connection.id,
+        connection_name: connection.name,
+        model_id: "planner-large",
+      },
+      musicTaggingRole,
+    ]);
+
+    render(<AssistantAiSetupView />);
+
+    expect(
+      await screen.findByText(/create separate connections/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Used by: Playlist planner · Music tagger"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        /other tasks may reuse this key or choose a different connection/i,
+      ),
+    ).toHaveLength(2);
+  });
+
   it("saves a provider connection and clears the API key from the form", async () => {
     const user = userEvent.setup();
     vi.mocked(assistantProvidersApi.createConnection).mockResolvedValue({

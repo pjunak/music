@@ -13,6 +13,7 @@ import {
 
 interface Props {
   connection: ProviderConnection;
+  assignedRoleLabels: string[];
   adapters: ProviderAdapter[];
   credentialStorageReady: boolean;
   busy: boolean;
@@ -26,6 +27,7 @@ interface Props {
 
 export function ProviderConnectionCard({
   connection,
+  assignedRoleLabels,
   adapters,
   credentialStorageReady,
   busy,
@@ -83,6 +85,11 @@ export function ProviderConnectionCard({
       </div>
 
       <p className="assistant-provider-url">{connection.base_url}</p>
+      <p className="field-hint">
+        {assignedRoleLabels.length > 0
+          ? `Used by: ${assignedRoleLabels.join(" · ")}`
+          : "Not assigned to an AI task yet."}
+      </p>
       {connection.verification_status === "failed" ? (
         <p className="assistant-provider-problem" role="status">
           {verificationFailureMessage(connection.verification_error_code)}

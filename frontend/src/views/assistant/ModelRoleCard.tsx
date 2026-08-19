@@ -107,6 +107,7 @@ export function ModelRoleCard({
         <label className="field">
           <span className="field-label">Connection</span>
           <select
+            aria-label="Connection"
             value={connectionId}
             onChange={(event) => {
               setConnectionId(event.target.value);
@@ -116,11 +117,15 @@ export function ModelRoleCard({
             <option value="">Choose a connection</option>
             {connections.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.name}
+                {item.name} · {item.key_hint}
                 {item.verification_status === "verified" ? " · verified" : ""}
               </option>
             ))}
           </select>
+          <span className="field-hint">
+            This choice applies only to {role.label.toLocaleLowerCase()}. Other
+            tasks may reuse this key or choose a different connection.
+          </span>
         </label>
 
         <label className="field">
