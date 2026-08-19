@@ -208,7 +208,7 @@ export function ModelQualityEvaluationCard({
         </details>
       ) : null}
 
-      <ModelUsageSummary job={reportJob} />
+      <ModelUsageSummary job={latest} />
 
       <div className="assistant-quality-meta">
         <span>Suite: {evaluation.suite_id}</span>

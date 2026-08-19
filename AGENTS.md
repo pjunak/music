@@ -199,8 +199,9 @@ Runtime data lives outside the image.
   reports synthetic and secret-free. A quality pass does not authorize live-library access.
 - Durable quality, playlist, and tagging model jobs record the shared bounded provider-usage
   summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
-  Preserve missing-usage counts explicitly; never infer unreported tokens or portable cost from
-  provider-specific pricing.
+  Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep
+  the usage already incurred. Preserve missing-usage counts explicitly; never infer unreported
+  tokens or portable cost from provider-specific pricing.
 - Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a
@@ -256,6 +257,9 @@ Runtime data lives outside the image.
   database row before waking the worker, report cooperative progress/cancellation,
   and declare restartability explicitly. Job handlers run outside the event loop
   and must be idempotent or checkpointed before they may be restartable.
+- Graceful shutdown follows the same restartability policy as crash recovery. Never requeue a
+  non-restartable provider job after it may have incurred cost; retain its latest safe checkpoint
+  and mark it interrupted instead.
 - SQLite schema creation is idempotent. `_apply_additive_columns()` handles
   only additive compatible columns; renames, drops, and type changes require a
   deliberate migration or documented reset.

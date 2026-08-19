@@ -332,6 +332,37 @@ def test_model_suggestion_rejects_stale_quality_certification(
     assert response.json()["detail"]["code"] == "model_quality_not_passed"
 
 
+def test_failed_model_suggestion_retains_attempted_provider_usage(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_quality_passed_model(auth_client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_suggestions.execute_structured_model_request",
+        lambda *_args, **_kwargs: StructuredModelResult(False, "timeout"),
+    )
+
+    started = auth_client.post(
+        "/api/assistant/playlists/model-suggestions/jobs",
+        json=_start_payload(),
+    )
+    finished = _wait_for_job(auth_client, started.json()["id"], {"failed"})
+
+    assert finished["result"] == {
+        "schema_version": "assistant-provider-usage-checkpoint/v1",
+        "usage": {
+            "schema_version": "assistant-provider-usage/v1",
+            "attempted_requests": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "input_tokens_reported_requests": 0,
+            "output_tokens_reported_requests": 0,
+            "provider_model_ids": [],
+            "provider_model_ids_truncated": False,
+        },
+    }
+
+
 def test_different_model_suggestion_cannot_join_active_job(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -33,6 +33,7 @@ def _progress_handler(
 def _cancellable_handler(
     context: JobExecutionContext, _parameters: dict[str, Any]
 ) -> dict[str, Any]:
+    context.checkpoint_result({"processed": 0})
     _cancel_started.set()
     for current in range(1, 1001):
         time.sleep(0.005)
@@ -111,6 +112,7 @@ def test_running_job_can_be_cancelled_and_retried(auth_client: TestClient) -> No
     assert cancelled.json()["status"] in {"cancel_requested", "cancelled"}
     terminal = _wait_for_status(auth_client, job_id, {"cancelled"})
     assert terminal["finished_at"] is not None
+    assert terminal["result"] == {"processed": 0}
 
     retried = auth_client.post(f"/api/jobs/{job_id}/retry")
     assert retried.status_code == 200, retried.text
@@ -165,3 +167,43 @@ def test_restart_recovery_respects_handler_policy(db_session) -> None:
     assert non_restartable is not None and non_restartable.status == "failed"
     assert non_restartable.error == "Job was interrupted by a server restart."
     assert cancelling is not None and cancelling.status == "cancelled"
+
+
+def test_graceful_stop_respects_restart_policy_and_keeps_checkpoints(
+    db_session,
+) -> None:
+    from app.jobs.runner import BackgroundJobRunner
+    from app.models.background_job import BackgroundJob
+
+    rows = [
+        BackgroundJob(
+            id="d" * 32,
+            kind=RESTARTABLE_KIND,
+            status="running",
+            parameters_json='{"steps":1}',
+            result_json='{"processed":2}',
+        ),
+        BackgroundJob(
+            id="e" * 32,
+            kind=NON_RESTARTABLE_KIND,
+            status="running",
+            parameters_json='{"steps":1}',
+            result_json='{"provider_usage":true}',
+        ),
+    ]
+    db_session.add_all(rows)
+    db_session.commit()
+    runner = BackgroundJobRunner()
+
+    runner._finish_interrupted(rows[0].id, restartable=True)
+    runner._finish_interrupted(rows[1].id, restartable=False)
+    db_session.expire_all()
+
+    restartable, non_restartable = [
+        db_session.get(BackgroundJob, row.id) for row in rows
+    ]
+    assert restartable is not None and restartable.status == "queued"
+    assert restartable.result_json == '{"processed":2}'
+    assert non_restartable is not None and non_restartable.status == "failed"
+    assert non_restartable.error == "Job was interrupted during server shutdown."
+    assert non_restartable.result_json == '{"provider_usage":true}'

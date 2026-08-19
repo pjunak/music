@@ -303,9 +303,11 @@ def run_playlist_quality_evaluation(
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
         context.check_cancelled()
-        return usage.record(
+        result = usage.record(
             execute_structured_model_request(resolved.execution, request)
         )
+        context.checkpoint_result(usage.checkpoint())
+        return result
 
     def case_complete(current: int, total: int) -> None:
         context.update_progress(
@@ -373,9 +375,11 @@ def run_tagging_quality_evaluation(
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
         context.check_cancelled()
-        return usage.record(
+        result = usage.record(
             execute_structured_model_request(resolved.execution, request)
         )
+        context.checkpoint_result(usage.checkpoint())
+        return result
 
     def case_complete(current: int, total: int) -> None:
         context.update_progress(

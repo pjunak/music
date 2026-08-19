@@ -528,6 +528,39 @@ def test_model_tagging_skips_current_profiles_without_provider_calls(
     assert finished["result"]["usage"]["attempted_requests"] == 0
 
 
+def test_failed_model_tagging_retains_attempted_provider_usage(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+) -> None:
+    _configure_quality_passed_tagger(auth_client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_tagging.execute_structured_model_request",
+        lambda *_args, **_kwargs: StructuredModelResult(False, "timeout"),
+    )
+
+    started = auth_client.post(
+        "/api/assistant/library-tags/model-jobs",
+        json=_start_payload(force=True),
+    )
+    finished = _wait_for_job(auth_client, started.json()["id"], {"failed"})
+
+    assert seeded_track_id > 0
+    assert finished["result"] == {
+        "schema_version": "assistant-provider-usage-checkpoint/v1",
+        "usage": {
+            "schema_version": "assistant-provider-usage/v1",
+            "attempted_requests": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "input_tokens_reported_requests": 0,
+            "output_tokens_reported_requests": 0,
+            "provider_model_ids": [],
+            "provider_model_ids_truncated": False,
+        },
+    }
+
+
 def test_model_tag_suggestions_become_stale_after_runtime_change(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

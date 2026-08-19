@@ -177,9 +177,11 @@ def run_model_playlist_suggestion(
             phase="Waiting for playlist model",
             message="Sending the disclosed, path-free candidate pool",
         )
-        return usage.record(
+        result = usage.record(
             execute_structured_model_request(resolved.execution, request)
         )
+        context.checkpoint_result(usage.checkpoint())
+        return result
 
     suggestion = ModelPlaylistPlanner(execute).suggest(
         tracks,

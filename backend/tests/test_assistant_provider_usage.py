@@ -34,6 +34,10 @@ def test_usage_accumulator_reports_tokens_and_missing_usage_separately() -> None
         "provider_model_ids": ["planner-v2"],
         "provider_model_ids_truncated": False,
     }
+    assert usage.checkpoint() == {
+        "schema_version": "assistant-provider-usage-checkpoint/v1",
+        "usage": usage.summary().model_dump(mode="json"),
+    }
 
 
 def test_usage_accumulator_bounds_provider_controlled_model_ids() -> None:

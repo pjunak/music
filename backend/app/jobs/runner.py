@@ -74,6 +74,21 @@ class JobContext(JobExecutionContext):
         if self._stopping.is_set():
             raise JobRunnerStopping
 
+    def checkpoint_result(self, result: dict[str, Any]) -> None:
+        serialized = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        with SessionLocal() as db:
+            job = db.get(BackgroundJob, self.job_id)
+            if job is None:
+                raise JobCancelled("job record was removed")
+            job.result_json = serialized
+            job.updated_at = utcnow()
+            cancellation_requested = job.status == "cancel_requested"
+            db.commit()
+        if cancellation_requested:
+            raise JobCancelled
+        if self._stopping.is_set():
+            raise JobRunnerStopping
+
 
 class BackgroundJobRunner:
     """One cooperative worker for heavy server-owned jobs.
@@ -226,7 +241,7 @@ class BackgroundJobRunner:
         except JobCancelled:
             self._finish_cancelled(job_id)
         except JobRunnerStopping:
-            self._requeue_interrupted(job_id)
+            self._finish_interrupted(job_id, restartable=registration.restartable)
         except Exception as exc:
             logger.exception("background job %s (%s) failed", job_id, registration.kind)
             detail = f"{type(exc).__name__}: {exc}".strip()[:2000]
@@ -289,7 +304,7 @@ class BackgroundJobRunner:
             job.finished_at = now
             db.commit()
 
-    def _requeue_interrupted(self, job_id: str) -> None:
+    def _finish_interrupted(self, job_id: str, *, restartable: bool) -> None:
         with SessionLocal() as db:
             job = db.get(BackgroundJob, job_id)
             if job is None:
@@ -299,10 +314,15 @@ class BackgroundJobRunner:
                 job.status = "cancelled"
                 job.progress_phase = "Cancelled"
                 job.finished_at = now
-            else:
+            elif restartable:
                 job.status = "queued"
                 job.progress_phase = "Queued for restart"
                 job.started_at = None
+            else:
+                job.status = "failed"
+                job.error = "Job was interrupted during server shutdown."
+                job.progress_phase = "Interrupted"
+                job.finished_at = now
             job.updated_at = now
             db.commit()
 

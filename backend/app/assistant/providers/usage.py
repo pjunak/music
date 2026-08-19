@@ -59,3 +59,9 @@ class ProviderUsageAccumulator:
             provider_model_ids=list(self._provider_model_ids),
             provider_model_ids_truncated=self._provider_model_ids_truncated,
         )
+
+    def checkpoint(self) -> dict[str, object]:
+        return {
+            "schema_version": "assistant-provider-usage-checkpoint/v1",
+            "usage": self.summary().model_dump(mode="json"),
+        }

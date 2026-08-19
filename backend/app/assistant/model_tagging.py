@@ -265,9 +265,11 @@ def run_model_music_tagging(
 
         def execute(request: StructuredModelRequest) -> StructuredModelResult:
             context.check_cancelled()
-            return usage.record(
+            result = usage.record(
                 execute_structured_model_request(resolved.execution, request)
             )
+            context.checkpoint_result(usage.checkpoint())
+            return result
 
         profiles = tag_tracks([_track_input(track) for track in batch], execute)
         context.check_cancelled()
