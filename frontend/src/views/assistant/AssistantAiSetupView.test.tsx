@@ -22,6 +22,7 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
       verifyConnection: vi.fn(),
       listRoles: vi.fn(),
       updateRole: vi.fn(),
+      testRole: vi.fn(),
       deleteRole: vi.fn(),
     },
   };
@@ -88,6 +89,9 @@ const role: ModelRole = {
   timeout_seconds: 30,
   max_output_tokens: 2000,
   verification_status: null,
+  conformance_status: "never",
+  conformance_error_code: null,
+  last_conformance_at: null,
   updated_at: null,
 };
 
@@ -171,27 +175,65 @@ describe("AssistantAiSetupView", () => {
     );
   });
 
-  it("assigns a verified connection and model to one task", async () => {
+  it("saves, tests, and then enables one model task", async () => {
     const user = userEvent.setup();
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
-    vi.mocked(assistantProvidersApi.updateRole).mockResolvedValue({
+    const configuredRole: ModelRole = {
       ...role,
       connection_id: connection.id,
       connection_name: connection.name,
       model_id: "planner-large",
+      enabled: false,
+      effective_enabled: false,
+      verification_status: "verified",
+    };
+    const testedRole: ModelRole = {
+      ...configuredRole,
+      conformance_status: "passed",
+      last_conformance_at: "2026-08-19T11:00:00Z",
+    };
+    const enabledRole: ModelRole = {
+      ...testedRole,
       enabled: true,
       effective_enabled: true,
-      verification_status: "verified",
+    };
+    vi.mocked(assistantProvidersApi.updateRole)
+      .mockResolvedValueOnce(configuredRole)
+      .mockResolvedValueOnce(enabledRole);
+    vi.mocked(assistantProvidersApi.testRole).mockResolvedValue({
+      role: testedRole,
+      passed: true,
+      error_code: null,
     });
     render(<AssistantAiSetupView />);
 
     await user.selectOptions(await screen.findByLabelText("Connection"), connection.id);
     await user.type(screen.getByLabelText("Model"), "planner-large");
-    await user.click(screen.getByLabelText("Allow this model for this task"));
     await user.click(screen.getByRole("button", { name: "Save task" }));
 
     await waitFor(() =>
       expect(assistantProvidersApi.updateRole).toHaveBeenCalledWith(
+        "playlist_planner",
+        {
+          connection_id: "connection-1",
+          model_id: "planner-large",
+          enabled: false,
+          timeout_seconds: 30,
+          max_output_tokens: 2000,
+        },
+      ),
+    );
+    await user.click(await screen.findByRole("button", { name: "Test model" }));
+    await waitFor(() =>
+      expect(assistantProvidersApi.testRole).toHaveBeenCalledWith(
+        "playlist_planner",
+      ),
+    );
+    await user.click(screen.getByLabelText("Allow this model for this task"));
+    await user.click(screen.getByRole("button", { name: "Save task" }));
+
+    await waitFor(() =>
+      expect(assistantProvidersApi.updateRole).toHaveBeenLastCalledWith(
         "playlist_planner",
         {
           connection_id: "connection-1",
@@ -202,6 +244,49 @@ describe("AssistantAiSetupView", () => {
         },
       ),
     );
+  });
+
+  it("keeps a failed model test visible and the task disabled", async () => {
+    const user = userEvent.setup();
+    const configuredRole: ModelRole = {
+      ...role,
+      connection_id: connection.id,
+      connection_name: connection.name,
+      model_id: "planner-large",
+      verification_status: "verified",
+    };
+    const failedRole: ModelRole = {
+      ...configuredRole,
+      conformance_status: "failed",
+      conformance_error_code: "invalid_structured_output",
+      last_conformance_at: "2026-08-19T11:00:00Z",
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([configuredRole]);
+    vi.mocked(assistantProvidersApi.testRole).mockResolvedValue({
+      role: failedRole,
+      passed: false,
+      error_code: "invalid_structured_output",
+    });
+    render(<AssistantAiSetupView />);
+
+    await user.click(await screen.findByRole("button", { name: "Test model" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Model test failed",
+        "The model did not return the required machine-readable JSON object.",
+      ),
+    );
+    expect(
+      screen.getByText(
+        "The model did not return the required machine-readable JSON object.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Allow this model for this task"),
+    ).toBeDisabled();
+    expect(screen.getByText(/no song or library data/i)).toBeInTheDocument();
   });
 
   it("keeps local tools available when encrypted storage is not configured", async () => {

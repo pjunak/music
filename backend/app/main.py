@@ -77,6 +77,14 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("tracks", "display_title", "VARCHAR(512) NOT NULL DEFAULT ''"),
     ("tracks", "origin", "VARCHAR(512) NOT NULL DEFAULT ''"),
     ("track_analyses", "metrics_json", "TEXT NOT NULL DEFAULT '{}'"),
+    (
+        "assistant_model_roles",
+        "conformance_status",
+        "VARCHAR(16) NOT NULL DEFAULT 'never'",
+    ),
+    ("assistant_model_roles", "conformance_error_code", "VARCHAR(64)"),
+    ("assistant_model_roles", "conformance_fingerprint", "VARCHAR(64)"),
+    ("assistant_model_roles", "last_conformance_at", "DATETIME"),
 ]
 
 

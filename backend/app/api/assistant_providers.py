@@ -9,7 +9,9 @@ from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DbSession
+from app.assistant.providers.execution import run_provider_conformance
 from app.assistant.providers.schemas import (
+    ModelConformanceOut,
     ModelRoleOut,
     ModelRoleUpdate,
     ProviderConnectionCreate,
@@ -23,10 +25,12 @@ from app.assistant.providers.service import (
     create_connection,
     delete_connection,
     delete_model_role,
+    finish_role_conformance,
     finish_verification,
     framework_status,
     list_connections,
     list_model_roles,
+    prepare_role_conformance,
     prepare_verification,
     update_connection,
     update_model_role,
@@ -158,3 +162,34 @@ def remove_role(role_id: str, _user: CurrentUser, db: DbSession) -> None:
         delete_model_role(db, role_id)
     except ProviderServiceError as exc:
         _raise_http(exc)
+
+
+@router.post("/roles/{role_id}/test", response_model=ModelConformanceOut)
+async def test_role_model(
+    role_id: str,
+    _user: CurrentUser,
+    db: DbSession,
+) -> ModelConformanceOut:
+    try:
+        target = prepare_role_conformance(db, role_id)
+    except ProviderServiceError as exc:
+        _raise_http(exc)
+
+    # The challenge contains synthetic data only. Network and model work stays
+    # off the event loop and uses the same bounded transport as verification.
+    result = await run_in_threadpool(
+        partial(
+            run_provider_conformance,
+            target.execution,
+            target.challenge,
+        )
+    )
+    try:
+        role = finish_role_conformance(db, target, result)
+    except ProviderServiceError as exc:
+        _raise_http(exc)
+    return ModelConformanceOut(
+        role=role,
+        passed=result.passed,
+        error_code=result.error_code,
+    )

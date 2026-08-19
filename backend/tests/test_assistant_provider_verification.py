@@ -4,20 +4,14 @@ import json
 
 import pytest
 
-from app.assistant.providers import verification
+from app.assistant.providers import transport, verification
+from app.assistant.providers.transport import JsonHttpResponse, ProviderTransportError
 
 
 class _Response:
     def __init__(self, payload: object, *, content_length: int | None = None) -> None:
         self._body = json.dumps(payload).encode()
-        self.status = 200
         self.content_length = content_length
-
-    def __enter__(self) -> _Response:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        return None
 
     def read(self, size: int) -> bytes:
         return self._body[:size]
@@ -28,31 +22,35 @@ class _Response:
         return None
 
 
-def test_public_verification_blocks_non_global_destination(
+def test_public_transport_blocks_non_global_destination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        verification.socket,
+        transport.socket,
         "getaddrinfo",
         lambda *args, **kwargs: [(2, 1, 6, "", ("127.0.0.1", 443))],
     )
     called = False
 
-    def should_not_request(*args: object, **kwargs: object) -> tuple[int, object]:
+    def should_not_request(*args: object, **kwargs: object) -> JsonHttpResponse:
         nonlocal called
         called = True
-        return 200, {"data": []}
+        return JsonHttpResponse(200, {})
 
-    monkeypatch.setattr(verification, "_http_get_json", should_not_request)
+    monkeypatch.setattr(transport, "_http_json", should_not_request)
 
-    result = verification.verify_provider_connection(
-        "openai-compatible/v1",
-        "https://localhost/v1",
-        "key",
-        allow_private_network=False,
-    )
+    with pytest.raises(ProviderTransportError) as error:
+        transport.request_json(
+            "GET",
+            "https://localhost/v1/models",
+            "key",
+            allow_private_network=False,
+            timeout_seconds=10,
+            max_response_bytes=1024,
+            user_agent="test/1",
+        )
 
-    assert result.error_code == "destination_blocked"
+    assert error.value.code == "destination_blocked"
     assert called is False
 
 
@@ -61,13 +59,8 @@ def test_verification_accepts_unique_bounded_model_ids(
 ) -> None:
     monkeypatch.setattr(
         verification,
-        "_destination_addresses",
-        lambda *a, **k: ("203.0.113.15",),
-    )
-    monkeypatch.setattr(
-        verification,
-        "_http_get_json",
-        lambda *a, **k: (
+        "request_json",
+        lambda *a, **k: JsonHttpResponse(
             200,
             {
                 "data": [
@@ -97,13 +90,8 @@ def test_verification_does_not_follow_redirects(
 ) -> None:
     monkeypatch.setattr(
         verification,
-        "_destination_addresses",
-        lambda *a, **k: ("203.0.113.15",),
-    )
-    monkeypatch.setattr(
-        verification,
-        "_http_get_json",
-        lambda *a, **k: (302, {"data": []}),
+        "request_json",
+        lambda *a, **k: JsonHttpResponse(302, {"data": []}),
     )
 
     result = verification.verify_provider_connection(
@@ -117,41 +105,76 @@ def test_verification_does_not_follow_redirects(
 
 
 def test_http_reader_rejects_declared_oversized_response() -> None:
-    with pytest.raises(OverflowError):
-        verification._read_json_response(
-            _Response(
-                {"data": []},
-                content_length=verification._MAX_VERIFICATION_BYTES + 1,
-            )
+    with pytest.raises(ProviderTransportError) as error:
+        transport._read_json_response(
+            _Response({"data": []}, content_length=1025),
+            max_response_bytes=1024,
         )
 
+    assert error.value.code == "response_too_large"
 
-def test_verification_pins_request_to_the_approved_dns_result(
+
+def test_transport_pins_request_to_the_approved_dns_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        verification,
+        transport,
         "_destination_addresses",
         lambda *args, **kwargs: ("203.0.113.15",),
     )
     observed: dict[str, object] = {}
 
     def request(
+        method: str,
         url: str,
         api_key: str,
         addresses: tuple[str, ...],
-    ) -> tuple[int, object]:
-        observed.update(url=url, api_key=api_key, addresses=addresses)
-        return 200, {"data": []}
+        **kwargs: object,
+    ) -> JsonHttpResponse:
+        observed.update(
+            method=method,
+            url=url,
+            api_key=api_key,
+            addresses=addresses,
+            kwargs=kwargs,
+        )
+        return JsonHttpResponse(200, {"data": []})
 
-    monkeypatch.setattr(verification, "_http_get_json", request)
+    monkeypatch.setattr(transport, "_http_json", request)
 
-    result = verification.verify_provider_connection(
-        "openai-compatible/v1",
-        "https://models.example/v1",
+    result = transport.request_json(
+        "GET",
+        "https://models.example/v1/models",
         "key",
         allow_private_network=False,
+        timeout_seconds=10,
+        max_response_bytes=1024,
+        user_agent="test/1",
     )
 
-    assert result.verified is True
+    assert result.status_code == 200
     assert observed["addresses"] == ("203.0.113.15",)
+
+
+def test_transport_rejects_oversized_json_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        transport,
+        "_destination_addresses",
+        lambda *args, **kwargs: ("203.0.113.15",),
+    )
+
+    with pytest.raises(ProviderTransportError) as error:
+        transport.request_json(
+            "POST",
+            "https://models.example/v1/chat/completions",
+            "key",
+            allow_private_network=False,
+            timeout_seconds=10,
+            max_response_bytes=1024,
+            user_agent="test/1",
+            payload={"prompt": "x" * transport._MAX_REQUEST_BYTES},
+        )
+
+    assert error.value.code == "request_too_large"

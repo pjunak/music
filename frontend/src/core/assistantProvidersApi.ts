@@ -1,6 +1,7 @@
 import { api } from "@/core/api";
 
 export type ProviderVerificationStatus = "never" | "verified" | "failed";
+export type ModelConformanceStatus = "never" | "passed" | "failed";
 
 export interface ProviderAdapter {
   id: string;
@@ -71,7 +72,16 @@ export interface ModelRole {
   timeout_seconds: number;
   max_output_tokens: number;
   verification_status: ProviderVerificationStatus | null;
+  conformance_status: ModelConformanceStatus;
+  conformance_error_code: string | null;
+  last_conformance_at: string | null;
   updated_at: string | null;
+}
+
+export interface ModelConformance {
+  role: ModelRole;
+  passed: boolean;
+  error_code: string | null;
 }
 
 export interface ModelRoleUpdate {
@@ -107,6 +117,10 @@ export const assistantProvidersApi = {
     api.put<ModelRole>(
       `/api/assistant/providers/roles/${encodeURIComponent(roleId)}`,
       payload,
+    ),
+  testRole: (roleId: string) =>
+    api.post<ModelConformance>(
+      `/api/assistant/providers/roles/${encodeURIComponent(roleId)}/test`,
     ),
   deleteRole: (roleId: string) =>
     api.delete<void>(

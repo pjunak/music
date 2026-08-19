@@ -21,6 +21,10 @@ from app.assistant.providers.definitions import (
     PROVIDER_ADAPTER_BY_ID,
     PROVIDER_ADAPTERS,
 )
+from app.assistant.providers.execution import (
+    ProviderConformanceResult,
+    ProviderExecutionTarget,
+)
 from app.assistant.providers.schemas import (
     ModelRoleDefinitionOut,
     ModelRoleOut,
@@ -56,6 +60,14 @@ class VerificationTarget:
     base_url: str
     api_key: str
     allow_private_network: bool
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class ConformanceTarget:
+    role_id: str
+    execution: ProviderExecutionTarget
+    challenge: str
     fingerprint: str
 
 
@@ -285,6 +297,7 @@ def update_connection(
         row.verification_error_code = None
         row.verified_models_json = "[]"
         row.last_verified_at = None
+        _reset_role_conformance_for_connection(db, row.id)
     row.updated_at = utcnow()
     try:
         db.commit()
@@ -372,9 +385,58 @@ def finish_verification(
     )
     row.last_verified_at = utcnow()
     row.updated_at = row.last_verified_at
+    _reset_role_conformance_for_connection(db, row.id)
     db.commit()
     db.refresh(row)
     return connection_out(row)
+
+
+def _reset_role_conformance(row: AssistantModelRole) -> None:
+    row.conformance_status = "never"
+    row.conformance_error_code = None
+    row.conformance_fingerprint = None
+    row.last_conformance_at = None
+
+
+def _reset_role_conformance_for_connection(db: Session, connection_id: str) -> None:
+    for role in db.scalars(
+        select(AssistantModelRole).where(
+            AssistantModelRole.connection_id == connection_id
+        )
+    ).all():
+        _reset_role_conformance(role)
+
+
+def _role_runtime_fingerprint(
+    row: AssistantModelRole,
+    connection: AssistantProviderConnection,
+) -> str:
+    payload = "\0".join(
+        (
+            _connection_fingerprint(connection),
+            row.role_id,
+            row.model_id,
+            str(row.timeout_seconds),
+            str(row.max_output_tokens),
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _conformance_status(
+    row: AssistantModelRole | None,
+    connection: AssistantProviderConnection | None,
+) -> Literal["never", "passed", "failed"]:
+    if row is None or connection is None:
+        return "never"
+    if row.conformance_fingerprint != _role_runtime_fingerprint(row, connection):
+        return "never"
+    if row.conformance_status in {"passed", "failed"}:
+        return cast(
+            "Literal['never', 'passed', 'failed']",
+            row.conformance_status,
+        )
+    return "never"
 
 
 def _role_out(
@@ -390,6 +452,7 @@ def _role_out(
         if connection is not None
         else None
     )
+    conformance_status = _conformance_status(row, connection)
     return ModelRoleOut(
         role_id=definition.id,
         label=definition.label,
@@ -402,11 +465,23 @@ def _role_out(
             row is not None
             and row.enabled
             and verification_status == "verified"
+            and conformance_status == "passed"
             and credential_available
         ),
         timeout_seconds=row.timeout_seconds if row is not None else 30,
         max_output_tokens=row.max_output_tokens if row is not None else 2_000,
         verification_status=verification_status,
+        conformance_status=conformance_status,
+        conformance_error_code=(
+            row.conformance_error_code
+            if row is not None and conformance_status == "failed"
+            else None
+        ),
+        last_conformance_at=(
+            row.last_conformance_at
+            if row is not None and conformance_status != "never"
+            else None
+        ),
         updated_at=row.updated_at if row is not None else None,
     )
 
@@ -486,6 +561,23 @@ def update_model_role(
         except CredentialVaultError as exc:
             raise _service_error_from_vault(exc) from None
     row = db.get(AssistantModelRole, role_id)
+    runtime_changed = (
+        row is None
+        or row.connection_id != connection.id
+        or row.model_id != payload.model_id
+        or row.timeout_seconds != payload.timeout_seconds
+        or row.max_output_tokens != payload.max_output_tokens
+    )
+    if payload.enabled and (
+        row is None
+        or runtime_changed
+        or _conformance_status(row, connection) != "passed"
+    ):
+        raise ProviderServiceError(
+            "model_not_tested",
+            "Save and test this model configuration before enabling it.",
+            409,
+        )
     if row is None:
         row = AssistantModelRole(
             role_id=role_id,
@@ -498,6 +590,8 @@ def update_model_role(
     row.enabled = payload.enabled
     row.timeout_seconds = payload.timeout_seconds
     row.max_output_tokens = payload.max_output_tokens
+    if runtime_changed:
+        _reset_role_conformance(row)
     row.updated_at = utcnow()
     db.commit()
     db.refresh(row)
@@ -511,3 +605,114 @@ def delete_model_role(db: Session, role_id: str) -> None:
     if row is not None:
         db.delete(row)
         db.commit()
+
+
+def _execution_target(
+    row: AssistantModelRole,
+    connection: AssistantProviderConnection,
+) -> ProviderExecutionTarget:
+    try:
+        api_key = _vault().decrypt(
+            connection.id,
+            connection.encrypted_api_key,
+            connection.api_key_nonce,
+        )
+    except CredentialVaultError as exc:
+        raise _service_error_from_vault(exc) from None
+    return ProviderExecutionTarget(
+        adapter_id=connection.adapter_id,
+        base_url=connection.base_url,
+        api_key=api_key,
+        allow_private_network=connection.allow_private_network,
+        model_id=row.model_id,
+        timeout_seconds=row.timeout_seconds,
+        max_output_tokens=row.max_output_tokens,
+    )
+
+
+def prepare_role_execution(db: Session, role_id: str) -> ProviderExecutionTarget:
+    """Resolve one enabled, verified, conformant role for future feature code."""
+
+    if role_id not in MODEL_ROLE_BY_ID:
+        raise ProviderServiceError("role_not_found", "Model role not found.", 404)
+    row = db.get(AssistantModelRole, role_id)
+    if row is None or not row.enabled:
+        raise ProviderServiceError(
+            "role_not_enabled",
+            "This model role is not enabled.",
+            409,
+        )
+    connection = get_connection(db, row.connection_id)
+    if connection.verification_status != "verified":
+        raise ProviderServiceError(
+            "connection_not_verified",
+            "Verify this provider connection before using the role.",
+            409,
+        )
+    if _conformance_status(row, connection) != "passed":
+        raise ProviderServiceError(
+            "model_not_tested",
+            "Test this model configuration before using the role.",
+            409,
+        )
+    return _execution_target(row, connection)
+
+
+def prepare_role_conformance(db: Session, role_id: str) -> ConformanceTarget:
+    if role_id not in MODEL_ROLE_BY_ID:
+        raise ProviderServiceError("role_not_found", "Model role not found.", 404)
+    row = db.get(AssistantModelRole, role_id)
+    if row is None:
+        raise ProviderServiceError(
+            "role_not_configured",
+            "Save a model configuration before testing it.",
+            409,
+        )
+    connection = get_connection(db, row.connection_id)
+    if connection.verification_status != "verified":
+        raise ProviderServiceError(
+            "connection_not_verified",
+            "Verify this provider connection before testing the model.",
+            409,
+        )
+    return ConformanceTarget(
+        role_id=role_id,
+        execution=_execution_target(row, connection),
+        challenge=secrets.token_urlsafe(24),
+        fingerprint=_role_runtime_fingerprint(row, connection),
+    )
+
+
+def finish_role_conformance(
+    db: Session,
+    target: ConformanceTarget,
+    result: ProviderConformanceResult,
+) -> ModelRoleOut:
+    db.expire_all()
+    row = db.get(AssistantModelRole, target.role_id)
+    if row is None:
+        raise ProviderServiceError(
+            "role_changed",
+            "The model role changed while its test was running. Test it again.",
+            409,
+        )
+    connection = get_connection(db, row.connection_id)
+    if _role_runtime_fingerprint(row, connection) != target.fingerprint:
+        raise ProviderServiceError(
+            "role_changed",
+            "The model role changed while its test was running. Test it again.",
+            409,
+        )
+    row.conformance_status = "passed" if result.passed else "failed"
+    row.conformance_error_code = result.error_code
+    row.conformance_fingerprint = target.fingerprint
+    row.last_conformance_at = utcnow()
+    row.updated_at = row.last_conformance_at
+    db.commit()
+    db.refresh(row)
+    return _role_out(
+        target.role_id,
+        row,
+        connection,
+        credential_available=True,
+    )

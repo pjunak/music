@@ -167,9 +167,12 @@ Runtime data lives outside the image.
   selection-plan, and candidate-limit checks before UI integration.
 - Optional model providers use separate encrypted connection records and per-task role mappings.
   Never return or log a provider key, never infer provider capabilities from a saved URL, and never
-  enable a role until the operator explicitly verifies its connection. Provider I/O must stay off
-  the event loop, bounded by time and response size, and protected against redirects and unsafe
-  destinations. Saving or verifying a connection does not authorize sending library data or
+  enable a role until the operator explicitly verifies its connection and its exact runtime
+  configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the
+  event loop, bounded by request size, time, and response size, and protected against redirects and
+  unsafe destinations. Feature code resolves usable roles through `prepare_role_execution()` and
+  owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
+  endpoint. Saving, verifying, or testing a role does not authorize sending library data or
   replacing a local engine. Preserve `ASSISTANT_CREDENTIAL_KEY` separately from database backups.
 - Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can

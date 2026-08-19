@@ -6,14 +6,16 @@ import type {
   ProviderConnection,
 } from "@/core/assistantProvidersApi";
 
-import { roleConnection } from "./providerUi";
+import { modelTestFailureMessage, roleConnection } from "./providerUi";
 
 interface Props {
   role: ModelRole;
   connections: ProviderConnection[];
   credentialStorageReady: boolean;
   busy: boolean;
+  testing: boolean;
   onSave: (roleId: string, payload: ModelRoleUpdate) => Promise<void>;
+  onTest: (roleId: string) => Promise<void>;
   onRemove: (roleId: string) => Promise<void>;
 }
 
@@ -22,7 +24,9 @@ export function ModelRoleCard({
   connections,
   credentialStorageReady,
   busy,
+  testing,
   onSave,
+  onTest,
   onRemove,
 }: Props) {
   const [connectionId, setConnectionId] = useState(role.connection_id ?? "");
@@ -40,9 +44,19 @@ export function ModelRoleCard({
   }, [role]);
 
   const connection = roleConnection(connections, connectionId);
-  const canEnable =
-    credentialStorageReady && connection?.verification_status === "verified";
   const configured = role.connection_id !== null;
+  const configurationMatches =
+    connectionId === (role.connection_id ?? "") &&
+    modelId.trim() === role.model_id &&
+    timeoutSeconds === role.timeout_seconds &&
+    maxOutputTokens === role.max_output_tokens;
+  const canTest =
+    credentialStorageReady &&
+    configured &&
+    configurationMatches &&
+    connection?.verification_status === "verified";
+  const canEnable =
+    canTest && role.conformance_status === "passed";
   const listId = `assistant-models-${role.role_id}`;
 
   async function save(event: React.FormEvent) {
@@ -64,11 +78,17 @@ export function ModelRoleCard({
   const stateLabel = role.effective_enabled
     ? "Ready"
     : role.enabled
-      ? role.verification_status === "verified"
-        ? "Stored key unavailable"
-        : "Waiting for verification"
+      ? role.verification_status !== "verified"
+        ? "Waiting for verification"
+        : role.conformance_status !== "passed"
+          ? "Needs model test"
+          : "Stored key unavailable"
       : configured
-        ? "Configured, switched off"
+        ? role.conformance_status === "passed"
+          ? "Tested, switched off"
+          : role.conformance_status === "failed"
+            ? "Model test failed"
+            : "Configured, not tested"
         : "Not configured";
 
   return (
@@ -114,7 +134,10 @@ export function ModelRoleCard({
                 ? "Choose or type a model ID"
                 : "Enter the provider's model ID"
             }
-            onChange={(event) => setModelId(event.target.value)}
+            onChange={(event) => {
+              setModelId(event.target.value);
+              setEnabled(false);
+            }}
           />
           <datalist id={listId}>
             {connection?.verified_models.map((item) => (
@@ -133,7 +156,19 @@ export function ModelRoleCard({
           <span>Allow this model for this task</span>
         </label>
         {!canEnable && connectionId ? (
-          <p className="field-hint">Verify the selected connection before enabling it.</p>
+          <p className="field-hint">
+            {connection?.verification_status !== "verified"
+              ? "Verify the selected connection before enabling it."
+              : role.conformance_status !== "passed" || !configurationMatches
+                ? "Save and pass the model test before enabling this task."
+                : "Encrypted credential storage is unavailable."}
+          </p>
+        ) : null}
+
+        {role.conformance_status === "failed" ? (
+          <p className="assistant-provider-problem" role="status">
+            {modelTestFailureMessage(role.conformance_error_code)}
+          </p>
         ) : null}
 
         <details className="assistant-role-limits">
@@ -146,7 +181,10 @@ export function ModelRoleCard({
                 min={5}
                 max={300}
                 value={timeoutSeconds}
-                onChange={(event) => setTimeoutSeconds(Number(event.target.value))}
+                onChange={(event) => {
+                  setTimeoutSeconds(Number(event.target.value));
+                  setEnabled(false);
+                }}
               />
             </label>
             <label className="field">
@@ -156,7 +194,10 @@ export function ModelRoleCard({
                 min={128}
                 max={65536}
                 value={maxOutputTokens}
-                onChange={(event) => setMaxOutputTokens(Number(event.target.value))}
+                onChange={(event) => {
+                  setMaxOutputTokens(Number(event.target.value));
+                  setEnabled(false);
+                }}
               />
             </label>
           </div>
@@ -166,21 +207,39 @@ export function ModelRoleCard({
           <button
             className="btn-primary"
             type="submit"
-            disabled={busy || !connectionId || !modelId.trim()}
+            disabled={busy || testing || !connectionId || !modelId.trim()}
           >
             {busy ? "Saving…" : "Save task"}
           </button>
           {configured ? (
             <button
+              className="btn-secondary"
+              type="button"
+              disabled={busy || testing || !canTest}
+              onClick={() => void onTest(role.role_id)}
+            >
+              {testing ? "Testing…" : "Test model"}
+            </button>
+          ) : null}
+          {configured ? (
+            <button
               className="btn-ghost"
               type="button"
-              disabled={busy}
+              disabled={busy || testing}
               onClick={() => void onRemove(role.role_id)}
             >
               Clear
             </button>
           ) : null}
         </div>
+        {configured && !configurationMatches ? (
+          <p className="field-hint">Save these changes before testing the model.</p>
+        ) : null}
+        {configured ? (
+          <p className="field-hint">
+            The test sends only a one-time synthetic challenge—no song or library data.
+          </p>
+        ) : null}
       </form>
     </article>
   );

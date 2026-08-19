@@ -8,10 +8,14 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import delete
 
+from app.assistant.providers.execution import ProviderConformanceResult
 from app.assistant.providers.schemas import ProviderConnectionUpdate
 from app.assistant.providers.service import (
     ProviderServiceError,
+    finish_role_conformance,
     finish_verification,
+    prepare_role_conformance,
+    prepare_role_execution,
     prepare_verification,
     update_connection,
 )
@@ -67,6 +71,13 @@ def _verify_success(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _conformance_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.api.assistant_providers.run_provider_conformance",
+        lambda *args, **kwargs: ProviderConformanceResult(True, None),
+    )
+
+
 def test_provider_endpoints_require_authentication(client: TestClient) -> None:
     requests = [
         client.get("/api/assistant/providers/status"),
@@ -76,6 +87,7 @@ def test_provider_endpoints_require_authentication(client: TestClient) -> None:
             json=_connection_payload(),
         ),
         client.get("/api/assistant/providers/roles"),
+        client.post("/api/assistant/providers/roles/playlist_planner/test"),
     ]
     assert {response.status_code for response in requests} == {401}
 
@@ -260,7 +272,7 @@ def test_verification_result_is_rejected_if_connection_changed_mid_request(
     assert error.value.code == "connection_changed"
 
 
-def test_role_cannot_be_enabled_until_connection_is_verified(
+def test_role_requires_verified_connection_and_model_test_before_enablement(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -284,13 +296,41 @@ def test_role_cannot_be_enabled_until_connection_is_verified(
     auth_client.post(
         f"/api/assistant/providers/connections/{created['id']}/verify"
     )
-    saved = auth_client.put(
+    untested = auth_client.put(
         "/api/assistant/providers/roles/playlist_planner",
         json=role_payload,
     )
+    assert untested.status_code == 409
+    assert untested.json()["detail"]["code"] == "model_not_tested"
+
+    saved = auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={**role_payload, "enabled": False},
+    )
     assert saved.status_code == 200
-    assert saved.json()["enabled"] is True
-    assert saved.json()["effective_enabled"] is True
+    assert saved.json()["conformance_status"] == "never"
+
+    _conformance_success(monkeypatch)
+    tested = auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/test"
+    )
+    assert tested.status_code == 200
+    assert tested.json()["passed"] is True
+    assert tested.json()["role"]["conformance_status"] == "passed"
+    assert tested.json()["role"]["effective_enabled"] is False
+
+    enabled = auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json=role_payload,
+    )
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+    assert enabled.json()["effective_enabled"] is True
+
+    with SessionLocal() as db:
+        target = prepare_role_execution(db, "playlist_planner")
+    assert target.model_id == "planner-large"
+    assert target.api_key == "secret-provider-key-1234"
 
 
 def test_failed_reverification_disables_role_effectively_but_keeps_draft(
@@ -302,6 +342,16 @@ def test_failed_reverification_disables_role_effectively_but_keeps_draft(
     auth_client.post(
         f"/api/assistant/providers/connections/{created['id']}/verify"
     )
+    auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={
+            "connection_id": created["id"],
+            "model_id": "planner-large",
+            "enabled": False,
+        },
+    )
+    _conformance_success(monkeypatch)
+    auth_client.post("/api/assistant/providers/roles/playlist_planner/test")
     auth_client.put(
         "/api/assistant/providers/roles/playlist_planner",
         json={
@@ -328,6 +378,7 @@ def test_failed_reverification_disables_role_effectively_but_keeps_draft(
     assert planner["enabled"] is True
     assert planner["effective_enabled"] is False
     assert planner["verification_status"] == "failed"
+    assert planner["conformance_status"] == "never"
 
 
 def test_connection_cannot_be_deleted_while_assigned_to_role(
@@ -394,8 +445,23 @@ def test_enabled_role_fails_closed_when_master_key_becomes_unavailable(
     role_payload = {
         "connection_id": created["id"],
         "model_id": "planner-large",
-        "enabled": True,
+        "enabled": False,
     }
+    assert (
+        auth_client.put(
+            "/api/assistant/providers/roles/playlist_planner",
+            json=role_payload,
+        ).status_code
+        == 200
+    )
+    _conformance_success(monkeypatch)
+    assert (
+        auth_client.post(
+            "/api/assistant/providers/roles/playlist_planner/test"
+        ).status_code
+        == 200
+    )
+    role_payload["enabled"] = True
     assert (
         auth_client.put(
             "/api/assistant/providers/roles/playlist_planner",
@@ -423,3 +489,117 @@ def test_enabled_role_fails_closed_when_master_key_becomes_unavailable(
     assert planner["effective_enabled"] is False
     assert rejected.status_code == 503
     assert rejected.json()["detail"]["code"] == "master_key_not_configured"
+
+
+def test_failed_model_test_is_persisted_without_enabling_role(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _create_connection(auth_client)
+    _verify_success(monkeypatch)
+    auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    )
+    auth_client.put(
+        "/api/assistant/providers/roles/music_tagger",
+        json={
+            "connection_id": created["id"],
+            "model_id": "tagger-small",
+            "enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        "app.api.assistant_providers.run_provider_conformance",
+        lambda *args, **kwargs: ProviderConformanceResult(
+            False,
+            "invalid_structured_output",
+        ),
+    )
+
+    tested = auth_client.post("/api/assistant/providers/roles/music_tagger/test")
+    enable = auth_client.put(
+        "/api/assistant/providers/roles/music_tagger",
+        json={
+            "connection_id": created["id"],
+            "model_id": "tagger-small",
+            "enabled": True,
+        },
+    )
+
+    assert tested.status_code == 200
+    assert tested.json()["passed"] is False
+    assert tested.json()["error_code"] == "invalid_structured_output"
+    assert tested.json()["role"]["conformance_status"] == "failed"
+    assert enable.status_code == 409
+    assert enable.json()["detail"]["code"] == "model_not_tested"
+
+
+def test_changing_model_limits_invalidates_previous_model_test(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _create_connection(auth_client)
+    _verify_success(monkeypatch)
+    auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    )
+    auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={
+            "connection_id": created["id"],
+            "model_id": "planner-large",
+            "enabled": False,
+        },
+    )
+    _conformance_success(monkeypatch)
+    auth_client.post("/api/assistant/providers/roles/playlist_planner/test")
+
+    changed = auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={
+            "connection_id": created["id"],
+            "model_id": "planner-large",
+            "enabled": False,
+            "timeout_seconds": 45,
+            "max_output_tokens": 2000,
+        },
+    )
+
+    assert changed.status_code == 200
+    assert changed.json()["conformance_status"] == "never"
+    assert changed.json()["last_conformance_at"] is None
+
+
+def test_model_test_result_is_rejected_if_role_changes_mid_request(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _create_connection(auth_client)
+    _verify_success(monkeypatch)
+    auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    )
+    auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={
+            "connection_id": created["id"],
+            "model_id": "planner-large",
+            "enabled": False,
+        },
+    )
+    with SessionLocal() as db:
+        target = prepare_role_conformance(db, "playlist_planner")
+    with SessionLocal() as db:
+        row = db.get(AssistantModelRole, "playlist_planner")
+        assert row is not None
+        row.model_id = "planner-new"
+        db.commit()
+
+    with SessionLocal() as db, pytest.raises(ProviderServiceError) as error:
+        finish_role_conformance(
+            db,
+            target,
+            ProviderConformanceResult(True, None),
+        )
+
+    assert error.value.code == "role_changed"

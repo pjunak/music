@@ -102,4 +102,13 @@ class ModelRoleOut(StrictProviderModel):
     timeout_seconds: int
     max_output_tokens: int
     verification_status: Literal["never", "verified", "failed"] | None
+    conformance_status: Literal["never", "passed", "failed"]
+    conformance_error_code: str | None
+    last_conformance_at: datetime | None
     updated_at: datetime | None
+
+
+class ModelConformanceOut(StrictProviderModel):
+    role: ModelRoleOut
+    passed: bool
+    error_code: str | None

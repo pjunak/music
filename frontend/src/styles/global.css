@@ -5210,12 +5210,12 @@ kbd,
   margin-right: auto;
   margin-left: auto;
 }
-/* The three-stage signal path is the page's one deliberate visual gesture:
- * provider access is routed through verification before any task can use it. */
+/* The four-stage signal path makes the safety gates visible: provider access
+ * is verified, then each assigned model proves structured output before use. */
 .assistant-provider-path {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--space-5);
   margin-top: 0;
   margin-bottom: var(--space-7);
@@ -5230,8 +5230,8 @@ kbd,
   content: "";
   position: absolute;
   top: 2rem;
-  right: 17%;
-  left: 17%;
+  right: 12%;
+  left: 12%;
   height: 1px;
   background: var(--border-strong);
 }

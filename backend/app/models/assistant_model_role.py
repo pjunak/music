@@ -21,6 +21,18 @@ class AssistantModelRole(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     max_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=2_000)
+    conformance_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="never"
+    )
+    conformance_error_code: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    conformance_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    last_conformance_at: Mapped[datetime | None] = mapped_column(
+        UtcDateTime, nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime, default=utcnow, onupdate=utcnow, nullable=False
     )

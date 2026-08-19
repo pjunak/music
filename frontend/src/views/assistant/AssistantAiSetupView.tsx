@@ -14,7 +14,10 @@ import { toast } from "@/core/toast";
 
 import { ModelRoleCard } from "./ModelRoleCard";
 import { ProviderConnectionCard } from "./ProviderConnectionCard";
-import { verificationFailureMessage } from "./providerUi";
+import {
+  modelTestFailureMessage,
+  verificationFailureMessage,
+} from "./providerUi";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The request could not be completed.";
@@ -189,6 +192,30 @@ export function AssistantAiSetupView() {
     }
   }
 
+  async function testRole(roleId: string) {
+    setBusyItem(`role-test:${roleId}`);
+    try {
+      const result = await assistantProvidersApi.testRole(roleId);
+      setRoles((current) =>
+        current.map((role) =>
+          role.role_id === roleId ? result.role : role,
+        ),
+      );
+      if (result.passed) {
+        toast.success(
+          "Model test passed",
+          "You can now enable this model for its assigned task.",
+        );
+      } else {
+        toast.error("Model test failed", modelTestFailureMessage(result.error_code));
+      }
+    } catch (error) {
+      toast.error("Model test could not run", errorMessage(error));
+    } finally {
+      setBusyItem(null);
+    }
+  }
+
   if (loading && status === null) {
     return <div className="route-spinner">Loading optional AI setup…</div>;
   }
@@ -216,8 +243,8 @@ export function AssistantAiSetupView() {
           <p className="assistant-eyebrow">Optional model routing</p>
           <h1>AI connections</h1>
           <p>
-            Store provider access once, verify what the server can reach, then choose
-            a model separately for each future Assistant task.
+            Store provider access once, verify what the server can reach, then test
+            and enable a model separately for each future Assistant task.
           </p>
         </div>
         <span className="assistant-algorithm">local tools stay active</span>
@@ -237,7 +264,12 @@ export function AssistantAiSetupView() {
         <li>
           <span>3</span>
           <strong>Assign</strong>
-          <p>Allow one model for one task.</p>
+          <p>Choose one model for one task.</p>
+        </li>
+        <li>
+          <span>4</span>
+          <strong>Test &amp; enable</strong>
+          <p>Prove structured output before use.</p>
         </li>
       </ol>
 
@@ -402,8 +434,8 @@ export function AssistantAiSetupView() {
           <div>
             <h2>Model tasks</h2>
             <p>
-              A verified connection can serve several tasks, but each one stays off
-              until you enable it.
+              A verified connection can serve several tasks. Each saved model must
+              pass a synthetic structured-output test before you can enable it.
             </p>
           </div>
           <span>{roles.filter((role) => role.effective_enabled).length} ready</span>
@@ -422,7 +454,9 @@ export function AssistantAiSetupView() {
                 connections={connections}
                 credentialStorageReady={status.credential_storage_ready}
                 busy={busyItem === `role:${role.role_id}`}
+                testing={busyItem === `role-test:${role.role_id}`}
                 onSave={saveRole}
+                onTest={testRole}
                 onRemove={removeRole}
               />
             ))}

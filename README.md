@@ -49,9 +49,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   that fail regressions. See [`backend/evaluation/README.md`](backend/evaluation/README.md).
 - **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
   dedicated Assistant tab, verify it from the server, and assign a model independently to each
-  future task. API keys are encrypted at rest and never returned to the browser. Connections do
-  not replace the local planner or send library data anywhere by themselves; model-backed tools
-  remain a later, explicit layer.
+  future task. Every assignment must pass a fixed synthetic structured-output test before it can
+  be enabled; changing its connection, model, timeout, or response limit invalidates that test.
+  API keys are encrypted at rest and never returned to the browser. The shared execution harness
+  is bounded and provider-neutral, but it is not exposed as a general prompt API and no playlist,
+  track, tag, cleanup, EQ, audio, or library data is sent yet. Local tools remain the active
+  implementations until each future model feature gets its own reviewed contract.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
