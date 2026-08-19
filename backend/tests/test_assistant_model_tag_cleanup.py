@@ -16,6 +16,7 @@ from app.assistant.model_tag_cleanup import (
     load_tag_cleanup_quality_suite,
     suggest_model_tag_cleanup,
 )
+from app.assistant.model_tag_cleanup_job import MODEL_TAG_CLEANUP_JOB_KIND
 from app.assistant.providers.execution import (
     ProviderConformanceResult,
     StructuredModelRequest,
@@ -28,6 +29,7 @@ from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.background_job import BackgroundJob
+from app.models.track_user_tag import TrackUserTag
 
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1] / "evaluation" / "tag-cleanup-v1.json"
@@ -38,10 +40,13 @@ _SUITE_PATH = (
 def _clean_tag_cleanup_model_configuration() -> Iterator[None]:
     def clean() -> None:
         with SessionLocal() as db:
+            db.execute(delete(TrackUserTag))
             db.execute(delete(AssistantModelEvaluation))
             db.execute(
                 delete(BackgroundJob).where(
-                    BackgroundJob.kind == TAG_CLEANUP_QUALITY_JOB_KIND
+                    BackgroundJob.kind.in_(
+                        [TAG_CLEANUP_QUALITY_JOB_KIND, MODEL_TAG_CLEANUP_JOB_KIND]
+                    )
                 )
             )
             db.execute(delete(AssistantModelRole))
@@ -162,6 +167,24 @@ def _configure_enabled_cleanup_role(
     ).status_code == 200
 
 
+def _configure_quality_passed_cleanup_role(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_enabled_cleanup_role(client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_evaluation.execute_structured_model_request",
+        _reference_cleanup_model,
+    )
+    started = client.post(
+        "/api/assistant/providers/roles/tag_cleanup/"
+        "evaluations/tag-cleanup-quality-v1/jobs"
+    )
+    assert started.status_code == 202, started.text
+    finished = _wait_for_job(client, started.json()["id"], {"succeeded"})
+    assert finished["result"]["evaluation"]["passed"] is True
+
+
 def test_cleanup_model_rejects_unknown_targets_and_chained_renames() -> None:
     usage = [TagUsage(tag="inn", track_count=3), TagUsage(tag="pub", track_count=2)]
 
@@ -262,3 +285,146 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     assert evaluations.status_code == 200, evaluations.text
     assert evaluations.json()[0]["status"] == "passed"
     assert evaluations.json()[0]["suite_id"] == "dnd-tag-cleanup-baseline-v1"
+
+
+def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+) -> None:
+    _configure_quality_passed_cleanup_role(auth_client, monkeypatch)
+    response = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": ["inn", "tavern"], "remove": []},
+    )
+    assert response.status_code == 200, response.text
+
+    status = auth_client.get(
+        "/api/assistant/library-tags/catalog/model-cleanup-status"
+    )
+    assert status.status_code == 200, status.text
+    assert status.json()["available"] is True
+    assert status.json()["manual_tags"] == 2
+    assert status.json()["estimated_provider_requests"] == 1
+    assert status.json()["disclosure"] == {
+        "version": "assistant-model-tag-cleanup-disclosure/v1",
+        "shared_with_provider": [
+            "Your normalized manual tag names",
+            "The number of tracks using each manual tag",
+            "The fixed D&D starter-tag vocabulary",
+        ],
+        "never_shared": [
+            "Audio or media files",
+            "Track titles, artists, albums, metadata, or filesystem paths",
+            "Playlists, generated tags, review history, or provider credentials",
+        ],
+        "maximum_tags": 500,
+        "may_incur_cost": True,
+    }
+
+    monkeypatch.setattr(
+        "app.assistant.model_tag_cleanup_job.execute_structured_model_request",
+        _reference_cleanup_model,
+    )
+    started = auth_client.post(
+        "/api/assistant/library-tags/catalog/model-cleanup-jobs",
+        json={
+            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v1",
+            "consent": True,
+        },
+    )
+    assert started.status_code == 202, started.text
+    finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+    assert finished["kind"] == MODEL_TAG_CLEANUP_JOB_KIND
+    assert finished["progress_current"] == finished["progress_total"] == 1
+    assert finished["result"]["suggestions"] == [
+        {
+            "id": finished["result"]["suggestions"][0]["id"],
+            "source": "inn",
+            "target": "tavern",
+            "confidence": "high",
+            "reason": "Synthetic reference synonym or spelling match",
+            "source_track_count": 1,
+            "target_track_count": 1,
+            "merged": True,
+        }
+    ]
+    assert len(finished["result"]["suggestions"][0]["id"]) == 64
+    assert finished["result"]["usage"]["attempted_requests"] == 1
+    assert "inn" not in json.dumps(finished["parameters"])
+    assert "tavern" not in json.dumps(finished["parameters"])
+    assert "secret-cleanup-key-1234" not in json.dumps(finished)
+
+    applied = auth_client.post(
+        "/api/assistant/library-tags/catalog/model-cleanup-apply",
+        json={
+            "job_id": finished["id"],
+            "catalog_signature": finished["result"]["catalog_signature"],
+            "items": [{"source": "inn", "target": "tavern"}],
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["applied"] == [
+        {
+            "source": "inn",
+            "target": "tavern",
+            "affected_tracks": 1,
+            "merged": True,
+        }
+    ]
+    catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
+    assert catalog["tag_usage"] == [{"tag": "tavern", "track_count": 1}]
+
+
+def test_model_tag_cleanup_apply_rejects_stale_or_invented_selection(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+) -> None:
+    _configure_quality_passed_cleanup_role(auth_client, monkeypatch)
+    response = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": ["inn"], "remove": []},
+    )
+    assert response.status_code == 200, response.text
+    monkeypatch.setattr(
+        "app.assistant.model_tag_cleanup_job.execute_structured_model_request",
+        _reference_cleanup_model,
+    )
+    started = auth_client.post(
+        "/api/assistant/library-tags/catalog/model-cleanup-jobs",
+        json={
+            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v1",
+            "consent": True,
+        },
+    )
+    finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+
+    invented = auth_client.post(
+        "/api/assistant/library-tags/catalog/model-cleanup-apply",
+        json={
+            "job_id": finished["id"],
+            "catalog_signature": finished["result"]["catalog_signature"],
+            "items": [{"source": "inn", "target": "combat"}],
+        },
+    )
+    assert invented.status_code == 422, invented.text
+    assert invented.json()["detail"]["code"] == "tag_cleanup_invalid_selection"
+
+    changed = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": ["tavern"], "remove": []},
+    )
+    assert changed.status_code == 200, changed.text
+    stale = auth_client.post(
+        "/api/assistant/library-tags/catalog/model-cleanup-apply",
+        json={
+            "job_id": finished["id"],
+            "catalog_signature": finished["result"]["catalog_signature"],
+            "items": [{"source": "inn", "target": "tavern"}],
+        },
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "tag_cleanup_stale"
+    catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
+    assert catalog["used_tags"] == ["inn", "tavern"]

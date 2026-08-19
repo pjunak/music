@@ -9,6 +9,7 @@ import type {
   LibraryAnalysisSummary,
   LibraryTagPage,
   ManualTagCatalog,
+  ModelTagCleanupAvailability,
   ModelTaggingAvailability,
 } from "@/core/api";
 
@@ -24,6 +25,9 @@ vi.mock("@/core/api", async (importActual) => {
       getLibraryAudioAnalysisSummary: vi.fn(),
       getModelTaggingAvailability: vi.fn(),
       startModelTagging: vi.fn(),
+      getModelTagCleanupAvailability: vi.fn(),
+      startModelTagCleanup: vi.fn(),
+      applyModelTagCleanup: vi.fn(),
       getManualTagCatalog: vi.fn(),
       listLibraryTags: vi.fn(),
       patchManualTags: vi.fn(),
@@ -118,6 +122,26 @@ const modelTaggingUnavailable: ModelTaggingAvailability = {
   },
 };
 
+const modelTagCleanupUnavailable: ModelTagCleanupAvailability = {
+  available: false,
+  reason_code: "role_not_configured",
+  role_id: "tag_cleanup",
+  connection_name: null,
+  model_id: null,
+  quality_evaluation_id: "tag-cleanup-quality-v1",
+  job_kind: "assistant.model-tag-cleanup",
+  catalog_signature: "0".repeat(64),
+  manual_tags: 0,
+  estimated_provider_requests: 0,
+  disclosure: {
+    version: "assistant-model-tag-cleanup-disclosure/v1",
+    shared_with_provider: [],
+    never_shared: [],
+    maximum_tags: 500,
+    may_incur_cost: true,
+  },
+};
+
 function job(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
   return {
     id: "job-1",
@@ -150,6 +174,9 @@ beforeEach(() => {
   vi.mocked(assistantApi.listLibraryTags).mockResolvedValue(emptyTagPage);
   vi.mocked(assistantApi.getModelTaggingAvailability).mockResolvedValue(
     modelTaggingUnavailable,
+  );
+  vi.mocked(assistantApi.getModelTagCleanupAvailability).mockResolvedValue(
+    modelTagCleanupUnavailable,
   );
   vi.mocked(jobsApi.list).mockResolvedValue([]);
 });

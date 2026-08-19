@@ -61,19 +61,23 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   its connection, model, timeout, or response limit invalidates that test.
   API keys are encrypted at rest and never returned to the browser. The shared execution harness
   is bounded and provider-neutral, but it is not exposed as a general prompt API. The playlist
-  planner and metadata music tagger are the first optional live-library integrations.
+  playlist planner, metadata music tagger, and manual-tag cleanup reviewer are the first optional
+  live-library integrations.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates and returns a draft. Music tagging sends metadata
   in batches of at most 20, may choose only from the fixed D&D vocabulary, and stores suggestions
   under `model-metadata-tagger/v1` for explicit per-tag review. Neither path can write a playlist or
-  manual tag directly. Quality, playlist, and tagging jobs retain their attempted request count,
+  manual tag directly. Tag cleanup sends only normalized manual tag names, their usage counts, and
+  the fixed D&D starter vocabulary in one bounded request; its stored proposal remains inert until
+  the user selects specific renames, and stale proposals are rejected. Quality, playlist, tagging,
+  and cleanup jobs retain their attempted request count,
   provider-reported model IDs, and reported input/output token totals; the UI identifies calls where
   the provider omitted usage rather than treating missing counts as exact zero. Usage is checkpointed
   after each provider attempt, so a failed or cancelled job still shows what was already reported.
   It does not estimate charges because provider pricing is not part of the portable model contract.
-  The Library Analysis screen restores tagging progress after refresh or reopen and shows model output
-  beside local suggestions without merging their ownership. Cleanup, EQ, audio, and other workflows
-  remain local until they receive their own reviewed contracts.
+  The Library Analysis screen restores tagging and cleanup progress after refresh or reopen and
+  shows model output beside local tools without merging their ownership. EQ and specialized audio
+  model workflows remain local until they receive their own reviewed contracts.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
@@ -98,6 +102,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   An optional quality-certified metadata tagging model can populate the same review surface through
   a durable server job. It never receives paths, audio, existing tags, or review decisions, skips
   unchanged model profiles, and cannot promote its output without an explicit acceptance.
+  A separately assigned, quality-certified cleanup model can review only the manual tag catalog and
+  usage counts. It proposes renames in a durable server job, selects nothing by default, and can
+  apply only the individually checked, still-current proposal items in one atomic transaction.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.

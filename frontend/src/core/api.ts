@@ -373,6 +373,42 @@ export interface ModelTaggingAvailability {
   disclosure: ModelTaggingDisclosure;
 }
 
+export const MODEL_TAG_CLEANUP_DISCLOSURE_VERSION =
+  "assistant-model-tag-cleanup-disclosure/v1" as const;
+
+export interface ModelTagCleanupDisclosure {
+  version: typeof MODEL_TAG_CLEANUP_DISCLOSURE_VERSION;
+  shared_with_provider: string[];
+  never_shared: string[];
+  maximum_tags: number;
+  may_incur_cost: boolean;
+}
+
+export interface ModelTagCleanupAvailability {
+  available: boolean;
+  reason_code: string | null;
+  role_id: "tag_cleanup";
+  connection_name: string | null;
+  model_id: string | null;
+  quality_evaluation_id: "tag-cleanup-quality-v1";
+  job_kind: string;
+  catalog_signature: string;
+  manual_tags: number;
+  estimated_provider_requests: number;
+  disclosure: ModelTagCleanupDisclosure;
+}
+
+export interface ModelTagCleanupSuggestion {
+  id: string;
+  source: string;
+  target: string;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+  source_track_count: number;
+  target_track_count: number;
+  merged: boolean;
+}
+
 export type BackgroundJobStatus =
   | "queued"
   | "running"
@@ -658,6 +694,30 @@ export const assistantApi = {
     api.post<TagCleanupApplyResult>(
       "/api/assistant/library-tags/catalog/cleanup-apply",
       { catalog_signature: catalogSignature, items },
+    ),
+  getModelTagCleanupAvailability: () =>
+    api.get<ModelTagCleanupAvailability>(
+      "/api/assistant/library-tags/catalog/model-cleanup-status",
+    ),
+  startModelTagCleanup: (
+    disclosureVersion: typeof MODEL_TAG_CLEANUP_DISCLOSURE_VERSION,
+  ) =>
+    api.post<BackgroundJob>(
+      "/api/assistant/library-tags/catalog/model-cleanup-jobs",
+      { disclosure_version: disclosureVersion, consent: true },
+    ),
+  applyModelTagCleanup: (
+    jobId: string,
+    catalogSignature: string,
+    items: Array<Pick<ModelTagCleanupSuggestion, "source" | "target">>,
+  ) =>
+    api.post<TagCleanupApplyResult>(
+      "/api/assistant/library-tags/catalog/model-cleanup-apply",
+      {
+        job_id: jobId,
+        catalog_signature: catalogSignature,
+        items,
+      },
     ),
   reviewAnalysisTag: (
     trackId: number,

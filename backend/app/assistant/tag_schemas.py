@@ -146,6 +146,65 @@ class TagCleanupApplyResult(StrictTagModel):
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
+MODEL_TAG_CLEANUP_DISCLOSURE_VERSION: Literal[
+    "assistant-model-tag-cleanup-disclosure/v1"
+] = "assistant-model-tag-cleanup-disclosure/v1"
+
+
+class ModelTagCleanupDisclosure(StrictTagModel):
+    version: Literal["assistant-model-tag-cleanup-disclosure/v1"]
+    shared_with_provider: list[str]
+    never_shared: list[str]
+    maximum_tags: int = Field(ge=1, le=500)
+    may_incur_cost: bool
+
+
+class ModelTagCleanupAvailability(StrictTagModel):
+    available: bool
+    reason_code: str | None
+    role_id: Literal["tag_cleanup"]
+    connection_name: str | None
+    model_id: str | None
+    quality_evaluation_id: Literal["tag-cleanup-quality-v1"]
+    job_kind: str
+    catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    manual_tags: int = Field(ge=0)
+    estimated_provider_requests: int = Field(ge=0, le=1)
+    disclosure: ModelTagCleanupDisclosure
+
+
+class ModelTagCleanupStartRequest(StrictTagModel):
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v1"]
+    consent: Literal[True]
+
+
+class ModelTagCleanupSuggestionOut(StrictTagModel):
+    id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source: str
+    target: str
+    confidence: Literal["high", "medium", "low"]
+    reason: str = Field(min_length=1, max_length=512)
+    source_track_count: int = Field(ge=1)
+    target_track_count: int = Field(ge=0)
+    merged: bool
+
+
+class ModelTagCleanupJobResult(StrictTagModel):
+    schema_version: Literal["assistant-model-tag-cleanup-job-result/v1"]
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v1"]
+    role_id: Literal["tag_cleanup"]
+    role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    engine_id: Literal["model-tag-cleanup/v1"]
+    catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    catalog_tags: int = Field(ge=1, le=500)
+    suggestions: list[ModelTagCleanupSuggestionOut] = Field(max_length=100)
+    usage: ProviderUsageSummary
+
+
+class ModelTagCleanupApplyRequest(TagCleanupApplyRequest):
+    job_id: str = Field(min_length=1, max_length=32)
+
+
 class AnalysisTagSuggestionOut(StrictTagModel):
     tag: str
     analyzer_id: str

@@ -1,5 +1,6 @@
 """Operator-owned playlist tags, kept separate from generated analysis."""
 
+import json
 from typing import Literal, NoReturn
 
 from fastapi import APIRouter, HTTPException, Query
@@ -11,6 +12,11 @@ from app.assistant.analysis import (
     load_current_metadata_profiles,
 )
 from app.assistant.audio_analysis import CurrentAudioProfile, load_current_audio_profiles
+from app.assistant.model_tag_cleanup_job import (
+    MODEL_TAG_CLEANUP_JOB_KIND,
+    model_tag_cleanup_availability,
+    model_tag_cleanup_job_parameters,
+)
 from app.assistant.model_tagging import (
     MODEL_TAGGING_JOB_KIND,
     model_tagging_availability,
@@ -22,6 +28,7 @@ from app.assistant.tag_cleanup import (
     InvalidTagCleanupSelectionError,
     StaleTagCleanupError,
     TagCleanupSelection,
+    apply_reviewed_tag_renames,
     apply_tag_cleanup,
     preview_tag_cleanup,
 )
@@ -54,6 +61,10 @@ from app.assistant.tag_schemas import (
     ManualTagRenameRequest,
     ManualTagRenameResult,
     ManualTagUsage,
+    ModelTagCleanupApplyRequest,
+    ModelTagCleanupAvailability,
+    ModelTagCleanupJobResult,
+    ModelTagCleanupStartRequest,
     ModelTaggingAvailability,
     ModelTaggingStartRequest,
     StarterTagGroupOut,
@@ -76,6 +87,7 @@ from app.assistant.tags import (
 from app.jobs.runner import job_runner
 from app.jobs.schemas import BackgroundJobOut, job_out
 from app.jobs.service import enqueue_unique_active_job
+from app.models.background_job import BackgroundJob
 from app.models.track import Track
 from app.models.track_user_tag import TrackUserTag
 
@@ -196,6 +208,137 @@ def tag_catalog(_user: CurrentUser, db: DbSession) -> ManualTagCatalog:
             ManualTagUsage(tag=item.tag, track_count=item.track_count)
             for item in usage
         ],
+    )
+
+
+@router.get(
+    "/catalog/model-cleanup-status",
+    response_model=ModelTagCleanupAvailability,
+)
+def model_library_tag_cleanup_status(
+    _user: CurrentUser,
+    db: DbSession,
+) -> ModelTagCleanupAvailability:
+    return model_tag_cleanup_availability(db)
+
+
+@router.post(
+    "/catalog/model-cleanup-jobs",
+    response_model=BackgroundJobOut,
+    status_code=202,
+)
+def start_model_library_tag_cleanup(
+    _payload: ModelTagCleanupStartRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BackgroundJobOut:
+    try:
+        parameters = model_tag_cleanup_job_parameters(db)
+    except ProviderServiceError as exc:
+        _raise_provider_error(exc)
+    job, created = enqueue_unique_active_job(
+        db,
+        MODEL_TAG_CLEANUP_JOB_KIND,
+        parameters,
+    )
+    output = job_out(job)
+    if not created and output.parameters != parameters:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "model_tag_cleanup_in_progress",
+                "message": (
+                    "Another model tag-cleanup job is already running. "
+                    "Wait for it to finish or cancel it first."
+                ),
+            },
+        )
+    if created:
+        job_runner.wake()
+    return output
+
+
+@router.post(
+    "/catalog/model-cleanup-apply",
+    response_model=TagCleanupApplyResult,
+)
+def apply_model_library_tag_cleanup(
+    payload: ModelTagCleanupApplyRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> TagCleanupApplyResult:
+    job = db.get(BackgroundJob, payload.job_id)
+    if job is None or job.kind != MODEL_TAG_CLEANUP_JOB_KIND:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "model_tag_cleanup_job_not_found",
+                "message": "Model tag-cleanup proposal not found.",
+            },
+        )
+    if job.status != "succeeded" or job.result_json is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "model_tag_cleanup_job_incomplete",
+                "message": "Model tag-cleanup proposal is not complete.",
+            },
+        )
+    try:
+        result = ModelTagCleanupJobResult.model_validate(
+            json.loads(job.result_json)
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "model_tag_cleanup_result_invalid",
+                "message": "Stored model tag-cleanup proposal is invalid.",
+            },
+        ) from exc
+    if payload.catalog_signature != result.catalog_signature:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "model_tag_cleanup_signature_mismatch",
+                "message": "The selected proposal signature does not match its job.",
+            },
+        )
+    try:
+        outcome = apply_reviewed_tag_renames(
+            db,
+            result.catalog_signature,
+            [
+                TagCleanupSelection(source=item.source, target=item.target)
+                for item in payload.items
+            ],
+            allowed_pairs={
+                (item.source, item.target) for item in result.suggestions
+            },
+        )
+    except StaleTagCleanupError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "tag_cleanup_stale", "message": str(exc)},
+        ) from exc
+    except InvalidTagCleanupSelectionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "tag_cleanup_invalid_selection", "message": str(exc)},
+        ) from exc
+    return TagCleanupApplyResult(
+        schema_version="assistant-tag-cleanup-apply/v1",
+        requested_items=len(payload.items),
+        applied=[
+            ManualTagRenameResult(
+                source=item.source,
+                target=item.target,
+                affected_tracks=item.affected_tracks,
+                merged=item.merged,
+            )
+            for item in outcome.applied
+        ],
+        catalog_signature=outcome.catalog_signature,
     )
 
 

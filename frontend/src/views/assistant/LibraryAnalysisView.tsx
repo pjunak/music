@@ -18,6 +18,7 @@ import {
 } from "./analysisJobs";
 import { LibraryAnalyzerPanel } from "./LibraryAnalyzerPanel";
 import { ModelTaggingPanel } from "./ModelTaggingPanel";
+import { ModelTagCleanupPanel } from "./ModelTagCleanupPanel";
 
 const LibraryTagEditor = lazy(async () => {
   const module = await import("./LibraryTagEditor");
@@ -237,6 +238,8 @@ export function LibraryAnalysisView() {
       />
 
       <ModelTaggingPanel onSuggestionsChanged={refreshTagSuggestions} />
+
+      <ModelTagCleanupPanel onCatalogChanged={refreshTagSuggestions} />
 
       <Suspense
         fallback={

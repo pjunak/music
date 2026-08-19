@@ -66,6 +66,35 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
         == 401
     )
     assert (
+        client.get(
+            "/api/assistant/library-tags/catalog/model-cleanup-status"
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/assistant/library-tags/catalog/model-cleanup-jobs",
+            json={
+                "disclosure_version": (
+                    "assistant-model-tag-cleanup-disclosure/v1"
+                ),
+                "consent": True,
+            },
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/assistant/library-tags/catalog/model-cleanup-apply",
+            json={
+                "job_id": "a" * 32,
+                "catalog_signature": "0" * 64,
+                "items": [{"source": "inn", "target": "tavern"}],
+            },
+        ).status_code
+        == 401
+    )
+    assert (
         client.post(
             "/api/assistant/library-tags/catalog/cleanup-apply",
             json={"catalog_signature": "0" * 64, "items": []},

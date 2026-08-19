@@ -55,6 +55,12 @@ class TagCleanupApplyOutcome:
     catalog_signature: str
 
 
+@dataclass(frozen=True)
+class TagCatalogSnapshot:
+    usage: tuple[TagUsage, ...]
+    signature: str
+
+
 class StaleTagCleanupError(ValueError):
     pass
 
@@ -177,16 +183,17 @@ def _manual_tag_usage_unlocked(db: Session) -> tuple[TagUsage, ...]:
 
 
 def preview_tag_cleanup(db: Session) -> TagCleanupPreview:
-    return build_tag_cleanup_preview(_manual_tag_usage_unlocked(db))
+    return build_tag_cleanup_preview(tag_catalog_snapshot(db).usage)
 
 
-def apply_tag_cleanup(
-    db: Session,
-    expected_signature: str,
+def tag_catalog_snapshot(db: Session) -> TagCatalogSnapshot:
+    usage = _manual_tag_usage_unlocked(db)
+    return TagCatalogSnapshot(usage=usage, signature=catalog_signature(usage))
+
+
+def _normalize_selections(
     selections: Sequence[TagCleanupSelection],
-) -> TagCleanupApplyOutcome:
-    """Apply explicitly selected current suggestions in one transaction."""
-
+) -> tuple[TagCleanupSelection, ...]:
     normalized = tuple(
         TagCleanupSelection(
             source=normalize_manual_tag(item.source),
@@ -202,68 +209,120 @@ def apply_tag_cleanup(
         raise InvalidTagCleanupSelectionError(
             "cleanup selections cannot depend on another selected rename"
         )
+    return normalized
 
-    with tag_write_lock:
-        current = build_tag_cleanup_preview(_manual_tag_usage_unlocked(db))
-        if current.catalog_signature != expected_signature:
-            raise StaleTagCleanupError(
-                "manual tags changed after this cleanup preview was created"
-            )
-        allowed = {
-            (suggestion.source, suggestion.target): suggestion
-            for suggestion in current.suggestions
-        }
-        if invalid := [
-            item for item in normalized if (item.source, item.target) not in allowed
-        ]:
-            first = invalid[0]
-            raise InvalidTagCleanupSelectionError(
-                f"cleanup suggestion is not current: {first.source} -> {first.target}"
-            )
 
-        source_rows = list(
-            db.scalars(
-                select(TrackUserTag).where(TrackUserTag.tag.in_(sources))
-            ).all()
+def _apply_reviewed_tag_renames_locked(
+    db: Session,
+    expected_signature: str,
+    current_usage: Sequence[TagUsage],
+    selections: tuple[TagCleanupSelection, ...],
+    allowed_pairs: set[tuple[str, str]],
+) -> TagCleanupApplyOutcome:
+    current_signature = catalog_signature(current_usage)
+    if current_signature != expected_signature:
+        raise StaleTagCleanupError(
+            "manual tags changed after this cleanup preview was created"
         )
-        rows_by_source: dict[str, list[TrackUserTag]] = {}
-        for row in source_rows:
-            rows_by_source.setdefault(row.tag, []).append(row)
-        existing_targets = {
-            (int(track_id), str(tag))
-            for track_id, tag in db.execute(
-                select(TrackUserTag.track_id, TrackUserTag.tag).where(
-                    TrackUserTag.tag.in_(targets)
-                )
-            ).all()
-        }
+    if invalid := [
+        item
+        for item in selections
+        if (item.source, item.target) not in allowed_pairs
+    ]:
+        first = invalid[0]
+        raise InvalidTagCleanupSelectionError(
+            f"cleanup suggestion is not current: {first.source} -> {first.target}"
+        )
 
-        outcomes: list[RenameTagOutcome] = []
-        for item in normalized:
-            rows = rows_by_source[item.source]
-            target_existed = any(tag == item.target for _, tag in existing_targets)
-            for row in rows:
-                db.delete(row)
-                pair = (row.track_id, item.target)
-                if pair not in existing_targets:
-                    db.add(TrackUserTag(track_id=row.track_id, tag=item.target))
-                    existing_targets.add(pair)
-            outcomes.append(
-                RenameTagOutcome(
-                    source=item.source,
-                    target=item.target,
-                    affected_tracks=len(rows),
-                    merged=target_existed,
-                )
+    sources = {item.source for item in selections}
+    targets = {item.target for item in selections}
+    source_rows = list(
+        db.scalars(select(TrackUserTag).where(TrackUserTag.tag.in_(sources))).all()
+    )
+    rows_by_source: dict[str, list[TrackUserTag]] = {}
+    for row in source_rows:
+        rows_by_source.setdefault(row.tag, []).append(row)
+    if missing := sorted(sources - rows_by_source.keys()):
+        raise StaleTagCleanupError(f"manual tag no longer exists: {missing[0]}")
+    existing_targets = {
+        (int(track_id), str(tag))
+        for track_id, tag in db.execute(
+            select(TrackUserTag.track_id, TrackUserTag.tag).where(
+                TrackUserTag.tag.in_(targets)
             )
-        try:
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
+        ).all()
+    }
 
-        next_signature = catalog_signature(_manual_tag_usage_unlocked(db))
+    outcomes: list[RenameTagOutcome] = []
+    for item in selections:
+        rows = rows_by_source[item.source]
+        target_existed = any(tag == item.target for _, tag in existing_targets)
+        for row in rows:
+            db.delete(row)
+            pair = (row.track_id, item.target)
+            if pair not in existing_targets:
+                db.add(TrackUserTag(track_id=row.track_id, tag=item.target))
+                existing_targets.add(pair)
+        outcomes.append(
+            RenameTagOutcome(
+                source=item.source,
+                target=item.target,
+                affected_tracks=len(rows),
+                merged=target_existed,
+            )
+        )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    next_signature = catalog_signature(_manual_tag_usage_unlocked(db))
     return TagCleanupApplyOutcome(
         applied=tuple(outcomes),
         catalog_signature=next_signature,
     )
+
+
+def apply_reviewed_tag_renames(
+    db: Session,
+    expected_signature: str,
+    selections: Sequence[TagCleanupSelection],
+    *,
+    allowed_pairs: set[tuple[str, str]],
+) -> TagCleanupApplyOutcome:
+    """Atomically apply an explicitly reviewed subset of a bound proposal."""
+
+    normalized = _normalize_selections(selections)
+    with tag_write_lock:
+        return _apply_reviewed_tag_renames_locked(
+            db,
+            expected_signature,
+            _manual_tag_usage_unlocked(db),
+            normalized,
+            allowed_pairs,
+        )
+
+
+def apply_tag_cleanup(
+    db: Session,
+    expected_signature: str,
+    selections: Sequence[TagCleanupSelection],
+) -> TagCleanupApplyOutcome:
+    """Apply explicitly selected current suggestions in one transaction."""
+
+    normalized = _normalize_selections(selections)
+    with tag_write_lock:
+        current_usage = _manual_tag_usage_unlocked(db)
+        current = build_tag_cleanup_preview(current_usage)
+        allowed_pairs = {
+            (suggestion.source, suggestion.target)
+            for suggestion in current.suggestions
+        }
+        return _apply_reviewed_tag_renames_locked(
+            db,
+            expected_signature,
+            current_usage=current_usage,
+            selections=normalized,
+            allowed_pairs=allowed_pairs,
+        )

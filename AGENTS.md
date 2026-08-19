@@ -196,11 +196,19 @@ Runtime data lives outside the image.
   fingerprint, and expose it only through the existing generated-tag review surface. The model may
   never add a `track_user_tags` row directly. Accepted suggestions become manual tags only through
   the existing explicit single or bulk review transaction.
+- Optional model-assisted manual-tag cleanup may run only through
+  `assistant.model-tag-cleanup`. Require the exact current `tag-cleanup-quality-v1` pass and
+  versioned disclosure consent, allow at most 500 catalog tags, make the provider job
+  non-restartable, and send only normalized manual tag names, their usage counts, and the fixed D&D
+  starter vocabulary. Never send song metadata, paths, audio, playlists, generated tags, review
+  history, or credentials. Store only a review-only proposal bound to the exact role fingerprint
+  and catalog signature. Apply only explicitly selected source/target pairs from that stored job,
+  reject stale or invented selections, and commit all selected manual-tag renames atomically.
 - Task-specific model quality checks run as durable, non-restartable jobs and persist their current
   certification separately from job history. Bind every result to the exact model-role runtime
   fingerprint, clear it after connection reverification or runtime changes, and keep historical
   reports synthetic and secret-free. A quality pass does not authorize live-library access.
-- Durable quality, playlist, and tagging model jobs record the shared bounded provider-usage
+- Durable quality, playlist, tagging, and tag-cleanup model jobs record the shared bounded provider-usage
   summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
   Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep
   the usage already incurred. Preserve missing-usage counts explicitly; never infer unreported
