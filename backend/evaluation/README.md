@@ -1,0 +1,57 @@
+# Playlist recommendation evaluation
+
+The evaluation harness runs synthetic, versioned libraries through the same
+`PlaylistSuggestionEngine` contract used by the Assistant API. It is intended
+to catch ranking and contract regressions before heuristic changes or optional
+model providers reach real libraries.
+
+From `backend/`, run the checked-in local baseline:
+
+```powershell
+uv run music-cli evaluate-playlists evaluation/playlist-local-v1.json
+```
+
+Use `--json` for the complete `playlist-evaluation-result/v1` result. The JSON
+includes per-case metrics, selected and top-ranked track IDs, failures, and a
+stable response fingerprint suitable for CI artifacts or before/after diffs.
+
+## What a suite measures
+
+Each `playlist-evaluation/v1` case supplies a synthetic track library, manual
+tags, generated metadata, optional measured signals, a normal playlist request,
+and explicit expectations. The evaluator reports:
+
+- precision and recall among the first `k` suggestions;
+- reciprocal rank of the first relevant song;
+- recall of songs that should be initially selected;
+- requested ordering-pair accuracy for energy flows;
+- explanation coverage;
+- forbidden, excluded, or invented track IDs;
+- response-contract integrity and optional repeat-run determinism.
+
+Thresholds belong to each case. A suite fails when a threshold is missed or an
+engine violates hard safety invariants: candidates must come from the supplied
+library, preserve its source metadata, remain unique, respect exclusions and
+limits, and agree with the reported selection plan. An engine error is contained
+to its case and reported by exception type without copying provider details into
+the result.
+
+## Adding cases
+
+Prefer representative decisions over large artificial libraries. Add a case
+when an operator can state which tracks are acceptable and why, especially for:
+
+- D&D settings and scenes such as tavern, medieval, dungeon, dancing, travel,
+  stealth, combat, and rest;
+- manual-tag priority over generated resemblance;
+- measurable constraints such as tempo and duration;
+- steady, rising, falling, and build-and-resolve ordering;
+- sparse or missing metadata and deliberately unsuitable tracks.
+
+Do not copy private library paths, credentials, or media into the suite. Use
+synthetic names and evidence. Keep relevant sets broad enough that the harness
+measures playlist quality instead of freezing one accidental exact ranking.
+
+The command currently selects the local planner. Future provider adapters can
+call `evaluate_playlist_engine()` with the same suite, then expose engine
+selection in the CLI after provider configuration exists.

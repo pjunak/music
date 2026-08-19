@@ -160,6 +160,11 @@ Runtime data lives outside the image.
 - Assistant suggestions are read-only drafts until the operator explicitly previews and commits
   them through Authoring import. Keep local heuristics and future model providers behind the same
   suggestion contracts; never let a ranking engine write playlists or mutate the library directly.
+- Playlist recommendation changes must run the versioned synthetic suites under
+  `backend/evaluation/` through the provider-neutral evaluator. Add representative cases and
+  explicit thresholds without copying private library data or freezing one incidental exact
+  ranking. Future model providers must pass the same unknown-track, source-integrity, exclusion,
+  selection-plan, and candidate-limit checks before UI integration.
 - Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a

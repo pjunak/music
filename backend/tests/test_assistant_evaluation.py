@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from app.assistant.engine import (
+    TrackAnalysisProfile,
+    TrackLike,
+    TrackSignalProfile,
+)
+from app.assistant.evaluation import (
+    PlaylistEvaluationSuite,
+    evaluate_playlist_engine,
+    load_evaluation_suite,
+)
+from app.assistant.local import local_playlist_planner
+from app.assistant.schemas import PlaylistSuggestionRequest, PlaylistSuggestionResponse
+from app.cli import main as cli_main
+
+SUITE_PATH = Path(__file__).parents[1] / "evaluation" / "playlist-local-v1.json"
+
+
+class ReorderedEngine:
+    engine_id = "evaluation-reordered/v1"
+
+    def __init__(self, *, alternate: bool = False) -> None:
+        self.alternate = alternate
+        self.calls = 0
+
+    def suggest(
+        self,
+        tracks: Sequence[TrackLike],
+        request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
+        signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
+    ) -> PlaylistSuggestionResponse:
+        response = local_playlist_planner.suggest(
+            tracks,
+            request,
+            profiles=profiles,
+            manual_tags=manual_tags,
+            signal_profiles=signal_profiles,
+        )
+        self.calls += 1
+        reverse = not self.alternate or self.calls % 2 == 0
+        candidates = list(reversed(response.candidates)) if reverse else response.candidates
+        return response.model_copy(
+            update={"engine": self.engine_id, "candidates": candidates}
+        )
+
+
+class UnknownTrackEngine:
+    engine_id = "evaluation-unknown-track/v1"
+
+    def suggest(
+        self,
+        tracks: Sequence[TrackLike],
+        request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
+        signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
+    ) -> PlaylistSuggestionResponse:
+        response = local_playlist_planner.suggest(
+            tracks,
+            request,
+            profiles=profiles,
+            manual_tags=manual_tags,
+            signal_profiles=signal_profiles,
+        )
+        candidates = list(response.candidates)
+        candidates[0] = candidates[0].model_copy(update={"track_id": 999_999})
+        return response.model_copy(
+            update={"engine": self.engine_id, "candidates": candidates}
+        )
+
+
+class RaisingEngine:
+    engine_id = "evaluation-raising/v1"
+
+    def suggest(
+        self,
+        tracks: Sequence[TrackLike],
+        request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
+        signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
+    ) -> PlaylistSuggestionResponse:
+        raise RuntimeError("provider details stay out of the report")
+
+
+def one_case_suite(suite: PlaylistEvaluationSuite) -> PlaylistEvaluationSuite:
+    return suite.model_copy(
+        update={"id": "single-evaluation-case", "cases": [suite.cases[0]]}
+    )
+
+
+def test_checked_in_playlist_evaluation_suite_passes() -> None:
+    suite = load_evaluation_suite(SUITE_PATH)
+
+    result = evaluate_playlist_engine(local_playlist_planner, suite)
+
+    assert result.passed is True
+    assert result.engine_id == "local-planner/v2"
+    assert result.summary.cases == 5
+    assert result.summary.passed_cases == 5
+    assert result.summary.mean_precision_at_k == 1.0
+    assert result.summary.mean_recall_at_k == 1.0
+    assert result.summary.mean_order_pair_accuracy == 1.0
+    assert all(case.metrics.contract_valid for case in result.cases)
+    assert all(case.metrics.deterministic is True for case in result.cases)
+
+
+def test_evaluator_reports_ranking_regressions() -> None:
+    suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
+
+    result = evaluate_playlist_engine(ReorderedEngine(), suite)
+
+    assert result.passed is False
+    assert result.summary.failed_cases == 1
+    assert result.cases[0].metrics.precision_at_k == 0.0
+    assert result.cases[0].metrics.contract_valid is True
+    assert "precision_at_k below threshold" in result.cases[0].failures
+    assert "recall_at_k below threshold" in result.cases[0].failures
+
+
+def test_evaluator_reports_nondeterministic_local_contract() -> None:
+    suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
+
+    result = evaluate_playlist_engine(ReorderedEngine(alternate=True), suite)
+
+    assert result.passed is False
+    assert result.cases[0].metrics.deterministic is False
+    assert result.cases[0].failures == ["engine response is not deterministic"]
+
+
+def test_evaluator_rejects_unknown_model_track_ids() -> None:
+    suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
+
+    result = evaluate_playlist_engine(UnknownTrackEngine(), suite)
+
+    assert result.passed is False
+    assert result.cases[0].metrics.unknown_candidate_count == 1
+    assert result.cases[0].metrics.contract_valid is False
+    assert "suggestion response violates the evaluation contract" in result.cases[0].failures
+
+
+def test_evaluator_contains_engine_errors_per_case() -> None:
+    suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
+
+    result = evaluate_playlist_engine(RaisingEngine(), suite)
+
+    assert result.passed is False
+    assert result.cases[0].metrics.contract_valid is False
+    assert result.cases[0].failures == ["engine raised RuntimeError"]
+    assert result.cases[0].response_fingerprint == ""
+
+
+def test_suite_validation_rejects_unknown_expectation_track() -> None:
+    payload = load_evaluation_suite(SUITE_PATH).model_dump(mode="json")
+    payload["cases"][0]["expectations"]["relevant_track_ids"] = [999_999]
+
+    with pytest.raises(ValidationError, match="unknown track IDs"):
+        PlaylistEvaluationSuite.model_validate(payload)
+
+
+def test_playlist_evaluation_cli_supports_human_and_json_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli_main(["evaluate-playlists", str(SUITE_PATH)]) == 0
+    human = capsys.readouterr().out
+    assert "PASS local-dnd-playlist-baseline" in human
+    assert "5/5 cases passed" in human
+
+    assert cli_main(["evaluate-playlists", str(SUITE_PATH), "--json"]) == 0
+    output = capsys.readouterr().out
+    assert '"schema_version": "playlist-evaluation-result/v1"' in output
+    assert '"engine_id": "local-planner/v2"' in output
+
+
+def test_playlist_evaluation_cli_rejects_invalid_suite(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text('{"schema_version":"wrong"}', encoding="utf-8")
+
+    assert cli_main(["evaluate-playlists", str(invalid)]) == 2
+    assert "Could not load evaluation suite" in capsys.readouterr().out

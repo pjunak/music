@@ -1,6 +1,6 @@
 import argparse
 
-from app.cli import create_user, init_storage, reload_modes, set_password
+from app.cli import create_user, init_storage, playlist_evaluation, reload_modes, set_password
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -11,6 +11,7 @@ def main(argv: list[str] | None = None) -> int:
     set_password.add_parser(sub)
     reload_modes.add_parser(sub)
     init_storage.add_parser(sub)
+    playlist_evaluation.add_parser(sub)
 
     args = parser.parse_args(argv)
     return args.handler(args)

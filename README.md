@@ -43,6 +43,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   then goes through the same preview and create-only Authoring import transaction. This baseline
   runs locally and makes no external model calls; signal measurements remain numeric evidence and
   never become semantic mood tags automatically.
+- **Playlist quality evaluation** — run versioned, synthetic D&D playlist scenarios through the
+  provider-neutral suggestion contract. The harness measures relevance, required selection,
+  ordering, explanations, determinism, and invented or excluded tracks, with explicit thresholds
+  that fail regressions. See [`backend/evaluation/README.md`](backend/evaluation/README.md).
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
