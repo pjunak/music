@@ -11,6 +11,7 @@ import {
 } from "@/core/api";
 import { toast } from "@/core/toast";
 
+import { readableBackgroundJobError } from "./backgroundJobs";
 import {
   MODEL_TAGGING_JOB_KIND,
   isModelTaggingJobActive,
@@ -38,12 +39,6 @@ function unavailableMessage(reasonCode: string | null): string {
     default:
       return "The connected music tagging model is not ready yet.";
   }
-}
-
-function readableJobError(error: string | null): string {
-  if (error === null) return "Start a new run when the provider is available.";
-  const match = /^[A-Za-z][A-Za-z0-9_]*Error: (.+)$/s.exec(error);
-  return match?.[1] ?? error;
 }
 
 export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
@@ -335,7 +330,12 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       ) : job?.status === "failed" ? (
         <div className="assistant-quality-result is-failed">
           <strong>The model tagging run did not finish</strong>
-          <p>{readableJobError(job.error)}</p>
+          <p>
+            {readableBackgroundJobError(
+              job.error,
+              "Start a new run when the provider is available.",
+            )}
+          </p>
         </div>
       ) : job?.status === "cancelled" ? (
         <div className="assistant-quality-result">

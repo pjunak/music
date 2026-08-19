@@ -338,6 +338,16 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         "eq_assistant",
         "audio_analyzer",
     }
+    descriptions = {role["id"]: role["description"] for role in payload["roles"]}
+    assert "Reserved" not in descriptions["playlist_planner"]
+    assert "Reserved" not in descriptions["music_tagger"]
+    for role_id in (
+        "tag_cleanup",
+        "library_cleanup",
+        "eq_assistant",
+        "audio_analyzer",
+    ):
+        assert descriptions[role_id].startswith("Reserved for")
 
 
 def test_connection_secret_is_encrypted_and_never_returned(

@@ -370,8 +370,9 @@ export function AssistantAiSetupView() {
           <p className="assistant-eyebrow">Optional model routing</p>
           <h1>AI connections</h1>
           <p>
-            Store provider access once, verify what the server can reach, then test
-            and enable a model separately for each future Assistant task.
+            Store provider access once, verify what the server can reach, then keep
+            each Assistant role on its own tested model. Playlist planning and music
+            tagging are live; reserved roles remain unused until their tools exist.
           </p>
         </div>
         <span className="assistant-algorithm">local tools stay active</span>

@@ -1,13 +1,9 @@
 import type { BackgroundJob, BackgroundJobStatus } from "@/core/api";
 
-const ACTIVE_STATUSES = new Set<BackgroundJobStatus>([
-  "queued",
-  "running",
-  "cancel_requested",
-]);
+import { isBackgroundJobActive } from "./backgroundJobs";
 
 export function isAnalysisJobActive(job: BackgroundJob | undefined): boolean {
-  return job !== undefined && ACTIVE_STATUSES.has(job.status);
+  return isBackgroundJobActive(job);
 }
 
 export function analysisStatusLabel(status: BackgroundJobStatus): string {

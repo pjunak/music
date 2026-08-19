@@ -1,4 +1,6 @@
-import type { BackgroundJob, BackgroundJobStatus } from "@/core/api";
+import type { BackgroundJob } from "@/core/api";
+
+import { isBackgroundJobActive } from "./backgroundJobs";
 
 export const PLAYLIST_MODEL_ROLE_ID = "playlist_planner";
 export const PLAYLIST_QUALITY_JOB_KIND =
@@ -18,14 +20,8 @@ export const MODEL_QUALITY_TARGETS = [
   },
 ] as const;
 
-const ACTIVE_STATUSES = new Set<BackgroundJobStatus>([
-  "queued",
-  "running",
-  "cancel_requested",
-]);
-
 export function isModelEvaluationJobActive(
   job: BackgroundJob | undefined,
 ): boolean {
-  return job !== undefined && ACTIVE_STATUSES.has(job.status);
+  return isBackgroundJobActive(job);
 }

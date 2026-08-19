@@ -55,7 +55,7 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   See [`backend/evaluation/README.md`](backend/evaluation/README.md).
 - **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
   dedicated Assistant tab, verify it from the server, and assign a model independently to each
-  future task. Every assignment must pass a fixed synthetic structured-output test before it can
+  declared role. Every assignment must pass a fixed synthetic structured-output test before it can
   be enabled; changing its connection, model, timeout, or response limit invalidates that test.
   API keys are encrypted at rest and never returned to the browser. The shared execution harness
   is bounded and provider-neutral, but it is not exposed as a general prompt API. The playlist

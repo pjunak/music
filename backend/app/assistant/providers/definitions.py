@@ -44,22 +44,28 @@ MODEL_ROLES = (
     ModelRoleDefinition(
         id="tag_cleanup",
         label="Song-tag cleanup",
-        description="Suggest consistent names and merges without changing manual tags directly.",
+        description=(
+            "Reserved for a future review-only tool for consistent names and merges."
+        ),
     ),
     ModelRoleDefinition(
         id="library_cleanup",
         label="Library cleanup",
-        description="Assist the existing propose-and-review cleanup workflow.",
+        description=(
+            "Reserved for a future model pass over the existing review-first cleanup."
+        ),
     ),
     ModelRoleDefinition(
         id="eq_assistant",
         label="EQ assistance",
-        description="Draft strictly validated EQ presets for Authoring review.",
+        description="Reserved for future validated EQ drafts in Authoring.",
     ),
     ModelRoleDefinition(
         id="audio_analyzer",
         label="Specialized audio analysis",
-        description="Run an optional model adapter alongside local signal analysis.",
+        description=(
+            "Reserved for a future audio-capable adapter with separate consent."
+        ),
     ),
 )
 MODEL_ROLE_BY_ID = {role.id: role for role in MODEL_ROLES}

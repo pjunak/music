@@ -8,8 +8,8 @@ const ASSISTANT_TABS = [
 ];
 
 /**
- * A separate preparation workspace for local automation and future optional
- * model-backed tools. Keeping this outside Authoring prevents experiments
+ * A separate preparation workspace for local automation and optional
+ * model-backed tools. Keeping this outside Authoring prevents generated drafts
  * from complicating the direct editors and their stable write paths.
  */
 export function AssistantShell() {

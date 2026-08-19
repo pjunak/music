@@ -4,6 +4,7 @@ import type {
   ModelRole,
 } from "@/core/assistantProvidersApi";
 
+import { readableBackgroundJobError } from "./backgroundJobs";
 import { isModelEvaluationJobActive } from "./modelEvaluationJobs";
 
 interface FailedScenario {
@@ -36,12 +37,6 @@ function formatTime(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
-}
-
-function readableJobError(error: string | null): string {
-  if (error === null) return "Run the check again when the provider is available.";
-  const match = /^[A-Za-z][A-Za-z0-9_]*Error: (.+)$/s.exec(error);
-  return match?.[1] ?? error;
 }
 
 function statusLabel(
@@ -172,7 +167,12 @@ export function ModelQualityEvaluationCard({
       ) : latest?.status === "failed" ? (
         <div className="assistant-quality-result is-failed">
           <strong>The evaluation did not finish</strong>
-          <p>{readableJobError(latest.error)}</p>
+          <p>
+            {readableBackgroundJobError(
+              latest.error,
+              "Run the check again when the provider is available.",
+            )}
+          </p>
         </div>
       ) : latest?.status === "cancelled" ? (
         <div className="assistant-quality-result">

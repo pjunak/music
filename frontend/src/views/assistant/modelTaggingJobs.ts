@@ -1,12 +1,8 @@
-import type { BackgroundJob, BackgroundJobStatus } from "@/core/api";
+import type { BackgroundJob } from "@/core/api";
+
+import { isBackgroundJobActive } from "./backgroundJobs";
 
 export const MODEL_TAGGING_JOB_KIND = "assistant.model-music-tagging";
-
-const ACTIVE_STATUSES = new Set<BackgroundJobStatus>([
-  "queued",
-  "running",
-  "cancel_requested",
-]);
 
 export interface ModelTaggingJobResult {
   schema_version: "assistant-model-music-tagging-job-result/v1";
@@ -20,7 +16,7 @@ export interface ModelTaggingJobResult {
 export function isModelTaggingJobActive(
   job: BackgroundJob | null | undefined,
 ): boolean {
-  return job !== null && job !== undefined && ACTIVE_STATUSES.has(job.status);
+  return isBackgroundJobActive(job);
 }
 
 export function modelTaggingResultFromJob(

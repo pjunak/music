@@ -5,10 +5,11 @@ import type {
   PlaylistSuggestionRequest,
 } from "@/core/api";
 
+import { isBackgroundJobActive } from "./backgroundJobs";
+
 export const MODEL_PLAYLIST_SUGGESTION_JOB_KIND =
   "assistant.model-playlist-suggestion";
 
-const ACTIVE_STATUSES = new Set(["queued", "running", "cancel_requested"]);
 const ENERGY_CURVES = new Set<PlaylistEnergyCurve>([
   "steady",
   "rising",
@@ -25,7 +26,7 @@ function objectValue(value: unknown): Record<string, unknown> | null {
 export function isModelSuggestionJobActive(
   job: BackgroundJob | null,
 ): boolean {
-  return job !== null && ACTIVE_STATUSES.has(job.status);
+  return isBackgroundJobActive(job);
 }
 
 export function modelSuggestionFromJob(
