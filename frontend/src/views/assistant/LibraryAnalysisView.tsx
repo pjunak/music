@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import type { BackgroundJob, LibraryAnalysisSummary } from "@/core/api";
 import { assistantApi, jobsApi } from "@/core/api";
@@ -10,6 +17,7 @@ import {
   isAnalysisJobActive,
 } from "./analysisJobs";
 import { LibraryAnalyzerPanel } from "./LibraryAnalyzerPanel";
+import { ModelTaggingPanel } from "./ModelTaggingPanel";
 
 const LibraryTagEditor = lazy(async () => {
   const module = await import("./LibraryTagEditor");
@@ -32,6 +40,11 @@ export function LibraryAnalysisView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyAnalyzer, setBusyAnalyzer] = useState<AnalyzerKey | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [tagEditorRefreshKey, setTagEditorRefreshKey] = useState(0);
+  const refreshTagSuggestions = useCallback(
+    () => setTagEditorRefreshKey((value) => value + 1),
+    [],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -158,13 +171,15 @@ export function LibraryAnalysisView() {
           <p className="assistant-eyebrow">Durable server-side work</p>
           <h1>Library analysis</h1>
           <p>
-            Build reusable local evidence for the whole library. Jobs continue on
-            the server and this page restores their progress after refresh or reopen.
+            Build reusable evidence for the whole library with local analyzers and
+            an optional connected tagging model. Jobs continue on the server and
+            this page restores their progress after refresh or reopen.
           </p>
         </div>
         <div className="assistant-algorithm-list" aria-label="Available analyzers">
           <span className="assistant-algorithm">local-metadata/v1</span>
           <span className="assistant-algorithm">local-audio/v1</span>
+          <span className="assistant-algorithm">optional model tagging</span>
         </div>
       </header>
 
@@ -221,6 +236,8 @@ export function LibraryAnalysisView() {
         onRetry={() => void retry("audio")}
       />
 
+      <ModelTaggingPanel onSuggestionsChanged={refreshTagSuggestions} />
+
       <Suspense
         fallback={
           <section className="surface-card assistant-tag-workspace">
@@ -228,7 +245,7 @@ export function LibraryAnalysisView() {
           </section>
         }
       >
-        <LibraryTagEditor />
+        <LibraryTagEditor refreshKey={tagEditorRefreshKey} />
       </Suspense>
 
       <section className="surface-card assistant-analysis-history">

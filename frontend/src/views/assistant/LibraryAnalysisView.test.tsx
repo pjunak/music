@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
@@ -8,6 +9,7 @@ import type {
   LibraryAnalysisSummary,
   LibraryTagPage,
   ManualTagCatalog,
+  ModelTaggingAvailability,
 } from "@/core/api";
 
 vi.mock("@/core/api", async (importActual) => {
@@ -20,6 +22,8 @@ vi.mock("@/core/api", async (importActual) => {
       getLibraryAnalysisSummary: vi.fn(),
       startLibraryAudioAnalysis: vi.fn(),
       getLibraryAudioAnalysisSummary: vi.fn(),
+      getModelTaggingAvailability: vi.fn(),
+      startModelTagging: vi.fn(),
       getManualTagCatalog: vi.fn(),
       listLibraryTags: vi.fn(),
       patchManualTags: vi.fn(),
@@ -46,6 +50,14 @@ import { assistantApi, jobsApi } from "@/core/api";
 import { toast } from "@/core/toast";
 
 import { LibraryAnalysisView } from "./LibraryAnalysisView";
+
+function renderView() {
+  return render(
+    <MemoryRouter>
+      <LibraryAnalysisView />
+    </MemoryRouter>,
+  );
+}
 
 const summary: LibraryAnalysisSummary = {
   analyzer: "local-metadata/v1",
@@ -84,6 +96,28 @@ const tagCatalog: ManualTagCatalog = {
   tag_usage: [],
 };
 
+const modelTaggingUnavailable: ModelTaggingAvailability = {
+  available: false,
+  reason_code: "role_not_configured",
+  role_id: "music_tagger",
+  connection_name: null,
+  model_id: null,
+  quality_evaluation_id: "music-tagging-quality-v1",
+  job_kind: "assistant.model-music-tagging",
+  library_tracks: 120,
+  current_profiles: 0,
+  tracks_needing_tags: 120,
+  estimated_provider_requests: 6,
+  disclosure: {
+    version: "assistant-model-music-tagging-disclosure/v1",
+    shared_with_provider: [],
+    never_shared: [],
+    allowed_tags: ["medieval", "tavern"],
+    tracks_per_request: 20,
+    may_incur_cost: true,
+  },
+};
+
 function job(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
   return {
     id: "job-1",
@@ -114,6 +148,9 @@ beforeEach(() => {
   );
   vi.mocked(assistantApi.getManualTagCatalog).mockResolvedValue(tagCatalog);
   vi.mocked(assistantApi.listLibraryTags).mockResolvedValue(emptyTagPage);
+  vi.mocked(assistantApi.getModelTaggingAvailability).mockResolvedValue(
+    modelTaggingUnavailable,
+  );
   vi.mocked(jobsApi.list).mockResolvedValue([]);
 });
 
@@ -129,7 +166,7 @@ describe("LibraryAnalysisView", () => {
       progress_phase: "Cancelling",
     });
     const user = userEvent.setup();
-    render(<LibraryAnalysisView />);
+    renderView();
 
     expect(await screen.findByText("Processed 42 of 120 tracks")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Library analysis progress" })).toHaveValue(
@@ -153,7 +190,7 @@ describe("LibraryAnalysisView", () => {
     });
     vi.mocked(assistantApi.startLibraryAnalysis).mockResolvedValue(queued);
     const user = userEvent.setup();
-    render(<LibraryAnalysisView />);
+    renderView();
 
     await screen.findByText("No library analysis has run yet");
     await user.click(screen.getByRole("button", { name: "Analyze library" }));
@@ -171,7 +208,7 @@ describe("LibraryAnalysisView", () => {
     const queued = job({ status: "queued", progress_current: 0, progress_total: null });
     vi.mocked(assistantApi.startLibraryAnalysis).mockResolvedValue(queued);
     const user = userEvent.setup();
-    render(<LibraryAnalysisView />);
+    renderView();
 
     await screen.findByText("No library analysis has run yet");
     const metadataPanel = screen.getByRole("region", { name: "Metadata profiles" });
@@ -198,7 +235,7 @@ describe("LibraryAnalysisView", () => {
     });
     vi.mocked(assistantApi.startLibraryAudioAnalysis).mockResolvedValue(queued);
     const user = userEvent.setup();
-    render(<LibraryAnalysisView />);
+    renderView();
 
     const audioPanel = await screen.findByRole("region", {
       name: "Audio signal profiles",

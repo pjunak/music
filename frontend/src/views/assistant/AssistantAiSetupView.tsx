@@ -18,8 +18,8 @@ import { ModelRoleCard } from "./ModelRoleCard";
 import { ModelQualityEvaluationCard } from "./ModelQualityEvaluationCard";
 import {
   isModelEvaluationJobActive,
-  PLAYLIST_MODEL_ROLE_ID,
-  PLAYLIST_QUALITY_JOB_KIND,
+  MODEL_QUALITY_TARGETS,
+  MUSIC_TAGGER_ROLE_ID,
 } from "./modelEvaluationJobs";
 import { ProviderConnectionCard } from "./ProviderConnectionCard";
 import {
@@ -92,11 +92,27 @@ export function AssistantAiSetupView() {
 
     async function poll(initial: boolean) {
       try {
-        const [nextEvaluations, nextHistory] = await Promise.all([
-          assistantProvidersApi.listRoleEvaluations(PLAYLIST_MODEL_ROLE_ID),
-          jobsApi.list({ kind: PLAYLIST_QUALITY_JOB_KIND, limit: 10 }),
-        ]);
+        const targetResults = await Promise.all(
+          MODEL_QUALITY_TARGETS.map(async (target) => {
+            const [evaluations, history] = await Promise.all([
+              assistantProvidersApi.listRoleEvaluations(target.roleId),
+              jobsApi.list({ kind: target.jobKind, limit: 10 }),
+            ]);
+            return {
+              evaluations: evaluations.filter(
+                (evaluation) => evaluation.role_id === target.roleId,
+              ),
+              history: history.filter((job) => job.kind === target.jobKind),
+            };
+          }),
+        );
         if (disposed) return;
+        const nextEvaluations = targetResults.flatMap(
+          (result) => result.evaluations,
+        );
+        const nextHistory = targetResults
+          .flatMap((result) => result.history)
+          .sort((left, right) => right.created_at.localeCompare(left.created_at));
         setQualityEvaluations(nextEvaluations);
         setQualityHistory(nextHistory);
         setQualityLoadError(null);
@@ -275,12 +291,16 @@ export function AssistantAiSetupView() {
   }
 
   async function startQualityEvaluation(evaluation: ModelQualityEvaluation) {
+    const isMusicTagging = evaluation.role_id === MUSIC_TAGGER_ROLE_ID;
     const confirmed = await confirmDialog({
-      title: "Run playlist model quality check?",
-      body: (
-        "The provider will receive fixed synthetic playlist scenarios. " +
-        "No songs or live library data are sent, but repeated model calls may incur cost."
-      ),
+      title: isMusicTagging
+        ? "Run music tagging model quality check?"
+        : "Run playlist model quality check?",
+      body:
+        `The provider will receive fixed synthetic ${
+          isMusicTagging ? "music metadata cases" : "playlist scenarios"
+        }. ` +
+        "No songs or live library data are sent, but repeated model calls may incur cost.",
       confirmLabel: "Run quality check",
       tone: "primary",
     });
@@ -582,8 +602,8 @@ export function AssistantAiSetupView() {
             <h2>Model quality checks</h2>
             <p>
               Basic model tests prove the response format. These longer checks
-              measure one model against fixed task-specific scenarios before it can
-              rank a live-library playlist draft.
+              measure each model against fixed task-specific scenarios before it can
+              use live library metadata for that task.
             </p>
           </div>
           <span>
@@ -611,10 +631,14 @@ export function AssistantAiSetupView() {
         ) : (
           qualityEvaluations.map((evaluation) => (
             <ModelQualityEvaluationCard
-              key={evaluation.evaluation_id}
+              key={`${evaluation.role_id}:${evaluation.evaluation_id}`}
               evaluation={evaluation}
               role={roles.find((role) => role.role_id === evaluation.role_id)}
-              history={qualityHistory}
+              history={qualityHistory.filter(
+                (job) =>
+                  job.parameters.role_id === evaluation.role_id &&
+                  job.parameters.evaluation_id === evaluation.evaluation_id,
+              )}
               loading={qualityLoading}
               actionBusy={busyItem?.startsWith("evaluation") === true}
               onStart={() => void startQualityEvaluation(evaluation)}
@@ -629,9 +653,9 @@ export function AssistantAiSetupView() {
         <p>
           Verification, model tests, and quality checks use only provider metadata
           or fixed synthetic inputs. No songs, audio, filesystem paths, or live
-          library tags are sent here. A passed playlist model becomes an optional
-          planning choice in Playlist Builder, where each real request has its own
-          data disclosure and confirmation before anything is sent.
+          library tags are sent here. Passed models become optional choices in
+          Playlist Builder or Library Analysis. Each real request has its own data
+          disclosure and confirmation before anything is sent.
         </p>
       </aside>
     </div>

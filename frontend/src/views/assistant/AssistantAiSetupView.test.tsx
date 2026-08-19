@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -124,6 +124,33 @@ const qualityEvaluation: ModelQualityEvaluation = {
   ),
   status: "never",
   suite_id: "local-dnd-playlist-baseline",
+  passed_cases: 0,
+  total_cases: 0,
+  last_job_id: null,
+  last_evaluated_at: null,
+};
+
+const musicTaggingRole: ModelRole = {
+  ...role,
+  role_id: "music_tagger",
+  label: "Music tagger",
+  description: "Suggests controlled D&D tags from indexed metadata.",
+  connection_id: connection.id,
+  connection_name: connection.name,
+  model_id: "tagger-small",
+  enabled: true,
+  effective_enabled: true,
+  verification_status: "verified",
+  conformance_status: "passed",
+};
+
+const musicTaggingEvaluation: ModelQualityEvaluation = {
+  evaluation_id: "music-tagging-quality-v1",
+  role_id: "music_tagger",
+  label: "Music tagging quality",
+  description: "Runs fixed synthetic metadata cases through this model.",
+  status: "never",
+  suite_id: "local-dnd-music-tagging-baseline",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -452,6 +479,58 @@ describe("AssistantAiSetupView", () => {
     expect(toast.success).toHaveBeenCalledWith(
       "Model quality check queued",
       "You can leave this page; progress is stored on the server.",
+    );
+  });
+
+  it("keeps music tagging quality separate from playlist planning", async () => {
+    const queued = qualityJob({
+      id: "tagging-quality-job",
+      kind: "assistant.model-evaluation.music-tagging-quality-v1",
+      status: "queued",
+      parameters: {
+        role_id: "music_tagger",
+        evaluation_id: "music-tagging-quality-v1",
+      },
+      progress_current: 0,
+      progress_total: null,
+      progress_phase: "Queued",
+      progress_message: "",
+      started_at: null,
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      role,
+      musicTaggingRole,
+    ]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockImplementation(
+      async (roleId) =>
+        roleId === "music_tagger" ? [musicTaggingEvaluation] : [],
+    );
+    vi.mocked(assistantProvidersApi.startRoleEvaluation).mockResolvedValue(queued);
+    const user = userEvent.setup();
+    render(<AssistantAiSetupView />);
+
+    const heading = await screen.findByRole("heading", {
+      name: "Music tagging quality",
+    });
+    const card = heading.closest("article");
+    expect(card).not.toBeNull();
+    await user.click(
+      within(card as HTMLElement).getByRole("button", {
+        name: "Run quality check",
+      }),
+    );
+
+    expect(confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Run music tagging model quality check?",
+      }),
+    );
+    await waitFor(() =>
+      expect(assistantProvidersApi.startRoleEvaluation).toHaveBeenCalledWith(
+        "music_tagger",
+        "music-tagging-quality-v1",
+      ),
     );
   });
 

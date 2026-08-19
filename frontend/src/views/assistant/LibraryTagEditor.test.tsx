@@ -118,7 +118,7 @@ describe("LibraryTagEditor", () => {
 
     expect(await screen.findByRole("heading", { name: "Tavern Dance" })).toBeInTheDocument();
     expect(screen.getByText("Your tags")).toBeInTheDocument();
-    expect(screen.getByText("Analysis suggestions")).toBeInTheDocument();
+    expect(screen.getByText("Generated suggestions")).toBeInTheDocument();
     expect(screen.getByText("Audio signal evidence")).toBeInTheDocument();
     expect(screen.getByText("120.0 BPM")).toBeInTheDocument();
     expect(screen.getByText("festive")).toBeInTheDocument();
@@ -129,6 +129,34 @@ describe("LibraryTagEditor", () => {
     expect(
       await screen.findByRole("button", { name: "Remove tag medieval" }),
     ).toBeInTheDocument();
+  });
+
+  it("labels connected-model suggestions separately from manual tags", async () => {
+    vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({
+      ...page,
+      items: [
+        {
+          ...track,
+          analysis_suggestions: [
+            {
+              ...track.analysis_suggestions[0],
+              tag: "dancing",
+              analyzer_id: "model-metadata-tagger/v1",
+              evidence: ["Title and genre support a dancing scene."],
+            },
+          ],
+        },
+      ],
+    });
+    render(<LibraryTagEditor />);
+
+    expect(
+      await screen.findByText(/model-metadata-tagger\/v1/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Accept dancing as manual tag" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Your tags")).toBeInTheDocument();
   });
 
   it("adds starter and custom tags and saves only the delta", async () => {

@@ -47,7 +47,11 @@ function sameTags(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((tag, index) => tag === right[index]);
 }
 
-export function LibraryTagEditor() {
+interface LibraryTagEditorProps {
+  refreshKey?: number;
+}
+
+export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
   const [catalog, setCatalog] = useState<ManualTagCatalog | null>(null);
   const [page, setPage] = useState<LibraryTagPage>({
     items: [],
@@ -99,7 +103,7 @@ export function LibraryTagEditor() {
     return () => {
       disposed = true;
     };
-  }, [reloadKey]);
+  }, [refreshKey, reloadKey]);
 
   useEffect(() => {
     let disposed = false;
@@ -135,7 +139,7 @@ export function LibraryTagEditor() {
     return () => {
       disposed = true;
     };
-  }, [offset, reloadKey, reviewFilter, search, tagFilter]);
+  }, [offset, refreshKey, reloadKey, reviewFilter, search, tagFilter]);
 
   const selected = useMemo(
     () => page.items.find((track) => track.track_id === selectedId),
@@ -462,7 +466,7 @@ export function LibraryTagEditor() {
           <h2>Manual playlist tags</h2>
           <p>
             Add your own D&amp;D settings, scenes, and moods. These labels stay
-            separate from analysis or future AI suggestions.
+            separate from local and model-generated suggestions.
           </p>
         </div>
         <span>{page.total} tracks</span>

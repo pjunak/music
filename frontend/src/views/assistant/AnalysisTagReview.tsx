@@ -80,7 +80,7 @@ export function AnalysisTagReview({
   return (
     <div className="assistant-tag-source is-analysis">
       <div>
-        <strong>Analysis suggestions</strong>
+        <strong>Generated suggestions</strong>
         <span>
           Generated evidence stays separate. Only accepting a suggestion copies it
           into your manual tags.
@@ -92,7 +92,7 @@ export function AnalysisTagReview({
         </p>
       ) : null}
       {suggestions.length === 0 ? (
-        <p className="muted small">No analysis tags available.</p>
+        <p className="muted small">No generated tags available.</p>
       ) : (
         <div className="assistant-analysis-review-list">
           {suggestions.map((suggestion) => {

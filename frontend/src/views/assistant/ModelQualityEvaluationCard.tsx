@@ -94,6 +94,11 @@ export function ModelQualityEvaluationCard({
   onStart,
   onCancel,
 }: Props) {
+  const isMusicTagging = evaluation.role_id === "music_tagger";
+  const taskName = isMusicTagging ? "music tagging" : "playlist planning";
+  const progressLabel = isMusicTagging
+    ? "Music tagging model quality progress"
+    : "Playlist model quality progress";
   const latest = history[0];
   const active = isModelEvaluationJobActive(latest);
   const reportJob =
@@ -129,10 +134,10 @@ export function ModelQualityEvaluationCard({
             ) : null}
           </div>
           {latest.progress_total === null ? (
-            <progress aria-label="Playlist model quality progress" />
+            <progress aria-label={progressLabel} />
           ) : (
             <progress
-              aria-label="Playlist model quality progress"
+              aria-label={progressLabel}
               value={latest.progress_current}
               max={Math.max(1, latest.progress_total)}
             />
@@ -145,7 +150,7 @@ export function ModelQualityEvaluationCard({
             Passed {evaluation.passed_cases} of {evaluation.total_cases} scenarios
           </strong>
           <p>
-            This model passed the current synthetic playlist gate for these exact
+            This model passed the current synthetic {taskName} gate for these exact
             settings.
           </p>
         </div>
@@ -155,8 +160,8 @@ export function ModelQualityEvaluationCard({
             Passed {evaluation.passed_cases} of {evaluation.total_cases} scenarios
           </strong>
           <p>
-            The local planner remains available. Review the failed scenarios before
-            trying this model again; it cannot be selected in Playlist Builder.
+            Local tools remain available. Review the failed scenarios before trying
+            this model again; it cannot be used for {taskName} yet.
           </p>
         </div>
       ) : evaluation.status === "stale" || latest?.status === "succeeded" ? (
@@ -177,7 +182,9 @@ export function ModelQualityEvaluationCard({
       ) : (
         <div className="assistant-quality-result">
           <strong>No quality report yet</strong>
-          <p>Enable the tested playlist model, then run its fixed synthetic suite.</p>
+          <p>
+            Enable the tested {taskName} model, then run its fixed synthetic suite.
+          </p>
         </div>
       )}
 
@@ -237,7 +244,7 @@ export function ModelQualityEvaluationCard({
       </div>
       {!canRun ? (
         <p className="field-hint">
-          Save, test, and enable the playlist planner role before running this check.
+          Save, test, and enable the {taskName} role before running this check.
         </p>
       ) : null}
     </article>

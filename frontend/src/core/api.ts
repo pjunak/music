@@ -346,6 +346,33 @@ export interface ModelPlaylistAvailability {
   disclosure: ModelPlaylistDisclosure;
 }
 
+export const MODEL_TAGGING_DISCLOSURE_VERSION =
+  "assistant-model-music-tagging-disclosure/v1" as const;
+
+export interface ModelTaggingDisclosure {
+  version: typeof MODEL_TAGGING_DISCLOSURE_VERSION;
+  shared_with_provider: string[];
+  never_shared: string[];
+  allowed_tags: string[];
+  tracks_per_request: number;
+  may_incur_cost: boolean;
+}
+
+export interface ModelTaggingAvailability {
+  available: boolean;
+  reason_code: string | null;
+  role_id: "music_tagger";
+  connection_name: string | null;
+  model_id: string | null;
+  quality_evaluation_id: "music-tagging-quality-v1";
+  job_kind: string;
+  library_tracks: number;
+  current_profiles: number;
+  tracks_needing_tags: number;
+  estimated_provider_requests: number;
+  disclosure: ModelTaggingDisclosure;
+}
+
 export type BackgroundJobStatus =
   | "queued"
   | "running"
@@ -547,6 +574,19 @@ export const assistantApi = {
     api.get<LibraryAnalysisSummary>(
       "/api/assistant/library-audio-analysis/summary",
     ),
+  getModelTaggingAvailability: () =>
+    api.get<ModelTaggingAvailability>(
+      "/api/assistant/library-tags/model-status",
+    ),
+  startModelTagging: (
+    force: boolean,
+    disclosureVersion: typeof MODEL_TAGGING_DISCLOSURE_VERSION,
+  ) =>
+    api.post<BackgroundJob>("/api/assistant/library-tags/model-jobs", {
+      force,
+      disclosure_version: disclosureVersion,
+      consent: true,
+    }),
   getManualTagCatalog: () =>
     api.get<ManualTagCatalog>("/api/assistant/library-tags/catalog"),
   listLibraryTags: (
