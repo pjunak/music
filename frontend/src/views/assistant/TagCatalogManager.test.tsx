@@ -12,6 +12,8 @@ vi.mock("@/core/api", async (importActual) => {
     assistantApi: {
       ...actual.assistantApi,
       renameManualTag: vi.fn(),
+      previewTagCleanup: vi.fn(),
+      applyTagCleanup: vi.fn(),
     },
   };
 });
@@ -43,6 +45,77 @@ beforeEach(() => {
 });
 
 describe("TagCatalogManager", () => {
+  it("requires explicit cleanup selection and applies only checked suggestions", async () => {
+    vi.mocked(assistantApi.previewTagCleanup).mockResolvedValue({
+      schema_version: "assistant-tag-cleanup-preview/v1",
+      catalog_signature: "a".repeat(64),
+      suggestions: [
+        {
+          id: "1".repeat(64),
+          source: "medival",
+          target: "medieval",
+          reason_code: "starter_typo",
+          reason: "One clear spelling edit from a D&D starter tag.",
+          source_track_count: 2,
+          target_track_count: 3,
+          merged: true,
+        },
+        {
+          id: "2".repeat(64),
+          source: "taverns",
+          target: "tavern",
+          reason_code: "starter_plural",
+          reason: "Matches the plural form of a D&D starter tag.",
+          source_track_count: 1,
+          target_track_count: 0,
+          merged: false,
+        },
+      ],
+    });
+    vi.mocked(confirmDialog).mockResolvedValue(true);
+    vi.mocked(assistantApi.applyTagCleanup).mockResolvedValue({
+      schema_version: "assistant-tag-cleanup-apply/v1",
+      requested_items: 1,
+      applied: [
+        {
+          source: "medival",
+          target: "medieval",
+          affected_tracks: 2,
+          merged: true,
+        },
+      ],
+      catalog_signature: "b".repeat(64),
+    });
+    const onChanged = vi.fn();
+    const user = userEvent.setup();
+    render(<TagCatalogManager catalog={catalog} onChanged={onChanged} />);
+
+    await user.click(screen.getByText("Manage used tags"));
+    await user.click(screen.getByRole("button", { name: "Find suggestions" }));
+    const applyButton = await screen.findByRole("button", {
+      name: "Apply selected",
+    });
+    expect(applyButton).toBeDisabled();
+
+    await user.click(screen.getByText(/medival/));
+    expect(applyButton).toBeEnabled();
+    await user.click(applyButton);
+
+    await waitFor(() =>
+      expect(assistantApi.applyTagCleanup).toHaveBeenCalledWith(
+        "a".repeat(64),
+        [{ source: "medival", target: "medieval" }],
+      ),
+    );
+    expect(confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Apply selected tag cleanup?",
+        confirmLabel: "Apply selected",
+      }),
+    );
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
+
   it("confirms and merges a renamed tag into an existing tag", async () => {
     vi.mocked(inputDialog).mockResolvedValue("medieval");
     vi.mocked(confirmDialog).mockResolvedValue(true);

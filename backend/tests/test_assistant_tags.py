@@ -62,6 +62,17 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
     assert client.get("/api/assistant/library-tags").status_code == 401
     assert client.get("/api/assistant/library-tags/catalog").status_code == 401
     assert (
+        client.get("/api/assistant/library-tags/catalog/cleanup-preview").status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/assistant/library-tags/catalog/cleanup-apply",
+            json={"catalog_signature": "0" * 64, "items": []},
+        ).status_code
+        == 401
+    )
+    assert (
         client.post(
             "/api/assistant/library-tags/bulk",
             json={"track_ids": [1], "add": ["tavern"], "remove": []},
@@ -707,3 +718,145 @@ def test_rename_merges_existing_tag_and_updates_usage_counts(
         json={"source": "tavern", "target": "inn"},
     )
     assert missing.status_code == 404
+
+
+def test_tag_cleanup_preview_is_conservative_and_read_only(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    first_extra, second_extra = extra_seeded_track_ids[:2]
+    for track_id, tags in (
+        (seeded_track_id, ["medival", "ambient"]),
+        (first_extra, ["taverns"]),
+        (second_extra, ["medieval"]),
+    ):
+        response = auth_client.patch(
+            f"/api/assistant/library-tags/{track_id}",
+            json={"add": tags, "remove": []},
+        )
+        assert response.status_code == 200, response.text
+
+    preview = auth_client.get(
+        "/api/assistant/library-tags/catalog/cleanup-preview"
+    )
+    assert preview.status_code == 200, preview.text
+    payload = preview.json()
+    assert payload["schema_version"] == "assistant-tag-cleanup-preview/v1"
+    assert len(payload["catalog_signature"]) == 64
+    assert [
+        (item["source"], item["target"], item["reason_code"], item["merged"])
+        for item in payload["suggestions"]
+    ] == [
+        ("medival", "medieval", "starter_typo", True),
+        ("taverns", "tavern", "starter_plural", False),
+    ]
+
+    catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
+    assert catalog["used_tags"] == ["ambient", "medieval", "medival", "taverns"]
+
+
+def test_tag_cleanup_applies_only_explicit_selection_atomically(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    other_id = extra_seeded_track_ids[0]
+    for track_id, tag in ((seeded_track_id, "medival"), (other_id, "taverns")):
+        response = auth_client.patch(
+            f"/api/assistant/library-tags/{track_id}",
+            json={"add": [tag], "remove": []},
+        )
+        assert response.status_code == 200, response.text
+
+    preview = auth_client.get(
+        "/api/assistant/library-tags/catalog/cleanup-preview"
+    ).json()
+    applied = auth_client.post(
+        "/api/assistant/library-tags/catalog/cleanup-apply",
+        json={
+            "catalog_signature": preview["catalog_signature"],
+            "items": [{"source": "medival", "target": "medieval"}],
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["applied"] == [
+        {
+            "source": "medival",
+            "target": "medieval",
+            "affected_tracks": 1,
+            "merged": False,
+        }
+    ]
+
+    catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
+    assert catalog["used_tags"] == ["medieval", "taverns"]
+
+
+def test_tag_cleanup_rejects_stale_preview_without_partial_changes(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    response = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": ["medival"], "remove": []},
+    )
+    assert response.status_code == 200, response.text
+    preview = auth_client.get(
+        "/api/assistant/library-tags/catalog/cleanup-preview"
+    ).json()
+
+    changed = auth_client.patch(
+        f"/api/assistant/library-tags/{extra_seeded_track_ids[0]}",
+        json={"add": ["tavern"], "remove": []},
+    )
+    assert changed.status_code == 200, changed.text
+    stale = auth_client.post(
+        "/api/assistant/library-tags/catalog/cleanup-apply",
+        json={
+            "catalog_signature": preview["catalog_signature"],
+            "items": [{"source": "medival", "target": "medieval"}],
+        },
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "tag_cleanup_stale"
+
+    catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
+    assert catalog["used_tags"] == ["medival", "tavern"]
+
+
+def test_tag_cleanup_rejects_invented_selection_before_valid_rename(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    other_id = extra_seeded_track_ids[0]
+    for track_id, tags in (
+        (seeded_track_id, ["medival"]),
+        (other_id, ["ambient"]),
+    ):
+        response = auth_client.patch(
+            f"/api/assistant/library-tags/{track_id}",
+            json={"add": tags, "remove": []},
+        )
+        assert response.status_code == 200, response.text
+    preview = auth_client.get(
+        "/api/assistant/library-tags/catalog/cleanup-preview"
+    ).json()
+
+    invalid = auth_client.post(
+        "/api/assistant/library-tags/catalog/cleanup-apply",
+        json={
+            "catalog_signature": preview["catalog_signature"],
+            "items": [
+                {"source": "medival", "target": "medieval"},
+                {"source": "ambient", "target": "tavern"},
+            ],
+        },
+    )
+    assert invalid.status_code == 422, invalid.text
+    assert invalid.json()["detail"]["code"] == "tag_cleanup_invalid_selection"
+
+    catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
+    assert catalog["used_tags"] == ["ambient", "medival"]

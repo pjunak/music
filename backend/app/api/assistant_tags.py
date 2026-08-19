@@ -17,6 +17,14 @@ from app.assistant.model_tagging import (
     model_tagging_job_parameters,
 )
 from app.assistant.providers.service import ProviderServiceError
+from app.assistant.tag_cleanup import (
+    TAG_CLEANUP_SCHEMA_VERSION,
+    InvalidTagCleanupSelectionError,
+    StaleTagCleanupError,
+    TagCleanupSelection,
+    apply_tag_cleanup,
+    preview_tag_cleanup,
+)
 from app.assistant.tag_reviews import (
     AnalysisSuggestionNotFoundError,
     AnalysisTagReviewTarget,
@@ -49,6 +57,10 @@ from app.assistant.tag_schemas import (
     ModelTaggingAvailability,
     ModelTaggingStartRequest,
     StarterTagGroupOut,
+    TagCleanupApplyRequest,
+    TagCleanupApplyResult,
+    TagCleanupPreviewOut,
+    TagCleanupSuggestionOut,
 )
 from app.assistant.tags import (
     DND_STARTER_TAG_GROUPS,
@@ -184,6 +196,72 @@ def tag_catalog(_user: CurrentUser, db: DbSession) -> ManualTagCatalog:
             ManualTagUsage(tag=item.tag, track_count=item.track_count)
             for item in usage
         ],
+    )
+
+
+@router.get("/catalog/cleanup-preview", response_model=TagCleanupPreviewOut)
+def preview_library_tag_cleanup(
+    _user: CurrentUser,
+    db: DbSession,
+) -> TagCleanupPreviewOut:
+    preview = preview_tag_cleanup(db)
+    return TagCleanupPreviewOut(
+        schema_version=TAG_CLEANUP_SCHEMA_VERSION,
+        catalog_signature=preview.catalog_signature,
+        suggestions=[
+            TagCleanupSuggestionOut(
+                id=item.id,
+                source=item.source,
+                target=item.target,
+                reason_code=item.reason_code,
+                reason=item.reason,
+                source_track_count=item.source_track_count,
+                target_track_count=item.target_track_count,
+                merged=item.merged,
+            )
+            for item in preview.suggestions
+        ],
+    )
+
+
+@router.post("/catalog/cleanup-apply", response_model=TagCleanupApplyResult)
+def apply_library_tag_cleanup(
+    payload: TagCleanupApplyRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> TagCleanupApplyResult:
+    try:
+        outcome = apply_tag_cleanup(
+            db,
+            payload.catalog_signature,
+            [
+                TagCleanupSelection(source=item.source, target=item.target)
+                for item in payload.items
+            ],
+        )
+    except StaleTagCleanupError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "tag_cleanup_stale", "message": str(exc)},
+        ) from exc
+    except InvalidTagCleanupSelectionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "tag_cleanup_invalid_selection", "message": str(exc)},
+        ) from exc
+    return TagCleanupApplyResult(
+        schema_version="assistant-tag-cleanup-apply/v1",
+        requested_items=len(payload.items),
+        applied=[
+            ManualTagRenameResult(
+                source=item.source,
+                target=item.target,
+                affected_tracks=item.affected_tracks,
+                merged=item.merged,
+            )
+            for item in outcome.applied
+        ],
+        catalog_signature=outcome.catalog_signature,
     )
 
 

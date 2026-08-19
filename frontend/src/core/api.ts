@@ -449,6 +449,30 @@ export interface ManualTagRenameResult {
   merged: boolean;
 }
 
+export interface TagCleanupSuggestion {
+  id: string;
+  source: string;
+  target: string;
+  reason_code: "starter_plural" | "starter_typo";
+  reason: string;
+  source_track_count: number;
+  target_track_count: number;
+  merged: boolean;
+}
+
+export interface TagCleanupPreview {
+  schema_version: "assistant-tag-cleanup-preview/v1";
+  catalog_signature: string;
+  suggestions: TagCleanupSuggestion[];
+}
+
+export interface TagCleanupApplyResult {
+  schema_version: "assistant-tag-cleanup-apply/v1";
+  requested_items: number;
+  applied: ManualTagRenameResult[];
+  catalog_signature: string;
+}
+
 export type AnalysisTagReviewDecision = "pending" | "accepted" | "rejected";
 
 export interface AnalysisTagSuggestion {
@@ -622,6 +646,18 @@ export const assistantApi = {
     api.post<ManualTagRenameResult>(
       "/api/assistant/library-tags/catalog/rename",
       { source, target },
+    ),
+  previewTagCleanup: () =>
+    api.get<TagCleanupPreview>(
+      "/api/assistant/library-tags/catalog/cleanup-preview",
+    ),
+  applyTagCleanup: (
+    catalogSignature: string,
+    items: Array<Pick<TagCleanupSuggestion, "source" | "target">>,
+  ) =>
+    api.post<TagCleanupApplyResult>(
+      "/api/assistant/library-tags/catalog/cleanup-apply",
+      { catalog_signature: catalogSignature, items },
     ),
   reviewAnalysisTag: (
     trackId: number,

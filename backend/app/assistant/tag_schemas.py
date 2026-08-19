@@ -94,6 +94,58 @@ class ManualTagRenameResult(StrictTagModel):
     merged: bool
 
 
+class TagCleanupSuggestionOut(StrictTagModel):
+    id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source: str
+    target: str
+    reason_code: Literal["starter_plural", "starter_typo"]
+    reason: str
+    source_track_count: int = Field(ge=1)
+    target_track_count: int = Field(ge=0)
+    merged: bool
+
+
+class TagCleanupPreviewOut(StrictTagModel):
+    schema_version: Literal["assistant-tag-cleanup-preview/v1"]
+    catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    suggestions: list[TagCleanupSuggestionOut]
+
+
+class TagCleanupSelectionIn(StrictTagModel):
+    source: str
+    target: str
+
+    @field_validator("source", "target")
+    @classmethod
+    def normalize_tag(cls, value: str) -> str:
+        return normalize_manual_tags([value])[0]
+
+    @model_validator(mode="after")
+    def different_tags(self) -> TagCleanupSelectionIn:
+        if self.source == self.target:
+            raise ValueError("source and target tags must be different")
+        return self
+
+
+class TagCleanupApplyRequest(StrictTagModel):
+    catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    items: list[TagCleanupSelectionIn] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_sources(self) -> TagCleanupApplyRequest:
+        sources = {item.source for item in self.items}
+        if len(sources) != len(self.items):
+            raise ValueError("cleanup sources must be unique")
+        return self
+
+
+class TagCleanupApplyResult(StrictTagModel):
+    schema_version: Literal["assistant-tag-cleanup-apply/v1"]
+    requested_items: int = Field(ge=1)
+    applied: list[ManualTagRenameResult]
+    catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class AnalysisTagSuggestionOut(StrictTagModel):
     tag: str
     analyzer_id: str

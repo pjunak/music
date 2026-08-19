@@ -5422,6 +5422,53 @@ kbd,
   color: var(--muted);
   font-size: var(--text-xs);
 }
+.assistant-tag-cleanup {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.assistant-tag-cleanup-heading,
+.assistant-tag-cleanup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.assistant-tag-cleanup-heading > div {
+  display: grid;
+  gap: var(--space-1);
+}
+.assistant-tag-cleanup-heading span,
+.assistant-tag-cleanup-actions > span,
+.assistant-tag-cleanup-list small {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-tag-cleanup-list {
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.assistant-tag-cleanup-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.assistant-tag-cleanup-list label:last-child {
+  border-bottom: 0;
+}
+.assistant-tag-cleanup-list label > span {
+  display: grid;
+  gap: var(--space-1);
+}
 .assistant-tag-usage-list {
   display: flex;
   flex-direction: column;
@@ -6496,6 +6543,11 @@ input.volume-slider::-moz-range-thumb {
   }
   .assistant-tag-usage-list button {
     grid-column: 1 / -1;
+  }
+  .assistant-tag-cleanup-heading,
+  .assistant-tag-cleanup-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
   /* Section-nav sub-tabs at narrow widths: tighter padding so the 4
    * Authoring sub-tabs (Playlists / Soundboards / Modes / Presets) come

@@ -55,8 +55,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   See [`backend/evaluation/README.md`](backend/evaluation/README.md).
 - **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
   dedicated Assistant tab, verify it from the server, and assign a model independently to each
-  declared role. Every assignment must pass a fixed synthetic structured-output test before it can
-  be enabled; changing its connection, model, timeout, or response limit invalidates that test.
+  declared role. A connection owns one key: several roles can deliberately reuse it, or specialized
+  roles can choose separate connections and keys even when they use the same provider. Every
+  assignment must pass a fixed synthetic structured-output test before it can be enabled; changing
+  its connection, model, timeout, or response limit invalidates that test.
   API keys are encrypted at rest and never returned to the browser. The shared execution harness
   is bounded and provider-neutral, but it is not exposed as a general prompt API. The playlist
   planner and metadata music tagger are the first optional live-library integrations.
@@ -85,9 +87,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   or any custom tag without modifying the audio file. Manual and generated tags remain visibly and
   structurally separate, while local playlist ranking gives explicit manual matches priority.
   Multi-select actions apply tags across a batch, and usage-aware rename can merge overlapping tags
-  without leaving duplicates. Generated tags expose their analyzer, confidence, and evidence for
-  per-tag review; accepting copies one into manual tags, while rejection remains a separate durable
-  decision, removes that label from current playlist evidence, and never mutates authored data.
+  without leaving duplicates. A conservative local cleanup preview finds only unambiguous spelling
+  or plural matches to the D&amp;D starter vocabulary; it changes nothing until individual suggestions
+  are selected, rejects stale previews, and applies the chosen renames in one transaction. Generated
+  tags expose their analyzer, confidence, and evidence for per-tag review; accepting copies one into
+  manual tags, while rejection remains a separate durable decision, removes that label from current
+  playlist evidence, and never mutates authored data.
   Review-state filters and explicitly selected bulk decisions make larger libraries manageable;
   stale or invalid suggestions are reported individually instead of blocking valid selections.
   An optional quality-certified metadata tagging model can populate the same review surface through
