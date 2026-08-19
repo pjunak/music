@@ -186,6 +186,11 @@ Runtime data lives outside the image.
   owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
   endpoint. Saving, verifying, or testing a role does not authorize sending library data or
   replacing a local engine. Preserve `ASSISTANT_CREDENTIAL_KEY` separately from database backups.
+- Credential recovery checks and master-key rotation are offline operator workflows. Keep audit
+  output secret-free and identify keys only by a short one-way fingerprint. Rotation must decrypt
+  every saved credential before mutating any row, re-encrypt all credentials in one transaction,
+  and reset provider verification, role conformance, and model-quality gates. Require an explicit
+  server-stopped acknowledgement before applying it; a dry run is the default.
 - The optional model playlist planner may run only through the dedicated consent-bound durable job.
   Keep `local-planner/v2` as the default, require the exact current `playlist-quality-v1` pass and
   disclosure version before enqueueing, and make model jobs non-restartable to avoid silently

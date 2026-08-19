@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 from dataclasses import dataclass
 
@@ -42,6 +43,7 @@ class CredentialVault:
         if len(key) != 32:
             raise CredentialVaultError("invalid_master_key")
         self._cipher = AESGCM(key)
+        self._key_id = hashlib.sha256(key).hexdigest()[:16]
 
     @classmethod
     def from_settings(cls) -> CredentialVault:
@@ -49,6 +51,18 @@ class CredentialVault:
         if configured is None or not configured.get_secret_value().strip():
             raise CredentialVaultError("master_key_not_configured")
         return cls(_decode_master_key(configured.get_secret_value()))
+
+    @classmethod
+    def from_encoded_key(cls, value: str) -> CredentialVault:
+        """Build a vault from an operator-supplied encoded key without changing settings."""
+
+        return cls(_decode_master_key(value))
+
+    @property
+    def key_id(self) -> str:
+        """Non-secret fingerprint suitable for pairing a key with a database backup."""
+
+        return self._key_id
 
     @staticmethod
     def _aad(connection_id: str) -> bytes:

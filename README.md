@@ -204,6 +204,37 @@ saved-key presence separately from verification. Removing a saved key keeps the 
 role choices, but prevents use until a new key is saved, the connection is verified, and the exact
 model configuration passes its tests again.
 
+Before relying on a backup, verify that its database and deployment key still match. This command
+is read-only: it prints a short non-secret key ID and counts, but never prints a provider key.
+
+```powershell
+music-cli assistant-credentials check
+```
+
+To validate a restored copy without touching production, point `DATABASE_URL` and
+`ASSISTANT_CREDENTIAL_KEY` at the isolated restore before running the same check. Treat a non-zero
+`unreadable credentials` count as an incomplete or mismatched backup.
+
+Master-key rotation is an offline, all-or-nothing operation. Generate a second key, expose it only
+to the rotation process as `ASSISTANT_CREDENTIAL_KEY_NEW`, and run the default dry run first:
+
+```powershell
+$env:ASSISTANT_CREDENTIAL_KEY_NEW = "<new URL-safe base64 32-byte key>"
+music-cli assistant-credentials rotate
+```
+
+After stopping every Music server process that uses the database, apply the rotation and then
+replace `ASSISTANT_CREDENTIAL_KEY` in the deployment secret store before restarting:
+
+```powershell
+music-cli assistant-credentials rotate --apply --server-stopped
+```
+
+Rotation decrypts every saved credential before changing any row, re-encrypts them in one database
+transaction, and resets provider verification, conformance, and model-quality gates. Connection and
+role choices remain, but must be verified and checked again. Never keep the old and new keys in the
+same long-lived environment file.
+
 Connection types and model tasks are linked through versioned capabilities rather than provider or
 model-name guesses. The initial OpenAI-compatible adapter verifies `structured-text/v1`. Future
 audio-capable adapters must implement and verify their own bounded `audio-input/v1` transport before
