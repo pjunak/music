@@ -59,11 +59,13 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   be enabled; changing its connection, model, timeout, or response limit invalidates that test.
   API keys are encrypted at rest and never returned to the browser. The shared execution harness
   is bounded and provider-neutral, but it is not exposed as a general prompt API. The playlist
-  planner is the first optional live-library integration: it requires a current synthetic quality
-  pass plus explicit disclosure consent for each request, sends at most 100 path-free candidates,
-  persists progress as a non-restartable server job, and can only return a reviewable draft. No
-  tagging, cleanup, EQ, audio, or other library workflow uses a provider yet; local tools remain
-  active until each future model feature gets its own reviewed contract.
+  playlist planner and metadata music tagger are the first optional live-library integrations.
+  Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
+  planning sends at most 100 path-free candidates and returns a draft. Music tagging sends metadata
+  in batches of at most 20, may choose only from the fixed D&D vocabulary, and stores suggestions
+  under `model-metadata-tagger/v1` for explicit per-tag review. Neither path can write a playlist or
+  manual tag directly. Cleanup, EQ, audio, and other workflows remain local until they receive their
+  own reviewed contracts.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
@@ -82,6 +84,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   decision, removes that label from current playlist evidence, and never mutates authored data.
   Review-state filters and explicitly selected bulk decisions make larger libraries manageable;
   stale or invalid suggestions are reported individually instead of blocking valid selections.
+  An optional quality-certified metadata tagging model can populate the same review surface through
+  a durable server job. It never receives paths, audio, existing tags, or review decisions, skips
+  unchanged model profiles, and cannot promote its output without an explicit acceptance.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.

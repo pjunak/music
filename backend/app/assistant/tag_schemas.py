@@ -194,3 +194,50 @@ class LibraryTagPage(StrictTagModel):
     total: int = Field(ge=0)
     offset: int = Field(ge=0)
     limit: int = Field(ge=1)
+
+
+MODEL_TAGGING_DISCLOSURE_VERSION: Literal[
+    "assistant-model-music-tagging-disclosure/v1"
+] = "assistant-model-music-tagging-disclosure/v1"
+
+
+class ModelTaggingDisclosure(StrictTagModel):
+    version: Literal["assistant-model-music-tagging-disclosure/v1"]
+    shared_with_provider: list[str]
+    never_shared: list[str]
+    allowed_tags: list[str]
+    tracks_per_request: int = Field(ge=1, le=20)
+    may_incur_cost: bool
+
+
+class ModelTaggingAvailability(StrictTagModel):
+    available: bool
+    reason_code: str | None
+    role_id: Literal["music_tagger"]
+    connection_name: str | None
+    model_id: str | None
+    quality_evaluation_id: Literal["music-tagging-quality-v1"]
+    job_kind: str
+    library_tracks: int = Field(ge=0)
+    current_profiles: int = Field(ge=0)
+    tracks_needing_tags: int = Field(ge=0)
+    estimated_provider_requests: int = Field(ge=0)
+    disclosure: ModelTaggingDisclosure
+
+
+class ModelTaggingStartRequest(StrictTagModel):
+    force: bool = False
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v1"]
+    consent: Literal[True]
+
+
+class ModelTaggingJobResult(StrictTagModel):
+    schema_version: Literal["assistant-model-music-tagging-job-result/v1"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v1"]
+    role_id: Literal["music_tagger"]
+    role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    analyzer_id: Literal["model-metadata-tagger/v1"]
+    library_tracks: int = Field(ge=0)
+    updated_profiles: int = Field(ge=0)
+    unchanged_profiles: int = Field(ge=0)
+    skipped_changed_tracks: int = Field(ge=0)

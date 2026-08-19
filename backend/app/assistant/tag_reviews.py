@@ -12,6 +12,12 @@ from app.assistant.analysis import (
     LOCAL_METADATA_ANALYZER_ID,
     track_source_signature,
 )
+from app.assistant.model_tagger import MODEL_TAG_ANALYZER_ID
+from app.assistant.model_tagging import (
+    MODEL_TAGGING_ROLE_ID,
+    model_tag_source_signature,
+)
+from app.assistant.providers.service import current_role_runtime_fingerprint
 from app.assistant.tag_lock import tag_write_lock
 from app.assistant.tags import MAX_TAGS_PER_TRACK, TagLimitError, normalize_manual_tag
 from app.models.base import utcnow
@@ -22,6 +28,7 @@ from app.models.track_user_tag import TrackUserTag
 
 ReviewStatus = Literal["pending", "accepted", "rejected"]
 ReviewFailureCode = Literal["not_found", "stale", "tag_limit"]
+_REVIEWABLE_ANALYZERS = (LOCAL_METADATA_ANALYZER_ID, MODEL_TAG_ANALYZER_ID)
 
 
 @dataclass(frozen=True)
@@ -115,12 +122,7 @@ def load_current_analysis_tag_suggestions(
     db: Session,
     tracks: Sequence[Track],
 ) -> Mapping[int, tuple[AnalysisTagSuggestion, ...]]:
-    """Load reviewable tags from current, valid local analysis profiles.
-
-    The returned contract already carries an analyzer ID and source signature,
-    so later analyzers can join this surface after defining their own current-
-    profile validation without changing review semantics.
-    """
+    """Load reviewable tags from every current, approved analysis profile."""
 
     track_by_id = {track.id: track for track in tracks}
     if not track_by_id:
@@ -128,9 +130,9 @@ def load_current_analysis_tag_suggestions(
     rows = list(
         db.scalars(
             select(TrackAnalysis).where(
-                TrackAnalysis.analyzer_id == LOCAL_METADATA_ANALYZER_ID,
+                TrackAnalysis.analyzer_id.in_(_REVIEWABLE_ANALYZERS),
                 TrackAnalysis.track_id.in_(track_by_id),
-            )
+            ).order_by(TrackAnalysis.track_id, TrackAnalysis.analyzer_id)
         ).all()
     )
     reviews = {
@@ -138,14 +140,26 @@ def load_current_analysis_tag_suggestions(
         for review in db.scalars(
             select(TrackAnalysisTagReview).where(
                 TrackAnalysisTagReview.track_id.in_(track_by_id),
-                TrackAnalysisTagReview.analyzer_id == LOCAL_METADATA_ANALYZER_ID,
+                TrackAnalysisTagReview.analyzer_id.in_(_REVIEWABLE_ANALYZERS),
             )
         ).all()
     }
-    suggestions: dict[int, tuple[AnalysisTagSuggestion, ...]] = {}
+    model_role_fingerprint = current_role_runtime_fingerprint(
+        db,
+        MODEL_TAGGING_ROLE_ID,
+    )
+    suggestions: dict[int, list[AnalysisTagSuggestion]] = {}
     for row in rows:
         track = track_by_id.get(row.track_id)
-        if track is None or row.source_signature != track_source_signature(track):
+        if (
+            track is None
+            or row.source_signature
+            != _current_source_signature(
+                track,
+                row.analyzer_id,
+                model_role_fingerprint,
+            )
+        ):
             continue
         tags = _profile_tags(row)
         evidence = _string_tuple(row.evidence_json)
@@ -177,8 +191,25 @@ def load_current_analysis_tag_suggestions(
                     status=status,
                 )
             )
-        suggestions[row.track_id] = tuple(track_suggestions)
-    return suggestions
+        suggestions.setdefault(row.track_id, []).extend(track_suggestions)
+    return {
+        track_id: tuple(track_suggestions)
+        for track_id, track_suggestions in suggestions.items()
+    }
+
+
+def _current_source_signature(
+    track: Track,
+    analyzer_id: str,
+    model_role_fingerprint: str | None,
+) -> str | None:
+    if analyzer_id == LOCAL_METADATA_ANALYZER_ID:
+        return track_source_signature(track)
+    if analyzer_id == MODEL_TAG_ANALYZER_ID:
+        if model_role_fingerprint is None:
+            return None
+        return model_tag_source_signature(track, model_role_fingerprint)
+    return None
 
 
 def filter_tracks_by_review_status(
@@ -283,17 +314,17 @@ def review_analysis_tags_bulk(
         valid: list[AnalysisTagReviewTarget] = []
         failures: list[AnalysisTagReviewFailure] = []
         profile_tags: dict[tuple[int, str], tuple[str, ...] | None] = {}
-        current_signatures = {
-            track_id: track_source_signature(track)
-            for track_id, track in tracks.items()
-        }
+        model_role_fingerprint = current_role_runtime_fingerprint(
+            db,
+            MODEL_TAGGING_ROLE_ID,
+        )
         for target in canonical:
             track = tracks.get(target.track_id)
             row = analyses.get((target.track_id, target.analyzer_id))
             if track is None:
                 failures.append(_failure(target, "not_found", "Track not found"))
                 continue
-            if row is None or target.analyzer_id != LOCAL_METADATA_ANALYZER_ID:
+            if row is None or target.analyzer_id not in _REVIEWABLE_ANALYZERS:
                 failures.append(
                     _failure(target, "not_found", "Analysis profile not found")
                 )
@@ -307,12 +338,16 @@ def review_analysis_tags_bulk(
                     )
                 )
                 continue
-            if row.source_signature != current_signatures[target.track_id]:
+            if row.source_signature != _current_source_signature(
+                track,
+                target.analyzer_id,
+                model_role_fingerprint,
+            ):
                 failures.append(
                     _failure(
                         target,
                         "stale",
-                        "Track metadata changed; rerun analysis before reviewing this tag",
+                        "Track or analyzer settings changed; rerun analysis before reviewing this tag",
                     )
                 )
                 continue

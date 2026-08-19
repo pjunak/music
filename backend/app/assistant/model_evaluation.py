@@ -10,11 +10,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.assistant.evaluation import (
-    PlaylistEvaluationResult,
     evaluate_playlist_engine,
     load_evaluation_suite,
 )
 from app.assistant.model_playlist import ModelPlaylistPlanner
+from app.assistant.model_tagger import (
+    MODEL_TAG_ANALYZER_ID,
+    TagQualityEvaluationResult,
+    evaluate_music_tagger,
+    load_tag_quality_suite,
+)
 from app.assistant.providers.definitions import MODEL_ROLE_BY_ID
 from app.assistant.providers.execution import (
     StructuredModelRequest,
@@ -37,8 +42,15 @@ PLAYLIST_QUALITY_EVALUATION_ID: Literal["playlist-quality-v1"] = (
     "playlist-quality-v1"
 )
 PLAYLIST_QUALITY_JOB_KIND = "assistant.model-evaluation.playlist-quality-v1"
+TAGGING_QUALITY_EVALUATION_ID: Literal["music-tagging-quality-v1"] = (
+    "music-tagging-quality-v1"
+)
+TAGGING_QUALITY_JOB_KIND = "assistant.model-evaluation.music-tagging-quality-v1"
 _PLAYLIST_SUITE_PATH = (
     Path(__file__).resolve().parents[2] / "evaluation" / "playlist-local-v1.json"
+)
+_TAGGING_SUITE_PATH = (
+    Path(__file__).resolve().parents[2] / "evaluation" / "music-tagging-v1.json"
 )
 
 
@@ -66,16 +78,30 @@ PLAYLIST_QUALITY_EVALUATION = ModelEvaluationDefinition(
     job_kind=PLAYLIST_QUALITY_JOB_KIND,
 )
 
+TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
+    id=TAGGING_QUALITY_EVALUATION_ID,
+    role_id="music_tagger",
+    label="Music tagging quality",
+    description=(
+        "Runs fixed synthetic D&D metadata-tagging cases through this model. "
+        "No songs or live library data are sent."
+    ),
+    suite_id="dnd-metadata-tagging-baseline",
+    suite_path=_TAGGING_SUITE_PATH,
+    job_kind=TAGGING_QUALITY_JOB_KIND,
+)
+
 _EVALUATIONS_BY_ROLE: dict[str, tuple[ModelEvaluationDefinition, ...]] = {
     PLAYLIST_QUALITY_EVALUATION.role_id: (PLAYLIST_QUALITY_EVALUATION,),
+    TAGGING_QUALITY_EVALUATION.role_id: (TAGGING_QUALITY_EVALUATION,),
 }
 
 
 class _EvaluationJobParameters(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    role_id: Literal["playlist_planner"]
-    evaluation_id: Literal["playlist-quality-v1"]
+    role_id: str = Field(min_length=1, max_length=64)
+    evaluation_id: str = Field(min_length=1, max_length=128)
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
@@ -162,8 +188,8 @@ def evaluation_job_parameters(
     definition = require_evaluation_definition(role_id, evaluation_id)
     resolved = prepare_role_execution_details(db, role_id)
     parameters = _EvaluationJobParameters(
-        role_id="playlist_planner",
-        evaluation_id="playlist-quality-v1",
+        role_id=definition.role_id,
+        evaluation_id=definition.id,
         role_fingerprint=resolved.fingerprint,
     )
     return definition, parameters.model_dump(mode="json")
@@ -196,7 +222,12 @@ def prepare_quality_gated_role_execution(
 def _record_result(
     context: JobExecutionContext,
     parameters: _EvaluationJobParameters,
-    result: PlaylistEvaluationResult,
+    *,
+    passed: bool,
+    suite_id: str,
+    engine_id: str,
+    passed_cases: int,
+    total_cases: int,
 ) -> None:
     with SessionLocal() as db:
         resolved = prepare_role_execution_details(db, parameters.role_id)
@@ -216,19 +247,19 @@ def _record_result(
                 evaluation_id=parameters.evaluation_id,
                 role_fingerprint=parameters.role_fingerprint,
                 status="never",
-                suite_id=result.suite_id,
-                engine_id=result.engine_id,
+                suite_id=suite_id,
+                engine_id=engine_id,
                 passed_cases=0,
                 total_cases=0,
                 job_id=context.job_id,
             )
             db.add(row)
         row.role_fingerprint = parameters.role_fingerprint
-        row.status = "passed" if result.passed else "failed"
-        row.suite_id = result.suite_id
-        row.engine_id = result.engine_id
-        row.passed_cases = result.summary.passed_cases
-        row.total_cases = result.summary.cases
+        row.status = "passed" if passed else "failed"
+        row.suite_id = suite_id
+        row.engine_id = engine_id
+        row.passed_cases = passed_cases
+        row.total_cases = total_cases
         row.job_id = context.job_id
         row.evaluated_at = utcnow()
         db.commit()
@@ -280,7 +311,81 @@ def run_playlist_quality_evaluation(
         on_case_complete=case_complete,
     )
     context.check_cancelled()
-    _record_result(context, parameters, result)
+    _record_result(
+        context,
+        parameters,
+        passed=result.passed,
+        suite_id=result.suite_id,
+        engine_id=result.engine_id,
+        passed_cases=result.summary.passed_cases,
+        total_cases=result.summary.cases,
+    )
+    return {
+        "schema_version": "assistant-model-quality-result/v1",
+        "role_id": parameters.role_id,
+        "evaluation_id": parameters.evaluation_id,
+        "role_fingerprint": parameters.role_fingerprint,
+        "evaluation": result.model_dump(mode="json"),
+    }
+
+
+def run_tagging_quality_evaluation(
+    context: JobExecutionContext,
+    raw_parameters: dict[str, Any],
+) -> dict[str, Any]:
+    parameters = _EvaluationJobParameters.model_validate(raw_parameters)
+    definition = require_evaluation_definition(
+        parameters.role_id,
+        parameters.evaluation_id,
+    )
+    if definition.id != TAGGING_QUALITY_EVALUATION_ID:
+        raise ValueError("Tagging quality handler received the wrong evaluation.")
+    suite = load_tag_quality_suite(definition.suite_path)
+    if suite.id != definition.suite_id:
+        raise RuntimeError("Configured model tagging suite ID does not match.")
+    context.update_progress(
+        0,
+        len(suite.cases),
+        phase="Preparing evaluation",
+        message="Loading fixed synthetic metadata-tagging cases",
+    )
+
+    with SessionLocal() as db:
+        resolved = prepare_role_execution_details(db, parameters.role_id)
+    if resolved.fingerprint != parameters.role_fingerprint:
+        raise ProviderServiceError(
+            "role_changed",
+            "The model role changed before evaluation started. Run it again.",
+            409,
+        )
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        context.check_cancelled()
+        return execute_structured_model_request(resolved.execution, request)
+
+    def case_complete(current: int, total: int) -> None:
+        context.update_progress(
+            current,
+            total,
+            phase="Evaluating tagging model",
+            message=f"Completed {current} of {total} synthetic cases",
+        )
+
+    result: TagQualityEvaluationResult = evaluate_music_tagger(
+        execute,
+        suite,
+        on_case_complete=case_complete,
+    )
+    context.check_cancelled()
+    _record_result(
+        context,
+        parameters,
+        passed=result.passed,
+        suite_id=result.suite_id,
+        engine_id=MODEL_TAG_ANALYZER_ID,
+        passed_cases=result.passed_cases,
+        total_cases=result.total_cases,
+    )
     return {
         "schema_version": "assistant-model-quality-result/v1",
         "role_id": parameters.role_id,
@@ -293,5 +398,10 @@ def run_playlist_quality_evaluation(
 register_job_handler(
     PLAYLIST_QUALITY_JOB_KIND,
     run_playlist_quality_evaluation,
+    restartable=False,
+)
+register_job_handler(
+    TAGGING_QUALITY_JOB_KIND,
+    run_tagging_quality_evaluation,
     restartable=False,
 )

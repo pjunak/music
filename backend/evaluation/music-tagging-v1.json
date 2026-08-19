@@ -1,0 +1,91 @@
+{
+  "schema_version": "assistant-music-tagger-evaluation/v1",
+  "id": "dnd-metadata-tagging-baseline",
+  "cases": [
+    {
+      "id": "medieval-tavern-dance",
+      "description": "Recognizes an explicit medieval tavern dance without combat tags",
+      "track": {
+        "track_id": 1,
+        "title": "The Minstrel's Jig",
+        "display_title": "",
+        "artist": "The Village Players",
+        "album": "Medieval Tavern Dances",
+        "origin": "",
+        "genre": "folk",
+        "length_s": 186.0,
+        "bpm": 122
+      },
+      "required_tags": ["medieval", "tavern", "dancing", "festive"],
+      "forbidden_tags": ["combat", "dark"]
+    },
+    {
+      "id": "dark-dungeon",
+      "description": "Recognizes a dark, eerie dungeon cue without festive tags",
+      "track": {
+        "track_id": 2,
+        "title": "Whispers Below the Crypt",
+        "display_title": "",
+        "artist": "Dungeon Atmospheres",
+        "album": "Ruins and Catacombs",
+        "origin": "",
+        "genre": "dark ambient",
+        "length_s": 301.0,
+        "bpm": null
+      },
+      "required_tags": ["dungeon", "dark", "eerie"],
+      "forbidden_tags": ["festive", "dancing"]
+    },
+    {
+      "id": "heroic-castle",
+      "description": "Recognizes a heroic royal procession without stealth tags",
+      "track": {
+        "track_id": 3,
+        "title": "March of the Crown Guard",
+        "display_title": "",
+        "artist": "Royal Brass Ensemble",
+        "album": "Castle Processions",
+        "origin": "Kingdom of Aranor",
+        "genre": "orchestral march",
+        "length_s": 214.0,
+        "bpm": 108
+      },
+      "required_tags": ["castle", "heroic"],
+      "forbidden_tags": ["stealth", "eerie"]
+    },
+    {
+      "id": "calm-travel",
+      "description": "Recognizes calm wilderness travel without combat tags",
+      "track": {
+        "track_id": 4,
+        "title": "Quiet Road Through Green Hills",
+        "display_title": "",
+        "artist": "Wayfarer's Rest",
+        "album": "Journeys",
+        "origin": "",
+        "genre": "acoustic ambient",
+        "length_s": 265.0,
+        "bpm": 76
+      },
+      "required_tags": ["travel", "wilderness", "calm"],
+      "forbidden_tags": ["combat", "tense"]
+    },
+    {
+      "id": "insufficient-evidence",
+      "description": "Avoids inventing D&D context from unrelated sparse metadata",
+      "track": {
+        "track_id": 5,
+        "title": "Untitled 07",
+        "display_title": "",
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 180.0,
+        "bpm": null
+      },
+      "required_tags": [],
+      "forbidden_tags": ["medieval", "tavern", "combat", "heroic", "eerie"]
+    }
+  ]
+}

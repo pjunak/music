@@ -183,6 +183,16 @@ Runtime data lives outside the image.
   response from the local candidate snapshot. Model results remain drafts and must use the existing
   Authoring import preview/select/commit path. Configured-model CLI evaluation separately requires
   the explicit `--send-suite-to-provider` disclosure flag.
+- The optional metadata music tagger may run only through
+  `assistant.model-music-tagging`. Require the exact current
+  `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider
+  request, and keep jobs non-restartable. Provider input is limited to indexed descriptive metadata,
+  duration, BPM, numeric track IDs, and the fixed D&D vocabulary; never send paths, audio, manual
+  tags, local generated tags, playlists, or review history. Store output under
+  `model-metadata-tagger/v1` in `track_analyses`, bind its source signature to metadata plus the role
+  fingerprint, and expose it only through the existing generated-tag review surface. The model may
+  never add a `track_user_tags` row directly. Accepted suggestions become manual tags only through
+  the existing explicit single or bulk review transaction.
 - Task-specific model quality checks run as durable, non-restartable jobs and persist their current
   certification separately from job history. Bind every result to the exact model-role runtime
   fingerprint, clear it after connection reverification or runtime changes, and keep historical

@@ -1,6 +1,6 @@
 """Operator-owned playlist tags, kept separate from generated analysis."""
 
-from typing import Literal
+from typing import Literal, NoReturn
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, or_, select
@@ -11,6 +11,12 @@ from app.assistant.analysis import (
     load_current_metadata_profiles,
 )
 from app.assistant.audio_analysis import CurrentAudioProfile, load_current_audio_profiles
+from app.assistant.model_tagging import (
+    MODEL_TAGGING_JOB_KIND,
+    model_tagging_availability,
+    model_tagging_job_parameters,
+)
+from app.assistant.providers.service import ProviderServiceError
 from app.assistant.tag_reviews import (
     AnalysisSuggestionNotFoundError,
     AnalysisTagReviewTarget,
@@ -40,6 +46,8 @@ from app.assistant.tag_schemas import (
     ManualTagRenameRequest,
     ManualTagRenameResult,
     ManualTagUsage,
+    ModelTaggingAvailability,
+    ModelTaggingStartRequest,
     StarterTagGroupOut,
 )
 from app.assistant.tags import (
@@ -53,10 +61,20 @@ from app.assistant.tags import (
     patch_manual_tags_bulk,
     rename_manual_tag,
 )
+from app.jobs.runner import job_runner
+from app.jobs.schemas import BackgroundJobOut, job_out
+from app.jobs.service import enqueue_unique_active_job
 from app.models.track import Track
 from app.models.track_user_tag import TrackUserTag
 
 router = APIRouter(prefix="/api/assistant/library-tags", tags=["assistant-tags"])
+
+
+def _raise_provider_error(error: ProviderServiceError) -> NoReturn:
+    raise HTTPException(
+        status_code=error.status_code,
+        detail={"code": error.code, "message": error.message},
+    ) from None
 
 
 def _track_out(
@@ -103,6 +121,50 @@ def _track_out(
             else None
         ),
     )
+
+
+@router.get("/model-status", response_model=ModelTaggingAvailability)
+def model_music_tagging_status(
+    _user: CurrentUser,
+    db: DbSession,
+) -> ModelTaggingAvailability:
+    return model_tagging_availability(db)
+
+
+@router.post(
+    "/model-jobs",
+    response_model=BackgroundJobOut,
+    status_code=202,
+)
+def start_model_music_tagging(
+    payload: ModelTaggingStartRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BackgroundJobOut:
+    try:
+        parameters = model_tagging_job_parameters(db, force=payload.force)
+    except ProviderServiceError as exc:
+        _raise_provider_error(exc)
+    job, created = enqueue_unique_active_job(
+        db,
+        MODEL_TAGGING_JOB_KIND,
+        parameters,
+    )
+    output = job_out(job)
+    if not created and output.parameters != parameters:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "model_tagging_in_progress",
+                "message": (
+                    "Another model music-tagging job is already running. "
+                    "Wait for it to finish or cancel it first."
+                ),
+            },
+        )
+    if created:
+        job_runner.wake()
+    return output
 
 
 @router.get("/catalog", response_model=ManualTagCatalog)
