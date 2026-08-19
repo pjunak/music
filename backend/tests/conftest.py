@@ -11,6 +11,7 @@ on length/title/etc behaviour rather than mocks.
 """
 from __future__ import annotations
 
+import base64
 import os
 import struct
 import tempfile
@@ -45,6 +46,9 @@ os.environ["ADVANCER_ENABLED"] = "0"
 # Secure cookie over http — so opt tests into a non-Secure session cookie.
 # (Production defaults to Secure; see Settings.session_cookie_secure.)
 os.environ["SESSION_COOKIE_SECURE"] = "false"
+# Provider keys remain decryptable between requests, but the test key is
+# isolated to this throwaway database and never used outside the test process.
+os.environ["ASSISTANT_CREDENTIAL_KEY"] = base64.urlsafe_b64encode(b"T" * 32).decode()
 
 
 def _silent_wav_bytes(seconds: float = 0.5, sample_rate: int = 8000) -> bytes:

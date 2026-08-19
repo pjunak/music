@@ -3,6 +3,7 @@ import { SectionNav } from "./SectionNav";
 const ASSISTANT_TABS = [
   { to: "playlists", label: "Playlist Builder" },
   { to: "analysis", label: "Library Analysis" },
+  { to: "ai", label: "AI Setup" },
   { to: "cleanup", label: "Cleanup" },
 ];
 

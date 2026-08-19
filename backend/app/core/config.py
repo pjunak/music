@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +57,12 @@ class Settings(BaseSettings):
     session_cookie_domain: str | None = None
     session_cookie_name: str = "music_session"
     session_ttl_days: int = 30
+
+    # Separate deployment secret used only to encrypt optional Assistant
+    # provider credentials at rest. It is a URL-safe base64 encoded 32-byte
+    # AES key and deliberately has no default. The application remains fully
+    # local when it is absent; the UI cannot store provider credentials.
+    assistant_credential_key: SecretStr | None = None
 
     # Upload guard rails (per request). Generous enough for hi-res FLAC albums;
     # they exist to stop an authenticated client from exhausting the volume

@@ -187,6 +187,8 @@ function formatApiDetail(detail: unknown): string | null {
     if (messages.length > 0) return messages.slice(0, 4).join(" · ");
   }
   if (detail && typeof detail === "object") {
+    const providerDetail = detail as { message?: unknown };
+    if (typeof providerDetail.message === "string") return providerDetail.message;
     try {
       return JSON.stringify(detail);
     } catch {

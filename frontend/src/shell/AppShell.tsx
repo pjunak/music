@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
@@ -36,6 +36,11 @@ import { indexTarget } from "./indexTarget";
 import { LoginModal } from "./LoginModal";
 import { NowPlayingBar } from "./NowPlayingBar";
 import { LoginRedirect, Protected, RouteSpinner } from "./routeGuards";
+
+const AssistantAiSetupView = lazy(async () => {
+  const module = await import("@/views/assistant/AssistantAiSetupView");
+  return { default: module.AssistantAiSetupView };
+});
 
 // Old paths kept alive for bookmarks/external links — each redirects into the
 // new IA. The Modes sub-tab is gone (mode CRUD moved to the header popup), so
@@ -189,6 +194,14 @@ export default function AppShell() {
             <Route index element={<Navigate to="playlists" replace />} />
             <Route path="playlists" element={<PlaylistBuilderView />} />
             <Route path="analysis" element={<LibraryAnalysisView />} />
+            <Route
+              path="ai"
+              element={
+                <Suspense fallback={<RouteSpinner />}>
+                  <AssistantAiSetupView />
+                </Suspense>
+              }
+            />
             <Route path="cleanup" element={<AssistantCleanupView />} />
           </Route>
           {/* Legacy routes — old top-level paths keep working for bookmarks

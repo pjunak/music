@@ -165,6 +165,12 @@ Runtime data lives outside the image.
   explicit thresholds without copying private library data or freezing one incidental exact
   ranking. Future model providers must pass the same unknown-track, source-integrity, exclusion,
   selection-plan, and candidate-limit checks before UI integration.
+- Optional model providers use separate encrypted connection records and per-task role mappings.
+  Never return or log a provider key, never infer provider capabilities from a saved URL, and never
+  enable a role until the operator explicitly verifies its connection. Provider I/O must stay off
+  the event loop, bounded by time and response size, and protected against redirects and unsafe
+  destinations. Saving or verifying a connection does not authorize sending library data or
+  replacing a local engine. Preserve `ASSISTANT_CREDENTIAL_KEY` separately from database backups.
 - Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a

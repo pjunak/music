@@ -47,6 +47,11 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   provider-neutral suggestion contract. The harness measures relevance, required selection,
   ordering, explanations, determinism, and invented or excluded tracks, with explicit thresholds
   that fail regressions. See [`backend/evaluation/README.md`](backend/evaluation/README.md).
+- **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
+  dedicated Assistant tab, verify it from the server, and assign a model independently to each
+  future task. API keys are encrypted at rest and never returned to the browser. Connections do
+  not replace the local planner or send library data anywhere by themselves; model-backed tools
+  remain a later, explicit layer.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
@@ -120,8 +125,27 @@ DB-backed tokens, nothing is signed.)
 | `ALLOWED_ORIGINS` | | `http://localhost:5173` | Comma-separated CORS origins (only needed for split dev) |
 | `SESSION_COOKIE_SECURE` | | `true` | Send the session cookie over HTTPS only. Set `false` only for a plain-HTTP (no-TLS) deployment |
 | `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
+| `ASSISTANT_CREDENTIAL_KEY` | Only for optional AI setup | — | URL-safe base64 32-byte key used to encrypt provider API keys in `app.db` |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
+
+### Optional AI connection storage
+
+The local Assistant does not need a model provider or a credential key. To enable encrypted
+credential storage in the separate **Assistant → AI Setup** screen, generate one deployment key:
+
+```powershell
+python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+```
+
+Set the printed value as `ASSISTANT_CREDENTIAL_KEY` in the server environment and restart the
+server. Keep it in the deployment's secret store, not in source control. A database backup and
+this key must be restored together; without the original key, saved provider credentials cannot
+be decrypted and must be entered again.
+
+The first adapter verifies OpenAI-compatible providers by requesting their model list. Public
+addresses require HTTPS. Private-network providers are opt-in per connection. Verification uses
+strict time and response-size limits and does not send songs, tags, prompts, or audio.
 
 There is no general migration framework: the schema is created idempotently on boot, and
 compatible additive columns are applied automatically. Renames, drops, and type changes require
