@@ -62,11 +62,14 @@ RUN pip install --no-cache-dir --upgrade pip wheel uv && \
 # ============================================================================
 FROM python:3.12-slim AS runtime
 
-# Only runtime deps. ca-certificates for outbound TLS; that's it.
+# Runtime deps. FFmpeg decodes the library's supported audio formats for the
+# optional server-side signal analyzer. It runs as one bounded subprocess per
+# track; playback remains browser/client-owned.
 # (build-essential + libffi-dev are in the builder stage above; they
 # don't ship in this image.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
+        ffmpeg \
         && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

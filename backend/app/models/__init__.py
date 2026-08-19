@@ -10,6 +10,7 @@ from app.models.playback_state import PlaybackState
 from app.models.playlist import Playlist, PlaylistItem
 from app.models.track import Track
 from app.models.track_analysis import TrackAnalysis
+from app.models.track_analysis_failure import TrackAnalysisFailure
 from app.models.track_analysis_tag_review import TrackAnalysisTagReview
 from app.models.track_user_tag import TrackUserTag
 from app.models.user import User
@@ -25,6 +26,7 @@ __all__ = [
     "PlaylistItem",
     "Track",
     "TrackAnalysis",
+    "TrackAnalysisFailure",
     "TrackAnalysisTagReview",
     "TrackUserTag",
     "User",

@@ -75,6 +75,7 @@ def _configure_logging(level: str) -> None:
 _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("tracks", "display_title", "VARCHAR(512) NOT NULL DEFAULT ''"),
     ("tracks", "origin", "VARCHAR(512) NOT NULL DEFAULT ''"),
+    ("track_analyses", "metrics_json", "TEXT NOT NULL DEFAULT '{}'"),
 ]
 
 

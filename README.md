@@ -42,8 +42,13 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   baseline runs locally and makes no external model calls or audio-content claims.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
-  and keeps outputs from different analyzers side by side. The current analyzer is metadata-only;
-  audio-signal analysis remains an explicit later layer.
+  and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
+  suggestions from existing metadata. `local-audio/v1` separately decodes files on the server and
+  stores measured level, dynamics, high-frequency, transient, and stable-tempo evidence. Signal
+  failures are checkpointed per track and retried later; signal measurements never become manual
+  tags or semantic mood claims automatically. The production image includes FFmpeg for the indexed
+  MP3, FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV
+  fallback.
 - **Manual playlist tags** — attach operator-owned context such as `medieval`, `tavern`, `dancing`,
   or any custom tag without modifying the audio file. Manual and generated tags remain visibly and
   structurally separate, while local playlist ranking gives explicit manual matches priority.

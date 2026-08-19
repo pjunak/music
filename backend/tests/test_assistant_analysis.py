@@ -16,18 +16,21 @@ def _isolate_analysis_state(client: TestClient) -> Iterator[None]:
     from app.core.db import SessionLocal
     from app.models.track import Track
     from app.models.track_analysis import TrackAnalysis
+    from app.models.track_analysis_failure import TrackAnalysisFailure
 
     with SessionLocal() as db:
         original_genres = {
             track.id: track.genre for track in db.scalars(select(Track)).all()
         }
         db.execute(delete(TrackAnalysis))
+        db.execute(delete(TrackAnalysisFailure))
         db.commit()
 
     yield
 
     with SessionLocal() as db:
         db.execute(delete(TrackAnalysis))
+        db.execute(delete(TrackAnalysisFailure))
         for track in db.scalars(select(Track)).all():
             if track.id in original_genres:
                 track.genre = original_genres[track.id]
@@ -61,11 +64,32 @@ def _start_and_wait(client: TestClient, *, force: bool = False) -> dict[str, Any
     return _wait_for_job(client, response.json()["id"])
 
 
+def _start_audio_and_wait(
+    client: TestClient,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    response = client.post(
+        "/api/assistant/library-audio-analysis/jobs",
+        json={"force": force},
+    )
+    assert response.status_code == 202, response.text
+    return _wait_for_job(client, response.json()["id"])
+
+
 def test_library_analysis_requires_auth(client: TestClient) -> None:
     assert client.get("/api/assistant/library-analysis/summary").status_code == 401
     assert (
         client.post(
             "/api/assistant/library-analysis/jobs",
+            json={"force": False},
+        ).status_code
+        == 401
+    )
+    assert client.get("/api/assistant/library-audio-analysis/summary").status_code == 401
+    assert (
+        client.post(
+            "/api/assistant/library-audio-analysis/jobs",
             json={"force": False},
         ).status_code
         == 401
@@ -134,6 +158,8 @@ def test_analysis_profiles_library_and_reuses_current_results(
         == library_tracks
     )
     assert payload["last_updated_at"] is not None
+    assert payload["failed_tracks"] == 0
+    assert payload["stale_tracks"] == 0
 
     with SessionLocal() as db:
         assert db.get(TrackAnalysis, (seeded_track_id, "future-audio/v1")) is not None
@@ -162,3 +188,93 @@ def test_analysis_refreshes_changed_metadata_and_force_rebuilds(
     forced = _start_and_wait(auth_client, force=True)
     assert forced["status"] == "succeeded", forced
     assert forced["result"]["updated"] == forced["result"]["tracks"]
+
+
+def test_audio_analysis_profiles_signals_and_reuses_current_results(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.assistant.audio_analysis import LOCAL_AUDIO_ANALYZER_ID
+    from app.core.db import SessionLocal
+    from app.models.track_analysis import TrackAnalysis
+
+    monkeypatch.setattr("app.assistant.audio_signal.shutil.which", lambda _name: None)
+    first = _start_audio_and_wait(auth_client)
+    assert first["status"] == "succeeded", first
+    assert first["result"]["updated"] == first["result"]["tracks"]
+    assert first["result"]["failed"] == 0
+
+    with SessionLocal() as db:
+        profile = db.get(TrackAnalysis, (seeded_track_id, LOCAL_AUDIO_ANALYZER_ID))
+        assert profile is not None
+        assert profile.moods_json == "[]"
+        metrics = profile.metrics_json
+        assert '"schema":"local-audio/v1"' in metrics
+        assert profile.confidence == "low"
+
+    unchanged = _start_audio_and_wait(auth_client)
+    assert unchanged["status"] == "succeeded", unchanged
+    assert unchanged["result"]["updated"] == 0
+    assert unchanged["result"]["unchanged"] == unchanged["result"]["tracks"]
+
+    summary = auth_client.get("/api/assistant/library-audio-analysis/summary")
+    assert summary.status_code == 200, summary.text
+    payload = summary.json()
+    assert payload["analyzer"] == LOCAL_AUDIO_ANALYZER_ID
+    assert payload["analyzed_tracks"] == payload["library_tracks"]
+    assert payload["failed_tracks"] == 0
+
+
+def test_audio_analysis_checkpoints_failures_and_retries_them(
+    auth_client: TestClient,
+    seeded_track_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.assistant import audio_analysis
+    from app.assistant.audio_signal import AudioSignalError
+    from app.core.db import SessionLocal
+    from app.models.track_analysis_failure import TrackAnalysisFailure
+
+    original = audio_analysis.analyze_audio_file
+
+    def fail_seeded(path, *, check_cancelled=None):  # type: ignore[no-untyped-def]
+        if path.name == "test-song.wav":
+            raise AudioSignalError("deliberate decode failure")
+        return original(path, check_cancelled=check_cancelled)
+
+    monkeypatch.setattr(audio_analysis, "analyze_audio_file", fail_seeded)
+    failed = _start_audio_and_wait(auth_client)
+    assert failed["status"] == "succeeded", failed
+    assert failed["result"]["failed"] == 1
+    assert failed["result"]["failure_samples"][0]["path"] == "Demo/test-song.wav"
+
+    with SessionLocal() as db:
+        failure = db.get(
+            TrackAnalysisFailure,
+            (seeded_track_id, "local-audio/v1"),
+        )
+        assert failure is not None
+        assert "deliberate decode failure" in failure.error
+
+    monkeypatch.setattr(audio_analysis, "analyze_audio_file", original)
+    retried = _start_audio_and_wait(auth_client)
+    assert retried["status"] == "succeeded", retried
+    assert retried["result"]["failed"] == 0
+
+    with SessionLocal() as db:
+        assert (
+            db.get(TrackAnalysisFailure, (seeded_track_id, "local-audio/v1"))
+            is None
+        )
+
+    monkeypatch.setattr(audio_analysis, "analyze_audio_file", fail_seeded)
+    forced_failure = _start_audio_and_wait(auth_client, force=True)
+    assert forced_failure["status"] == "succeeded", forced_failure
+    assert forced_failure["result"]["failed"] == 1
+
+    monkeypatch.setattr(audio_analysis, "analyze_audio_file", original)
+    refreshed = _start_audio_and_wait(auth_client)
+    assert refreshed["status"] == "succeeded", refreshed
+    assert refreshed["result"]["updated"] == 1
+    assert refreshed["result"]["failed"] == 0

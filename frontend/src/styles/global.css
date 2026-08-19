@@ -4234,7 +4234,8 @@ kbd,
   margin: 0 auto var(--space-6);
 }
 .assistant-page-header h1,
-.assistant-section-heading h2 {
+.assistant-section-heading h2,
+.assistant-section-heading h3 {
   margin: 0;
 }
 .assistant-page-header h1 {
@@ -4397,7 +4398,8 @@ kbd,
   gap: var(--space-4);
   margin-bottom: var(--space-5);
 }
-.assistant-section-heading h2 {
+.assistant-section-heading h2,
+.assistant-section-heading h3 {
   margin-top: var(--space-1);
   font-size: var(--text-lg);
 }
@@ -4547,11 +4549,40 @@ kbd,
 }
 .assistant-analysis-header,
 .assistant-analysis-grid,
+.assistant-analyzer-section,
 .assistant-analysis-history,
 .assistant-analysis-error {
   width: min(100%, 1180px);
   margin-right: auto;
   margin-left: auto;
+}
+.assistant-algorithm-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.assistant-analyzer-section {
+  margin-bottom: var(--space-6);
+}
+.assistant-analyzer-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-4);
+}
+.assistant-analyzer-heading h2,
+.assistant-analyzer-heading p {
+  margin-top: 0;
+}
+.assistant-analyzer-heading h2 {
+  margin-bottom: var(--space-2);
+}
+.assistant-analyzer-heading p:last-child {
+  max-width: 760px;
+  margin-bottom: 0;
+  color: var(--muted);
 }
 .assistant-analysis-grid {
   display: grid;
@@ -4623,6 +4654,24 @@ kbd,
   height: 0.65rem;
   accent-color: var(--accent2);
 }
+.assistant-job-failures {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-job-failures summary {
+  cursor: pointer;
+}
+.assistant-job-failures ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+}
+.assistant-job-failures li + li {
+  margin-top: var(--space-2);
+}
+.assistant-job-failures li span {
+  display: block;
+  overflow-wrap: anywhere;
+}
 .assistant-analysis-actions {
   display: flex;
   flex-wrap: wrap;
@@ -4684,7 +4733,7 @@ kbd,
 }
 .assistant-job-history-row {
   display: grid;
-  grid-template-columns: minmax(90px, auto) minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(90px, auto) auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--space-4);
   min-height: 48px;
@@ -4898,6 +4947,56 @@ kbd,
 .assistant-tag-source.is-analysis {
   border-left: 3px solid var(--muted);
   background: var(--surface-2);
+}
+.assistant-tag-source.is-signal {
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+}
+.assistant-tag-source.is-signal > div.assistant-signal-heading {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.assistant-signal-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.assistant-signal-heading > div > span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-signal-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.assistant-signal-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.assistant-signal-metrics span,
+.assistant-signal-evidence {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-signal-evidence {
+  margin-top: var(--space-3);
+}
+.assistant-signal-evidence summary {
+  cursor: pointer;
+}
+.assistant-signal-evidence ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
 }
 .assistant-tag-source > div:first-child {
   display: flex;
@@ -5565,6 +5664,9 @@ input.volume-slider::-moz-range-thumb {
   .assistant-analysis-grid {
     grid-template-columns: 1fr;
   }
+  .assistant-analyzer-heading {
+    flex-direction: column;
+  }
   .assistant-tag-layout {
     grid-template-columns: 1fr;
   }
@@ -5636,7 +5738,8 @@ input.volume-slider::-moz-range-thumb {
     grid-template-columns: auto minmax(0, 1fr);
   }
   .assistant-job-history-row > span:nth-child(3),
-  .assistant-job-history-row > span:nth-child(4) {
+  .assistant-job-history-row > span:nth-child(4),
+  .assistant-job-history-row > span:nth-child(5) {
     grid-column: 2;
   }
   .assistant-tag-toolbar {

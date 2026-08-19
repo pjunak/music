@@ -174,6 +174,7 @@ def test_manual_and_analysis_tags_remain_separate(
         }
         for tag in ("dark", "tense")
     ]
+    assert payload["audio_signal"] is None
 
     listing = auth_client.get(
         "/api/assistant/library-tags",
@@ -192,6 +193,57 @@ def test_manual_and_analysis_tags_remain_separate(
     assert changed.json()["manual_tags"] == ["feast", "tavern"]
 
 
+def test_library_tag_detail_exposes_current_audio_evidence_read_only(
+    auth_client: TestClient,
+    seeded_track_id: int,
+) -> None:
+    from app.assistant.audio_analysis import (
+        LOCAL_AUDIO_ANALYZER_ID,
+        audio_source_signature,
+    )
+    from app.core.db import SessionLocal
+    from app.models.track import Track
+    from app.models.track_analysis import TrackAnalysis
+
+    with SessionLocal() as db:
+        track = db.get(Track, seeded_track_id)
+        assert track is not None
+        db.add(
+            TrackAnalysis(
+                track_id=track.id,
+                analyzer_id=LOCAL_AUDIO_ANALYZER_ID,
+                source_signature=audio_source_signature(track),
+                job_id="b" * 32,
+                energy=0.5,
+                brightness=0.25,
+                tension=0.4,
+                moods_json="[]",
+                evidence_json='["Measured signal evidence","No mood claim"]',
+                metrics_json=(
+                    '{"schema":"local-audio/v1","rms_dbfs":-18.0,'
+                    '"tempo_bpm":120.0}'
+                ),
+                confidence="medium",
+            )
+        )
+        db.commit()
+
+    listing = auth_client.get(
+        "/api/assistant/library-tags",
+        params={"search": "test-song"},
+    )
+    assert listing.status_code == 200, listing.text
+    profile = listing.json()["items"][0]["audio_signal"]
+    assert profile == {
+        "analyzer_id": LOCAL_AUDIO_ANALYZER_ID,
+        "confidence": "medium",
+        "evidence": ["Measured signal evidence", "No mood claim"],
+        "metrics": {
+            "schema": LOCAL_AUDIO_ANALYZER_ID,
+            "rms_dbfs": -18.0,
+            "tempo_bpm": 120.0,
+        },
+    }
 def test_analysis_tag_reviews_are_durable_and_keep_manual_tags_independent(
     auth_client: TestClient,
     seeded_track_id: int,

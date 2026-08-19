@@ -109,6 +109,47 @@ def load_current_metadata_profiles(
     return profiles
 
 
+def metadata_analysis_summary(db: Session) -> dict[str, object]:
+    """Summarize only metadata profiles that still match indexed fields."""
+
+    tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
+    rows = {
+        row.track_id: row
+        for row in db.scalars(
+            select(TrackAnalysis).where(
+                TrackAnalysis.analyzer_id == LOCAL_METADATA_ANALYZER_ID
+            )
+        ).all()
+    }
+    current: list[TrackAnalysis] = []
+    stale_tracks = 0
+    for track in tracks:
+        row = rows.get(track.id)
+        if row is None:
+            continue
+        if row.source_signature == track_source_signature(track):
+            current.append(row)
+        else:
+            stale_tracks += 1
+
+    confidence_counts = {"high": 0, "medium": 0, "low": 0}
+    for row in current:
+        if row.confidence in confidence_counts:
+            confidence_counts[row.confidence] += 1
+    last_updated_at = max((row.updated_at for row in current), default=None)
+    return {
+        "analyzer": LOCAL_METADATA_ANALYZER_ID,
+        "library_tracks": len(tracks),
+        "analyzed_tracks": len(current),
+        "failed_tracks": 0,
+        "stale_tracks": stale_tracks,
+        "high_confidence": confidence_counts["high"],
+        "medium_confidence": confidence_counts["medium"],
+        "low_confidence": confidence_counts["low"],
+        "last_updated_at": last_updated_at,
+    }
+
+
 def _chunks(values: Sequence[Track], size: int) -> list[Sequence[Track]]:
     return [values[index : index + size] for index in range(0, len(values), size)]
 

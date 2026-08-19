@@ -1,58 +1,37 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
-import { EmptyState } from "@/components/EmptyState";
-import {
-  type BackgroundJob,
-  type BackgroundJobStatus,
-  type LibraryAnalysisSummary,
-  assistantApi,
-  jobsApi,
-} from "@/core/api";
+import type { BackgroundJob, LibraryAnalysisSummary } from "@/core/api";
+import { assistantApi, jobsApi } from "@/core/api";
 import { toast } from "@/core/toast";
+
+import {
+  analysisStatusLabel,
+  formatAnalysisTime,
+  isAnalysisJobActive,
+} from "./analysisJobs";
+import { LibraryAnalyzerPanel } from "./LibraryAnalyzerPanel";
 
 const LibraryTagEditor = lazy(async () => {
   const module = await import("./LibraryTagEditor");
   return { default: module.LibraryTagEditor };
 });
 
-const ANALYSIS_JOB_KIND = "assistant.library-analysis";
-const ACTIVE_STATUSES = new Set<BackgroundJobStatus>([
-  "queued",
-  "running",
-  "cancel_requested",
-]);
-
-function isActive(job: BackgroundJob | undefined): boolean {
-  return job !== undefined && ACTIVE_STATUSES.has(job.status);
-}
-
-function statusLabel(status: BackgroundJobStatus): string {
-  return status.replace("_", " ");
-}
-
-function formatTime(value: string | null): string {
-  if (value === null) return "Never";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function resultNumber(job: BackgroundJob, key: string): number | null {
-  const value = job.result?.[key];
-  return typeof value === "number" ? value : null;
-}
+const METADATA_JOB_KIND = "assistant.library-analysis";
+const AUDIO_JOB_KIND = "assistant.library-audio-analysis";
+type AnalyzerKey = "metadata" | "audio";
 
 export function LibraryAnalysisView() {
-  const [history, setHistory] = useState<BackgroundJob[]>([]);
-  const [summary, setSummary] = useState<LibraryAnalysisSummary | null>(null);
+  const [metadataHistory, setMetadataHistory] = useState<BackgroundJob[]>([]);
+  const [audioHistory, setAudioHistory] = useState<BackgroundJob[]>([]);
+  const [metadataSummary, setMetadataSummary] =
+    useState<LibraryAnalysisSummary | null>(null);
+  const [audioSummary, setAudioSummary] = useState<LibraryAnalysisSummary | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [actionBusy, setActionBusy] = useState(false);
+  const [busyAnalyzer, setBusyAnalyzer] = useState<AnalyzerKey | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-
-  const latest = history[0];
-  const active = isActive(latest);
 
   useEffect(() => {
     let disposed = false;
@@ -61,18 +40,22 @@ export function LibraryAnalysisView() {
     async function poll(initial: boolean) {
       if (initial) setLoading(true);
       try {
-        const [jobs, analysisSummary] = await Promise.all([
-          jobsApi.list({ kind: ANALYSIS_JOB_KIND, limit: 10 }),
-          assistantApi.getLibraryAnalysisSummary(),
-        ]);
+        const [metadataJobs, audioJobs, nextMetadataSummary, nextAudioSummary] =
+          await Promise.all([
+            jobsApi.list({ kind: METADATA_JOB_KIND, limit: 10 }),
+            jobsApi.list({ kind: AUDIO_JOB_KIND, limit: 10 }),
+            assistantApi.getLibraryAnalysisSummary(),
+            assistantApi.getLibraryAudioAnalysisSummary(),
+          ]);
         if (disposed) return;
-        setHistory(jobs);
-        setSummary(analysisSummary);
+        setMetadataHistory(metadataJobs);
+        setAudioHistory(audioJobs);
+        setMetadataSummary(nextMetadataSummary);
+        setAudioSummary(nextAudioSummary);
         setLoadError(null);
-        timer = window.setTimeout(
-          () => void poll(false),
-          isActive(jobs[0]) ? 1500 : 5000,
-        );
+        const hasActiveJob =
+          isAnalysisJobActive(metadataJobs[0]) || isAnalysisJobActive(audioJobs[0]);
+        timer = window.setTimeout(() => void poll(false), hasActiveJob ? 1500 : 5000);
       } catch (error) {
         if (disposed) return;
         setLoadError(
@@ -91,25 +74,41 @@ export function LibraryAnalysisView() {
     };
   }, [refreshKey]);
 
-  const confidenceTotal = useMemo(
+  const combinedHistory = useMemo(
     () =>
-      summary === null
-        ? 0
-        : summary.high_confidence +
-          summary.medium_confidence +
-          summary.low_confidence,
-    [summary],
+      [...metadataHistory, ...audioHistory].sort((left, right) =>
+        right.created_at.localeCompare(left.created_at),
+      ),
+    [audioHistory, metadataHistory],
   );
 
-  async function start(force: boolean) {
-    setActionBusy(true);
+  function historyFor(analyzer: AnalyzerKey): BackgroundJob[] {
+    return analyzer === "metadata" ? metadataHistory : audioHistory;
+  }
+
+  function replaceLatest(analyzer: AnalyzerKey, job: BackgroundJob, refresh = false) {
+    const setter = analyzer === "metadata" ? setMetadataHistory : setAudioHistory;
+    setter((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+    if (refresh) setRefreshKey((value) => value + 1);
+  }
+
+  async function start(analyzer: AnalyzerKey, force: boolean) {
+    setBusyAnalyzer(analyzer);
     try {
-      const job = await assistantApi.startLibraryAnalysis(force);
-      setHistory((current) => [job, ...current.filter((item) => item.id !== job.id)]);
-      toast.success(
-        force ? "Library rebuild queued" : "Library analysis queued",
-        "You can leave this page; progress is stored on the server.",
-      );
+      const job =
+        analyzer === "metadata"
+          ? await assistantApi.startLibraryAnalysis(force)
+          : await assistantApi.startLibraryAudioAnalysis(force);
+      replaceLatest(analyzer, job);
+      const title =
+        analyzer === "metadata"
+          ? force
+            ? "Library rebuild queued"
+            : "Library analysis queued"
+          : force
+            ? "Audio rebuild queued"
+            : "Audio analysis queued";
+      toast.success(title, "You can leave this page; progress is stored on the server.");
       setRefreshKey((value) => value + 1);
     } catch (error) {
       toast.error(
@@ -117,38 +116,38 @@ export function LibraryAnalysisView() {
         error instanceof Error ? error.message : undefined,
       );
     } finally {
-      setActionBusy(false);
+      setBusyAnalyzer(null);
     }
   }
 
-  async function cancel() {
+  async function cancel(analyzer: AnalyzerKey) {
+    const latest = historyFor(analyzer)[0];
     if (latest === undefined) return;
-    setActionBusy(true);
+    setBusyAnalyzer(analyzer);
     try {
       const job = await jobsApi.cancel(latest.id);
-      setHistory((current) => [job, ...current.filter((item) => item.id !== job.id)]);
-      setRefreshKey((value) => value + 1);
+      replaceLatest(analyzer, job, true);
     } catch (error) {
       toast.error(
         "Cancellation failed",
         error instanceof Error ? error.message : undefined,
       );
     } finally {
-      setActionBusy(false);
+      setBusyAnalyzer(null);
     }
   }
 
-  async function retry() {
+  async function retry(analyzer: AnalyzerKey) {
+    const latest = historyFor(analyzer)[0];
     if (latest === undefined) return;
-    setActionBusy(true);
+    setBusyAnalyzer(analyzer);
     try {
       const job = await jobsApi.retry(latest.id);
-      setHistory((current) => [job, ...current]);
-      setRefreshKey((value) => value + 1);
+      replaceLatest(analyzer, job, true);
     } catch (error) {
       toast.error("Retry failed", error instanceof Error ? error.message : undefined);
     } finally {
-      setActionBusy(false);
+      setBusyAnalyzer(null);
     }
   }
 
@@ -159,11 +158,14 @@ export function LibraryAnalysisView() {
           <p className="assistant-eyebrow">Durable server-side work</p>
           <h1>Library analysis</h1>
           <p>
-            Build reusable mood profiles for the whole library. Jobs continue on
+            Build reusable local evidence for the whole library. Jobs continue on
             the server and this page restores their progress after refresh or reopen.
           </p>
         </div>
-        <span className="assistant-algorithm">local-metadata/v1</span>
+        <div className="assistant-algorithm-list" aria-label="Available analyzers">
+          <span className="assistant-algorithm">local-metadata/v1</span>
+          <span className="assistant-algorithm">local-audio/v1</span>
+        </div>
       </header>
 
       {loadError !== null ? (
@@ -175,132 +177,49 @@ export function LibraryAnalysisView() {
         </div>
       ) : null}
 
-      <div className="assistant-analysis-grid">
-        <section className="surface-card authoring-card assistant-analysis-current">
-          <div className="assistant-section-heading">
-            <div>
-              <p className="assistant-eyebrow">Current work</p>
-              <h2>{active ? "Analysis in progress" : "Analysis is ready"}</h2>
-            </div>
-            {latest !== undefined ? (
-              <span className={`assistant-job-status is-${latest.status}`}>
-                {statusLabel(latest.status)}
-              </span>
-            ) : null}
-          </div>
+      <LibraryAnalyzerPanel
+        id="metadata-analysis"
+        title="Metadata profiles"
+        description="Turn filenames, paths, genres, origins, and BPM tags into explainable local suggestions."
+        analyzer="local-metadata/v1"
+        history={metadataHistory}
+        summary={metadataSummary}
+        loading={loading}
+        actionBusy={busyAnalyzer === "metadata"}
+        progressLabel="Library analysis progress"
+        emptyTitle="No library analysis has run yet"
+        emptyDescription="Start the local pass to turn existing metadata and BPM values into reusable, versioned mood profiles."
+        analyzeLabel="Analyze library"
+        checkLabel="Check for changes"
+        rebuildTitle="Recompute every profile even when its source metadata is unchanged"
+        coverageNote="This pass uses existing metadata only. Its generated tags remain separate until you explicitly review them below."
+        showFailureStat={false}
+        onStart={(force) => void start("metadata", force)}
+        onCancel={() => void cancel("metadata")}
+        onRetry={() => void retry("metadata")}
+      />
 
-          {loading && latest === undefined ? (
-            <p className="muted">Loading analysis history…</p>
-          ) : latest === undefined ? (
-            <EmptyState title="No library analysis has run yet">
-              Start the local pass to turn existing metadata and BPM values into
-              reusable, versioned mood profiles.
-            </EmptyState>
-          ) : (
-            <div className="assistant-job-progress">
-              <div className="assistant-job-progress-label">
-                <strong>{latest.progress_phase || statusLabel(latest.status)}</strong>
-                {latest.progress_total !== null ? (
-                  <span>
-                    {latest.progress_current} / {latest.progress_total}
-                  </span>
-                ) : null}
-              </div>
-              {latest.progress_total === null ? (
-                <progress aria-label="Library analysis progress" />
-              ) : (
-                <progress
-                  aria-label="Library analysis progress"
-                  value={latest.progress_current}
-                  max={Math.max(1, latest.progress_total)}
-                />
-              )}
-              {latest.progress_message ? <p>{latest.progress_message}</p> : null}
-              {latest.error ? <p className="error">{latest.error}</p> : null}
-              {latest.status === "succeeded" ? (
-                <p>
-                  {resultNumber(latest, "updated") ?? 0} profiles updated ·{" "}
-                  {resultNumber(latest, "unchanged") ?? 0} already current
-                </p>
-              ) : null}
-            </div>
-          )}
-
-          <div className="assistant-analysis-actions">
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void start(false)}
-              disabled={active || actionBusy}
-            >
-              {latest?.status === "succeeded" ? "Check for changes" : "Analyze library"}
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => void start(true)}
-              disabled={active || actionBusy}
-              title="Recompute every profile even when its source metadata is unchanged"
-            >
-              Rebuild all profiles
-            </button>
-            {active ? (
-              <button type="button" onClick={() => void cancel()} disabled={actionBusy}>
-                {latest?.status === "cancel_requested" ? "Cancelling…" : "Cancel"}
-              </button>
-            ) : null}
-            {latest?.status === "failed" || latest?.status === "cancelled" ? (
-              <button type="button" onClick={() => void retry()} disabled={actionBusy}>
-                Retry last job
-              </button>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="surface-card assistant-analysis-summary">
-          <div className="assistant-section-heading">
-            <div>
-              <p className="assistant-eyebrow">Stored profiles</p>
-              <h2>Coverage</h2>
-            </div>
-            <span>{summary?.analyzer ?? "local-metadata/v1"}</span>
-          </div>
-          <div className="assistant-analysis-stats">
-            <div>
-              <strong>{summary?.analyzed_tracks ?? 0}</strong>
-              <span>Analyzed</span>
-            </div>
-            <div>
-              <strong>{summary?.library_tracks ?? 0}</strong>
-              <span>Library tracks</span>
-            </div>
-            <div>
-              <strong>{summary?.high_confidence ?? 0}</strong>
-              <span>High confidence</span>
-            </div>
-            <div>
-              <strong>{summary?.low_confidence ?? 0}</strong>
-              <span>Needs richer data</span>
-            </div>
-          </div>
-          {summary !== null && summary.library_tracks > 0 ? (
-            <div className="assistant-analysis-coverage">
-              <span
-                style={{
-                  width: `${Math.round((confidenceTotal / summary.library_tracks) * 100)}%`,
-                }}
-              />
-            </div>
-          ) : null}
-          <p className="assistant-analysis-note">
-            This pass uses existing metadata only. It does not identify vocals,
-            instruments, key, loudness, or spectral character from the audio signal.
-          </p>
-          <p className="muted small">
-            Last updated: {formatTime(summary?.last_updated_at ?? null)}
-          </p>
-        </section>
-      </div>
+      <LibraryAnalyzerPanel
+        id="audio-analysis"
+        title="Audio signal profiles"
+        description="Measure level, dynamics, high-frequency content, transient activity, and a tempo estimate when the pulse is stable."
+        analyzer="local-audio/v1"
+        history={audioHistory}
+        summary={audioSummary}
+        loading={loading}
+        actionBusy={busyAnalyzer === "audio"}
+        progressLabel="Audio signal analysis progress"
+        emptyTitle="No audio signal analysis has run yet"
+        emptyDescription="Start the server-side pass. It processes one track at a time, checkpoints failures, and can continue after a restart."
+        analyzeLabel="Analyze audio signals"
+        checkLabel="Check audio changes"
+        rebuildTitle="Decode and remeasure every track even when the indexed file is unchanged"
+        coverageNote="These are measured signal features and conservative proxies. They do not automatically claim a mood, genre, instrument, or D&D scene tag."
+        showFailureStat
+        onStart={(force) => void start("audio", force)}
+        onCancel={() => void cancel("audio")}
+        onRetry={() => void retry("audio")}
+      />
 
       <Suspense
         fallback={
@@ -316,20 +235,21 @@ export function LibraryAnalysisView() {
         <div className="assistant-section-heading">
           <div>
             <p className="assistant-eyebrow">Persistent history</p>
-            <h2>Recent jobs</h2>
+            <h2>Recent analysis jobs</h2>
           </div>
         </div>
-        {history.length === 0 ? (
+        {combinedHistory.length === 0 ? (
           <p className="muted">Completed and interrupted runs will appear here.</p>
         ) : (
           <div className="assistant-job-history-list">
-            {history.map((job) => (
+            {combinedHistory.map((job) => (
               <div className="assistant-job-history-row" key={job.id}>
                 <span className={`assistant-job-status is-${job.status}`}>
-                  {statusLabel(job.status)}
+                  {analysisStatusLabel(job.status)}
                 </span>
+                <span>{job.kind === AUDIO_JOB_KIND ? "Audio signal" : "Metadata"}</span>
                 <span>{job.progress_phase || "Queued"}</span>
-                <span>{formatTime(job.created_at)}</span>
+                <span>{formatAnalysisTime(job.created_at)}</span>
                 <span>Attempt {job.attempts || 1}</span>
               </div>
             ))}

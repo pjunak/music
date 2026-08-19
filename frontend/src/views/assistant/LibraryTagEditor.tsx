@@ -17,6 +17,7 @@ import { toast } from "@/core/toast";
 
 import { AnalysisTagReview } from "./AnalysisTagReview";
 import { analysisTagSuggestionKey } from "./analysisTagSelection";
+import { AudioSignalEvidence } from "./AudioSignalEvidence";
 import { TagCatalogManager } from "./TagCatalogManager";
 
 const PAGE_SIZE = 50;
@@ -812,6 +813,8 @@ export function LibraryTagEditor() {
                   )
                 }
               />
+
+              <AudioSignalEvidence profile={selected.audio_signal} />
 
               <div className="assistant-tag-save-row">
                 <button

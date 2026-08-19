@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +18,8 @@ vi.mock("@/core/api", async (importActual) => {
       ...actual.assistantApi,
       startLibraryAnalysis: vi.fn(),
       getLibraryAnalysisSummary: vi.fn(),
+      startLibraryAudioAnalysis: vi.fn(),
+      getLibraryAudioAnalysisSummary: vi.fn(),
       getManualTagCatalog: vi.fn(),
       listLibraryTags: vi.fn(),
       patchManualTags: vi.fn(),
@@ -49,10 +51,24 @@ const summary: LibraryAnalysisSummary = {
   analyzer: "local-metadata/v1",
   library_tracks: 120,
   analyzed_tracks: 80,
+  failed_tracks: 0,
+  stale_tracks: 0,
   high_confidence: 35,
   medium_confidence: 30,
   low_confidence: 15,
   last_updated_at: "2026-08-18T10:00:00Z",
+};
+
+const audioSummary: LibraryAnalysisSummary = {
+  analyzer: "local-audio/v1",
+  library_tracks: 120,
+  analyzed_tracks: 64,
+  failed_tracks: 2,
+  stale_tracks: 1,
+  high_confidence: 24,
+  medium_confidence: 30,
+  low_confidence: 10,
+  last_updated_at: "2026-08-18T11:00:00Z",
 };
 
 const emptyTagPage: LibraryTagPage = {
@@ -93,6 +109,9 @@ function job(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(assistantApi.getLibraryAnalysisSummary).mockResolvedValue(summary);
+  vi.mocked(assistantApi.getLibraryAudioAnalysisSummary).mockResolvedValue(
+    audioSummary,
+  );
   vi.mocked(assistantApi.getManualTagCatalog).mockResolvedValue(tagCatalog);
   vi.mocked(assistantApi.listLibraryTags).mockResolvedValue(emptyTagPage);
   vi.mocked(jobsApi.list).mockResolvedValue([]);
@@ -101,7 +120,9 @@ beforeEach(() => {
 describe("LibraryAnalysisView", () => {
   it("restores persisted progress and can request cancellation", async () => {
     const running = job();
-    vi.mocked(jobsApi.list).mockResolvedValue([running]);
+    vi.mocked(jobsApi.list).mockImplementation(async (params) =>
+      params?.kind === "assistant.library-analysis" ? [running] : [],
+    );
     vi.mocked(jobsApi.cancel).mockResolvedValue({
       ...running,
       status: "cancel_requested",
@@ -115,7 +136,7 @@ describe("LibraryAnalysisView", () => {
       42,
     );
     expect(screen.getByText("80")).toBeInTheDocument();
-    expect(screen.getByText("Analyzed")).toBeInTheDocument();
+    expect(screen.getAllByText("Analyzed")).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(jobsApi.cancel).toHaveBeenCalledWith("job-1");
@@ -153,11 +174,44 @@ describe("LibraryAnalysisView", () => {
     render(<LibraryAnalysisView />);
 
     await screen.findByText("No library analysis has run yet");
-    await user.click(screen.getByRole("button", { name: "Rebuild all profiles" }));
+    const metadataPanel = screen.getByRole("region", { name: "Metadata profiles" });
+    await user.click(
+      within(metadataPanel).getByRole("button", { name: "Rebuild all profiles" }),
+    );
 
     await waitFor(() => expect(assistantApi.startLibraryAnalysis).toHaveBeenCalledWith(true));
     expect(toast.success).toHaveBeenCalledWith(
       "Library rebuild queued",
+      "You can leave this page; progress is stored on the server.",
+    );
+  });
+
+  it("starts the separate audio signal analyzer without changing metadata tags", async () => {
+    const queued = job({
+      id: "audio-job",
+      kind: "assistant.library-audio-analysis",
+      status: "queued",
+      progress_current: 0,
+      progress_total: null,
+      progress_phase: "Queued",
+      started_at: null,
+    });
+    vi.mocked(assistantApi.startLibraryAudioAnalysis).mockResolvedValue(queued);
+    const user = userEvent.setup();
+    render(<LibraryAnalysisView />);
+
+    const audioPanel = await screen.findByRole("region", {
+      name: "Audio signal profiles",
+    });
+    await user.click(
+      within(audioPanel).getByRole("button", { name: "Analyze audio signals" }),
+    );
+
+    await waitFor(() =>
+      expect(assistantApi.startLibraryAudioAnalysis).toHaveBeenCalledWith(false),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Audio analysis queued",
       "You can leave this page; progress is stored on the server.",
     );
   });

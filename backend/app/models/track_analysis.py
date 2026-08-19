@@ -27,6 +27,7 @@ class TrackAnalysis(Base):
     tension: Mapped[float] = mapped_column(Float, nullable=False)
     moods_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    metrics_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     confidence: Mapped[str] = mapped_column(String(16), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime, default=utcnow, nullable=False

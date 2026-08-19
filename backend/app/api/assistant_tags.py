@@ -10,6 +10,7 @@ from app.assistant.analysis import (
     LOCAL_METADATA_ANALYZER_ID,
     load_current_metadata_profiles,
 )
+from app.assistant.audio_analysis import CurrentAudioProfile, load_current_audio_profiles
 from app.assistant.tag_reviews import (
     AnalysisSuggestionNotFoundError,
     AnalysisTagReviewTarget,
@@ -24,6 +25,7 @@ from app.assistant.tag_schemas import (
     AnalysisTagReviewRequest,
     AnalysisTagReviewResult,
     AnalysisTagSuggestionOut,
+    AudioSignalProfileOut,
     BulkAnalysisTagReviewApplied,
     BulkAnalysisTagReviewFailure,
     BulkAnalysisTagReviewRequest,
@@ -64,6 +66,7 @@ def _track_out(
     analysis_tags: list[str],
     analysis_confidence: Literal["high", "medium", "low"] | None,
     analysis_suggestions: list[AnalysisTagSuggestion],
+    audio_profile: CurrentAudioProfile | None,
 ) -> LibraryTagTrack:
     return LibraryTagTrack(
         track_id=track.id,
@@ -89,6 +92,16 @@ def _track_out(
             )
             for suggestion in analysis_suggestions
         ],
+        audio_signal=(
+            AudioSignalProfileOut(
+                analyzer_id=audio_profile.analyzer_id,
+                confidence=audio_profile.confidence,
+                evidence=list(audio_profile.evidence),
+                metrics=audio_profile.metrics,
+            )
+            if audio_profile is not None
+            else None
+        ),
     )
 
 
@@ -277,6 +290,7 @@ def list_library_tags(
     track_ids = [track.id for track in tracks]
     manual_by_track = load_manual_tags(db, track_ids)
     profiles = load_current_metadata_profiles(db, tracks)
+    audio_profiles = load_current_audio_profiles(db, tracks)
     suggestions = load_current_analysis_tag_suggestions(db, tracks)
     items: list[LibraryTagTrack] = []
     for track in tracks:
@@ -288,6 +302,7 @@ def list_library_tags(
                 analysis_tags=list(profile.moods) if profile is not None else [],
                 analysis_confidence=(profile.confidence if profile is not None else None),
                 analysis_suggestions=list(suggestions.get(track.id, ())),
+                audio_profile=audio_profiles.get(track.id),
             )
         )
     return LibraryTagPage(items=items, total=total, offset=offset, limit=limit)
@@ -313,6 +328,7 @@ def update_library_tags(
     except (TagLimitError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     profile = load_current_metadata_profiles(db, [track]).get(track.id)
+    audio_profile = load_current_audio_profiles(db, [track]).get(track.id)
     return _track_out(
         track,
         list(manual_tags),
@@ -321,6 +337,7 @@ def update_library_tags(
         analysis_suggestions=list(
             load_current_analysis_tag_suggestions(db, [track]).get(track.id, ())
         ),
+        audio_profile=audio_profile,
     )
 
 

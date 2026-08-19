@@ -330,6 +330,8 @@ export interface LibraryAnalysisSummary {
   analyzer: string;
   library_tracks: number;
   analyzed_tracks: number;
+  failed_tracks: number;
+  stale_tracks: number;
   high_confidence: number;
   medium_confidence: number;
   low_confidence: number;
@@ -420,6 +422,13 @@ export interface BulkAnalysisTagReviewResult {
   failures: BulkAnalysisTagReviewFailure[];
 }
 
+export interface AudioSignalProfile {
+  analyzer_id: string;
+  confidence: "high" | "medium" | "low";
+  evidence: string[];
+  metrics: Record<string, string | number | null>;
+}
+
 export interface LibraryTagTrack {
   track_id: number;
   path: string;
@@ -432,6 +441,7 @@ export interface LibraryTagTrack {
   analysis_tags: string[];
   analysis_confidence: "high" | "medium" | "low" | null;
   analysis_suggestions: AnalysisTagSuggestion[];
+  audio_signal: AudioSignalProfile | null;
 }
 
 export interface LibraryTagPage {
@@ -471,6 +481,14 @@ export const assistantApi = {
     api.post<BackgroundJob>("/api/assistant/library-analysis/jobs", { force }),
   getLibraryAnalysisSummary: () =>
     api.get<LibraryAnalysisSummary>("/api/assistant/library-analysis/summary"),
+  startLibraryAudioAnalysis: (force = false) =>
+    api.post<BackgroundJob>("/api/assistant/library-audio-analysis/jobs", {
+      force,
+    }),
+  getLibraryAudioAnalysisSummary: () =>
+    api.get<LibraryAnalysisSummary>(
+      "/api/assistant/library-audio-analysis/summary",
+    ),
   getManualTagCatalog: () =>
     api.get<ManualTagCatalog>("/api/assistant/library-tags/catalog"),
   listLibraryTags: (

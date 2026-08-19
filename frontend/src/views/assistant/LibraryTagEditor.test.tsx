@@ -81,6 +81,21 @@ const track: LibraryTagTrack = {
       status: "rejected",
     },
   ],
+  audio_signal: {
+    analyzer_id: "local-audio/v1",
+    confidence: "medium",
+    evidence: [
+      "Signal level: -18.0 dBFS RMS, -2.0 dBFS peak",
+      "Signal proxies do not identify instruments, genre, scene, or mood.",
+    ],
+    metrics: {
+      schema: "local-audio/v1",
+      rms_dbfs: -18,
+      level_spread_db: 7.5,
+      high_frequency_ratio: 0.21,
+      tempo_bpm: 120,
+    },
+  },
 };
 
 const page: LibraryTagPage = {
@@ -104,6 +119,8 @@ describe("LibraryTagEditor", () => {
     expect(await screen.findByRole("heading", { name: "Tavern Dance" })).toBeInTheDocument();
     expect(screen.getByText("Your tags")).toBeInTheDocument();
     expect(screen.getByText("Analysis suggestions")).toBeInTheDocument();
+    expect(screen.getByText("Audio signal evidence")).toBeInTheDocument();
+    expect(screen.getByText("120.0 BPM")).toBeInTheDocument();
     expect(screen.getByText("festive")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Accept tavern as manual tag" }),

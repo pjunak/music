@@ -167,6 +167,13 @@ class BulkAnalysisTagReviewResult(StrictTagModel):
     failures: list[BulkAnalysisTagReviewFailure]
 
 
+class AudioSignalProfileOut(StrictTagModel):
+    analyzer_id: str
+    confidence: Literal["high", "medium", "low"]
+    evidence: list[str]
+    metrics: dict[str, str | int | float | None]
+
+
 class LibraryTagTrack(StrictTagModel):
     track_id: int
     path: str
@@ -179,6 +186,7 @@ class LibraryTagTrack(StrictTagModel):
     analysis_tags: list[str]
     analysis_confidence: Literal["high", "medium", "low"] | None
     analysis_suggestions: list[AnalysisTagSuggestionOut]
+    audio_signal: AudioSignalProfileOut | None
 
 
 class LibraryTagPage(StrictTagModel):

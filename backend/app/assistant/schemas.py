@@ -78,6 +78,8 @@ class LibraryAnalysisSummary(StrictAssistantModel):
     analyzer: str
     library_tracks: int = Field(ge=0)
     analyzed_tracks: int = Field(ge=0)
+    failed_tracks: int = Field(ge=0)
+    stale_tracks: int = Field(ge=0)
     high_confidence: int = Field(ge=0)
     medium_confidence: int = Field(ge=0)
     low_confidence: int = Field(ge=0)
