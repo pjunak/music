@@ -17,6 +17,7 @@ import {
   isModelTaggingJobActive,
   modelTaggingResultFromJob,
 } from "./modelTaggingJobs";
+import { ModelUsageSummary } from "./ModelUsageSummary";
 
 interface Props {
   onSuggestionsChanged: () => void;
@@ -343,6 +344,8 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
           <p>Completed batches remain available for review.</p>
         </div>
       ) : null}
+
+      <ModelUsageSummary job={job} />
 
       {active && job !== null ? (
         <div className="assistant-model-tagging-actions">

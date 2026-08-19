@@ -197,6 +197,10 @@ Runtime data lives outside the image.
   certification separately from job history. Bind every result to the exact model-role runtime
   fingerprint, clear it after connection reverification or runtime changes, and keep historical
   reports synthetic and secret-free. A quality pass does not authorize live-library access.
+- Durable quality, playlist, and tagging model jobs record the shared bounded provider-usage
+  summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
+  Preserve missing-usage counts explicitly; never infer unreported tokens or portable cost from
+  provider-specific pricing.
 - Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a

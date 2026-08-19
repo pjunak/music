@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.assistant.providers.schemas import ProviderUsageSummary
 from app.assistant.tags import normalize_manual_tags
 
 
@@ -241,3 +242,4 @@ class ModelTaggingJobResult(StrictTagModel):
     updated_profiles: int = Field(ge=0)
     unchanged_profiles: int = Field(ge=0)
     skipped_changed_tracks: int = Field(ge=0)
+    usage: ProviderUsageSummary

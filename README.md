@@ -64,9 +64,13 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   planning sends at most 100 path-free candidates and returns a draft. Music tagging sends metadata
   in batches of at most 20, may choose only from the fixed D&D vocabulary, and stores suggestions
   under `model-metadata-tagger/v1` for explicit per-tag review. Neither path can write a playlist or
-  manual tag directly. The Library Analysis screen restores tagging progress after refresh or
-  reopen and shows model output beside local suggestions without merging their ownership. Cleanup,
-  EQ, audio, and other workflows remain local until they receive their own reviewed contracts.
+  manual tag directly. Quality, playlist, and tagging jobs retain their attempted request count,
+  provider-reported model IDs, and reported input/output token totals; the UI identifies calls where
+  the provider omitted usage rather than treating missing counts as exact zero. It does not estimate
+  charges because provider pricing is not part of the portable model contract. The Library Analysis
+  screen restores tagging progress after refresh or reopen and shows model output beside local
+  suggestions without merging their ownership. Cleanup, EQ, audio, and other workflows remain local
+  until they receive their own reviewed contracts.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable

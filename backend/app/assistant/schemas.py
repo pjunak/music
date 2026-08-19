@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.assistant.providers.schemas import ProviderUsageSummary
+
 
 class StrictAssistantModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -127,6 +129,7 @@ class ModelPlaylistSuggestionJobResult(StrictAssistantModel):
     role_id: Literal["playlist_planner"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     suggestion: PlaylistSuggestionResponse
+    usage: ProviderUsageSummary
 
 
 class LibraryAnalysisStartRequest(StrictAssistantModel):

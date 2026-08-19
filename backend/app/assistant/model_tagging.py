@@ -32,6 +32,7 @@ from app.assistant.providers.service import (
     ProviderServiceError,
     current_role_runtime_fingerprint,
 )
+from app.assistant.providers.usage import ProviderUsageAccumulator
 from app.assistant.tag_schemas import (
     MODEL_TAGGING_DISCLOSURE_VERSION,
     ModelTaggingAvailability,
@@ -247,6 +248,7 @@ def run_model_music_tagging(
 
     updated = 0
     skipped_changed = 0
+    usage = ProviderUsageAccumulator()
     for start in range(0, total, MODEL_TAG_BATCH_SIZE):
         context.check_cancelled()
         batch = work[start : start + MODEL_TAG_BATCH_SIZE]
@@ -263,7 +265,9 @@ def run_model_music_tagging(
 
         def execute(request: StructuredModelRequest) -> StructuredModelResult:
             context.check_cancelled()
-            return execute_structured_model_request(resolved.execution, request)
+            return usage.record(
+                execute_structured_model_request(resolved.execution, request)
+            )
 
         profiles = tag_tracks([_track_input(track) for track in batch], execute)
         context.check_cancelled()
@@ -330,6 +334,7 @@ def run_model_music_tagging(
         updated_profiles=updated,
         unchanged_profiles=max(0, len(tracks) - len(work)),
         skipped_changed_tracks=skipped_changed,
+        usage=usage.summary(),
     ).model_dump(mode="json")
 
 

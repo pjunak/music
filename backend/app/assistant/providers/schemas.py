@@ -3,11 +3,46 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 
 class StrictProviderModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ProviderUsageSummary(StrictProviderModel):
+    schema_version: Literal["assistant-provider-usage/v1"]
+    attempted_requests: int = Field(ge=0)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    input_tokens_reported_requests: int = Field(ge=0)
+    output_tokens_reported_requests: int = Field(ge=0)
+    provider_model_ids: list[str] = Field(max_length=8)
+    provider_model_ids_truncated: bool
+
+    @field_validator("provider_model_ids")
+    @classmethod
+    def validate_model_ids(cls, value: list[str]) -> list[str]:
+        if any(not model_id or len(model_id) > 256 for model_id in value):
+            raise ValueError("provider model IDs must contain 1-256 characters")
+        if len(set(value)) != len(value):
+            raise ValueError("provider model IDs must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def validate_reported_requests(self) -> ProviderUsageSummary:
+        if self.input_tokens_reported_requests > self.attempted_requests:
+            raise ValueError("reported input-token requests exceed attempted requests")
+        if self.output_tokens_reported_requests > self.attempted_requests:
+            raise ValueError("reported output-token requests exceed attempted requests")
+        return self
 
 
 class ProviderAdapterOut(StrictProviderModel):
@@ -125,3 +160,12 @@ class ModelQualityEvaluationOut(StrictProviderModel):
     total_cases: int
     last_job_id: str | None
     last_evaluated_at: datetime | None
+
+
+class ModelQualityJobResult(StrictProviderModel):
+    schema_version: Literal["assistant-model-quality-result/v1"]
+    role_id: str = Field(min_length=1, max_length=64)
+    evaluation_id: str = Field(min_length=1, max_length=128)
+    role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    evaluation: dict[str, object]
+    usage: ProviderUsageSummary

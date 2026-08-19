@@ -21,6 +21,7 @@ from app.assistant.providers.execution import (
     execute_structured_model_request,
 )
 from app.assistant.providers.service import ProviderServiceError
+from app.assistant.providers.usage import ProviderUsageAccumulator
 from app.assistant.schemas import (
     MODEL_PLAYLIST_DISCLOSURE_VERSION,
     ModelPlaylistAvailability,
@@ -166,6 +167,7 @@ def run_model_playlist_suggestion(
         phase="Filtering locally",
         message=f"Preparing a bounded candidate pool from {len(tracks)} library tracks",
     )
+    usage = ProviderUsageAccumulator()
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
         context.check_cancelled()
@@ -175,7 +177,9 @@ def run_model_playlist_suggestion(
             phase="Waiting for playlist model",
             message="Sending the disclosed, path-free candidate pool",
         )
-        return execute_structured_model_request(resolved.execution, request)
+        return usage.record(
+            execute_structured_model_request(resolved.execution, request)
+        )
 
     suggestion = ModelPlaylistPlanner(execute).suggest(
         tracks,
@@ -199,6 +203,7 @@ def run_model_playlist_suggestion(
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,
         suggestion=suggestion,
+        usage=usage.summary(),
     ).model_dump(mode="json")
 
 

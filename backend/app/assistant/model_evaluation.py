@@ -26,13 +26,17 @@ from app.assistant.providers.execution import (
     StructuredModelResult,
     execute_structured_model_request,
 )
-from app.assistant.providers.schemas import ModelQualityEvaluationOut
+from app.assistant.providers.schemas import (
+    ModelQualityEvaluationOut,
+    ModelQualityJobResult,
+)
 from app.assistant.providers.service import (
     ProviderServiceError,
     ResolvedRoleExecution,
     current_role_runtime_fingerprint,
     prepare_role_execution_details,
 )
+from app.assistant.providers.usage import ProviderUsageAccumulator
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
@@ -292,10 +296,13 @@ def run_playlist_quality_evaluation(
             "The model role changed before evaluation started. Run it again.",
             409,
         )
+    usage = ProviderUsageAccumulator()
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
         context.check_cancelled()
-        return execute_structured_model_request(resolved.execution, request)
+        return usage.record(
+            execute_structured_model_request(resolved.execution, request)
+        )
 
     def case_complete(current: int, total: int) -> None:
         context.update_progress(
@@ -320,13 +327,14 @@ def run_playlist_quality_evaluation(
         passed_cases=result.summary.passed_cases,
         total_cases=result.summary.cases,
     )
-    return {
-        "schema_version": "assistant-model-quality-result/v1",
-        "role_id": parameters.role_id,
-        "evaluation_id": parameters.evaluation_id,
-        "role_fingerprint": parameters.role_fingerprint,
-        "evaluation": result.model_dump(mode="json"),
-    }
+    return ModelQualityJobResult(
+        schema_version="assistant-model-quality-result/v1",
+        role_id=parameters.role_id,
+        evaluation_id=parameters.evaluation_id,
+        role_fingerprint=parameters.role_fingerprint,
+        evaluation=result.model_dump(mode="json"),
+        usage=usage.summary(),
+    ).model_dump(mode="json")
 
 
 def run_tagging_quality_evaluation(
@@ -358,10 +366,13 @@ def run_tagging_quality_evaluation(
             "The model role changed before evaluation started. Run it again.",
             409,
         )
+    usage = ProviderUsageAccumulator()
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
         context.check_cancelled()
-        return execute_structured_model_request(resolved.execution, request)
+        return usage.record(
+            execute_structured_model_request(resolved.execution, request)
+        )
 
     def case_complete(current: int, total: int) -> None:
         context.update_progress(
@@ -386,13 +397,14 @@ def run_tagging_quality_evaluation(
         passed_cases=result.passed_cases,
         total_cases=result.total_cases,
     )
-    return {
-        "schema_version": "assistant-model-quality-result/v1",
-        "role_id": parameters.role_id,
-        "evaluation_id": parameters.evaluation_id,
-        "role_fingerprint": parameters.role_fingerprint,
-        "evaluation": result.model_dump(mode="json"),
-    }
+    return ModelQualityJobResult(
+        schema_version="assistant-model-quality-result/v1",
+        role_id=parameters.role_id,
+        evaluation_id=parameters.evaluation_id,
+        role_fingerprint=parameters.role_fingerprint,
+        evaluation=result.model_dump(mode="json"),
+        usage=usage.summary(),
+    ).model_dump(mode="json")
 
 
 register_job_handler(

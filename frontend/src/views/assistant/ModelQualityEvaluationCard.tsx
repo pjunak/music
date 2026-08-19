@@ -6,6 +6,7 @@ import type {
 
 import { readableBackgroundJobError } from "./backgroundJobs";
 import { isModelEvaluationJobActive } from "./modelEvaluationJobs";
+import { ModelUsageSummary } from "./ModelUsageSummary";
 
 interface FailedScenario {
   id: string;
@@ -206,6 +207,8 @@ export function ModelQualityEvaluationCard({
           </ul>
         </details>
       ) : null}
+
+      <ModelUsageSummary job={reportJob} />
 
       <div className="assistant-quality-meta">
         <span>Suite: {evaluation.suite_id}</span>

@@ -26,6 +26,7 @@ import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 
 import { PlaylistSuggestionResults } from "./PlaylistSuggestionResults";
+import { ModelUsageSummary } from "./ModelUsageSummary";
 import {
   MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
   isModelSuggestionJobActive,
@@ -719,6 +720,8 @@ export function PlaylistBuilderView() {
                     : "Find matching songs"}
             </button>
           </form>
+
+          <ModelUsageSummary job={modelJob} />
 
           {suggestion !== null ? (
             <section className="assistant-create-panel" aria-label="Create playlist">

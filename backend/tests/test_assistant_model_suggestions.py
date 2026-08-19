@@ -98,6 +98,9 @@ def _reference_playlist_model(
             "ranked_track_ids": [item["track_id"] for item in ranked],
             "selected_track_ids": [item["track_id"] for item in selected],
         },
+        provider_model_id="planner-response-model",
+        input_tokens=120,
+        output_tokens=30,
     )
 
 
@@ -160,6 +163,15 @@ def _configure_quality_passed_model(
     assert started.status_code == 202, started.text
     finished = _wait_for_job(client, started.json()["id"], {"succeeded"})
     assert finished["result"]["evaluation"]["passed"] is True
+    quality_usage = finished["result"]["usage"]
+    assert quality_usage["attempted_requests"] > 0
+    assert quality_usage["input_tokens"] == (
+        quality_usage["attempted_requests"] * 120
+    )
+    assert quality_usage["output_tokens"] == (
+        quality_usage["attempted_requests"] * 30
+    )
+    assert quality_usage["provider_model_ids"] == ["planner-response-model"]
 
 
 def _start_payload(prompt: str = "Warm medieval tavern") -> dict[str, object]:
@@ -271,6 +283,16 @@ def test_model_suggestion_is_path_free_durable_and_preview_only(
     assert finished["result"]["suggestion"]["engine"] == (
         "model-playlist-planner/v1"
     )
+    assert finished["result"]["usage"] == {
+        "schema_version": "assistant-provider-usage/v1",
+        "attempted_requests": 1,
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "input_tokens_reported_requests": 1,
+        "output_tokens_reported_requests": 1,
+        "provider_model_ids": ["planner-response-model"],
+        "provider_model_ids_truncated": False,
+    }
     assert "secret-provider-key-1234" not in json.dumps(finished)
     assert observed
     assert len(observed[0]["candidates"]) <= 100

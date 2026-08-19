@@ -132,6 +132,9 @@ def _reference_music_tagger(
                 for track in payload["tracks"]
             ],
         },
+        provider_model_id="tagger-response-model",
+        input_tokens=80,
+        output_tokens=20,
     )
 
 
@@ -194,6 +197,15 @@ def _configure_quality_passed_tagger(
     assert started.status_code == 202, started.text
     finished = _wait_for_job(client, started.json()["id"], {"succeeded"})
     assert finished["result"]["evaluation"]["passed"] is True
+    quality_usage = finished["result"]["usage"]
+    assert quality_usage["attempted_requests"] > 0
+    assert quality_usage["input_tokens"] == (
+        quality_usage["attempted_requests"] * 80
+    )
+    assert quality_usage["output_tokens"] == (
+        quality_usage["attempted_requests"] * 20
+    )
+    assert quality_usage["provider_model_ids"] == ["tagger-response-model"]
 
 
 def _start_payload(force: bool = False) -> dict[str, object]:
@@ -353,6 +365,16 @@ def test_model_tagging_is_path_free_durable_and_review_only(
     assert finished["kind"] == MODEL_TAGGING_JOB_KIND
     assert finished["progress_current"] == finished["progress_total"] == 1
     assert finished["result"]["updated_profiles"] == 1
+    assert finished["result"]["usage"] == {
+        "schema_version": "assistant-provider-usage/v1",
+        "attempted_requests": 1,
+        "input_tokens": 80,
+        "output_tokens": 20,
+        "input_tokens_reported_requests": 1,
+        "output_tokens_reported_requests": 1,
+        "provider_model_ids": ["tagger-response-model"],
+        "provider_model_ids_truncated": False,
+    }
     assert "secret-provider-key-1234" not in json.dumps(finished)
     assert observed
     provider_track = observed[0]["tracks"][0]
@@ -440,6 +462,7 @@ def test_model_tagging_skips_current_profiles_without_provider_calls(
     assert calls == 1
     assert finished["result"]["updated_profiles"] == 0
     assert finished["result"]["unchanged_profiles"] == 1
+    assert finished["result"]["usage"]["attempted_requests"] == 0
 
 
 def test_model_tag_suggestions_become_stale_after_runtime_change(
