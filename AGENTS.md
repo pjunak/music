@@ -174,12 +174,15 @@ Runtime data lives outside the image.
   owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
   endpoint. Saving, verifying, or testing a role does not authorize sending library data or
   replacing a local engine. Preserve `ASSISTANT_CREDENTIAL_KEY` separately from database backups.
-- The optional model playlist planner is evaluation-only until deliberately integrated. It locally
-  enforces eligibility and exclusions, sends a privacy-reduced pool of at most 100 candidates, and
-  accepts only ranked/selected IDs. Never send library-relative paths or trust model-supplied source
-  fields, tags, scores, reasons, or evidence; reconstruct the public response from the local
-  candidate snapshot. Configured-model CLI evaluation requires the explicit
-  `--send-suite-to-provider` disclosure flag. The live API remains `local-planner/v2`.
+- The optional model playlist planner may run only through the dedicated consent-bound durable job.
+  Keep `local-planner/v2` as the default, require the exact current `playlist-quality-v1` pass and
+  disclosure version before enqueueing, and make model jobs non-restartable to avoid silently
+  repeating provider cost. Locally enforce eligibility and exclusions, send a privacy-reduced pool
+  of at most 100 candidates, and accept only ranked/selected IDs. Never send library-relative paths
+  or trust model-supplied source fields, tags, scores, reasons, or evidence; reconstruct the public
+  response from the local candidate snapshot. Model results remain drafts and must use the existing
+  Authoring import preview/select/commit path. Configured-model CLI evaluation separately requires
+  the explicit `--send-suite-to-provider` disclosure flag.
 - Task-specific model quality checks run as durable, non-restartable jobs and persist their current
   certification separately from job history. Bind every result to the exact model-role runtime
   fingerprint, clear it after connection reverification or runtime changes, and keep historical

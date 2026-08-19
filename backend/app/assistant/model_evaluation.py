@@ -24,6 +24,7 @@ from app.assistant.providers.execution import (
 from app.assistant.providers.schemas import ModelQualityEvaluationOut
 from app.assistant.providers.service import (
     ProviderServiceError,
+    ResolvedRoleExecution,
     current_role_runtime_fingerprint,
     prepare_role_execution_details,
 )
@@ -32,7 +33,9 @@ from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.base import utcnow
 
-PLAYLIST_QUALITY_EVALUATION_ID = "playlist-quality-v1"
+PLAYLIST_QUALITY_EVALUATION_ID: Literal["playlist-quality-v1"] = (
+    "playlist-quality-v1"
+)
 PLAYLIST_QUALITY_JOB_KIND = "assistant.model-evaluation.playlist-quality-v1"
 _PLAYLIST_SUITE_PATH = (
     Path(__file__).resolve().parents[2] / "evaluation" / "playlist-local-v1.json"
@@ -164,6 +167,30 @@ def evaluation_job_parameters(
         role_fingerprint=resolved.fingerprint,
     )
     return definition, parameters.model_dump(mode="json")
+
+
+def prepare_quality_gated_role_execution(
+    db: Session,
+    role_id: str,
+    evaluation_id: str,
+) -> ResolvedRoleExecution:
+    """Resolve a role only when its current runtime passed the required suite."""
+
+    definition = require_evaluation_definition(role_id, evaluation_id)
+    resolved = prepare_role_execution_details(db, role_id)
+    row = db.get(AssistantModelEvaluation, (role_id, evaluation_id))
+    if (
+        row is None
+        or row.status != "passed"
+        or row.suite_id != definition.suite_id
+        or row.role_fingerprint != resolved.fingerprint
+    ):
+        raise ProviderServiceError(
+            "model_quality_not_passed",
+            "Run and pass the current model quality check before using live library data.",
+            409,
+        )
+    return resolved
 
 
 def _record_result(

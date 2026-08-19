@@ -85,5 +85,9 @@ scores, and explanations in the evaluation response are reconstructed from the
 trusted local candidate snapshot. Unknown, duplicate, over-limit, malformed, or
 explicitly truncated model output fails the case instead of being repaired.
 
-This is an evaluation-only provider path. The live Assistant playlist API still
-uses `local-planner/v2` and cannot send a real library to a provider.
+The local Assistant planner remains the default. After this suite passes through
+AI Setup, the exact certified model configuration can also be selected for a
+live-library suggestion. That separate durable job requires the current
+versioned disclosure and explicit consent, sends only the same bounded path-free
+candidate contract, and returns a draft that cannot write a playlist. Evaluation
+success does not bypass the normal review and Authoring import preview.

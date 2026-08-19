@@ -91,6 +91,44 @@ class PlaylistSuggestionResponse(StrictAssistantModel):
     candidates: list[PlaylistCandidate]
 
 
+MODEL_PLAYLIST_DISCLOSURE_VERSION: Literal[
+    "assistant-playlist-model-disclosure/v1"
+] = "assistant-playlist-model-disclosure/v1"
+
+
+class ModelPlaylistDisclosure(StrictAssistantModel):
+    version: Literal["assistant-playlist-model-disclosure/v1"]
+    shared_with_provider: list[str]
+    never_shared: list[str]
+    maximum_candidates: int = Field(ge=1, le=100)
+    may_incur_cost: bool
+
+
+class ModelPlaylistAvailability(StrictAssistantModel):
+    available: bool
+    reason_code: str | None
+    role_id: Literal["playlist_planner"]
+    connection_name: str | None
+    model_id: str | None
+    quality_evaluation_id: Literal["playlist-quality-v1"]
+    job_kind: str
+    disclosure: ModelPlaylistDisclosure
+
+
+class ModelPlaylistSuggestionStartRequest(StrictAssistantModel):
+    request: PlaylistSuggestionRequest
+    disclosure_version: Literal["assistant-playlist-model-disclosure/v1"]
+    consent: Literal[True]
+
+
+class ModelPlaylistSuggestionJobResult(StrictAssistantModel):
+    schema_version: Literal["assistant-playlist-suggestion-job-result/v1"]
+    disclosure_version: Literal["assistant-playlist-model-disclosure/v1"]
+    role_id: Literal["playlist_planner"]
+    role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    suggestion: PlaylistSuggestionResponse
+
+
 class LibraryAnalysisStartRequest(StrictAssistantModel):
     force: bool = False
 

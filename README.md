@@ -36,13 +36,13 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   suitable for assistant-generated drafts. Imports are create-only: invalid references and existing
   names or IDs are reported for review rather than overwritten. See
   [`clients/authoring-import-v1.md`](clients/authoring-import-v1.md).
-- **Local playlist Assistant** — describe a mood or scene and get explainable, deterministic song
-  suggestions from your manual tags, current metadata profiles, and any available measured audio
-  signals. Choose a steady, rising, falling, or build-and-resolve flow; the planner ranks tracks,
-  orders the default selection, and leaves the final track choice to you. The reviewed playlist
-  then goes through the same preview and create-only Authoring import transaction. This baseline
-  runs locally and makes no external model calls; signal measurements remain numeric evidence and
-  never become semantic mood tags automatically.
+- **Review-first playlist Assistant** — describe a mood or scene and get song suggestions from your
+  manual tags, current metadata profiles, and any available measured audio signals. The local,
+  explainable planner remains the default and makes no external calls. An explicitly selected,
+  quality-certified provider model can optionally rerank a locally filtered pool after a versioned
+  disclosure and confirmation. Both methods produce the same read-only draft: you choose the final
+  tracks, then use the existing preview and create-only Authoring import transaction. Signal
+  measurements remain numeric evidence and never become semantic mood tags automatically.
 - **Playlist quality evaluation** — run versioned, synthetic D&D playlist scenarios through the
   provider-neutral suggestion contract. The harness measures relevance, required selection,
   ordering, explanations, determinism, and invented or excluded tracks, with explicit thresholds
@@ -50,18 +50,20 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   CLI disclosure flag or an explicit durable job in AI Setup. The server stores progress and the
   exact model-configuration fingerprint, so refreshes can restore the run and changed settings
   invalidate its result. Local filtering reduces each case to at most 100 candidates, paths are
-  removed, and the model may return only known track IDs. The live Assistant remains local.
+  removed, and the model may return only known track IDs. A current pass is required before that
+  exact model configuration can be selected for a live-library suggestion.
   See [`backend/evaluation/README.md`](backend/evaluation/README.md).
 - **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
   dedicated Assistant tab, verify it from the server, and assign a model independently to each
   future task. Every assignment must pass a fixed synthetic structured-output test before it can
   be enabled; changing its connection, model, timeout, or response limit invalidates that test.
   API keys are encrypted at rest and never returned to the browser. The shared execution harness
-  is bounded and provider-neutral, but it is not exposed as a general prompt API. Only the fixed,
-  synthetic playlist quality suite can currently be sent to a configured provider through an
-  explicit evaluation action; no live playlist, track, cleanup, EQ, audio, or library workflow
-  uses it. Local tools
-  remain the active implementations until each future model feature gets its own reviewed contract.
+  is bounded and provider-neutral, but it is not exposed as a general prompt API. The playlist
+  planner is the first optional live-library integration: it requires a current synthetic quality
+  pass plus explicit disclosure consent for each request, sends at most 100 path-free candidates,
+  persists progress as a non-restartable server job, and can only return a reviewable draft. No
+  tagging, cleanup, EQ, audio, or other library workflow uses a provider yet; local tools remain
+  active until each future model feature gets its own reviewed contract.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable

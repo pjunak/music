@@ -1,5 +1,7 @@
 """Authenticated local-first Assistant endpoints."""
-from fastapi import APIRouter
+from typing import NoReturn
+
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
@@ -15,9 +17,17 @@ from app.assistant.audio_analysis import (
 )
 from app.assistant.engine import PlaylistSuggestionEngine
 from app.assistant.local import local_playlist_planner
+from app.assistant.model_suggestions import (
+    MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
+    model_playlist_availability,
+    model_suggestion_job_parameters,
+)
+from app.assistant.providers.service import ProviderServiceError
 from app.assistant.schemas import (
     LibraryAnalysisStartRequest,
     LibraryAnalysisSummary,
+    ModelPlaylistAvailability,
+    ModelPlaylistSuggestionStartRequest,
     PlaylistSuggestionRequest,
     PlaylistSuggestionResponse,
 )
@@ -29,6 +39,13 @@ from app.models.track import Track
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 playlist_suggestion_engine: PlaylistSuggestionEngine = local_playlist_planner
+
+
+def _raise_provider_error(error: ProviderServiceError) -> NoReturn:
+    raise HTTPException(
+        status_code=error.status_code,
+        detail={"code": error.code, "message": error.message},
+    ) from None
 
 
 @router.post("/playlists/suggest", response_model=PlaylistSuggestionResponse)
@@ -48,6 +65,53 @@ def suggest_playlist(
         manual_tags=manual_tags,
         signal_profiles=signal_profiles,
     )
+
+
+@router.get(
+    "/playlists/model-status",
+    response_model=ModelPlaylistAvailability,
+)
+def model_playlist_status(
+    _user: CurrentUser,
+    db: DbSession,
+) -> ModelPlaylistAvailability:
+    return model_playlist_availability(db)
+
+
+@router.post(
+    "/playlists/model-suggestions/jobs",
+    response_model=BackgroundJobOut,
+    status_code=202,
+)
+def start_model_playlist_suggestion(
+    payload: ModelPlaylistSuggestionStartRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BackgroundJobOut:
+    try:
+        parameters = model_suggestion_job_parameters(db, payload.request)
+    except ProviderServiceError as exc:
+        _raise_provider_error(exc)
+    job, created = enqueue_unique_active_job(
+        db,
+        MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
+        parameters,
+    )
+    output = job_out(job)
+    if not created and output.parameters != parameters:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "model_suggestion_in_progress",
+                "message": (
+                    "Another model playlist suggestion is already running. "
+                    "Wait for it to finish or cancel it first."
+                ),
+            },
+        )
+    if created:
+        job_runner.wake()
+    return output
 
 
 @router.post(
