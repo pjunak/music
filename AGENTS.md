@@ -174,6 +174,12 @@ Runtime data lives outside the image.
   owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
   endpoint. Saving, verifying, or testing a role does not authorize sending library data or
   replacing a local engine. Preserve `ASSISTANT_CREDENTIAL_KEY` separately from database backups.
+- The optional model playlist planner is evaluation-only until deliberately integrated. It locally
+  enforces eligibility and exclusions, sends a privacy-reduced pool of at most 100 candidates, and
+  accepts only ranked/selected IDs. Never send library-relative paths or trust model-supplied source
+  fields, tags, scores, reasons, or evidence; reconstruct the public response from the local
+  candidate snapshot. Configured-model CLI evaluation requires the explicit
+  `--send-suite-to-provider` disclosure flag. The live API remains `local-planner/v2`.
 - Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a

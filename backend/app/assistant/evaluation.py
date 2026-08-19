@@ -15,7 +15,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.assistant.engine import PlaylistSuggestionEngine, TrackAnalysisProfile
+from app.assistant.engine import (
+    PlaylistSuggestionEngine,
+    SuggestionEngineError,
+    TrackAnalysisProfile,
+)
 from app.assistant.schemas import PlaylistSuggestionRequest, PlaylistSuggestionResponse
 
 
@@ -423,6 +427,11 @@ def _engine_error_result(
     case: PlaylistEvaluationCase,
     error: Exception,
 ) -> EvaluationCaseResult:
+    failure = (
+        f"engine error: {error.code}"
+        if isinstance(error, SuggestionEngineError)
+        else f"engine raised {type(error).__name__}"
+    )
     return EvaluationCaseResult(
         id=case.id,
         description=case.description,
@@ -441,7 +450,7 @@ def _engine_error_result(
             deterministic=None,
             contract_valid=False,
         ),
-        failures=[f"engine raised {type(error).__name__}"],
+        failures=[failure],
         top_track_ids=[],
         selected_track_ids=[],
         response_fingerprint="",

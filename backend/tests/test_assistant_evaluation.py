@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.assistant.engine import (
+    SuggestionEngineError,
     TrackAnalysisProfile,
     TrackLike,
     TrackSignalProfile,
@@ -17,6 +18,7 @@ from app.assistant.evaluation import (
     load_evaluation_suite,
 )
 from app.assistant.local import local_playlist_planner
+from app.assistant.providers.service import ProviderServiceError
 from app.assistant.schemas import PlaylistSuggestionRequest, PlaylistSuggestionResponse
 from app.cli import main as cli_main
 
@@ -92,6 +94,20 @@ class RaisingEngine:
         raise RuntimeError("provider details stay out of the report")
 
 
+class UnsafeCodedEngine(RaisingEngine):
+    engine_id = "evaluation-unsafe-error/v1"
+
+    def suggest(
+        self,
+        tracks: Sequence[TrackLike],
+        request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
+        signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
+    ) -> PlaylistSuggestionResponse:
+        raise SuggestionEngineError("secret provider detail must not escape")
+
+
 def one_case_suite(suite: PlaylistEvaluationSuite) -> PlaylistEvaluationSuite:
     return suite.model_copy(
         update={"id": "single-evaluation-case", "cases": [suite.cases[0]]}
@@ -159,6 +175,15 @@ def test_evaluator_contains_engine_errors_per_case() -> None:
     assert result.cases[0].response_fingerprint == ""
 
 
+def test_evaluator_sanitizes_declared_engine_error_codes() -> None:
+    suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
+
+    result = evaluate_playlist_engine(UnsafeCodedEngine(), suite)
+
+    assert result.cases[0].failures == ["engine error: engine_failure"]
+    assert "secret provider detail" not in result.model_dump_json()
+
+
 def test_suite_validation_rejects_unknown_expectation_track() -> None:
     payload = load_evaluation_suite(SUITE_PATH).model_dump(mode="json")
     payload["cases"][0]["expectations"]["relevant_track_ids"] = [999_999]
@@ -190,3 +215,61 @@ def test_playlist_evaluation_cli_rejects_invalid_suite(
 
     assert cli_main(["evaluate-playlists", str(invalid)]) == 2
     assert "Could not load evaluation suite" in capsys.readouterr().out
+
+
+def test_configured_model_cli_requires_explicit_suite_disclosure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    prepared = False
+
+    def should_not_prepare() -> ReorderedEngine:
+        nonlocal prepared
+        prepared = True
+        return ReorderedEngine()
+
+    monkeypatch.setattr(
+        "app.cli.playlist_evaluation._configured_model_engine",
+        should_not_prepare,
+    )
+
+    result = cli_main(
+        [
+            "evaluate-playlists",
+            str(SUITE_PATH),
+            "--engine",
+            "configured-model",
+        ]
+    )
+
+    assert result == 2
+    assert prepared is False
+    assert "requires --send-suite-to-provider" in capsys.readouterr().out
+
+
+def test_configured_model_cli_reports_safe_role_preparation_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail() -> ReorderedEngine:
+        raise ProviderServiceError("role_not_enabled", "private detail", 409)
+
+    monkeypatch.setattr(
+        "app.cli.playlist_evaluation._configured_model_engine",
+        fail,
+    )
+
+    result = cli_main(
+        [
+            "evaluate-playlists",
+            str(SUITE_PATH),
+            "--engine",
+            "configured-model",
+            "--send-suite-to-provider",
+        ]
+    )
+
+    assert result == 2
+    output = capsys.readouterr().out
+    assert "role_not_enabled" in output
+    assert "private detail" not in output

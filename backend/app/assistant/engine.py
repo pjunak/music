@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -69,3 +70,12 @@ class PlaylistSuggestionEngine(Protocol):
         manual_tags: Mapping[int, Sequence[str]] | None = None,
         signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
     ) -> PlaylistSuggestionResponse: ...
+
+
+class SuggestionEngineError(RuntimeError):
+    """An engine failure that is safe to expose in synthetic evaluation output."""
+
+    def __init__(self, code: str) -> None:
+        safe_code = code if re.fullmatch(r"[a-z0-9_]{1,64}", code) else "engine_failure"
+        super().__init__(safe_code)
+        self.code = safe_code
