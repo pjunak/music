@@ -582,8 +582,8 @@ export function AssistantAiSetupView() {
             <h2>Model quality checks</h2>
             <p>
               Basic model tests prove the response format. These longer checks
-              measure one model against fixed task-specific scenarios before any
-              future live-library integration.
+              measure one model against fixed task-specific scenarios before it can
+              rank a live-library playlist draft.
             </p>
           </div>
           <span>
@@ -625,12 +625,13 @@ export function AssistantAiSetupView() {
       </section>
 
       <aside className="assistant-provider-boundary">
-        <strong>Synthetic checks only</strong>
+        <strong>Setup does not share your library</strong>
         <p>
           Verification, model tests, and quality checks use only provider metadata
           or fixed synthetic inputs. No songs, audio, filesystem paths, or live
-          library tags are sent. Future model-backed tools will keep the same
-          preview, selection, and commit workflow as the local Assistant.
+          library tags are sent here. A passed playlist model becomes an optional
+          planning choice in Playlist Builder, where each real request has its own
+          data disclosure and confirmation before anything is sent.
         </p>
       </aside>
     </div>

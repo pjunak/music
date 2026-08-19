@@ -324,6 +324,28 @@ export interface PlaylistSuggestionRequest {
   energy_curve?: PlaylistEnergyCurve;
 }
 
+export const MODEL_PLAYLIST_DISCLOSURE_VERSION =
+  "assistant-playlist-model-disclosure/v1" as const;
+
+export interface ModelPlaylistDisclosure {
+  version: typeof MODEL_PLAYLIST_DISCLOSURE_VERSION;
+  shared_with_provider: string[];
+  never_shared: string[];
+  maximum_candidates: number;
+  may_incur_cost: boolean;
+}
+
+export interface ModelPlaylistAvailability {
+  available: boolean;
+  reason_code: string | null;
+  role_id: "playlist_planner";
+  connection_name: string | null;
+  model_id: string | null;
+  quality_evaluation_id: "playlist-quality-v1";
+  job_kind: string;
+  disclosure: ModelPlaylistDisclosure;
+}
+
 export type BackgroundJobStatus =
   | "queued"
   | "running"
@@ -502,6 +524,17 @@ export const jobsApi = {
 export const assistantApi = {
   suggestPlaylist: (payload: PlaylistSuggestionRequest) =>
     api.post<PlaylistSuggestion>("/api/assistant/playlists/suggest", payload),
+  getModelPlaylistAvailability: () =>
+    api.get<ModelPlaylistAvailability>("/api/assistant/playlists/model-status"),
+  startModelPlaylistSuggestion: (
+    payload: PlaylistSuggestionRequest,
+    disclosureVersion: typeof MODEL_PLAYLIST_DISCLOSURE_VERSION,
+  ) =>
+    api.post<BackgroundJob>("/api/assistant/playlists/model-suggestions/jobs", {
+      request: payload,
+      disclosure_version: disclosureVersion,
+      consent: true,
+    }),
   startLibraryAnalysis: (force = false) =>
     api.post<BackgroundJob>("/api/assistant/library-analysis/jobs", { force }),
   getLibraryAnalysisSummary: () =>

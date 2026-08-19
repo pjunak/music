@@ -155,8 +155,8 @@ export function ModelQualityEvaluationCard({
             Passed {evaluation.passed_cases} of {evaluation.total_cases} scenarios
           </strong>
           <p>
-            Keep the local planner active. Review the failed scenarios before any
-            future live-library integration.
+            The local planner remains available. Review the failed scenarios before
+            trying this model again; it cannot be selected in Playlist Builder.
           </p>
         </div>
       ) : evaluation.status === "stale" || latest?.status === "succeeded" ? (

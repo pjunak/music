@@ -14,6 +14,7 @@ const ENERGY_CURVE_LABELS: Record<PlaylistEnergyCurve, string> = {
 
 interface Props {
   suggestion: PlaylistSuggestion | null;
+  planningMethod: "local" | "model";
   selectedTrackIds: ReadonlySet<number>;
   onToggleTrack: (trackId: number) => void;
   onSelectAll: () => void;
@@ -48,6 +49,7 @@ function MoodAxis({ label, value }: { label: string; value: number }) {
 
 export function PlaylistSuggestionResults({
   suggestion,
+  planningMethod,
   selectedTrackIds,
   onToggleTrack,
   onSelectAll,
@@ -57,9 +59,16 @@ export function PlaylistSuggestionResults({
     return (
       <div className="assistant-results">
         <div className="surface-card assistant-results-empty">
-          <EmptyState title="Your library stays private and local">
-            Start with a mood. The local planner makes no remote calls and clearly
-            separates your tags, metadata, and measured audio-signal evidence.
+          <EmptyState
+            title={
+              planningMethod === "local"
+                ? "Your library stays private and local"
+                : "Nothing is shared until you confirm"
+            }
+          >
+            {planningMethod === "local"
+              ? "Start with a mood. The local planner makes no remote calls and clearly separates your tags, metadata, and measured audio-signal evidence."
+              : "The server filters your library first. You will see and confirm exactly what the connected model can receive before the job starts."}
           </EmptyState>
         </div>
       </div>
@@ -105,7 +114,11 @@ export function PlaylistSuggestionResults({
       <section className="assistant-candidates surface-card" aria-label="Suggested songs">
         <div className="assistant-section-heading">
           <div>
-            <p className="assistant-eyebrow">Ranked locally</p>
+            <p className="assistant-eyebrow">
+              {suggestion.engine === "model-playlist-planner/v1"
+                ? "Ranked with connected model"
+                : "Ranked locally"}
+            </p>
             <h2>Suggested songs</h2>
           </div>
           <div className="assistant-selection-actions">

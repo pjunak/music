@@ -1,18 +1,39 @@
-import { type FormEvent, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link } from "react-router-dom";
 
 import { Field } from "@/components/Field";
+import { confirmDialog } from "@/components/confirmDialog";
 import {
   type AuthoringImportPreview,
+  type BackgroundJob,
+  MODEL_PLAYLIST_DISCLOSURE_VERSION,
+  type ModelPlaylistAvailability,
   type PlaylistEnergyCurve,
   type PlaylistSuggestion,
+  type PlaylistSuggestionRequest,
   assistantApi,
   authoringImportApi,
+  jobsApi,
 } from "@/core/api";
 import { usePlayerStore } from "@/core/playerStore";
 import { toast } from "@/core/toast";
 
 import { PlaylistSuggestionResults } from "./PlaylistSuggestionResults";
+import {
+  MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
+  isModelSuggestionJobActive,
+  modelSuggestionFromJob,
+  modelSuggestionRequestFromJob,
+} from "./modelSuggestionJobs";
+
+type PlanningMethod = "local" | "model";
 
 interface PlaylistImportDocument {
   schema: "authoring-import/v1";
@@ -42,6 +63,21 @@ function optionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function modelUnavailableMessage(reasonCode: string | null): string {
+  switch (reasonCode) {
+    case "model_quality_not_passed":
+      return "Run and pass the playlist quality check in AI Setup first.";
+    case "role_not_enabled":
+    case "role_not_configured":
+      return "Assign and enable a playlist planning model in AI Setup first.";
+    case "connection_not_verified":
+    case "model_not_tested":
+      return "Verify and test the assigned playlist model in AI Setup first.";
+    default:
+      return "The connected model is not ready. Check its setup before using it.";
+  }
+}
+
 export function PlaylistBuilderView() {
   const activeModeId = usePlayerStore((state) => state.state?.active_mode_id ?? null);
   const [prompt, setPrompt] = useState("");
@@ -50,11 +86,18 @@ export function PlaylistBuilderView() {
   const [minBpm, setMinBpm] = useState("");
   const [maxBpm, setMaxBpm] = useState("");
   const [includeUnknownBpm, setIncludeUnknownBpm] = useState(true);
+  const [planningMethod, setPlanningMethod] = useState<PlanningMethod>("local");
+  const [modelAvailability, setModelAvailability] =
+    useState<ModelPlaylistAvailability | null>(null);
+  const [modelStatusLoading, setModelStatusLoading] = useState(true);
+  const [modelStatusError, setModelStatusError] = useState<string | null>(null);
+  const [modelJob, setModelJob] = useState<BackgroundJob | null>(null);
   const [suggestion, setSuggestion] = useState<PlaylistSuggestion | null>(null);
   const [selectedTrackIds, setSelectedTrackIds] = useState<Set<number>>(new Set());
   const [playlistName, setPlaylistName] = useState("");
   const [playlistCategory, setPlaylistCategory] = useState("");
   const [suggesting, setSuggesting] = useState(false);
+  const [confirmingModel, setConfirmingModel] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -63,6 +106,7 @@ export function PlaylistBuilderView() {
     null,
   );
   const [created, setCreated] = useState(false);
+  const userActionStarted = useRef(false);
 
   const selectedCandidates = useMemo(
     () =>
@@ -76,34 +120,22 @@ export function PlaylistBuilderView() {
     0,
   );
   const previewItem = preview?.items.find((item) => item.kind === "playlist") ?? null;
+  const activeModelJob =
+    modelJob !== null && isModelSuggestionJobActive(modelJob) ? modelJob : null;
+  const modelJobActive = activeModelJob !== null;
+  const suggestionUsesModel = suggestion?.engine === "model-playlist-planner/v1";
+  const importSourceName = suggestionUsesModel
+    ? "Assistant model playlist builder"
+    : "Assistant local playlist builder";
 
-  function invalidatePreview() {
+  const invalidatePreview = useCallback(() => {
     setPreview(null);
     setPreviewDocument(null);
     setCreated(false);
-  }
+  }, []);
 
-  async function suggest(event: FormEvent) {
-    event.preventDefault();
-    if (prompt.trim().length < 2) {
-      setSuggestError("Describe the mood in at least two characters.");
-      return;
-    }
-    setSuggesting(true);
-    setSuggestError(null);
-    invalidatePreview();
-    try {
-      const minimumBpm = optionalNumber(minBpm);
-      const maximumBpm = optionalNumber(maxBpm);
-      const result = await assistantApi.suggestPlaylist({
-        prompt: prompt.trim(),
-        target_minutes: Math.min(600, Math.max(5, targetMinutes || 60)),
-        candidate_limit: 40,
-        energy_curve: energyCurve,
-        include_unknown_bpm: includeUnknownBpm,
-        ...(minimumBpm === undefined ? {} : { min_bpm: minimumBpm }),
-        ...(maximumBpm === undefined ? {} : { max_bpm: maximumBpm }),
-      });
+  const applySuggestion = useCallback(
+    (result: PlaylistSuggestion) => {
       setSuggestion(result);
       setSelectedTrackIds(
         new Set(
@@ -112,6 +144,149 @@ export function PlaylistBuilderView() {
             .map((candidate) => candidate.track_id),
         ),
       );
+      invalidatePreview();
+    },
+    [invalidatePreview],
+  );
+
+  const restoreRequest = useCallback((request: PlaylistSuggestionRequest) => {
+    setPrompt(request.prompt);
+    setTargetMinutes(request.target_minutes);
+    setEnergyCurve(request.energy_curve ?? "steady");
+    setMinBpm(request.min_bpm === undefined ? "" : String(request.min_bpm));
+    setMaxBpm(request.max_bpm === undefined ? "" : String(request.max_bpm));
+    setIncludeUnknownBpm(request.include_unknown_bpm ?? true);
+  }, []);
+
+  const acceptModelJob = useCallback(
+    (job: BackgroundJob, restoreForm: boolean) => {
+      setModelJob(job);
+      if (restoreForm) {
+        const request = modelSuggestionRequestFromJob(job);
+        if (request !== null) restoreRequest(request);
+      }
+      if (isModelSuggestionJobActive(job)) {
+        setPlanningMethod("model");
+        setSuggestion(null);
+        setSelectedTrackIds(new Set());
+        setSuggestError(null);
+        invalidatePreview();
+        return;
+      }
+      if (job.status === "succeeded") {
+        const restored = modelSuggestionFromJob(job);
+        setPlanningMethod("model");
+        if (restored === null) {
+          setSuggestion(null);
+          setSelectedTrackIds(new Set());
+          setSuggestError(
+            "The saved model draft is incomplete and cannot be reviewed. Run it again.",
+          );
+          return;
+        }
+        applySuggestion(restored);
+        setSuggestError(null);
+        return;
+      }
+      if (job.status === "failed" || job.status === "cancelled") {
+        setPlanningMethod("model");
+        setSuggestion(null);
+        setSelectedTrackIds(new Set());
+        setSuggestError(
+          job.status === "cancelled"
+            ? "The connected-model suggestion was cancelled."
+            : job.error || "The connected model could not produce a playlist draft.",
+        );
+        invalidatePreview();
+      }
+    },
+    [applySuggestion, invalidatePreview, restoreRequest],
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    assistantApi
+      .getModelPlaylistAvailability()
+      .then((availability) => {
+        if (disposed) return;
+        setModelAvailability(availability);
+        setModelStatusError(null);
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setModelStatusError(errorMessage(error));
+      })
+      .finally(() => {
+        if (!disposed) setModelStatusLoading(false);
+      });
+    jobsApi
+      .list({ kind: MODEL_PLAYLIST_SUGGESTION_JOB_KIND, limit: 1 })
+      .then((jobs) => {
+        if (
+          !disposed &&
+          !userActionStarted.current &&
+          jobs[0] !== undefined
+        ) {
+          acceptModelJob(jobs[0], true);
+        }
+      })
+      .catch(() => {
+        // The local planner remains usable when saved model job history is unavailable.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [acceptModelJob]);
+
+  useEffect(() => {
+    if (modelJob === null || !isModelSuggestionJobActive(modelJob)) return;
+    const jobId = modelJob.id;
+    let disposed = false;
+    let timer: number | undefined;
+    async function poll() {
+      try {
+        const next = await jobsApi.get(jobId);
+        if (disposed) return;
+        acceptModelJob(next, false);
+        if (isModelSuggestionJobActive(next)) {
+          timer = window.setTimeout(() => void poll(), 1500);
+        }
+      } catch (error) {
+        if (disposed) return;
+        setSuggestError(
+          `Saved model progress is temporarily unavailable. ${errorMessage(error)}`,
+        );
+        timer = window.setTimeout(() => void poll(), 5000);
+      }
+    }
+    timer = window.setTimeout(() => void poll(), 1200);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [acceptModelJob, modelJob]);
+
+  function suggestionRequest(): PlaylistSuggestionRequest {
+    const minimumBpm = optionalNumber(minBpm);
+    const maximumBpm = optionalNumber(maxBpm);
+    return {
+      prompt: prompt.trim(),
+      target_minutes: Math.min(600, Math.max(5, targetMinutes || 60)),
+      candidate_limit: 40,
+      energy_curve: energyCurve,
+      include_unknown_bpm: includeUnknownBpm,
+      ...(minimumBpm === undefined ? {} : { min_bpm: minimumBpm }),
+      ...(maximumBpm === undefined ? {} : { max_bpm: maximumBpm }),
+    };
+  }
+
+  async function runLocalSuggestion(request: PlaylistSuggestionRequest) {
+    userActionStarted.current = true;
+    setSuggesting(true);
+    setSuggestError(null);
+    setModelJob(null);
+    invalidatePreview();
+    try {
+      applySuggestion(await assistantApi.suggestPlaylist(request));
     } catch (error) {
       setSuggestion(null);
       setSelectedTrackIds(new Set());
@@ -119,6 +294,83 @@ export function PlaylistBuilderView() {
     } finally {
       setSuggesting(false);
     }
+  }
+
+  async function runModelSuggestion(request: PlaylistSuggestionRequest) {
+    const availability = modelAvailability;
+    if (availability === null || !availability.available) {
+      setSuggestError(
+        modelUnavailableMessage(availability?.reason_code ?? null),
+      );
+      return;
+    }
+    userActionStarted.current = true;
+    setConfirmingModel(true);
+    let confirmed = false;
+    try {
+      confirmed = await confirmDialog({
+        title: "Send this candidate pool to your connected model?",
+        body: `The server will first filter your library, then send the disclosed metadata for at most ${availability.disclosure.maximum_candidates} candidates to ${availability.connection_name ?? "your provider"} (${availability.model_id ?? "the assigned model"}). No audio or file paths are sent. The provider may charge for this request.`,
+        confirmLabel: "Send candidates and start",
+        cancelLabel: "Keep editing",
+        tone: "primary",
+      });
+    } finally {
+      setConfirmingModel(false);
+    }
+    if (!confirmed) return;
+    setSuggestError(null);
+    setSuggestion(null);
+    setSelectedTrackIds(new Set());
+    invalidatePreview();
+    try {
+      const job = await assistantApi.startModelPlaylistSuggestion(
+        request,
+        MODEL_PLAYLIST_DISCLOSURE_VERSION,
+      );
+      acceptModelJob(job, false);
+      toast.success(
+        "Model suggestion queued",
+        "You can leave this page; progress and the draft are stored on the server.",
+      );
+    } catch (error) {
+      setSuggestError(errorMessage(error));
+    }
+  }
+
+  async function suggest(event: FormEvent) {
+    event.preventDefault();
+    if (prompt.trim().length < 2) {
+      setSuggestError("Describe the mood in at least two characters.");
+      return;
+    }
+    const request = suggestionRequest();
+    if (planningMethod === "model") await runModelSuggestion(request);
+    else await runLocalSuggestion(request);
+  }
+
+  function changePlanningMethod(method: PlanningMethod) {
+    userActionStarted.current = true;
+    setPlanningMethod(method);
+    setSuggestion(null);
+    setSelectedTrackIds(new Set());
+    setSuggestError(null);
+    setModelJob(null);
+    invalidatePreview();
+  }
+
+  async function cancelModelSuggestion() {
+    if (modelJob === null || !isModelSuggestionJobActive(modelJob)) return;
+    try {
+      acceptModelJob(await jobsApi.cancel(modelJob.id), false);
+    } catch (error) {
+      setSuggestError(`Cancellation failed. ${errorMessage(error)}`);
+    }
+  }
+
+  async function runLocalFallback() {
+    changePlanningMethod("local");
+    await runLocalSuggestion(suggestionRequest());
   }
 
   function toggleTrack(trackId: number) {
@@ -150,7 +402,7 @@ export function PlaylistBuilderView() {
 
     const document: PlaylistImportDocument = {
       schema: "authoring-import/v1",
-      name: `Local suggestion: ${prompt.trim()}`,
+      name: `${suggestionUsesModel ? "Model" : "Local"} suggestion: ${prompt.trim()}`,
       playlists: [
         {
           name,
@@ -166,7 +418,7 @@ export function PlaylistBuilderView() {
       const result = await authoringImportApi.previewDocument(
         activeModeId,
         document,
-        "Assistant local playlist builder",
+        importSourceName,
       );
       setPreview(result);
       setPreviewDocument(document);
@@ -191,7 +443,7 @@ export function PlaylistBuilderView() {
         activeModeId,
         previewDocument,
         [{ kind: "playlist", resource_id: previewItem.resource_id }],
-        "Assistant local playlist builder",
+        importSourceName,
       );
       if (result.imported.length !== 1) {
         const detail = result.skipped[0]?.reason ?? "The playlist was not created.";
@@ -211,12 +463,11 @@ export function PlaylistBuilderView() {
     <div className="assistant-playlist-view">
       <header className="assistant-page-header">
         <div>
-          <p className="assistant-eyebrow">Local · explainable · review-first</p>
+          <p className="assistant-eyebrow">Local by default · review-first</p>
           <h1>Build a playlist from a mood</h1>
           <p>
-            Describe the scene or atmosphere. The local planner combines your tags,
-            current metadata profiles, and available audio measurements, then you
-            decide exactly what gets created.
+            Describe the scene or atmosphere, choose how to rank the matches, then
+            decide exactly which songs reach the normal Authoring review.
           </p>
         </div>
         <span className="assistant-algorithm">
@@ -225,7 +476,11 @@ export function PlaylistBuilderView() {
       </header>
 
       <div className="assistant-workbench">
-        <aside className="assistant-composer surface-card authoring-card">
+        <aside
+          className={`assistant-composer surface-card authoring-card${
+            planningMethod === "model" ? " is-model-planning" : ""
+          }`}
+        >
           <form className="assistant-form" onSubmit={suggest}>
             <Field
               label="Mood or scene"
@@ -241,6 +496,108 @@ export function PlaylistBuilderView() {
                 maxLength={500}
               />
             </Field>
+            <fieldset className="assistant-planning-method">
+              <legend>Planning method</legend>
+              <div className="assistant-planning-options">
+                <label
+                  className={`assistant-planning-option${
+                    planningMethod === "local" ? " is-selected" : ""
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="planning-method"
+                    value="local"
+                    checked={planningMethod === "local"}
+                    disabled={modelJobActive}
+                    onChange={() => changePlanningMethod("local")}
+                  />
+                  <span>
+                    <strong>Local planner</strong>
+                    <small>Fast, explainable, and never leaves this server.</small>
+                  </span>
+                </label>
+                <label
+                  className={`assistant-planning-option${
+                    planningMethod === "model" ? " is-selected" : ""
+                  }${
+                    !modelAvailability?.available && !modelJobActive
+                      ? " is-disabled"
+                      : ""
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="planning-method"
+                    value="model"
+                    checked={planningMethod === "model"}
+                    disabled={
+                      modelJobActive ||
+                      modelStatusLoading ||
+                      !modelAvailability?.available
+                    }
+                    onChange={() => changePlanningMethod("model")}
+                  />
+                  <span>
+                    <strong>Connected model</strong>
+                    <small>
+                      {modelStatusLoading
+                        ? "Checking the certified playlist model…"
+                        : modelAvailability?.available
+                          ? `${modelAvailability.connection_name ?? "Provider"} · ${modelAvailability.model_id ?? "assigned model"}`
+                          : "Needs a ready, quality-checked model."}
+                    </small>
+                  </span>
+                </label>
+              </div>
+              {!modelStatusLoading && !modelAvailability?.available ? (
+                <p className="assistant-planning-help">
+                  {modelStatusError !== null
+                    ? `Model status is unavailable: ${modelStatusError}`
+                    : modelUnavailableMessage(modelAvailability?.reason_code ?? null)}{" "}
+                  <Link to="/assistant/ai">Open AI Setup</Link>
+                </p>
+              ) : null}
+            </fieldset>
+            {planningMethod === "model" && modelAvailability !== null ? (
+              <section
+                className="assistant-model-disclosure"
+                aria-label="Connected model data disclosure"
+              >
+                <div className="assistant-model-disclosure-heading">
+                  <div>
+                    <span>Provider boundary</span>
+                    <strong>Review what leaves the server</strong>
+                  </div>
+                  <span>quality checked</span>
+                </div>
+                <div className="assistant-model-disclosure-grid">
+                  <div>
+                    <strong>Shared after confirmation</strong>
+                    <ul>
+                      {modelAvailability.disclosure.shared_with_provider.map(
+                        (item) => (
+                          <li key={item}>{item}</li>
+                        ),
+                      )}
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>Stays here</strong>
+                    <ul>
+                      {modelAvailability.disclosure.never_shared.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                <p>
+                  At most {modelAvailability.disclosure.maximum_candidates} locally
+                  filtered songs. This request may incur provider cost and will run
+                  only after you confirm it.
+                </p>
+              </section>
+            ) : null}
             <Field label="Target length">
               <div className="assistant-number-field">
                 <input
@@ -301,8 +658,65 @@ export function PlaylistBuilderView() {
                 Include songs without BPM data
               </label>
             </details>
-            <button className="btn-primary" type="submit" disabled={suggesting}>
-              {suggesting ? "Finding matches…" : "Find matching songs"}
+            {modelJobActive ? (
+              <div className="assistant-model-progress" role="status">
+                <div>
+                  <strong>
+                    {activeModelJob?.progress_phase || "Starting model work"}
+                  </strong>
+                  <span>
+                    {activeModelJob?.progress_message || "The server owns this job."}
+                  </span>
+                </div>
+                {activeModelJob?.progress_total !== null &&
+                activeModelJob?.progress_total !== undefined &&
+                activeModelJob.progress_total > 0 ? (
+                  <progress
+                    aria-label="Connected model suggestion progress"
+                    value={activeModelJob.progress_current}
+                    max={activeModelJob.progress_total}
+                  />
+                ) : (
+                  <progress aria-label="Connected model suggestion progress" />
+                )}
+                <button
+                  className="btn-ghost"
+                  type="button"
+                  disabled={activeModelJob?.status === "cancel_requested"}
+                  onClick={() => void cancelModelSuggestion()}
+                >
+                  {activeModelJob?.status === "cancel_requested"
+                    ? "Stopping after current step…"
+                    : "Cancel model suggestion"}
+                </button>
+                <small>You can leave this page; progress is stored on the server.</small>
+              </div>
+            ) : null}
+            {planningMethod === "model" &&
+            suggestError !== null &&
+            !modelJobActive ? (
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={() => void runLocalFallback()}
+              >
+                Use local planner with these settings
+              </button>
+            ) : null}
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={suggesting || confirmingModel || modelJobActive}
+            >
+              {confirmingModel
+                ? "Waiting for confirmation…"
+                : suggesting
+                ? "Finding matches…"
+                : modelJobActive
+                  ? "Model suggestion running…"
+                  : planningMethod === "model"
+                    ? "Review disclosure and start"
+                    : "Find matching songs"}
             </button>
           </form>
 
@@ -385,6 +799,7 @@ export function PlaylistBuilderView() {
 
         <PlaylistSuggestionResults
           suggestion={suggestion}
+          planningMethod={planningMethod}
           selectedTrackIds={selectedTrackIds}
           onToggleTrack={toggleTrack}
           onSelectAll={selectAll}

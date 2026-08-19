@@ -4283,6 +4283,9 @@ kbd,
   gap: var(--space-5);
   min-width: 0;
 }
+.assistant-composer.is-model-planning {
+  position: static;
+}
 .assistant-form,
 .assistant-create-panel {
   display: flex;
@@ -4296,6 +4299,160 @@ kbd,
 .assistant-form > button,
 .assistant-create-panel > button {
   min-height: 40px;
+}
+.assistant-planning-method {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.assistant-planning-method legend {
+  margin-bottom: var(--space-2);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.assistant-planning-options {
+  display: grid;
+  gap: var(--space-2);
+}
+.assistant-planning-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    background 120ms ease;
+}
+.assistant-planning-option:hover:not(.is-disabled) {
+  border-color: var(--border-strong);
+}
+.assistant-planning-option.is-selected {
+  border-color: color-mix(in srgb, var(--accent2) 58%, var(--border));
+  background: color-mix(in srgb, var(--accent2) 7%, var(--surface-2));
+  box-shadow: inset 3px 0 var(--accent2);
+}
+.assistant-planning-option.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+.assistant-planning-option input {
+  margin-top: 0.18rem;
+  accent-color: var(--accent2);
+}
+.assistant-planning-option > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.assistant-planning-option small,
+.assistant-planning-help {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}
+.assistant-planning-help {
+  margin: var(--space-2) 0 0;
+}
+.assistant-planning-help a {
+  color: var(--accent2-strong);
+}
+.assistant-model-disclosure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--accent2) 32%, var(--border));
+  border-left: 3px solid var(--accent2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent2) 5%, var(--surface-2));
+}
+.assistant-model-disclosure-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.assistant-model-disclosure-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.assistant-model-disclosure-heading > div > span {
+  color: var(--accent2-strong);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.assistant-model-disclosure-heading > span {
+  padding: 0.12rem var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--accent2) 38%, var(--border));
+  border-radius: 999px;
+  color: var(--accent2-strong);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.assistant-model-disclosure-grid {
+  display: grid;
+  gap: var(--space-3);
+}
+.assistant-model-disclosure-grid > div {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.assistant-model-disclosure-grid strong {
+  font-size: var(--text-xs);
+}
+.assistant-model-disclosure ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding-left: 1.15rem;
+  color: var(--muted-strong);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}
+.assistant-model-disclosure > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}
+.assistant-model-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.assistant-model-progress > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.assistant-model-progress span,
+.assistant-model-progress small {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}
+.assistant-model-progress progress {
+  width: 100%;
+  accent-color: var(--accent2);
+}
+.assistant-model-progress button {
+  align-self: flex-start;
 }
 .assistant-number-field {
   display: grid;
