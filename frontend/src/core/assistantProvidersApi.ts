@@ -1,7 +1,12 @@
-import { api } from "@/core/api";
+import { api, type BackgroundJob } from "@/core/api";
 
 export type ProviderVerificationStatus = "never" | "verified" | "failed";
 export type ModelConformanceStatus = "never" | "passed" | "failed";
+export type ModelQualityEvaluationStatus =
+  | "never"
+  | "passed"
+  | "failed"
+  | "stale";
 
 export interface ProviderAdapter {
   id: string;
@@ -84,6 +89,19 @@ export interface ModelConformance {
   error_code: string | null;
 }
 
+export interface ModelQualityEvaluation {
+  evaluation_id: string;
+  role_id: string;
+  label: string;
+  description: string;
+  status: ModelQualityEvaluationStatus;
+  suite_id: string;
+  passed_cases: number;
+  total_cases: number;
+  last_job_id: string | null;
+  last_evaluated_at: string | null;
+}
+
 export interface ModelRoleUpdate {
   connection_id: string;
   model_id: string;
@@ -121,6 +139,14 @@ export const assistantProvidersApi = {
   testRole: (roleId: string) =>
     api.post<ModelConformance>(
       `/api/assistant/providers/roles/${encodeURIComponent(roleId)}/test`,
+    ),
+  listRoleEvaluations: (roleId: string) =>
+    api.get<ModelQualityEvaluation[]>(
+      `/api/assistant/providers/roles/${encodeURIComponent(roleId)}/evaluations`,
+    ),
+  startRoleEvaluation: (roleId: string, evaluationId: string) =>
+    api.post<BackgroundJob>(
+      `/api/assistant/providers/roles/${encodeURIComponent(roleId)}/evaluations/${encodeURIComponent(evaluationId)}/jobs`,
     ),
   deleteRole: (roleId: string) =>
     api.delete<void>(

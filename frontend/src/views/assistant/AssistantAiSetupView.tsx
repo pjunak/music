@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { type BackgroundJob, jobsApi } from "@/core/api";
 import type {
+  ModelQualityEvaluation,
   ModelRole,
   ModelRoleUpdate,
   ProviderConnection,
@@ -13,6 +15,12 @@ import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
 
 import { ModelRoleCard } from "./ModelRoleCard";
+import { ModelQualityEvaluationCard } from "./ModelQualityEvaluationCard";
+import {
+  isModelEvaluationJobActive,
+  PLAYLIST_MODEL_ROLE_ID,
+  PLAYLIST_QUALITY_JOB_KIND,
+} from "./modelEvaluationJobs";
 import { ProviderConnectionCard } from "./ProviderConnectionCard";
 import {
   modelTestFailureMessage,
@@ -31,6 +39,13 @@ export function AssistantAiSetupView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyItem, setBusyItem] = useState<string | null>(null);
+  const [qualityEvaluations, setQualityEvaluations] = useState<
+    ModelQualityEvaluation[]
+  >([]);
+  const [qualityHistory, setQualityHistory] = useState<BackgroundJob[]>([]);
+  const [qualityLoading, setQualityLoading] = useState(true);
+  const [qualityLoadError, setQualityLoadError] = useState<string | null>(null);
+  const [qualityRefreshKey, setQualityRefreshKey] = useState(0);
 
   const [name, setName] = useState("");
   const [adapterId, setAdapterId] = useState("");
@@ -39,6 +54,10 @@ export function AssistantAiSetupView() {
   const [allowPrivate, setAllowPrivate] = useState(false);
 
   const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
+  const refreshQuality = useCallback(
+    () => setQualityRefreshKey((value) => value + 1),
+    [],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -66,6 +85,41 @@ export function AssistantAiSetupView() {
       disposed = true;
     };
   }, [refreshKey]);
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | undefined;
+
+    async function poll(initial: boolean) {
+      try {
+        const [nextEvaluations, nextHistory] = await Promise.all([
+          assistantProvidersApi.listRoleEvaluations(PLAYLIST_MODEL_ROLE_ID),
+          jobsApi.list({ kind: PLAYLIST_QUALITY_JOB_KIND, limit: 10 }),
+        ]);
+        if (disposed) return;
+        setQualityEvaluations(nextEvaluations);
+        setQualityHistory(nextHistory);
+        setQualityLoadError(null);
+        const hasActiveJob = nextHistory.some(isModelEvaluationJobActive);
+        timer = window.setTimeout(
+          () => void poll(false),
+          hasActiveJob ? 1500 : 5000,
+        );
+      } catch (error) {
+        if (disposed) return;
+        setQualityLoadError(errorMessage(error));
+        timer = window.setTimeout(() => void poll(false), 5000);
+      } finally {
+        if (!disposed && initial) setQualityLoading(false);
+      }
+    }
+
+    void poll(true);
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [qualityRefreshKey]);
 
   async function createConnection(event: React.FormEvent) {
     event.preventDefault();
@@ -108,6 +162,7 @@ export function AssistantAiSetupView() {
       );
       toast.success("Connection updated");
       refresh();
+      refreshQuality();
     } catch (error) {
       toast.error("Connection could not be updated", errorMessage(error));
       throw error;
@@ -134,6 +189,7 @@ export function AssistantAiSetupView() {
         toast.error("Verification failed", verificationFailureMessage(result.error_code));
       }
       refresh();
+      refreshQuality();
     } catch (error) {
       toast.error("Verification could not run", errorMessage(error));
     } finally {
@@ -171,6 +227,7 @@ export function AssistantAiSetupView() {
         current.map((role) => (role.role_id === roleId ? updated : role)),
       );
       toast.success("Model task saved", updated.label);
+      refreshQuality();
     } catch (error) {
       toast.error("Model task could not be saved", errorMessage(error));
       throw error;
@@ -185,6 +242,7 @@ export function AssistantAiSetupView() {
       await assistantProvidersApi.deleteRole(roleId);
       toast.success("Model task cleared");
       refresh();
+      refreshQuality();
     } catch (error) {
       toast.error("Model task could not be cleared", errorMessage(error));
     } finally {
@@ -211,6 +269,55 @@ export function AssistantAiSetupView() {
       }
     } catch (error) {
       toast.error("Model test could not run", errorMessage(error));
+    } finally {
+      setBusyItem(null);
+    }
+  }
+
+  async function startQualityEvaluation(evaluation: ModelQualityEvaluation) {
+    const confirmed = await confirmDialog({
+      title: "Run playlist model quality check?",
+      body: (
+        "The provider will receive fixed synthetic playlist scenarios. " +
+        "No songs or live library data are sent, but repeated model calls may incur cost."
+      ),
+      confirmLabel: "Run quality check",
+      tone: "primary",
+    });
+    if (!confirmed) return;
+    setBusyItem(`evaluation:${evaluation.evaluation_id}`);
+    try {
+      const job = await assistantProvidersApi.startRoleEvaluation(
+        evaluation.role_id,
+        evaluation.evaluation_id,
+      );
+      setQualityHistory((current) => [
+        job,
+        ...current.filter((item) => item.id !== job.id),
+      ]);
+      toast.success(
+        "Model quality check queued",
+        "You can leave this page; progress is stored on the server.",
+      );
+      refreshQuality();
+    } catch (error) {
+      toast.error("Quality check could not start", errorMessage(error));
+    } finally {
+      setBusyItem(null);
+    }
+  }
+
+  async function cancelQualityEvaluation(jobId: string) {
+    setBusyItem("evaluation-cancel");
+    try {
+      const job = await jobsApi.cancel(jobId);
+      setQualityHistory((current) => [
+        job,
+        ...current.filter((item) => item.id !== job.id),
+      ]);
+      refreshQuality();
+    } catch (error) {
+      toast.error("Cancellation failed", errorMessage(error));
     } finally {
       setBusyItem(null);
     }
@@ -270,6 +377,11 @@ export function AssistantAiSetupView() {
           <span>4</span>
           <strong>Test &amp; enable</strong>
           <p>Prove structured output before use.</p>
+        </li>
+        <li>
+          <span>5</span>
+          <strong>Evaluate</strong>
+          <p>Run task-specific quality checks.</p>
         </li>
       </ol>
 
@@ -438,7 +550,7 @@ export function AssistantAiSetupView() {
               pass a synthetic structured-output test before you can enable it.
             </p>
           </div>
-          <span>{roles.filter((role) => role.effective_enabled).length} ready</span>
+          <span>{roles.filter((role) => role.effective_enabled).length} enabled</span>
         </div>
         {connections.length === 0 ? (
           <div className="surface-card assistant-provider-empty">
@@ -464,12 +576,61 @@ export function AssistantAiSetupView() {
         )}
       </section>
 
+      <section className="assistant-provider-section assistant-quality-section">
+        <div className="assistant-section-heading">
+          <div>
+            <h2>Model quality checks</h2>
+            <p>
+              Basic model tests prove the response format. These longer checks
+              measure one model against fixed task-specific scenarios before any
+              future live-library integration.
+            </p>
+          </div>
+          <span>
+            {qualityEvaluations.filter((item) => item.status === "passed").length}{" "}
+            passed
+          </span>
+        </div>
+        {qualityLoadError !== null ? (
+          <div className="assistant-analysis-error" role="alert">
+            <span>{qualityLoadError}</span>
+            <button type="button" onClick={refreshQuality}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {qualityEvaluations.length === 0 && qualityLoading ? (
+          <div className="surface-card assistant-provider-empty">
+            <p>Loading model quality checks…</p>
+          </div>
+        ) : qualityEvaluations.length === 0 && qualityLoadError === null ? (
+          <div className="surface-card assistant-provider-empty">
+            <h3>No quality checks are registered</h3>
+            <p>Task-specific checks will appear here when the server provides them.</p>
+          </div>
+        ) : (
+          qualityEvaluations.map((evaluation) => (
+            <ModelQualityEvaluationCard
+              key={evaluation.evaluation_id}
+              evaluation={evaluation}
+              role={roles.find((role) => role.role_id === evaluation.role_id)}
+              history={qualityHistory}
+              loading={qualityLoading}
+              actionBusy={busyItem?.startsWith("evaluation") === true}
+              onStart={() => void startQualityEvaluation(evaluation)}
+              onCancel={(jobId) => void cancelQualityEvaluation(jobId)}
+            />
+          ))
+        )}
+      </section>
+
       <aside className="assistant-provider-boundary">
-        <strong>Framework only</strong>
+        <strong>Synthetic checks only</strong>
         <p>
-          This screen does not send songs, tags, prompts, or audio to any provider.
-          Model-backed tools will be added separately and will keep the same preview,
-          selection, and commit workflow as the local Assistant.
+          Verification, model tests, and quality checks use only provider metadata
+          or fixed synthetic inputs. No songs, audio, filesystem paths, or live
+          library tags are sent. Future model-backed tools will keep the same
+          preview, selection, and commit workflow as the local Assistant.
         </p>
       </aside>
     </div>

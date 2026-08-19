@@ -3,11 +3,27 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ProviderApiModule from "@/core/assistantProvidersApi";
+import type * as ApiModule from "@/core/api";
+import type { BackgroundJob } from "@/core/api";
 import type {
+  ModelQualityEvaluation,
   ModelRole,
   ProviderConnection,
   ProviderFrameworkStatus,
 } from "@/core/assistantProvidersApi";
+
+vi.mock("@/core/api", async (importActual) => {
+  const actual = await importActual<typeof ApiModule>();
+  return {
+    ...actual,
+    jobsApi: {
+      list: vi.fn(),
+      get: vi.fn(),
+      cancel: vi.fn(),
+      retry: vi.fn(),
+    },
+  };
+});
 
 vi.mock("@/core/assistantProvidersApi", async (importActual) => {
   const actual = await importActual<typeof ProviderApiModule>();
@@ -23,6 +39,8 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
       listRoles: vi.fn(),
       updateRole: vi.fn(),
       testRole: vi.fn(),
+      listRoleEvaluations: vi.fn(),
+      startRoleEvaluation: vi.fn(),
       deleteRole: vi.fn(),
     },
   };
@@ -38,6 +56,7 @@ vi.mock("@/core/toast", () => ({
 }));
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { jobsApi } from "@/core/api";
 import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
 
@@ -95,11 +114,54 @@ const role: ModelRole = {
   updated_at: null,
 };
 
+const qualityEvaluation: ModelQualityEvaluation = {
+  evaluation_id: "playlist-quality-v1",
+  role_id: "playlist_planner",
+  label: "Playlist planning quality",
+  description: (
+    "Runs fixed synthetic D&D playlist scenarios through this model. " +
+    "No songs or live library data are sent."
+  ),
+  status: "never",
+  suite_id: "local-dnd-playlist-baseline",
+  passed_cases: 0,
+  total_cases: 0,
+  last_job_id: null,
+  last_evaluated_at: null,
+};
+
+function qualityJob(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
+  return {
+    id: "quality-job-1",
+    kind: "assistant.model-evaluation.playlist-quality-v1",
+    status: "running",
+    parameters: {
+      role_id: "playlist_planner",
+      evaluation_id: "playlist-quality-v1",
+    },
+    result: null,
+    error: null,
+    progress_current: 2,
+    progress_total: 5,
+    progress_phase: "Evaluating playlist model",
+    progress_message: "Completed 2 of 5 synthetic scenarios",
+    attempts: 1,
+    retry_of_id: null,
+    created_at: "2026-08-19T12:00:00Z",
+    updated_at: "2026-08-19T12:01:00Z",
+    started_at: "2026-08-19T12:00:01Z",
+    finished_at: null,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue(frameworkStatus);
   vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([]);
   vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([role]);
+  vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([]);
+  vi.mocked(jobsApi.list).mockResolvedValue([]);
   vi.mocked(confirmDialog).mockResolvedValue(true);
 });
 
@@ -302,5 +364,144 @@ describe("AssistantAiSetupView", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Local analysis and playlist building continue/)).toBeInTheDocument();
     expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+  });
+
+  it("restores playlist quality progress and can cancel after a refresh", async () => {
+    const enabledRole: ModelRole = {
+      ...role,
+      connection_id: connection.id,
+      connection_name: connection.name,
+      model_id: "planner-large",
+      enabled: true,
+      effective_enabled: true,
+      verification_status: "verified",
+      conformance_status: "passed",
+    };
+    const running = qualityJob();
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([enabledRole]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      qualityEvaluation,
+    ]);
+    vi.mocked(jobsApi.list).mockResolvedValue([running]);
+    vi.mocked(jobsApi.cancel).mockResolvedValue({
+      ...running,
+      status: "cancel_requested",
+      progress_phase: "Cancelling",
+    });
+    const user = userEvent.setup();
+    render(<AssistantAiSetupView />);
+
+    expect(
+      await screen.findByText("Completed 2 of 5 synthetic scenarios"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Playlist model quality progress",
+      }),
+    ).toHaveValue(2);
+
+    await user.click(screen.getByRole("button", { name: "Cancel check" }));
+    expect(jobsApi.cancel).toHaveBeenCalledWith("quality-job-1");
+  });
+
+  it("starts the synthetic quality check only after explicit confirmation", async () => {
+    const enabledRole: ModelRole = {
+      ...role,
+      connection_id: connection.id,
+      connection_name: connection.name,
+      model_id: "planner-large",
+      enabled: true,
+      effective_enabled: true,
+      verification_status: "verified",
+      conformance_status: "passed",
+    };
+    const queued = qualityJob({
+      status: "queued",
+      progress_current: 0,
+      progress_total: null,
+      progress_phase: "Queued",
+      progress_message: "",
+      started_at: null,
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([enabledRole]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      qualityEvaluation,
+    ]);
+    vi.mocked(assistantProvidersApi.startRoleEvaluation).mockResolvedValue(queued);
+    const user = userEvent.setup();
+    render(<AssistantAiSetupView />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Run quality check" }),
+    );
+
+    expect(confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Run playlist model quality check?",
+        confirmLabel: "Run quality check",
+      }),
+    );
+    await waitFor(() =>
+      expect(assistantProvidersApi.startRoleEvaluation).toHaveBeenCalledWith(
+        "playlist_planner",
+        "playlist-quality-v1",
+      ),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Model quality check queued",
+      "You can leave this page; progress is stored on the server.",
+    );
+  });
+
+  it("shows a completed failed report without treating the job as broken", async () => {
+    const completed = qualityJob({
+      status: "succeeded",
+      progress_current: 5,
+      result: {
+        evaluation: {
+          cases: [
+            {
+              id: "tavern-dance",
+              description: "Tavern dancing",
+              passed: false,
+              failures: ["recall_at_k below threshold"],
+            },
+          ],
+        },
+      },
+      progress_phase: "Complete",
+      progress_message: "Completed 5 of 5 synthetic scenarios",
+      finished_at: "2026-08-19T12:05:00Z",
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      {
+        ...role,
+        connection_id: connection.id,
+        model_id: "planner-large",
+        enabled: true,
+        effective_enabled: true,
+      },
+    ]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      {
+        ...qualityEvaluation,
+        status: "failed",
+        passed_cases: 3,
+        total_cases: 5,
+        last_job_id: completed.id,
+        last_evaluated_at: completed.finished_at,
+      },
+    ]);
+    vi.mocked(jobsApi.list).mockResolvedValue([completed]);
+    const user = userEvent.setup();
+    render(<AssistantAiSetupView />);
+
+    expect(await screen.findByText("Passed 3 of 5 scenarios")).toBeInTheDocument();
+    await user.click(screen.getByText("Review 1 failed scenario"));
+    expect(screen.getByText("Tavern dancing")).toBeInTheDocument();
+    expect(screen.getByText("recall_at_k below threshold")).toBeInTheDocument();
   });
 });

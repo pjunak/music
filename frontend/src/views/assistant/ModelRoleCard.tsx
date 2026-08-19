@@ -76,7 +76,7 @@ export function ModelRoleCard({
   }
 
   const stateLabel = role.effective_enabled
-    ? "Ready"
+    ? "Enabled"
     : role.enabled
       ? role.verification_status !== "verified"
         ? "Waiting for verification"
