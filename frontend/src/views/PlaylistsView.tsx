@@ -21,6 +21,8 @@ import { trackTitle } from "@/core/trackDisplay";
 import type { ModeSummary, PlaylistMeta, Track, TrackInPlaylist } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
+import { AutomaticPlaylistEditor } from "./AutomaticPlaylistEditor";
+
 export function PlaylistsView() {
   // Playlists are per-mode now — this tab shows the active mode's only.
   const activeModeId = usePlayerStore((s) => s.state?.active_mode_id ?? null);
@@ -42,7 +44,7 @@ export function PlaylistsView() {
       // re-mint refresh (and re-run the [refresh] effect = a full refetch)
       // on every list click.
       setSelected((sel) =>
-        sel !== null && !list.some((p) => p.id === sel.id) ? null : sel,
+        sel === null ? null : (list.find((playlist) => playlist.id === sel.id) ?? null),
       );
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
@@ -95,6 +97,9 @@ export function PlaylistsView() {
                     <span className="playlist-name">{p.name}</span>
                     {p.category ? (
                       <span className="muted small">{p.category}</span>
+                    ) : null}
+                    {p.automatic ? (
+                      <span className="muted small">Automatic · local rule</span>
                     ) : null}
                   </button>
                   <IconButton
@@ -294,6 +299,7 @@ function PlaylistDetail({
   }
 
   function handleTrackDrop(e: React.DragEvent<HTMLElement>) {
+    if (playlist.automatic) return;
     e.preventDefault();
     const raw = e.dataTransfer.getData("application/json");
     if (!raw) return;
@@ -382,6 +388,12 @@ function PlaylistDetail({
 
       <PlaylistMetaEditor playlist={playlist} modes={modes} onSaved={onChanged} />
 
+      <AutomaticPlaylistEditor
+        playlist={playlist}
+        onChanged={onChanged}
+        onTracksChanged={refreshTracks}
+      />
+
       <section
         className="playlist-tracks-section surface-card"
         onDragOver={(e) => {
@@ -400,7 +412,9 @@ function PlaylistDetail({
           handleTrackDrop(e);
         }}
       >
-        <h3 className="section-label">Tracks ({tracks.length})</h3>
+        <h3 className="section-label">
+          Tracks ({tracks.length}){playlist.automatic ? " · managed by local rule" : ""}
+        </h3>
         {loading ? (
           <p className="muted small">Loading…</p>
         ) : tracks.length === 0 ? (
@@ -423,18 +437,22 @@ function PlaylistDetail({
                     {t?.artist ? <span className="muted small">{t.artist}</span> : null}
                   </div>
                   <div className="playlist-track-actions">
-                    <IconButton
-                      label="Move up"
-                      icon={<ArrowUpIcon />}
-                      onClick={() => void moveTo(row.position, row.position - 1)}
-                      disabled={mutating || row.position === 0}
-                    />
-                    <IconButton
-                      label="Move down"
-                      icon={<ArrowDownIcon />}
-                      onClick={() => void moveTo(row.position, row.position + 1)}
-                      disabled={mutating || row.position === tracks.length - 1}
-                    />
+                    {!playlist.automatic ? (
+                      <>
+                        <IconButton
+                          label="Move up"
+                          icon={<ArrowUpIcon />}
+                          onClick={() => void moveTo(row.position, row.position - 1)}
+                          disabled={mutating || row.position === 0}
+                        />
+                        <IconButton
+                          label="Move down"
+                          icon={<ArrowDownIcon />}
+                          onClick={() => void moveTo(row.position, row.position + 1)}
+                          disabled={mutating || row.position === tracks.length - 1}
+                        />
+                      </>
+                    ) : null}
                     <IconButton
                       label="Play this track"
                       icon={<PlayIcon />}
@@ -442,13 +460,15 @@ function PlaylistDetail({
                         wsClient.send({ type: "ambient_play_track", track_id: row.track_id })
                       }
                     />
-                    <IconButton
-                      label="Remove from playlist"
-                      icon={<XIcon />}
-                      variant="danger"
-                      onClick={() => void removeAt(row.position)}
-                      disabled={mutating}
-                    />
+                    {!playlist.automatic ? (
+                      <IconButton
+                        label="Remove from playlist"
+                        icon={<XIcon />}
+                        variant="danger"
+                        onClick={() => void removeAt(row.position)}
+                        disabled={mutating}
+                      />
+                    ) : null}
                   </div>
                 </li>
               );
@@ -457,7 +477,7 @@ function PlaylistDetail({
         )}
       </section>
 
-      <section className="surface-card">
+      {!playlist.automatic ? <section className="surface-card">
         <h3 className="section-label">Add tracks</h3>
         <p className="muted small">
           Click <strong>+</strong> on a row, or drag a track up into the list above.
@@ -471,7 +491,7 @@ function PlaylistDetail({
           })}
           excludeIds={tracks.map((r) => r.track_id)}
         />
-      </section>
+      </section> : null}
     </div>
   );
 }

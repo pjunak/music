@@ -1,7 +1,8 @@
-"""Playlist domain logic: position arithmetic, manual mutators.
+"""Playlist domain logic: position arithmetic and materialized item access.
 
-Playlists are now manual-only — see docs/FUTURE.md for the smart-playlist
-plan. The position invariant: items occupy contiguous, 0-indexed integer
+Manual playlists use the mutators below. Automatic playlists refresh their
+local rule before reads and expose the same item rows. The position invariant:
+items occupy contiguous, 0-indexed integer
 positions. Insert/delete/move all maintain that.
 
 The DB can still punch holes in it behind our back: ``PlaylistItem.track_id``
@@ -201,6 +202,10 @@ def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> N
 
 
 def list_items(db: Session, playlist: Playlist) -> list[PlaylistItem]:
+    if playlist.automatic_rule_json:
+        from app.domain.automatic_playlists import refresh_automatic_playlist_if_stale
+
+        refresh_automatic_playlist_if_stale(db, playlist)
     # Self-heal any cascade gap so callers always see contiguous positions;
     # persist it here since `get_db` doesn't commit on a read path.
     if _repack(db, playlist.id):

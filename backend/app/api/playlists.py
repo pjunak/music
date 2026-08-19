@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
+from app.domain import automatic_playlists
 from app.domain import playlists as playlists_domain
 from app.models.playlist import Playlist
 from app.models.track import Track
@@ -37,6 +38,9 @@ class PlaylistMeta(BaseModel):
     name: str
     mode_id: str | None
     category: str | None
+    automatic: bool
+    automatic_rule: automatic_playlists.AutomaticPlaylistRuleV1 | None
+    automatic_refreshed_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -69,6 +73,32 @@ class TrackMoveRequest(BaseModel):
     to_position: int = Field(ge=0)
 
 
+class AutomaticPlaylistPreviewRequest(BaseModel):
+    rule: automatic_playlists.AutomaticPlaylistRuleV1
+
+
+class AutomaticPlaylistConfigureRequest(AutomaticPlaylistPreviewRequest):
+    source_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class AutomaticTrackSummary(TrackSummary):
+    bpm: int | None
+
+
+class AutomaticPlaylistPreview(BaseModel):
+    schema_version: Literal["automatic-playlist-preview/v1"]
+    source_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    library_tracks: int
+    matched_tracks: int
+    tracks: list[AutomaticTrackSummary]
+
+
+class AutomaticPlaylistApplyResult(BaseModel):
+    schema_version: Literal["automatic-playlist-apply/v1"]
+    playlist: PlaylistMeta
+    materialized_tracks: int
+
+
 # --- helpers ----------------------------------------------------------------
 
 
@@ -86,6 +116,53 @@ def _validate_mode(mode_id: str | None) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"unknown mode: {mode_id}"
         )
+
+
+def _playlist_meta(playlist: Playlist) -> PlaylistMeta:
+    rule = (
+        automatic_playlists.parse_automatic_rule(playlist.automatic_rule_json)
+        if playlist.automatic_rule_json
+        else None
+    )
+    return PlaylistMeta(
+        id=playlist.id,
+        name=playlist.name,
+        mode_id=playlist.mode_id,
+        category=playlist.category,
+        automatic=rule is not None,
+        automatic_rule=rule,
+        automatic_refreshed_at=playlist.automatic_refreshed_at,
+        created_at=playlist.created_at,
+        updated_at=playlist.updated_at,
+    )
+
+
+def _require_manual_playlist(playlist: Playlist) -> None:
+    if playlist.automatic_rule_json:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "automatic_playlist_items_managed",
+                "message": (
+                    "This playlist is automatic. Edit its rule or make it manual "
+                    "before changing individual songs."
+                ),
+            },
+        )
+
+
+def _automatic_preview(
+    resolution: automatic_playlists.AutomaticPlaylistResolution,
+) -> AutomaticPlaylistPreview:
+    return AutomaticPlaylistPreview(
+        schema_version="automatic-playlist-preview/v1",
+        source_signature=resolution.source_signature,
+        library_tracks=resolution.library_tracks,
+        matched_tracks=len(resolution.tracks),
+        tracks=[
+            AutomaticTrackSummary.model_validate(track) for track in resolution.tracks
+        ],
+    )
 
 
 def _enrich_items(db: DbSession, playlist: Playlist) -> list[TrackInPlaylist]:
@@ -121,7 +198,7 @@ def create_playlist(payload: PlaylistCreate, _: CurrentUser, db: DbSession) -> P
     db.add(pl)
     db.commit()
     db.refresh(pl)
-    return PlaylistMeta.model_validate(pl)
+    return _playlist_meta(pl)
 
 
 @router.get("", response_model=list[PlaylistMeta])
@@ -139,12 +216,12 @@ def list_playlists(
     if category is not None:
         stmt = stmt.where(Playlist.category == category)
     rows = db.scalars(stmt).all()
-    return [PlaylistMeta.model_validate(r) for r in rows]
+    return [_playlist_meta(r) for r in rows]
 
 
 @router.get("/{playlist_id}", response_model=PlaylistMeta)
 def get_playlist(playlist_id: int, _: CurrentUser, db: DbSession) -> PlaylistMeta:
-    return PlaylistMeta.model_validate(_get_playlist(db, playlist_id))
+    return _playlist_meta(_get_playlist(db, playlist_id))
 
 
 @router.patch("/{playlist_id}", response_model=PlaylistMeta)
@@ -167,7 +244,7 @@ def update_playlist(
         pl.category = fields["category"]
     db.commit()
     db.refresh(pl)
-    return PlaylistMeta.model_validate(pl)
+    return _playlist_meta(pl)
 
 
 @router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -187,12 +264,107 @@ def get_tracks(playlist_id: int, _: CurrentUser, db: DbSession) -> list[TrackInP
 
 
 @router.post(
+    "/{playlist_id}/automatic/preview",
+    response_model=AutomaticPlaylistPreview,
+)
+def preview_automatic_playlist(
+    playlist_id: int,
+    payload: AutomaticPlaylistPreviewRequest,
+    _: CurrentUser,
+    db: DbSession,
+) -> AutomaticPlaylistPreview:
+    _get_playlist(db, playlist_id)
+    return _automatic_preview(
+        automatic_playlists.resolve_automatic_playlist(db, payload.rule)
+    )
+
+
+@router.put(
+    "/{playlist_id}/automatic",
+    response_model=AutomaticPlaylistApplyResult,
+)
+def configure_automatic_playlist(
+    playlist_id: int,
+    payload: AutomaticPlaylistConfigureRequest,
+    _: CurrentUser,
+    db: DbSession,
+) -> AutomaticPlaylistApplyResult:
+    playlist = _get_playlist(db, playlist_id)
+    resolution = automatic_playlists.resolve_automatic_playlist(db, payload.rule)
+    if resolution.source_signature != payload.source_signature:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "automatic_playlist_preview_stale",
+                "message": "The library or tags changed. Preview the rule again.",
+            },
+        )
+    automatic_playlists.materialize_automatic_playlist(
+        db,
+        playlist,
+        payload.rule,
+        resolution,
+    )
+    db.refresh(playlist)
+    return AutomaticPlaylistApplyResult(
+        schema_version="automatic-playlist-apply/v1",
+        playlist=_playlist_meta(playlist),
+        materialized_tracks=len(resolution.tracks),
+    )
+
+
+@router.post(
+    "/{playlist_id}/automatic/refresh",
+    response_model=AutomaticPlaylistApplyResult,
+)
+def refresh_automatic_playlist(
+    playlist_id: int,
+    _: CurrentUser,
+    db: DbSession,
+) -> AutomaticPlaylistApplyResult:
+    playlist = _get_playlist(db, playlist_id)
+    if not playlist.automatic_rule_json:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "playlist_not_automatic",
+                "message": "This playlist does not have an automatic rule.",
+            },
+        )
+    rule = automatic_playlists.parse_automatic_rule(playlist.automatic_rule_json)
+    resolution = automatic_playlists.resolve_automatic_playlist(db, rule)
+    automatic_playlists.materialize_automatic_playlist(db, playlist, rule, resolution)
+    db.refresh(playlist)
+    return AutomaticPlaylistApplyResult(
+        schema_version="automatic-playlist-apply/v1",
+        playlist=_playlist_meta(playlist),
+        materialized_tracks=len(resolution.tracks),
+    )
+
+
+@router.delete(
+    "/{playlist_id}/automatic",
+    response_model=PlaylistMeta,
+)
+def disable_automatic_playlist(
+    playlist_id: int,
+    _: CurrentUser,
+    db: DbSession,
+) -> PlaylistMeta:
+    playlist = _get_playlist(db, playlist_id)
+    automatic_playlists.disable_automatic_playlist(db, playlist)
+    db.refresh(playlist)
+    return _playlist_meta(playlist)
+
+
+@router.post(
     "/{playlist_id}/tracks", response_model=TrackInPlaylist, status_code=status.HTTP_201_CREATED
 )
 def add_track(
     playlist_id: int, payload: TrackAddRequest, _: CurrentUser, db: DbSession
 ) -> TrackInPlaylist:
     pl = _get_playlist(db, playlist_id)
+    _require_manual_playlist(pl)
     if db.get(Track, payload.track_id) is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="track not in library"
@@ -215,6 +387,7 @@ def remove_track(
     playlist_id: int, position: int, _: CurrentUser, db: DbSession
 ) -> None:
     pl = _get_playlist(db, playlist_id)
+    _require_manual_playlist(pl)
     try:
         playlists_domain.remove_track(db, pl, position)
     except playlists_domain.PositionOutOfRange as e:
@@ -230,6 +403,7 @@ def move_track(
     db: DbSession,
 ) -> None:
     pl = _get_playlist(db, playlist_id)
+    _require_manual_playlist(pl)
     try:
         playlists_domain.move_track(db, pl, position, payload.to_position)
     except playlists_domain.PositionOutOfRange as e:

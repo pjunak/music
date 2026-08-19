@@ -229,11 +229,27 @@ export interface ModeDetail extends ModeSummary {
 }
 
 // Playlist meta shape returned by /api/playlists.
+export interface AutomaticPlaylistRule {
+  schema: "automatic-playlist/v1";
+  include_tags: string[];
+  match: "any" | "all";
+  exclude_tags: string[];
+  tag_sources: "manual" | "manual_and_local";
+  min_bpm: number | null;
+  max_bpm: number | null;
+  include_unknown_bpm: boolean;
+  maximum_tracks: number;
+  order_by: "title" | "newest" | "bpm_ascending" | "bpm_descending";
+}
+
 export interface PlaylistMeta {
   id: number;
   name: string;
   mode_id: string | null;
   category: string | null;
+  automatic: boolean;
+  automatic_rule: AutomaticPlaylistRule | null;
+  automatic_refreshed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -243,6 +259,24 @@ export interface TrackInPlaylist {
   position: number;
   track_id: number;
   track: TrackSummary | null;
+}
+
+export interface AutomaticPlaylistTrack extends TrackSummary {
+  bpm: number | null;
+}
+
+export interface AutomaticPlaylistPreview {
+  schema_version: "automatic-playlist-preview/v1";
+  source_signature: string;
+  library_tracks: number;
+  matched_tracks: number;
+  tracks: AutomaticPlaylistTrack[];
+}
+
+export interface AutomaticPlaylistApplyResult {
+  schema_version: "automatic-playlist-apply/v1";
+  playlist: PlaylistMeta;
+  materialized_tracks: number;
 }
 
 export interface FolderEntry {

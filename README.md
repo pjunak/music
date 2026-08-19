@@ -124,6 +124,13 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   A separately assigned, quality-certified cleanup model can review only the manual tag catalog and
   usage counts. It proposes renames in a durable server job, selects nothing by default, and can
   apply only the individually checked, still-current proposal items in one atomic transaction.
+- **Automatic playlists** — switch a normal playlist to a versioned local tag/BPM rule after
+  previewing its exact resolved songs. Rules can match any or every included tag, exclude tags,
+  choose accepted/manual tags alone or add current local metadata analysis, bound BPM and list
+  length, and use deterministic ordering. The result materializes into the same ordered playlist
+  rows used by playback and refreshes when opened or played after relevant library evidence changes.
+  Individual item edits stay locked while automatic mode is active; switching back to manual keeps
+  the current resolved songs. Provider/model suggestions are never automatic rule evidence.
 - **Live EQ tuning** — enable Live tuning in an existing preset to auto-activate it and
   hear throttled, auto-saved rack/EQ changes on every active browser output while music plays.
 - **Soundboards** — fire-and-forget SFX, with keyboard hotkeys, broadcast to every active output.

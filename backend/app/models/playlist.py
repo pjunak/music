@@ -1,14 +1,13 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, UtcDateTime, utcnow
 
 
 class Playlist(Base):
-    """Playlists are explicit, manually-curated track lists. Smart playlists
-    are deferred — see docs/FUTURE.md."""
+    """A normal playlist with either manual items or one local automatic rule."""
 
     __tablename__ = "playlists"
 
@@ -16,6 +15,13 @@ class Playlist(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     mode_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     category: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    automatic_rule_json: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    automatic_source_signature: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    automatic_refreshed_at: Mapped[datetime | None] = mapped_column(
+        UtcDateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime, default=utcnow, onupdate=utcnow, nullable=False

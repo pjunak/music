@@ -90,6 +90,9 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
         "verified_capabilities_json",
         "TEXT NOT NULL DEFAULT '[]'",
     ),
+    ("playlists", "automatic_rule_json", "TEXT NOT NULL DEFAULT ''"),
+    ("playlists", "automatic_source_signature", "VARCHAR(64)"),
+    ("playlists", "automatic_refreshed_at", "DATETIME"),
 ]
 
 

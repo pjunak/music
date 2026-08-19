@@ -1,4 +1,7 @@
 import type {
+  AutomaticPlaylistApplyResult,
+  AutomaticPlaylistPreview,
+  AutomaticPlaylistRule,
   Cue,
   FolderEntry,
   FoldersResponse,
@@ -850,6 +853,26 @@ export const playlistsApi = {
     playlistId: number,
     payload: { name: string; mode_id?: string | null; category?: string | null },
   ) => api.patch<PlaylistMeta>(`/api/playlists/${playlistId}`, payload),
+  previewAutomatic: (playlistId: number, rule: AutomaticPlaylistRule) =>
+    api.post<AutomaticPlaylistPreview>(
+      `/api/playlists/${playlistId}/automatic/preview`,
+      { rule },
+    ),
+  configureAutomatic: (
+    playlistId: number,
+    rule: AutomaticPlaylistRule,
+    sourceSignature: string,
+  ) =>
+    api.put<AutomaticPlaylistApplyResult>(
+      `/api/playlists/${playlistId}/automatic`,
+      { rule, source_signature: sourceSignature },
+    ),
+  refreshAutomatic: (playlistId: number) =>
+    api.post<AutomaticPlaylistApplyResult>(
+      `/api/playlists/${playlistId}/automatic/refresh`,
+    ),
+  disableAutomatic: (playlistId: number) =>
+    api.delete<PlaylistMeta>(`/api/playlists/${playlistId}/automatic`),
   exportUrl: (playlistId: number, format: "m3u" | "json") =>
     `${BASE}/api/playlists/${playlistId}/export?format=${format}`,
 };

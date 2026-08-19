@@ -254,6 +254,13 @@ Runtime data lives outside the image.
   Tag cleanup detection is pure and conservative. Bind its preview to the current manual-tag
   catalog, require explicit per-suggestion selection, reject stale or invented selections, and apply
   all selected renames in one transaction without changing unselected tags.
+- Automatic playlists are a mode on the normal `Playlist` model, not a second playlist type. Keep
+  `automatic-playlist/v1` local and deterministic, require an exact read-only preview before saving
+  a rule, and materialize matches into ordinary ordered playlist items so existing playback clients
+  remain unchanged. Refresh stale rules before reads and playback. Only accepted/manual tags and,
+  when explicitly selected, current `local-metadata/v1` moods may be rule evidence; provider/model
+  suggestions must never become silent automatic inputs. Lock individual item edits while the rule
+  is active, and preserve the materialized list when the operator switches back to manual.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue
