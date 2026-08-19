@@ -139,8 +139,9 @@ export function PlaylistSuggestionResults({
           </div>
         </div>
         <p className="assistant-candidate-audition-note">
-          Play buttons replace the current ambient song. Auditioning does not
-          change which songs are selected for the playlist.
+          Play buttons stop current ambient playback before starting the chosen
+          song. Auditioning does not change which songs are selected for the
+          playlist.
         </p>
         {suggestion.candidates.length === 0 ? (
           <EmptyState title="No songs passed these filters">

@@ -405,6 +405,13 @@ export function PlaylistBuilderView() {
 
   function auditionTrack(trackId: number) {
     if (ambientTrackId !== trackId) {
+      // A direct play normally honors the configured crossfade, which keeps
+      // the outgoing song alive for the fade window. Auditioning must be a
+      // hard replacement: ordered WebSocket messages stop and unload both
+      // ambient channels before the requested draft song starts. Send the
+      // stop even when our snapshot still looks empty so rapid clicks cannot
+      // race a not-yet-observed prior audition.
+      wsClient.send({ type: "ambient_stop" });
       wsClient.send({ type: "ambient_play_track", track_id: trackId });
       return;
     }

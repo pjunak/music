@@ -356,11 +356,31 @@ describe("PlaylistBuilderView", () => {
     });
     expect(includeRainy).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Play Rainy Alley" }));
-    expect(wsClient.send).toHaveBeenLastCalledWith({
-      type: "ambient_play_track",
-      track_id: 11,
-    });
+    expect(vi.mocked(wsClient.send).mock.calls.map(([action]) => action)).toEqual([
+      { type: "ambient_stop" },
+      { type: "ambient_play_track", track_id: 11 },
+    ]);
     expect(includeRainy).toBeChecked();
+
+    // The local snapshot has not caught up yet. A rapid second click must
+    // still stop the first audition before starting the next song.
+    await user.click(
+      screen.getByRole("button", { name: "Play Distant Footsteps" }),
+    );
+    expect(
+      vi.mocked(wsClient.send).mock.calls.slice(-2).map(([action]) => action),
+    ).toEqual([
+      { type: "ambient_stop" },
+      { type: "ambient_play_track", track_id: 12 },
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Play Rainy Alley" }));
+    expect(
+      vi.mocked(wsClient.send).mock.calls.slice(-2).map(([action]) => action),
+    ).toEqual([
+      { type: "ambient_stop" },
+      { type: "ambient_play_track", track_id: 11 },
+    ]);
 
     act(() => {
       usePlayerStore.setState({
@@ -391,10 +411,12 @@ describe("PlaylistBuilderView", () => {
     await user.click(
       screen.getByRole("button", { name: "Play Distant Footsteps" }),
     );
-    expect(wsClient.send).toHaveBeenLastCalledWith({
-      type: "ambient_play_track",
-      track_id: 12,
-    });
+    expect(
+      vi.mocked(wsClient.send).mock.calls.slice(-2).map(([action]) => action),
+    ).toEqual([
+      { type: "ambient_stop" },
+      { type: "ambient_play_track", track_id: 12 },
+    ]);
   });
 
   it("confirms the disclosure, persists progress, and restores the model draft", async () => {
