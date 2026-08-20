@@ -10,7 +10,11 @@ from app.assistant.providers.credential_admin import (
     audit_credentials,
     rotate_credentials,
 )
-from app.assistant.providers.credentials import CredentialVault, CredentialVaultError
+from app.assistant.providers.credentials import (
+    CredentialVault,
+    CredentialVaultError,
+    credential_storage_status,
+)
 from app.core.db import SessionLocal
 
 _NEW_KEY_ENV = "ASSISTANT_CREDENTIAL_KEY_NEW"
@@ -99,9 +103,17 @@ def _run_rotate(args: argparse.Namespace, current: CredentialVault) -> int:
         print(f"Rotation failed before commit ({exc.code}).")
         return 2
     print(f"Rotated {rotated} saved provider credential(s) atomically.")
-    print(
-        f"Before restarting, replace ASSISTANT_CREDENTIAL_KEY with the key whose id is {new.key_id}."
-    )
+    storage = credential_storage_status()
+    if storage.source == "file" and storage.key_file_path:
+        print(
+            "Before restarting, replace the credential key file at "
+            f"{storage.key_file_path} with the key whose id is {new.key_id}."
+        )
+    else:
+        print(
+            "Before restarting, replace ASSISTANT_CREDENTIAL_KEY with the key "
+            f"whose id is {new.key_id}."
+        )
     print("Provider connections must be verified and model quality gates rerun.")
     return 0
 

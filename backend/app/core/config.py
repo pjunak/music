@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # local when it is absent; the UI cannot store provider credentials.
     assistant_credential_key: SecretStr | None = None
 
+    # Optional fixed file used when the operator wants the authenticated UI to
+    # initialize credential storage. The path itself is not secret. Production
+    # should bind-mount a dedicated host directory here; the app creates only
+    # the final key file and never chooses or changes this path through the API.
+    assistant_credential_key_file: Path | None = None
+
     # Upload guard rails (per request). Generous enough for hi-res FLAC albums;
     # they exist to stop an authenticated client from exhausting the volume
     # backing MUSIC_DIR/SFX_LIBRARY_DIR with one unbounded request.

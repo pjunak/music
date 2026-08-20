@@ -34,6 +34,7 @@ from app.assistant.providers.service import (
     finish_role_conformance,
     finish_verification,
     framework_status,
+    initialize_provider_credential_storage,
     list_connections,
     list_model_roles,
     prepare_role_conformance,
@@ -57,8 +58,26 @@ def _raise_http(error: ProviderServiceError) -> NoReturn:
 
 
 @router.get("/status", response_model=ProviderFrameworkStatusOut)
-def get_framework_status(_user: CurrentUser) -> ProviderFrameworkStatusOut:
-    return framework_status()
+def get_framework_status(
+    _user: CurrentUser,
+    db: DbSession,
+) -> ProviderFrameworkStatusOut:
+    return framework_status(db)
+
+
+@router.post(
+    "/credential-storage/initialize",
+    response_model=ProviderFrameworkStatusOut,
+    status_code=201,
+)
+def initialize_provider_storage(
+    _user: CurrentUser,
+    db: DbSession,
+) -> ProviderFrameworkStatusOut:
+    try:
+        return initialize_provider_credential_storage(db)
+    except ProviderServiceError as exc:
+        _raise_http(exc)
 
 
 @router.get("/connections", response_model=list[ProviderConnectionOut])

@@ -112,7 +112,8 @@ ENV MUSIC_DIR=/data/music \
     MODES_DIR=/data/modes \
     MODES_SEED_DIR=/seeds/modes \
     DEVICES_FILE=/data/devices.json \
-    DATABASE_URL=sqlite:////data/app.db
+    DATABASE_URL=sqlite:////data/app.db \
+    ASSISTANT_CREDENTIAL_KEY_FILE=/run/music-secrets/assistant-credential.key
 
 EXPOSE 8000
 

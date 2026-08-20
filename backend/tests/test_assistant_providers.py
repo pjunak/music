@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import stat
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -188,6 +191,7 @@ def _wait_for_job(
 def test_provider_endpoints_require_authentication(client: TestClient) -> None:
     requests = [
         client.get("/api/assistant/providers/status"),
+        client.post("/api/assistant/providers/credential-storage/initialize"),
         client.get("/api/assistant/providers/connections"),
         client.post(
             "/api/assistant/providers/connections",
@@ -365,6 +369,14 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
     assert response.status_code == 200
     payload = response.json()
     assert payload["credential_storage_ready"] is True
+    assert payload["credential_storage_source"] == "environment"
+    assert len(payload["credential_storage_key_id"]) == 16
+    assert payload["credential_storage_key_file_path"] is None
+    assert payload["credential_storage_can_initialize"] is False
+    assert (
+        payload["credential_storage_initialization_error"]
+        == "master_key_already_configured"
+    )
     assert [adapter["id"] for adapter in payload["adapters"]] == [
         "openai-compatible/v1"
     ]
@@ -419,6 +431,25 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         assert descriptions[role_id].startswith("Reserved for")
 
 
+def test_environment_master_key_takes_precedence_over_configured_file(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    previous_file = settings.assistant_credential_key_file
+    key_file = tmp_path / "invalid-file-key"
+    key_file.write_text("not-a-valid-key", encoding="ascii")
+    settings.assistant_credential_key_file = key_file
+    try:
+        response = auth_client.get("/api/assistant/providers/status")
+    finally:
+        settings.assistant_credential_key_file = previous_file
+
+    assert response.status_code == 200
+    assert response.json()["credential_storage_ready"] is True
+    assert response.json()["credential_storage_source"] == "environment"
+
+
 def test_connection_secret_is_encrypted_and_never_returned(
     auth_client: TestClient,
 ) -> None:
@@ -460,6 +491,150 @@ def test_connection_storage_fails_closed_without_master_key(
     assert status.json()["credential_storage_error"] == "master_key_not_configured"
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "master_key_not_configured"
+
+
+def test_authenticated_ui_can_initialize_fixed_key_file_storage(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    previous_key = settings.assistant_credential_key
+    previous_file = settings.assistant_credential_key_file
+    secrets_dir = tmp_path / "assistant-secrets"
+    secrets_dir.mkdir(mode=0o700)
+    if os.name == "posix":
+        secrets_dir.chmod(0o700)
+    key_file = secrets_dir / "assistant-credential.key"
+    requested_file = tmp_path / "client-chosen.key"
+    settings.assistant_credential_key = None
+    settings.assistant_credential_key_file = key_file
+    try:
+        before = auth_client.get("/api/assistant/providers/status")
+        initialized = auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize",
+            json={"key_file_path": str(requested_file)},
+        )
+        created = auth_client.post(
+            "/api/assistant/providers/connections",
+            json=_connection_payload(),
+        )
+    finally:
+        settings.assistant_credential_key = previous_key
+        settings.assistant_credential_key_file = previous_file
+
+    assert before.status_code == 200
+    assert before.json()["credential_storage_ready"] is False
+    assert before.json()["credential_storage_can_initialize"] is True
+    assert before.json()["credential_storage_key_file_path"] == str(key_file)
+    assert initialized.status_code == 201, initialized.text
+    payload = initialized.json()
+    assert payload["credential_storage_ready"] is True
+    assert payload["credential_storage_source"] == "file"
+    assert payload["credential_storage_can_initialize"] is False
+    assert len(payload["credential_storage_key_id"]) == 16
+    assert key_file.exists()
+    encoded_key = key_file.read_text(encoding="ascii")
+    assert len(base64.urlsafe_b64decode(encoded_key)) == 32
+    assert encoded_key not in initialized.text
+    assert not requested_file.exists()
+    if os.name == "posix":
+        assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+    assert created.status_code == 201, created.text
+
+
+def test_key_file_initialization_never_overwrites_existing_file(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    previous_key = settings.assistant_credential_key
+    previous_file = settings.assistant_credential_key_file
+    secrets_dir = tmp_path / "assistant-secrets"
+    secrets_dir.mkdir(mode=0o700)
+    key_file = secrets_dir / "assistant-credential.key"
+    key_file.write_text("existing-invalid-value", encoding="ascii")
+    if os.name == "posix":
+        key_file.chmod(0o600)
+    settings.assistant_credential_key = None
+    settings.assistant_credential_key_file = key_file
+    try:
+        response = auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        )
+    finally:
+        settings.assistant_credential_key = previous_key
+        settings.assistant_credential_key_file = previous_file
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "master_key_file_exists"
+    assert key_file.read_text(encoding="ascii") == "existing-invalid-value"
+
+
+def test_key_file_initialization_refuses_to_orphan_saved_credentials(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    _create_connection(auth_client, api_key="existing-provider-secret")
+    settings = get_settings()
+    previous_key = settings.assistant_credential_key
+    previous_file = settings.assistant_credential_key_file
+    secrets_dir = tmp_path / "assistant-secrets"
+    secrets_dir.mkdir(mode=0o700)
+    key_file = secrets_dir / "assistant-credential.key"
+    settings.assistant_credential_key = None
+    settings.assistant_credential_key_file = key_file
+    try:
+        status = auth_client.get("/api/assistant/providers/status")
+        response = auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        )
+    finally:
+        settings.assistant_credential_key = previous_key
+        settings.assistant_credential_key_file = previous_file
+
+    assert status.status_code == 200
+    assert status.json()["credential_storage_can_initialize"] is False
+    assert status.json()["credential_storage_initialization_error"] == (
+        "saved_credentials_require_existing_key"
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == (
+        "saved_credentials_require_existing_key"
+    )
+    assert not key_file.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits only")
+def test_key_file_initialization_requires_private_parent_directory(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    previous_key = settings.assistant_credential_key
+    previous_file = settings.assistant_credential_key_file
+    secrets_dir = tmp_path / "shared-secrets"
+    secrets_dir.mkdir(mode=0o755)
+    secrets_dir.chmod(0o755)
+    key_file = secrets_dir / "assistant-credential.key"
+    settings.assistant_credential_key = None
+    settings.assistant_credential_key_file = key_file
+    try:
+        status = auth_client.get("/api/assistant/providers/status")
+        response = auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        )
+    finally:
+        settings.assistant_credential_key = previous_key
+        settings.assistant_credential_key_file = previous_file
+
+    assert status.status_code == 200
+    assert status.json()["credential_storage_can_initialize"] is False
+    assert status.json()["credential_storage_initialization_error"] == (
+        "master_key_directory_permissions"
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "master_key_directory_permissions"
+    assert not key_file.exists()
 
 
 @pytest.mark.parametrize(

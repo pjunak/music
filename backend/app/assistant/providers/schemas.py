@@ -69,6 +69,11 @@ class ModelRoleDefinitionOut(StrictProviderModel):
 class ProviderFrameworkStatusOut(StrictProviderModel):
     credential_storage_ready: bool
     credential_storage_error: str | None
+    credential_storage_source: Literal["environment", "file"] | None
+    credential_storage_key_id: str | None
+    credential_storage_key_file_path: str | None
+    credential_storage_can_initialize: bool
+    credential_storage_initialization_error: str | None
     capabilities: list[ProviderCapabilityOut]
     adapters: list[ProviderAdapterOut]
     roles: list[ModelRoleDefinitionOut]

@@ -7,14 +7,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.assistant.providers.credentials import (
     CredentialVault,
     CredentialVaultError,
-    credential_vault_status,
+    credential_storage_status,
+    initialize_credential_storage,
 )
 from app.assistant.providers.definitions import (
     MODEL_ROLE_BY_ID,
@@ -95,6 +96,14 @@ def _service_error_from_vault(error: CredentialVaultError) -> ProviderServiceErr
         return ProviderServiceError(
             error.code,
             "The server provider-credential master key is invalid.",
+            503,
+        )
+    if error.code.startswith("master_key_file_") or error.code.startswith(
+        "master_key_directory_"
+    ):
+        return ProviderServiceError(
+            error.code,
+            "The server provider-credential key file is unavailable or unsafe.",
             503,
         )
     return ProviderServiceError(
@@ -241,11 +250,34 @@ def connection_out(row: AssistantProviderConnection) -> ProviderConnectionOut:
     )
 
 
-def framework_status() -> ProviderFrameworkStatusOut:
-    ready, error = credential_vault_status()
+def _saved_credentials_exist(db: Session) -> bool:
+    return (
+        db.scalar(
+            select(AssistantProviderConnection.id)
+            .where(
+                or_(
+                    AssistantProviderConnection.encrypted_api_key != "",
+                    AssistantProviderConnection.api_key_nonce != "",
+                )
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def framework_status(db: Session) -> ProviderFrameworkStatusOut:
+    storage = credential_storage_status(
+        saved_credentials_exist=_saved_credentials_exist(db)
+    )
     return ProviderFrameworkStatusOut(
-        credential_storage_ready=ready,
-        credential_storage_error=error,
+        credential_storage_ready=storage.ready,
+        credential_storage_error=storage.error,
+        credential_storage_source=storage.source,
+        credential_storage_key_id=storage.key_id,
+        credential_storage_key_file_path=storage.key_file_path,
+        credential_storage_can_initialize=storage.can_initialize,
+        credential_storage_initialization_error=storage.initialization_error,
         capabilities=[
             ProviderCapabilityOut(
                 id=capability.id,
@@ -274,6 +306,33 @@ def framework_status() -> ProviderFrameworkStatusOut:
             for role in MODEL_ROLES
         ],
     )
+
+
+def initialize_provider_credential_storage(
+    db: Session,
+) -> ProviderFrameworkStatusOut:
+    try:
+        initialize_credential_storage(
+            saved_credentials_exist=_saved_credentials_exist(db)
+        )
+    except CredentialVaultError as exc:
+        status_code = (
+            409
+            if exc.code
+            in {
+                "master_key_already_configured",
+                "master_key_file_exists",
+                "master_key_managed_by_environment",
+                "saved_credentials_require_existing_key",
+            }
+            else 503
+        )
+        raise ProviderServiceError(
+            exc.code,
+            "Encrypted provider-key storage could not be initialized safely.",
+            status_code,
+        ) from None
+    return framework_status(db)
 
 
 def list_connections(db: Session) -> list[ProviderConnectionOut]:

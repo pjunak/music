@@ -1,5 +1,6 @@
 import base64
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from app.assistant.providers.credential_admin import (
 )
 from app.assistant.providers.credentials import CredentialVault, CredentialVaultError
 from app.cli import main
+from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
@@ -207,3 +209,39 @@ def test_cli_rotation_requires_offline_acknowledgement(
 
     assert main(["assistant-credentials", "rotate", "--apply"]) == 2
     assert "--server-stopped" in capsys.readouterr().out
+
+
+def test_cli_rotation_identifies_file_backed_key_for_replacement(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    _create_connection(auth_client, "CLI file", "cli-secret")
+    settings = get_settings()
+    previous_key = settings.assistant_credential_key
+    previous_file = settings.assistant_credential_key_file
+    assert previous_key is not None
+    key_file = tmp_path / "assistant-credential.key"
+    key_file.write_text(previous_key.get_secret_value(), encoding="ascii")
+    key_file.chmod(0o600)
+    settings.assistant_credential_key = None
+    settings.assistant_credential_key_file = key_file
+    monkeypatch.setenv("ASSISTANT_CREDENTIAL_KEY_NEW", _encoded_key(19))
+    try:
+        result = main(
+            [
+                "assistant-credentials",
+                "rotate",
+                "--apply",
+                "--server-stopped",
+            ]
+        )
+    finally:
+        settings.assistant_credential_key = previous_key
+        settings.assistant_credential_key_file = previous_file
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert f"replace the credential key file at {key_file}" in output
+    assert "cli-secret" not in output
