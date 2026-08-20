@@ -1,9 +1,11 @@
-# Assistant setup and acceptance runbook
+# Assistant setup and acceptance guide
 
 This is the operator guide for finishing and validating the local-first Assistant,
 optional model connections, review-first authoring, and automatic playlists. The
 local playlist and library tools work without any provider key. Model-backed tools
 are optional and fail closed when their setup or quality checks are incomplete.
+Only section 1 is relevant to deploying the code; the remaining sections are
+first-time setup and functional checks, not release prerequisites.
 
 ## What is ready
 
@@ -25,17 +27,22 @@ provider adapter, data limit, disclosure, quality suite, and review contract.
 
 ## 1. Prepare the deployment
 
-1. Back up `app.db`, `devices.json`, the modes directory, and the music/SFX
-   directories before deploying a new build.
-2. If provider credentials already exist, also back up the deployment secret named
-   `ASSISTANT_CREDENTIAL_KEY`. The database and this key are one restore set.
-3. Build and deploy the current `main` revision through the normal CI and
+1. Make a copy of `app.db`. This is the only application data changed by the
+   additive schema update in this release.
+2. If provider credentials are already saved, confirm that the deployment secret
+   `ASSISTANT_CREDENTIAL_KEY` is still available. A database backup and this key are
+   one restore set.
+3. Confirm the deployment still mounts the existing music, SFX, modes, and device
+   paths in their usual locations. These features do not migrate or rewrite those
+   files, so a new full media backup is not required for this release.
+4. Build and deploy the current `main` revision through the normal CI and
    infrastructure workflow. Do not copy a development database over production.
-4. After startup, sign in and confirm that normal playback, output-device selection,
+5. After startup, sign in and confirm that normal playback, output-device selection,
    Authoring, and the Library still work before enabling optional models.
 
-The schema changes in this feature are additive and are applied at startup. Keep the
-pre-deployment database backup until the acceptance checks below pass.
+The schema changes are additive and applied at startup. Music and SFX should still be
+covered by the server's normal long-term backup policy because they are valuable source
+data, not because this release introduces a special risk to them.
 
 ## 2. Establish the local baseline first
 
@@ -165,7 +172,10 @@ Use a small, representative sample before running across the whole library.
 4. Explicitly create the preset, audition it at a safe level, and fine-tune it in normal
    Authoring. The model does not receive audio, songs, existing presets, or library data.
 
-## 7. Prove backup and credential recovery
+## 7. Optional credential recovery checks
+
+This is sensible before relying on saved provider credentials in production, but it is
+not required for every deployment and is irrelevant when no provider key is stored.
 
 Run the read-only credential audit in the deployed environment:
 
@@ -174,7 +184,7 @@ music-cli assistant-credentials check
 ```
 
 The command must report zero unreadable credentials. It prints only counts and a short
-one-way key ID. Then test an isolated restore:
+one-way key ID. A periodic recovery test can use an isolated restore:
 
 1. Copy a database backup to a non-production location.
 2. Point `DATABASE_URL` at that copy and set the matching
@@ -182,9 +192,9 @@ one-way key ID. Then test an isolated restore:
 3. Run the same check and require zero unreadable credentials.
 4. Do not start two Music servers against the same SQLite database.
 
-For planned master-key rotation, generate a new key, expose it temporarily as
-`ASSISTANT_CREDENTIAL_KEY_NEW`, run the dry run, stop every server using the database,
-then apply:
+Only when deliberately rotating the master key, generate a new key and expose it
+temporarily as `ASSISTANT_CREDENTIAL_KEY_NEW`. Run the dry run, stop every server
+using the database, then apply:
 
 ```powershell
 music-cli assistant-credentials rotate
@@ -209,11 +219,9 @@ This project slice is operationally complete when all applicable statements are 
   role has current conformance and quality passes.
 - Live model jobs show disclosure, require explicit consent, survive browser refresh, and
   never write authored state without review.
-- A restored database/key pair passes `assistant-credentials check` with zero unreadable
-  credentials.
+- If provider credentials are stored, `assistant-credentials check` reports zero
+  unreadable credentials and the matching master key is retained securely.
 - Provider dashboards have appropriate rate/spending limits and no unexpected requests.
-- The deployment backup, rollback route, and matching credential master key are documented
-  outside the repository.
 
 If no provider models are wanted, sections 3-7 are optional; the local baseline and
 automatic playlists are still a complete supported workflow.

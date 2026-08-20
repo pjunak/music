@@ -97,8 +97,8 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   shows model output beside local tools without merging their ownership. The EQ workflow sends only
   the operator's goal and fixed band limits; specialized audio-model workflows remain locked until
   a concrete bounded audio transport receives its own reviewed contract.
-  See [`ASSISTANT.md`](ASSISTANT.md) for the deployment, setup, verification, backup, and
-  acceptance runbook.
+  See [`ASSISTANT.md`](ASSISTANT.md) for the practical deployment, setup, verification, and
+  acceptance guide.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
