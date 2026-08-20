@@ -147,17 +147,23 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
 ## Quick start (Docker)
 
 The repo ships a multi-stage `Dockerfile` (Node build of the SPA → Python runtime serving both
-the API and the static bundle on port 8000). All state lives under `/data`, so a single bind
-mount persists everything.
+the API and the static bundle on port 8000). Application data lives under `/data`. The optional
+Assistant credential master key uses a second, dedicated secrets mount so it is not mixed into
+the database/media backup.
 
 ```bash
 # Build the image
 docker build -t music .
 
-# Run it — one bind mount for music/, sfx/, modes/, and app.db
+# Prepare the optional AI secrets directory for the image's non-root UID.
+# Skip this and its mount if no provider API keys will be used.
+sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-secrets
+
+# Run it — application data and optional secrets stay separate.
 docker run -d --name music \
   -p 8000:8000 \
   -v /srv/music-data:/data \
+  -v /srv/music-secrets:/run/music-secrets \
   music
 
 # Create the operator account (password prompts interactively)
@@ -189,22 +195,39 @@ DB-backed tokens, nothing is signed.)
 | `SESSION_COOKIE_SECURE` | | `true` | Send the session cookie over HTTPS only. Set `false` only for a plain-HTTP (no-TLS) deployment |
 | `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
 | `ASSISTANT_CREDENTIAL_KEY` | Only for optional AI setup | — | URL-safe base64 32-byte key used to encrypt provider API keys in `app.db` |
+| `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional AI setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; AI Setup may create it once when its private parent mount exists |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 
 ### Optional AI connection storage
 
-The local Assistant does not need a model provider or a credential key. To enable encrypted
-credential storage in the separate **Assistant → AI Setup** screen, generate one deployment key:
+The local Assistant does not need a model provider or a credential key. For the standard Docker
+image, mount the private directory shown in Quick start, sign in, open
+**Assistant → AI Setup**, and select **Initialize secure storage**. Music creates the fixed
+`/run/music-secrets/assistant-credential.key` file with a new random key. The key value is never
+sent to the browser, stored in `app.db`, or mixed into `/data`.
+
+The API cannot choose a path, overwrite an existing file, replace a key, or initialize a new key
+when saved encrypted provider credentials already exist. `ASSISTANT_CREDENTIAL_KEY_FILE` is a
+non-secret deployment setting; its parent directory must already exist, be private, and be writable
+by the container's UID 1000.
+
+Managed deployments may instead generate a key externally:
 
 ```powershell
 python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 ```
 
 Set the printed value as `ASSISTANT_CREDENTIAL_KEY` in the server environment and restart the
-server. Keep it in the deployment's secret store, not in source control. A database backup and
-this key must be restored together; without the original key, saved provider credentials cannot
-be decrypted and must be entered again.
+server. This environment value takes precedence over the configured file. Keep either form in the
+deployment's secret store, not in source control. A database backup and this key must be restored
+together; without the original key, saved provider credentials cannot be decrypted and must be
+entered again.
+
+AI Setup includes a maintenance guide with the configured file path and a copyable removal command.
+Removal is intentionally console-only. Delete every saved provider API key first and remove the
+master key only when deliberately starting over. To preserve saved credentials, use the offline
+rotation workflow below instead of editing or replacing the file.
 
 The first adapter verifies OpenAI-compatible providers by requesting their model list. Public
 addresses require HTTPS. Private-network providers are opt-in per connection. Verification uses
@@ -220,9 +243,10 @@ is read-only: it prints a short non-secret key ID and counts, but never prints a
 music-cli assistant-credentials check
 ```
 
-To validate a restored copy without touching production, point `DATABASE_URL` and
-`ASSISTANT_CREDENTIAL_KEY` at the isolated restore before running the same check. Treat a non-zero
-`unreadable credentials` count as an incomplete or mismatched backup.
+To validate a restored copy without touching production, point `DATABASE_URL` at the isolated
+database and provide its matching key through `ASSISTANT_CREDENTIAL_KEY` or an isolated
+`ASSISTANT_CREDENTIAL_KEY_FILE` before running the same check. Treat a non-zero `unreadable
+credentials` count as an incomplete or mismatched backup.
 
 Master-key rotation is an offline, all-or-nothing operation. Generate a second key, expose it only
 to the rotation process as `ASSISTANT_CREDENTIAL_KEY_NEW`, and run the default dry run first:
@@ -233,7 +257,7 @@ music-cli assistant-credentials rotate
 ```
 
 After stopping every Music server process that uses the database, apply the rotation and then
-replace `ASSISTANT_CREDENTIAL_KEY` in the deployment secret store before restarting:
+replace the configured environment key or key-file contents with the new key before restarting:
 
 ```powershell
 music-cli assistant-credentials rotate --apply --server-stopped

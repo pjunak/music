@@ -14,6 +14,7 @@ import type {
 import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
 
+import { CredentialStorageCard } from "./CredentialStorageCard";
 import { ModelRoleCard } from "./ModelRoleCard";
 import { ModelQualityEvaluationCard } from "./ModelQualityEvaluationCard";
 import {
@@ -38,6 +39,7 @@ export function AssistantAiSetupView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyItem, setBusyItem] = useState<string | null>(null);
+  const [storageInitializing, setStorageInitializing] = useState(false);
   const [qualityEvaluations, setQualityEvaluations] = useState<
     ModelQualityEvaluation[]
   >([]);
@@ -135,6 +137,23 @@ export function AssistantAiSetupView() {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [qualityRefreshKey]);
+
+  async function initializeCredentialStorage() {
+    setStorageInitializing(true);
+    try {
+      const nextStatus = await assistantProvidersApi.initializeCredentialStorage();
+      setStatus(nextStatus);
+      toast.success(
+        "Encrypted storage initialized",
+        "You can now save provider API keys.",
+      );
+    } catch (error) {
+      toast.error("Encrypted storage could not be initialized", errorMessage(error));
+      refresh();
+    } finally {
+      setStorageInitializing(false);
+    }
+  }
 
   async function createConnection(event: React.FormEvent) {
     event.preventDefault();
@@ -455,33 +474,11 @@ export function AssistantAiSetupView() {
           <span>{connections.length} saved</span>
         </div>
 
-        {!status.credential_storage_ready ? (
-          <div className="surface-card assistant-provider-storage" role="status">
-            <div aria-hidden="true">Key</div>
-            <div>
-              <h3>
-                {status.credential_storage_error === "invalid_master_key"
-                  ? "The server's credential key is invalid"
-                  : "Encrypted key storage needs one server setting"}
-              </h3>
-              <p>
-                {status.credential_storage_error === "invalid_master_key" ? (
-                  <>
-                    <code>ASSISTANT_CREDENTIAL_KEY</code> must be a URL-safe base64
-                    value containing exactly 32 bytes. Correct it and restart the
-                    server.
-                  </>
-                ) : (
-                  <>
-                    Add <code>ASSISTANT_CREDENTIAL_KEY</code> to the server
-                    environment, restart the server, then return here.
-                  </>
-                )}{" "}
-                Local analysis and playlist building continue to work without it.
-              </p>
-            </div>
-          </div>
-        ) : null}
+        <CredentialStorageCard
+          status={status}
+          busy={storageInitializing}
+          onInitialize={initializeCredentialStorage}
+        />
         <div
           className={`assistant-provider-connections-layout${
             status.credential_storage_ready ? "" : " is-storage-locked"

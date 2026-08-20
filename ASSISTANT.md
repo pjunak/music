@@ -29,9 +29,9 @@ provider adapter, data limit, disclosure, quality suite, and review contract.
 
 1. Make a copy of `app.db`. This is the only application data changed by the
    additive schema update in this release.
-2. If provider credentials are already saved, confirm that the deployment secret
-   `ASSISTANT_CREDENTIAL_KEY` is still available. A database backup and this key are
-   one restore set.
+2. If provider credentials are already saved, confirm that the matching Assistant
+   credential master key is still available through `ASSISTANT_CREDENTIAL_KEY` or the
+   dedicated key-file mount. A database backup and this key are one restore set.
 3. Confirm the deployment still mounts the existing music, SFX, modes, and device
    paths in their usual locations. These features do not migrate or rewrite those
    files, so a new full media backup is not required for this release.
@@ -68,21 +68,36 @@ planning.
 ## 3. Enable encrypted provider credentials
 
 The server needs one deployment-owned 32-byte master key before it can save provider
-API keys. Generate a URL-safe base64 key outside the repository:
+API keys. For the standard Docker image, create and mount a private host directory:
+
+```bash
+sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-secrets
+# Include this option in the existing docker run command:
+# -v /srv/music-secrets:/run/music-secrets
+```
+
+Restart the container, sign in, open **Assistant -> AI Setup**, and select
+**Initialize secure storage**. The server creates the fixed private key file; no key
+material is returned to the page.
+
+Managed deployments may instead generate a URL-safe base64 key outside the repository:
 
 ```powershell
 python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 ```
 
 1. Save the result as `ASSISTANT_CREDENTIAL_KEY` in the deployment's secret store.
-2. Restart the Music server.
+2. Restart the Music server. This environment value takes precedence over the key file.
 3. Open **Assistant -> AI Setup** and confirm credential storage is ready.
 4. Keep the master key out of `.env` files that are copied, logs, screenshots, source
    control, and provider-connection names.
 
 The key encrypts provider credentials in `app.db`; it is not a provider API key. Losing
 it does not expose a provider key, but it makes every saved credential unreadable and
-requires those credentials to be entered again.
+requires those credentials to be entered again. The page cannot remove or replace this
+master key. Its maintenance guide shows the configured path and a console command for
+deliberately starting over. Delete saved provider API keys first; use the offline rotation
+workflow in section 7 if they must be preserved.
 
 ## 4. Add and verify provider connections
 
@@ -187,8 +202,8 @@ The command must report zero unreadable credentials. It prints only counts and a
 one-way key ID. A periodic recovery test can use an isolated restore:
 
 1. Copy a database backup to a non-production location.
-2. Point `DATABASE_URL` at that copy and set the matching
-   `ASSISTANT_CREDENTIAL_KEY` only in the isolated process.
+2. Point `DATABASE_URL` at that copy and provide the matching key through
+   `ASSISTANT_CREDENTIAL_KEY` or an isolated `ASSISTANT_CREDENTIAL_KEY_FILE`.
 3. Run the same check and require zero unreadable credentials.
 4. Do not start two Music servers against the same SQLite database.
 
@@ -201,7 +216,8 @@ music-cli assistant-credentials rotate
 music-cli assistant-credentials rotate --apply --server-stopped
 ```
 
-Replace the deployment's current key with the new key before restart. Rotation is atomic
+Replace the deployment's current environment value or key-file contents with the new key
+before restart. Rotation is atomic
 but intentionally clears connection verification, role conformance, and quality gates;
 repeat sections 4 and 5 afterward.
 

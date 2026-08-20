@@ -31,6 +31,7 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
     ...actual,
     assistantProvidersApi: {
       getStatus: vi.fn(),
+      initializeCredentialStorage: vi.fn(),
       listConnections: vi.fn(),
       createConnection: vi.fn(),
       updateConnection: vi.fn(),
@@ -66,6 +67,11 @@ import { AssistantAiSetupView } from "./AssistantAiSetupView";
 const frameworkStatus: ProviderFrameworkStatus = {
   credential_storage_ready: true,
   credential_storage_error: null,
+  credential_storage_source: "environment",
+  credential_storage_key_id: "0123456789abcdef",
+  credential_storage_key_file_path: null,
+  credential_storage_can_initialize: false,
+  credential_storage_initialization_error: "master_key_already_configured",
   capabilities: [
     {
       id: "structured-text/v1",
@@ -540,14 +546,94 @@ describe("AssistantAiSetupView", () => {
       ...frameworkStatus,
       credential_storage_ready: false,
       credential_storage_error: "master_key_not_configured",
+      credential_storage_source: null,
+      credential_storage_key_id: null,
+      credential_storage_key_file_path:
+        "/run/music-secrets/assistant-credential.key",
+      credential_storage_can_initialize: false,
+      credential_storage_initialization_error:
+        "master_key_directory_unavailable",
     });
     render(<AssistantAiSetupView />);
 
     expect(
-      await screen.findByText("Encrypted key storage needs one server setting"),
+      await screen.findByText("Secure key storage needs server setup"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Local analysis and playlist building continue/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Local analysis and playlist building remain available/),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+  });
+
+  it("initializes fixed key-file storage from the authenticated UI", async () => {
+    const missingStorage: ProviderFrameworkStatus = {
+      ...frameworkStatus,
+      credential_storage_ready: false,
+      credential_storage_error: "master_key_not_configured",
+      credential_storage_source: null,
+      credential_storage_key_id: null,
+      credential_storage_key_file_path:
+        "/run/music-secrets/assistant-credential.key",
+      credential_storage_can_initialize: true,
+      credential_storage_initialization_error: null,
+    };
+    const initializedStorage: ProviderFrameworkStatus = {
+      ...frameworkStatus,
+      credential_storage_source: "file",
+      credential_storage_key_file_path:
+        "/run/music-secrets/assistant-credential.key",
+    };
+    vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue(missingStorage);
+    vi.mocked(
+      assistantProvidersApi.initializeCredentialStorage,
+    ).mockResolvedValue(initializedStorage);
+
+    render(<AssistantAiSetupView />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Initialize secure storage" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        assistantProvidersApi.initializeCredentialStorage,
+      ).toHaveBeenCalledOnce(),
+    );
+    expect(
+      await screen.findByText("Encrypted key storage is ready"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("API key")).toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith(
+      "Encrypted storage initialized",
+      "You can now save provider API keys.",
+    );
+  });
+
+  it("shows console-only removal and safe rotation guidance", async () => {
+    vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({
+      ...frameworkStatus,
+      credential_storage_source: "file",
+      credential_storage_key_file_path:
+        "/run/music-secrets/assistant-credential.key",
+    });
+    render(<AssistantAiSetupView />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Show maintenance guide" }),
+    );
+
+    expect(screen.getByText("Server maintenance")).toBeInTheDocument();
+    expect(
+      screen.getByText(/cannot replace or remove the master key from the browser/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "sudo docker exec -u 0 music rm -- '/run/music-secrets/assistant-credential.key'",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/assistant-credentials rotate/),
+    ).toBeInTheDocument();
   });
 
   it("restores playlist quality progress and can cancel after a refresh", async () => {

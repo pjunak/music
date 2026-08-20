@@ -32,6 +32,11 @@ export interface ModelRoleDefinition {
 export interface ProviderFrameworkStatus {
   credential_storage_ready: boolean;
   credential_storage_error: string | null;
+  credential_storage_source: "environment" | "file" | null;
+  credential_storage_key_id: string | null;
+  credential_storage_key_file_path: string | null;
+  credential_storage_can_initialize: boolean;
+  credential_storage_initialization_error: string | null;
   capabilities: ProviderCapability[];
   adapters: ProviderAdapter[];
   roles: ModelRoleDefinition[];
@@ -127,6 +132,10 @@ export interface ModelRoleUpdate {
 export const assistantProvidersApi = {
   getStatus: () =>
     api.get<ProviderFrameworkStatus>("/api/assistant/providers/status"),
+  initializeCredentialStorage: () =>
+    api.post<ProviderFrameworkStatus>(
+      "/api/assistant/providers/credential-storage/initialize",
+    ),
   listConnections: () =>
     api.get<ProviderConnection[]>("/api/assistant/providers/connections"),
   createConnection: (payload: ProviderConnectionCreate) =>

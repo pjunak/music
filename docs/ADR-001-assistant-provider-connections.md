@@ -8,7 +8,11 @@
 **Implementation follow-up (2026-08-20):** Playlist planning, music tagging,
 manual-tag cleanup, and EQ drafting now execute through dedicated quality-gated,
 consent-bound feature contracts. Credential audit and offline atomic key rotation
-are also implemented. The connection/role boundary below remains authoritative.
+are also implemented. An authenticated operator may initialize a missing master key
+at one deployment-configured file path in a dedicated secrets mount. The API never
+accepts the path or returns, replaces, or removes the key; environment configuration
+takes precedence and rotation remains offline. The connection/role boundary below
+remains authoritative.
 
 ## Context
 
@@ -26,8 +30,11 @@ network calls must not block playback or weaken the local fallback.
 - Encrypt credentials with AES-256-GCM using `cryptography`. A random nonce is
   generated for every write and the connection ID is authenticated as
   associated data. The deployment supplies a URL-safe base64 32-byte master key
-  through `ASSISTANT_CREDENTIAL_KEY`; it is never stored in the database or
-  returned by the API.
+  through `ASSISTANT_CREDENTIAL_KEY`, or configures a fixed
+  `ASSISTANT_CREDENTIAL_KEY_FILE` in a dedicated secrets mount and lets the
+  authenticated operator initialize that missing file once. The environment value
+  takes precedence. The API never accepts a path, returns key material, overwrites
+  an existing file, or generates a replacement while encrypted credentials exist.
 - Ship one initial adapter, `openai-compatible/v1`, behind a registry boundary.
   Supporting a provider means implementing an adapter, not adding provider
   fields to playlist or tag code.

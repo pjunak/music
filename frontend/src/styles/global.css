@@ -5793,9 +5793,12 @@ kbd,
 .assistant-provider-storage {
   display: grid;
   grid-template-columns: auto 1fr;
-  align-items: center;
+  align-items: start;
   gap: var(--space-5);
   border-left: 3px solid var(--warn);
+}
+.assistant-provider-storage.is-ready {
+  border-left-color: var(--accent2);
 }
 .assistant-provider-storage > div:first-child {
   display: grid;
@@ -5808,6 +5811,25 @@ kbd,
   font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: var(--text-xs);
 }
+.assistant-provider-storage.is-ready > div:first-child {
+  color: var(--accent2-strong);
+}
+.assistant-provider-storage-body {
+  min-width: 0;
+}
+.assistant-provider-storage-summary {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+.assistant-provider-storage-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
 .assistant-provider-storage h3,
 .assistant-provider-storage p {
   margin: 0;
@@ -5816,6 +5838,39 @@ kbd,
   margin-top: var(--space-2);
   color: var(--muted-strong);
   line-height: var(--leading-base);
+}
+.assistant-provider-storage .assistant-provider-storage-meta {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-provider-storage-guide {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.assistant-provider-storage-guide h4,
+.assistant-provider-storage-guide h5 {
+  margin: 0;
+}
+.assistant-provider-command-block {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.assistant-provider-command-block > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.assistant-provider-command-block > div code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.assistant-provider-command-block > div button {
+  flex: 0 0 auto;
 }
 .assistant-provider-storage code,
 .assistant-provider-boundary code {
@@ -6720,6 +6775,14 @@ input.volume-slider::-moz-range-thumb {
   .assistant-provider-storage,
   .assistant-provider-boundary {
     grid-template-columns: 1fr;
+  }
+  .assistant-provider-storage-summary,
+  .assistant-provider-command-block > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .assistant-provider-storage-actions {
+    justify-content: flex-start;
   }
   .assistant-intent-grid,
   .assistant-filter-grid {

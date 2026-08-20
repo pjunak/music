@@ -185,7 +185,12 @@ Runtime data lives outside the image.
   unsafe destinations. Feature code resolves usable roles through `prepare_role_execution()` and
   owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
   endpoint. Saving, verifying, or testing a role does not authorize sending library data or
-  replacing a local engine. Preserve `ASSISTANT_CREDENTIAL_KEY` separately from database backups.
+  replacing a local engine. Preserve the Assistant credential master key separately from database
+  backups. `ASSISTANT_CREDENTIAL_KEY` takes precedence over the fixed
+  `ASSISTANT_CREDENTIAL_KEY_FILE`; the authenticated API may exclusively create only that configured
+  file and must never accept a path, return the key, overwrite an existing file, or generate a new
+  key while saved provider credentials exist. Browser UI must not delete or replace the master key;
+  removal and rotation remain explicit console/offline maintenance workflows.
 - Credential recovery checks and master-key rotation are offline operator workflows. Keep audit
   output secret-free and identify keys only by a short one-way fingerprint. Rotation must decrypt
   every saved credential before mutating any row, re-encrypt all credentials in one transaction,
