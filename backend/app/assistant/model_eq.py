@@ -69,12 +69,31 @@ class EqDraftOutput(_StrictModel):
         return values
 
 
+class EqPresetBand(_StrictModel):
+    frequency: int
+    gain: EqGain
+
+
 class EqPresetDraft(_StrictModel):
     name: str = Field(min_length=1, max_length=128)
     goal: str = Field(min_length=2, max_length=1000)
-    bands: list[dict[str, float | int]] = Field(min_length=10, max_length=10)
+    bands: list[EqPresetBand] = Field(min_length=10, max_length=10)
     rationale: str = Field(min_length=1, max_length=1000)
-    cautions: list[str] = Field(max_length=5)
+    cautions: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(
+        max_length=5
+    )
+
+    @field_validator("bands")
+    @classmethod
+    def bands_use_canonical_graphic_eq(
+        cls,
+        values: list[EqPresetBand],
+    ) -> list[EqPresetBand]:
+        if tuple(band.frequency for band in values) != EQ_FREQUENCIES:
+            raise ValueError("EQ draft bands must use the canonical frequency order")
+        if any(abs(band.gain * 2 - round(band.gain * 2)) > 1e-9 for band in values):
+            raise ValueError("EQ draft gains must use 0.5 dB steps")
+        return values
 
 
 class EqBandExpectation(_StrictModel):
@@ -171,7 +190,7 @@ def generate_eq_draft(
         name=name,
         goal=goal,
         bands=[
-            {"frequency": frequency, "gain": gain}
+            EqPresetBand(frequency=frequency, gain=gain)
             for frequency, gain in zip(EQ_FREQUENCIES, output.gains_db, strict=True)
         ],
         rationale=output.rationale,
@@ -196,7 +215,7 @@ def evaluate_eq_model(
         try:
             draft = generate_eq_draft("Synthetic EQ check", case.goal, execute)
             gains = {
-                int(band["frequency"]): float(band["gain"]) for band in draft.bands
+                band.frequency: band.gain for band in draft.bands
             }
             for expected in case.expectations:
                 actual = gains.get(expected.frequency_hz)

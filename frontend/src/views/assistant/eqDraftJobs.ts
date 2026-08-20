@@ -1,4 +1,10 @@
 import type { BackgroundJob, EqPresetDraft } from "@/core/api";
+import {
+  EQ_FREQUENCIES,
+  EQ_GAIN_MAX,
+  EQ_GAIN_MIN,
+  EQ_GAIN_STEP,
+} from "@/core/eq";
 
 import { isBackgroundJobActive } from "./backgroundJobs";
 
@@ -32,19 +38,24 @@ export function eqDraftFromJob(
   ) {
     return null;
   }
-  const bands = draft.bands.flatMap((value) => {
+  const bands: EqPresetDraft["bands"] = [];
+  for (const [index, value] of draft.bands.entries()) {
     if (
       !isRecord(value) ||
       typeof value.frequency !== "number" ||
       typeof value.gain !== "number" ||
       !Number.isFinite(value.frequency) ||
-      !Number.isFinite(value.gain)
+      !Number.isFinite(value.gain) ||
+      value.frequency !== EQ_FREQUENCIES[index] ||
+      value.gain < EQ_GAIN_MIN ||
+      value.gain > EQ_GAIN_MAX ||
+      Math.abs(value.gain / EQ_GAIN_STEP - Math.round(value.gain / EQ_GAIN_STEP)) >
+        Number.EPSILON
     ) {
-      return [];
+      return null;
     }
-    return [{ frequency: value.frequency, gain: value.gain }];
-  });
-  if (bands.length !== 10) return null;
+    bands.push({ frequency: value.frequency, gain: value.gain });
+  }
   return {
     name: draft.name,
     goal: draft.goal,

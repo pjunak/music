@@ -18,10 +18,14 @@ then flipped back to positive after the slot is free.
 """
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.playlist import Playlist, PlaylistItem
+
+logger = logging.getLogger(__name__)
 
 # Parks the moved item far outside the negated-real-position range so the
 # flip-back pass can exclude it without colliding with any shifted row.
@@ -203,9 +207,22 @@ def move_track(db: Session, playlist: Playlist, from_pos: int, to_pos: int) -> N
 
 def list_items(db: Session, playlist: Playlist) -> list[PlaylistItem]:
     if playlist.automatic_rule_json:
-        from app.domain.automatic_playlists import refresh_automatic_playlist_if_stale
+        from app.domain.automatic_playlists import (
+            AutomaticPlaylistError,
+            refresh_automatic_playlist_if_stale,
+        )
 
-        refresh_automatic_playlist_if_stale(db, playlist)
+        try:
+            refresh_automatic_playlist_if_stale(db, playlist)
+        except AutomaticPlaylistError as exc:
+            # Preserve the last known-good materialized rows so one damaged rule
+            # cannot break playback. Playlist metadata exposes the error and the
+            # operator can replace the rule or switch the playlist back to manual.
+            logger.warning(
+                "Automatic playlist %s could not refresh (%s); preserving items",
+                playlist.id,
+                exc.code,
+            )
     # Self-heal any cascade gap so callers always see contiguous positions;
     # persist it here since `get_db` doesn't commit on a read path.
     if _repack(db, playlist.id):

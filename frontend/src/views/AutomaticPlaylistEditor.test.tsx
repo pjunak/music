@@ -36,6 +36,7 @@ const manualPlaylist: PlaylistMeta = {
   category: null,
   automatic: false,
   automatic_rule: null,
+  automatic_rule_error: null,
   automatic_refreshed_at: null,
   created_at: "2026-08-19T10:00:00Z",
   updated_at: "2026-08-19T10:00:00Z",
@@ -179,6 +180,37 @@ describe("AutomaticPlaylistEditor", () => {
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({ confirmLabel: "Make manual" }),
     );
+    expect(onChanged).toHaveBeenCalled();
+    expect(onTracksChanged).toHaveBeenCalled();
+  });
+
+  it("offers recovery when a saved automatic rule is unreadable", async () => {
+    const user = userEvent.setup();
+    vi.mocked(confirmDialog).mockResolvedValue(true);
+    vi.mocked(playlistsApi.disableAutomatic).mockResolvedValue(manualPlaylist);
+    const damaged: PlaylistMeta = {
+      ...manualPlaylist,
+      automatic: true,
+      automatic_rule: null,
+      automatic_rule_error: "automatic_rule_invalid",
+    };
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    const onTracksChanged = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AutomaticPlaylistEditor
+        playlist={damaged}
+        onChanged={onChanged}
+        onTracksChanged={onTracksChanged}
+      />,
+    );
+
+    expect(screen.getByText("The saved rule cannot be read")).toBeInTheDocument();
+    expect(
+      screen.getByText(/last resolved songs are being kept/i),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Make manual" }));
+
+    await waitFor(() => expect(playlistsApi.disableAutomatic).toHaveBeenCalledWith(7));
     expect(onChanged).toHaveBeenCalled();
     expect(onTracksChanged).toHaveBeenCalled();
   });

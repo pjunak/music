@@ -222,6 +222,32 @@ export function AutomaticPlaylistEditor({
     );
   }
 
+  if (playlist.automatic && !editing && stored === null) {
+    return (
+      <section className="playlist-automatic-editor authoring-card" role="alert">
+        <div className="playlist-automatic-heading">
+          <div>
+            <p className="assistant-eyebrow">Automatic playlist needs attention</p>
+            <h3>The saved rule cannot be read</h3>
+          </div>
+          <span>{playlist.automatic_rule_error ?? "automatic_rule_invalid"}</span>
+        </div>
+        <p className="muted small">
+          The last resolved songs are being kept so playback still works. Replace the
+          rule through a new preview, or make the playlist manual to keep those songs.
+        </p>
+        <div className="form-actions">
+          <button type="button" onClick={() => setEditing(true)}>
+            Replace rule
+          </button>
+          <button type="button" onClick={() => void makeManual()}>
+            Make manual
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="playlist-automatic-editor authoring-card">
       <div className="playlist-automatic-heading">

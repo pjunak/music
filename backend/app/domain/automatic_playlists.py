@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.assistant.analysis import load_current_metadata_profiles
+from app.assistant.engine import TrackAnalysisProfile
 from app.assistant.tags import load_manual_tags, normalize_manual_tags
 from app.models.base import utcnow
 from app.models.playlist import Playlist, PlaylistItem
@@ -83,7 +84,7 @@ def parse_automatic_rule(value: str) -> AutomaticPlaylistRuleV1:
 def _effective_tags(
     track_id: int,
     manual: Mapping[int, tuple[str, ...]],
-    local_profiles: Mapping[int, object],
+    local_profiles: Mapping[int, TrackAnalysisProfile],
     *,
     include_local: bool,
 ) -> set[str]:
@@ -134,8 +135,9 @@ def resolve_automatic_playlist(
     manual_mapping = load_manual_tags(db, [track.id for track in tracks])
     manual = {track_id: tuple(tags) for track_id, tags in manual_mapping.items()}
     include_local = rule.tag_sources == "manual_and_local"
-    local_mapping = load_current_metadata_profiles(db, tracks) if include_local else {}
-    local_profiles = {track_id: profile for track_id, profile in local_mapping.items()}
+    local_profiles: Mapping[int, TrackAnalysisProfile] = (
+        load_current_metadata_profiles(db, tracks) if include_local else {}
+    )
     effective_tags = {
         track.id: _effective_tags(
             track.id,
@@ -157,11 +159,6 @@ def resolve_automatic_playlist(
                 "display_title": track.display_title,
                 "title": track.title,
                 "tags": sorted(effective_tags[track.id]),
-                "local_source_signature": getattr(
-                    local_profiles.get(track.id),
-                    "source_signature",
-                    None,
-                ),
             }
             for track in tracks
         ],

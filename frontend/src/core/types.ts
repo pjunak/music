@@ -249,6 +249,7 @@ export interface PlaylistMeta {
   category: string | null;
   automatic: boolean;
   automatic_rule: AutomaticPlaylistRule | null;
+  automatic_rule_error: string | null;
   automatic_refreshed_at: string | null;
   created_at: string;
   updated_at: string;

@@ -40,6 +40,7 @@ class PlaylistMeta(BaseModel):
     category: str | None
     automatic: bool
     automatic_rule: automatic_playlists.AutomaticPlaylistRuleV1 | None
+    automatic_rule_error: str | None = None
     automatic_refreshed_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -119,18 +120,23 @@ def _validate_mode(mode_id: str | None) -> None:
 
 
 def _playlist_meta(playlist: Playlist) -> PlaylistMeta:
-    rule = (
-        automatic_playlists.parse_automatic_rule(playlist.automatic_rule_json)
-        if playlist.automatic_rule_json
-        else None
-    )
+    rule: automatic_playlists.AutomaticPlaylistRuleV1 | None = None
+    rule_error: str | None = None
+    if playlist.automatic_rule_json:
+        try:
+            rule = automatic_playlists.parse_automatic_rule(
+                playlist.automatic_rule_json
+            )
+        except automatic_playlists.AutomaticPlaylistError as exc:
+            rule_error = exc.code
     return PlaylistMeta(
         id=playlist.id,
         name=playlist.name,
         mode_id=playlist.mode_id,
         category=playlist.category,
-        automatic=rule is not None,
+        automatic=bool(playlist.automatic_rule_json),
         automatic_rule=rule,
+        automatic_rule_error=rule_error,
         automatic_refreshed_at=playlist.automatic_refreshed_at,
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,

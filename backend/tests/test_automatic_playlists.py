@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, delete, inspect
 from app.assistant.analysis import LOCAL_METADATA_ANALYZER_ID, track_source_signature
 from app.core.db import SessionLocal
 from app.main import _apply_additive_columns
-from app.models.playlist import Playlist
+from app.models.playlist import Playlist, PlaylistItem
 from app.models.track import Track
 from app.models.track_analysis import TrackAnalysis
 from app.models.track_user_tag import TrackUserTag
@@ -310,6 +310,47 @@ def test_rule_can_include_current_local_analysis_without_model_tags(
     assert manual_only.json()["matched_tracks"] == 0
     assert local.status_code == 200
     assert [track["id"] for track in local.json()["tracks"]] == [track_id]
+
+
+def test_invalid_stored_rule_preserves_materialized_tracks_and_can_be_disabled(
+    auth_client: TestClient,
+) -> None:
+    track_id = _add_track(
+        "Automatic/preserved.wav",
+        "Preserved Tavern Song",
+        bpm=100,
+        tags=("tavern",),
+    )
+    with SessionLocal() as db:
+        playlist = Playlist(
+            name="Damaged automatic rule",
+            mode_id="dnd",
+            automatic_rule_json='{"schema":"automatic-playlist/unsupported"}',
+            automatic_source_signature="0" * 64,
+        )
+        db.add(playlist)
+        db.flush()
+        db.add(PlaylistItem(playlist_id=playlist.id, position=0, track_id=track_id))
+        db.commit()
+        playlist_id = playlist.id
+
+    listed = auth_client.get("/api/playlists", params={"mode_id": "dnd"})
+    detail = auth_client.get(f"/api/playlists/{playlist_id}")
+    tracks = auth_client.get(f"/api/playlists/{playlist_id}/tracks")
+    disabled = auth_client.delete(f"/api/playlists/{playlist_id}/automatic")
+
+    assert listed.status_code == 200, listed.text
+    listed_playlist = next(item for item in listed.json() if item["id"] == playlist_id)
+    assert listed_playlist["automatic"] is True
+    assert listed_playlist["automatic_rule"] is None
+    assert listed_playlist["automatic_rule_error"] == "automatic_rule_invalid"
+    assert detail.status_code == 200
+    assert detail.json()["automatic_rule_error"] == "automatic_rule_invalid"
+    assert tracks.status_code == 200
+    assert [item["track_id"] for item in tracks.json()] == [track_id]
+    assert disabled.status_code == 200
+    assert disabled.json()["automatic"] is False
+    assert disabled.json()["automatic_rule_error"] is None
 
 
 def test_additive_upgrade_creates_automatic_columns(

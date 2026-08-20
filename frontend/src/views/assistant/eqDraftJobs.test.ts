@@ -66,6 +66,37 @@ describe("EQ draft jobs", () => {
     ).toBeNull();
   });
 
+  it("rejects non-canonical frequencies, gain ranges, and gain steps", () => {
+    const base = job().result as {
+      schema_version: string;
+      draft: {
+        name: string;
+        goal: string;
+        bands: Array<{ frequency: number; gain: number }>;
+        rationale: string;
+        cautions: string[];
+      };
+    };
+    for (const replacement of [
+      { frequency: 63, gain: 0 },
+      { frequency: 64, gain: 12.5 },
+      { frequency: 64, gain: 0.25 },
+    ]) {
+      const bands = base.draft.bands.map((band) => ({ ...band }));
+      bands[1] = replacement;
+      expect(
+        eqDraftFromJob(
+          job({
+            result: {
+              ...base,
+              draft: { ...base.draft, bands },
+            },
+          }),
+        ),
+      ).toBeNull();
+    }
+  });
+
   it("treats queued and running jobs as active", () => {
     expect(isEqDraftJobActive(job({ status: "queued" }))).toBe(true);
     expect(isEqDraftJobActive(job({ status: "running" }))).toBe(true);

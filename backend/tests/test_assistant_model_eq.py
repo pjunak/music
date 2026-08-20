@@ -167,7 +167,7 @@ def test_eq_contract_builds_only_canonical_bands() -> None:
 
     draft = generate_eq_draft("Warm Tavern", "warm wooden tavern", capture)
 
-    assert [band["frequency"] for band in draft.bands] == [
+    assert [band.frequency for band in draft.bands] == [
         32,
         64,
         125,
@@ -179,7 +179,7 @@ def test_eq_contract_builds_only_canonical_bands() -> None:
         8000,
         16000,
     ]
-    assert draft.bands[3]["gain"] == 2.0
+    assert draft.bands[3].gain == 2.0
     assert json.loads(observed[0].user_prompt)["goal"] == "warm wooden tavern"
     assert "untrusted user data" in observed[0].system_prompt
 
