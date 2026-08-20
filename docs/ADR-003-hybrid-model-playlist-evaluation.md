@@ -5,6 +5,10 @@
 **Date:** 2026-08-19
 **Decider:** Project owner
 
+**Extended by:** [ADR-005](ADR-005-consent-bound-model-playlist-suggestions.md),
+which adds the durable, consent-bound live-library path while preserving this
+local filtering and ID-only output contract.
+
 ## Context
 
 The optional provider harness can execute strict JSON requests, but connecting
@@ -70,6 +74,6 @@ semantic ranking and sequence planning. Selected.
 - The disclosure flag confirms only the selected suite. Custom suites may still
   contain sensitive text; their author remains responsible for reviewing them.
 - Passing the synthetic suite is necessary but not sufficient for live use.
-  Live integration still needs an in-app disclosure and consent step, bounded
-  asynchronous execution, local fallback, and the existing review-to-import
-  workflow. No real library data is sent in this slice.
+  ADR-005 supplies the separate in-app disclosure and consent step, bounded
+  asynchronous execution, local fallback, and existing review-to-import
+  workflow. The evaluation CLI itself still sends only the chosen synthetic suite.

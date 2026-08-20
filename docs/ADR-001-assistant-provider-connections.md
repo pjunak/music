@@ -5,6 +5,11 @@
 **Date:** 2026-08-19
 **Decider:** Project owner
 
+**Implementation follow-up (2026-08-20):** Playlist planning, music tagging,
+manual-tag cleanup, and EQ drafting now execute through dedicated quality-gated,
+consent-bound feature contracts. Credential audit and offline atomic key rotation
+are also implemented. The connection/role boundary below remains authoritative.
+
 ## Context
 
 The Assistant needs optional access to user-chosen model providers without
@@ -40,15 +45,15 @@ network calls must not block playback or weaken the local fallback.
   connection or its role assignments. Removal or replacement resets connection
   verification and every dependent model gate; configured roles remain stored
   but cannot execute until a newly saved credential passes those gates again.
-- Role configuration remains inactive until its connection has verified. This
-  slice stores configuration only; local analyzers and `local-planner/v2`
-  remain the sole runtime engines.
+- Role configuration remains inactive until its connection has verified. Local
+  analyzers and `local-planner/v2` remain the defaults; implemented model roles
+  execute only through their dedicated disclosure, quality, and review contracts.
 - A reserved role is not a usable feature flag. Roles remain unavailable for
   configuration until their feature-specific transport, quality evaluation,
   disclosure, consent, and review/commit boundaries are implemented.
-- Provider calls run outside the FastAPI event loop. Future longer model work
-  must use the durable background-job runner and the established review-first
-  Authoring boundary.
+- Provider calls run outside the FastAPI event loop. Long-running model work
+  uses the durable background-job runner and the established review-first
+  Authoring or generated-tag review boundary.
 
 ## Options considered
 
@@ -78,9 +83,10 @@ connection serve several roles. Selected.
 
 - A database backup contains only encrypted provider keys. Restoring configured
   connections also requires the same deployment master key.
-- Losing or rotating the master key makes existing provider credentials
-  unreadable; the operator must re-enter them. Key rotation tooling can be
-  added before production use requires it.
+- Losing the master key makes existing provider credentials unreadable; the
+  operator must re-enter them. Planned rotation uses the offline, atomic
+  `music-cli assistant-credentials rotate` workflow and resets every dependent
+  verification and quality gate.
 - Encryption protects database copies and accidental disclosure, not a fully
   compromised running server that also has the master key.
 - OpenAI-compatible verification is the first adapter, not a claim that all

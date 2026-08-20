@@ -260,7 +260,9 @@ Runtime data lives outside the image.
   remain unchanged. Refresh stale rules before reads and playback. Only accepted/manual tags and,
   when explicitly selected, current `local-metadata/v1` moods may be rule evidence; provider/model
   suggestions must never become silent automatic inputs. Lock individual item edits while the rule
-  is active, and preserve the materialized list when the operator switches back to manual.
+  is active, and preserve the materialized list when the operator switches back to manual. A
+  malformed persisted rule must not break playlist listing or playback: expose its safe error state,
+  keep the last materialized rows, and let the operator replace the rule or make the playlist manual.
 - Authoring import is source adapter -> preview -> explicit selection -> atomic commit. Mode and
   versioned JSON sources share the same planner and transaction. It is create-only: conflicts are
   skipped, playlist tracks are re-resolved by canonical library-relative path, and a selected cue

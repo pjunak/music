@@ -5,6 +5,11 @@
 **Date:** 2026-08-19
 **Decider:** Project owner
 
+**Implementation follow-up (2026-08-20):** The same fingerprint-bound quality
+framework now certifies playlist planning, music tagging, manual-tag cleanup, and
+EQ drafting. Passing results are consumed only by each feature's own consent and
+review contract.
+
 ## Context
 
 The configured playlist model can already be tested for basic structured-output
@@ -42,9 +47,10 @@ must never authorize a changed model.
 - Treat a completed but failing quality report as a successful job with a
   failed certification. Job failure is reserved for infrastructure,
   configuration, cancellation, or execution-lifecycle failure.
-- Do not connect a passing result to the live playlist API in this decision.
-  Live model use still requires a separate consent, disclosure, bounded data,
-  fallback, and review-to-import integration.
+- Do not treat a passing result as standing authorization for a live request.
+  ADR-005 adds the playlist-specific consent, disclosure, bounded data, fallback,
+  and review-to-import integration; other roles apply equivalent task-specific
+  contracts.
 
 ## Options considered
 

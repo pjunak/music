@@ -33,6 +33,18 @@ deleted; accepted product/security decisions live in `README.md` or `AGENTS.md`.
 
 ## Future feature
 
+- **Specialized model audio analysis.** Choose a concrete provider protocol,
+  then add a bounded `audio-input/v1` adapter, explicit file disclosure and
+  consent, a synthetic quality suite, durable non-restartable execution, and a
+  review-only result contract. Do not unlock the reserved role before all of
+  those boundaries exist.
+- **Model-assisted library cleanup.** Extend the existing propose -> review ->
+  journal -> execute cleanup workflow with a minimized model input and fixed
+  output schema. The model must not move, rename, or delete files directly.
+- **Provider-independent cost controls.** Provider dashboards remain the source
+  of truth for spending limits. Add in-app budgets only if adapters can expose a
+  trustworthy portable accounting contract; never infer charges from missing
+  token usage.
 - **Weighted shuffle.** Reintroduce `"weighted"` only with a real play-count or
   recency algorithm. Persisted legacy values already coerce to `"random"`, so
   the protocol addition can remain additive.

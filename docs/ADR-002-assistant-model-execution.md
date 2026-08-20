@@ -5,11 +5,15 @@
 **Date:** 2026-08-19
 **Decider:** Project owner
 
+**Implementation follow-up (2026-08-20):** The conformance harness now feeds four
+dedicated feature contracts: playlist planning, music tagging, manual-tag cleanup,
+and EQ drafting. It remains unavailable as a general prompt endpoint.
+
 ## Context
 
 Provider connections and task roles can be configured without proving that a
 chosen model accepts requests or follows the machine-readable contracts needed
-by future playlist, tagging, cleanup, EQ, and audio tools. A general prompt API
+by playlist, tagging, cleanup, EQ, and future audio tools. A general prompt API
 would make experimentation easy, but it would also bypass task-specific data
 minimization, output validation, review, and authoring boundaries.
 
@@ -34,8 +38,9 @@ minimization, output validation, review, and authoring boundaries.
   any runtime input or explicitly re-verifying the connection clears the result.
   A role is effective only while its connection is verified, its encrypted
   credential is readable, it is enabled, and its current fingerprint has passed.
-- Make no automatic retries. A retry may duplicate cost or provider-side work;
-  task-specific retry and idempotency policies belong to future durable jobs.
+- Make no automatic provider retries. A retry may duplicate cost or provider-side
+  work; live model jobs are durable but non-restartable and require a deliberate
+  new run after an uncertain interruption.
 - Keep calls off the FastAPI event loop. The short setup test uses a worker
   thread; long-running feature work must use the existing durable job runner.
 
@@ -75,4 +80,6 @@ boundary for later feature schemas. Selected.
   Each model-backed feature still needs a narrow data contract, local schema
   validation, synthetic evaluation, operator disclosure, and review-first commit
   path before integration.
-- No real library data leaves the server in this slice.
+- Conformance itself sends no real library data. Live feature endpoints separately
+  enforce their versioned disclosure, explicit consent, minimized input schema,
+  output validation, and review-only destination.

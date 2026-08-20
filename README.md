@@ -97,6 +97,8 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   shows model output beside local tools without merging their ownership. The EQ workflow sends only
   the operator's goal and fixed band limits; specialized audio-model workflows remain locked until
   a concrete bounded audio transport receives its own reviewed contract.
+  See [`ASSISTANT.md`](ASSISTANT.md) for the deployment, setup, verification, backup, and
+  acceptance runbook.
 - **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
   stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
   and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
@@ -246,6 +248,10 @@ Connection types and model tasks are linked through versioned capabilities rathe
 model-name guesses. The initial OpenAI-compatible adapter verifies `structured-text/v1`. Future
 audio-capable adapters must implement and verify their own bounded `audio-input/v1` transport before
 the specialized audio-analysis role can be configured.
+
+The complete first-run sequence—local baseline, connection verification, per-role conformance and
+quality checks, live-data acceptance, and isolated backup restore—is in
+[`ASSISTANT.md`](ASSISTANT.md).
 
 There is no general migration framework: the schema is created idempotently on boot, and
 compatible additive columns are applied automatically. Renames, drops, and type changes require
