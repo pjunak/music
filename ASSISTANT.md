@@ -192,11 +192,20 @@ Use a small, representative sample before running across the whole library.
 This is sensible before relying on saved provider credentials in production, but it is
 not required for every deployment and is irrelevant when no provider key is stored.
 
-Run the read-only credential audit in the deployed environment:
+Run the read-only credential audit inside the deployed application environment:
 
-```powershell
+```console
 music-cli assistant-credentials check
 ```
+
+For Docker, this is normally:
+
+```console
+docker exec music music-cli assistant-credentials check
+```
+
+Follow the deployment stack's own runbook for file paths and the safe
+one-off-container rotation sequence.
 
 The command must report zero unreadable credentials. It prints only counts and a short
 one-way key ID. A periodic recovery test can use an isolated restore:
@@ -211,14 +220,15 @@ Only when deliberately rotating the master key, generate a new key and expose it
 temporarily as `ASSISTANT_CREDENTIAL_KEY_NEW`. Run the dry run, stop every server
 using the database, then apply:
 
-```powershell
+```console
 music-cli assistant-credentials rotate
 music-cli assistant-credentials rotate --apply --server-stopped
 ```
 
 Replace the deployment's current environment value or key-file contents with the new key
-before restart. Rotation is atomic
-but intentionally clears connection verification, role conformance, and quality gates;
+before restart. Database re-encryption is atomic, but replacing the external key is a
+separate operator step and the server must remain stopped between them. Rotation
+intentionally clears connection verification, role conformance, and quality gates;
 repeat sections 4 and 5 afterward.
 
 ## 8. Final acceptance checklist
