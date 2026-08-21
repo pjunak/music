@@ -26,6 +26,8 @@ from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.background_job import BackgroundJob
 from app.models.playlist import Playlist
 
+from .assistant_test_values import TEST_PROVIDER_API_KEY
+
 DISCLOSURE_VERSION = "assistant-playlist-model-disclosure/v1"
 
 
@@ -114,7 +116,7 @@ def _configure_quality_passed_model(
             "name": "Playlist models",
             "adapter_id": "openai-compatible/v1",
             "base_url": "https://models.example.test/v1",
-            "api_key": "secret-provider-key-1234",
+            "api_key": TEST_PROVIDER_API_KEY,
             "allow_private_network": False,
         },
     )
@@ -294,7 +296,7 @@ def test_model_suggestion_is_path_free_durable_and_preview_only(
         "provider_model_ids": ["planner-response-model"],
         "provider_model_ids_truncated": False,
     }
-    assert "secret-provider-key-1234" not in json.dumps(finished)
+    assert TEST_PROVIDER_API_KEY not in json.dumps(finished)
     assert observed
     assert len(observed[0]["candidates"]) <= 100
     assert all("path" not in candidate for candidate in observed[0]["candidates"])

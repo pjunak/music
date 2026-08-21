@@ -40,6 +40,11 @@ from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.background_job import BackgroundJob
 
+from .assistant_test_values import (
+    TEST_EXISTING_API_KEY,
+    TEST_PROVIDER_API_KEY,
+    TEST_REPLACEMENT_API_KEY,
+)
 from .conftest import TEST_PASSWORD
 
 PLAYLIST_QUALITY_JOB_KIND = "assistant.model-evaluation.playlist-quality-v1"
@@ -71,7 +76,7 @@ def _connection_payload(**overrides: object) -> dict[str, object]:
         "name": "Primary models",
         "adapter_id": "openai-compatible/v1",
         "base_url": "https://models.example.test/v1",
-        "api_key": "secret-provider-key-1234",
+        "api_key": TEST_PROVIDER_API_KEY,
         "allow_private_network": False,
     }
     payload.update(overrides)
@@ -272,7 +277,7 @@ def test_playlist_model_quality_job_persists_progress_and_current_gate(
     assert finished["progress_total"] == 8
     assert finished["result"]["evaluation"]["passed"] is True
     assert finished["result"]["evaluation"]["summary"]["passed_cases"] == 8
-    assert "secret-provider-key-1234" not in json.dumps(finished)
+    assert TEST_PROVIDER_API_KEY not in json.dumps(finished)
     assert "path" not in json.dumps(finished["parameters"])
 
     restored = auth_client.get(
@@ -507,7 +512,7 @@ def test_environment_master_key_takes_precedence_over_configured_file(
 def test_connection_secret_is_encrypted_and_never_returned(
     auth_client: TestClient,
 ) -> None:
-    secret = "secret-provider-key-1234"
+    secret = TEST_PROVIDER_API_KEY
     created = _create_connection(auth_client, api_key=secret)
 
     assert created["credential_saved"] is True
@@ -704,7 +709,7 @@ def test_complete_storage_reset_erases_credentials_then_file_key(
         assert initialized.status_code == 201, initialized.text
         replacement = auth_client.put(
             f"/api/assistant/providers/connections/{created['id']}",
-            json={"api_key": "replacement-provider-key-9999"},
+            json={"api_key": TEST_REPLACEMENT_API_KEY},
         )
         assert replacement.status_code == 200, replacement.text
         assert replacement.json()["key_hint"] == "••••9999"
@@ -834,7 +839,7 @@ def test_key_file_initialization_refuses_to_orphan_saved_credentials(
     auth_client: TestClient,
     tmp_path: Path,
 ) -> None:
-    _create_connection(auth_client, api_key="existing-provider-secret")
+    _create_connection(auth_client, api_key=TEST_EXISTING_API_KEY)
     settings = get_settings()
     previous_key = settings.assistant_credential_key
     previous_file = settings.assistant_credential_key_file
@@ -971,9 +976,9 @@ def test_verification_records_models_without_returning_key(
     assert observed["args"] == (
         "openai-compatible/v1",
         "https://models.example.test/v1",
-        "secret-provider-key-1234",
+        TEST_PROVIDER_API_KEY,
     )
-    assert "secret-provider-key-1234" not in response.text
+    assert TEST_PROVIDER_API_KEY not in response.text
 
 
 def test_changing_connection_inputs_resets_verification(
@@ -1003,7 +1008,7 @@ def test_saved_connection_credential_cannot_be_replaced_in_place(
     auth_client: TestClient,
 ) -> None:
     created = _create_connection(auth_client)
-    replacement_key = "-".join(("test", "replacement", "9999"))
+    replacement_key = TEST_REPLACEMENT_API_KEY
 
     response = auth_client.put(
         f"/api/assistant/providers/connections/{created['id']}",
@@ -1079,7 +1084,7 @@ def test_connection_credential_can_be_deleted_then_replaced(
 
     replacement = auth_client.put(
         f"/api/assistant/providers/connections/{created['id']}",
-        json={"api_key": "replacement-provider-key-9999"},
+        json={"api_key": TEST_REPLACEMENT_API_KEY},
     )
     assert replacement.status_code == 200, replacement.text
     assert replacement.json()["credential_saved"] is True
@@ -1108,7 +1113,7 @@ def test_connection_credential_can_be_deleted_then_replaced(
     assert observed["args"] == (
         "openai-compatible/v1",
         "https://models.example.test/v1",
-        "replacement-provider-key-9999",
+        TEST_REPLACEMENT_API_KEY,
     )
 
 
@@ -1198,7 +1203,7 @@ def test_role_requires_verified_connection_and_model_test_before_enablement(
     with SessionLocal() as db:
         target = prepare_role_execution(db, "playlist_planner")
     assert target.model_id == "planner-large"
-    assert target.api_key == "secret-provider-key-1234"
+    assert target.api_key == TEST_PROVIDER_API_KEY
 
 
 def test_reserved_roles_cannot_be_configured_or_tested(

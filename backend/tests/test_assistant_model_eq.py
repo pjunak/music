@@ -26,6 +26,8 @@ from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.background_job import BackgroundJob
 
+from .assistant_test_values import TEST_PROVIDER_API_KEY
+
 DISCLOSURE_VERSION = "assistant-eq-draft-disclosure/v1"
 
 
@@ -106,7 +108,7 @@ def _configure_quality_passed_eq(
             "name": "EQ model",
             "adapter_id": "openai-compatible/v1",
             "base_url": "https://models.example.test/v1",
-            "api_key": "secret-provider-key-1234",
+            "api_key": TEST_PROVIDER_API_KEY,
             "allow_private_network": False,
         },
     )
@@ -238,7 +240,7 @@ def test_eq_endpoints_are_consent_bound_durable_and_review_only(
     assert finished["result"]["draft"]["name"] == "Warm Tavern"
     assert finished["result"]["engine_id"] == "model-graphic-eq/v1"
     assert finished["result"]["usage"]["attempted_requests"] == 1
-    assert "secret-provider-key-1234" not in json.dumps(finished)
+    assert TEST_PROVIDER_API_KEY not in json.dumps(finished)
 
 
 @pytest.mark.parametrize(

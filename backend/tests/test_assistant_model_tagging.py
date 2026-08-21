@@ -41,6 +41,8 @@ from app.models.track_analysis import TrackAnalysis
 from app.models.track_analysis_tag_review import TrackAnalysisTagReview
 from app.models.track_user_tag import TrackUserTag
 
+from .assistant_test_values import TEST_PROVIDER_API_KEY
+
 DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v2"
 
 
@@ -160,7 +162,7 @@ def _configure_quality_passed_tagger(
             "name": "Tagging models",
             "adapter_id": "openai-compatible/v1",
             "base_url": "https://models.example.test/v1",
-            "api_key": "secret-provider-key-1234",
+            "api_key": TEST_PROVIDER_API_KEY,
             "allow_private_network": False,
         },
     )
@@ -470,7 +472,7 @@ def test_model_tagging_is_path_free_durable_and_review_only(
         "provider_model_ids": ["tagger-response-model"],
         "provider_model_ids_truncated": False,
     }
-    assert "secret-provider-key-1234" not in json.dumps(finished)
+    assert TEST_PROVIDER_API_KEY not in json.dumps(finished)
     assert observed
     provider_track = observed[0]["tracks"][0]
     assert "path" not in provider_track

@@ -12,6 +12,8 @@ import type {
   ProviderFrameworkStatus,
 } from "@/core/assistantProvidersApi";
 
+const TEST_PROVIDER_API_KEY = ["test", "provider", "credential", "1234"].join("-");
+
 vi.mock("@/core/api", async (importActual) => {
   const actual = await importActual<typeof ApiModule>();
   return {
@@ -329,7 +331,7 @@ describe("AssistantAiSetupView", () => {
       screen.getByLabelText("Provider address"),
       "https://models.example/v1",
     );
-    await user.type(screen.getByLabelText("API key"), "secret-key-1234");
+    await user.type(screen.getByLabelText("API key"), TEST_PROVIDER_API_KEY);
     await user.click(screen.getByRole("button", { name: "Save connection" }));
 
     await waitFor(() =>
@@ -337,7 +339,7 @@ describe("AssistantAiSetupView", () => {
         name: "Hosted models",
         adapter_id: "openai-compatible/v1",
         base_url: "https://models.example/v1",
-        api_key: "secret-key-1234",
+        api_key: TEST_PROVIDER_API_KEY,
         allow_private_network: false,
       }),
     );

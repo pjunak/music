@@ -10,12 +10,14 @@ from app.assistant.providers.execution import (
 )
 from app.assistant.providers.transport import JsonHttpResponse, ProviderTransportError
 
+from .assistant_test_values import TEST_SHORT_API_KEY
+
 
 def _target() -> ProviderExecutionTarget:
     return ProviderExecutionTarget(
         adapter_id="openai-compatible/v1",
         base_url="https://models.example/v1",
-        api_key="secret-key",
+        api_key=TEST_SHORT_API_KEY,
         allow_private_network=False,
         model_id="planner-large",
         timeout_seconds=30,
@@ -111,7 +113,7 @@ def test_execution_returns_safe_transport_error_without_secret(
     )
 
     assert result.error_code == "timeout"
-    assert "secret-key" not in repr(result)
+    assert TEST_SHORT_API_KEY not in repr(result)
 
 
 def test_conformance_requires_exact_challenge_response(

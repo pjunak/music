@@ -31,6 +31,8 @@ from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.background_job import BackgroundJob
 from app.models.track_user_tag import TrackUserTag
 
+from .assistant_test_values import TEST_CLEANUP_API_KEY
+
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1] / "evaluation" / "tag-cleanup-v1.json"
 )
@@ -127,7 +129,7 @@ def _configure_enabled_cleanup_role(
             "name": "Cleanup models",
             "adapter_id": "openai-compatible/v1",
             "base_url": "https://models.example.test/v1",
-            "api_key": "secret-cleanup-key-1234",
+            "api_key": TEST_CLEANUP_API_KEY,
             "allow_private_network": False,
         },
     )
@@ -278,7 +280,7 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
         "provider_model_ids": ["cleanup-response-model"],
         "provider_model_ids_truncated": False,
     }
-    assert "secret-cleanup-key-1234" not in json.dumps(finished)
+    assert TEST_CLEANUP_API_KEY not in json.dumps(finished)
 
     evaluations = auth_client.get(
         "/api/assistant/providers/roles/tag_cleanup/evaluations"
@@ -354,7 +356,7 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
     assert finished["result"]["usage"]["attempted_requests"] == 1
     assert "inn" not in json.dumps(finished["parameters"])
     assert "tavern" not in json.dumps(finished["parameters"])
-    assert "secret-cleanup-key-1234" not in json.dumps(finished)
+    assert TEST_CLEANUP_API_KEY not in json.dumps(finished)
 
     applied = auth_client.post(
         "/api/assistant/library-tags/catalog/model-cleanup-apply",
