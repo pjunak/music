@@ -73,7 +73,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   key is saved plus a masked hint. A saved key can be deleted without deleting its connection or
   role drafts; deletion and replacement both invalidate verification and model-quality gates until
   the operator explicitly completes them again. The shared execution harness is bounded and
-  provider-neutral, but it is not exposed as a general prompt API. Provider adapters declare
+  provider-neutral, requests OpenAI-compatible JSON-object output, and supplies each task's exact
+  output shape before validating the response locally. A harness contract upgrade makes existing
+  model tests and quality reports stale so they must be rerun explicitly. The harness is not
+  exposed as a general prompt API. Provider adapters declare
   supported transports such as structured text or future bounded audio input; verification records
   the capabilities actually confirmed, and tasks accept only compatible verified connections.
   Reserved future tasks remain visible as planned work but cannot be configured before their

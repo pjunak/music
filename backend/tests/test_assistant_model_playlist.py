@@ -134,6 +134,7 @@ def test_model_planner_sends_reduced_candidates_and_reconstructs_sources() -> No
     assert request_payload["schema_version"] == "assistant-playlist-planner-input/v1"
     assert all("path" not in candidate for candidate in request_payload["candidates"])
     assert "untrusted data" in executor.requests[0].system_prompt
+    assert "Example JSON shape" in executor.requests[0].system_prompt
     assert response.engine == "model-playlist-planner/v1"
     assert [candidate.track_id for candidate in response.candidates] == [102, 101]
     source_by_id = {track.id: track for track in tracks}
@@ -202,6 +203,9 @@ def test_model_planner_fails_closed_on_untrusted_ids(
         )
 
     assert error.value.code == error_code
+    if error_code == "model_output_schema_invalid":
+        assert error.value.diagnostic is not None
+        assert ":" in error.value.diagnostic
 
 
 def test_model_planner_contains_provider_failure_as_safe_code() -> None:

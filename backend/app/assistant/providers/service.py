@@ -29,6 +29,7 @@ from app.assistant.providers.definitions import (
     ModelRoleDefinition,
 )
 from app.assistant.providers.execution import (
+    CONFORMANCE_CONTRACT,
     ProviderConformanceResult,
     ProviderExecutionTarget,
 )
@@ -736,6 +737,7 @@ def _role_runtime_fingerprint(
 ) -> str:
     payload = "\0".join(
         (
+            CONFORMANCE_CONTRACT,
             _connection_fingerprint(connection),
             row.role_id,
             row.model_id,

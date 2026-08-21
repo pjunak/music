@@ -25,6 +25,7 @@ from app.assistant.providers.execution import (
     StructuredModelRequest,
     StructuredModelResult,
 )
+from app.assistant.schema_diagnostics import safe_validation_diagnostic
 from app.assistant.schemas import (
     PlaylistCandidate,
     PlaylistIntent,
@@ -197,7 +198,10 @@ class ModelPlaylistPlanner:
                     "schema_version, ranked_track_ids, and selected_track_ids. Use only IDs "
                     "from candidates, rank no more than request.candidate_limit IDs, and put "
                     "selected IDs in intended playback order. The schema_version must be "
-                    f"{MODEL_PLAYLIST_OUTPUT_CONTRACT}."
+                    f"{MODEL_PLAYLIST_OUTPUT_CONTRACT}. Example JSON shape: "
+                    '{"schema_version":"assistant-playlist-planner-output/v1",'
+                    '"ranked_track_ids":[],"selected_track_ids":[]}. Populate both '
+                    "arrays with integer IDs from the supplied candidates."
                 ),
                 user_prompt=model_input.model_dump_json(),
                 max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
@@ -210,7 +214,10 @@ class ModelPlaylistPlanner:
         try:
             model_output = ModelPlaylistOutput.model_validate(result.payload)
         except ValidationError as exc:
-            raise SuggestionEngineError("model_output_schema_invalid") from exc
+            raise SuggestionEngineError(
+                "model_output_schema_invalid",
+                diagnostic=safe_validation_diagnostic(exc, ModelPlaylistOutput),
+            ) from exc
 
         if len(model_output.ranked_track_ids) > request.candidate_limit:
             raise SuggestionEngineError("model_output_candidate_limit_exceeded")

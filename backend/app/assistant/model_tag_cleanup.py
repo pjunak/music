@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.assistant.providers.execution import StructuredModelRequest, StructuredModelResult
+from app.assistant.schema_diagnostics import safe_validation_diagnostic
 from app.assistant.tags import DND_STARTER_TAG_GROUPS, TagUsage
 
 MODEL_TAG_CLEANUP_INPUT_CONTRACT: Literal[
@@ -140,9 +141,10 @@ class TagCleanupQualityEvaluationResult(_StrictModel):
 
 
 class ModelTagCleanupError(RuntimeError):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, diagnostic: str | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.diagnostic = diagnostic
 
 
 StructuredCleanupExecutor = Callable[
@@ -186,8 +188,12 @@ def suggest_model_tag_cleanup(
                 "Target must be an exact used tag or starter tag. Never invent a tag, "
                 "rename a starter tag, create source/target chains, or suggest a "
                 "subjective merge when both labels could carry distinct useful meaning. "
-                "Prefer no suggestion when uncertain. The schema_version must be "
-                f"{MODEL_TAG_CLEANUP_OUTPUT_CONTRACT}."
+                "Prefer no suggestion when uncertain. Source, target, and reason must be "
+                "strings; confidence must be high, medium, or low. The schema_version must be "
+                f"{MODEL_TAG_CLEANUP_OUTPUT_CONTRACT}. Example JSON shape: "
+                '{"schema_version":"assistant-model-tag-cleanup-output/v1",'
+                '"suggestions":[]}. Fill each non-empty suggestion with exactly source, '
+                "target, confidence, and reason."
             ),
             user_prompt=model_input.model_dump_json(),
             max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
@@ -200,7 +206,10 @@ def suggest_model_tag_cleanup(
     try:
         output = ModelTagCleanupOutput.model_validate(result.payload)
     except ValidationError as exc:
-        raise ModelTagCleanupError("model_output_schema_invalid") from exc
+        raise ModelTagCleanupError(
+            "model_output_schema_invalid",
+            diagnostic=safe_validation_diagnostic(exc, ModelTagCleanupOutput),
+        ) from exc
 
     used_tags = {item.tag for item in usage}
     allowed_targets = used_tags | _STARTER_TAG_SET
@@ -267,7 +276,10 @@ def evaluate_model_tag_cleanup(
                     f"expected at most {case.maximum_suggestions}"
                 )
         except ModelTagCleanupError as exc:
-            failures.append(f"Cleanup model error: {exc.code}")
+            failure = f"Cleanup model error: {exc.code}"
+            if exc.diagnostic is not None:
+                failure += f" ({exc.diagnostic})"
+            failures.append(failure)
         results.append(
             TagCleanupQualityCaseResult(
                 id=case.id,

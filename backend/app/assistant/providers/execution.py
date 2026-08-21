@@ -17,7 +17,7 @@ from app.assistant.providers.transport import (
     safe_http_error_code,
 )
 
-CONFORMANCE_CONTRACT = "assistant-provider-conformance/v1"
+CONFORMANCE_CONTRACT = "assistant-provider-conformance/v2"
 _MAX_EXECUTION_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
@@ -121,6 +121,7 @@ def _execute_openai_compatible(
                     request.max_output_tokens,
                     target.max_output_tokens,
                 ),
+                "response_format": {"type": "json_object"},
             },
         )
     except ProviderTransportError as exc:

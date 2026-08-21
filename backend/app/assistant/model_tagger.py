@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.assistant.providers.execution import StructuredModelRequest, StructuredModelResult
+from app.assistant.schema_diagnostics import safe_validation_diagnostic
 from app.assistant.tags import DND_STARTER_TAG_GROUPS
 
 MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v2"] = (
@@ -161,9 +162,10 @@ class TagQualityEvaluationResult(_StrictModel):
 
 
 class ModelTaggerError(RuntimeError):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, diagnostic: str | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.diagnostic = diagnostic
 
 
 StructuredTaggerExecutor = Callable[[StructuredModelRequest], StructuredModelResult]
@@ -203,7 +205,12 @@ def tag_tracks(
                 "instrument, genre, setting, scene, or D&D context. "
                 "Numeric axes must be between 0 and 1. Evidence must briefly cite only "
                 "the supplied metadata or numeric signal evidence. The schema_version must be "
-                f"{MODEL_TAGGER_OUTPUT_CONTRACT}."
+                f"{MODEL_TAGGER_OUTPUT_CONTRACT}. Example JSON shape for one track: "
+                '{"schema_version":"assistant-music-tagger-output/v1","tracks":['
+                f'{{"track_id":{model_input.tracks[0].track_id},"tags":[],"energy":0.5,'
+                '"brightness":0.5,"tension":0.5,"confidence":"low",'
+                '"evidence":["Metadata is insufficient for a specific tag"]}]}. '
+                "The example teaches shape only; derive every value from each supplied track."
             ),
             user_prompt=model_input.model_dump_json(),
             max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
@@ -216,7 +223,10 @@ def tag_tracks(
     try:
         output = ModelTaggerOutput.model_validate(result.payload)
     except ValidationError as exc:
-        raise ModelTaggerError("model_output_schema_invalid") from exc
+        raise ModelTaggerError(
+            "model_output_schema_invalid",
+            diagnostic=safe_validation_diagnostic(exc, ModelTaggerOutput),
+        ) from exc
     expected_ids = {track.track_id for track in tracks}
     actual_ids = {track.track_id for track in output.tracks}
     if actual_ids != expected_ids:
@@ -258,7 +268,10 @@ def evaluate_music_tagger(
                     f"expected at least {case.minimum_evidence_items} item(s)"
                 )
         except ModelTaggerError as exc:
-            failures.append(f"Tagger error: {exc.code}")
+            failure = f"Tagger error: {exc.code}"
+            if exc.diagnostic is not None:
+                failure += f" ({exc.diagnostic})"
+            failures.append(failure)
         results.append(
             TagQualityCaseResult(
                 id=case.id,

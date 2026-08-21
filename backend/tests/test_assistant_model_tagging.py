@@ -121,6 +121,7 @@ def _reference_music_tagger(
     _target: object,
     request: StructuredModelRequest,
 ) -> StructuredModelResult:
+    assert "Example JSON shape" in request.system_prompt
     payload = json.loads(request.user_prompt)
     return StructuredModelResult(
         True,
@@ -287,6 +288,8 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
     with pytest.raises(ModelTaggerError) as invalid:
         tag_tracks(tracks, unknown)
     assert invalid.value.code == "model_output_schema_invalid"
+    assert invalid.value.diagnostic is not None
+    assert "invented-vibe" not in invalid.value.diagnostic
 
     def missing(_request: StructuredModelRequest) -> StructuredModelResult:
         return StructuredModelResult(
@@ -298,6 +301,8 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
     with pytest.raises(ModelTaggerError) as incomplete:
         tag_tracks(tracks, missing)
     assert incomplete.value.code == "model_output_schema_invalid"
+    assert incomplete.value.diagnostic is not None
+    assert "tracks" in incomplete.value.diagnostic
 
 
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:

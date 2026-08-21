@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.assistant.providers.execution import StructuredModelRequest, StructuredModelResult
+from app.assistant.schema_diagnostics import safe_validation_diagnostic
 
 EQ_DRAFT_INPUT_CONTRACT: Literal["assistant-eq-draft-input/v1"] = (
     "assistant-eq-draft-input/v1"
@@ -135,9 +136,10 @@ class EqQualityEvaluationResult(_StrictModel):
 
 
 class ModelEqError(RuntimeError):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, diagnostic: str | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.diagnostic = diagnostic
 
 
 StructuredEqExecutor = Callable[[StructuredModelRequest], StructuredModelResult]
@@ -172,7 +174,11 @@ def generate_eq_draft(
                 "numbers in the supplied frequency order, each from -12 to +12 in "
                 "0.5 dB steps. Prefer small changes, preserve headroom, and mention "
                 "uncertainty or playback-specific risks in cautions. The schema_version "
-                f"must be {EQ_DRAFT_OUTPUT_CONTRACT}."
+                f"must be {EQ_DRAFT_OUTPUT_CONTRACT}. Example JSON shape: "
+                '{"schema_version":"assistant-eq-draft-output/v1",'
+                '"gains_db":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],'
+                '"rationale":"Neutral example; adapt gains to the supplied goal.",'
+                '"cautions":["Review on the intended speakers."]}.'
             ),
             user_prompt=model_input.model_dump_json(),
             max_output_tokens=_MAX_OUTPUT_TOKENS,
@@ -185,7 +191,10 @@ def generate_eq_draft(
     try:
         output = EqDraftOutput.model_validate(result.payload)
     except ValidationError as exc:
-        raise ModelEqError("model_output_schema_invalid") from exc
+        raise ModelEqError(
+            "model_output_schema_invalid",
+            diagnostic=safe_validation_diagnostic(exc, EqDraftOutput),
+        ) from exc
     return EqPresetDraft(
         name=name,
         goal=goal,
@@ -228,7 +237,10 @@ def evaluate_eq_model(
                         f"{expected.maximum_gain_db:g} dB."
                     )
         except ModelEqError as exc:
-            failures.append(f"EQ model error: {exc.code}")
+            failure = f"EQ model error: {exc.code}"
+            if exc.diagnostic is not None:
+                failure += f" ({exc.diagnostic})"
+            failures.append(failure)
         results.append(
             EqQualityCaseResult(
                 id=case.id,

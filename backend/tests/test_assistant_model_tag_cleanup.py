@@ -97,6 +97,7 @@ def _reference_cleanup_model(
     _target: object,
     request: StructuredModelRequest,
 ) -> StructuredModelResult:
+    assert "Example JSON shape" in request.system_prompt
     payload = json.loads(request.user_prompt)
     used = {item["tag"] for item in payload["used_tags"]}
     allowed = used | set(payload["starter_tags"])
@@ -240,6 +241,33 @@ def test_cleanup_model_rejects_unknown_targets_and_chained_renames() -> None:
                 ]
             ),
         )
+
+
+def test_cleanup_model_reports_safe_schema_diagnostic() -> None:
+    usage = [TagUsage(tag="inn", track_count=3)]
+
+    with pytest.raises(ModelTagCleanupError) as invalid:
+        suggest_model_tag_cleanup(
+            usage,
+            lambda _request: StructuredModelResult(
+                True,
+                None,
+                {
+                    "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
+                    "suggestions": [
+                        {
+                            "source": "inn",
+                            "target": "tavern",
+                            "reason": "Clear synonym",
+                        }
+                    ],
+                },
+            ),
+        )
+
+    assert invalid.value.code == "model_output_schema_invalid"
+    assert invalid.value.diagnostic is not None
+    assert "suggestions.0.confidence" in invalid.value.diagnostic
 
 
 def test_reference_cleanup_model_passes_fixed_quality_suite() -> None:

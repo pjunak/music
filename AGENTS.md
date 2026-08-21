@@ -182,7 +182,11 @@ Runtime data lives outside the image.
   enable a role until the operator explicitly verifies its connection and its exact runtime
   configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the
   event loop, bounded by request size, time, and response size, and protected against redirects and
-  unsafe destinations. Feature code resolves usable roles through `prepare_role_execution()` and
+  unsafe destinations. OpenAI-compatible structured requests must use JSON-object response mode,
+  and each fixed feature prompt must include a concrete example of its strict output shape. Include
+  the versioned conformance contract in the role runtime fingerprint so a transport-contract change
+  makes existing model tests and quality results stale instead of silently reusing them. Feature
+  code resolves usable roles through `prepare_role_execution()` and
   owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
   endpoint. Saving, verifying, or testing a role does not authorize sending library data or
   replacing a local engine. Preserve the Assistant credential master key separately from database

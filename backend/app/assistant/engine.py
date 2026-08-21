@@ -75,7 +75,13 @@ class PlaylistSuggestionEngine(Protocol):
 class SuggestionEngineError(RuntimeError):
     """An engine failure that is safe to expose in synthetic evaluation output."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, diagnostic: str | None = None) -> None:
         safe_code = code if re.fullmatch(r"[a-z0-9_]{1,64}", code) else "engine_failure"
         super().__init__(safe_code)
         self.code = safe_code
+        self.diagnostic = (
+            diagnostic
+            if diagnostic is not None
+            and re.fullmatch(r"[a-z0-9_.<>:; -]{1,256}", diagnostic)
+            else None
+        )

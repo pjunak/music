@@ -1292,6 +1292,48 @@ def test_role_requires_verified_connection_and_model_test_before_enablement(
     assert target.api_key == TEST_PROVIDER_API_KEY
 
 
+def test_conformance_contract_change_invalidates_existing_model_test(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _create_connection(auth_client)
+    _verify_success(monkeypatch)
+    assert auth_client.post(
+        f"/api/assistant/providers/connections/{created['id']}/verify"
+    ).status_code == 200
+    role_payload = {
+        "connection_id": created["id"],
+        "model_id": "planner-large",
+        "enabled": False,
+    }
+    assert auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json=role_payload,
+    ).status_code == 200
+    _conformance_success(monkeypatch)
+    assert auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/test"
+    ).status_code == 200
+    role_payload["enabled"] = True
+    assert auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json=role_payload,
+    ).status_code == 200
+
+    monkeypatch.setattr(
+        "app.assistant.providers.service.CONFORMANCE_CONTRACT",
+        "assistant-provider-conformance/test-next-version",
+    )
+    roles = auth_client.get("/api/assistant/providers/roles")
+    planner = next(
+        item for item in roles.json() if item["role_id"] == "playlist_planner"
+    )
+
+    assert planner["enabled"] is True
+    assert planner["effective_enabled"] is False
+    assert planner["conformance_status"] == "never"
+
+
 def test_reserved_roles_cannot_be_configured_or_tested(
     auth_client: TestClient,
 ) -> None:

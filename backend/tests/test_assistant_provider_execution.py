@@ -66,6 +66,7 @@ def test_execution_normalizes_structured_response_and_usage(
             {"role": "user", "content": "user"},
         ],
         "max_tokens": 512,
+        "response_format": {"type": "json_object"},
     }
 
 
@@ -124,6 +125,7 @@ def test_conformance_requires_exact_challenge_response(
         assert isinstance(payload, dict)
         messages = payload["messages"]
         assert isinstance(messages, list)
+        assert payload["response_format"] == {"type": "json_object"}
         return JsonHttpResponse(
             200,
             {

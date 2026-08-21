@@ -184,10 +184,11 @@ def test_eq_contract_builds_only_canonical_bands() -> None:
     assert draft.bands[3].gain == 2.0
     assert json.loads(observed[0].user_prompt)["goal"] == "warm wooden tavern"
     assert "untrusted user data" in observed[0].system_prompt
+    assert "Example JSON shape" in observed[0].system_prompt
 
 
 def test_eq_contract_rejects_non_half_db_steps() -> None:
-    def invalid(_request: StructuredModelRequest) -> StructuredModelResult:
+    def invalid_output(_request: StructuredModelRequest) -> StructuredModelResult:
         return StructuredModelResult(
             True,
             None,
@@ -199,8 +200,10 @@ def test_eq_contract_rejects_non_half_db_steps() -> None:
             },
         )
 
-    with pytest.raises(ModelEqError, match="model_output_schema_invalid"):
-        generate_eq_draft("Invalid", "some sound goal", invalid)
+    with pytest.raises(ModelEqError, match="model_output_schema_invalid") as raised:
+        generate_eq_draft("Invalid", "some sound goal", invalid_output)
+    assert raised.value.diagnostic is not None
+    assert "gains_db" in raised.value.diagnostic
 
 
 def test_eq_endpoints_are_consent_bound_durable_and_review_only(

@@ -9,6 +9,13 @@
 dedicated feature contracts: playlist planning, music tagging, manual-tag cleanup,
 and EQ drafting. It remains unavailable as a general prompt endpoint.
 
+**Implementation follow-up (2026-08-22):** Structured requests now enable the
+OpenAI-compatible JSON-object response mode and every feature prompt includes a
+concrete, non-biasing output example. The versioned conformance contract is part
+of the role runtime fingerprint, so this transport change makes previous model
+tests and quality reports stale. Schema failures expose only a bounded field path
+and validation type; provider-generated values remain private.
+
 ## Context
 
 Provider connections and task roles can be configured without proving that a
@@ -23,8 +30,9 @@ minimization, output validation, review, and authoring boundaries.
   request limits, response limits, JSON decoding, and redirect rejection in one
   transport shared by connection verification and model execution.
 - Keep provider request shapes behind adapter functions. The initial
-  `openai-compatible/v1` execution adapter calls `/chat/completions`; future
-  adapter differences do not leak into roles or Assistant features.
+  `openai-compatible/v1` execution adapter calls `/chat/completions` with
+  `response_format: {"type": "json_object"}`; future adapter differences do not
+  leak into roles or Assistant features.
 - Normalize successful model output to one JSON object plus bounded model,
   finish-reason, and usage metadata. Markdown-wrapped JSON, arrays, prose, and
   malformed provider envelopes fail closed with safe error codes. Raw prompts,
@@ -34,8 +42,9 @@ minimization, output validation, review, and authoring boundaries.
   role. It sends a random one-time challenge and synthetic contract identifier,
   then requires the model to copy both exactly in a three-field JSON object.
 - Bind a passing conformance result to a fingerprint of the connection secret
-  and network settings, role, model, timeout, and output-token limit. Changing
-  any runtime input or explicitly re-verifying the connection clears the result.
+  and network settings, role, model, timeout, output-token limit, and versioned
+  conformance contract. Changing any runtime input, upgrading that execution
+  contract, or explicitly re-verifying the connection clears the result.
   A role is effective only while its connection is verified, its encrypted
   credential is readable, it is enabled, and its current fingerprint has passed.
 - Make no automatic provider retries. A retry may duplicate cost or provider-side

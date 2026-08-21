@@ -427,11 +427,12 @@ def _engine_error_result(
     case: PlaylistEvaluationCase,
     error: Exception,
 ) -> EvaluationCaseResult:
-    failure = (
-        f"engine error: {error.code}"
-        if isinstance(error, SuggestionEngineError)
-        else f"engine raised {type(error).__name__}"
-    )
+    if isinstance(error, SuggestionEngineError):
+        failure = f"engine error: {error.code}"
+        if error.diagnostic is not None:
+            failure += f" ({error.diagnostic})"
+    else:
+        failure = f"engine raised {type(error).__name__}"
     return EvaluationCaseResult(
         id=case.id,
         description=case.description,
