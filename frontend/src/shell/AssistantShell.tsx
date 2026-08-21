@@ -5,7 +5,6 @@ const ASSISTANT_TABS = [
   { to: "eq", label: "EQ Assistant" },
   { to: "analysis", label: "Library Analysis" },
   { to: "ai", label: "AI Setup" },
-  { to: "cleanup", label: "Cleanup" },
 ];
 
 /**

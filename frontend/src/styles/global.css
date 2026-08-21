@@ -4841,16 +4841,6 @@ kbd,
   background: transparent;
   color: var(--muted);
 }
-.assistant-placeholder {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  overflow: auto;
-  padding: var(--space-6);
-}
-.assistant-placeholder-card {
-  width: min(100%, 620px);
-}
 .assistant-analysis-view {
   flex: 1;
   min-height: 0;
@@ -6736,8 +6726,7 @@ input.volume-slider::-moz-range-thumb {
 @media (max-width: 700px) {
   .assistant-playlist-view,
   .assistant-analysis-view,
-  .assistant-provider-view,
-  .assistant-placeholder {
+  .assistant-provider-view {
     padding: var(--space-4);
   }
   .assistant-page-header,

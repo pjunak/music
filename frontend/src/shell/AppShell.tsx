@@ -25,7 +25,6 @@ import { PlaylistsView } from "@/views/PlaylistsView";
 import { PresetsView } from "@/views/PresetsView";
 import { SettingsView } from "@/views/SettingsView";
 import { SoundboardsView } from "@/views/SoundboardsView";
-import { AssistantCleanupView } from "@/views/assistant/AssistantCleanupView";
 import { LibraryAnalysisView } from "@/views/assistant/LibraryAnalysisView";
 import { PlaylistBuilderView } from "@/views/assistant/PlaylistBuilderView";
 import { EqAssistantView } from "@/views/assistant/EqAssistantView";
@@ -204,7 +203,8 @@ export default function AppShell() {
                 </Suspense>
               }
             />
-            <Route path="cleanup" element={<AssistantCleanupView />} />
+            {/* Preserve bookmarks for the removed placeholder page. */}
+            <Route path="cleanup" element={<Navigate to="/library" replace />} />
           </Route>
           {/* Legacy routes — old top-level paths keep working for bookmarks
               and external links by redirecting into the new IA. */}
