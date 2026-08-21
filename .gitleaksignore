@@ -1,0 +1,4 @@
+# Exact historical false positive: this was a synthetic key in a test, never a
+# provider credential. Keep the exception fingerprint-scoped so all other
+# generic API-key findings, including findings in the same test file, still fail.
+f501bbe147c85ad61b6cdcd0727df71750f0d8a2:backend/tests/test_assistant_providers.py:generic-api-key:1009

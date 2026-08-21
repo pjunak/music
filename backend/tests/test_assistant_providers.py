@@ -1003,10 +1003,11 @@ def test_saved_connection_credential_cannot_be_replaced_in_place(
     auth_client: TestClient,
 ) -> None:
     created = _create_connection(auth_client)
+    replacement_key = "-".join(("test", "replacement", "9999"))
 
     response = auth_client.put(
         f"/api/assistant/providers/connections/{created['id']}",
-        json={"api_key": "unexpected-replacement-key-9999"},
+        json={"api_key": replacement_key},
     )
 
     assert response.status_code == 409
