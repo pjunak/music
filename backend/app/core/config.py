@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # the final key file and never chooses or changes this path through the API.
     assistant_credential_key_file: Path | None = None
 
+    # Optional non-secret display hint for deployment-specific setup guidance.
+    # This is a host path and is never used for application filesystem access.
+    assistant_credential_host_directory_hint: str | None = None
+
     # Upload guard rails (per request). Generous enough for hi-res FLAC albums;
     # they exist to stop an authenticated client from exhausting the volume
     # backing MUSIC_DIR/SFX_LIBRARY_DIR with one unbounded request.

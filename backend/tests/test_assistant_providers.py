@@ -6,6 +6,7 @@ import os
 import stat
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,6 +16,7 @@ from pydantic import SecretStr
 from sqlalchemy import delete
 
 from app.assistant.model_playlist import MODEL_PLAYLIST_OUTPUT_CONTRACT
+from app.assistant.providers.credentials import CredentialVaultError
 from app.assistant.providers.execution import (
     ProviderConformanceResult,
     StructuredModelRequest,
@@ -36,6 +38,9 @@ from app.core.db import SessionLocal
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
+from app.models.background_job import BackgroundJob
+
+from .conftest import TEST_PASSWORD
 
 PLAYLIST_QUALITY_JOB_KIND = "assistant.model-evaluation.playlist-quality-v1"
 
@@ -43,13 +48,21 @@ PLAYLIST_QUALITY_JOB_KIND = "assistant.model-evaluation.playlist-quality-v1"
 @pytest.fixture(autouse=True)
 def _clean_provider_configuration() -> Iterator[None]:
     with SessionLocal() as db:
+        db.execute(delete(AssistantModelEvaluation))
         db.execute(delete(AssistantModelRole))
         db.execute(delete(AssistantProviderConnection))
+        db.execute(
+            delete(BackgroundJob).where(BackgroundJob.kind.like("assistant.model%"))
+        )
         db.commit()
     yield
     with SessionLocal() as db:
+        db.execute(delete(AssistantModelEvaluation))
         db.execute(delete(AssistantModelRole))
         db.execute(delete(AssistantProviderConnection))
+        db.execute(
+            delete(BackgroundJob).where(BackgroundJob.kind.like("assistant.model%"))
+        )
         db.commit()
 
 
@@ -72,6 +85,25 @@ def _create_connection(client: TestClient, **overrides: object) -> dict[str, obj
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+@contextmanager
+def _file_backed_credential_storage(tmp_path: Path) -> Iterator[Path]:
+    settings = get_settings()
+    previous_key = settings.assistant_credential_key
+    previous_file = settings.assistant_credential_key_file
+    secrets_dir = tmp_path / "assistant-secrets"
+    secrets_dir.mkdir(mode=0o700)
+    if os.name == "posix":
+        secrets_dir.chmod(0o700)
+    key_file = secrets_dir / "assistant-credential.key"
+    settings.assistant_credential_key = None
+    settings.assistant_credential_key_file = key_file
+    try:
+        yield key_file
+    finally:
+        settings.assistant_credential_key = previous_key
+        settings.assistant_credential_key_file = previous_file
 
 
 def _verify_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,6 +224,10 @@ def test_provider_endpoints_require_authentication(client: TestClient) -> None:
     requests = [
         client.get("/api/assistant/providers/status"),
         client.post("/api/assistant/providers/credential-storage/initialize"),
+        client.post(
+            "/api/assistant/providers/credential-storage/reset",
+            json={"current_password": TEST_PASSWORD},
+        ),
         client.get("/api/assistant/providers/connections"),
         client.post(
             "/api/assistant/providers/connections",
@@ -372,6 +408,7 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
     assert payload["credential_storage_source"] == "environment"
     assert len(payload["credential_storage_key_id"]) == 16
     assert payload["credential_storage_key_file_path"] is None
+    assert payload["credential_storage_host_directory_hint"] is None
     assert payload["credential_storage_can_initialize"] is False
     assert (
         payload["credential_storage_initialization_error"]
@@ -429,6 +466,23 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         "audio_analyzer",
     ):
         assert descriptions[role_id].startswith("Reserved for")
+
+
+def test_status_exposes_nonsecret_credential_host_directory_hint(
+    auth_client: TestClient,
+) -> None:
+    settings = get_settings()
+    previous = settings.assistant_credential_host_directory_hint
+    settings.assistant_credential_host_directory_hint = "/opt/stacks/music/secrets"
+    try:
+        response = auth_client.get("/api/assistant/providers/status")
+    finally:
+        settings.assistant_credential_host_directory_hint = previous
+
+    assert response.status_code == 200
+    assert response.json()["credential_storage_host_directory_hint"] == (
+        "/opt/stacks/music/secrets"
+    )
 
 
 def test_environment_master_key_takes_precedence_over_configured_file(
@@ -540,6 +594,212 @@ def test_authenticated_ui_can_initialize_fixed_key_file_storage(
     if os.name == "posix":
         assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
     assert created.status_code == 201, created.text
+
+
+def test_complete_storage_reset_requires_current_password(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    with _file_backed_credential_storage(tmp_path) as key_file:
+        assert auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        ).status_code == 201
+        created = _create_connection(auth_client)
+
+        response = auth_client.post(
+            "/api/assistant/providers/credential-storage/reset",
+            json={"current_password": "wrong-password"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "current_password_invalid"
+        assert key_file.exists()
+        with SessionLocal() as db:
+            row = db.get(AssistantProviderConnection, created["id"])
+            assert row is not None
+            assert row.encrypted_api_key
+
+
+def test_complete_storage_reset_erases_credentials_then_file_key(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    with _file_backed_credential_storage(tmp_path) as key_file:
+        assert auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        ).status_code == 201
+        created = _create_connection(auth_client)
+        with SessionLocal() as db:
+            connection = db.get(AssistantProviderConnection, created["id"])
+            assert connection is not None
+            connection.verification_status = "verified"
+            connection.verified_models_json = '["planner-large"]'
+            connection.verified_capabilities_json = '["structured-text/v1"]'
+            role = AssistantModelRole(
+                role_id="playlist_planner",
+                connection_id=connection.id,
+                model_id="planner-large",
+                enabled=True,
+                conformance_status="passed",
+                conformance_fingerprint="f" * 64,
+            )
+            job = BackgroundJob(
+                id="reset-quality-job",
+                kind=PLAYLIST_QUALITY_JOB_KIND,
+                status="succeeded",
+                parameters_json="{}",
+            )
+            db.add_all((role, job))
+            db.flush()
+            db.add(
+                AssistantModelEvaluation(
+                    role_id=role.role_id,
+                    evaluation_id="playlist-quality-v1",
+                    role_fingerprint="f" * 64,
+                    status="passed",
+                    suite_id="playlist-quality-v1",
+                    engine_id="configured-model/v1",
+                    passed_cases=1,
+                    total_cases=1,
+                    job_id=job.id,
+                )
+            )
+            db.commit()
+
+        response = auth_client.post(
+            "/api/assistant/providers/credential-storage/reset",
+            json={"current_password": TEST_PASSWORD},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["deleted_credentials"] == 1
+        assert payload["master_key_removed"] is True
+        assert payload["master_key_removal_error"] is None
+        assert payload["status"]["credential_storage_ready"] is False
+        assert payload["status"]["credential_storage_can_initialize"] is True
+        assert not key_file.exists()
+        with SessionLocal() as db:
+            connection = db.get(AssistantProviderConnection, created["id"])
+            assert connection is not None
+            assert connection.encrypted_api_key == ""
+            assert connection.api_key_nonce == ""
+            assert connection.api_key_hint == ""
+            assert connection.verification_status == "never"
+            assert connection.verified_models_json == "[]"
+            assert connection.verified_capabilities_json == "[]"
+            stored_role = db.get(AssistantModelRole, "playlist_planner")
+            assert stored_role is not None
+            assert stored_role.enabled is True
+            assert stored_role.conformance_status == "never"
+            assert stored_role.conformance_fingerprint is None
+            assert db.get(
+                AssistantModelEvaluation,
+                ("playlist_planner", "playlist-quality-v1"),
+            ) is None
+
+        initialized = auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        )
+        assert initialized.status_code == 201, initialized.text
+        replacement = auth_client.put(
+            f"/api/assistant/providers/connections/{created['id']}",
+            json={"api_key": "replacement-provider-key-9999"},
+        )
+        assert replacement.status_code == 200, replacement.text
+        assert replacement.json()["key_hint"] == "••••9999"
+
+
+def test_complete_storage_reset_refuses_environment_managed_key(
+    auth_client: TestClient,
+) -> None:
+    created = _create_connection(auth_client)
+
+    response = auth_client.post(
+        "/api/assistant/providers/credential-storage/reset",
+        json={"current_password": TEST_PASSWORD},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == (
+        "master_key_managed_by_environment"
+    )
+    with SessionLocal() as db:
+        row = db.get(AssistantProviderConnection, created["id"])
+        assert row is not None
+        assert row.encrypted_api_key
+
+
+def test_complete_storage_reset_refuses_active_model_job(
+    auth_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    with _file_backed_credential_storage(tmp_path) as key_file:
+        assert auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        ).status_code == 201
+        created = _create_connection(auth_client)
+        with SessionLocal() as db:
+            db.add(
+                BackgroundJob(
+                    id="active-provider-job",
+                    kind="assistant.model-playlist-suggestion",
+                    status="queued",
+                    parameters_json="{}",
+                )
+            )
+            db.commit()
+
+        response = auth_client.post(
+            "/api/assistant/providers/credential-storage/reset",
+            json={"current_password": TEST_PASSWORD},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "model_job_active"
+        assert key_file.exists()
+        with SessionLocal() as db:
+            row = db.get(AssistantProviderConnection, created["id"])
+            assert row is not None
+            assert row.encrypted_api_key
+
+
+def test_complete_storage_reset_reports_key_file_removal_failure(
+    auth_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _file_backed_credential_storage(tmp_path) as key_file:
+        assert auth_client.post(
+            "/api/assistant/providers/credential-storage/initialize"
+        ).status_code == 201
+        created = _create_connection(auth_client)
+
+        def fail_removal(_key_file: Path) -> bool:
+            raise CredentialVaultError("master_key_file_delete_failed")
+
+        monkeypatch.setattr(
+            "app.assistant.providers.service.remove_credential_storage_key_file",
+            fail_removal,
+        )
+        response = auth_client.post(
+            "/api/assistant/providers/credential-storage/reset",
+            json={"current_password": TEST_PASSWORD},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["deleted_credentials"] == 1
+        assert payload["master_key_removed"] is False
+        assert payload["master_key_removal_error"] == (
+            "master_key_file_delete_failed"
+        )
+        assert payload["status"]["credential_storage_ready"] is True
+        assert key_file.exists()
+        with SessionLocal() as db:
+            row = db.get(AssistantProviderConnection, created["id"])
+            assert row is not None
+            assert row.encrypted_api_key == ""
 
 
 def test_key_file_initialization_never_overwrites_existing_file(
@@ -739,7 +999,24 @@ def test_changing_connection_inputs_resets_verification(
     assert response.json()["last_verified_at"] is None
 
 
-def test_connection_credential_can_be_deleted_and_replaced(
+def test_saved_connection_credential_cannot_be_replaced_in_place(
+    auth_client: TestClient,
+) -> None:
+    created = _create_connection(auth_client)
+
+    response = auth_client.put(
+        f"/api/assistant/providers/connections/{created['id']}",
+        json={"api_key": "unexpected-replacement-key-9999"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "credential_already_saved"
+    listed = auth_client.get("/api/assistant/providers/connections")
+    assert listed.status_code == 200
+    assert listed.json()[0]["key_hint"] == "••••1234"
+
+
+def test_connection_credential_can_be_deleted_then_replaced(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

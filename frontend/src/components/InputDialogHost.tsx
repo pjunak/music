@@ -17,7 +17,11 @@ export function InputDialogHost() {
   // Reset state every time a new request opens so a stale value from the
   // previous prompt can't leak in, then focus + select the field.
   useEffect(() => {
-    if (current === null) return;
+    if (current === null) {
+      setValue("");
+      setError(null);
+      return;
+    }
     setValue(current.initial ?? "");
     setError(null);
     queueMicrotask(() => {
@@ -71,7 +75,7 @@ export function InputDialogHost() {
       <Field label={current.label} error={error ?? undefined}>
         <input
           ref={inputRef}
-          type="text"
+          type={current.type ?? "text"}
           value={value}
           onChange={(e) => {
             setValue(e.target.value);

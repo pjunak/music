@@ -15,6 +15,8 @@ interface InputRequest {
   initial?: string;
   /** Placeholder when the input is empty. */
   placeholder?: string;
+  /** Input presentation. Password values are cleared when the dialog closes. */
+  type?: "text" | "password";
   /** HTML pattern attribute for inline browser validation. */
   pattern?: string;
   /** Tooltip explaining the pattern when validation fails. */

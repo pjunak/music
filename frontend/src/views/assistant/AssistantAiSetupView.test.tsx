@@ -32,6 +32,7 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
     assistantProvidersApi: {
       getStatus: vi.fn(),
       initializeCredentialStorage: vi.fn(),
+      resetCredentialStorage: vi.fn(),
       listConnections: vi.fn(),
       createConnection: vi.fn(),
       updateConnection: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
 });
 
 vi.mock("@/components/confirmDialog", () => ({ confirmDialog: vi.fn() }));
+vi.mock("@/components/inputDialog", () => ({ inputDialog: vi.fn() }));
 
 vi.mock("@/core/toast", () => ({
   toast: {
@@ -58,6 +60,7 @@ vi.mock("@/core/toast", () => ({
 }));
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { inputDialog } from "@/components/inputDialog";
 import { jobsApi } from "@/core/api";
 import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
@@ -70,6 +73,7 @@ const frameworkStatus: ProviderFrameworkStatus = {
   credential_storage_source: "environment",
   credential_storage_key_id: "0123456789abcdef",
   credential_storage_key_file_path: null,
+  credential_storage_host_directory_hint: null,
   credential_storage_can_initialize: false,
   credential_storage_initialization_error: "master_key_already_configured",
   capabilities: [
@@ -216,6 +220,7 @@ beforeEach(() => {
   vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([]);
   vi.mocked(jobsApi.list).mockResolvedValue([]);
   vi.mocked(confirmDialog).mockResolvedValue(true);
+  vi.mocked(inputDialog).mockResolvedValue("test-password");
 });
 
 describe("AssistantAiSetupView", () => {
@@ -401,6 +406,21 @@ describe("AssistantAiSetupView", () => {
 
     expect(await screen.findByText("API key saved")).toBeInTheDocument();
     expect(screen.getByText("••••1234")).toBeInTheDocument();
+    const connectionCard = screen
+      .getByRole("heading", { name: "Hosted models" })
+      .closest("article");
+    expect(connectionCard).not.toBeNull();
+    await user.click(
+      within(connectionCard as HTMLElement).getByRole("button", { name: "Change" }),
+    );
+    expect(
+      within(connectionCard as HTMLElement).getByText(
+        /cannot be replaced in place/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(connectionCard as HTMLElement).queryByLabelText("Replace API key"),
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Delete API key" }));
 
     expect(confirmDialog).toHaveBeenCalledWith({
@@ -550,6 +570,7 @@ describe("AssistantAiSetupView", () => {
       credential_storage_key_id: null,
       credential_storage_key_file_path:
         "/run/music-secrets/assistant-credential.key",
+      credential_storage_host_directory_hint: "/opt/stacks/music/secrets",
       credential_storage_can_initialize: false,
       credential_storage_initialization_error:
         "master_key_directory_unavailable",
@@ -563,6 +584,14 @@ describe("AssistantAiSetupView", () => {
       screen.getByText(/Local analysis and playlist building remain available/),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show maintenance guide" }),
+    );
+    expect(
+      screen.getByText(
+        "sudo install -d -m 0700 -o 1000 -g 1000 /opt/stacks/music/secrets",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("initializes fixed key-file storage from the authenticated UI", async () => {
@@ -609,7 +638,7 @@ describe("AssistantAiSetupView", () => {
     );
   });
 
-  it("shows console-only removal and safe rotation guidance", async () => {
+  it("shows UI reset and safe rotation guidance for file storage", async () => {
     vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({
       ...frameworkStatus,
       credential_storage_source: "file",
@@ -618,21 +647,92 @@ describe("AssistantAiSetupView", () => {
     });
     render(<AssistantAiSetupView />);
 
+    expect(
+      await screen.findByRole("button", { name: "Reset AI secure storage" }),
+    ).toBeInTheDocument();
+
     await userEvent.click(
-      await screen.findByRole("button", { name: "Show maintenance guide" }),
+      screen.getByRole("button", { name: "Show maintenance guide" }),
     );
 
     expect(screen.getByText("Server maintenance")).toBeInTheDocument();
     expect(
-      screen.getByText(/cannot replace or remove the master key from the browser/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "sudo docker exec -u 0 music rm -- '/run/music-secrets/assistant-credential.key'",
-      ),
+      screen.getByText(/erases every saved provider key before it removes/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/assistant-credentials rotate/),
+    ).toBeInTheDocument();
+  });
+
+  it("password-confirms and completely resets file-backed AI storage", async () => {
+    const fileStorage: ProviderFrameworkStatus = {
+      ...frameworkStatus,
+      credential_storage_source: "file",
+      credential_storage_key_file_path:
+        "/run/music-secrets/assistant-credential.key",
+    };
+    const resetStorage: ProviderFrameworkStatus = {
+      ...fileStorage,
+      credential_storage_ready: false,
+      credential_storage_error: "master_key_not_configured",
+      credential_storage_source: null,
+      credential_storage_key_id: null,
+      credential_storage_can_initialize: true,
+      credential_storage_initialization_error: null,
+    };
+    vi.mocked(assistantProvidersApi.getStatus)
+      .mockResolvedValueOnce(fileStorage)
+      .mockResolvedValue(resetStorage);
+    vi.mocked(assistantProvidersApi.listConnections)
+      .mockResolvedValueOnce([connection])
+      .mockResolvedValue([
+        {
+          ...connection,
+          credential_saved: false,
+          key_hint: null,
+          verification_status: "never",
+          verified_models: [],
+          verified_capability_ids: [],
+          last_verified_at: null,
+        },
+      ]);
+    vi.mocked(assistantProvidersApi.resetCredentialStorage).mockResolvedValue({
+      deleted_credentials: 1,
+      master_key_removed: true,
+      master_key_removal_error: null,
+      status: resetStorage,
+    });
+    render(<AssistantAiSetupView />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Reset AI secure storage" }),
+    );
+
+    expect(confirmDialog).toHaveBeenCalledWith({
+      title: "Reset all AI secure storage?",
+      body: expect.stringContaining("permanently deleted"),
+      confirmLabel: "Continue to password",
+      tone: "danger",
+    });
+    expect(inputDialog).toHaveBeenCalledWith({
+      title: "Confirm AI storage reset",
+      body: expect.stringContaining("not stored"),
+      label: "Current password",
+      type: "password",
+      confirmLabel: "Delete all AI credentials",
+      trim: false,
+    });
+    await waitFor(() =>
+      expect(assistantProvidersApi.resetCredentialStorage).toHaveBeenCalledWith(
+        "test-password",
+      ),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "AI secure storage reset",
+      "1 saved provider API key was deleted. Connection and task drafts were kept.",
+    );
+    expect(
+      await screen.findByRole("button", { name: "Initialize secure storage" }),
     ).toBeInTheDocument();
   });
 

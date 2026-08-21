@@ -64,7 +64,9 @@ export function ProviderConnectionCard({
       base_url: baseUrl.trim(),
       allow_private_network: allowPrivate,
     };
-    if (apiKey.trim()) payload.api_key = apiKey.trim();
+    if (!connection.credential_saved && apiKey.trim()) {
+      payload.api_key = apiKey.trim();
+    }
     try {
       await onUpdate(connection.id, payload);
       setApiKey("");
@@ -225,24 +227,25 @@ export function ProviderConnectionCard({
               onChange={(event) => setBaseUrl(event.target.value)}
             />
           </label>
-          <label className="field">
-            <span className="field-label">
-              {connection.credential_saved ? "Replace API key" : "API key"}
-            </span>
-            <input
-              type="password"
-              value={apiKey}
-              maxLength={4096}
-              autoComplete="new-password"
-              disabled={!credentialStorageReady}
-              placeholder={
-                connection.credential_saved
-                  ? "Leave empty to keep the current key"
-                  : "Enter a key to enable verification"
-              }
-              onChange={(event) => setApiKey(event.target.value)}
-            />
-          </label>
+          {connection.credential_saved ? (
+            <p className="field-hint">
+              The saved API key cannot be replaced in place. Delete it from this
+              connection first if you intentionally need to enter another key.
+            </p>
+          ) : (
+            <label className="field">
+              <span className="field-label">API key</span>
+              <input
+                type="password"
+                value={apiKey}
+                maxLength={4096}
+                autoComplete="new-password"
+                disabled={!credentialStorageReady}
+                placeholder="Enter a key to enable verification"
+                onChange={(event) => setApiKey(event.target.value)}
+              />
+            </label>
+          )}
           <label className="checkbox-row assistant-private-network">
             <input
               type="checkbox"
@@ -252,8 +255,8 @@ export function ProviderConnectionCard({
             <span>Allow a provider on my private network</span>
           </label>
           <p className="field-hint">
-            Saving or replacing a key—or changing the address, connection type, or
-            network access—requires verification again.
+            Saving a new key—or changing the address, connection type, or network
+            access—requires verification again.
           </p>
           <button
             className="btn-primary"

@@ -235,6 +235,52 @@ def initialize_credential_storage(
     return initialized
 
 
+def prepare_credential_storage_key_removal() -> Path:
+    """Resolve and validate the fixed file-backed key before database erasure."""
+
+    if _environment_key() is not None:
+        raise CredentialVaultError("master_key_managed_by_environment")
+    key_file = _key_file()
+    if key_file is None:
+        raise CredentialVaultError("master_key_file_not_configured")
+    if not key_file.is_absolute():
+        raise CredentialVaultError("master_key_file_path_not_absolute")
+    if not os.path.lexists(key_file):
+        return key_file
+    try:
+        file_stat = key_file.lstat()
+        parent_stat = key_file.parent.lstat()
+    except OSError as exc:
+        raise CredentialVaultError("master_key_file_unreadable") from exc
+    if (
+        key_file.is_symlink()
+        or not stat.S_ISREG(file_stat.st_mode)
+        or key_file.parent.is_symlink()
+        or not stat.S_ISDIR(parent_stat.st_mode)
+    ):
+        raise CredentialVaultError("master_key_file_unsafe")
+    return key_file
+
+
+def remove_credential_storage_key_file(key_file: Path) -> bool:
+    """Remove only the preflighted configured key file; never follow symlinks."""
+
+    if _environment_key() is not None or key_file != _key_file():
+        raise CredentialVaultError("master_key_storage_changed")
+    if not os.path.lexists(key_file):
+        return False
+    try:
+        file_stat = key_file.lstat()
+        if key_file.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
+            raise CredentialVaultError("master_key_file_unsafe")
+        os.unlink(key_file)
+    except CredentialVaultError:
+        raise
+    except OSError as exc:
+        raise CredentialVaultError("master_key_file_delete_failed") from exc
+    return True
+
+
 class CredentialVault:
     def __init__(self, key: bytes) -> None:
         if len(key) != _MASTER_KEY_BYTES:

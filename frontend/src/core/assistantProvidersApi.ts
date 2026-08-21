@@ -35,11 +35,19 @@ export interface ProviderFrameworkStatus {
   credential_storage_source: "environment" | "file" | null;
   credential_storage_key_id: string | null;
   credential_storage_key_file_path: string | null;
+  credential_storage_host_directory_hint: string | null;
   credential_storage_can_initialize: boolean;
   credential_storage_initialization_error: string | null;
   capabilities: ProviderCapability[];
   adapters: ProviderAdapter[];
   roles: ModelRoleDefinition[];
+}
+
+export interface ProviderCredentialStorageResetResult {
+  deleted_credentials: number;
+  master_key_removed: boolean;
+  master_key_removal_error: string | null;
+  status: ProviderFrameworkStatus;
 }
 
 export interface ProviderConnection {
@@ -135,6 +143,11 @@ export const assistantProvidersApi = {
   initializeCredentialStorage: () =>
     api.post<ProviderFrameworkStatus>(
       "/api/assistant/providers/credential-storage/initialize",
+    ),
+  resetCredentialStorage: (currentPassword: string) =>
+    api.post<ProviderCredentialStorageResetResult>(
+      "/api/assistant/providers/credential-storage/reset",
+      { current_password: currentPassword },
     ),
   listConnections: () =>
     api.get<ProviderConnection[]>("/api/assistant/providers/connections"),

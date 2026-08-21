@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import NoReturn
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DbSession
@@ -22,6 +22,8 @@ from app.assistant.providers.schemas import (
     ProviderConnectionCreate,
     ProviderConnectionOut,
     ProviderConnectionUpdate,
+    ProviderCredentialStorageReset,
+    ProviderCredentialStorageResetOut,
     ProviderFrameworkStatusOut,
     ProviderVerificationOut,
 )
@@ -39,10 +41,13 @@ from app.assistant.providers.service import (
     list_model_roles,
     prepare_role_conformance,
     prepare_verification,
+    reset_provider_credential_storage,
     update_connection,
     update_model_role,
 )
 from app.assistant.providers.verification import verify_provider_connection
+from app.core.password_attempts import password_attempt_throttle
+from app.core.security import verify_password
 from app.jobs.runner import job_runner
 from app.jobs.schemas import BackgroundJobOut, job_out
 from app.jobs.service import enqueue_unique_active_job
@@ -76,6 +81,44 @@ def initialize_provider_storage(
 ) -> ProviderFrameworkStatusOut:
     try:
         return initialize_provider_credential_storage(db)
+    except ProviderServiceError as exc:
+        _raise_http(exc)
+
+
+@router.post(
+    "/credential-storage/reset",
+    response_model=ProviderCredentialStorageResetOut,
+)
+def reset_provider_storage(
+    payload: ProviderCredentialStorageReset,
+    request: Request,
+    user: CurrentUser,
+    db: DbSession,
+) -> ProviderCredentialStorageResetOut:
+    throttle_key = request.client.host if request.client else "unknown"
+    if password_attempt_throttle.blocked(throttle_key):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "password_confirmation_throttled",
+                "message": "Too many password attempts; try again shortly.",
+            },
+        )
+    if not verify_password(
+        user.password_hash,
+        payload.current_password.get_secret_value(),
+    ):
+        password_attempt_throttle.record_failure(throttle_key)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "current_password_invalid",
+                "message": "The current account password is incorrect.",
+            },
+        )
+    password_attempt_throttle.record_success(throttle_key)
+    try:
+        return reset_provider_credential_storage(db)
     except ProviderServiceError as exc:
         _raise_http(exc)
 

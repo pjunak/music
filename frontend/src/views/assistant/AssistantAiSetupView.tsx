@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { inputDialog } from "@/components/inputDialog";
 import { type BackgroundJob, jobsApi } from "@/core/api";
 import type {
   ModelQualityEvaluation,
@@ -40,6 +41,7 @@ export function AssistantAiSetupView() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [storageInitializing, setStorageInitializing] = useState(false);
+  const [storageResetting, setStorageResetting] = useState(false);
   const [qualityEvaluations, setQualityEvaluations] = useState<
     ModelQualityEvaluation[]
   >([]);
@@ -152,6 +154,53 @@ export function AssistantAiSetupView() {
       refresh();
     } finally {
       setStorageInitializing(false);
+    }
+  }
+
+  async function resetCredentialStorage() {
+    const confirmed = await confirmDialog({
+      title: "Reset all AI secure storage?",
+      body:
+        "Every saved provider API key will be permanently deleted, all model verification and quality gates will reset, and the file-backed master key will be removed. Connection and task drafts will remain.",
+      confirmLabel: "Continue to password",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+    const currentPassword = await inputDialog({
+      title: "Confirm AI storage reset",
+      body:
+        "Enter the password for your currently signed-in Music account. This password is checked by the server and is not stored.",
+      label: "Current password",
+      type: "password",
+      confirmLabel: "Delete all AI credentials",
+      trim: false,
+    });
+    if (currentPassword === null) return;
+
+    setStorageResetting(true);
+    try {
+      const result = await assistantProvidersApi.resetCredentialStorage(
+        currentPassword,
+      );
+      setStatus(result.status);
+      refresh();
+      refreshQuality();
+      if (result.master_key_removed) {
+        toast.success(
+          "AI secure storage reset",
+          `${result.deleted_credentials} saved provider API key${result.deleted_credentials === 1 ? " was" : "s were"} deleted. Connection and task drafts were kept.`,
+        );
+      } else {
+        toast.error(
+          "Provider API keys deleted, but the master key remains",
+          "No credential still depends on that key. Retry the reset; if it still fails, SSH is needed to repair or remove the fixed key file.",
+        );
+      }
+    } catch (error) {
+      toast.error("AI secure storage could not be reset", errorMessage(error));
+      refresh();
+    } finally {
+      setStorageResetting(false);
     }
   }
 
@@ -477,7 +526,9 @@ export function AssistantAiSetupView() {
         <CredentialStorageCard
           status={status}
           busy={storageInitializing}
+          resetting={storageResetting}
           onInitialize={initializeCredentialStorage}
+          onReset={resetCredentialStorage}
         />
         <div
           className={`assistant-provider-connections-layout${

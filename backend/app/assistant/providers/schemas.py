@@ -72,11 +72,23 @@ class ProviderFrameworkStatusOut(StrictProviderModel):
     credential_storage_source: Literal["environment", "file"] | None
     credential_storage_key_id: str | None
     credential_storage_key_file_path: str | None
+    credential_storage_host_directory_hint: str | None
     credential_storage_can_initialize: bool
     credential_storage_initialization_error: str | None
     capabilities: list[ProviderCapabilityOut]
     adapters: list[ProviderAdapterOut]
     roles: list[ModelRoleDefinitionOut]
+
+
+class ProviderCredentialStorageReset(StrictProviderModel):
+    current_password: SecretStr = Field(min_length=1, max_length=256)
+
+
+class ProviderCredentialStorageResetOut(StrictProviderModel):
+    deleted_credentials: int = Field(ge=0)
+    master_key_removed: bool
+    master_key_removal_error: str | None
+    status: ProviderFrameworkStatusOut
 
 
 class ProviderConnectionCreate(StrictProviderModel):

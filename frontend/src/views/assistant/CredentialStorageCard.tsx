@@ -6,16 +6,13 @@ import { toast } from "@/core/toast";
 interface CredentialStorageCardProps {
   status: ProviderFrameworkStatus;
   busy: boolean;
+  resetting: boolean;
   onInitialize: () => Promise<void>;
+  onReset: () => Promise<void>;
 }
 
-const CONTAINER_NAME = "music";
-const HOST_SECRETS_DIRECTORY = "/srv/music-secrets";
+const DEFAULT_HOST_SECRETS_DIRECTORY = "/srv/music-secrets";
 const CONTAINER_SECRETS_DIRECTORY = "/run/music-secrets";
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
 
 function storageTitle(status: ProviderFrameworkStatus): string {
   if (status.credential_storage_ready) return "Encrypted key storage is ready";
@@ -116,23 +113,28 @@ async function copyCommand(command: string): Promise<void> {
 export function CredentialStorageCard({
   status,
   busy,
+  resetting,
   onInitialize,
+  onReset,
 }: CredentialStorageCardProps) {
   const [showGuide, setShowGuide] = useState(false);
   const keyFilePath = status.credential_storage_key_file_path;
-  const removeCommand =
-    keyFilePath && status.credential_storage_source === "file"
-      ? `sudo docker exec -u 0 ${CONTAINER_NAME} rm -- ${shellQuote(keyFilePath)}`
-      : null;
+  const hostSecretsDirectory =
+    status.credential_storage_host_directory_hint ??
+    DEFAULT_HOST_SECRETS_DIRECTORY;
   const initializationError = status.credential_storage_initialization_error;
+  const resetAvailable =
+    status.credential_storage_source === "file" ||
+    (keyFilePath !== null &&
+      initializationError === "saved_credentials_require_existing_key");
   const needsMountSetup =
     !status.credential_storage_ready &&
     (initializationError === "master_key_file_not_configured" ||
       initializationError?.startsWith("master_key_directory_"));
   const prepareDirectoryCommand =
-    `sudo install -d -m 0700 -o 1000 -g 1000 ${HOST_SECRETS_DIRECTORY}`;
+    `sudo install -d -m 0700 -o 1000 -g 1000 ${hostSecretsDirectory}`;
   const dockerMount =
-    `-v ${HOST_SECRETS_DIRECTORY}:${CONTAINER_SECRETS_DIRECTORY}`;
+    `-v ${hostSecretsDirectory}:${CONTAINER_SECRETS_DIRECTORY}`;
 
   return (
     <section
@@ -164,10 +166,20 @@ export function CredentialStorageCard({
               <button
                 className="btn-primary"
                 type="button"
-                disabled={busy}
+                disabled={busy || resetting}
                 onClick={() => void onInitialize()}
               >
                 {busy ? "Initializing…" : "Initialize secure storage"}
+              </button>
+            ) : null}
+            {resetAvailable ? (
+              <button
+                className="btn-danger"
+                type="button"
+                disabled={busy || resetting}
+                onClick={() => void onReset()}
+              >
+                {resetting ? "Resetting…" : "Reset AI secure storage"}
               </button>
             ) : null}
             <button
@@ -185,9 +197,10 @@ export function CredentialStorageCard({
           <div className="assistant-provider-storage-guide">
             <h4>Server maintenance</h4>
             <p>
-              Music deliberately cannot replace or remove the master key from the
-              browser. This prevents an accidental click from making every saved
-              provider credential unreadable.
+              File-backed storage can be reset above after an explicit warning and
+              current-password confirmation. Music erases every saved provider key
+              before it removes the fixed master-key file, so the reset cannot leave
+              encrypted credentials orphaned.
             </p>
 
             {status.credential_storage_source === "environment" ? (
@@ -203,7 +216,7 @@ export function CredentialStorageCard({
               <div className="assistant-provider-command-block">
                 <p>
                   On the Docker host, prepare a private directory owned by the image's
-                  user, then mount <code>{HOST_SECRETS_DIRECTORY}</code> at{" "}
+                  user, then mount <code>{hostSecretsDirectory}</code> at{" "}
                   <code>{CONTAINER_SECRETS_DIRECTORY}</code> and restart the container.
                 </p>
                 <div>
@@ -225,32 +238,6 @@ export function CredentialStorageCard({
                     <code>{keyFilePath ?? `${CONTAINER_SECRETS_DIRECTORY}/assistant-credential.key`}</code>.
                   </p>
                 ) : null}
-              </div>
-            ) : null}
-
-            {removeCommand ? (
-              <div className="assistant-provider-command-block">
-                <h5>Remove and start over</h5>
-                <p>
-                  First delete every saved provider API key in this screen. Only then,
-                  if you intentionally want to abandon the current master key, sign in
-                  to the Docker host and run:
-                </p>
-                <div>
-                  <code>{removeCommand}</code>
-                  <button
-                    className="btn-ghost"
-                    type="button"
-                    onClick={() => void copyCommand(removeCommand)}
-                  >
-                    Copy command
-                  </button>
-                </div>
-                <p>
-                  This assumes the documented container name{" "}
-                  <code>{CONTAINER_NAME}</code>. Adjust it if your deployment uses
-                  another name.
-                </p>
               </div>
             ) : null}
 

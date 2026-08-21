@@ -196,6 +196,7 @@ DB-backed tokens, nothing is signed.)
 | `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
 | `ASSISTANT_CREDENTIAL_KEY` | Only for optional AI setup | — | URL-safe base64 32-byte key used to encrypt provider API keys in `app.db` |
 | `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional AI setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; AI Setup may create it once when its private parent mount exists |
+| `ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT` | | — | Optional non-secret host path shown in AI Setup's copyable mount/setup guide |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 
@@ -208,9 +209,11 @@ image, mount the private directory shown in Quick start, sign in, open
 sent to the browser, stored in `app.db`, or mixed into `/data`.
 
 The API cannot choose a path, overwrite an existing file, replace a key, or initialize a new key
-when saved encrypted provider credentials already exist. `ASSISTANT_CREDENTIAL_KEY_FILE` is a
-non-secret deployment setting; its parent directory must already exist, be private, and be writable
-by the container's UID 1000.
+when saved encrypted provider credentials already exist. A password-confirmed complete reset is the
+only browser operation that may remove the fixed file: it first erases every encrypted provider
+credential and resets the model gates in one database transaction, then removes that exact file.
+`ASSISTANT_CREDENTIAL_KEY_FILE` is a non-secret deployment setting; its parent directory must
+already exist, be private, and be writable by the container's UID 1000.
 
 Managed deployments may instead generate a key externally:
 
@@ -224,17 +227,21 @@ deployment's secret store, not in source control. A database backup and this key
 together; without the original key, saved provider credentials cannot be decrypted and must be
 entered again.
 
-AI Setup includes a maintenance guide with the configured file path and a copyable removal command.
-Removal is intentionally console-only. Delete every saved provider API key first and remove the
-master key only when deliberately starting over. To preserve saved credentials, use the offline
-rotation workflow below instead of editing or replacing the file.
+For file-backed storage, AI Setup can delete every saved provider API key and the master key through
+**Reset AI secure storage** after a destructive-action warning and current-password confirmation.
+Connection and role drafts remain, active provider jobs block the reset, and a failed final file
+removal is reported separately after the credentials are already safely erased. Environment-backed
+keys still belong to the service configuration and cannot be removed by a running process. To
+preserve saved credentials, use the offline rotation workflow below instead of resetting or editing
+the file.
 
 The first adapter verifies OpenAI-compatible providers by requesting their model list. Public
 addresses require HTTPS. Private-network providers are opt-in per connection. Verification uses
 strict time and response-size limits and does not send songs, tags, prompts, or audio. The UI reports
-saved-key presence separately from verification. Removing a saved key keeps the connection and its
-role choices, but prevents use until a new key is saved, the connection is verified, and the exact
-model configuration passes its tests again.
+saved-key presence separately from verification. A saved provider key cannot be replaced in place:
+delete it explicitly before entering another one. Removing it keeps the connection and its role
+choices, but prevents use until a new key is saved, the connection is verified, and the exact model
+configuration passes its tests again.
 
 Before relying on a backup, verify that its database and deployment key still match. This command
 is read-only: it prints a short non-secret key ID and counts, but never prints a provider key.

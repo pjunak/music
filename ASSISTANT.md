@@ -94,10 +94,12 @@ python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_b
 
 The key encrypts provider credentials in `app.db`; it is not a provider API key. Losing
 it does not expose a provider key, but it makes every saved credential unreadable and
-requires those credentials to be entered again. The page cannot remove or replace this
-master key. Its maintenance guide shows the configured path and a console command for
-deliberately starting over. Delete saved provider API keys first; use the offline rotation
-workflow in section 7 if they must be preserved.
+requires those credentials to be entered again. For file-backed storage, **Reset AI secure
+storage** can deliberately start over through the UI after current-password confirmation.
+It erases all saved provider credentials and their verification/quality gates before it
+removes the fixed key file, while retaining connection and role drafts. Environment-backed
+keys remain deployment-managed. Use the offline rotation workflow in section 7 when saved
+credentials must be preserved.
 
 ## 4. Add and verify provider connections
 
@@ -113,9 +115,11 @@ For each connection:
    you intentionally run on a trusted private address.
 4. Save the connection. Confirm the UI says a credential is saved and shows only a
    masked hint.
-5. Click **Verify connection**. Verification lists models and confirms the adapter's
+5. A saved API key is write-once. To use another key, explicitly delete the current one
+   from the connection and then enter the replacement.
+6. Click **Verify connection**. Verification lists models and confirms the adapter's
    structured-text capability; it does not send library data.
-6. If verification fails, correct the base URL, credential, TLS, or provider access.
+7. If verification fails, correct the base URL, credential, TLS, or provider access.
    Do not work around a failure by enabling private-network access for a public host.
 
 Saving and verification are separate by design. A saved credential alone cannot run a
@@ -247,6 +251,8 @@ This project slice is operationally complete when all applicable statements are 
   never write authored state without review.
 - If provider credentials are stored, `assistant-credentials check` reports zero
   unreadable credentials and the matching master key is retained securely.
+- A file-backed test connection can be deleted and secure storage reset/reinitialized
+  through AI Setup without SSH; connection and role drafts remain disabled until retested.
 - Provider dashboards have appropriate rate/spending limits and no unexpected requests.
 
 If no provider models are wanted, sections 3-7 are optional; the local baseline and

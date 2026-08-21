@@ -189,8 +189,12 @@ Runtime data lives outside the image.
   backups. `ASSISTANT_CREDENTIAL_KEY` takes precedence over the fixed
   `ASSISTANT_CREDENTIAL_KEY_FILE`; the authenticated API may exclusively create only that configured
   file and must never accept a path, return the key, overwrite an existing file, or generate a new
-  key while saved provider credentials exist. Browser UI must not delete or replace the master key;
-  removal and rotation remain explicit console/offline maintenance workflows.
+  key while saved provider credentials exist. Saved provider credentials are write-once and must be
+  explicitly deleted before another key can be added. The password-confirmed browser reset may
+  remove only the configured file-backed key after atomically erasing all saved credentials and
+  resetting every provider/model gate; preserve connection and role drafts, refuse active provider
+  jobs, and report post-commit file-removal failure as a partial result. Environment-key removal and
+  credential-preserving rotation remain explicit console/offline maintenance workflows.
 - Credential recovery checks and master-key rotation are offline operator workflows. Keep audit
   output secret-free and identify keys only by a short one-way fingerprint. Rotation must decrypt
   every saved credential before mutating any row, re-encrypt all credentials in one transaction,

@@ -16,6 +16,8 @@ from app.assistant.providers.credentials import (
     CredentialVaultError,
     credential_storage_status,
     initialize_credential_storage,
+    prepare_credential_storage_key_removal,
+    remove_credential_storage_key_file,
 )
 from app.assistant.providers.definitions import (
     MODEL_ROLE_BY_ID,
@@ -39,6 +41,7 @@ from app.assistant.providers.schemas import (
     ProviderConnectionCreate,
     ProviderConnectionOut,
     ProviderConnectionUpdate,
+    ProviderCredentialStorageResetOut,
     ProviderFrameworkStatusOut,
 )
 from app.assistant.providers.verification import (
@@ -46,9 +49,12 @@ from app.assistant.providers.verification import (
     ProviderVerificationResult,
     normalize_provider_base_url,
 )
+from app.core.config import get_settings
+from app.jobs.service import ACTIVE_JOB_STATUSES
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
+from app.models.background_job import BackgroundJob
 from app.models.base import utcnow
 
 
@@ -276,6 +282,9 @@ def framework_status(db: Session) -> ProviderFrameworkStatusOut:
         credential_storage_source=storage.source,
         credential_storage_key_id=storage.key_id,
         credential_storage_key_file_path=storage.key_file_path,
+        credential_storage_host_directory_hint=(
+            get_settings().assistant_credential_host_directory_hint
+        ),
         credential_storage_can_initialize=storage.can_initialize,
         credential_storage_initialization_error=storage.initialization_error,
         capabilities=[
@@ -333,6 +342,72 @@ def initialize_provider_credential_storage(
             status_code,
         ) from None
     return framework_status(db)
+
+
+def reset_provider_credential_storage(
+    db: Session,
+) -> ProviderCredentialStorageResetOut:
+    """Erase provider secrets first, then remove the fixed file-backed key."""
+
+    try:
+        key_file = prepare_credential_storage_key_removal()
+    except CredentialVaultError as exc:
+        status_code = (
+            409
+            if exc.code
+            in {
+                "master_key_managed_by_environment",
+                "master_key_file_not_configured",
+            }
+            else 503
+        )
+        raise ProviderServiceError(
+            exc.code,
+            "This credential store cannot be reset safely from the browser.",
+            status_code,
+        ) from None
+
+    active_model_job = db.scalar(
+        select(BackgroundJob.id)
+        .where(
+            BackgroundJob.kind.like("assistant.model%"),
+            BackgroundJob.status.in_(ACTIVE_JOB_STATUSES),
+        )
+        .limit(1)
+    )
+    if active_model_job is not None:
+        raise ProviderServiceError(
+            "model_job_active",
+            "Cancel or wait for active model jobs before resetting AI storage.",
+            409,
+        )
+
+    connections = db.scalars(select(AssistantProviderConnection)).all()
+    deleted_credentials = sum(_credential_saved(row) for row in connections)
+    for row in connections:
+        _clear_connection_credential(row)
+
+    roles = db.scalars(select(AssistantModelRole)).all()
+    for role in roles:
+        _reset_role_conformance(role)
+    db.execute(delete(AssistantModelEvaluation))
+    db.commit()
+
+    removal_error: str | None = None
+    try:
+        remove_credential_storage_key_file(key_file)
+    except CredentialVaultError as exc:
+        # The database no longer contains ciphertext that depends on this key.
+        # Return the partial result so the UI does not misreport the credential
+        # erasure as failed; the exact fixed-path removal can be retried.
+        removal_error = exc.code
+
+    return ProviderCredentialStorageResetOut(
+        deleted_credentials=deleted_credentials,
+        master_key_removed=removal_error is None,
+        master_key_removal_error=removal_error,
+        status=framework_status(db),
+    )
 
 
 def list_connections(db: Session) -> list[ProviderConnectionOut]:
@@ -407,6 +482,12 @@ def update_connection(
     payload: ProviderConnectionUpdate,
 ) -> ProviderConnectionOut:
     row = get_connection(db, connection_id)
+    if payload.api_key is not None and _credential_saved(row):
+        raise ProviderServiceError(
+            "credential_already_saved",
+            "Delete the saved API key before adding a different one.",
+            409,
+        )
     name = payload.name if payload.name is not None else row.name
     adapter_id = payload.adapter_id if payload.adapter_id is not None else row.adapter_id
     base_url_value = payload.base_url if payload.base_url is not None else row.base_url
@@ -489,6 +570,16 @@ def delete_connection_credential(
     connection_id: str,
 ) -> ProviderConnectionOut:
     row = get_connection(db, connection_id)
+    _clear_connection_credential(row)
+    _reset_role_conformance_for_connection(db, row.id)
+    db.commit()
+    db.refresh(row)
+    return connection_out(row)
+
+
+def _clear_connection_credential(
+    row: AssistantProviderConnection,
+) -> None:
     row.encrypted_api_key = ""
     row.api_key_nonce = ""
     row.api_key_hint = ""
@@ -498,10 +589,6 @@ def delete_connection_credential(
     row.verified_capabilities_json = "[]"
     row.last_verified_at = None
     row.updated_at = utcnow()
-    _reset_role_conformance_for_connection(db, row.id)
-    db.commit()
-    db.refresh(row)
-    return connection_out(row)
 
 
 def _connection_fingerprint(row: AssistantProviderConnection) -> str:
