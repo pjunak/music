@@ -512,6 +512,8 @@ def update_connection(
         or allow_private != row.allow_private_network
         or payload.api_key is not None
     )
+    if verification_inputs_changed:
+        _require_no_active_model_jobs_for_connection(db, row.id)
     row.name = name
     row.adapter_id = adapter_id
     row.base_url = base_url
@@ -570,6 +572,7 @@ def delete_connection_credential(
     connection_id: str,
 ) -> ProviderConnectionOut:
     row = get_connection(db, connection_id)
+    _require_no_active_model_jobs_for_connection(db, row.id)
     _clear_connection_credential(row)
     _reset_role_conformance_for_connection(db, row.id)
     db.commit()
@@ -606,8 +609,50 @@ def _connection_fingerprint(row: AssistantProviderConnection) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _active_model_job_for_connection(
+    db: Session,
+    connection_id: str,
+) -> BackgroundJob | None:
+    role_ids = set(
+        db.scalars(
+            select(AssistantModelRole.role_id).where(
+                AssistantModelRole.connection_id == connection_id
+            )
+        ).all()
+    )
+    if not role_ids:
+        return None
+    jobs = db.scalars(
+        select(BackgroundJob).where(
+            BackgroundJob.kind.like("assistant.model%"),
+            BackgroundJob.status.in_(ACTIVE_JOB_STATUSES),
+        )
+    ).all()
+    for job in jobs:
+        try:
+            parameters = json.loads(job.parameters_json)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(parameters, dict) and parameters.get("role_id") in role_ids:
+            return job
+    return None
+
+
+def _require_no_active_model_jobs_for_connection(
+    db: Session,
+    connection_id: str,
+) -> None:
+    if _active_model_job_for_connection(db, connection_id) is not None:
+        raise ProviderServiceError(
+            "connection_model_job_active",
+            "Wait for or cancel active model work before changing or verifying this connection.",
+            409,
+        )
+
+
 def prepare_verification(db: Session, connection_id: str) -> VerificationTarget:
     row = get_connection(db, connection_id)
+    _require_no_active_model_jobs_for_connection(db, row.id)
     api_key = _connection_credential(row)
     return VerificationTarget(
         connection_id=row.id,
@@ -632,6 +677,7 @@ def finish_verification(
             "The connection changed while verification was running. Verify it again.",
             409,
         )
+    _require_no_active_model_jobs_for_connection(db, row.id)
     row.verification_status = "verified" if result.verified else "failed"
     row.verification_error_code = result.error_code
     row.verified_models_json = json.dumps(

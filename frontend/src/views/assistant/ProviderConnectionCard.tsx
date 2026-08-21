@@ -162,7 +162,11 @@ export function ProviderConnectionCard({
           }
           onClick={() => void onVerify(connection.id)}
         >
-          {busy ? "Working…" : "Verify connection"}
+          {busy
+            ? "Working…"
+            : connection.verification_status === "verified"
+              ? "Verify again"
+              : "Verify connection"}
         </button>
         <button
           className="btn-ghost"
@@ -256,7 +260,8 @@ export function ProviderConnectionCard({
           </label>
           <p className="field-hint">
             Saving a new key—or changing the address, connection type, or network
-            access—requires verification again.
+            access—clears verification, model tests, and quality results for assigned
+            tasks. Active model work must finish or be cancelled first.
           </p>
           <button
             className="btn-primary"

@@ -387,6 +387,45 @@ describe("AssistantAiSetupView", () => {
     );
   });
 
+  it("warns that reverifying an assigned connection resets its model gates", async () => {
+    const user = userEvent.setup();
+    const assignedRole: ModelRole = {
+      ...role,
+      connection_id: connection.id,
+      connection_name: connection.name,
+      model_id: "planner-large",
+      enabled: true,
+      effective_enabled: true,
+      verification_status: "verified",
+      conformance_status: "passed",
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([assignedRole]);
+    vi.mocked(assistantProvidersApi.verifyConnection).mockResolvedValue({
+      connection,
+      verified: true,
+      error_code: null,
+      models: connection.verified_models,
+    });
+    render(<AssistantAiSetupView />);
+
+    await user.click(await screen.findByRole("button", { name: "Verify again" }));
+
+    expect(confirmDialog).toHaveBeenCalledWith({
+      title: "Verify connection again?",
+      body:
+        "Verifying Hosted models again will clear the model tests and quality " +
+        "results for Playlist planner. Wait for or cancel any running model work first.",
+      confirmLabel: "Verify and reset tests",
+      tone: "primary",
+    });
+    await waitFor(() =>
+      expect(assistantProvidersApi.verifyConnection).toHaveBeenCalledWith(
+        "connection-1",
+      ),
+    );
+  });
+
   it("shows, deletes, and gates use of a saved API key", async () => {
     const user = userEvent.setup();
     const connectionWithoutKey: ProviderConnection = {

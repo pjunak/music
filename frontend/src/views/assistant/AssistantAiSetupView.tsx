@@ -255,6 +255,25 @@ export function AssistantAiSetupView() {
   }
 
   async function verifyConnection(connectionId: string) {
+    const connection = connections.find((item) => item.id === connectionId);
+    const assignedRoles = roles.filter(
+      (role) => role.connection_id === connectionId,
+    );
+    if (
+      connection?.verification_status === "verified" &&
+      assignedRoles.length > 0
+    ) {
+      const confirmed = await confirmDialog({
+        title: "Verify connection again?",
+        body:
+          `Verifying ${connection.name} again will clear the model tests and quality results for ` +
+          `${assignedRoles.map((role) => role.label).join(", ")}. ` +
+          "Wait for or cancel any running model work first.",
+        confirmLabel: "Verify and reset tests",
+        tone: "primary",
+      });
+      if (!confirmed) return;
+    }
     setBusyItem(`connection:${connectionId}`);
     try {
       const result = await assistantProvidersApi.verifyConnection(connectionId);

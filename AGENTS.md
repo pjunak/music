@@ -240,6 +240,9 @@ Runtime data lives outside the image.
   certification separately from job history. Bind every result to the exact model-role runtime
   fingerprint, clear it after connection reverification or runtime changes, and keep historical
   reports synthetic and secret-free. A quality pass does not authorize live-library access.
+  Connection changes, credential deletion, and reverification must refuse to reset assigned roles
+  while their model jobs are queued or running; the UI must warn that deliberate reverification
+  clears their model tests and quality results.
 - Durable quality, playlist, tagging, and tag-cleanup model jobs record the shared bounded provider-usage
   summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
   Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep

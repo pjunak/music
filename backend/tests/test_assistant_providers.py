@@ -981,6 +981,92 @@ def test_verification_records_models_without_returning_key(
     assert TEST_PROVIDER_API_KEY not in response.text
 
 
+def test_connection_invalidation_refuses_active_assigned_model_job(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    role = _enabled_playlist_role(auth_client, monkeypatch)
+    with SessionLocal() as db:
+        db.add(
+            BackgroundJob(
+                id="active-quality-during-reverification",
+                kind=PLAYLIST_QUALITY_JOB_KIND,
+                status="running",
+                parameters_json=json.dumps(
+                    {
+                        "role_id": "playlist_planner",
+                        "evaluation_id": "playlist-quality-v1",
+                    }
+                ),
+            )
+        )
+        db.commit()
+
+    response = auth_client.post(
+        f"/api/assistant/providers/connections/{role['connection_id']}/verify"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "connection_model_job_active"
+    assert response.json()["detail"]["message"] == (
+        "Wait for or cancel active model work before changing or verifying this connection."
+    )
+    changed = auth_client.put(
+        f"/api/assistant/providers/connections/{role['connection_id']}",
+        json={"base_url": "https://other.example.test/api"},
+    )
+    deleted = auth_client.delete(
+        f"/api/assistant/providers/connections/{role['connection_id']}/credential"
+    )
+    assert changed.status_code == 409
+    assert changed.json()["detail"]["code"] == "connection_model_job_active"
+    assert deleted.status_code == 409
+    assert deleted.json()["detail"]["code"] == "connection_model_job_active"
+    roles = auth_client.get("/api/assistant/providers/roles").json()
+    stored = next(item for item in roles if item["role_id"] == "playlist_planner")
+    assert stored["conformance_status"] == "passed"
+    assert stored["effective_enabled"] is True
+
+
+def test_reverification_finish_refuses_job_started_during_provider_request(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    role = _enabled_playlist_role(auth_client, monkeypatch)
+    with SessionLocal() as db:
+        target = prepare_verification(db, cast(str, role["connection_id"]))
+    with SessionLocal() as db:
+        db.add(
+            BackgroundJob(
+                id="quality-started-during-reverification",
+                kind=PLAYLIST_QUALITY_JOB_KIND,
+                status="running",
+                parameters_json=json.dumps(
+                    {
+                        "role_id": "playlist_planner",
+                        "evaluation_id": "playlist-quality-v1",
+                    }
+                ),
+            )
+        )
+        db.commit()
+    result = ProviderVerificationResult(
+        True,
+        None,
+        ("planner-large",),
+        ("structured-text/v1",),
+    )
+
+    with SessionLocal() as db, pytest.raises(ProviderServiceError) as exc_info:
+        finish_verification(db, target, result)
+
+    assert exc_info.value.code == "connection_model_job_active"
+    with SessionLocal() as db:
+        stored = db.get(AssistantModelRole, "playlist_planner")
+        assert stored is not None
+        assert stored.conformance_status == "passed"
+
+
 def test_changing_connection_inputs_resets_verification(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
