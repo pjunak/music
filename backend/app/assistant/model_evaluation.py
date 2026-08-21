@@ -68,18 +68,11 @@ TAG_CLEANUP_QUALITY_EVALUATION_ID: Literal["tag-cleanup-quality-v1"] = (
 TAG_CLEANUP_QUALITY_JOB_KIND = "assistant.model-evaluation.tag-cleanup-quality-v1"
 EQ_QUALITY_EVALUATION_ID: Literal["eq-quality-v1"] = "eq-quality-v1"
 EQ_QUALITY_JOB_KIND = "assistant.model-evaluation.eq-quality-v1"
-_PLAYLIST_SUITE_PATH = (
-    Path(__file__).resolve().parents[2] / "evaluation" / "playlist-local-v1.json"
-)
-_TAGGING_SUITE_PATH = (
-    Path(__file__).resolve().parents[2] / "evaluation" / "music-tagging-v1.json"
-)
-_TAG_CLEANUP_SUITE_PATH = (
-    Path(__file__).resolve().parents[2] / "evaluation" / "tag-cleanup-v1.json"
-)
-_EQ_SUITE_PATH = (
-    Path(__file__).resolve().parents[2] / "evaluation" / "eq-assistant-v1.json"
-)
+_EVALUATION_SUITE_DIR = Path(__file__).resolve().with_name("evaluation_suites")
+_PLAYLIST_SUITE_PATH = _EVALUATION_SUITE_DIR / "playlist-local-v1.json"
+_TAGGING_SUITE_PATH = _EVALUATION_SUITE_DIR / "music-tagging-v1.json"
+_TAG_CLEANUP_SUITE_PATH = _EVALUATION_SUITE_DIR / "tag-cleanup-v1.json"
+_EQ_SUITE_PATH = _EVALUATION_SUITE_DIR / "eq-assistant-v1.json"
 
 
 @dataclass(frozen=True)
@@ -150,6 +143,16 @@ _EVALUATIONS_BY_ROLE: dict[str, tuple[ModelEvaluationDefinition, ...]] = {
     TAG_CLEANUP_QUALITY_EVALUATION.role_id: (TAG_CLEANUP_QUALITY_EVALUATION,),
     EQ_QUALITY_EVALUATION.role_id: (EQ_QUALITY_EVALUATION,),
 }
+
+
+def bundled_evaluation_suite_paths() -> tuple[Path, ...]:
+    """Return every read-only suite that must ship with the backend package."""
+
+    return tuple(
+        definition.suite_path
+        for definitions in _EVALUATIONS_BY_ROLE.values()
+        for definition in definitions
+    )
 
 
 class _EvaluationJobParameters(BaseModel):

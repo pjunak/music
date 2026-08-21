@@ -34,7 +34,11 @@ from app.models.track_user_tag import TrackUserTag
 from .assistant_test_values import TEST_CLEANUP_API_KEY
 
 _SUITE_PATH = (
-    Path(__file__).resolve().parents[1] / "evaluation" / "tag-cleanup-v1.json"
+    Path(__file__).resolve().parents[1]
+    / "app"
+    / "assistant"
+    / "evaluation_suites"
+    / "tag-cleanup-v1.json"
 )
 
 

@@ -82,6 +82,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --no-index --find-links=/wheels music-backend && \
     rm -rf /wheels
 
+# Fail the image build if a packaging change drops any of the read-only model
+# quality suites. These files are loaded from the installed package at runtime.
+RUN python -c "from app.assistant.model_evaluation import bundled_evaluation_suite_paths; missing = [str(path) for path in bundled_evaluation_suite_paths() if not path.is_file()]; assert not missing, f'Missing bundled evaluation suites: {missing}'"
+
 # Modes ship as a read-only seed at /seeds/modes (EQ presets ride along inside
 # each mode). On boot the backend copies it into MODES_DIR only when that
 # directory is empty, so user edits made in a bind-mounted volume survive

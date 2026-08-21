@@ -8,7 +8,7 @@ model providers reach real libraries.
 From `backend/`, run the checked-in local baseline:
 
 ```powershell
-uv run music-cli evaluate-playlists evaluation/playlist-local-v1.json
+uv run music-cli evaluate-playlists app/assistant/evaluation_suites/playlist-local-v1.json
 ```
 
 The local engine remains the default and makes no provider requests. To evaluate
@@ -16,7 +16,7 @@ the enabled, verified, and tested `playlist_planner` model role instead, use the
 explicit disclosure flag:
 
 ```powershell
-uv run music-cli evaluate-playlists evaluation/playlist-local-v1.json `
+uv run music-cli evaluate-playlists app/assistant/evaluation_suites/playlist-local-v1.json `
   --engine configured-model `
   --send-suite-to-provider
 ```
@@ -82,8 +82,8 @@ measures playlist quality instead of freezing one accidental exact ranking.
 
 ## Music metadata tagging evaluation
 
-`evaluation/music-tagging-v1.json` applies the same versioned quality-gate rule
-to the optional metadata tagger. Its synthetic cases cover explicit tavern,
+`app/assistant/evaluation_suites/music-tagging-v1.json` applies the same versioned quality-gate
+rule to the optional metadata tagger. Its synthetic cases cover explicit tavern,
 dungeon, castle, travel, seafaring, and temple contexts; sparse metadata;
 instructions embedded in untrusted metadata; forbidden tags; and the confidence
 and evidence expected for reviewable suggestions. The tagger must return every
@@ -106,10 +106,10 @@ success does not bypass the normal review and Authoring import preview.
 
 ## EQ draft evaluation
 
-`evaluation/eq-assistant-v1.json` checks the optional EQ role with synthetic warm-tavern,
-harshness-reduction, and clarity goals. The provider must return exactly ten bounded gains in the
-fixed band order; the harness also checks conservative request-specific directions. Passing the
-suite certifies only that exact role fingerprint. A live EQ request still needs the current
-disclosure and returns an inert draft that the operator must preview and select through Authoring
-import. No songs, audio, library metadata, paths, or existing presets are used by either the suite
-or the live EQ request.
+`app/assistant/evaluation_suites/eq-assistant-v1.json` checks the optional EQ role with synthetic
+warm-tavern, harshness-reduction, and clarity goals. The provider must return exactly ten bounded
+gains in the fixed band order; the harness also checks conservative request-specific directions.
+Passing the suite certifies only that exact role fingerprint. A live EQ request still needs the
+current disclosure and returns an inert draft that the operator must preview and select through
+Authoring import. No songs, audio, library metadata, paths, or existing presets are used by either
+the suite or the live EQ request.

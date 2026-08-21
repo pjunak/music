@@ -54,7 +54,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   invalidate its result. Local filtering reduces each case to at most 100 candidates, paths are
   removed, and the model may return only known track IDs. A current pass is required before that
   exact model configuration can be selected for a live-library suggestion.
-  See [`backend/evaluation/README.md`](backend/evaluation/README.md).
+  Bundled suites live under
+  [`backend/app/assistant/evaluation_suites/`](backend/app/assistant/evaluation_suites/);
+  see [`backend/evaluation/README.md`](backend/evaluation/README.md) for the harness guide.
 - **Review-first EQ Assistant** — connect a separately chosen structured-text model and describe
   the sound you want. The task can return only ten fixed graphic-EQ bands with gains from -12 to
   +12 dB in 0.5 dB steps; frequencies and the final preset document are constructed locally. A

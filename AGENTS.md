@@ -161,10 +161,10 @@ Runtime data lives outside the image.
   them through Authoring import. Keep local heuristics and future model providers behind the same
   suggestion contracts; never let a ranking engine write playlists or mutate the library directly.
 - Playlist recommendation changes must run the versioned synthetic suites under
-  `backend/evaluation/` through the provider-neutral evaluator. Add representative cases and
-  explicit thresholds without copying private library data or freezing one incidental exact
-  ranking. Future model providers must pass the same unknown-track, source-integrity, exclusion,
-  selection-plan, and candidate-limit checks before UI integration.
+  `backend/app/assistant/evaluation_suites/` through the provider-neutral evaluator. Add
+  representative cases and explicit thresholds without copying private library data or freezing
+  one incidental exact ranking. Future model providers must pass the same unknown-track,
+  source-integrity, exclusion, selection-plan, and candidate-limit checks before UI integration.
 - Optional model providers use encrypted connection records and per-task role mappings. Each
   connection owns exactly one credential; roles reference connections so tasks may deliberately
   reuse one credential or choose separate connections, including separate keys for the same

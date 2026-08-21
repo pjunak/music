@@ -22,7 +22,13 @@ from app.assistant.providers.service import ProviderServiceError
 from app.assistant.schemas import PlaylistSuggestionRequest, PlaylistSuggestionResponse
 from app.cli import main as cli_main
 
-SUITE_PATH = Path(__file__).parents[1] / "evaluation" / "playlist-local-v1.json"
+SUITE_PATH = (
+    Path(__file__).parents[1]
+    / "app"
+    / "assistant"
+    / "evaluation_suites"
+    / "playlist-local-v1.json"
+)
 
 
 class ReorderedEngine:

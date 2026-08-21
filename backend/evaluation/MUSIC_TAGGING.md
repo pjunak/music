@@ -5,8 +5,8 @@ The optional music evidence tagger must pass
 quality check from **Assistant → AI Setup** after configuring, testing, and
 enabling the `music_tagger` role.
 
-The checked-in `music-tagging-v1.json` suite contains synthetic titles, artists,
-albums, origins, genres, durations, BPM values, and one bounded local-signal
+The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains synthetic
+titles, artists, albums, origins, genres, durations, BPM values, and one bounded local-signal
 evidence case. It tests clear D&D cases such
 as medieval tavern dancing, dark dungeons, heroic castles, calm travel, and
 insufficient evidence. No real library data, paths, media, manual tags, or review
