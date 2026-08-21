@@ -140,7 +140,10 @@ export function ModelRoleCard({
 
   if (!role.configuration_available) {
     return (
-      <article className="surface-card assistant-role-card is-planned">
+      <article
+        id={`assistant-role-${role.role_id}`}
+        className="surface-card assistant-role-card is-planned"
+      >
         <div className="assistant-role-heading">
           <div>
             <span className="assistant-role-state">{stateLabel}</span>
@@ -171,7 +174,10 @@ export function ModelRoleCard({
   }
 
   return (
-    <article className="surface-card assistant-role-card">
+    <article
+      id={`assistant-role-${role.role_id}`}
+      className="surface-card assistant-role-card"
+    >
       <div className="assistant-role-heading">
         <div>
           <span className={`assistant-role-state${role.effective_enabled ? " is-ready" : ""}`}>

@@ -816,6 +816,93 @@ describe("AssistantAiSetupView", () => {
     expect(jobsApi.cancel).toHaveBeenCalledWith("quality-job-1");
   });
 
+  it("keeps an obsolete interrupted attempt as collapsed history", async () => {
+    const interrupted = qualityJob({
+      status: "failed",
+      error: "ProviderServiceError: Test this model configuration before using the role.",
+      progress_phase: "Interrupted",
+      progress_message: "",
+      finished_at: "2026-08-19T12:05:00Z",
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      {
+        ...role,
+        connection_id: connection.id,
+        connection_name: connection.name,
+        model_id: "planner-large",
+        enabled: true,
+        effective_enabled: false,
+        verification_status: "verified",
+        conformance_status: "never",
+        last_conformance_at: null,
+      },
+    ]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      qualityEvaluation,
+    ]);
+    vi.mocked(jobsApi.list).mockResolvedValue([interrupted]);
+    const user = userEvent.setup();
+    render(<AssistantAiSetupView />);
+
+    expect(await screen.findByText("No quality report yet")).toBeInTheDocument();
+    expect(screen.getByText("Not run")).toBeInTheDocument();
+    expect(
+      screen.queryByText("The evaluation did not finish"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Run quality check" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("link", {
+        name: "Review the playlist planning model task above",
+      }),
+    ).toHaveAttribute("href", "#assistant-role-playlist_planner");
+
+    await user.click(screen.getByText("Show previous interrupted attempt"));
+    expect(
+      screen.getByText("Test this model configuration before using the role."),
+    ).toBeVisible();
+  });
+
+  it("shows an interruption from the currently tested model configuration", async () => {
+    const interrupted = qualityJob({
+      status: "failed",
+      error: "Provider request timed out.",
+      progress_phase: "Interrupted",
+      progress_message: "",
+      finished_at: "2026-08-19T12:05:00Z",
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      {
+        ...role,
+        connection_id: connection.id,
+        connection_name: connection.name,
+        model_id: "planner-large",
+        enabled: true,
+        effective_enabled: true,
+        verification_status: "verified",
+        conformance_status: "passed",
+        last_conformance_at: "2026-08-19T11:00:00Z",
+      },
+    ]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      qualityEvaluation,
+    ]);
+    vi.mocked(jobsApi.list).mockResolvedValue([interrupted]);
+    render(<AssistantAiSetupView />);
+
+    expect(
+      await screen.findByText("The evaluation did not finish"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Provider request timed out.")).toBeInTheDocument();
+    expect(screen.getByText("Run interrupted")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Run quality check again" }),
+    ).toBeEnabled();
+  });
+
   it("starts the synthetic quality check only after explicit confirmation", async () => {
     const enabledRole: ModelRole = {
       ...role,

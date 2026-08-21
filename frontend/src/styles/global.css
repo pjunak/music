@@ -6157,6 +6157,25 @@ kbd,
   border-radius: var(--radius);
   background: var(--surface-2);
 }
+.assistant-quality-history {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.assistant-quality-history summary {
+  cursor: pointer;
+}
+.assistant-quality-history > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.assistant-quality-history p {
+  margin: 0;
+}
 .assistant-quality-meta {
   display: flex;
   flex-wrap: wrap;

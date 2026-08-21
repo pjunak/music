@@ -40,6 +40,28 @@ function formatTime(value: string | null): string {
   }).format(new Date(value));
 }
 
+function attemptFollowsCurrentModelTest(
+  job: BackgroundJob,
+  role: ModelRole | undefined,
+): boolean {
+  if (role?.effective_enabled !== true || role.last_conformance_at === null) {
+    return false;
+  }
+  const jobCreatedAt = Date.parse(job.created_at);
+  const modelTestedAt = Date.parse(role.last_conformance_at);
+  return (
+    Number.isFinite(jobCreatedAt) &&
+    Number.isFinite(modelTestedAt) &&
+    jobCreatedAt >= modelTestedAt
+  );
+}
+
+function previousAttemptLabel(job: BackgroundJob): string {
+  if (job.status === "failed") return "Show previous interrupted attempt";
+  if (job.status === "cancelled") return "Show previous cancelled attempt";
+  return "Show previous attempt";
+}
+
 function statusLabel(
   evaluation: ModelQualityEvaluation,
   latest: BackgroundJob | undefined,
@@ -106,10 +128,27 @@ export function ModelQualityEvaluationCard({
         : evaluation.role_id === "eq_assistant"
           ? "EQ model quality progress"
           : "Playlist model quality progress";
-  const latest = history[0];
-  const active = isModelEvaluationJobActive(latest);
+  const latestHistory = history[0];
+  const activeJob = isModelEvaluationJobActive(latestHistory)
+    ? latestHistory
+    : undefined;
   const reportJob =
-    latest !== undefined && evaluation.last_job_id === latest.id ? latest : undefined;
+    evaluation.last_job_id === null
+      ? undefined
+      : history.find((job) => job.id === evaluation.last_job_id);
+  const currentTerminalAttempt =
+    evaluation.status === "never" &&
+    latestHistory !== undefined &&
+    !isModelEvaluationJobActive(latestHistory) &&
+    attemptFollowsCurrentModelTest(latestHistory, role)
+      ? latestHistory
+      : undefined;
+  const currentJob = activeJob ?? reportJob ?? currentTerminalAttempt;
+  const active = activeJob !== undefined;
+  const historicalJob =
+    latestHistory !== undefined && latestHistory.id !== currentJob?.id
+      ? latestHistory
+      : undefined;
   const failures = failedScenarios(reportJob);
   const canRun = role?.effective_enabled === true;
 
@@ -121,35 +160,35 @@ export function ModelQualityEvaluationCard({
           <h3>{evaluation.label}</h3>
         </div>
         <span
-          className={`assistant-job-status is-${statusClass(evaluation, latest)}`}
+          className={`assistant-job-status is-${statusClass(evaluation, currentJob)}`}
         >
-          {statusLabel(evaluation, latest)}
+          {statusLabel(evaluation, currentJob)}
         </span>
       </div>
       <p>{evaluation.description}</p>
 
-      {loading && latest === undefined ? (
+      {loading && currentJob === undefined ? (
         <p className="muted">Loading stored evaluation history…</p>
-      ) : active && latest !== undefined ? (
+      ) : active && activeJob !== undefined ? (
         <div className="assistant-job-progress">
           <div className="assistant-job-progress-label">
-            <strong>{latest.progress_phase || "Queued"}</strong>
-            {latest.progress_total !== null ? (
+            <strong>{activeJob.progress_phase || "Queued"}</strong>
+            {activeJob.progress_total !== null ? (
               <span>
-                {latest.progress_current} / {latest.progress_total}
+                {activeJob.progress_current} / {activeJob.progress_total}
               </span>
             ) : null}
           </div>
-          {latest.progress_total === null ? (
+          {activeJob.progress_total === null ? (
             <progress aria-label={progressLabel} />
           ) : (
             <progress
               aria-label={progressLabel}
-              value={latest.progress_current}
-              max={Math.max(1, latest.progress_total)}
+              value={activeJob.progress_current}
+              max={Math.max(1, activeJob.progress_total)}
             />
           )}
-          {latest.progress_message ? <p>{latest.progress_message}</p> : null}
+          {activeJob.progress_message ? <p>{activeJob.progress_message}</p> : null}
         </div>
       ) : evaluation.status === "passed" ? (
         <div className="assistant-quality-result">
@@ -171,22 +210,22 @@ export function ModelQualityEvaluationCard({
             this model again; it cannot be used for {taskName} yet.
           </p>
         </div>
-      ) : evaluation.status === "stale" || latest?.status === "succeeded" ? (
+      ) : evaluation.status === "stale" || currentJob?.status === "succeeded" ? (
         <div className="assistant-quality-result">
           <strong>These model settings need a new check</strong>
           <p>The previous report is history only and no longer certifies this role.</p>
         </div>
-      ) : latest?.status === "failed" ? (
+      ) : currentJob?.status === "failed" ? (
         <div className="assistant-quality-result is-failed">
           <strong>The evaluation did not finish</strong>
           <p>
             {readableBackgroundJobError(
-              latest.error,
+              currentJob.error,
               "Run the check again when the provider is available.",
             )}
           </p>
         </div>
-      ) : latest?.status === "cancelled" ? (
+      ) : currentJob?.status === "cancelled" ? (
         <div className="assistant-quality-result">
           <strong>The evaluation was cancelled</strong>
           <p>No quality decision was saved.</p>
@@ -219,7 +258,28 @@ export function ModelQualityEvaluationCard({
         </details>
       ) : null}
 
-      <ModelUsageSummary job={latest} />
+      <ModelUsageSummary job={currentJob} />
+
+      {historicalJob !== undefined ? (
+        <details className="assistant-quality-history">
+          <summary>{previousAttemptLabel(historicalJob)}</summary>
+          <div>
+            {historicalJob.status === "failed" ? (
+              <p>
+                {readableBackgroundJobError(
+                  historicalJob.error,
+                  "The previous evaluation did not finish.",
+                )}
+              </p>
+            ) : historicalJob.status === "cancelled" ? (
+              <p>The previous evaluation was cancelled.</p>
+            ) : (
+              <p>This attempt is retained as history and does not certify the current role.</p>
+            )}
+            <ModelUsageSummary job={historicalJob} />
+          </div>
+        </details>
+      ) : null}
 
       <div className="assistant-quality-meta">
         <span>Suite: {evaluation.suite_id}</span>
@@ -232,14 +292,16 @@ export function ModelQualityEvaluationCard({
       </p>
 
       <div className="assistant-role-actions">
-        {active && latest !== undefined ? (
+        {active && activeJob !== undefined ? (
           <button
             type="button"
             className="btn-secondary"
-            disabled={actionBusy || latest.status === "cancel_requested"}
-            onClick={() => onCancel(latest.id)}
+            disabled={actionBusy || activeJob.status === "cancel_requested"}
+            onClick={() => onCancel(activeJob.id)}
           >
-            {latest.status === "cancel_requested" ? "Cancelling…" : "Cancel check"}
+            {activeJob.status === "cancel_requested"
+              ? "Cancelling…"
+              : "Cancel check"}
           </button>
         ) : (
           <button
@@ -250,7 +312,7 @@ export function ModelQualityEvaluationCard({
           >
             {actionBusy
               ? "Starting…"
-              : evaluation.status === "never" && latest === undefined
+              : evaluation.status === "never" && currentJob === undefined
                 ? "Run quality check"
                 : "Run quality check again"}
           </button>
@@ -258,7 +320,10 @@ export function ModelQualityEvaluationCard({
       </div>
       {!canRun ? (
         <p className="field-hint">
-          Save, test, and enable the {taskName} role before running this check.
+          <a href={`#assistant-role-${evaluation.role_id}`}>
+            Review the {taskName} model task above
+          </a>{" "}
+          to save, test, and enable it before running this check.
         </p>
       ) : null}
     </article>
