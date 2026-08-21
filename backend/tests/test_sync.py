@@ -912,7 +912,6 @@ def test_state_load_after_track_deletion_clears_active_track(
     engine would fetch its stream URL and surface as SRC_NOT_SUPPORTED.
     The load-time prune defends against that."""
     import asyncio
-    import io
     import struct
 
     from app.core.db import SessionLocal
@@ -951,7 +950,6 @@ def test_state_load_after_track_deletion_clears_active_track(
     asyncio.run(machine.load(SessionLocal))
     snap = asyncio.run(machine.snapshot())
     assert snap.ambient.current_track_id is None
-    _ = io  # keep import for potential future test growth
 
 
 def test_remove_active_output_mutator() -> None:

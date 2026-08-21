@@ -1,7 +1,6 @@
 """Library API: tree, search, metadata edit, move, delete, upload, rescan."""
 from __future__ import annotations
 
-import io
 import os
 import struct
 from pathlib import Path
@@ -1067,7 +1066,3 @@ def test_next_track_id_after_wraps_or_stops_at_end(
         assert library_index.next_track_id_after(db, sentinel, wrap=False) is None
         # With wrap, follow loops back to the library's first track.
         assert library_index.next_track_id_after(db, sentinel, wrap=True) is not None
-
-
-# Quiet pyflakes about io being imported for potential future test helpers.
-_ = io

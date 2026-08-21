@@ -1,5 +1,4 @@
-"""Playlist CRUD + tracks endpoints. Playlists are manual-only now;
-smart playlists are deferred (see docs/FUTURE.md)."""
+"""Playlist CRUD and ordered-track endpoint coverage."""
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session

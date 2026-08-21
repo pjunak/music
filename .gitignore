@@ -113,5 +113,6 @@ coverage/
 .windsurf/
 .codeium/
 
-# Internal planning / spec docs — local-only, not for the public repo.
-docs/
+# Local planning and mockups stay private; architecture decisions are shared.
+docs/*
+!docs/ADR-*.md
