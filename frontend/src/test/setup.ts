@@ -53,6 +53,48 @@ for (const name of ["localStorage", "sessionStorage"] as const) {
   }
 }
 
+// jsdom exposes canvas/media methods but reports them as "not implemented"
+// when components call them. Provide the deterministic subset our UI uses so
+// tests exercise component behavior without browser-capability noise.
+function makeCanvas2dContext(): CanvasRenderingContext2D {
+  const gradient = {
+    addColorStop: () => {},
+  } as CanvasGradient;
+
+  return {
+    beginPath: () => {},
+    clearRect: () => {},
+    closePath: () => {},
+    createLinearGradient: () => gradient,
+    fill: () => {},
+    fillText: () => {},
+    lineTo: () => {},
+    moveTo: () => {},
+    setTransform: () => {},
+    stroke: () => {},
+  } as unknown as CanvasRenderingContext2D;
+}
+
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  configurable: true,
+  writable: true,
+  value(contextId: string): CanvasRenderingContext2D | null {
+    return contextId === "2d" ? makeCanvas2dContext() : null;
+  },
+});
+
+Object.defineProperty(HTMLMediaElement.prototype, "play", {
+  configurable: true,
+  writable: true,
+  value: () => Promise.resolve(),
+});
+
+Object.defineProperty(HTMLMediaElement.prototype, "pause", {
+  configurable: true,
+  writable: true,
+  value: () => {},
+});
+
 // Tear the rendered tree down between tests so a leftover component
 // from a prior test can't spy on later expects.
 afterEach(() => {
