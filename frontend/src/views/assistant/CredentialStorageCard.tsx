@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { ProviderFrameworkStatus } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
@@ -118,6 +118,13 @@ export function CredentialStorageCard({
   onReset,
 }: CredentialStorageCardProps) {
   const [showGuide, setShowGuide] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(
+    !status.credential_storage_ready,
+  );
+
+  useEffect(() => {
+    setStorageOpen(!status.credential_storage_ready);
+  }, [status.credential_storage_ready]);
   const keyFilePath = status.credential_storage_key_file_path;
   const hostSecretsDirectory =
     status.credential_storage_host_directory_hint ??
@@ -137,17 +144,24 @@ export function CredentialStorageCard({
     `-v ${hostSecretsDirectory}:${CONTAINER_SECRETS_DIRECTORY}`;
 
   return (
-    <section
+    <details
       className={`surface-card assistant-provider-storage${
         status.credential_storage_ready ? " is-ready" : ""
       }`}
+      open={storageOpen}
+      onToggle={(event) => setStorageOpen(event.currentTarget.open)}
       aria-labelledby="assistant-credential-storage-title"
     >
-      <div aria-hidden="true">Key</div>
+      <summary>
+        <span aria-hidden="true">Key</span>
+        <span id="assistant-credential-storage-title">{storageTitle(status)}</span>
+        <small>
+          {status.credential_storage_ready ? "Ready" : "Action required"}
+        </small>
+      </summary>
       <div className="assistant-provider-storage-body">
         <div className="assistant-provider-storage-summary">
           <div>
-            <h3 id="assistant-credential-storage-title">{storageTitle(status)}</h3>
             <p>
               {storageDescription(status)}{" "}
               {!status.credential_storage_ready &&
@@ -250,6 +264,6 @@ export function CredentialStorageCard({
           </div>
         ) : null}
       </div>
-    </section>
+    </details>
   );
 }

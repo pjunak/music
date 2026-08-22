@@ -15,6 +15,7 @@ from .assistant_test_values import TEST_SHORT_API_KEY
 
 def _target(
     adapter_id: str = "openai-compatible/v1",
+    thinking_mode: execution.ThinkingMode = "provider_default",
 ) -> ProviderExecutionTarget:
     return ProviderExecutionTarget(
         adapter_id=adapter_id,
@@ -24,6 +25,7 @@ def _target(
         model_id="planner-large",
         timeout_seconds=30,
         max_output_tokens=2000,
+        thinking_mode=thinking_mode,
     )
 
 
@@ -70,6 +72,33 @@ def test_execution_normalizes_structured_response_and_usage(
         "max_tokens": 512,
         "response_format": {"type": "json_object"},
     }
+
+
+@pytest.mark.parametrize("thinking_mode", ["enabled", "disabled"])
+def test_execution_sends_explicit_thinking_override(
+    monkeypatch: pytest.MonkeyPatch,
+    thinking_mode: execution.ThinkingMode,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(kwargs)
+        return JsonHttpResponse(
+            200,
+            {"choices": [{"message": {"content": '{"answer":"ok"}'}}]},
+        )
+
+    monkeypatch.setattr(execution, "request_json", request)
+
+    result = execution.execute_structured_model_request(
+        _target(thinking_mode=thinking_mode),
+        StructuredModelRequest("system", "user", 512),
+    )
+
+    assert result.succeeded is True
+    payload = observed["payload"]
+    assert isinstance(payload, dict)
+    assert payload["thinking"] == {"type": thinking_mode}
 
 
 def test_strict_adapter_sends_exact_task_json_schema(

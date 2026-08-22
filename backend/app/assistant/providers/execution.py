@@ -25,6 +25,7 @@ CONFORMANCE_CONTRACT: Literal["assistant-provider-conformance/v3"] = (
     "assistant-provider-conformance/v3"
 )
 _MAX_EXECUTION_RESPONSE_BYTES = 2 * 1024 * 1024
+ThinkingMode = Literal["provider_default", "enabled", "disabled"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class ProviderExecutionTarget:
     model_id: str
     timeout_seconds: int
     max_output_tokens: int
+    thinking_mode: ThinkingMode = "provider_default"
 
 
 @dataclass(frozen=True)
@@ -156,6 +158,20 @@ def _execute_openai_compatible(
                 "schema": request.output_schema,
             },
         }
+    payload: dict[str, object] = {
+        "model": target.model_id,
+        "messages": [
+            {"role": "system", "content": request.system_prompt},
+            {"role": "user", "content": request.user_prompt},
+        ],
+        "max_tokens": min(
+            request.max_output_tokens,
+            target.max_output_tokens,
+        ),
+        "response_format": response_format,
+    }
+    if target.thinking_mode != "provider_default":
+        payload["thinking"] = {"type": target.thinking_mode}
     try:
         response = request_json(
             "POST",
@@ -165,18 +181,7 @@ def _execute_openai_compatible(
             timeout_seconds=target.timeout_seconds,
             max_response_bytes=_MAX_EXECUTION_RESPONSE_BYTES,
             user_agent="music-assistant-model-executor/1",
-            payload={
-                "model": target.model_id,
-                "messages": [
-                    {"role": "system", "content": request.system_prompt},
-                    {"role": "user", "content": request.user_prompt},
-                ],
-                "max_tokens": min(
-                    request.max_output_tokens,
-                    target.max_output_tokens,
-                ),
-                "response_format": response_format,
-            },
+            payload=payload,
         )
     except ProviderTransportError as exc:
         return StructuredModelResult(False, exc.code)

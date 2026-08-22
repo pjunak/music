@@ -5,6 +5,7 @@ import type {
   ModelQualityEvaluation,
   ModelRole,
   ModelRoleUpdate,
+  ModelThinkingMode,
   ProviderAdapter,
   ProviderCapability,
   ProviderConnection,
@@ -101,6 +102,9 @@ export function ModelRoleCard({
   const [connectionId, setConnectionId] = useState(role.connection_id ?? "");
   const [modelId, setModelId] = useState(role.model_id);
   const [enabled, setEnabled] = useState(role.enabled);
+  const [thinkingMode, setThinkingMode] = useState<ModelThinkingMode>(
+    role.thinking_mode,
+  );
   const [timeoutSeconds, setTimeoutSeconds] = useState(role.timeout_seconds);
   const [maxOutputTokens, setMaxOutputTokens] = useState(role.max_output_tokens);
 
@@ -108,6 +112,7 @@ export function ModelRoleCard({
     setConnectionId(role.connection_id ?? "");
     setModelId(role.model_id);
     setEnabled(role.enabled);
+    setThinkingMode(role.thinking_mode);
     setTimeoutSeconds(role.timeout_seconds);
     setMaxOutputTokens(role.max_output_tokens);
   }, [role]);
@@ -139,7 +144,8 @@ export function ModelRoleCard({
     connectionId === (role.connection_id ?? "") &&
     modelId.trim() === role.model_id &&
     timeoutSeconds === role.timeout_seconds &&
-    maxOutputTokens === role.max_output_tokens;
+    maxOutputTokens === role.max_output_tokens &&
+    thinkingMode === role.thinking_mode;
   const taskDraftMatches = configurationMatches && enabled === role.enabled;
   const canTest =
     credentialStorageReady &&
@@ -187,6 +193,7 @@ export function ModelRoleCard({
         connection_id: connectionId,
         model_id: modelId.trim(),
         enabled,
+        thinking_mode: thinkingMode,
         timeout_seconds: timeoutSeconds,
         max_output_tokens: maxOutputTokens,
       });
@@ -307,15 +314,17 @@ export function ModelRoleCard({
               );
             })}
           </select>
-          <span className="field-hint">
-            This choice applies only to {role.label.toLocaleLowerCase()}. Other
-            tasks may reuse this key or choose a different connection.
-          </span>
         </label>
 
         <div className="field">
-          <label className="field-label" htmlFor={`assistant-model-${role.role_id}`}>
-            Model
+          <label
+            className="field-label assistant-model-label"
+            htmlFor={`assistant-model-${role.role_id}`}
+          >
+            <span>Model</span>
+            {verifiedModels.length > 0 ? (
+              <small>{verifiedModels.length} verified</small>
+            ) : null}
           </label>
           <ModelPicker
             id={`assistant-model-${role.role_id}`}
@@ -328,34 +337,23 @@ export function ModelRoleCard({
           />
         </div>
 
-        <div className="assistant-role-authorization">
-          <label className="checkbox-row assistant-role-enabled">
-            <input
-              type="checkbox"
-              checked={enabled}
-              disabled={qualityActive || (!enabled && !canEnable)}
-              onChange={(event) => setEnabled(event.target.checked)}
-            />
-            <span>Allow this model for this task</span>
-          </label>
-          <div className="assistant-role-checks" aria-label={`${role.label} checks`}>
-            <a
-              className={`assistant-role-check is-${modelTestTone(role)}`}
-              href="#assistant-test-console"
-              onClick={onViewTestLog}
-            >
-              <span>Model test</span>
-              <strong>{modelTestStatusLabel(role)}</strong>
-            </a>
-            <a
-              className={`assistant-role-check is-${qualityStatusTone}`}
-              href="#assistant-test-console"
-              onClick={onViewTestLog}
-            >
-              <span>Quality</span>
-              <strong>{qualityLabel}</strong>
-            </a>
-          </div>
+        <div className="assistant-role-checks" aria-label={`${role.label} checks`}>
+          <a
+            className={`assistant-role-check is-${modelTestTone(role)}`}
+            href="#assistant-test-console"
+            onClick={onViewTestLog}
+          >
+            <span>Model test</span>
+            <strong>{modelTestStatusLabel(role)}</strong>
+          </a>
+          <a
+            className={`assistant-role-check is-${qualityStatusTone}`}
+            href="#assistant-test-console"
+            onClick={onViewTestLog}
+          >
+            <span>Quality</span>
+            <strong>{qualityLabel}</strong>
+          </a>
         </div>
         {!canEnable && connectionId ? (
           <p className="field-hint">
@@ -384,7 +382,49 @@ export function ModelRoleCard({
         ) : null}
 
         <details className="assistant-role-limits">
-          <summary>Request limits</summary>
+          <summary>
+            Request settings
+            <span>
+              {timeoutSeconds}s · {maxOutputTokens.toLocaleString()} tokens ·
+              Thinking{" "}
+              {thinkingMode === "provider_default"
+                ? "default"
+                : thinkingMode === "enabled"
+                  ? "on"
+                  : "off"}
+            </span>
+          </summary>
+          <fieldset className="assistant-thinking-mode">
+            <legend>Thinking mode</legend>
+            <div className="assistant-thinking-options">
+              {(
+                [
+                  ["provider_default", "Provider default"],
+                  ["enabled", "On"],
+                  ["disabled", "Off"],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value}>
+                  <input
+                    type="radio"
+                    name={`assistant-thinking-${role.role_id}`}
+                    value={value}
+                    checked={thinkingMode === value}
+                    disabled={qualityActive}
+                    onChange={() => {
+                      setThinkingMode(value);
+                      setEnabled(false);
+                    }}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+            <p>
+              Provider default sends no override. On or Off is confirmed when you
+              run this model's test.
+            </p>
+          </fieldset>
           <div className="field-row">
             <label className="field">
               <span className="field-label">Timeout (seconds)</span>
@@ -418,6 +458,16 @@ export function ModelRoleCard({
         </details>
 
         <div className="assistant-role-actions">
+          <label className="checkbox-row assistant-role-enabled">
+            <input
+              type="checkbox"
+              aria-label="Allow this model for this task"
+              checked={enabled}
+              disabled={qualityActive || (!enabled && !canEnable)}
+              onChange={(event) => setEnabled(event.target.checked)}
+            />
+            <span>Allow for task</span>
+          </label>
           <button
             className="btn-primary"
             type="submit"
@@ -486,20 +536,6 @@ export function ModelRoleCard({
             </button>
           ) : null}
         </div>
-        {configured && !taskDraftMatches ? (
-          <p className="field-hint">Save these changes before running checks.</p>
-        ) : role.conformance_status === "passed" && !role.effective_enabled ? (
-          <p className="field-hint">
-            {role.enabled
-              ? "Restore and verify this task’s connection before running quality scenarios."
-              : "Allow and save this task before running its quality scenarios."}
-          </p>
-        ) : configured ? (
-          <p className="field-hint">
-            Checks use only fixed synthetic inputs—no songs or live library data.
-            Quality scenarios can make repeated provider calls.
-          </p>
-        ) : null}
       </form>
     </article>
   );

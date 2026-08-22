@@ -66,6 +66,10 @@ function count(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
+function thinkingModeLabel(mode: ModelRole["thinking_mode"]): string {
+  return mode === "provider_default" ? "provider default" : mode;
+}
+
 function currentModelTestResult(
   role: ModelRole,
   result: ModelConformance | undefined,
@@ -96,7 +100,7 @@ function buildLogEntries(
     message:
       role.connection_id === null
         ? "Choose a verified connection and model, then save this task."
-        : `Using ${role.connection_name ?? "saved connection"} · ${role.model_id}.`,
+        : `Using ${role.connection_name ?? "saved connection"} · ${role.model_id} · thinking ${thinkingModeLabel(role.thinking_mode)}.`,
   });
 
   if (testing) {
@@ -156,7 +160,7 @@ function buildLogEntries(
       time: null,
       tone: "warning",
       message:
-        "Model test passed. Select “Allow this model for this task” and save before running quality scenarios.",
+        "Model test passed. Select “Allow for task” and save before running quality scenarios.",
     });
   }
 
@@ -362,6 +366,7 @@ export function ModelTestConsole({
               connection?.verified_models.includes(role.model_id) ?? false,
             timeout_seconds: role.timeout_seconds,
             maximum_response_tokens: role.max_output_tokens,
+            thinking_mode: role.thinking_mode,
           },
     model_test: {
       latest_response: modelResult,
@@ -380,6 +385,7 @@ export function ModelTestConsole({
         `${role.label} test log`,
         `Connection: ${role.connection_name ?? "not configured"}`,
         `Model: ${role.model_id || "not selected"}`,
+        `Thinking: ${thinkingModeLabel(role.thinking_mode)}`,
         "",
         ...entries.map(
           (entry) =>

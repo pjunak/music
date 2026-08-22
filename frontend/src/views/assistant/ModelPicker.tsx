@@ -13,7 +13,6 @@ export function ModelPicker({ id, value, models, onChange }: Props) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const listId = `${id}-list`;
-  const hintId = `${id}-hint`;
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredModels = useMemo(
     () =>
@@ -80,10 +79,10 @@ export function ModelPicker({ id, value, models, onChange }: Props) {
         <input
           ref={inputRef}
           id={id}
+          aria-label="Model"
           role="combobox"
           aria-autocomplete="list"
           aria-controls={listId}
-          aria-describedby={hintId}
           aria-expanded={open}
           aria-activedescendant={
             open && filteredModels[activeIndex]
@@ -163,13 +162,6 @@ export function ModelPicker({ id, value, models, onChange }: Props) {
         ) : null}
       </div>
 
-      <span id={hintId} className="field-hint">
-        {disabled
-          ? "Save and verify the selected connection to load its model list."
-          : selectedAvailable
-            ? `${models.length} models loaded from this connection.`
-            : `Choose one of the ${models.length} models loaded during verification.`}
-      </span>
     </div>
   );
 }

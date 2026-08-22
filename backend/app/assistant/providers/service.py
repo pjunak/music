@@ -217,6 +217,17 @@ def _verification_status(
     )
 
 
+def _thinking_mode(
+    value: str,
+) -> Literal["provider_default", "enabled", "disabled"]:
+    return cast(
+        "Literal['provider_default', 'enabled', 'disabled']",
+        value
+        if value in {"provider_default", "enabled", "disabled"}
+        else "provider_default",
+    )
+
+
 def _credential_saved(row: AssistantProviderConnection) -> bool:
     return bool(row.encrypted_api_key and row.api_key_nonce)
 
@@ -745,6 +756,7 @@ def _role_runtime_fingerprint(
             row.model_id,
             str(row.timeout_seconds),
             str(row.max_output_tokens),
+            _thinking_mode(row.thinking_mode),
         )
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -820,6 +832,11 @@ def _role_out(
         ),
         timeout_seconds=row.timeout_seconds if row is not None else 30,
         max_output_tokens=row.max_output_tokens if row is not None else 2_000,
+        thinking_mode=(
+            _thinking_mode(row.thinking_mode)
+            if row is not None
+            else "provider_default"
+        ),
         verification_status=verification_status,
         conformance_status=conformance_status,
         conformance_error_code=(
@@ -931,6 +948,7 @@ def update_model_role(
         or row.model_id != payload.model_id
         or row.timeout_seconds != payload.timeout_seconds
         or row.max_output_tokens != payload.max_output_tokens
+        or _thinking_mode(row.thinking_mode) != payload.thinking_mode
     )
     if payload.enabled and (
         row is None
@@ -954,6 +972,7 @@ def update_model_role(
     row.enabled = payload.enabled
     row.timeout_seconds = payload.timeout_seconds
     row.max_output_tokens = payload.max_output_tokens
+    row.thinking_mode = payload.thinking_mode
     if runtime_changed:
         _reset_role_conformance(row)
         db.execute(
@@ -989,6 +1008,7 @@ def _execution_target(
         model_id=row.model_id,
         timeout_seconds=row.timeout_seconds,
         max_output_tokens=row.max_output_tokens,
+        thinking_mode=_thinking_mode(row.thinking_mode),
     )
 
 

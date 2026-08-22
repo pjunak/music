@@ -40,7 +40,6 @@ export function ProviderConnectionCard({
   onDeleteCredential,
   onDelete,
 }: Props) {
-  const [editing, setEditing] = useState(false);
   const [name, setName] = useState(connection.name);
   const [adapterId, setAdapterId] = useState(connection.adapter_id);
   const [baseUrl, setBaseUrl] = useState(connection.base_url);
@@ -70,7 +69,6 @@ export function ProviderConnectionCard({
     try {
       await onUpdate(connection.id, payload);
       setApiKey("");
-      setEditing(false);
     } catch {
       // The parent reports the failure and keeps this form open for correction.
     }
@@ -96,36 +94,22 @@ export function ProviderConnectionCard({
       </div>
 
       <p className="assistant-provider-url">{connection.base_url}</p>
-      <div
-        className={`assistant-provider-credential${
-          connection.credential_saved ? " is-saved" : " is-missing"
-        }`}
-      >
-        <div>
+      <div className="assistant-provider-facts" aria-label="Connection summary">
+        <span>
+          Key
           <strong>
-            {connection.credential_saved ? "API key saved" : "No API key saved"}
-          </strong>
-          <p>
             {connection.credential_saved
-              ? connection.verification_status === "verified"
-                ? verifiedCapabilityLabels.length > 0
-                  ? `Encrypted on this server. Verified for: ${verifiedCapabilityLabels.join(
-                      " · ",
-                    )}.`
-                  : "Encrypted on this server, but no supported task capability was confirmed."
-                : "Encrypted on this server. Verification is still required before use."
-              : "Add a key under Change, then verify this connection before use."}
-          </p>
-        </div>
-        {connection.credential_saved && connection.key_hint ? (
-          <code>{connection.key_hint}</code>
-        ) : null}
+              ? connection.key_hint ?? "Saved"
+              : "Missing"}
+          </strong>
+        </span>
+        <span>
+          Models <strong>{models.length}</strong>
+        </span>
+        <span>
+          Tasks <strong>{assignedRoleLabels.length}</strong>
+        </span>
       </div>
-      <p className="field-hint">
-        {assignedRoleLabels.length > 0
-          ? `Used by: ${assignedRoleLabels.join(" · ")}`
-          : "Not assigned to an AI task yet."}
-      </p>
       {connection.verification_status === "failed" ? (
         <p className="assistant-provider-problem" role="status">
           {verificationFailureMessage(connection.verification_error_code)}
@@ -138,20 +122,6 @@ export function ProviderConnectionCard({
           confirms a compatible capability.
         </p>
       ) : null}
-
-      <div className="assistant-provider-models">
-        <span>Available models</span>
-        <strong>{models.length}</strong>
-        {models.length > 0 ? (
-          <p title={models.join(", ")}>{models.slice(0, 3).join(" · ")}</p>
-        ) : (
-          <p>
-            {connection.credential_saved
-              ? "Verify this connection to load its model list."
-              : "Save an API key before loading models."}
-          </p>
-        )}
-      </div>
 
       <div className="assistant-provider-actions">
         <button
@@ -169,14 +139,31 @@ export function ProviderConnectionCard({
               : "Verify connection"}
         </button>
         <button
-          className="btn-ghost"
+          className="btn-danger"
           type="button"
           disabled={busy}
-          aria-expanded={editing}
-          onClick={() => setEditing((value) => !value)}
+          onClick={() => void onDelete(connection)}
         >
-          {editing ? "Close changes" : "Change"}
+          Delete
         </button>
+      </div>
+
+      <details className="assistant-provider-details">
+        <summary>Connection details</summary>
+        <dl>
+          <div>
+            <dt>Verified capabilities</dt>
+            <dd>{verifiedCapabilityLabels.join(" · ") || "None confirmed"}</dd>
+          </div>
+          <div>
+            <dt>Assigned tasks</dt>
+            <dd>{assignedRoleLabels.join(" · ") || "None"}</dd>
+          </div>
+          <div>
+            <dt>Available models</dt>
+            <dd>{models.join(" · ") || "Verify to load models"}</dd>
+          </div>
+        </dl>
         {connection.credential_saved ? (
           <button
             className="btn-ghost"
@@ -187,91 +174,86 @@ export function ProviderConnectionCard({
             Delete API key
           </button>
         ) : null}
-        <button
-          className="btn-danger"
-          type="button"
-          disabled={busy}
-          onClick={() => void onDelete(connection)}
-        >
-          Delete
-        </button>
-      </div>
 
-      {editing ? (
-        <form className="assistant-provider-edit" onSubmit={(event) => void save(event)}>
-          <label className="field">
-            <span className="field-label">Connection name</span>
-            <input
-              value={name}
-              maxLength={128}
-              required
-              onChange={(event) => setName(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Connection type</span>
-            <select
-              value={adapterId}
-              onChange={(event) => setAdapterId(event.target.value)}
-            >
-              {adapters.map((adapter) => (
-                <option key={adapter.id} value={adapter.id}>
-                  {adapter.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span className="field-label">Provider address</span>
-            <input
-              type="url"
-              value={baseUrl}
-              maxLength={2048}
-              required
-              onChange={(event) => setBaseUrl(event.target.value)}
-            />
-          </label>
-          {connection.credential_saved ? (
-            <p className="field-hint">
-              The saved API key cannot be replaced in place. Delete it from this
-              connection first if you intentionally need to enter another key.
-            </p>
-          ) : (
+        <details className="assistant-provider-settings">
+          <summary>Connection settings</summary>
+          <form
+            className="assistant-provider-edit"
+            onSubmit={(event) => void save(event)}
+          >
             <label className="field">
-              <span className="field-label">API key</span>
+              <span className="field-label">Connection name</span>
               <input
-                type="password"
-                value={apiKey}
-                maxLength={4096}
-                autoComplete="new-password"
-                disabled={!credentialStorageReady}
-                placeholder="Enter a key to enable verification"
-                onChange={(event) => setApiKey(event.target.value)}
+                value={name}
+                maxLength={128}
+                required
+                onChange={(event) => setName(event.target.value)}
               />
             </label>
-          )}
-          <label className="checkbox-row assistant-private-network">
-            <input
-              type="checkbox"
-              checked={allowPrivate}
-              onChange={(event) => setAllowPrivate(event.target.checked)}
-            />
-            <span>Allow a provider on my private network</span>
-          </label>
-          <p className="field-hint">
-            Saving a new key—or changing the address, connection type, or network
-            access—clears verification, model tests, and quality results for assigned
-            tasks. Active model work must finish or be cancelled first.
-          </p>
-          <button
-            className="btn-primary"
-            type="submit"
-            disabled={busy || !name.trim() || !baseUrl.trim()}
-          >
-            Save changes
-          </button>
-        </form>
-      ) : null}
+            <label className="field">
+              <span className="field-label">Connection type</span>
+              <select
+                value={adapterId}
+                onChange={(event) => setAdapterId(event.target.value)}
+              >
+                {adapters.map((adapter) => (
+                  <option key={adapter.id} value={adapter.id}>
+                    {adapter.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">Provider address</span>
+              <input
+                type="url"
+                value={baseUrl}
+                maxLength={2048}
+                required
+                onChange={(event) => setBaseUrl(event.target.value)}
+              />
+            </label>
+            {connection.credential_saved ? (
+              <p className="field-hint">
+                The saved API key cannot be replaced in place. Delete it first if
+                you intentionally need to enter another key.
+              </p>
+            ) : (
+              <label className="field">
+                <span className="field-label">API key</span>
+                <input
+                  type="password"
+                  value={apiKey}
+                  maxLength={4096}
+                  autoComplete="new-password"
+                  disabled={!credentialStorageReady}
+                  placeholder="Enter a key to enable verification"
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+              </label>
+            )}
+            <label className="checkbox-row assistant-private-network">
+              <input
+                type="checkbox"
+                checked={allowPrivate}
+                onChange={(event) => setAllowPrivate(event.target.checked)}
+              />
+              <span>Allow a provider on my private network</span>
+            </label>
+            <p className="field-hint">
+              Changing provider settings clears verification and assigned task
+              checks. Active model work must finish or be cancelled first.
+            </p>
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={busy || !name.trim() || !baseUrl.trim()}
+            >
+              Save changes
+            </button>
+          </form>
+        </details>
+      </details>
     </article>
   );
 }

@@ -1630,7 +1630,7 @@ def test_failed_model_test_is_persisted_without_enabling_role(
     assert enable.json()["detail"]["code"] == "model_not_tested"
 
 
-def test_changing_model_limits_invalidates_previous_model_test(
+def test_changing_thinking_mode_invalidates_previous_model_test(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1656,12 +1656,14 @@ def test_changing_model_limits_invalidates_previous_model_test(
             "connection_id": created["id"],
             "model_id": "planner-large",
             "enabled": False,
-            "timeout_seconds": 45,
+            "thinking_mode": "disabled",
+            "timeout_seconds": 30,
             "max_output_tokens": 2000,
         },
     )
 
     assert changed.status_code == 200
+    assert changed.json()["thinking_mode"] == "disabled"
     assert changed.json()["conformance_status"] == "never"
     assert changed.json()["last_conformance_at"] is None
 

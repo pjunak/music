@@ -2,6 +2,7 @@ import { api, type BackgroundJob } from "@/core/api";
 
 export type ProviderVerificationStatus = "never" | "verified" | "failed";
 export type ModelConformanceStatus = "never" | "passed" | "failed";
+export type ModelThinkingMode = "provider_default" | "enabled" | "disabled";
 export type ModelQualityEvaluationStatus =
   | "never"
   | "passed"
@@ -103,6 +104,7 @@ export interface ModelRole {
   effective_enabled: boolean;
   timeout_seconds: number;
   max_output_tokens: number;
+  thinking_mode: ModelThinkingMode;
   verification_status: ProviderVerificationStatus | null;
   conformance_status: ModelConformanceStatus;
   conformance_error_code: string | null;
@@ -141,6 +143,7 @@ export interface ModelRoleUpdate {
   enabled: boolean;
   timeout_seconds?: number;
   max_output_tokens?: number;
+  thinking_mode?: ModelThinkingMode;
 }
 
 export const assistantProvidersApi = {

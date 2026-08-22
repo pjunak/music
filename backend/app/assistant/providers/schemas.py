@@ -147,6 +147,9 @@ class ModelRoleUpdate(StrictProviderModel):
     enabled: bool = False
     timeout_seconds: int = Field(default=30, ge=5, le=300)
     max_output_tokens: int = Field(default=2000, ge=128, le=65536)
+    thinking_mode: Literal["provider_default", "enabled", "disabled"] = (
+        "provider_default"
+    )
 
     @field_validator("connection_id", "model_id", mode="before")
     @classmethod
@@ -167,6 +170,7 @@ class ModelRoleOut(StrictProviderModel):
     effective_enabled: bool
     timeout_seconds: int
     max_output_tokens: int
+    thinking_mode: Literal["provider_default", "enabled", "disabled"]
     verification_status: Literal["never", "verified", "failed"] | None
     conformance_status: Literal["never", "passed", "failed"]
     conformance_error_code: str | None

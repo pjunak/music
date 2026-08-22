@@ -137,6 +137,7 @@ const role: ModelRole = {
   model_id: "",
   enabled: false,
   effective_enabled: false,
+  thinking_mode: "provider_default",
   timeout_seconds: 30,
   max_output_tokens: 2000,
   verification_status: null,
@@ -241,17 +242,20 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     expect(
-      await screen.findByText(/create separate connections/i),
+      await screen.findByRole("heading", { name: "AI connections" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Used by: Playlist planner · Music tagger"),
-    ).toBeInTheDocument();
+      screen.queryByText(/Each connection stores one provider key/i),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Connection details"));
+    expect(screen.getByText("Playlist planner · Music tagger")).toBeInTheDocument();
+    expect(screen.getByText("Structured text")).toBeInTheDocument();
     expect(
-      screen.getAllByText(
-        /other tasks may reuse this key or choose a different connection/i,
-      ),
-    ).toHaveLength(2);
-    expect(screen.getByText(/Verified for: Structured text/i)).toBeInTheDocument();
+      screen.queryByText(/other tasks may reuse this key/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Add provider connection").closest("details"),
+    ).not.toHaveAttribute("open");
   });
 
   it("keeps future capability-bound tasks visibly planned and locked", async () => {
@@ -305,8 +309,15 @@ describe("AssistantAiSetupView", () => {
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([configuredRole]);
     render(<AssistantAiSetupView />);
 
+    const connectionCard = (await screen.findByRole("heading", {
+      name: "Hosted models",
+    })).closest("article");
+    expect(connectionCard).not.toBeNull();
+    await userEvent.click(
+      within(connectionCard as HTMLElement).getByText("Connection details"),
+    );
     expect(
-      await screen.findByText(/no supported task capability was confirmed/i),
+      within(connectionCard as HTMLElement).getByText("None confirmed"),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Test model" })).toBeDisabled();
     expect(
@@ -482,14 +493,16 @@ describe("AssistantAiSetupView", () => {
     ).mockResolvedValue(connectionWithoutKey);
     render(<AssistantAiSetupView />);
 
-    expect(await screen.findByText("API key saved")).toBeInTheDocument();
-    expect(screen.getByText("••••1234")).toBeInTheDocument();
+    expect(await screen.findByText("••••1234")).toBeInTheDocument();
     const connectionCard = screen
       .getByRole("heading", { name: "Hosted models" })
       .closest("article");
     expect(connectionCard).not.toBeNull();
     await user.click(
-      within(connectionCard as HTMLElement).getByRole("button", { name: "Change" }),
+      within(connectionCard as HTMLElement).getByText("Connection details"),
+    );
+    await user.click(
+      within(connectionCard as HTMLElement).getByText("Connection settings"),
     );
     expect(
       within(connectionCard as HTMLElement).getByText(
@@ -512,7 +525,7 @@ describe("AssistantAiSetupView", () => {
         assistantProvidersApi.deleteConnectionCredential,
       ).toHaveBeenCalledWith("connection-1"),
     );
-    expect(await screen.findByText("No API key saved")).toBeInTheDocument();
+    expect(await screen.findByText("Missing")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Verify connection" }),
     ).toBeDisabled();
@@ -535,6 +548,7 @@ describe("AssistantAiSetupView", () => {
       model_id: "planner-large",
       enabled: false,
       effective_enabled: false,
+      thinking_mode: "disabled",
       verification_status: "verified",
     };
     const testedRole: ModelRole = {
@@ -574,6 +588,8 @@ describe("AssistantAiSetupView", () => {
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "planner-large" }));
     expect(modelPicker).toHaveValue("planner-large");
+    await user.click(screen.getByText("Request settings"));
+    await user.click(screen.getByLabelText("Off"));
     await user.click(screen.getByRole("button", { name: "Save task" }));
 
     await waitFor(() =>
@@ -583,6 +599,7 @@ describe("AssistantAiSetupView", () => {
           connection_id: "connection-1",
           model_id: "planner-large",
           enabled: false,
+          thinking_mode: "disabled",
           timeout_seconds: 30,
           max_output_tokens: 2000,
         },
@@ -604,6 +621,7 @@ describe("AssistantAiSetupView", () => {
           connection_id: "connection-1",
           model_id: "planner-large",
           enabled: true,
+          thinking_mode: "disabled",
           timeout_seconds: 30,
           max_output_tokens: 2000,
         },
@@ -658,8 +676,8 @@ describe("AssistantAiSetupView", () => {
       screen.getByLabelText("Allow this model for this task"),
     ).toBeDisabled();
     expect(
-      screen.getByText(/no songs or live library data/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/no songs or live library data/i),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByLabelText("Selected model task diagnostics JSON"),
     ).toHaveTextContent(/"provider_model_id":\s*"planner-large-2026"/);
@@ -668,6 +686,7 @@ describe("AssistantAiSetupView", () => {
     );
     const copiedDetails = await navigator.clipboard.readText();
     expect(copiedDetails).toContain('"duration_ms": 947');
+    expect(copiedDetails).toContain('"thinking_mode": "provider_default"');
     expect(copiedDetails).toContain(
       '"adapter_label": "OpenAI-compatible API"',
     );

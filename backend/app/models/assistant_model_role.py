@@ -21,6 +21,9 @@ class AssistantModelRole(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     max_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=2_000)
+    thinking_mode: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="provider_default"
+    )
     conformance_status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="never"
     )
