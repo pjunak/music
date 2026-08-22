@@ -10,14 +10,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from app.assistant.providers.definitions import OPENAI_COMPATIBLE_ADAPTER
+from app.assistant.providers.definitions import (
+    OPENAI_COMPATIBLE_ADAPTER,
+    OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
+)
 from app.assistant.providers.transport import (
     ProviderTransportError,
     request_json,
     safe_http_error_code,
 )
 
-CONFORMANCE_CONTRACT = "assistant-provider-conformance/v2"
+CONFORMANCE_CONTRACT = "assistant-provider-conformance/v3"
 _MAX_EXECUTION_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
@@ -37,6 +40,8 @@ class StructuredModelRequest:
     system_prompt: str
     user_prompt: str
     max_output_tokens: int
+    output_schema_name: str | None = None
+    output_schema: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +107,18 @@ def _execute_openai_compatible(
     target: ProviderExecutionTarget,
     request: StructuredModelRequest,
 ) -> StructuredModelResult:
+    response_format: dict[str, object] = {"type": "json_object"}
+    if target.adapter_id == OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER:
+        if request.output_schema_name is None or request.output_schema is None:
+            return StructuredModelResult(False, "output_schema_required")
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": request.output_schema_name,
+                "strict": True,
+                "schema": request.output_schema,
+            },
+        }
     try:
         response = request_json(
             "POST",
@@ -121,7 +138,7 @@ def _execute_openai_compatible(
                     request.max_output_tokens,
                     target.max_output_tokens,
                 ),
-                "response_format": {"type": "json_object"},
+                "response_format": response_format,
             },
         )
     except ProviderTransportError as exc:
@@ -144,7 +161,10 @@ def execute_structured_model_request(
 ) -> StructuredModelResult:
     """Execute one request; feature-specific schema checks happen above this layer."""
 
-    if target.adapter_id == OPENAI_COMPATIBLE_ADAPTER:
+    if target.adapter_id in {
+        OPENAI_COMPATIBLE_ADAPTER,
+        OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
+    }:
         return _execute_openai_compatible(target, request)
     return StructuredModelResult(False, "unsupported_adapter")
 
@@ -155,6 +175,16 @@ def run_provider_conformance(
 ) -> ProviderConformanceResult:
     """Check transport plus strict JSON instruction following with synthetic data."""
 
+    conformance_schema: dict[str, object] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["contract", "challenge", "accepted"],
+        "properties": {
+            "contract": {"type": "string", "const": CONFORMANCE_CONTRACT},
+            "challenge": {"type": "string", "const": challenge},
+            "accepted": {"type": "boolean", "const": True},
+        },
+    }
     request = StructuredModelRequest(
         system_prompt=(
             "This is a connection conformance test. Return only one JSON object with "
@@ -167,6 +197,8 @@ def run_provider_conformance(
             separators=(",", ":"),
         ),
         max_output_tokens=256,
+        output_schema_name="assistant-provider-conformance",
+        output_schema=conformance_schema,
     )
     result = execute_structured_model_request(target, request)
     if not result.succeeded:

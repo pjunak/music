@@ -13,9 +13,11 @@ from app.assistant.providers.transport import JsonHttpResponse, ProviderTranspor
 from .assistant_test_values import TEST_SHORT_API_KEY
 
 
-def _target() -> ProviderExecutionTarget:
+def _target(
+    adapter_id: str = "openai-compatible/v1",
+) -> ProviderExecutionTarget:
     return ProviderExecutionTarget(
-        adapter_id="openai-compatible/v1",
+        adapter_id=adapter_id,
         base_url="https://models.example/v1",
         api_key=TEST_SHORT_API_KEY,
         allow_private_network=False,
@@ -68,6 +70,60 @@ def test_execution_normalizes_structured_response_and_usage(
         "max_tokens": 512,
         "response_format": {"type": "json_object"},
     }
+
+
+def test_strict_adapter_sends_exact_task_json_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(kwargs)
+        return JsonHttpResponse(
+            200,
+            {"choices": [{"message": {"content": '{"answer":"ok"}'}}]},
+        )
+
+    schema: dict[str, object] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["answer"],
+        "properties": {"answer": {"type": "string"}},
+    }
+    monkeypatch.setattr(execution, "request_json", request)
+
+    result = execution.execute_structured_model_request(
+        _target("openai-compatible-json-schema/v1"),
+        StructuredModelRequest(
+            "system",
+            "user",
+            512,
+            output_schema_name="test-answer",
+            output_schema=schema,
+        ),
+    )
+
+    assert result.succeeded is True
+    payload = observed["payload"]
+    assert isinstance(payload, dict)
+    assert payload["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "test-answer",
+            "strict": True,
+            "schema": schema,
+        },
+    }
+
+
+def test_strict_adapter_requires_a_schema() -> None:
+    result = execution.execute_structured_model_request(
+        _target("openai-compatible-json-schema/v1"),
+        StructuredModelRequest("system", "user", 512),
+    )
+
+    assert result.succeeded is False
+    assert result.error_code == "output_schema_required"
 
 
 @pytest.mark.parametrize(

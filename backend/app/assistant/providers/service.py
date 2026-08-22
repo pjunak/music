@@ -21,6 +21,7 @@ from app.assistant.providers.credentials import (
 )
 from app.assistant.providers.definitions import (
     MODEL_ROLE_BY_ID,
+    MODEL_ROLE_RUNTIME_CONTRACTS,
     MODEL_ROLES,
     PROVIDER_ADAPTER_BY_ID,
     PROVIDER_ADAPTERS,
@@ -740,6 +741,7 @@ def _role_runtime_fingerprint(
             CONFORMANCE_CONTRACT,
             _connection_fingerprint(connection),
             row.role_id,
+            MODEL_ROLE_RUNTIME_CONTRACTS[row.role_id],
             row.model_id,
             str(row.timeout_seconds),
             str(row.max_output_tokens),

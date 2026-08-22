@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from app.assistant.providers.definitions import (
     OPENAI_COMPATIBLE_ADAPTER,
-    STRUCTURED_TEXT_CAPABILITY,
+    OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
+    PROVIDER_ADAPTER_BY_ID,
 )
 from app.assistant.providers.transport import (
     ProviderTransportError,
@@ -35,6 +36,7 @@ class ProviderVerificationResult:
 
 
 def _verify_openai_compatible(
+    adapter_id: str,
     base_url: str,
     api_key: str,
     *,
@@ -81,7 +83,7 @@ def _verify_openai_compatible(
         True,
         None,
         tuple(models),
-        (STRUCTURED_TEXT_CAPABILITY,),
+        PROVIDER_ADAPTER_BY_ID[adapter_id].capability_ids,
     )
 
 
@@ -92,8 +94,12 @@ def verify_provider_connection(
     *,
     allow_private_network: bool,
 ) -> ProviderVerificationResult:
-    if adapter_id == OPENAI_COMPATIBLE_ADAPTER:
+    if adapter_id in {
+        OPENAI_COMPATIBLE_ADAPTER,
+        OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
+    }:
         return _verify_openai_compatible(
+            adapter_id,
             base_url,
             api_key,
             allow_private_network=allow_private_network,

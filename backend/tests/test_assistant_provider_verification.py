@@ -86,6 +86,29 @@ def test_verification_accepts_unique_bounded_model_ids(
     assert result.capability_ids == ("structured-text/v1",)
 
 
+def test_strict_adapter_verification_advertises_schema_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        verification,
+        "request_json",
+        lambda *a, **k: JsonHttpResponse(200, {"data": [{"id": "model-a"}]}),
+    )
+
+    result = verification.verify_provider_connection(
+        "openai-compatible-json-schema/v1",
+        "https://models.example/v1",
+        "key",
+        allow_private_network=False,
+    )
+
+    assert result.verified is True
+    assert result.capability_ids == (
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    )
+
+
 def test_verification_does_not_follow_redirects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

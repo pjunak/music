@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 OPENAI_COMPATIBLE_ADAPTER = "openai-compatible/v1"
+OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER = "openai-compatible-json-schema/v1"
 STRUCTURED_TEXT_CAPABILITY = "structured-text/v1"
+STRICT_JSON_SCHEMA_CAPABILITY = "strict-json-schema/v1"
 AUDIO_INPUT_CAPABILITY = "audio-input/v1"
 
 
@@ -40,6 +42,13 @@ PROVIDER_CAPABILITIES = (
         ),
     ),
     ProviderCapabilityDefinition(
+        id=STRICT_JSON_SCHEMA_CAPABILITY,
+        label="Strict JSON Schema",
+        description=(
+            "Constrains model responses with the task's exact JSON Schema at the API."
+        ),
+    ),
+    ProviderCapabilityDefinition(
         id=AUDIO_INPUT_CAPABILITY,
         label="Audio input",
         description="Accepts bounded audio content through a dedicated provider adapter.",
@@ -55,9 +64,18 @@ PROVIDER_ADAPTERS = (
         id=OPENAI_COMPATIBLE_ADAPTER,
         label="OpenAI-compatible API",
         description=(
-            "For services that expose a compatible /models endpoint and Bearer API key."
+            "Maximum compatibility using JSON-object response mode plus strict local validation."
         ),
         capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
+    ),
+    ProviderAdapterDefinition(
+        id=OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
+        label="OpenAI-compatible strict JSON Schema",
+        description=(
+            "For compatible services that support response_format type json_schema. "
+            "Use the standard adapter when the provider supports only json_object."
+        ),
+        capability_ids=(STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY),
     ),
 )
 PROVIDER_ADAPTER_BY_ID = {adapter.id: adapter for adapter in PROVIDER_ADAPTERS}
@@ -113,3 +131,14 @@ MODEL_ROLES = (
     ),
 )
 MODEL_ROLE_BY_ID = {role.id: role for role in MODEL_ROLES}
+
+# Feature prompt/input/output changes must invalidate conformance and quality
+# results even when a connection, model, and runtime limits are unchanged.
+MODEL_ROLE_RUNTIME_CONTRACTS: dict[str, str] = {
+    "music_tagger": "assistant-music-tagger-input/v3+output/v1",
+    "playlist_planner": "assistant-playlist-planner-input/v2+output/v1",
+    "tag_cleanup": "assistant-model-tag-cleanup-input/v2+output/v1",
+    "library_cleanup": "reserved-library-cleanup/v1",
+    "eq_assistant": "assistant-eq-draft-input/v2+output/v1",
+    "audio_analyzer": "reserved-audio-analyzer/v1",
+}

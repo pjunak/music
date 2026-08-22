@@ -17,6 +17,10 @@ from sqlalchemy import delete
 
 from app.assistant.model_playlist import MODEL_PLAYLIST_OUTPUT_CONTRACT
 from app.assistant.providers.credentials import CredentialVaultError
+from app.assistant.providers.definitions import (
+    MODEL_ROLE_BY_ID,
+    MODEL_ROLE_RUNTIME_CONTRACTS,
+)
 from app.assistant.providers.execution import (
     ProviderConformanceResult,
     StructuredModelRequest,
@@ -404,6 +408,10 @@ def test_failed_playlist_quality_is_a_completed_report_not_a_broken_job(
     assert quality["total_cases"] == 8
 
 
+def test_every_model_role_has_a_runtime_contract() -> None:
+    assert set(MODEL_ROLE_RUNTIME_CONTRACTS) == set(MODEL_ROLE_BY_ID)
+
+
 def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> None:
     response = auth_client.get("/api/assistant/providers/status")
 
@@ -420,7 +428,8 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         == "master_key_already_configured"
     )
     assert [adapter["id"] for adapter in payload["adapters"]] == [
-        "openai-compatible/v1"
+        "openai-compatible/v1",
+        "openai-compatible-json-schema/v1",
     ]
     assert payload["capabilities"] == [
         {
@@ -432,6 +441,13 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
             ),
         },
         {
+            "id": "strict-json-schema/v1",
+            "label": "Strict JSON Schema",
+            "description": (
+                "Constrains model responses with the task's exact JSON Schema at the API."
+            ),
+        },
+        {
             "id": "audio-input/v1",
             "label": "Audio input",
             "description": (
@@ -440,6 +456,10 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         },
     ]
     assert payload["adapters"][0]["capability_ids"] == ["structured-text/v1"]
+    assert payload["adapters"][1]["capability_ids"] == [
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    ]
     assert {role["id"] for role in payload["roles"]} == {
         "music_tagger",
         "playlist_planner",
