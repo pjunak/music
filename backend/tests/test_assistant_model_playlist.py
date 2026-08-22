@@ -139,9 +139,14 @@ def test_model_planner_sends_reduced_candidates_and_reconstructs_sources() -> No
     )
     assert executor.requests[0].output_schema is not None
     output_properties = executor.requests[0].output_schema["properties"]
+    assert isinstance(output_properties, dict)
     candidate_ids = [item["track_id"] for item in request_payload["candidates"]]
-    assert output_properties["ranked_track_ids"]["items"]["enum"] == candidate_ids
-    assert output_properties["selected_track_ids"]["items"]["enum"] == candidate_ids
+    for field in ("ranked_track_ids", "selected_track_ids"):
+        field_schema = output_properties[field]
+        assert isinstance(field_schema, dict)
+        item_schema = field_schema["items"]
+        assert isinstance(item_schema, dict)
+        assert item_schema["enum"] == candidate_ids
     assert all("path" not in candidate for candidate in request_payload["candidates"])
     assert "untrusted data" in executor.requests[0].system_prompt
     assert "Example JSON shape" in executor.requests[0].system_prompt

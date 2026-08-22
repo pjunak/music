@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import update
+from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
 from app.assistant.tags import normalize_manual_tag
@@ -295,17 +295,20 @@ def replace_tag_vocabulary(
         raise TagVocabularyConflictError(
             "The tag vocabulary changed after this page was loaded. Reload it and try again."
         )
-    result = db.execute(
-        update(AssistantTagVocabulary)
-        .where(
-            AssistantTagVocabulary.key == TAG_VOCABULARY_KEY,
-            AssistantTagVocabulary.revision == expected_revision,
-        )
-        .values(
-            document_json=_document_json(document),
-            revision=expected_revision + 1,
-            updated_at=utcnow(),
-        )
+    result = cast(
+        "CursorResult[Any]",
+        db.execute(
+            update(AssistantTagVocabulary)
+            .where(
+                AssistantTagVocabulary.key == TAG_VOCABULARY_KEY,
+                AssistantTagVocabulary.revision == expected_revision,
+            )
+            .values(
+                document_json=_document_json(document),
+                revision=expected_revision + 1,
+                updated_at=utcnow(),
+            )
+        ),
     )
     if result.rowcount != 1:
         db.rollback()

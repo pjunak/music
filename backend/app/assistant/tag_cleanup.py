@@ -160,6 +160,7 @@ def build_tag_cleanup_preview(
             "vocabulary_plural",
             "vocabulary_typo",
         ]
+        candidates: tuple[str, ...]
         if alias_target is not None:
             candidates = (alias_target.name,)
             reason_code = "vocabulary_alias"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from copy import deepcopy
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -357,6 +358,7 @@ def suggest_model_tag_cleanup(
         batch = indexed_sources[offset : offset + MODEL_TAG_CLEANUP_BATCH_SIZE]
         source_ids = [source_id for source_id, _item in batch]
         source_by_id = dict(batch)
+        vocabulary_tag_ids = [tag.id for tag in vocabulary.entries]
         model_input = ModelTagCleanupInput(
             schema_version=MODEL_TAG_CLEANUP_INPUT_CONTRACT,
             canonical_tags=canonical_inputs,
@@ -390,10 +392,10 @@ def suggest_model_tag_cleanup(
                     ],
                 },
                 max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
-                schema_transform=lambda schema, source_ids=source_ids: _closed_cleanup_schema(
-                    schema,
+                schema_transform=partial(
+                    _closed_cleanup_schema,
                     source_ids=source_ids,
-                    tag_ids=[tag.id for tag in vocabulary.entries],
+                    tag_ids=vocabulary_tag_ids,
                 ),
             )
         )

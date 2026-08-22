@@ -85,5 +85,8 @@ def test_harness_uses_task_specific_closed_schema_in_prompt_and_request() -> Non
 
     assert request.output_schema is not None
     properties = request.output_schema["properties"]
-    assert properties["accepted"]["const"] is True
+    assert isinstance(properties, dict)
+    accepted = properties["accepted"]
+    assert isinstance(accepted, dict)
+    assert accepted["const"] is True
     assert '"const":true' in request.system_prompt

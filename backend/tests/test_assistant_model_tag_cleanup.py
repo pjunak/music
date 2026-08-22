@@ -369,11 +369,23 @@ def test_cleanup_model_receives_only_remaining_result_capacity() -> None:
         payload = json.loads(request.user_prompt)
         observed_slots.append(payload["remaining_suggestion_slots"])
         assert request.output_schema is not None
-        decision = request.output_schema["$defs"]["ModelTagCleanupDecision"]
-        assert decision["properties"]["source_id"]["enum"] == ["source-001"]
-        target_choices = decision["properties"]["target_tag_id"]["anyOf"]
+        definitions = request.output_schema["$defs"]
+        assert isinstance(definitions, dict)
+        decision = definitions["ModelTagCleanupDecision"]
+        assert isinstance(decision, dict)
+        properties = decision["properties"]
+        assert isinstance(properties, dict)
+        source_schema = properties["source_id"]
+        assert isinstance(source_schema, dict)
+        assert source_schema["enum"] == ["source-001"]
+        target_schema = properties["target_tag_id"]
+        assert isinstance(target_schema, dict)
+        target_choices = target_schema["anyOf"]
+        assert isinstance(target_choices, list)
         target_ids = next(
-            item["enum"] for item in target_choices if item.get("type") == "string"
+            item["enum"]
+            for item in target_choices
+            if isinstance(item, dict) and item.get("type") == "string"
         )
         assert "setting.tavern" in target_ids
         return StructuredModelResult(
