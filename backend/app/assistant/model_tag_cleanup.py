@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -17,29 +18,30 @@ from app.assistant.structured_harness import (
     numbered_rules,
 )
 from app.assistant.tag_cleanup import build_tag_cleanup_preview
-from app.assistant.tags import DND_STARTER_TAG_GROUPS, TagUsage
+from app.assistant.tag_vocabulary import (
+    TagVocabularySnapshot,
+    default_tag_vocabulary_snapshot,
+)
+from app.assistant.tags import TagUsage
 
 MODEL_TAG_CLEANUP_INPUT_CONTRACT: Literal[
-    "assistant-model-tag-cleanup-input/v2"
-] = "assistant-model-tag-cleanup-input/v2"
+    "assistant-model-tag-cleanup-input/v3"
+] = "assistant-model-tag-cleanup-input/v3"
 MODEL_TAG_CLEANUP_OUTPUT_CONTRACT: Literal[
-    "assistant-model-tag-cleanup-output/v1"
-] = "assistant-model-tag-cleanup-output/v1"
+    "assistant-model-tag-cleanup-output/v2"
+] = "assistant-model-tag-cleanup-output/v2"
 MODEL_TAG_CLEANUP_EVALUATION_CONTRACT: Literal[
-    "assistant-model-tag-cleanup-evaluation/v1"
-] = "assistant-model-tag-cleanup-evaluation/v1"
-MODEL_TAG_CLEANUP_ENGINE_ID: Literal["model-tag-cleanup/v2"] = (
-    "model-tag-cleanup/v2"
+    "assistant-model-tag-cleanup-evaluation/v2"
+] = "assistant-model-tag-cleanup-evaluation/v2"
+MODEL_TAG_CLEANUP_ENGINE_ID: Literal["model-tag-cleanup/v3"] = (
+    "model-tag-cleanup/v3"
 )
 MAX_MODEL_CLEANUP_TAGS = 500
 MAX_MODEL_CLEANUP_SUGGESTIONS = 100
+MODEL_TAG_CLEANUP_BATCH_SIZE = 50
 _MAX_MODEL_OUTPUT_TOKENS = 8_000
 _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9_]{1,64}$")
-
-MODEL_TAG_CLEANUP_STARTER_TAGS: tuple[str, ...] = tuple(
-    tag for group in DND_STARTER_TAG_GROUPS for tag in group.tags
-)
-_STARTER_TAG_SET = frozenset(MODEL_TAG_CLEANUP_STARTER_TAGS)
+_DEFAULT_TAG_SET = default_tag_vocabulary_snapshot().names
 
 BoundedReason = Annotated[str, Field(min_length=1, max_length=512)]
 CleanupConfidence = Literal["high", "medium", "low"]
@@ -54,16 +56,28 @@ class ModelTagUsageInput(_StrictModel):
     track_count: int = Field(ge=0)
 
 
+class ModelCanonicalTagInput(_StrictModel):
+    tag_id: str = Field(min_length=2, max_length=64)
+    name: str = Field(min_length=1, max_length=64)
+    group: str = Field(min_length=1, max_length=64)
+    description: str = Field(min_length=2, max_length=300)
+
+
+class ModelTagCleanupSourceInput(_StrictModel):
+    source_id: str = Field(pattern=r"^source-[0-9]{3}$")
+    tag: str = Field(min_length=1, max_length=64)
+    track_count: int = Field(ge=0)
+
+
 class ModelTagCleanupInput(_StrictModel):
-    schema_version: Literal["assistant-model-tag-cleanup-input/v2"]
-    starter_tags: list[str] = Field(min_length=1, max_length=64)
-    candidate_sources: list[ModelTagUsageInput] = Field(
+    schema_version: Literal["assistant-model-tag-cleanup-input/v3"]
+    canonical_tags: list[ModelCanonicalTagInput] = Field(
         min_length=1,
         max_length=MAX_MODEL_CLEANUP_TAGS,
     )
-    allowed_targets: list[ModelTagUsageInput] = Field(
+    candidate_sources: list[ModelTagCleanupSourceInput] = Field(
         min_length=1,
-        max_length=MAX_MODEL_CLEANUP_TAGS + 64,
+        max_length=MAX_MODEL_CLEANUP_TAGS,
     )
     remaining_suggestion_slots: int = Field(
         ge=0,
@@ -71,11 +85,11 @@ class ModelTagCleanupInput(_StrictModel):
     )
 
 
-class ModelTagCleanupSuggestion(_StrictModel):
+class ModelTagCleanupDecision(_StrictModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    source: str = Field(min_length=1, max_length=64)
-    target: str = Field(min_length=1, max_length=64)
+    source_id: str = Field(pattern=r"^source-[0-9]{3}$")
+    target_tag_id: str | None = Field(default=None, min_length=2, max_length=64)
     confidence: CleanupConfidence
     reason: BoundedReason
 
@@ -83,10 +97,18 @@ class ModelTagCleanupSuggestion(_StrictModel):
 class ModelTagCleanupOutput(_StrictModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    schema_version: Literal["assistant-model-tag-cleanup-output/v1"]
-    suggestions: list[ModelTagCleanupSuggestion] = Field(
-        max_length=MAX_MODEL_CLEANUP_SUGGESTIONS
+    schema_version: Literal["assistant-model-tag-cleanup-output/v2"]
+    decisions: list[ModelTagCleanupDecision] = Field(
+        min_length=1,
+        max_length=MAX_MODEL_CLEANUP_TAGS,
     )
+
+
+class ModelTagCleanupSuggestion(_StrictModel):
+    source: str = Field(min_length=1, max_length=64)
+    target: str = Field(min_length=1, max_length=64)
+    confidence: CleanupConfidence
+    reason: BoundedReason
 
 
 class TagCleanupPair(_StrictModel):
@@ -135,7 +157,7 @@ class TagCleanupQualityCase(_StrictModel):
             raise ValueError(
                 f"cleanup expectations reference unknown sources: {unknown_sources}"
             )
-        allowed_targets = known_sources | _STARTER_TAG_SET
+        allowed_targets = known_sources | _DEFAULT_TAG_SET
         if unknown_targets := sorted(
             {target for _source, target in required | forbidden} - allowed_targets
         ):
@@ -150,7 +172,7 @@ class TagCleanupQualityCase(_StrictModel):
 
 
 class TagCleanupQualitySuite(_StrictModel):
-    schema_version: Literal["assistant-model-tag-cleanup-evaluation/v1"]
+    schema_version: Literal["assistant-model-tag-cleanup-evaluation/v2"]
     id: str = Field(min_length=1, max_length=128)
     cases: list[TagCleanupQualityCase] = Field(min_length=1, max_length=100)
 
@@ -198,18 +220,19 @@ _TAG_CLEANUP_TASK = StructuredTaskDefinition(
     task_id="assistant-tag-cleanup",
     role="A conservative catalog normalizer for operator-owned music tags.",
     objective=(
-        "Find only clear unresolved duplicate, synonym, or normalization pairs after "
-        "the server has already removed deterministic spelling and plural cases."
+        "Classify every unresolved source as exactly one canonical tag ID or no safe "
+        "match after deterministic aliases, spelling, and plurals are removed."
     ),
-    untrusted_data=("candidate source tags", "allowed target tags"),
+    untrusted_data=("candidate source tags", "canonical tag names and descriptions"),
     rules=numbered_rules(
-        "source must exactly match candidate_sources. target must exactly match allowed_targets. Never invent or rewrite a tag.",
-        "The server has already handled unambiguous spelling and plural rules. Focus on clear semantic synonyms that preserve the catalog's useful distinctions.",
-        "Prefer an established starter tag or an already-used target. Track counts indicate adoption only; popularity does not make two meanings equivalent.",
-        "Never rename a starter tag, return the same source and target, use one source twice, or create source/target chains.",
-        "Return no more suggestions than remaining_suggestion_slots. The server reserves the other slots for higher-confidence deterministic results.",
-        "Do not merge related but meaningfully distinct settings, scenes, or moods. Return no suggestion when context would be needed to decide safely.",
-        "reason must be a short catalog-level explanation and confidence must reflect how unambiguous the normalization is.",
+        "Return every candidate source_id exactly once and no other source IDs. Preserve the input order.",
+        "target_tag_id must be an exact ID from canonical_tags or null. Never return a tag name, source text, or invented ID as the target.",
+        "The server already handled declared aliases and unambiguous spelling and plurals. Choose a target only for a clear semantic synonym that preserves useful distinctions.",
+        "Do not merge related but meaningfully distinct settings, scenes, or moods. Use null whenever track context would be needed to decide safely.",
+        "Track counts indicate adoption only; popularity does not make two meanings equivalent. Definitions are authoritative when labels could overlap.",
+        "Do not stop after the first match. Evaluate each source independently even when earlier sources map to the same target.",
+        "At most remaining_suggestion_slots decisions may use a non-null target_tag_id. All other sources must still receive an explicit null decision.",
+        "reason must be a short catalog-level explanation and confidence must reflect how unambiguous the decision is.",
     ),
 )
 
@@ -222,30 +245,79 @@ def _safe_execution_error(code: str | None) -> str:
 
 def unresolved_model_cleanup_usage(
     usage: Sequence[TagUsage],
+    vocabulary: TagVocabularySnapshot | None = None,
 ) -> tuple[TagUsage, ...]:
-    """Return only non-starter sources not handled by deterministic cleanup."""
+    """Return only non-canonical sources not handled by deterministic cleanup."""
 
+    vocabulary = vocabulary or default_tag_vocabulary_snapshot()
     local_sources = {
-        item.source for item in build_tag_cleanup_preview(usage).suggestions
+        item.source
+        for item in build_tag_cleanup_preview(usage, vocabulary).suggestions
     }
     return tuple(
         item
         for item in usage
-        if item.tag not in _STARTER_TAG_SET and item.tag not in local_sources
+        if item.tag not in vocabulary.names and item.tag not in local_sources
     )
+
+
+def _closed_cleanup_schema(
+    schema: dict[str, object],
+    *,
+    source_ids: list[str],
+    tag_ids: list[str],
+) -> dict[str, object]:
+    closed = deepcopy(schema)
+    definitions = closed.get("$defs")
+    if not isinstance(definitions, dict):
+        raise RuntimeError("cleanup output schema is missing definitions")
+    decision = definitions.get("ModelTagCleanupDecision")
+    if not isinstance(decision, dict):
+        raise RuntimeError("cleanup decision schema is missing")
+    properties = decision.get("properties")
+    if not isinstance(properties, dict):
+        raise RuntimeError("cleanup decision properties are missing")
+    source_schema = properties.get("source_id")
+    if not isinstance(source_schema, dict):
+        raise RuntimeError("cleanup source schema is missing")
+    source_schema["enum"] = source_ids
+    target_schema = properties.get("target_tag_id")
+    if not isinstance(target_schema, dict):
+        raise RuntimeError("cleanup target schema is missing")
+    choices = target_schema.get("anyOf")
+    if not isinstance(choices, list):
+        raise RuntimeError("cleanup target choices are missing")
+    string_choice = next(
+        (choice for choice in choices if isinstance(choice, dict) and choice.get("type") == "string"),
+        None,
+    )
+    if string_choice is None:
+        raise RuntimeError("cleanup target string choice is missing")
+    string_choice["enum"] = tag_ids
+    output_properties = closed.get("properties")
+    if not isinstance(output_properties, dict):
+        raise RuntimeError("cleanup output properties are missing")
+    decisions_schema = output_properties.get("decisions")
+    if not isinstance(decisions_schema, dict):
+        raise RuntimeError("cleanup decisions schema is missing")
+    decisions_schema["minItems"] = len(source_ids)
+    decisions_schema["maxItems"] = len(source_ids)
+    return closed
 
 
 def suggest_model_tag_cleanup(
     usage: Sequence[TagUsage],
     execute: StructuredCleanupExecutor,
+    vocabulary: TagVocabularySnapshot | None = None,
 ) -> tuple[ModelTagCleanupSuggestion, ...]:
-    """Return validated, non-chained suggestions without changing manual tags."""
+    """Return validated canonical mappings without changing manual tags."""
 
     if not usage:
         return ()
     if len(usage) > MAX_MODEL_CLEANUP_TAGS:
         raise ModelTagCleanupError("catalog_too_large")
-    local_preview = build_tag_cleanup_preview(usage)
+    vocabulary = vocabulary or default_tag_vocabulary_snapshot()
+    local_preview = build_tag_cleanup_preview(usage, vocabulary)
     all_local_suggestions = tuple(
         ModelTagCleanupSuggestion(
             source=item.source,
@@ -255,93 +327,107 @@ def suggest_model_tag_cleanup(
         )
         for item in local_preview.suggestions
     )
-    locally_resolved_sources = {item.source for item in all_local_suggestions}
     local_suggestions = all_local_suggestions[:MAX_MODEL_CLEANUP_SUGGESTIONS]
     remaining_suggestion_slots = (
         MAX_MODEL_CLEANUP_SUGGESTIONS - len(local_suggestions)
     )
-    candidate_sources = list(unresolved_model_cleanup_usage(usage))
+    candidate_sources = list(unresolved_model_cleanup_usage(usage, vocabulary))
     if not candidate_sources or remaining_suggestion_slots == 0:
         return local_suggestions
 
-    counts = {item.tag: item.track_count for item in usage}
-    allowed_target_tags = sorted(
-        (set(counts) - locally_resolved_sources) | _STARTER_TAG_SET
-    )
-    model_input = ModelTagCleanupInput(
-        schema_version=MODEL_TAG_CLEANUP_INPUT_CONTRACT,
-        starter_tags=list(MODEL_TAG_CLEANUP_STARTER_TAGS),
-        candidate_sources=[
-            ModelTagUsageInput(tag=item.tag, track_count=item.track_count)
-            for item in candidate_sources
-        ],
-        allowed_targets=[
-            ModelTagUsageInput(tag=tag, track_count=counts.get(tag, 0))
-            for tag in allowed_target_tags
-        ],
-        remaining_suggestion_slots=remaining_suggestion_slots,
-    )
-    result = execute(
-        build_structured_request(
-            _TAG_CLEANUP_TASK,
-            model_input,
-            ModelTagCleanupOutput,
-            output_example={
-                "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
-                "suggestions": [
-                    {
-                        "source": "alehouse",
-                        "target": "tavern",
-                        "confidence": "high",
-                        "reason": "Both labels describe the same catalog setting.",
-                    }
-                ],
-            },
-            max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
+    groups = vocabulary.group_by_tag_id
+    canonical_inputs = [
+        ModelCanonicalTagInput(
+            tag_id=tag.id,
+            name=tag.name,
+            group=groups[tag.id].label,
+            description=tag.description,
         )
-    )
-    if not result.succeeded or result.payload is None:
-        raise ModelTagCleanupError(_safe_execution_error(result.error_code))
-    if result.finish_reason in {"length", "max_tokens"}:
-        raise ModelTagCleanupError("model_output_incomplete")
-    try:
-        output = ModelTagCleanupOutput.model_validate(result.payload)
-    except ValidationError as exc:
-        raise ModelTagCleanupError(
-            "model_output_schema_invalid",
-            diagnostic=safe_validation_diagnostic(exc, ModelTagCleanupOutput),
-        ) from exc
-    if len(output.suggestions) > remaining_suggestion_slots:
-        raise ModelTagCleanupError("model_output_too_many_suggestions")
-
-    source_tags = {item.tag for item in candidate_sources}
-    allowed_targets = set(allowed_target_tags)
-    sources = [item.source for item in output.suggestions]
-    targets = {item.target for item in output.suggestions}
-    if len(sources) != len(set(sources)):
-        raise ModelTagCleanupError("model_output_duplicate_source")
-    if set(sources) & targets:
-        raise ModelTagCleanupError("model_output_chained_rename")
-    for item in output.suggestions:
-        if item.source not in source_tags:
-            raise ModelTagCleanupError("model_output_unknown_source")
-        if item.source in _STARTER_TAG_SET:
-            raise ModelTagCleanupError("model_output_starter_source")
-        if item.target not in allowed_targets:
-            raise ModelTagCleanupError("model_output_unknown_target")
-        if item.source == item.target:
-            raise ModelTagCleanupError("model_output_same_tag")
-    model_suggestions = tuple(output.suggestions)
-    combined_sources = [
-        item.source for item in (*local_suggestions, *model_suggestions)
+        for tag in vocabulary.entries
     ]
-    combined_targets = {
-        item.target for item in (*local_suggestions, *model_suggestions)
-    }
-    if len(combined_sources) != len(set(combined_sources)):
-        raise ModelTagCleanupError("model_output_duplicate_source")
-    if set(combined_sources) & combined_targets:
-        raise ModelTagCleanupError("model_output_chained_rename")
+    by_id = vocabulary.by_id
+    model_suggestions: list[ModelTagCleanupSuggestion] = []
+    indexed_sources = [
+        (f"source-{index:03d}", item)
+        for index, item in enumerate(candidate_sources, start=1)
+    ]
+    for offset in range(0, len(indexed_sources), MODEL_TAG_CLEANUP_BATCH_SIZE):
+        if len(model_suggestions) >= remaining_suggestion_slots:
+            break
+        batch = indexed_sources[offset : offset + MODEL_TAG_CLEANUP_BATCH_SIZE]
+        source_ids = [source_id for source_id, _item in batch]
+        source_by_id = dict(batch)
+        model_input = ModelTagCleanupInput(
+            schema_version=MODEL_TAG_CLEANUP_INPUT_CONTRACT,
+            canonical_tags=canonical_inputs,
+            candidate_sources=[
+                ModelTagCleanupSourceInput(
+                    source_id=source_id,
+                    tag=item.tag,
+                    track_count=item.track_count,
+                )
+                for source_id, item in batch
+            ],
+            remaining_suggestion_slots=(
+                remaining_suggestion_slots - len(model_suggestions)
+            ),
+        )
+        result = execute(
+            build_structured_request(
+                _TAG_CLEANUP_TASK,
+                model_input,
+                ModelTagCleanupOutput,
+                output_example={
+                    "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
+                    "decisions": [
+                        {
+                            "source_id": source_id,
+                            "target_tag_id": None,
+                            "confidence": "low",
+                            "reason": "No safe canonical match is established.",
+                        }
+                        for source_id in source_ids
+                    ],
+                },
+                max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
+                schema_transform=lambda schema, source_ids=source_ids: _closed_cleanup_schema(
+                    schema,
+                    source_ids=source_ids,
+                    tag_ids=[tag.id for tag in vocabulary.entries],
+                ),
+            )
+        )
+        if not result.succeeded or result.payload is None:
+            raise ModelTagCleanupError(_safe_execution_error(result.error_code))
+        if result.finish_reason in {"length", "max_tokens"}:
+            raise ModelTagCleanupError("model_output_incomplete")
+        try:
+            output = ModelTagCleanupOutput.model_validate(result.payload)
+        except ValidationError as exc:
+            raise ModelTagCleanupError(
+                "model_output_schema_invalid",
+                diagnostic=safe_validation_diagnostic(exc, ModelTagCleanupOutput),
+            ) from exc
+        returned_source_ids = [item.source_id for item in output.decisions]
+        if returned_source_ids != source_ids:
+            raise ModelTagCleanupError("model_output_source_set_mismatch")
+        for decision in output.decisions:
+            if decision.target_tag_id is None:
+                continue
+            target = by_id.get(decision.target_tag_id)
+            if target is None:
+                raise ModelTagCleanupError("model_output_unknown_target")
+            source = source_by_id[decision.source_id]
+            model_suggestions.append(
+                ModelTagCleanupSuggestion(
+                    source=source.tag,
+                    target=target.name,
+                    confidence=decision.confidence,
+                    reason=decision.reason,
+                )
+            )
+            if len(model_suggestions) > remaining_suggestion_slots:
+                raise ModelTagCleanupError("model_output_too_many_suggestions")
     return (*local_suggestions, *model_suggestions)
 
 

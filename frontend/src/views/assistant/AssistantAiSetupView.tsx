@@ -570,6 +570,47 @@ export function AssistantAiSetupView() {
   }
 
   if (status === null) return null;
+  const frameworkStatus = status;
+
+  function renderRoleCard(role: ModelRole) {
+    const evaluation = qualityEvaluations.find(
+      (item) => item.role_id === role.role_id,
+    );
+    const evaluationHistory = qualityHistory.filter(
+      (job) =>
+        job.parameters.role_id === role.role_id &&
+        job.parameters.evaluation_id === evaluation?.evaluation_id,
+    );
+    return (
+      <ModelRoleCard
+        key={role.role_id}
+        role={role}
+        connections={connections}
+        adapters={frameworkStatus.adapters}
+        capabilities={frameworkStatus.capabilities}
+        credentialStorageReady={frameworkStatus.credential_storage_ready}
+        busy={busyItem === `role:${role.role_id}`}
+        testing={busyItem === `role-test:${role.role_id}`}
+        qualityEvaluation={evaluation}
+        qualityHistory={evaluationHistory}
+        qualityLoading={qualityLoading}
+        qualityActionBusy={busyItem?.startsWith("evaluation") === true}
+        onSave={saveRole}
+        onTest={testRole}
+        onStartQuality={(item) => void startQualityEvaluation(item)}
+        onCancelQuality={(jobId) => void cancelQualityEvaluation(jobId)}
+        onViewTestLog={() => setSelectedTestRoleId(role.role_id)}
+        onRemove={removeRole}
+      />
+    );
+  }
+
+  const tagRoles = roles.filter((role) =>
+    ["music_tagger", "tag_cleanup"].includes(role.role_id),
+  );
+  const standaloneRoles = roles.filter(
+    (role) => !["music_tagger", "tag_cleanup"].includes(role.role_id),
+  );
 
   return (
     <div className="assistant-provider-view">
@@ -824,38 +865,26 @@ export function AssistantAiSetupView() {
           </div>
         ) : (
           <div className="assistant-role-grid">
-            {roles.map((role) => {
-              const evaluation = qualityEvaluations.find(
-                (item) => item.role_id === role.role_id,
-              );
-              const evaluationHistory = qualityHistory.filter(
-                (job) =>
-                  job.parameters.role_id === role.role_id &&
-                  job.parameters.evaluation_id === evaluation?.evaluation_id,
-              );
-              return (
-                <ModelRoleCard
-                  key={role.role_id}
-                  role={role}
-                  connections={connections}
-                  adapters={status.adapters}
-                  capabilities={status.capabilities}
-                  credentialStorageReady={status.credential_storage_ready}
-                  busy={busyItem === `role:${role.role_id}`}
-                  testing={busyItem === `role-test:${role.role_id}`}
-                  qualityEvaluation={evaluation}
-                  qualityHistory={evaluationHistory}
-                  qualityLoading={qualityLoading}
-                  qualityActionBusy={busyItem?.startsWith("evaluation") === true}
-                  onSave={saveRole}
-                  onTest={testRole}
-                  onStartQuality={(item) => void startQualityEvaluation(item)}
-                  onCancelQuality={(jobId) => void cancelQualityEvaluation(jobId)}
-                  onViewTestLog={() => setSelectedTestRoleId(role.role_id)}
-                  onRemove={removeRole}
-                />
-              );
-            })}
+            {tagRoles.length > 0 ? (
+              <section className="assistant-role-family assistant-tag-role-family">
+                <div className="assistant-role-family-heading">
+                  <div>
+                    <p className="assistant-eyebrow">Shared controlled vocabulary</p>
+                    <h3>Tag intelligence</h3>
+                    <p>
+                      Tagging chooses canonical IDs; cleanup maps existing names back
+                      to those same IDs. Keep separate models when speed and semantic
+                      depth need different settings.
+                    </p>
+                  </div>
+                  <span>one vocabulary · two tasks</span>
+                </div>
+                <div className="assistant-role-family-grid">
+                  {tagRoles.map(renderRoleCard)}
+                </div>
+              </section>
+            ) : null}
+            {standaloneRoles.map(renderRoleCard)}
           </div>
         )}
         {connections.length > 0 ? (

@@ -41,6 +41,13 @@ interface Props {
   onRemove: (roleId: string) => Promise<void>;
 }
 
+const ROLE_OUTPUT_CONSTRAINTS: Record<string, string> = {
+  music_tagger: "Canonical tag IDs",
+  tag_cleanup: "Canonical ID or no match",
+  playlist_planner: "Known track IDs; server-ranked",
+  eq_assistant: "Ten bounded EQ gains",
+};
+
 function includesEveryCapability(
   availableIds: string[] | undefined,
   requiredIds: string[],
@@ -283,6 +290,12 @@ export function ModelRoleCard({
         </label>
       </div>
       <p>{role.description}</p>
+      {ROLE_OUTPUT_CONSTRAINTS[role.role_id] !== undefined ? (
+        <div className="assistant-role-contract">
+          <span>Validated output</span>
+          <strong>{ROLE_OUTPUT_CONSTRAINTS[role.role_id]}</strong>
+        </div>
+      ) : null}
 
       <form onSubmit={(event) => void save(event)}>
         <label className="field">

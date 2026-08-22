@@ -210,7 +210,8 @@ Runtime data lives outside the image.
   Keep `local-planner/v2` as the default, require the exact current `playlist-quality-v1` pass and
   disclosure version before enqueueing, and make model jobs non-restartable to avoid silently
   repeating provider cost. Locally enforce eligibility and exclusions, send a privacy-reduced pool
-  of at most 100 candidates, and accept only ranked/selected IDs. Never send library-relative paths
+  of at most 100 candidates, inject those exact IDs into the output schema, and accept only
+  ranked/selected IDs. Never send library-relative paths
   or trust model-supplied source fields, tags, scores, reasons, or evidence; reconstruct the public
   response from the local candidate snapshot. Model results remain drafts and must use the existing
   Authoring import preview/select/commit path. Configured-model CLI evaluation separately requires
@@ -228,25 +229,28 @@ Runtime data lives outside the image.
   `assistant.model-music-tagging`. Require the exact current
   `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider
   request, and keep jobs non-restartable. Provider input is limited to indexed descriptive metadata,
-  duration, BPM, numeric track IDs, the fixed D&D vocabulary, path-free deterministic metadata
-  tag hypotheses with matched fields/terms and canonical-title provenance, and—when current—
+  duration, BPM, numeric track IDs, the current revisioned operator vocabulary (stable IDs, names,
+  groups, definitions, and aliases), path-free deterministic metadata tag-ID hypotheses with matched
+  fields/terms and canonical-title provenance, and—when current—
   bounded `local-audio/v1` energy, brightness, tension, tempo, activity, normalized dynamics,
   rhythmic density/stability, and confidence values. Never send paths, audio, waveforms, detailed signal
   metrics, manual tags, stored local generated tags, playlists, or review history. Store output
-  under `model-evidence-tagger/v3` in `track_analyses`, bind its source
-  signature to metadata, the optional local-audio source signature, and the role fingerprint, and
+  under `model-evidence-tagger/v4` in `track_analyses`, bind its source
+  signature to metadata, the optional local-audio source signature, vocabulary fingerprint, and
+  role fingerprint, and
   expose it only through the existing generated-tag review surface. The model may
   never add a `track_user_tags` row directly. Accepted suggestions become manual tags only through
   the existing explicit single or bulk review transaction.
 - Optional model-assisted manual-tag cleanup may run only through
-  `assistant.model-tag-cleanup`. Run deterministic spelling/plural cleanup first and make no
+  `assistant.model-tag-cleanup`. Run declared-alias and deterministic spelling/plural cleanup first and make no
   provider call when it resolves every candidate. Require the exact current
   `tag-cleanup-quality-v1` pass and versioned disclosure consent, allow at most 500 catalog tags,
-  make the provider job non-restartable, and send only unresolved normalized source tags, allowed
-  targets, their usage counts, and the fixed D&D starter vocabulary. Never send song metadata,
+  make the provider job non-restartable, batch at most 50 unresolved names per call, and send only
+  source IDs/names and usage counts plus canonical vocabulary IDs, names, groups, and definitions.
+  Require one ordered canonical-ID-or-null decision per source. Never send song metadata,
   paths, audio, playlists, generated tags, review
   history, or credentials. Store only a review-only proposal bound to the exact role fingerprint
-  and catalog signature. Apply only explicitly selected source/target pairs from that stored job,
+  catalog signature, and vocabulary fingerprint. Apply only explicitly selected source/target pairs from that stored job,
   reject stale or invented selections, and commit all selected manual-tag renames atomically.
 - Task-specific model quality checks run as durable, non-restartable jobs and persist their current
   certification separately from job history. Bind every result to the exact model-role runtime

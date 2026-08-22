@@ -51,6 +51,7 @@ from app.assistant.providers.verification import (
     ProviderVerificationResult,
     normalize_provider_base_url,
 )
+from app.assistant.structured_harness import STRUCTURED_HARNESS_CONTRACT
 from app.core.config import get_settings
 from app.jobs.service import ACTIVE_JOB_STATUSES
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
@@ -750,6 +751,7 @@ def _role_runtime_fingerprint(
     payload = "\0".join(
         (
             CONFORMANCE_CONTRACT,
+            STRUCTURED_HARNESS_CONTRACT,
             _connection_fingerprint(connection),
             row.role_id,
             MODEL_ROLE_RUNTIME_CONTRACTS[row.role_id],

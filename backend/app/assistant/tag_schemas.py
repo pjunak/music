@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.assistant.providers.schemas import ProviderUsageSummary
+from app.assistant.tag_vocabulary import TagVocabularyGroup
 from app.assistant.tags import normalize_manual_tags
 
 
@@ -71,6 +72,19 @@ class ManualTagCatalog(StrictTagModel):
     tag_usage: list[ManualTagUsage]
 
 
+class TagVocabularyOut(StrictTagModel):
+    schema_version: Literal["assistant-tag-vocabulary/v1"]
+    revision: int = Field(ge=1)
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    groups: list[TagVocabularyGroup]
+
+
+class TagVocabularyUpdateRequest(StrictTagModel):
+    schema_version: Literal["assistant-tag-vocabulary/v1"]
+    expected_revision: int = Field(ge=1)
+    groups: list[TagVocabularyGroup] = Field(min_length=1, max_length=20)
+
+
 class ManualTagRenameRequest(StrictTagModel):
     source: str
     target: str
@@ -98,7 +112,11 @@ class TagCleanupSuggestionOut(StrictTagModel):
     id: str = Field(pattern=r"^[a-f0-9]{64}$")
     source: str
     target: str
-    reason_code: Literal["starter_plural", "starter_typo"]
+    reason_code: Literal[
+        "vocabulary_alias",
+        "vocabulary_plural",
+        "vocabulary_typo",
+    ]
     reason: str
     source_track_count: int = Field(ge=1)
     target_track_count: int = Field(ge=0)
@@ -106,8 +124,9 @@ class TagCleanupSuggestionOut(StrictTagModel):
 
 
 class TagCleanupPreviewOut(StrictTagModel):
-    schema_version: Literal["assistant-tag-cleanup-preview/v1"]
+    schema_version: Literal["assistant-tag-cleanup-preview/v2"]
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     suggestions: list[TagCleanupSuggestionOut]
 
 
@@ -129,6 +148,7 @@ class TagCleanupSelectionIn(StrictTagModel):
 
 class TagCleanupApplyRequest(StrictTagModel):
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     items: list[TagCleanupSelectionIn] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -147,12 +167,12 @@ class TagCleanupApplyResult(StrictTagModel):
 
 
 MODEL_TAG_CLEANUP_DISCLOSURE_VERSION: Literal[
-    "assistant-model-tag-cleanup-disclosure/v2"
-] = "assistant-model-tag-cleanup-disclosure/v2"
+    "assistant-model-tag-cleanup-disclosure/v3"
+] = "assistant-model-tag-cleanup-disclosure/v3"
 
 
 class ModelTagCleanupDisclosure(StrictTagModel):
-    version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
+    version: Literal["assistant-model-tag-cleanup-disclosure/v3"]
     shared_with_provider: list[str]
     never_shared: list[str]
     maximum_tags: int = Field(ge=1, le=500)
@@ -168,13 +188,14 @@ class ModelTagCleanupAvailability(StrictTagModel):
     quality_evaluation_id: Literal["tag-cleanup-quality-v1"]
     job_kind: str
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     manual_tags: int = Field(ge=0)
-    estimated_provider_requests: int = Field(ge=0, le=1)
+    estimated_provider_requests: int = Field(ge=0, le=10)
     disclosure: ModelTagCleanupDisclosure
 
 
 class ModelTagCleanupStartRequest(StrictTagModel):
-    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v3"]
     consent: Literal[True]
 
 
@@ -191,12 +212,13 @@ class ModelTagCleanupSuggestionOut(StrictTagModel):
 
 
 class ModelTagCleanupJobResult(StrictTagModel):
-    schema_version: Literal["assistant-model-tag-cleanup-job-result/v2"]
-    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
+    schema_version: Literal["assistant-model-tag-cleanup-job-result/v3"]
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v3"]
     role_id: Literal["tag_cleanup"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    engine_id: Literal["model-tag-cleanup/v2"]
+    engine_id: Literal["model-tag-cleanup/v3"]
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     catalog_tags: int = Field(ge=1, le=500)
     suggestions: list[ModelTagCleanupSuggestionOut] = Field(max_length=100)
     usage: ProviderUsageSummary
@@ -310,12 +332,12 @@ class LibraryTagPage(StrictTagModel):
 
 
 MODEL_TAGGING_DISCLOSURE_VERSION: Literal[
-    "assistant-model-music-tagging-disclosure/v3"
-] = "assistant-model-music-tagging-disclosure/v3"
+    "assistant-model-music-tagging-disclosure/v4"
+] = "assistant-model-music-tagging-disclosure/v4"
 
 
 class ModelTaggingDisclosure(StrictTagModel):
-    version: Literal["assistant-model-music-tagging-disclosure/v3"]
+    version: Literal["assistant-model-music-tagging-disclosure/v4"]
     shared_with_provider: list[str]
     never_shared: list[str]
     allowed_tags: list[str]
@@ -341,16 +363,17 @@ class ModelTaggingAvailability(StrictTagModel):
 
 class ModelTaggingStartRequest(StrictTagModel):
     force: bool = False
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v3"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v4"]
     consent: Literal[True]
 
 
 class ModelTaggingJobResult(StrictTagModel):
-    schema_version: Literal["assistant-model-music-tagging-job-result/v3"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v3"]
+    schema_version: Literal["assistant-model-music-tagging-job-result/v4"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v4"]
     role_id: Literal["music_tagger"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    analyzer_id: Literal["model-evidence-tagger/v3"]
+    analyzer_id: Literal["model-evidence-tagger/v4"]
+    vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     library_tracks: int = Field(ge=0)
     updated_profiles: int = Field(ge=0)
     unchanged_profiles: int = Field(ge=0)

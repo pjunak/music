@@ -4,6 +4,7 @@ each caller having to import each model individually."""
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
+from app.models.assistant_tag_vocabulary import AssistantTagVocabulary
 from app.models.auth_session import AuthSession
 from app.models.background_job import BackgroundJob
 from app.models.base import Base
@@ -22,6 +23,7 @@ __all__ = [
     "AssistantModelEvaluation",
     "AssistantModelRole",
     "AssistantProviderConnection",
+    "AssistantTagVocabulary",
     "AuthSession",
     "BackgroundJob",
     "Base",

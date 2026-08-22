@@ -10,6 +10,7 @@ from sqlalchemy import delete
 @pytest.fixture(autouse=True)
 def _isolate_tag_state(client: TestClient) -> Iterator[None]:
     from app.core.db import SessionLocal
+    from app.models.assistant_tag_vocabulary import AssistantTagVocabulary
     from app.models.track_analysis import TrackAnalysis
     from app.models.track_analysis_tag_review import TrackAnalysisTagReview
     from app.models.track_user_tag import TrackUserTag
@@ -18,12 +19,14 @@ def _isolate_tag_state(client: TestClient) -> Iterator[None]:
         db.execute(delete(TrackAnalysisTagReview))
         db.execute(delete(TrackUserTag))
         db.execute(delete(TrackAnalysis))
+        db.execute(delete(AssistantTagVocabulary))
         db.commit()
     yield
     with SessionLocal() as db:
         db.execute(delete(TrackAnalysisTagReview))
         db.execute(delete(TrackUserTag))
         db.execute(delete(TrackAnalysis))
+        db.execute(delete(AssistantTagVocabulary))
         db.commit()
 
 
@@ -61,6 +64,7 @@ def _seed_analysis(track_id: int, moods_json: str = '["dark", "tense"]') -> str:
 def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
     assert client.get("/api/assistant/library-tags").status_code == 401
     assert client.get("/api/assistant/library-tags/catalog").status_code == 401
+    assert client.get("/api/assistant/library-tags/vocabulary").status_code == 401
     assert (
         client.get("/api/assistant/library-tags/catalog/cleanup-preview").status_code
         == 401
@@ -76,7 +80,7 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
             "/api/assistant/library-tags/catalog/model-cleanup-jobs",
             json={
                 "disclosure_version": (
-                    "assistant-model-tag-cleanup-disclosure/v2"
+                    "assistant-model-tag-cleanup-disclosure/v3"
                 ),
                 "consent": True,
             },
@@ -89,6 +93,7 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
             json={
                 "job_id": "a" * 32,
                 "catalog_signature": "0" * 64,
+                "vocabulary_fingerprint": "0" * 64,
                 "items": [{"source": "inn", "target": "tavern"}],
             },
         ).status_code
@@ -97,7 +102,11 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
     assert (
         client.post(
             "/api/assistant/library-tags/catalog/cleanup-apply",
-            json={"catalog_signature": "0" * 64, "items": []},
+            json={
+                "catalog_signature": "0" * 64,
+                "vocabulary_fingerprint": "0" * 64,
+                "items": [],
+            },
         ).status_code
         == 401
     )
@@ -181,6 +190,58 @@ def test_catalog_has_dnd_starters_and_tracks_custom_usage(
         {"tag": "medieval", "track_count": 1},
         {"tag": "tavern", "track_count": 1},
     ]
+
+
+def test_tag_vocabulary_is_editable_revisioned_and_drives_catalog(
+    auth_client: TestClient,
+) -> None:
+    loaded = auth_client.get("/api/assistant/library-tags/vocabulary")
+    assert loaded.status_code == 200, loaded.text
+    original = loaded.json()
+    assert original["schema_version"] == "assistant-tag-vocabulary/v1"
+    assert original["revision"] == 1
+    assert len(original["fingerprint"]) == 64
+
+    groups = original["groups"]
+    mood_group = next(group for group in groups if group["key"] == "mood")
+    mood_group["tags"].append(
+        {
+            "id": "mood.wondrous",
+            "name": "wondrous",
+            "description": "Awe, magical discovery, and expansive wonder.",
+            "aliases": ["wonder-filled"],
+        }
+    )
+    saved = auth_client.put(
+        "/api/assistant/library-tags/vocabulary",
+        json={
+            "schema_version": original["schema_version"],
+            "expected_revision": original["revision"],
+            "groups": groups,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["revision"] == 2
+    assert saved.json()["fingerprint"] != original["fingerprint"]
+
+    catalog = auth_client.get("/api/assistant/library-tags/catalog")
+    assert catalog.status_code == 200, catalog.text
+    mood_tags = next(
+        group["tags"]
+        for group in catalog.json()["starter_groups"]
+        if group["key"] == "mood"
+    )
+    assert "wondrous" in mood_tags
+
+    conflict = auth_client.put(
+        "/api/assistant/library-tags/vocabulary",
+        json={
+            "schema_version": original["schema_version"],
+            "expected_revision": original["revision"],
+            "groups": groups,
+        },
+    )
+    assert conflict.status_code == 409
 
 
 def test_manual_and_analysis_tags_remain_separate(
@@ -771,14 +832,15 @@ def test_tag_cleanup_preview_is_conservative_and_read_only(
     )
     assert preview.status_code == 200, preview.text
     payload = preview.json()
-    assert payload["schema_version"] == "assistant-tag-cleanup-preview/v1"
+    assert payload["schema_version"] == "assistant-tag-cleanup-preview/v2"
     assert len(payload["catalog_signature"]) == 64
+    assert len(payload["vocabulary_fingerprint"]) == 64
     assert [
         (item["source"], item["target"], item["reason_code"], item["merged"])
         for item in payload["suggestions"]
     ] == [
-        ("medival", "medieval", "starter_typo", True),
-        ("taverns", "tavern", "starter_plural", False),
+        ("medival", "medieval", "vocabulary_typo", True),
+        ("taverns", "tavern", "vocabulary_plural", False),
     ]
 
     catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
@@ -805,6 +867,7 @@ def test_tag_cleanup_applies_only_explicit_selection_atomically(
         "/api/assistant/library-tags/catalog/cleanup-apply",
         json={
             "catalog_signature": preview["catalog_signature"],
+            "vocabulary_fingerprint": preview["vocabulary_fingerprint"],
             "items": [{"source": "medival", "target": "medieval"}],
         },
     )
@@ -845,6 +908,7 @@ def test_tag_cleanup_rejects_stale_preview_without_partial_changes(
         "/api/assistant/library-tags/catalog/cleanup-apply",
         json={
             "catalog_signature": preview["catalog_signature"],
+            "vocabulary_fingerprint": preview["vocabulary_fingerprint"],
             "items": [{"source": "medival", "target": "medieval"}],
         },
     )
@@ -878,6 +942,7 @@ def test_tag_cleanup_rejects_invented_selection_before_valid_rename(
         "/api/assistant/library-tags/catalog/cleanup-apply",
         json={
             "catalog_signature": preview["catalog_signature"],
+            "vocabulary_fingerprint": preview["vocabulary_fingerprint"],
             "items": [
                 {"source": "medival", "target": "medieval"},
                 {"source": "ambient", "target": "tavern"},

@@ -33,10 +33,18 @@ from app.assistant.providers.execution import (
     StructuredModelResult,
 )
 from app.assistant.providers.verification import ProviderVerificationResult
+from app.assistant.tag_vocabulary import (
+    TagVocabularyDocument,
+    TagVocabularyEntry,
+    TagVocabularyGroup,
+    TagVocabularySnapshot,
+    vocabulary_fingerprint,
+)
 from app.core.db import SessionLocal
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
+from app.models.assistant_tag_vocabulary import AssistantTagVocabulary
 from app.models.background_job import BackgroundJob
 from app.models.track import Track
 from app.models.track_analysis import TrackAnalysis
@@ -45,7 +53,7 @@ from app.models.track_user_tag import TrackUserTag
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v3"
+DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v4"
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1]
     / "app"
@@ -81,6 +89,7 @@ def _clean_model_tagging_configuration() -> Iterator[None]:
             )
             db.execute(delete(AssistantModelRole))
             db.execute(delete(AssistantProviderConnection))
+            db.execute(delete(AssistantTagVocabulary))
             db.commit()
 
     clean()
@@ -134,6 +143,9 @@ def _reference_music_tagger(
 ) -> StructuredModelResult:
     assert "Example JSON shape" in request.system_prompt
     payload = json.loads(request.user_prompt)
+    tag_id_by_name = {
+        item["name"]: item["tag_id"] for item in payload["vocabulary"]
+    }
     return StructuredModelResult(
         True,
         None,
@@ -142,7 +154,9 @@ def _reference_music_tagger(
             "tracks": [
                 {
                     "track_id": track["track_id"],
-                    "tags": _tags_for_metadata(track),
+                    "tag_ids": [
+                        tag_id_by_name[tag] for tag in _tags_for_metadata(track)
+                    ],
                     "energy": 0.5,
                     "brightness": 0.5,
                     "tension": 0.5,
@@ -285,7 +299,7 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
                 "tracks": [
                     {
                         "track_id": 1,
-                        "tags": ["invented-vibe"],
+                        "tag_ids": ["mood.invented-vibe"],
                         "energy": 0.5,
                         "brightness": 0.5,
                         "tension": 0.5,
@@ -298,9 +312,7 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
 
     with pytest.raises(ModelTaggerError) as invalid:
         tag_tracks(tracks, unknown)
-    assert invalid.value.code == "model_output_schema_invalid"
-    assert invalid.value.diagnostic is not None
-    assert "invented-vibe" not in invalid.value.diagnostic
+    assert invalid.value.code == "model_output_unknown_tag_id"
 
     def missing(_request: StructuredModelRequest) -> StructuredModelResult:
         return StructuredModelResult(
@@ -330,7 +342,7 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
                 "tracks": [
                     {
                         "track_id": payload["tracks"][0]["track_id"],
-                        "tags": [],
+                        "tag_ids": [],
                         "energy": 0.5,
                         "brightness": 0.5,
                         "tension": 0.5,
@@ -361,13 +373,102 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
     evidence = observed[0]["metadata_evidence"]
     assert evidence["analyzer_id"] == "local-metadata-evidence/v1"
     assert evidence["canonical_title_source"] == "display_title"
-    assert {"tavern", "rest", "calm"} <= set(evidence["candidate_tags"])
-    assert "combat" not in evidence["candidate_tags"]
+    assert {"setting.tavern", "scene.rest", "mood.calm"} <= set(
+        evidence["candidate_tag_ids"]
+    )
+    assert "scene.combat" not in evidence["candidate_tag_ids"]
     tavern_match = next(
-        item for item in evidence["tag_matches"] if item["tag"] == "tavern"
+        item
+        for item in evidence["tag_matches"]
+        if item["tag_id"] == "setting.tavern"
     )
     assert set(tavern_match["matched_fields"]) == {"origin", "title"}
     assert set(tavern_match["matched_terms"]) == {"inn", "tavern"}
+
+
+def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
+    document = TagVocabularyDocument(
+        groups=[
+            TagVocabularyGroup(
+                key="mood",
+                label="Mood",
+                description="Operator-defined emotional tones.",
+                tags=[
+                    TagVocabularyEntry(
+                        id="mood.wondrous",
+                        name="wondrous",
+                        description="Awe and magical discovery.",
+                        aliases=["wonder-filled", "magical wonder"],
+                    )
+                ],
+            )
+        ]
+    )
+    vocabulary = TagVocabularySnapshot(
+        document=document,
+        revision=7,
+        fingerprint=vocabulary_fingerprint(document),
+    )
+    observed_schema: dict[str, Any] = {}
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        assert request.output_schema is not None
+        observed_schema.update(request.output_schema)
+        payload = json.loads(request.user_prompt)
+        assert payload["vocabulary"] == [
+            {
+                "tag_id": "mood.wondrous",
+                "name": "wondrous",
+                "group": "Mood",
+                "description": "Awe and magical discovery.",
+                "aliases": ["wonder-filled", "magical wonder"],
+            }
+        ]
+        assert payload["tracks"][0]["metadata_evidence"][
+            "candidate_tag_ids"
+        ] == ["mood.wondrous"]
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": ["mood.wondrous"],
+                        "energy": 0.5,
+                        "brightness": 0.6,
+                        "tension": 0.2,
+                        "confidence": "high",
+                        "evidence": ["Title explicitly describes magical wonder."],
+                    }
+                ],
+            },
+        )
+
+    result = tag_tracks(
+        [
+            ModelTagTrackInput(
+                track_id=1,
+                title="Magical Wonder",
+                display_title="",
+                artist="",
+                album="",
+                origin="",
+                genre="",
+                length_s=120,
+                bpm=None,
+            )
+        ],
+        execute,
+        vocabulary,
+    )
+
+    choice = observed_schema["$defs"]["ModelTagTrackChoice"]
+    assert choice["properties"]["tag_ids"]["items"]["enum"] == [
+        "mood.wondrous"
+    ]
+    assert result[1].tags == ["wondrous"]
 
 
 def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
@@ -376,9 +477,15 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
         payload = json.loads(request.user_prompt)
+        name_by_id = {
+            item["tag_id"]: item["name"] for item in payload["vocabulary"]
+        }
         observed.update(
             {
-                track["track_id"]: set(track["metadata_evidence"]["candidate_tags"])
+                track["track_id"]: {
+                    name_by_id[tag_id]
+                    for tag_id in track["metadata_evidence"]["candidate_tag_ids"]
+                }
                 for track in payload["tracks"]
             }
         )
@@ -390,7 +497,7 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
                 "tracks": [
                     {
                         "track_id": track["track_id"],
-                        "tags": [],
+                        "tag_ids": [],
                         "energy": 0.5,
                         "brightness": 0.5,
                         "tension": 0.5,
@@ -411,7 +518,7 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v2",
+            "schema_version": "assistant-music-tagger-evaluation/v3",
             "id": "confidence-evidence-boundary",
             "cases": [
                 {
@@ -446,7 +553,7 @@ def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
                 "tracks": [
                     {
                         "track_id": 1,
-                        "tags": ["tavern"],
+                        "tag_ids": ["setting.tavern"],
                         "energy": 0.5,
                         "brightness": 0.5,
                         "tension": 0.5,
@@ -606,7 +713,12 @@ def test_model_tagging_is_path_free_durable_and_review_only(
         "local-metadata-evidence/v1"
     )
     assert {"medieval", "tavern", "dancing", "festive"} <= set(
-        provider_track["metadata_evidence"]["candidate_tags"]
+        next(
+            item["name"]
+            for item in observed[0]["vocabulary"]
+            if item["tag_id"] == tag_id
+        )
+        for tag_id in provider_track["metadata_evidence"]["candidate_tag_ids"]
     )
     assert provider_track["metadata_evidence"]["tag_matches"]
 
@@ -822,3 +934,53 @@ def test_model_tag_suggestions_become_stale_after_runtime_change(
         suggestion["analyzer_id"] != MODEL_TAG_ANALYZER_ID
         for suggestion in item["analysis_suggestions"]
     )
+
+
+def test_model_tag_suggestions_become_stale_after_vocabulary_change(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+) -> None:
+    with SessionLocal() as db:
+        track = db.get(Track, seeded_track_id)
+        assert track is not None
+        track.title = "The Minstrel's Jig"
+        track.album = "Medieval Tavern Dances"
+        db.commit()
+    _configure_quality_passed_tagger(auth_client, monkeypatch)
+    monkeypatch.setattr(
+        "app.assistant.model_tagging.execute_structured_model_request",
+        _reference_music_tagger,
+    )
+    started = auth_client.post(
+        "/api/assistant/library-tags/model-jobs",
+        json=_start_payload(),
+    )
+    _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+
+    vocabulary = auth_client.get("/api/assistant/library-tags/vocabulary").json()
+    vocabulary["groups"][0]["description"] = (
+        "Operator-updated setting definitions."
+    )
+    saved = auth_client.put(
+        "/api/assistant/library-tags/vocabulary",
+        json={
+            "schema_version": vocabulary["schema_version"],
+            "expected_revision": vocabulary["revision"],
+            "groups": vocabulary["groups"],
+        },
+    )
+    listing = auth_client.get("/api/assistant/library-tags")
+    status = auth_client.get("/api/assistant/library-tags/model-status")
+
+    assert saved.status_code == 200, saved.text
+    item = next(
+        entry
+        for entry in listing.json()["items"]
+        if entry["track_id"] == seeded_track_id
+    )
+    assert all(
+        suggestion["analyzer_id"] != MODEL_TAG_ANALYZER_ID
+        for suggestion in item["analysis_suggestions"]
+    )
+    assert status.json()["current_profiles"] == 0

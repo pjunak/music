@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 
 from app.assistant.providers.execution import StructuredModelRequest
 
-STRUCTURED_HARNESS_CONTRACT = "assistant-structured-harness/v1"
+STRUCTURED_HARNESS_CONTRACT = "assistant-structured-harness/v2"
 # The provider schema name appends ``-response`` and must remain within the
 # 64-character limit used by strict OpenAI-compatible endpoints.
 _TASK_ID = re.compile(r"^[a-zA-Z0-9_-]{1,55}$")
@@ -95,11 +96,14 @@ def build_structured_request(
     *,
     output_example: dict[str, object],
     max_output_tokens: int,
+    schema_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> StructuredModelRequest:
     """Build one task request with a generated, locally validated output contract."""
 
     validated_example = output_model.model_validate(output_example)
     output_schema = output_model.model_json_schema(mode="validation")
+    if schema_transform is not None:
+        output_schema = schema_transform(output_schema)
     return StructuredModelRequest(
         system_prompt=_system_prompt(
             definition,

@@ -87,9 +87,11 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   metadata music tagger, manual-tag cleanup reviewer, and EQ draft assistant are the implemented
   optional model tasks.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
-  planning sends at most 100 path-free candidates and returns a draft. Music tagging sends metadata
-  in batches of at most 20, may choose only from the fixed D&D vocabulary, and stores suggestions
-  under `model-evidence-tagger/v3` for explicit per-tag review. Before each request the server
+  planning sends at most 100 path-free candidates, constrains the response to those exact track
+  IDs, and returns a draft. Music tagging sends metadata in batches of at most 20, may choose only
+  stable IDs from the revisioned operator vocabulary, and stores suggestions under
+  `model-evidence-tagger/v4` for explicit per-tag review. The Tag Vocabulary Assistant tab exposes
+  every canonical name, definition, group, and exact alias for manual editing. Before each request the server
   builds a path-free deterministic metadata hypothesis from the disclosed fields, including the
   exact field and term behind each controlled-vocabulary candidate; a non-empty display title is
   canonical for this matching. When current local signal analysis exists, tagging may also send
@@ -97,9 +99,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   activity, normalized dynamic range, rhythmic density/stability, and confidence values; audio
   files, waveforms, paths, and detailed measurements remain on the server. Neither
   path can write a playlist or
-  manual tag directly. Tag cleanup resolves unambiguous spelling and plural cases locally first,
-  then sends only unresolved source tags, allowed targets, usage counts, and the fixed D&D starter
-  vocabulary in one bounded request. Local-only cleanup makes no provider call, and every stored
+  manual tag directly. Tag cleanup resolves declared aliases and unambiguous spelling/plural cases
+  locally first, then sends only unresolved source IDs/names and usage counts plus canonical ID
+  definitions in batches of at most 50. The model returns exactly one canonical-ID-or-null decision
+  per source. Local-only cleanup makes no provider call, and every stored
   suggestion identifies whether it came from a local rule or the model. The proposal remains inert
   until
   the user selects specific renames, and stale proposals are rejected. Quality, playlist, tagging,
@@ -108,8 +111,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   the provider omitted usage rather than treating missing counts as exact zero. Usage is checkpointed
   after each provider attempt, so a failed or cancelled job still shows what was already reported.
   It does not estimate charges because provider pricing is not part of the portable model contract.
-  The Library Analysis screen restores tagging and cleanup progress after refresh or reopen and
-  shows model output beside local tools without merging their ownership. The EQ workflow sends only
+  The Library Analysis screen restores tagging progress after refresh or reopen and shows model
+  output beside local tools without merging their ownership. Vocabulary and cleanup share a separate
+  workspace, while AI Setup groups their cards but preserves independent model choices. The EQ workflow sends only
   the operator's goal and fixed band limits; specialized audio-model workflows remain locked until
   a concrete bounded audio transport receives its own reviewed contract.
   See [`ASSISTANT.md`](ASSISTANT.md) for the practical deployment, setup, verification, and
@@ -127,9 +131,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   or any custom tag without modifying the audio file. Manual and generated tags remain visibly and
   structurally separate, while local playlist ranking gives explicit manual matches priority.
   Multi-select actions apply tags across a batch, and usage-aware rename can merge overlapping tags
-  without leaving duplicates. A conservative local cleanup preview finds only unambiguous spelling
-  or plural matches to the D&amp;D starter vocabulary; it changes nothing until individual suggestions
-  are selected, rejects stale previews, and applies the chosen renames in one transaction. Generated
+  without leaving duplicates. A conservative local cleanup preview applies operator-declared aliases
+  and finds only unambiguous spelling or plural matches to the controlled vocabulary; it changes
+  nothing until individual suggestions are selected, rejects stale previews, and applies the chosen
+  renames in one transaction. Generated
   tags expose their analyzer, confidence, and evidence for per-tag review; accepting copies one into
   manual tags, while rejection remains a separate durable decision, removes that label from current
   playlist evidence, and never mutates authored data.

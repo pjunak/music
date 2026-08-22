@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.assistant.local import analyze_track_metadata
 from app.assistant.metadata_tag_evidence import (
     MetadataField,
+    infer_metadata_matches_for_aliases,
     infer_metadata_tag_matches,
 )
 from app.assistant.providers.execution import StructuredModelRequest, StructuredModelResult
@@ -21,27 +23,31 @@ from app.assistant.structured_harness import (
     build_structured_request,
     numbered_rules,
 )
-from app.assistant.tags import DND_STARTER_TAG_GROUPS
-
-MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v3"] = (
-    "assistant-music-tagger-input/v3"
+from app.assistant.tag_vocabulary import (
+    TagVocabularySnapshot,
+    default_tag_vocabulary_snapshot,
 )
-MODEL_TAGGER_OUTPUT_CONTRACT: Literal["assistant-music-tagger-output/v1"] = (
-    "assistant-music-tagger-output/v1"
+
+MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v4"] = (
+    "assistant-music-tagger-input/v4"
+)
+MODEL_TAGGER_OUTPUT_CONTRACT: Literal["assistant-music-tagger-output/v2"] = (
+    "assistant-music-tagger-output/v2"
 )
 MODEL_TAGGING_EVALUATION_CONTRACT: Literal[
-    "assistant-music-tagger-evaluation/v2"
-] = "assistant-music-tagger-evaluation/v2"
-MODEL_TAG_ANALYZER_ID: Literal["model-evidence-tagger/v3"] = (
-    "model-evidence-tagger/v3"
+    "assistant-music-tagger-evaluation/v3"
+] = "assistant-music-tagger-evaluation/v3"
+MODEL_TAG_ANALYZER_ID: Literal["model-evidence-tagger/v4"] = (
+    "model-evidence-tagger/v4"
 )
 MODEL_TAG_BATCH_SIZE = 20
 MAX_MODEL_TAGS_PER_TRACK = 8
 _MAX_MODEL_OUTPUT_TOKENS = 8_000
 _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9_]{1,64}$")
 
+_DEFAULT_VOCABULARY = default_tag_vocabulary_snapshot()
 MODEL_TAG_VOCABULARY: tuple[str, ...] = tuple(
-    tag for group in DND_STARTER_TAG_GROUPS for tag in group.tags
+    tag.name for tag in _DEFAULT_VOCABULARY.entries
 )
 _MODEL_TAG_SET = frozenset(MODEL_TAG_VOCABULARY)
 
@@ -72,7 +78,7 @@ class ModelTagAudioEvidence(_StrictModel):
 
 
 class ModelTagMetadataMatch(_StrictModel):
-    tag: str = Field(min_length=1, max_length=64)
+    tag_id: str = Field(min_length=2, max_length=64)
     matched_fields: list[
         Literal["title", "artist", "album", "origin", "genre"]
     ] = Field(min_length=1, max_length=5)
@@ -85,7 +91,7 @@ class ModelTagMetadataMatch(_StrictModel):
 class ModelTagMetadataEvidence(_StrictModel):
     analyzer_id: Literal["local-metadata-evidence/v1"]
     canonical_title_source: Literal["display_title", "title", "none"]
-    candidate_tags: list[str] = Field(max_length=32)
+    candidate_tag_ids: list[str] = Field(max_length=32)
     tag_matches: list[ModelTagMetadataMatch] = Field(max_length=32)
     energy: float = Field(ge=0.0, le=1.0)
     brightness: float = Field(ge=0.0, le=1.0)
@@ -94,12 +100,10 @@ class ModelTagMetadataEvidence(_StrictModel):
 
     @model_validator(mode="after")
     def consistent_controlled_tag_matches(self) -> ModelTagMetadataEvidence:
-        matched_tags = [match.tag for match in self.tag_matches]
-        if any(tag not in _MODEL_TAG_SET for tag in matched_tags):
-            raise ValueError("metadata evidence tags must use the controlled vocabulary")
-        if len(matched_tags) != len(set(matched_tags)):
+        matched_ids = [match.tag_id for match in self.tag_matches]
+        if len(matched_ids) != len(set(matched_ids)):
             raise ValueError("metadata evidence tag matches must be unique")
-        if self.candidate_tags != matched_tags:
+        if self.candidate_tag_ids != matched_ids:
             raise ValueError("metadata evidence candidates must match tag provenance")
         return self
 
@@ -119,16 +123,24 @@ class ModelTagTrackInput(_StrictModel):
 
 
 class ModelTaggerInput(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-input/v3"]
-    allowed_tags: list[str] = Field(min_length=1, max_length=64)
+    schema_version: Literal["assistant-music-tagger-input/v4"]
+    vocabulary: list[ModelTagDefinition] = Field(min_length=1, max_length=200)
     tracks: list[ModelTagTrackInput] = Field(min_length=1, max_length=20)
 
 
-class ModelTagTrackOutput(_StrictModel):
+class ModelTagDefinition(_StrictModel):
+    tag_id: str = Field(min_length=2, max_length=64)
+    name: str = Field(min_length=1, max_length=64)
+    group: str = Field(min_length=1, max_length=64)
+    description: str = Field(min_length=2, max_length=300)
+    aliases: list[str] = Field(default_factory=list, max_length=24)
+
+
+class ModelTagTrackChoice(_StrictModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     track_id: int = Field(gt=0)
-    tags: list[str] = Field(max_length=MAX_MODEL_TAGS_PER_TRACK)
+    tag_ids: list[str] = Field(max_length=MAX_MODEL_TAGS_PER_TRACK)
     energy: float = Field(ge=0.0, le=1.0)
     brightness: float = Field(ge=0.0, le=1.0)
     tension: float = Field(ge=0.0, le=1.0)
@@ -136,19 +148,17 @@ class ModelTagTrackOutput(_StrictModel):
     evidence: list[BoundedEvidence] = Field(max_length=4)
 
     @model_validator(mode="after")
-    def valid_tags(self) -> ModelTagTrackOutput:
-        if len(set(self.tags)) != len(self.tags):
-            raise ValueError("tags must be unique")
-        if not set(self.tags) <= _MODEL_TAG_SET:
-            raise ValueError("tags must come from allowed_tags")
+    def unique_tags(self) -> ModelTagTrackChoice:
+        if len(set(self.tag_ids)) != len(self.tag_ids):
+            raise ValueError("tag_ids must be unique")
         return self
 
 
 class ModelTaggerOutput(_StrictModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    schema_version: Literal["assistant-music-tagger-output/v1"]
-    tracks: list[ModelTagTrackOutput] = Field(min_length=1, max_length=20)
+    schema_version: Literal["assistant-music-tagger-output/v2"]
+    tracks: list[ModelTagTrackChoice] = Field(min_length=1, max_length=20)
 
     @model_validator(mode="after")
     def unique_tracks(self) -> ModelTaggerOutput:
@@ -156,6 +166,16 @@ class ModelTaggerOutput(_StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("track IDs must be unique")
         return self
+
+
+class ModelTagTrackOutput(_StrictModel):
+    track_id: int = Field(gt=0)
+    tags: list[str] = Field(max_length=MAX_MODEL_TAGS_PER_TRACK)
+    energy: float = Field(ge=0.0, le=1.0)
+    brightness: float = Field(ge=0.0, le=1.0)
+    tension: float = Field(ge=0.0, le=1.0)
+    confidence: TagConfidence
+    evidence: list[BoundedEvidence] = Field(max_length=4)
 
 
 class TagQualityCase(_StrictModel):
@@ -188,7 +208,7 @@ class TagQualityCase(_StrictModel):
 
 
 class TagQualitySuite(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-evaluation/v2"]
+    schema_version: Literal["assistant-music-tagger-evaluation/v3"]
     id: str = Field(min_length=1, max_length=128)
     cases: list[TagQualityCase] = Field(min_length=1, max_length=100)
 
@@ -237,8 +257,8 @@ _TAGGING_TASK = StructuredTaskDefinition(
     task_id="assistant-music-tagger",
     role="A conservative evidence classifier for reviewable tabletop music tags.",
     objective=(
-        "Choose only defensible controlled-vocabulary tags and bounded sound axes from "
-        "the supplied metadata plus independent local algorithmic evidence."
+        "Choose only defensible canonical tag IDs and bounded sound axes from the "
+        "supplied metadata plus independent local algorithmic evidence."
     ),
     untrusted_data=(
         "titles",
@@ -249,8 +269,10 @@ _TAGGING_TASK = StructuredTaskDefinition(
         "genres",
     ),
     rules=numbered_rules(
-        "Return every supplied track_id exactly once and no other IDs. Use no more than eight unique values from allowed_tags for each track.",
-        "Explicit descriptive metadata is the strongest semantic evidence. metadata_evidence is a deterministic local hypothesis, not ground truth; confirm it against the descriptive fields before using its candidate_tags.",
+        "Return every supplied track_id exactly once and no other IDs. Use no more than eight unique tag_ids for each track.",
+        "Every tag_id must exactly match an ID in vocabulary. Return IDs only; never return tag names, synonyms, explanations, or invented IDs in tag_ids.",
+        "Vocabulary names and definitions describe the available choices. Definitions are authoritative when labels overlap.",
+        "Explicit descriptive metadata is the strongest semantic evidence. metadata_evidence is a deterministic local hypothesis, not ground truth; confirm it against the descriptive fields before using its candidate_tag_ids.",
         "metadata_evidence.tag_matches records which canonical field and explicit term produced each hypothesis. When display_title is non-empty it is the canonical title; treat conflicting raw title text cautiously.",
         "audio_evidence contains bounded signal proxies, never audio. It can support energy, brightness, tension, tempo, activity, dynamics, and rhythm, but cannot by itself prove an instrument, genre, setting, scene, culture, or D&D context.",
         "Do not turn generic high energy or tension into combat. Do not turn generic low energy into rest. Setting and scene tags require explicit semantic evidence.",
@@ -266,7 +288,10 @@ def _safe_execution_error(code: str | None) -> str:
     return "model_execution_failed"
 
 
-def _metadata_evidence(track: ModelTagTrackInput) -> ModelTagMetadataEvidence:
+def _metadata_evidence(
+    track: ModelTagTrackInput,
+    vocabulary: TagVocabularySnapshot,
+) -> ModelTagMetadataEvidence:
     canonical_title = track.display_title.strip() or track.title
     canonical_title_source: Literal["display_title", "title", "none"] = (
         "display_title"
@@ -296,18 +321,34 @@ def _metadata_evidence(track: ModelTagTrackInput) -> ModelTagMetadataEvidence:
         "origin": track.origin,
         "genre": track.genre,
     }
-    matches = infer_metadata_tag_matches(metadata_fields)
+    tags_by_name = vocabulary.by_name
+    fields_by_tag: dict[str, set[MetadataField]] = {}
+    terms_by_tag: dict[str, set[str]] = {}
+    runtime_aliases = {
+        tag.name: (tag.name, *tag.aliases) for tag in vocabulary.entries
+    }
+    for match in (
+        *infer_metadata_tag_matches(metadata_fields),
+        *infer_metadata_matches_for_aliases(metadata_fields, runtime_aliases),
+    ):
+        if match.tag not in tags_by_name:
+            continue
+        fields_by_tag.setdefault(match.tag, set()).update(match.matched_fields)
+        terms_by_tag.setdefault(match.tag, set()).update(match.matched_terms)
+    matched_tags = [
+        tag for tag in vocabulary.entries if tag.name in fields_by_tag
+    ]
     return ModelTagMetadataEvidence(
         analyzer_id="local-metadata-evidence/v1",
         canonical_title_source=canonical_title_source,
-        candidate_tags=[match.tag for match in matches],
+        candidate_tag_ids=[tag.id for tag in matched_tags],
         tag_matches=[
             ModelTagMetadataMatch(
-                tag=match.tag,
-                matched_fields=list(match.matched_fields),
-                matched_terms=list(match.matched_terms),
+                tag_id=tag.id,
+                matched_fields=sorted(fields_by_tag[tag.name]),
+                matched_terms=sorted(terms_by_tag[tag.name]),
             )
-            for match in matches
+            for tag in matched_tags
         ],
         energy=profile.energy,
         brightness=profile.brightness,
@@ -316,23 +357,81 @@ def _metadata_evidence(track: ModelTagTrackInput) -> ModelTagMetadataEvidence:
     )
 
 
+def _closed_tagger_schema(
+    schema: dict[str, object],
+    *,
+    track_ids: list[int],
+    tag_ids: list[str],
+) -> dict[str, object]:
+    closed = deepcopy(schema)
+    definitions = closed.get("$defs")
+    if not isinstance(definitions, dict):
+        raise RuntimeError("tagger output schema is missing definitions")
+    choice = definitions.get("ModelTagTrackChoice")
+    if not isinstance(choice, dict):
+        raise RuntimeError("tagger track choice schema is missing")
+    properties = choice.get("properties")
+    if not isinstance(properties, dict):
+        raise RuntimeError("tagger track choice properties are missing")
+    track_id_schema = properties.get("track_id")
+    tag_ids_schema = properties.get("tag_ids")
+    if not isinstance(track_id_schema, dict) or not isinstance(tag_ids_schema, dict):
+        raise RuntimeError("tagger ID schemas are missing")
+    track_id_schema["enum"] = track_ids
+    tag_items = tag_ids_schema.get("items")
+    if not isinstance(tag_items, dict):
+        raise RuntimeError("tagger tag item schema is missing")
+    tag_items["enum"] = tag_ids
+    output_properties = closed.get("properties")
+    if not isinstance(output_properties, dict):
+        raise RuntimeError("tagger output properties are missing")
+    tracks_schema = output_properties.get("tracks")
+    if not isinstance(tracks_schema, dict):
+        raise RuntimeError("tagger tracks schema is missing")
+    tracks_schema["minItems"] = len(track_ids)
+    tracks_schema["maxItems"] = len(track_ids)
+    return closed
+
+
 def tag_tracks(
     tracks: Sequence[ModelTagTrackInput],
     execute: StructuredTaggerExecutor,
+    vocabulary: TagVocabularySnapshot | None = None,
 ) -> dict[int, ModelTagTrackOutput]:
     """Return one validated profile for every supplied, path-free track."""
 
+    vocabulary = vocabulary or default_tag_vocabulary_snapshot()
+    allowed_ids = vocabulary.ids
     prepared_tracks = [
         track
         if track.metadata_evidence is not None
-        else track.model_copy(update={"metadata_evidence": _metadata_evidence(track)})
+        else track.model_copy(
+            update={"metadata_evidence": _metadata_evidence(track, vocabulary)}
+        )
         for track in tracks
     ]
+    if any(
+        track.metadata_evidence is not None
+        and not set(track.metadata_evidence.candidate_tag_ids) <= allowed_ids
+        for track in prepared_tracks
+    ):
+        raise ModelTaggerError("metadata_evidence_vocabulary_mismatch")
+    groups = vocabulary.group_by_tag_id
     model_input = ModelTaggerInput(
         schema_version=MODEL_TAGGER_INPUT_CONTRACT,
-        allowed_tags=list(MODEL_TAG_VOCABULARY),
+        vocabulary=[
+            ModelTagDefinition(
+                tag_id=tag.id,
+                name=tag.name,
+                group=groups[tag.id].label,
+                description=tag.description,
+                aliases=tag.aliases,
+            )
+            for tag in vocabulary.entries
+        ],
         tracks=prepared_tracks,
     )
+    input_track_ids = [track.track_id for track in model_input.tracks]
     result = execute(
         build_structured_request(
             _TAGGING_TASK,
@@ -342,8 +441,8 @@ def tag_tracks(
                 "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
                 "tracks": [
                     {
-                        "track_id": model_input.tracks[0].track_id,
-                        "tags": [],
+                        "track_id": track_id,
+                        "tag_ids": [],
                         "energy": 0.5,
                         "brightness": 0.5,
                         "tension": 0.5,
@@ -352,9 +451,15 @@ def tag_tracks(
                             "Supplied metadata is insufficient for a specific tag."
                         ],
                     }
+                    for track_id in input_track_ids
                 ],
             },
             max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
+            schema_transform=lambda schema: _closed_tagger_schema(
+                schema,
+                track_ids=input_track_ids,
+                tag_ids=[tag.id for tag in vocabulary.entries],
+            ),
         )
     )
     if not result.succeeded or result.payload is None:
@@ -368,11 +473,24 @@ def tag_tracks(
             "model_output_schema_invalid",
             diagnostic=safe_validation_diagnostic(exc, ModelTaggerOutput),
         ) from exc
-    expected_ids = {track.track_id for track in tracks}
-    actual_ids = {track.track_id for track in output.tracks}
-    if actual_ids != expected_ids:
+    returned_track_ids = [track.track_id for track in output.tracks]
+    if returned_track_ids != input_track_ids:
         raise ModelTaggerError("model_output_track_set_mismatch")
-    return {track.track_id: track for track in output.tracks}
+    tags_by_id = vocabulary.by_id
+    resolved: dict[int, ModelTagTrackOutput] = {}
+    for track in output.tracks:
+        if not set(track.tag_ids) <= allowed_ids:
+            raise ModelTaggerError("model_output_unknown_tag_id")
+        resolved[track.track_id] = ModelTagTrackOutput(
+            track_id=track.track_id,
+            tags=[tags_by_id[tag_id].name for tag_id in track.tag_ids],
+            energy=track.energy,
+            brightness=track.brightness,
+            tension=track.tension,
+            confidence=track.confidence,
+            evidence=track.evidence,
+        )
+    return resolved
 
 
 def load_tag_quality_suite(path: Path) -> TagQualitySuite:

@@ -53,10 +53,13 @@ data, not because this release introduces a special risk to them.
    bounded numeric evidence; it does not send audio anywhere or invent semantic tags.
 4. Review generated tags and accept only the useful ones. Add or edit manual tags such
    as `medieval`, `tavern`, `dancing`, `combat`, `travel`, and custom campaign terms.
-5. Open **Assistant -> Playlist Builder**, create at least one local suggestion, audition
+5. Open **Assistant -> Tag Vocabulary**. Review the canonical names, definitions, and
+   aliases that models may use; promote any deliberate custom term that models should
+   be able to generate.
+6. Open **Assistant -> Playlist Builder**, create at least one local suggestion, audition
    several songs, adjust the final selection, preview the Authoring import, and create
    a test playlist.
-6. Create or choose a normal playlist, configure an automatic local rule, review its
+7. Create or choose a normal playlist, configure an automatic local rule, review its
    exact matching songs, and enable it. Change a relevant accepted tag and confirm the
    playlist refreshes when opened or played. Switch it back to manual and confirm its
    current songs remain.
@@ -173,10 +176,11 @@ Use a small, representative sample before running across the whole library.
 
 1. Review the disclosed counts and estimated provider requests in Library Analysis.
 2. Start with a small library/sample if provider cost or output quality is uncertain.
-3. Confirm model output appears as generated `model-evidence-tagger/v3` suggestions,
+3. Confirm model output appears as generated `model-evidence-tagger/v4` suggestions,
    separate from local analysis and manual tags.
 4. Inspect the disclosure: the model receives a path-free deterministic metadata
-   hypothesis with each candidate tag's matched field and term. A non-empty display
+   hypothesis with each candidate tag ID's matched field and term plus the current
+   canonical ID/name/definition list. A non-empty display
    title is used as the canonical title for this matching. When available, the model
    also receives bounded local signal axes/activity/dynamics/rhythm.
    These remain evidence, not automatic tags.
@@ -186,11 +190,13 @@ Use a small, representative sample before running across the whole library.
 
 ### Manual-tag cleanup
 
-1. Review local conservative cleanup first. The combined harness also runs these rules
+1. Open **Assistant -> Tag Vocabulary** and review local conservative cleanup there.
+   Declared aliases, spelling, and plural rules run
    before its provider boundary and does not spend a provider request when they resolve
    every candidate.
 2. Run model cleanup only after reviewing its disclosure: it receives unresolved source
-   tags, allowed target tags and usage counts, not songs or generated analysis. Confirm
+   IDs/names and usage counts plus canonical ID definitions, not songs or generated
+   analysis. It must return one canonical-ID-or-null decision for every source. Confirm
    each proposal labels its origin as local rule or model.
 3. Select individual proposed renames. Confirm unselected items remain unchanged and a
    stale proposal is rejected rather than guessed or partially repaired.

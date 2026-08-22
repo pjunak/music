@@ -23,7 +23,6 @@ from app.assistant.model_evaluation import (
 from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
     MODEL_TAG_BATCH_SIZE,
-    MODEL_TAG_VOCABULARY,
     ModelTagAudioEvidence,
     ModelTagTrackInput,
     tag_tracks,
@@ -44,6 +43,10 @@ from app.assistant.tag_schemas import (
     ModelTaggingDisclosure,
     ModelTaggingJobResult,
 )
+from app.assistant.tag_vocabulary import (
+    TagVocabularySnapshot,
+    load_tag_vocabulary,
+)
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.models.assistant_model_role import AssistantModelRole
@@ -55,34 +58,43 @@ from app.models.track_analysis import TrackAnalysis
 MODEL_TAGGING_JOB_KIND = "assistant.model-music-tagging"
 MODEL_TAGGING_ROLE_ID: Literal["music_tagger"] = "music_tagger"
 
-MODEL_TAGGING_DISCLOSURE = ModelTaggingDisclosure(
-    version=MODEL_TAGGING_DISCLOSURE_VERSION,
-    shared_with_provider=[
-        "Indexed titles, display titles, artists, albums, origins, and genres",
-        "Track durations and BPM values when available",
-        (
-            "Current local audio-signal proxies when available: energy, brightness, "
-            "tension, tempo, activity, dynamic range, rhythmic density, rhythmic "
-            "stability, and confidence"
-        ),
-        (
-            "A deterministic local-metadata hypothesis: candidate tags with matched "
-            "fields and terms, canonical-title source, energy, brightness, tension, "
-            "and confidence"
-        ),
-        "A server-assigned numeric track ID used only to match the response",
-        "The fixed D&D tag vocabulary the model is allowed to choose from",
-    ],
-    never_shared=[
-        "Audio files, waveforms, detailed signal measurements, or cover artwork",
-        "Filesystem or library-relative paths",
-        "Your manual tags, generated-tag review decisions, or accepted/rejected state",
-        "Playlists, review decisions, and provider credentials",
-    ],
-    allowed_tags=list(MODEL_TAG_VOCABULARY),
-    tracks_per_request=MODEL_TAG_BATCH_SIZE,
-    may_incur_cost=True,
-)
+def _model_tagging_disclosure(
+    vocabulary: TagVocabularySnapshot,
+) -> ModelTaggingDisclosure:
+    return ModelTaggingDisclosure(
+        version=MODEL_TAGGING_DISCLOSURE_VERSION,
+        shared_with_provider=[
+            "Indexed titles, display titles, artists, albums, origins, and genres",
+            "Track durations and BPM values when available",
+            (
+                "Current local audio-signal proxies when available: energy, brightness, "
+                "tension, tempo, activity, dynamic range, rhythmic density, rhythmic "
+                "stability, and confidence"
+            ),
+            (
+                "A deterministic local-metadata hypothesis: candidate tag IDs with "
+                "matched fields and terms, canonical-title source, energy, brightness, "
+                "tension, and confidence"
+            ),
+            "A server-assigned numeric track ID used only to match the response",
+            (
+                "The operator-managed canonical tag IDs, names, groups, definitions, and aliases; "
+                "the model may return only those IDs"
+            ),
+        ],
+        never_shared=[
+            "Audio files, waveforms, detailed signal measurements, or cover artwork",
+            "Filesystem or library-relative paths",
+            (
+                "Your manual tags, generated-tag review decisions, or accepted/rejected "
+                "state"
+            ),
+            "Playlists, review decisions, and provider credentials",
+        ],
+        allowed_tags=[tag.name for tag in vocabulary.entries],
+        tracks_per_request=MODEL_TAG_BATCH_SIZE,
+        may_incur_cost=True,
+    )
 
 
 class _ModelTaggingJobParameters(BaseModel):
@@ -90,15 +102,17 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v3"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v4"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     force: bool
 
 
 def model_tag_source_signature(
     track: Track,
     role_fingerprint: str,
+    vocabulary_fingerprint: str,
     audio_profile: CurrentAudioProfile | None,
 ) -> str:
     """Bind a generated profile to exact metadata, optional audio evidence, and runtime."""
@@ -108,7 +122,7 @@ def model_tag_source_signature(
     )
     payload = (
         f"{MODEL_TAG_ANALYZER_ID}\0{role_fingerprint}\0"
-        f"{track_source_signature(track)}\0{audio_signature}"
+        f"{vocabulary_fingerprint}\0{track_source_signature(track)}\0{audio_signature}"
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -117,6 +131,7 @@ def _current_profile_count(
     db: Session,
     tracks: list[Track],
     fingerprint: str | None,
+    vocabulary_fingerprint: str,
     audio_profiles: dict[int, CurrentAudioProfile],
 ) -> int:
     if not tracks or fingerprint is None:
@@ -135,6 +150,7 @@ def _current_profile_count(
         == model_tag_source_signature(
             track,
             fingerprint,
+            vocabulary_fingerprint,
             audio_profiles.get(track.id),
         )
         for track in tracks
@@ -149,6 +165,7 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
         else None
     )
     tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
+    vocabulary = load_tag_vocabulary(db)
     audio_profiles = load_current_audio_profiles(db, tracks)
     reason_code: str | None = None
     fingerprint: str | None = None
@@ -162,7 +179,13 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
     except ProviderServiceError as exc:
         reason_code = exc.code
         fingerprint = current_role_runtime_fingerprint(db, MODEL_TAGGING_ROLE_ID)
-    current = _current_profile_count(db, tracks, fingerprint, audio_profiles)
+    current = _current_profile_count(
+        db,
+        tracks,
+        fingerprint,
+        vocabulary.fingerprint,
+        audio_profiles,
+    )
     needed = max(0, len(tracks) - current)
     return ModelTaggingAvailability(
         available=reason_code is None,
@@ -177,7 +200,7 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
         current_profiles=current,
         tracks_needing_tags=needed,
         estimated_provider_requests=math.ceil(needed / MODEL_TAG_BATCH_SIZE),
-        disclosure=MODEL_TAGGING_DISCLOSURE,
+        disclosure=_model_tagging_disclosure(vocabulary),
     )
 
 
@@ -187,12 +210,14 @@ def model_tagging_job_parameters(db: Session, *, force: bool) -> dict[str, Any]:
         MODEL_TAGGING_ROLE_ID,
         TAGGING_QUALITY_EVALUATION_ID,
     )
+    vocabulary = load_tag_vocabulary(db)
     return _ModelTaggingJobParameters(
         role_id=MODEL_TAGGING_ROLE_ID,
         quality_evaluation_id=TAGGING_QUALITY_EVALUATION_ID,
         disclosure_version=MODEL_TAGGING_DISCLOSURE_VERSION,
         consent=True,
         role_fingerprint=resolved.fingerprint,
+        vocabulary_fingerprint=vocabulary.fingerprint,
         force=force,
     ).model_dump(mode="json")
 
@@ -210,6 +235,12 @@ def _require_unchanged_quality_gate(
         raise ProviderServiceError(
             "role_changed",
             "The music tagging model changed while the job was running. Run it again.",
+            409,
+        )
+    if load_tag_vocabulary(db).fingerprint != parameters.vocabulary_fingerprint:
+        raise ProviderServiceError(
+            "tag_vocabulary_changed",
+            "The tag vocabulary changed while the job was running. Run it again.",
             409,
         )
 
@@ -277,6 +308,13 @@ def run_model_music_tagging(
                 "The music tagging model changed before the job started. Run it again.",
                 409,
             )
+        vocabulary = load_tag_vocabulary(db)
+        if vocabulary.fingerprint != parameters.vocabulary_fingerprint:
+            raise ProviderServiceError(
+                "tag_vocabulary_changed",
+                "The tag vocabulary changed before the job started. Run it again.",
+                409,
+            )
         tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
         existing = {
             row.track_id: row
@@ -292,6 +330,7 @@ def run_model_music_tagging(
         track.id: model_tag_source_signature(
             track,
             parameters.role_fingerprint,
+            parameters.vocabulary_fingerprint,
             audio_profiles.get(track.id),
         )
         for track in tracks
@@ -346,6 +385,7 @@ def run_model_music_tagging(
                 for track in batch
             ],
             execute,
+            vocabulary,
         )
         context.check_cancelled()
         with SessionLocal() as db:
@@ -375,6 +415,7 @@ def run_model_music_tagging(
                     or model_tag_source_signature(
                         current_track,
                         parameters.role_fingerprint,
+                        parameters.vocabulary_fingerprint,
                         current_audio_profiles.get(snapshot.id),
                     )
                     != signatures[snapshot.id]
@@ -398,10 +439,13 @@ def run_model_music_tagging(
                 row.evidence_json = json.dumps(profile.evidence, ensure_ascii=False)
                 row.metrics_json = json.dumps(
                     {
-                        "contract": "assistant-music-tagger-output/v1",
-                        "input_contract": "assistant-music-tagger-input/v3",
+                        "contract": "assistant-music-tagger-output/v2",
+                        "input_contract": "assistant-music-tagger-input/v4",
                         "used_audio_evidence": snapshot.id in audio_profiles,
                         "role_fingerprint": parameters.role_fingerprint,
+                        "vocabulary_fingerprint": (
+                            parameters.vocabulary_fingerprint
+                        ),
                     },
                     separators=(",", ":"),
                 )
@@ -417,11 +461,12 @@ def run_model_music_tagging(
         )
 
     return ModelTaggingJobResult(
-        schema_version="assistant-model-music-tagging-job-result/v3",
+        schema_version="assistant-model-music-tagging-job-result/v4",
         disclosure_version=parameters.disclosure_version,
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,
         analyzer_id=MODEL_TAG_ANALYZER_ID,
+        vocabulary_fingerprint=parameters.vocabulary_fingerprint,
         library_tracks=len(tracks),
         updated_profiles=updated,
         unchanged_profiles=max(0, len(tracks) - len(work)),

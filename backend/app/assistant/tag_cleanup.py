@@ -12,16 +12,20 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.assistant.tag_lock import tag_write_lock
+from app.assistant.tag_vocabulary import (
+    TagVocabularySnapshot,
+    default_tag_vocabulary_snapshot,
+    load_tag_vocabulary,
+)
 from app.assistant.tags import (
-    DND_STARTER_TAG_GROUPS,
     RenameTagOutcome,
     TagUsage,
     normalize_manual_tag,
 )
 from app.models.track_user_tag import TrackUserTag
 
-TAG_CLEANUP_SCHEMA_VERSION: Literal["assistant-tag-cleanup-preview/v1"] = (
-    "assistant-tag-cleanup-preview/v1"
+TAG_CLEANUP_SCHEMA_VERSION: Literal["assistant-tag-cleanup-preview/v2"] = (
+    "assistant-tag-cleanup-preview/v2"
 )
 
 
@@ -30,7 +34,11 @@ class TagCleanupSuggestion:
     id: str
     source: str
     target: str
-    reason_code: Literal["starter_plural", "starter_typo"]
+    reason_code: Literal[
+        "vocabulary_alias",
+        "vocabulary_plural",
+        "vocabulary_typo",
+    ]
     reason: str
     source_track_count: int
     target_track_count: int
@@ -40,6 +48,7 @@ class TagCleanupSuggestion:
 @dataclass(frozen=True)
 class TagCleanupPreview:
     catalog_signature: str
+    vocabulary_fingerprint: str
     suggestions: tuple[TagCleanupSuggestion, ...]
 
 
@@ -67,12 +76,6 @@ class StaleTagCleanupError(ValueError):
 
 class InvalidTagCleanupSelectionError(ValueError):
     pass
-
-
-def _starter_tags() -> tuple[str, ...]:
-    return tuple(
-        tag for group in DND_STARTER_TAG_GROUPS for tag in group.tags
-    )
 
 
 def _is_single_edit(source: str, target: str) -> bool:
@@ -120,36 +123,57 @@ def catalog_signature(usage: Sequence[TagUsage]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _suggestion_id(source: str, target: str, reason_code: str) -> str:
+def _suggestion_id(
+    source: str,
+    target: str,
+    reason_code: str,
+    vocabulary_fingerprint: str,
+) -> str:
     return hashlib.sha256(
-        f"{TAG_CLEANUP_SCHEMA_VERSION}\0{source}\0{target}\0{reason_code}".encode()
+        (
+            f"{TAG_CLEANUP_SCHEMA_VERSION}\0{vocabulary_fingerprint}\0"
+            f"{source}\0{target}\0{reason_code}"
+        ).encode()
     ).hexdigest()
 
 
-def build_tag_cleanup_preview(usage: Sequence[TagUsage]) -> TagCleanupPreview:
-    """Propose only unambiguous spelling/plural fixes into the D&D vocabulary."""
+def build_tag_cleanup_preview(
+    usage: Sequence[TagUsage],
+    vocabulary: TagVocabularySnapshot | None = None,
+) -> TagCleanupPreview:
+    """Propose only explicit aliases and unambiguous canonical-name fixes."""
 
+    vocabulary = vocabulary or default_tag_vocabulary_snapshot()
     counts = {item.tag: item.track_count for item in usage}
-    starter_tags = _starter_tags()
-    starter_set = set(starter_tags)
+    canonical_tags = tuple(tag.name for tag in vocabulary.entries)
+    canonical_set = set(canonical_tags)
+    aliases = vocabulary.aliases
     suggestions: list[TagCleanupSuggestion] = []
     for source in sorted(counts):
-        if source in starter_set:
+        if source in canonical_set:
             continue
 
+        alias_target = aliases.get(source)
         plural_target = source[:-1] if source.endswith("s") else ""
-        reason_code: Literal["starter_plural", "starter_typo"]
-        candidates: tuple[str, ...]
-        if plural_target in starter_set:
+        reason_code: Literal[
+            "vocabulary_alias",
+            "vocabulary_plural",
+            "vocabulary_typo",
+        ]
+        if alias_target is not None:
+            candidates = (alias_target.name,)
+            reason_code = "vocabulary_alias"
+            reason = "Matches an alias defined in the controlled vocabulary."
+        elif plural_target in canonical_set:
             candidates = (plural_target,)
-            reason_code = "starter_plural"
-            reason = "Matches the plural form of a D&D starter tag."
+            reason_code = "vocabulary_plural"
+            reason = "Matches the plural form of a canonical tag."
         else:
             candidates = tuple(
-                target for target in starter_tags if _is_single_edit(source, target)
+                target for target in canonical_tags if _is_single_edit(source, target)
             )
-            reason_code = "starter_typo"
-            reason = "One clear spelling edit from a D&D starter tag."
+            reason_code = "vocabulary_typo"
+            reason = "One clear spelling edit from a canonical tag."
 
         if len(candidates) != 1:
             continue
@@ -157,7 +181,12 @@ def build_tag_cleanup_preview(usage: Sequence[TagUsage]) -> TagCleanupPreview:
         target_count = counts.get(target, 0)
         suggestions.append(
             TagCleanupSuggestion(
-                id=_suggestion_id(source, target, reason_code),
+                id=_suggestion_id(
+                    source,
+                    target,
+                    reason_code,
+                    vocabulary.fingerprint,
+                ),
                 source=source,
                 target=target,
                 reason_code=reason_code,
@@ -169,6 +198,7 @@ def build_tag_cleanup_preview(usage: Sequence[TagUsage]) -> TagCleanupPreview:
         )
     return TagCleanupPreview(
         catalog_signature=catalog_signature(usage),
+        vocabulary_fingerprint=vocabulary.fingerprint,
         suggestions=tuple(suggestions),
     )
 
@@ -183,7 +213,10 @@ def _manual_tag_usage_unlocked(db: Session) -> tuple[TagUsage, ...]:
 
 
 def preview_tag_cleanup(db: Session) -> TagCleanupPreview:
-    return build_tag_cleanup_preview(tag_catalog_snapshot(db).usage)
+    return build_tag_cleanup_preview(
+        tag_catalog_snapshot(db).usage,
+        load_tag_vocabulary(db),
+    )
 
 
 def tag_catalog_snapshot(db: Session) -> TagCatalogSnapshot:
@@ -307,6 +340,7 @@ def apply_reviewed_tag_renames(
 def apply_tag_cleanup(
     db: Session,
     expected_signature: str,
+    expected_vocabulary_fingerprint: str,
     selections: Sequence[TagCleanupSelection],
 ) -> TagCleanupApplyOutcome:
     """Apply explicitly selected current suggestions in one transaction."""
@@ -314,7 +348,12 @@ def apply_tag_cleanup(
     normalized = _normalize_selections(selections)
     with tag_write_lock:
         current_usage = _manual_tag_usage_unlocked(db)
-        current = build_tag_cleanup_preview(current_usage)
+        vocabulary = load_tag_vocabulary(db)
+        if vocabulary.fingerprint != expected_vocabulary_fingerprint:
+            raise StaleTagCleanupError(
+                "tag vocabulary changed after this cleanup preview was created"
+            )
+        current = build_tag_cleanup_preview(current_usage, vocabulary)
         allowed_pairs = {
             (suggestion.source, suggestion.target)
             for suggestion in current.suggestions

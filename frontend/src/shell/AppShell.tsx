@@ -28,6 +28,7 @@ import { SoundboardsView } from "@/views/SoundboardsView";
 import { LibraryAnalysisView } from "@/views/assistant/LibraryAnalysisView";
 import { PlaylistBuilderView } from "@/views/assistant/PlaylistBuilderView";
 import { EqAssistantView } from "@/views/assistant/EqAssistantView";
+import { TagVocabularyView } from "@/views/assistant/TagVocabularyView";
 
 import { AssistantShell } from "./AssistantShell";
 import { AuthoringShell } from "./AuthoringShell";
@@ -195,6 +196,7 @@ export default function AppShell() {
             <Route path="playlists" element={<PlaylistBuilderView />} />
             <Route path="eq" element={<EqAssistantView />} />
             <Route path="analysis" element={<LibraryAnalysisView />} />
+            <Route path="tags" element={<TagVocabularyView />} />
             <Route
               path="ai"
               element={

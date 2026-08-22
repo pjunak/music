@@ -104,10 +104,10 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
     role_id="music_tagger",
     label="Music tagging quality",
     description=(
-        "Runs fixed synthetic D&D metadata and signal-evidence tagging cases. "
-        "No songs or live library data are sent."
+        "Runs fixed synthetic metadata and signal-evidence cases against the "
+        "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="dnd-evidence-tagging-baseline-v4",
+    suite_id="controlled-vocabulary-tagging-baseline-v5",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -117,10 +117,10 @@ TAG_CLEANUP_QUALITY_EVALUATION = ModelEvaluationDefinition(
     role_id="tag_cleanup",
     label="Song-tag cleanup quality",
     description=(
-        "Runs fixed synthetic D&D tag-catalog cleanup cases through this model. "
-        "No songs or live library data are sent."
+        "Runs fixed synthetic canonical-ID and no-match tag-cleanup cases through "
+        "this model. No songs or live library data are sent."
     ),
-    suite_id="dnd-tag-cleanup-baseline-v2",
+    suite_id="controlled-vocabulary-cleanup-baseline-v3",
     suite_path=_TAG_CLEANUP_SUITE_PATH,
     job_kind=TAG_CLEANUP_QUALITY_JOB_KIND,
 )

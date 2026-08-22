@@ -5,8 +5,9 @@ import { isBackgroundJobActive } from "./backgroundJobs";
 export const MODEL_TAGGING_JOB_KIND = "assistant.model-music-tagging";
 
 export interface ModelTaggingJobResult {
-  schema_version: "assistant-model-music-tagging-job-result/v3";
-  analyzer_id: "model-evidence-tagger/v3";
+  schema_version: "assistant-model-music-tagging-job-result/v4";
+  analyzer_id: "model-evidence-tagger/v4";
+  vocabulary_fingerprint: string;
   library_tracks: number;
   updated_profiles: number;
   unchanged_profiles: number;
@@ -26,8 +27,10 @@ export function modelTaggingResultFromJob(
   const isCount = (value: unknown): value is number =>
     typeof value === "number" && Number.isInteger(value) && value >= 0;
   if (
-    result?.schema_version !== "assistant-model-music-tagging-job-result/v3" ||
-    result.analyzer_id !== "model-evidence-tagger/v3" ||
+    result?.schema_version !== "assistant-model-music-tagging-job-result/v4" ||
+    result.analyzer_id !== "model-evidence-tagger/v4" ||
+    typeof result.vocabulary_fingerprint !== "string" ||
+    !/^[a-f0-9]{64}$/.test(result.vocabulary_fingerprint) ||
     !isCount(result.library_tracks) ||
     !isCount(result.updated_profiles) ||
     !isCount(result.unchanged_profiles) ||
@@ -38,6 +41,7 @@ export function modelTaggingResultFromJob(
   return {
     schema_version: result.schema_version,
     analyzer_id: result.analyzer_id,
+    vocabulary_fingerprint: result.vocabulary_fingerprint,
     library_tracks: result.library_tracks,
     updated_profiles: result.updated_profiles,
     unchanged_profiles: result.unchanged_profiles,

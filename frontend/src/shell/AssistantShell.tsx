@@ -4,6 +4,7 @@ const ASSISTANT_TABS = [
   { to: "playlists", label: "Playlist Builder" },
   { to: "eq", label: "EQ Assistant" },
   { to: "analysis", label: "Library Analysis" },
+  { to: "tags", label: "Tag Vocabulary" },
   { to: "ai", label: "AI Setup" },
 ];
 

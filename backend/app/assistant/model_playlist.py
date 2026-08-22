@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -214,6 +215,30 @@ def _safe_execution_error(code: str | None) -> str:
     return "model_execution_failed"
 
 
+def _closed_playlist_schema(
+    schema: dict[str, object],
+    *,
+    candidate_ids: list[int],
+    candidate_limit: int,
+) -> dict[str, object]:
+    """Constrain both output arrays to the exact server-selected candidate IDs."""
+
+    closed = deepcopy(schema)
+    properties = closed.get("properties")
+    if not isinstance(properties, dict):
+        raise RuntimeError("playlist output schema is missing properties")
+    for field in ("ranked_track_ids", "selected_track_ids"):
+        array_schema = properties.get(field)
+        if not isinstance(array_schema, dict):
+            raise RuntimeError(f"playlist output schema is missing {field}")
+        item_schema = array_schema.get("items")
+        if not isinstance(item_schema, dict):
+            raise RuntimeError(f"playlist output schema is missing {field} items")
+        item_schema["enum"] = candidate_ids
+        array_schema["maxItems"] = min(candidate_limit, len(candidate_ids))
+    return closed
+
+
 class ModelPlaylistPlanner:
     """Model ranking over a locally filtered, privacy-reduced candidate set."""
 
@@ -270,6 +295,14 @@ class ModelPlaylistPlanner:
                 for rank, item in enumerate(baseline.candidates, start=1)
             ],
         )
+        candidate_ids = [item.track_id for item in model_input.candidates]
+        baseline_ranked_ids = candidate_ids[: request.candidate_limit]
+        baseline_ranked_set = set(baseline_ranked_ids)
+        baseline_selected_ids = [
+            item.track_id
+            for item in baseline_selected
+            if item.track_id in baseline_ranked_set
+        ]
         result = self._executor(
             build_structured_request(
                 _PLAYLIST_TASK,
@@ -277,10 +310,15 @@ class ModelPlaylistPlanner:
                 ModelPlaylistOutput,
                 output_example={
                     "schema_version": MODEL_PLAYLIST_OUTPUT_CONTRACT,
-                    "ranked_track_ids": [],
-                    "selected_track_ids": [],
+                    "ranked_track_ids": baseline_ranked_ids,
+                    "selected_track_ids": baseline_selected_ids,
                 },
                 max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
+                schema_transform=lambda schema: _closed_playlist_schema(
+                    schema,
+                    candidate_ids=candidate_ids,
+                    candidate_limit=request.candidate_limit,
+                ),
             )
         )
         if not result.succeeded or result.payload is None:

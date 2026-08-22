@@ -50,7 +50,9 @@ indexed metadata / local audio / operator request
   boundary, and ordered decision rules.
 - The output JSON Schema is generated from the same strict Pydantic model used for
   local validation. A locally validated example and that schema are embedded in the
-  fixed system prompt and carried on `StructuredModelRequest`.
+  fixed system prompt and carried on `StructuredModelRequest`. A task may close that
+  generated schema further with request-specific identity enums and exact list bounds;
+  the transformed schema is still shared by the prompt and provider request.
 - The standard `openai-compatible/v1` adapter uses broadly supported JSON-object
   response mode. The `openai-compatible-json-schema/v1` adapter sends the exact
   schema with `response_format.type=json_schema` and `strict=true` for providers
@@ -66,17 +68,21 @@ indexed metadata / local audio / operator request
 - **Playlist planning:** local code owns eligibility, exclusions, bounded candidate
   reduction, evidence separation, scores, default duration selection, and energy
   sequencing. The model receives that baseline and can return only ranked and
-  selected track IDs. Public data and reasons are reconstructed locally.
+  selected IDs from an exact request-specific enum. The example starts from the local
+  plan rather than an empty response. Public data and reasons are reconstructed locally.
 - **Music tagging:** the server derives a path-free `local-metadata-evidence/v1`
-  hypothesis with controlled-tag, matched-field, matched-term, and canonical-title
+  hypothesis with controlled-tag ID, matched-field, matched-term, and canonical-title
   provenance from the same descriptive fields sent to the provider. Current
   `local-audio/v1` evidence is reduced to bounded axes, tempo, activity, dynamic range, rhythmic
   density, rhythmic stability, and confidence. These are labelled hypotheses and
-  signal proxies; they cannot establish semantic D&D context by themselves.
-- **Manual-tag cleanup:** deterministic spelling and plural rules run first. Those
-  suggestions require no provider request. The model sees only unresolved non-starter
-  sources plus an exact allowed-target catalog. The combined proposal labels each
-  suggestion as `local-rule` or `model`.
+  signal proxies; they cannot establish semantic setting or scene context by themselves.
+  A revisioned operator vocabulary supplies stable IDs, names, groups, definitions, and
+  aliases. The model returns only exact IDs; names are restored locally.
+- **Manual-tag cleanup:** declared aliases plus deterministic spelling and plural rules
+  run first. Those suggestions require no provider request. The model sees only
+  unresolved sources plus canonical ID definitions, then must return one ordered
+  canonical-ID-or-null decision per source. The combined proposal labels each
+  suggestion as `local-rule` or `model` and is bound to both catalog and vocabulary.
 - **EQ drafting:** a deterministic intent map creates a conservative ten-band
   baseline and a per-band refinement envelope. The model can refine only inside that
   envelope in 0.5 dB steps; the server owns frequencies, safety checks, and preset
@@ -92,13 +98,17 @@ indexed metadata / local audio / operator request
   cost and hide an incompatible model. The operator deliberately retries after
   reviewing the failure.
 - Library scale is contained before the provider boundary: at most 100 playlist
-  candidates, 20 tagging tracks per batch, and 500 catalog tags. Deterministic cleanup
-  can reduce the last payload or avoid it completely.
+  candidates, 20 tagging tracks per batch, and 500 catalog tags in cleanup batches of
+  at most 50 unresolved names. Deterministic cleanup can reduce those payloads or avoid
+  provider calls completely.
 
 ## Trade-offs
 
 - Embedding JSON Schema increases input tokens, but removes a second hand-maintained
   description and gives compatible providers a native constraint.
+- Sending the vocabulary definitions costs input tokens, but removes the inefficient
+  create-tags-then-interpret-tags loop and makes unknown model output unrepresentable
+  for strict-schema providers.
 - The strict adapter improves format reliability but is not universally supported;
   keeping it explicit avoids speculative retries or provider-name detection.
 - Supplying local hypotheses can anchor a model. The prompt therefore labels source

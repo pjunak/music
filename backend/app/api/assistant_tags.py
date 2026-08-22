@@ -72,9 +72,17 @@ from app.assistant.tag_schemas import (
     TagCleanupApplyResult,
     TagCleanupPreviewOut,
     TagCleanupSuggestionOut,
+    TagVocabularyOut,
+    TagVocabularyUpdateRequest,
+)
+from app.assistant.tag_vocabulary import (
+    TAG_VOCABULARY_SCHEMA,
+    TagVocabularyConflictError,
+    TagVocabularyDocument,
+    load_tag_vocabulary,
+    replace_tag_vocabulary,
 )
 from app.assistant.tags import (
-    DND_STARTER_TAG_GROUPS,
     TagLimitError,
     TagNotFoundError,
     load_manual_tags,
@@ -194,20 +202,58 @@ def start_model_music_tagging(
 @router.get("/catalog", response_model=ManualTagCatalog)
 def tag_catalog(_user: CurrentUser, db: DbSession) -> ManualTagCatalog:
     usage = manual_tag_usage(db)
+    vocabulary = load_tag_vocabulary(db)
     return ManualTagCatalog(
         starter_groups=[
             StarterTagGroupOut(
                 key=group.key,
                 label=group.label,
-                tags=list(group.tags),
+                tags=[tag.name for tag in group.tags],
             )
-            for group in DND_STARTER_TAG_GROUPS
+            for group in vocabulary.document.groups
         ],
         used_tags=[item.tag for item in usage],
         tag_usage=[
             ManualTagUsage(tag=item.tag, track_count=item.track_count)
             for item in usage
         ],
+    )
+
+
+@router.get("/vocabulary", response_model=TagVocabularyOut)
+def get_tag_vocabulary(_user: CurrentUser, db: DbSession) -> TagVocabularyOut:
+    snapshot = load_tag_vocabulary(db)
+    return TagVocabularyOut(
+        schema_version=TAG_VOCABULARY_SCHEMA,
+        revision=snapshot.revision,
+        fingerprint=snapshot.fingerprint,
+        groups=list(snapshot.document.groups),
+    )
+
+
+@router.put("/vocabulary", response_model=TagVocabularyOut)
+def update_tag_vocabulary(
+    payload: TagVocabularyUpdateRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> TagVocabularyOut:
+    document = TagVocabularyDocument(
+        schema_version=payload.schema_version,
+        groups=payload.groups,
+    )
+    try:
+        snapshot = replace_tag_vocabulary(
+            db,
+            expected_revision=payload.expected_revision,
+            document=document,
+        )
+    except TagVocabularyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return TagVocabularyOut(
+        schema_version=TAG_VOCABULARY_SCHEMA,
+        revision=snapshot.revision,
+        fingerprint=snapshot.fingerprint,
+        groups=list(snapshot.document.groups),
     )
 
 
@@ -304,6 +350,27 @@ def apply_model_library_tag_cleanup(
                 "message": "The selected proposal signature does not match its job.",
             },
         )
+    if payload.vocabulary_fingerprint != result.vocabulary_fingerprint:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "model_tag_cleanup_vocabulary_mismatch",
+                "message": (
+                    "The selected vocabulary fingerprint does not match its job."
+                ),
+            },
+        )
+    if load_tag_vocabulary(db).fingerprint != result.vocabulary_fingerprint:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "tag_cleanup_stale",
+                "message": (
+                    "The tag vocabulary changed after this proposal was created. "
+                    "Run cleanup again."
+                ),
+            },
+        )
     try:
         outcome = apply_reviewed_tag_renames(
             db,
@@ -351,6 +418,7 @@ def preview_library_tag_cleanup(
     return TagCleanupPreviewOut(
         schema_version=TAG_CLEANUP_SCHEMA_VERSION,
         catalog_signature=preview.catalog_signature,
+        vocabulary_fingerprint=preview.vocabulary_fingerprint,
         suggestions=[
             TagCleanupSuggestionOut(
                 id=item.id,
@@ -377,6 +445,7 @@ def apply_library_tag_cleanup(
         outcome = apply_tag_cleanup(
             db,
             payload.catalog_signature,
+            payload.vocabulary_fingerprint,
             [
                 TagCleanupSelection(source=item.source, target=item.target)
                 for item in payload.items

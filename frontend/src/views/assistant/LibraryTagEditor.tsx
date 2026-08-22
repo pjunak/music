@@ -18,7 +18,6 @@ import { toast } from "@/core/toast";
 import { AnalysisTagReview } from "./AnalysisTagReview";
 import { analysisTagSuggestionKey } from "./analysisTagSelection";
 import { AudioSignalEvidence } from "./AudioSignalEvidence";
-import { TagCatalogManager } from "./TagCatalogManager";
 
 const PAGE_SIZE = 50;
 const MAX_TAGS = 32;
@@ -843,15 +842,6 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
         </div>
       </div>
 
-      <TagCatalogManager
-        catalog={catalog}
-        onChanged={() => {
-          setTagFilter("");
-          setOffset(0);
-          setSelectedTrackIds(new Set());
-          setReloadKey((value) => value + 1);
-        }}
-      />
     </section>
   );
 }

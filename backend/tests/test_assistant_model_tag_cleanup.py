@@ -23,11 +23,19 @@ from app.assistant.providers.execution import (
     StructuredModelResult,
 )
 from app.assistant.providers.verification import ProviderVerificationResult
+from app.assistant.tag_vocabulary import (
+    TagVocabularyDocument,
+    TagVocabularyEntry,
+    TagVocabularyGroup,
+    TagVocabularySnapshot,
+    vocabulary_fingerprint,
+)
 from app.assistant.tags import TagUsage
 from app.core.db import SessionLocal
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
+from app.models.assistant_tag_vocabulary import AssistantTagVocabulary
 from app.models.background_job import BackgroundJob
 from app.models.track_user_tag import TrackUserTag
 
@@ -57,6 +65,7 @@ def _clean_tag_cleanup_model_configuration() -> Iterator[None]:
             )
             db.execute(delete(AssistantModelRole))
             db.execute(delete(AssistantProviderConnection))
+            db.execute(delete(AssistantTagVocabulary))
             db.commit()
 
     clean()
@@ -94,6 +103,10 @@ _REFERENCE_MERGES = {
     "quiet sleep": "rest",
     "sad": "melancholy",
     "love theme": "romantic",
+    "clue hunting": "investigation",
+    "camp recovery": "rest",
+    "wistful grief": "melancholy",
+    "tender love": "romantic",
 }
 
 
@@ -103,25 +116,29 @@ def _reference_cleanup_model(
 ) -> StructuredModelResult:
     assert "Example JSON shape" in request.system_prompt
     payload = json.loads(request.user_prompt)
-    used = {item["tag"] for item in payload["candidate_sources"]}
-    allowed = {item["tag"] for item in payload["allowed_targets"]}
+    target_id_by_name = {
+        item["name"]: item["tag_id"] for item in payload["canonical_tags"]
+    }
     assert payload["remaining_suggestion_slots"] <= 100
-    suggestions = [
+    decisions = [
         {
-            "source": source,
-            "target": target,
+            "source_id": source["source_id"],
+            "target_tag_id": (
+                target_id_by_name[target]
+                if (target := _REFERENCE_MERGES.get(source["tag"])) is not None
+                else None
+            ),
             "confidence": "high",
             "reason": "Synthetic reference synonym or spelling match",
         }
-        for source, target in _REFERENCE_MERGES.items()
-        if source in used and target in allowed
+        for source in payload["candidate_sources"]
     ]
     return StructuredModelResult(
         True,
         None,
         {
             "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
-            "suggestions": suggestions,
+            "decisions": decisions,
         },
         provider_model_id="cleanup-response-model",
         input_tokens=60,
@@ -198,16 +215,19 @@ def _configure_quality_passed_cleanup_role(
     assert finished["result"]["evaluation"]["passed"] is True
 
 
-def test_cleanup_model_rejects_unknown_targets_and_chained_renames() -> None:
-    usage = [TagUsage(tag="inn", track_count=3), TagUsage(tag="pub", track_count=2)]
+def test_cleanup_model_rejects_unknown_targets_and_wrong_source_order() -> None:
+    usage = [
+        TagUsage(tag="ale room", track_count=3),
+        TagUsage(tag="road music", track_count=2),
+    ]
 
-    def execute_with(suggestions: list[dict[str, object]]) -> StructuredModelResult:
+    def execute_with(decisions: list[dict[str, object]]) -> StructuredModelResult:
         return StructuredModelResult(
             True,
             None,
             {
                 "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
-                "suggestions": suggestions,
+                "decisions": decisions,
             },
         )
 
@@ -217,31 +237,40 @@ def test_cleanup_model_rejects_unknown_targets_and_chained_renames() -> None:
             lambda _request: execute_with(
                 [
                     {
-                        "source": "inn",
-                        "target": "invented-tag",
+                        "source_id": "source-001",
+                        "target_tag_id": "mood.invented-tag",
                         "confidence": "high",
                         "reason": "Not allowed",
-                    }
+                    },
+                    {
+                        "source_id": "source-002",
+                        "target_tag_id": None,
+                        "confidence": "low",
+                        "reason": "No safe match",
+                    },
                 ]
             ),
         )
 
-    with pytest.raises(ModelTagCleanupError, match="model_output_chained_rename"):
+    with pytest.raises(
+        ModelTagCleanupError,
+        match="model_output_source_set_mismatch",
+    ):
         suggest_model_tag_cleanup(
             usage,
             lambda _request: execute_with(
                 [
                     {
-                        "source": "inn",
-                        "target": "pub",
+                        "source_id": "source-002",
+                        "target_tag_id": None,
                         "confidence": "high",
-                        "reason": "First link",
+                        "reason": "Second source first",
                     },
                     {
-                        "source": "pub",
-                        "target": "tavern",
+                        "source_id": "source-001",
+                        "target_tag_id": None,
                         "confidence": "high",
-                        "reason": "Second link",
+                        "reason": "First source second",
                     },
                 ]
             ),
@@ -249,7 +278,7 @@ def test_cleanup_model_rejects_unknown_targets_and_chained_renames() -> None:
 
 
 def test_cleanup_model_reports_safe_schema_diagnostic() -> None:
-    usage = [TagUsage(tag="inn", track_count=3)]
+    usage = [TagUsage(tag="ale room", track_count=3)]
 
     with pytest.raises(ModelTagCleanupError) as invalid:
         suggest_model_tag_cleanup(
@@ -259,10 +288,10 @@ def test_cleanup_model_reports_safe_schema_diagnostic() -> None:
                 None,
                 {
                     "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
-                    "suggestions": [
+                    "decisions": [
                         {
-                            "source": "inn",
-                            "target": "tavern",
+                            "source_id": "source-001",
+                            "target_tag_id": "setting.tavern",
                             "reason": "Clear synonym",
                         }
                     ],
@@ -272,7 +301,7 @@ def test_cleanup_model_reports_safe_schema_diagnostic() -> None:
 
     assert invalid.value.code == "model_output_schema_invalid"
     assert invalid.value.diagnostic is not None
-    assert "suggestions.0.confidence" in invalid.value.diagnostic
+    assert "decisions.0.confidence" in invalid.value.diagnostic
 
 
 def test_cleanup_resolves_unambiguous_sources_without_provider_call() -> None:
@@ -295,24 +324,78 @@ def test_cleanup_resolves_unambiguous_sources_without_provider_call() -> None:
     assert all(item.confidence == "high" for item in suggestions)
 
 
+def test_cleanup_uses_operator_aliases_without_a_provider_call() -> None:
+    document = TagVocabularyDocument(
+        groups=[
+            TagVocabularyGroup(
+                key="mood",
+                label="Mood",
+                description="Operator-defined emotional tones.",
+                tags=[
+                    TagVocabularyEntry(
+                        id="mood.dreamlike",
+                        name="dreamlike",
+                        description="Soft, unreal, and oneiric atmosphere.",
+                        aliases=["oneiric"],
+                    )
+                ],
+            )
+        ]
+    )
+    vocabulary = TagVocabularySnapshot(
+        document=document,
+        revision=3,
+        fingerprint=vocabulary_fingerprint(document),
+    )
+
+    def should_not_run(_request: StructuredModelRequest) -> StructuredModelResult:
+        raise AssertionError("declared vocabulary aliases must resolve locally")
+
+    suggestions = suggest_model_tag_cleanup(
+        [TagUsage(tag="oneiric", track_count=4)],
+        should_not_run,
+        vocabulary,
+    )
+
+    assert [(item.source, item.target) for item in suggestions] == [
+        ("oneiric", "dreamlike")
+    ]
+
+
 def test_cleanup_model_receives_only_remaining_result_capacity() -> None:
     observed_slots: list[int] = []
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
-        observed_slots.append(json.loads(request.user_prompt)["remaining_suggestion_slots"])
+        payload = json.loads(request.user_prompt)
+        observed_slots.append(payload["remaining_suggestion_slots"])
+        assert request.output_schema is not None
+        decision = request.output_schema["$defs"]["ModelTagCleanupDecision"]
+        assert decision["properties"]["source_id"]["enum"] == ["source-001"]
+        target_choices = decision["properties"]["target_tag_id"]["anyOf"]
+        target_ids = next(
+            item["enum"] for item in target_choices if item.get("type") == "string"
+        )
+        assert "setting.tavern" in target_ids
         return StructuredModelResult(
             True,
             None,
             {
                 "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
-                "suggestions": [],
+                "decisions": [
+                    {
+                        "source_id": "source-001",
+                        "target_tag_id": None,
+                        "confidence": "low",
+                        "reason": "No safe match",
+                    }
+                ],
             },
         )
 
     suggest_model_tag_cleanup(
         [
             TagUsage(tag="medival", track_count=3),
-            TagUsage(tag="inn", track_count=2),
+            TagUsage(tag="ale room", track_count=2),
         ],
         execute,
     )
@@ -328,7 +411,7 @@ def test_reference_cleanup_model_passes_fixed_quality_suite() -> None:
     )
 
     assert result.passed is True
-    assert result.passed_cases == result.total_cases == 10
+    assert result.passed_cases == result.total_cases == 12
 
 
 def test_tag_cleanup_quality_job_persists_certification_and_usage(
@@ -349,16 +432,16 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
 
     assert finished["kind"] == TAG_CLEANUP_QUALITY_JOB_KIND
-    assert finished["progress_current"] == 10
-    assert finished["progress_total"] == 10
+    assert finished["progress_current"] == 12
+    assert finished["progress_total"] == 12
     assert finished["result"]["evaluation"]["passed"] is True
     assert finished["result"]["usage"] == {
         "schema_version": "assistant-provider-usage/v1",
-        "attempted_requests": 7,
-        "input_tokens": 420,
-        "output_tokens": 105,
-        "input_tokens_reported_requests": 7,
-        "output_tokens_reported_requests": 7,
+        "attempted_requests": 3,
+        "input_tokens": 180,
+        "output_tokens": 45,
+        "input_tokens_reported_requests": 3,
+        "output_tokens_reported_requests": 3,
         "provider_model_ids": ["cleanup-response-model"],
         "provider_model_ids_truncated": False,
     }
@@ -369,7 +452,9 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     )
     assert evaluations.status_code == 200, evaluations.text
     assert evaluations.json()[0]["status"] == "passed"
-    assert evaluations.json()[0]["suite_id"] == "dnd-tag-cleanup-baseline-v2"
+    assert evaluations.json()[0]["suite_id"] == (
+        "controlled-vocabulary-cleanup-baseline-v3"
+    )
 
 
 def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
@@ -390,14 +475,16 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
     assert status.status_code == 200, status.text
     assert status.json()["available"] is True
     assert status.json()["manual_tags"] == 2
-    assert status.json()["estimated_provider_requests"] == 1
+    assert status.json()["estimated_provider_requests"] == 0
     assert status.json()["disclosure"] == {
-        "version": "assistant-model-tag-cleanup-disclosure/v2",
+        "version": "assistant-model-tag-cleanup-disclosure/v3",
         "shared_with_provider": [
             "Manual source tags not already resolved by deterministic cleanup rules",
-            "Allowed existing or starter target tags",
-            "The number of tracks using each shared source or target tag",
-            "The fixed D&D starter-tag vocabulary",
+            "The number of tracks using each shared source tag",
+            (
+                "The operator-managed canonical tag IDs, names, groups, and "
+                "definitions; the model may return only those IDs or no match"
+            ),
         ],
         "never_shared": [
             "Audio or media files",
@@ -415,7 +502,7 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
     started = auth_client.post(
         "/api/assistant/library-tags/catalog/model-cleanup-jobs",
         json={
-            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v2",
+            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v3",
             "consent": True,
         },
     )
@@ -428,16 +515,16 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
             "id": finished["result"]["suggestions"][0]["id"],
             "source": "inn",
             "target": "tavern",
-            "origin": "model",
+            "origin": "local-rule",
             "confidence": "high",
-            "reason": "Synthetic reference synonym or spelling match",
+            "reason": "Matches an alias defined in the controlled vocabulary.",
             "source_track_count": 1,
             "target_track_count": 1,
             "merged": True,
         }
     ]
     assert len(finished["result"]["suggestions"][0]["id"]) == 64
-    assert finished["result"]["usage"]["attempted_requests"] == 1
+    assert finished["result"]["usage"]["attempted_requests"] == 0
     assert "inn" not in json.dumps(finished["parameters"])
     assert "tavern" not in json.dumps(finished["parameters"])
     assert TEST_CLEANUP_API_KEY not in json.dumps(finished)
@@ -447,6 +534,9 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
         json={
             "job_id": finished["id"],
             "catalog_signature": finished["result"]["catalog_signature"],
+            "vocabulary_fingerprint": finished["result"][
+                "vocabulary_fingerprint"
+            ],
             "items": [{"source": "inn", "target": "tavern"}],
         },
     )
@@ -481,7 +571,7 @@ def test_model_tag_cleanup_apply_rejects_stale_or_invented_selection(
     started = auth_client.post(
         "/api/assistant/library-tags/catalog/model-cleanup-jobs",
         json={
-            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v2",
+            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v3",
             "consent": True,
         },
     )
@@ -492,6 +582,9 @@ def test_model_tag_cleanup_apply_rejects_stale_or_invented_selection(
         json={
             "job_id": finished["id"],
             "catalog_signature": finished["result"]["catalog_signature"],
+            "vocabulary_fingerprint": finished["result"][
+                "vocabulary_fingerprint"
+            ],
             "items": [{"source": "inn", "target": "combat"}],
         },
     )
@@ -508,6 +601,9 @@ def test_model_tag_cleanup_apply_rejects_stale_or_invented_selection(
         json={
             "job_id": finished["id"],
             "catalog_signature": finished["result"]["catalog_signature"],
+            "vocabulary_fingerprint": finished["result"][
+                "vocabulary_fingerprint"
+            ],
             "items": [{"source": "inn", "target": "tavern"}],
         },
     )
@@ -515,3 +611,51 @@ def test_model_tag_cleanup_apply_rejects_stale_or_invented_selection(
     assert stale.json()["detail"]["code"] == "tag_cleanup_stale"
     catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
     assert catalog["used_tags"] == ["inn", "tavern"]
+
+
+def test_model_tag_cleanup_apply_rejects_changed_vocabulary(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+) -> None:
+    _configure_quality_passed_cleanup_role(auth_client, monkeypatch)
+    added = auth_client.patch(
+        f"/api/assistant/library-tags/{seeded_track_id}",
+        json={"add": ["inn"], "remove": []},
+    )
+    assert added.status_code == 200, added.text
+    started = auth_client.post(
+        "/api/assistant/library-tags/catalog/model-cleanup-jobs",
+        json={
+            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v3",
+            "consent": True,
+        },
+    )
+    finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+
+    vocabulary = auth_client.get("/api/assistant/library-tags/vocabulary").json()
+    vocabulary["groups"][0]["description"] = "Changed setting definitions."
+    saved = auth_client.put(
+        "/api/assistant/library-tags/vocabulary",
+        json={
+            "schema_version": vocabulary["schema_version"],
+            "expected_revision": vocabulary["revision"],
+            "groups": vocabulary["groups"],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    stale = auth_client.post(
+        "/api/assistant/library-tags/catalog/model-cleanup-apply",
+        json={
+            "job_id": finished["id"],
+            "catalog_signature": finished["result"]["catalog_signature"],
+            "vocabulary_fingerprint": finished["result"][
+                "vocabulary_fingerprint"
+            ],
+            "items": [{"source": "inn", "target": "tavern"}],
+        },
+    )
+
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "tag_cleanup_stale"

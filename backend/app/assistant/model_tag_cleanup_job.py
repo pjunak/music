@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +15,7 @@ from app.assistant.model_evaluation import (
 )
 from app.assistant.model_tag_cleanup import (
     MAX_MODEL_CLEANUP_TAGS,
+    MODEL_TAG_CLEANUP_BATCH_SIZE,
     MODEL_TAG_CLEANUP_ENGINE_ID,
     ModelTagCleanupSuggestion,
     suggest_model_tag_cleanup,
@@ -37,6 +39,7 @@ from app.assistant.tag_schemas import (
     ModelTagCleanupJobResult,
     ModelTagCleanupSuggestionOut,
 )
+from app.assistant.tag_vocabulary import load_tag_vocabulary
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.models.assistant_model_role import AssistantModelRole
@@ -49,9 +52,11 @@ MODEL_TAG_CLEANUP_DISCLOSURE = ModelTagCleanupDisclosure(
     version=MODEL_TAG_CLEANUP_DISCLOSURE_VERSION,
     shared_with_provider=[
         "Manual source tags not already resolved by deterministic cleanup rules",
-        "Allowed existing or starter target tags",
-        "The number of tracks using each shared source or target tag",
-        "The fixed D&D starter-tag vocabulary",
+        "The number of tracks using each shared source tag",
+        (
+            "The operator-managed canonical tag IDs, names, groups, and definitions; "
+            "the model may return only those IDs or no match"
+        ),
     ],
     never_shared=[
         "Audio or media files",
@@ -68,20 +73,23 @@ class _ModelTagCleanupJobParameters(BaseModel):
 
     role_id: Literal["tag_cleanup"]
     quality_evaluation_id: Literal["tag-cleanup-quality-v1"]
-    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v3"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
+    vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _suggestion_id(
     role_fingerprint: str,
     catalog_signature: str,
+    vocabulary_fingerprint: str,
     suggestion: ModelTagCleanupSuggestion,
 ) -> str:
     value = (
         f"{MODEL_TAG_CLEANUP_ENGINE_ID}\0{role_fingerprint}\0"
-        f"{catalog_signature}\0{suggestion.source}\0{suggestion.target}"
+        f"{catalog_signature}\0{vocabulary_fingerprint}\0"
+        f"{suggestion.source}\0{suggestion.target}"
     )
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -94,7 +102,8 @@ def model_tag_cleanup_availability(db: Session) -> ModelTagCleanupAvailability:
         else None
     )
     snapshot = tag_catalog_snapshot(db)
-    unresolved = unresolved_model_cleanup_usage(snapshot.usage)
+    vocabulary = load_tag_vocabulary(db)
+    unresolved = unresolved_model_cleanup_usage(snapshot.usage, vocabulary)
     reason_code: str | None = None
     try:
         prepare_quality_gated_role_execution(
@@ -117,8 +126,11 @@ def model_tag_cleanup_availability(db: Session) -> ModelTagCleanupAvailability:
         quality_evaluation_id=TAG_CLEANUP_QUALITY_EVALUATION_ID,
         job_kind=MODEL_TAG_CLEANUP_JOB_KIND,
         catalog_signature=snapshot.signature,
+        vocabulary_fingerprint=vocabulary.fingerprint,
         manual_tags=len(snapshot.usage),
-        estimated_provider_requests=1 if unresolved else 0,
+        estimated_provider_requests=math.ceil(
+            len(unresolved) / MODEL_TAG_CLEANUP_BATCH_SIZE
+        ),
         disclosure=MODEL_TAG_CLEANUP_DISCLOSURE,
     )
 
@@ -130,6 +142,7 @@ def model_tag_cleanup_job_parameters(db: Session) -> dict[str, Any]:
         TAG_CLEANUP_QUALITY_EVALUATION_ID,
     )
     snapshot = tag_catalog_snapshot(db)
+    vocabulary = load_tag_vocabulary(db)
     if not snapshot.usage:
         raise ProviderServiceError(
             "tag_catalog_empty",
@@ -149,6 +162,7 @@ def model_tag_cleanup_job_parameters(db: Session) -> dict[str, Any]:
         consent=True,
         role_fingerprint=resolved.fingerprint,
         catalog_signature=snapshot.signature,
+        vocabulary_fingerprint=vocabulary.fingerprint,
     ).model_dump(mode="json")
 
 
@@ -165,6 +179,12 @@ def _require_unchanged_role(
         raise ProviderServiceError(
             "role_changed",
             "The tag cleanup model changed while the job was running. Run it again.",
+            409,
+        )
+    if load_tag_vocabulary(db).fingerprint != parameters.vocabulary_fingerprint:
+        raise ProviderServiceError(
+            "tag_vocabulary_changed",
+            "The tag vocabulary changed while cleanup was running. Run it again.",
             409,
         )
 
@@ -187,10 +207,17 @@ def run_model_tag_cleanup(
                 409,
             )
         snapshot = tag_catalog_snapshot(db)
+        vocabulary = load_tag_vocabulary(db)
     if snapshot.signature != parameters.catalog_signature:
         raise ProviderServiceError(
             "tag_catalog_changed",
             "Manual tags changed before model cleanup started. Run it again.",
+            409,
+        )
+    if vocabulary.fingerprint != parameters.vocabulary_fingerprint:
+        raise ProviderServiceError(
+            "tag_vocabulary_changed",
+            "The tag vocabulary changed before model cleanup started. Run it again.",
             409,
         )
 
@@ -210,7 +237,7 @@ def run_model_tag_cleanup(
         context.checkpoint_result(usage.checkpoint())
         return result
 
-    unresolved = unresolved_model_cleanup_usage(snapshot.usage)
+    unresolved = unresolved_model_cleanup_usage(snapshot.usage, vocabulary)
     context.update_progress(
         0,
         1,
@@ -225,21 +252,31 @@ def run_model_tag_cleanup(
             else "All cleanup candidates were resolved locally"
         ),
     )
-    suggestions = suggest_model_tag_cleanup(snapshot.usage, execute)
+    suggestions = suggest_model_tag_cleanup(snapshot.usage, execute, vocabulary)
     context.check_cancelled()
     with SessionLocal() as db:
         _require_unchanged_role(db, parameters)
+        if tag_catalog_snapshot(db).signature != parameters.catalog_signature:
+            raise ProviderServiceError(
+                "tag_catalog_changed",
+                "Manual tags changed while model cleanup was running. Run it again.",
+                409,
+            )
 
     counts = {item.tag: item.track_count for item in snapshot.usage}
     local_pairs = {
         (item.source, item.target)
-        for item in build_tag_cleanup_preview(snapshot.usage).suggestions
+        for item in build_tag_cleanup_preview(
+            snapshot.usage,
+            vocabulary,
+        ).suggestions
     }
     output = [
         ModelTagCleanupSuggestionOut(
             id=_suggestion_id(
                 parameters.role_fingerprint,
                 parameters.catalog_signature,
+                parameters.vocabulary_fingerprint,
                 suggestion,
             ),
             source=suggestion.source,
@@ -264,12 +301,13 @@ def run_model_tag_cleanup(
         message=f"Saved {len(output)} review-only suggestions",
     )
     return ModelTagCleanupJobResult(
-        schema_version="assistant-model-tag-cleanup-job-result/v2",
+        schema_version="assistant-model-tag-cleanup-job-result/v3",
         disclosure_version=parameters.disclosure_version,
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,
         engine_id=MODEL_TAG_CLEANUP_ENGINE_ID,
         catalog_signature=parameters.catalog_signature,
+        vocabulary_fingerprint=parameters.vocabulary_fingerprint,
         catalog_tags=len(snapshot.usage),
         suggestions=output,
         usage=usage.summary(),

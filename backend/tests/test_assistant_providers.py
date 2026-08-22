@@ -1312,9 +1312,24 @@ def test_role_requires_verified_connection_and_model_test_before_enablement(
     assert target.api_key == TEST_PROVIDER_API_KEY
 
 
-def test_conformance_contract_change_invalidates_existing_model_test(
+@pytest.mark.parametrize(
+    ("contract_name", "next_contract"),
+    [
+        (
+            "CONFORMANCE_CONTRACT",
+            "assistant-provider-conformance/test-next-version",
+        ),
+        (
+            "STRUCTURED_HARNESS_CONTRACT",
+            "assistant-structured-harness/test-next-version",
+        ),
+    ],
+)
+def test_execution_contract_change_invalidates_existing_model_test(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    contract_name: str,
+    next_contract: str,
 ) -> None:
     created = _create_connection(auth_client)
     _verify_success(monkeypatch)
@@ -1341,8 +1356,8 @@ def test_conformance_contract_change_invalidates_existing_model_test(
     ).status_code == 200
 
     monkeypatch.setattr(
-        "app.assistant.providers.service.CONFORMANCE_CONTRACT",
-        "assistant-provider-conformance/test-next-version",
+        f"app.assistant.providers.service.{contract_name}",
+        next_contract,
     )
     roles = auth_client.get("/api/assistant/providers/roles")
     planner = next(

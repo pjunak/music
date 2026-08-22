@@ -8,12 +8,13 @@ import { isBackgroundJobActive } from "./backgroundJobs";
 export const MODEL_TAG_CLEANUP_JOB_KIND = "assistant.model-tag-cleanup";
 
 export interface ModelTagCleanupJobResult {
-  schema_version: "assistant-model-tag-cleanup-job-result/v2";
-  disclosure_version: "assistant-model-tag-cleanup-disclosure/v2";
+  schema_version: "assistant-model-tag-cleanup-job-result/v3";
+  disclosure_version: "assistant-model-tag-cleanup-disclosure/v3";
   role_id: "tag_cleanup";
   role_fingerprint: string;
-  engine_id: "model-tag-cleanup/v2";
+  engine_id: "model-tag-cleanup/v3";
   catalog_signature: string;
+  vocabulary_fingerprint: string;
   catalog_tags: number;
   suggestions: ModelTagCleanupSuggestion[];
 }
@@ -61,15 +62,17 @@ export function modelTagCleanupResultFromJob(
 ): ModelTagCleanupJobResult | null {
   const result = job?.result;
   if (
-    result?.schema_version !== "assistant-model-tag-cleanup-job-result/v2" ||
+    result?.schema_version !== "assistant-model-tag-cleanup-job-result/v3" ||
     result.disclosure_version !==
-      "assistant-model-tag-cleanup-disclosure/v2" ||
+      "assistant-model-tag-cleanup-disclosure/v3" ||
     result.role_id !== "tag_cleanup" ||
     typeof result.role_fingerprint !== "string" ||
     !SIGNATURE.test(result.role_fingerprint) ||
-    result.engine_id !== "model-tag-cleanup/v2" ||
+    result.engine_id !== "model-tag-cleanup/v3" ||
     typeof result.catalog_signature !== "string" ||
     !SIGNATURE.test(result.catalog_signature) ||
+    typeof result.vocabulary_fingerprint !== "string" ||
+    !SIGNATURE.test(result.vocabulary_fingerprint) ||
     !isCount(result.catalog_tags) ||
     result.catalog_tags < 1 ||
     !Array.isArray(result.suggestions)
@@ -85,6 +88,7 @@ export function modelTagCleanupResultFromJob(
     role_fingerprint: result.role_fingerprint,
     engine_id: result.engine_id,
     catalog_signature: result.catalog_signature,
+    vocabulary_fingerprint: result.vocabulary_fingerprint,
     catalog_tags: result.catalog_tags,
     suggestions: suggestions as ModelTagCleanupSuggestion[],
   };

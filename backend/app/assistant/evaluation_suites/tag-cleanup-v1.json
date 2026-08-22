@@ -1,6 +1,6 @@
 {
-  "schema_version": "assistant-model-tag-cleanup-evaluation/v1",
-  "id": "dnd-tag-cleanup-baseline-v2",
+  "schema_version": "assistant-model-tag-cleanup-evaluation/v2",
+  "id": "controlled-vocabulary-cleanup-baseline-v3",
   "cases": [
     {
       "id": "inn-to-tavern",
@@ -146,6 +146,41 @@
         {"source": "love theme", "target": "melancholy"}
       ],
       "maximum_suggestions": 2
+    },
+    {
+      "id": "semantic-scene-decisions",
+      "description": "Classifies every clear scene synonym while retaining a safe no-match decision",
+      "used_tags": [
+        {"tag": "clue hunting", "track_count": 6},
+        {"tag": "camp recovery", "track_count": 4},
+        {"tag": "background music", "track_count": 20}
+      ],
+      "required_pairs": [
+        {"source": "clue hunting", "target": "investigation"},
+        {"source": "camp recovery", "target": "rest"}
+      ],
+      "forbidden_pairs": [
+        {"source": "background music", "target": "rest"}
+      ],
+      "maximum_suggestions": 2
+    },
+    {
+      "id": "semantic-mood-decisions",
+      "description": "Maps explicit mood phrases without collapsing distinct canonical moods",
+      "used_tags": [
+        {"tag": "wistful grief", "track_count": 5},
+        {"tag": "tender love", "track_count": 3},
+        {"tag": "ominous uncertainty", "track_count": 7}
+      ],
+      "required_pairs": [
+        {"source": "wistful grief", "target": "melancholy"},
+        {"source": "tender love", "target": "romantic"}
+      ],
+      "forbidden_pairs": [
+        {"source": "wistful grief", "target": "romantic"},
+        {"source": "tender love", "target": "melancholy"}
+      ],
+      "maximum_suggestions": 3
     }
   ]
 }

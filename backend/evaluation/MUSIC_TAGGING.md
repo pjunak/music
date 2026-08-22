@@ -16,11 +16,13 @@ does not justify inventing a D&D setting.
 The provider must return one strict profile for every supplied synthetic track:
 
 - the original numeric track ID;
-- zero to eight tags from the fixed D&D starter vocabulary;
+- zero to eight stable IDs from the controlled vocabulary;
 - bounded energy, brightness, and tension axes;
 - confidence and short supplied-evidence explanations.
 
-Unknown tags, missing or duplicate IDs, malformed fields, truncated output, and
+The server injects the exact synthetic track IDs and canonical tag IDs into the
+response schema, then resolves validated IDs to local names. Unknown tags, missing
+or duplicate IDs, malformed fields, truncated output, and
 unexpected tracks fail the contract instead of being repaired. Each case also
 declares required and forbidden tags. All cases must pass for the exact model
 runtime fingerprint to be certified.

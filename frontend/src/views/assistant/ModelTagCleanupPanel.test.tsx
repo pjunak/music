@@ -47,6 +47,7 @@ import {
 import { ModelTagCleanupPanel } from "./ModelTagCleanupPanel";
 
 const catalogSignature = "a".repeat(64);
+const vocabularyFingerprint = "f".repeat(64);
 
 const availability: ModelTagCleanupAvailability = {
   available: true,
@@ -57,6 +58,7 @@ const availability: ModelTagCleanupAvailability = {
   quality_evaluation_id: "tag-cleanup-quality-v1",
   job_kind: "assistant.model-tag-cleanup",
   catalog_signature: catalogSignature,
+  vocabulary_fingerprint: vocabularyFingerprint,
   manual_tags: 17,
   estimated_provider_requests: 1,
   disclosure: {
@@ -104,12 +106,13 @@ function completedJob(
     started_at: "2026-08-19T12:00:01Z",
     finished_at: "2026-08-19T12:00:03Z",
     result: {
-      schema_version: "assistant-model-tag-cleanup-job-result/v2",
+      schema_version: "assistant-model-tag-cleanup-job-result/v3",
       disclosure_version: MODEL_TAG_CLEANUP_DISCLOSURE_VERSION,
       role_id: "tag_cleanup",
       role_fingerprint: "b".repeat(64),
-      engine_id: "model-tag-cleanup/v2",
+      engine_id: "model-tag-cleanup/v3",
       catalog_signature: catalogSignature,
+      vocabulary_fingerprint: vocabularyFingerprint,
       catalog_tags: 17,
       suggestions: [
         {
@@ -220,6 +223,7 @@ describe("ModelTagCleanupPanel", () => {
       expect(assistantApi.applyModelTagCleanup).toHaveBeenCalledWith(
         "cleanup-job-1",
         catalogSignature,
+        vocabularyFingerprint,
         [{ source: "tavarn", target: "tavern" }],
       ),
     );
@@ -235,7 +239,7 @@ describe("ModelTagCleanupPanel", () => {
     renderPanel();
 
     expect(
-      await screen.findByText(/catalog changed after this proposal was created/i),
+      await screen.findByText(/catalog or controlled vocabulary changed/i),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Select tavarn to tavern")).not.toBeInTheDocument();
     expect(

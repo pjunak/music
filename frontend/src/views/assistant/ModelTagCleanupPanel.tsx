@@ -109,7 +109,8 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
   const catalogIsCurrent =
     result !== null &&
     availability !== null &&
-    result.catalog_signature === availability.catalog_signature;
+    result.catalog_signature === availability.catalog_signature &&
+    result.vocabulary_fingerprint === availability.vocabulary_fingerprint;
   const selected =
     result?.suggestions.filter((item) => selectedIds.has(item.id)) ?? [];
 
@@ -120,7 +121,10 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
       body:
         `${availability.manual_tags} normalized manual tag name${
           availability.manual_tags === 1 ? "" : "s"
-        }, usage counts, and the fixed D&D starter vocabulary will be sent in one provider request. ` +
+        } will be checked against your controlled vocabulary. ` +
+        (availability.estimated_provider_requests > 0
+          ? `Only unresolved names, usage counts, and canonical tag IDs and definitions may be sent in ${availability.estimated_provider_requests} provider request${availability.estimated_provider_requests === 1 ? "" : "s"}. `
+          : "Declared aliases and clear spelling rules resolve this catalog locally, so no provider request is expected. ") +
         "No songs, audio, titles, artists, albums, paths, playlists, generated tags, review history, or credentials will be sent. " +
         "The model can only return a proposal for you to review. Provider usage may incur cost.",
       confirmLabel: "Request cleanup suggestions",
@@ -191,6 +195,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
       const outcome = await assistantApi.applyModelTagCleanup(
         job.id,
         result.catalog_signature,
+        result.vocabulary_fingerprint,
         selected.map(({ source, target }) => ({ source, target })),
       );
       setSelectedIds(new Set());
@@ -371,8 +376,9 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
           {!catalogIsCurrent ? (
             <div className="assistant-analysis-error" role="alert">
               <span>
-                The manual tag catalog changed after this proposal was created.
-                Run a new review; this proposal cannot be applied.
+                The manual tag catalog or controlled vocabulary changed after this
+                proposal was created. Run a new review; this proposal cannot be
+                applied.
               </span>
             </div>
           ) : result.suggestions.length === 0 ? (

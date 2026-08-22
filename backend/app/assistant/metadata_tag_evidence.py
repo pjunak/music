@@ -1,4 +1,4 @@
-"""Deterministic, path-free D&D tag evidence from descriptive metadata.
+"""Deterministic, path-free controlled-tag evidence from descriptive metadata.
 
 This module finds explicit controlled-vocabulary terms and conservative aliases.
 It does not decide or persist tags. Callers can disclose the matches as hypotheses
@@ -86,14 +86,23 @@ def _tokens(value: str) -> frozenset[str]:
 def infer_metadata_tag_matches(
     fields: Mapping[MetadataField, str],
 ) -> tuple[MetadataTagMatch, ...]:
-    """Return deterministic tag hypotheses with compact field-level provenance."""
+    """Return hypotheses from the built-in conservative semantic alias table."""
+
+    return infer_metadata_matches_for_aliases(fields, _TAG_ALIASES)
+
+
+def infer_metadata_matches_for_aliases(
+    fields: Mapping[MetadataField, str],
+    aliases_by_tag: Mapping[str, tuple[str, ...]],
+) -> tuple[MetadataTagMatch, ...]:
+    """Match an operator vocabulary's exact names and aliases with provenance."""
 
     field_tokens = {field: _tokens(value) for field, value in fields.items() if value.strip()}
     matches: list[MetadataTagMatch] = []
-    for tag in (tag for group in DND_STARTER_TAG_GROUPS for tag in group.tags):
+    for tag, aliases in aliases_by_tag.items():
         matched_fields: set[MetadataField] = set()
         matched_terms: set[str] = set()
-        for alias in _TAG_ALIASES[tag]:
+        for alias in aliases:
             alias_tokens = _tokens(alias)
             for field, tokens in field_tokens.items():
                 if alias_tokens <= tokens:

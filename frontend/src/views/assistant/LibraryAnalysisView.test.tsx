@@ -114,7 +114,7 @@ const modelTaggingUnavailable: ModelTaggingAvailability = {
   tracks_needing_tags: 120,
   estimated_provider_requests: 6,
   disclosure: {
-    version: "assistant-model-music-tagging-disclosure/v3",
+    version: "assistant-model-music-tagging-disclosure/v4",
     shared_with_provider: [],
     never_shared: [],
     allowed_tags: ["medieval", "tavern"],
@@ -132,10 +132,11 @@ const modelTagCleanupUnavailable: ModelTagCleanupAvailability = {
   quality_evaluation_id: "tag-cleanup-quality-v1",
   job_kind: "assistant.model-tag-cleanup",
   catalog_signature: "0".repeat(64),
+  vocabulary_fingerprint: "1".repeat(64),
   manual_tags: 0,
   estimated_provider_requests: 0,
   disclosure: {
-    version: "assistant-model-tag-cleanup-disclosure/v2",
+    version: "assistant-model-tag-cleanup-disclosure/v3",
     shared_with_provider: [],
     never_shared: [],
     maximum_tags: 500,

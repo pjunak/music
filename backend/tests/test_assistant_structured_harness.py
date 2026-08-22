@@ -57,3 +57,33 @@ def test_task_id_reserves_space_for_provider_schema_suffix() -> None:
             rules=("Use the input.",),
             untrusted_data=("value",),
         )
+
+
+def test_harness_uses_task_specific_closed_schema_in_prompt_and_request() -> None:
+    def close_schema(schema: dict[str, object]) -> dict[str, object]:
+        properties = schema["properties"]
+        assert isinstance(properties, dict)
+        accepted = properties["accepted"]
+        assert isinstance(accepted, dict)
+        accepted["const"] = True
+        return schema
+
+    request = build_structured_request(
+        StructuredTaskDefinition(
+            task_id="closed-test-task",
+            role="A test role.",
+            objective="Return a validated decision.",
+            rules=("Use the closed schema.",),
+            untrusted_data=("value",),
+        ),
+        _Input(value="untrusted"),
+        _Output,
+        output_example={"schema_version": "test-output/v1", "accepted": True},
+        max_output_tokens=128,
+        schema_transform=close_schema,
+    )
+
+    assert request.output_schema is not None
+    properties = request.output_schema["properties"]
+    assert properties["accepted"]["const"] is True
+    assert '"const":true' in request.system_prompt

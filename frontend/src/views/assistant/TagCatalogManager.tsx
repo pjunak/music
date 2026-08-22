@@ -77,6 +77,7 @@ export function TagCatalogManager({ catalog, onChanged }: Props) {
     try {
       const result = await assistantApi.applyTagCleanup(
         cleanupPreview.catalog_signature,
+        cleanupPreview.vocabulary_fingerprint,
         selected.map((item) => ({ source: item.source, target: item.target })),
       );
       const affectedTracks = result.applied.reduce(
@@ -164,8 +165,8 @@ export function TagCatalogManager({ catalog, onChanged }: Props) {
           <div>
             <strong>Cleanup suggestions</strong>
             <span>
-              Find only clear spelling or plural matches to the D&amp;D starter
-              tags. Nothing changes until you select and confirm it.
+              Find declared aliases plus clear spelling or plural matches to the
+              controlled vocabulary. Nothing changes until you select and confirm it.
             </span>
           </div>
           <button

@@ -87,7 +87,7 @@ rule to the optional metadata tagger. Its synthetic cases cover explicit tavern,
 dungeon, castle, travel, seafaring, and temple contexts; sparse metadata;
 instructions embedded in untrusted metadata; forbidden tags; and the confidence
 and evidence expected for reviewable suggestions. The tagger must return every
-numeric track ID exactly once, use only the fixed D&D vocabulary, and avoid
+numeric track ID exactly once, use only stable IDs from the controlled vocabulary, and avoid
 inventing confident context when the metadata is insufficient.
 
 The configured model is a hybrid ranker behind the same

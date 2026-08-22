@@ -150,7 +150,7 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
         `processed in about ${requestPlan.requests} provider request${
           requestPlan.requests === 1 ? "" : "s"
         }. Indexed titles, artists, albums, origins, genres, durations, and BPM ` +
-        "may be sent with a numeric matching ID and the fixed vocabulary. When current local audio analysis exists, bounded energy, brightness, tension, tempo, and confidence values may also be sent. " +
+        "may be sent with a numeric matching ID and your current controlled vocabulary. When current local audio analysis exists, bounded energy, brightness, tension, tempo, and confidence values may also be sent. " +
         "Audio files, waveforms, paths, manual tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
       confirmLabel: requestPlan.tracks === 0 ? "Check current tags" : "Suggest tags",
       tone: "primary",
@@ -280,8 +280,8 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
             </div>
             <details className="assistant-model-tagging-vocabulary">
               <summary>
-                Review the {availability.disclosure.allowed_tags.length}-tag D&amp;D
-                vocabulary
+                Review the {availability.disclosure.allowed_tags.length}-tag
+                controlled vocabulary
               </summary>
               <p>{availability.disclosure.allowed_tags.join(" · ")}</p>
             </details>

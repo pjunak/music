@@ -177,13 +177,21 @@ const musicTaggingRole: ModelRole = {
   conformance_status: "passed",
 };
 
+const tagCleanupRole: ModelRole = {
+  ...musicTaggingRole,
+  role_id: "tag_cleanup",
+  label: "Song-tag cleanup",
+  description: "Maps existing song tags onto the controlled vocabulary.",
+  model_id: "cleanup-fast",
+};
+
 const musicTaggingEvaluation: ModelQualityEvaluation = {
   evaluation_id: "music-tagging-quality-v1",
   role_id: "music_tagger",
   label: "Music tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "dnd-evidence-tagging-baseline-v4",
+  suite_id: "controlled-vocabulary-tagging-baseline-v5",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -227,6 +235,38 @@ beforeEach(() => {
 });
 
 describe("AssistantAiSetupView", () => {
+  it("groups tagging and cleanup around their shared vocabulary", async () => {
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      musicTaggingRole,
+      tagCleanupRole,
+    ]);
+
+    render(<AssistantAiSetupView />);
+
+    const heading = await screen.findByRole("heading", {
+      name: "Tag intelligence",
+    });
+    const family = heading.closest("section");
+    expect(family).not.toBeNull();
+    expect(
+      within(family as HTMLElement).getByRole("heading", {
+        name: "Music tagger",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(family as HTMLElement).getByRole("heading", {
+        name: "Song-tag cleanup",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(family as HTMLElement).getByText("Canonical tag IDs"),
+    ).toBeInTheDocument();
+    expect(
+      within(family as HTMLElement).getByText("Canonical ID or no match"),
+    ).toBeInTheDocument();
+  });
+
   it("explains per-task keys and shows which tasks reuse a connection", async () => {
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([

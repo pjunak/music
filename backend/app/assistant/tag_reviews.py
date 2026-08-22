@@ -23,6 +23,7 @@ from app.assistant.model_tagging import (
 )
 from app.assistant.providers.service import current_role_runtime_fingerprint
 from app.assistant.tag_lock import tag_write_lock
+from app.assistant.tag_vocabulary import load_tag_vocabulary
 from app.assistant.tags import MAX_TAGS_PER_TRACK, TagLimitError, normalize_manual_tag
 from app.models.base import utcnow
 from app.models.track import Track
@@ -152,6 +153,7 @@ def load_current_analysis_tag_suggestions(
         db,
         MODEL_TAGGING_ROLE_ID,
     )
+    vocabulary_fingerprint = load_tag_vocabulary(db).fingerprint
     audio_profiles = load_current_audio_profiles(db, list(track_by_id.values()))
     suggestions: dict[int, list[AnalysisTagSuggestion]] = {}
     for row in rows:
@@ -163,6 +165,7 @@ def load_current_analysis_tag_suggestions(
                 track,
                 row.analyzer_id,
                 model_role_fingerprint,
+                vocabulary_fingerprint,
                 audio_profiles.get(track.id),
             )
         ):
@@ -208,6 +211,7 @@ def _current_source_signature(
     track: Track,
     analyzer_id: str,
     model_role_fingerprint: str | None,
+    vocabulary_fingerprint: str,
     audio_profile: CurrentAudioProfile | None,
 ) -> str | None:
     if analyzer_id == LOCAL_METADATA_ANALYZER_ID:
@@ -218,6 +222,7 @@ def _current_source_signature(
         return model_tag_source_signature(
             track,
             model_role_fingerprint,
+            vocabulary_fingerprint,
             audio_profile,
         )
     return None
@@ -329,6 +334,7 @@ def review_analysis_tags_bulk(
             db,
             MODEL_TAGGING_ROLE_ID,
         )
+        vocabulary_fingerprint = load_tag_vocabulary(db).fingerprint
         audio_profiles = load_current_audio_profiles(db, list(tracks.values()))
         for target in canonical:
             track = tracks.get(target.track_id)
@@ -354,6 +360,7 @@ def review_analysis_tags_bulk(
                 track,
                 target.analyzer_id,
                 model_role_fingerprint,
+                vocabulary_fingerprint,
                 audio_profiles.get(track.id),
             ):
                 failures.append(

@@ -379,7 +379,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v3" as const;
+  "assistant-model-music-tagging-disclosure/v4" as const;
 
 export interface ModelTaggingDisclosure {
   version: typeof MODEL_TAGGING_DISCLOSURE_VERSION;
@@ -407,7 +407,7 @@ export interface ModelTaggingAvailability {
 }
 
 export const MODEL_TAG_CLEANUP_DISCLOSURE_VERSION =
-  "assistant-model-tag-cleanup-disclosure/v2" as const;
+  "assistant-model-tag-cleanup-disclosure/v3" as const;
 
 export interface ModelTagCleanupDisclosure {
   version: typeof MODEL_TAG_CLEANUP_DISCLOSURE_VERSION;
@@ -426,6 +426,7 @@ export interface ModelTagCleanupAvailability {
   quality_evaluation_id: "tag-cleanup-quality-v1";
   job_kind: string;
   catalog_signature: string;
+  vocabulary_fingerprint: string;
   manual_tags: number;
   estimated_provider_requests: number;
   disclosure: ModelTagCleanupDisclosure;
@@ -494,6 +495,27 @@ export interface ManualTagCatalog {
   tag_usage: ManualTagUsage[];
 }
 
+export interface TagVocabularyEntry {
+  id: string;
+  name: string;
+  description: string;
+  aliases: string[];
+}
+
+export interface TagVocabularyGroup {
+  key: string;
+  label: string;
+  description: string;
+  tags: TagVocabularyEntry[];
+}
+
+export interface TagVocabulary {
+  schema_version: "assistant-tag-vocabulary/v1";
+  revision: number;
+  fingerprint: string;
+  groups: TagVocabularyGroup[];
+}
+
 export interface ManualTagUsage {
   tag: string;
   track_count: number;
@@ -523,7 +545,10 @@ export interface TagCleanupSuggestion {
   id: string;
   source: string;
   target: string;
-  reason_code: "starter_plural" | "starter_typo";
+  reason_code:
+    | "vocabulary_alias"
+    | "vocabulary_plural"
+    | "vocabulary_typo";
   reason: string;
   source_track_count: number;
   target_track_count: number;
@@ -531,8 +556,9 @@ export interface TagCleanupSuggestion {
 }
 
 export interface TagCleanupPreview {
-  schema_version: "assistant-tag-cleanup-preview/v1";
+  schema_version: "assistant-tag-cleanup-preview/v2";
   catalog_signature: string;
+  vocabulary_fingerprint: string;
   suggestions: TagCleanupSuggestion[];
 }
 
@@ -694,6 +720,17 @@ export const assistantApi = {
     }),
   getManualTagCatalog: () =>
     api.get<ManualTagCatalog>("/api/assistant/library-tags/catalog"),
+  getTagVocabulary: () =>
+    api.get<TagVocabulary>("/api/assistant/library-tags/vocabulary"),
+  updateTagVocabulary: (
+    expectedRevision: number,
+    groups: TagVocabularyGroup[],
+  ) =>
+    api.put<TagVocabulary>("/api/assistant/library-tags/vocabulary", {
+      schema_version: "assistant-tag-vocabulary/v1",
+      expected_revision: expectedRevision,
+      groups,
+    }),
   listLibraryTags: (
     params: {
       search?: string;
@@ -734,11 +771,16 @@ export const assistantApi = {
     ),
   applyTagCleanup: (
     catalogSignature: string,
+    vocabularyFingerprint: string,
     items: Array<Pick<TagCleanupSuggestion, "source" | "target">>,
   ) =>
     api.post<TagCleanupApplyResult>(
       "/api/assistant/library-tags/catalog/cleanup-apply",
-      { catalog_signature: catalogSignature, items },
+      {
+        catalog_signature: catalogSignature,
+        vocabulary_fingerprint: vocabularyFingerprint,
+        items,
+      },
     ),
   getModelTagCleanupAvailability: () =>
     api.get<ModelTagCleanupAvailability>(
@@ -754,6 +796,7 @@ export const assistantApi = {
   applyModelTagCleanup: (
     jobId: string,
     catalogSignature: string,
+    vocabularyFingerprint: string,
     items: Array<Pick<ModelTagCleanupSuggestion, "source" | "target">>,
   ) =>
     api.post<TagCleanupApplyResult>(
@@ -761,6 +804,7 @@ export const assistantApi = {
       {
         job_id: jobId,
         catalog_signature: catalogSignature,
+        vocabulary_fingerprint: vocabularyFingerprint,
         items,
       },
     ),

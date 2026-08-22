@@ -1,6 +1,6 @@
 {
-  "schema_version": "assistant-music-tagger-evaluation/v2",
-  "id": "dnd-evidence-tagging-baseline-v4",
+  "schema_version": "assistant-music-tagger-evaluation/v3",
+  "id": "controlled-vocabulary-tagging-baseline-v5",
   "cases": [
     {
       "id": "medieval-tavern-dance",

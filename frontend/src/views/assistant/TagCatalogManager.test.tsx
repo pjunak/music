@@ -47,15 +47,16 @@ beforeEach(() => {
 describe("TagCatalogManager", () => {
   it("requires explicit cleanup selection and applies only checked suggestions", async () => {
     vi.mocked(assistantApi.previewTagCleanup).mockResolvedValue({
-      schema_version: "assistant-tag-cleanup-preview/v1",
+      schema_version: "assistant-tag-cleanup-preview/v2",
       catalog_signature: "a".repeat(64),
+      vocabulary_fingerprint: "f".repeat(64),
       suggestions: [
         {
           id: "1".repeat(64),
           source: "medival",
           target: "medieval",
-          reason_code: "starter_typo",
-          reason: "One clear spelling edit from a D&D starter tag.",
+          reason_code: "vocabulary_typo",
+          reason: "One clear spelling edit from a canonical tag.",
           source_track_count: 2,
           target_track_count: 3,
           merged: true,
@@ -64,8 +65,8 @@ describe("TagCatalogManager", () => {
           id: "2".repeat(64),
           source: "taverns",
           target: "tavern",
-          reason_code: "starter_plural",
-          reason: "Matches the plural form of a D&D starter tag.",
+          reason_code: "vocabulary_plural",
+          reason: "Matches the plural form of a canonical tag.",
           source_track_count: 1,
           target_track_count: 0,
           merged: false,
@@ -104,6 +105,7 @@ describe("TagCatalogManager", () => {
     await waitFor(() =>
       expect(assistantApi.applyTagCleanup).toHaveBeenCalledWith(
         "a".repeat(64),
+        "f".repeat(64),
         [{ source: "medival", target: "medieval" }],
       ),
     );
