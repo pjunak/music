@@ -19,12 +19,17 @@ observable after the browser closes without silently repeating uncertain calls.
 ## Decision
 
 - Reuse `track_analyses` and `track_analysis_tag_reviews` with the versioned
-  analyzer ID `model-evidence-tagger/v2`. Do not create a parallel AI-tag store.
+  analyzer ID `model-evidence-tagger/v3`. Do not create a parallel AI-tag store.
 - Limit model input to numeric track ID, indexed title, display title, artist,
   album, origin, genre, duration, BPM, and an optional bounded projection of a
   current `local-audio/v1` profile: energy, brightness, tension, tempo estimate,
-  and confidence. Do not send paths, audio, waveforms, detailed signal
-  measurements, manual tags, local generated tags, playlists, or review history.
+  activity, normalized dynamic range, rhythmic density, rhythmic stability, and
+  confidence. Also derive a path-free `local-metadata-evidence/v1` hypothesis from the
+  same disclosed descriptive fields and send its bounded candidate tags, the matched
+  field and term for each candidate, canonical-title source, axes, and confidence. A
+  non-empty display title is canonical for deterministic title matching. Do not send
+  paths, audio, waveforms, detailed signal measurements,
+  manual tags, stored local generated tags, playlists, or review history.
   Numeric signal evidence may refine generic mood and activity judgments but is
   never proof of an instrument, genre, setting, scene, or D&D context.
 - Send at most 20 tracks per provider request. Treat every metadata string as
@@ -64,10 +69,13 @@ This may surface creative labels but quickly creates synonyms, spelling drift,
 and one-off tags that undermine filtering. Rejected for the first contract;
 custom manual tags remain available.
 
-### Send manual and local generated tags as context
+### Send manual and stored local generated tags as context
 
 This could improve consistency but expands disclosure and makes accepting one
 suggestion change the input signature for every remaining suggestion. Rejected.
+The selected path recomputes a privacy-reduced deterministic metadata hypothesis
+from already disclosed fields, so it cannot expose a filesystem-path match or a
+past review decision.
 
 ### Store a separate model-tag table and review system
 

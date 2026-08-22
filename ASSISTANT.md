@@ -109,7 +109,12 @@ task ownership clearer.
 
 For each connection:
 
-1. Choose the `openai-compatible/v1` adapter.
+1. Choose `openai-compatible/v1` for the widest provider compatibility. If the
+   provider explicitly documents OpenAI-style `response_format` with
+   `type: json_schema`, you may instead choose
+   `openai-compatible-json-schema/v1` for API-enforced strict output. Do not choose
+   the strict adapter merely because the endpoint is otherwise OpenAI-compatible;
+   the role conformance test is the authoritative check.
 2. Enter a clear local name, the provider's documented API base URL, and its API key.
 3. Leave private-network access off for public providers. Enable it only for a service
    you intentionally run on a trusted private address.
@@ -168,25 +173,36 @@ Use a small, representative sample before running across the whole library.
 
 1. Review the disclosed counts and estimated provider requests in Library Analysis.
 2. Start with a small library/sample if provider cost or output quality is uncertain.
-3. Confirm model output appears as generated `model-evidence-tagger/v2` suggestions,
+3. Confirm model output appears as generated `model-evidence-tagger/v3` suggestions,
    separate from local analysis and manual tags.
-4. Accept, reject, and reopen several suggestions. Only acceptance may add a manual tag.
-5. Confirm automatic playlists do not react to pending or rejected model suggestions;
+4. Inspect the disclosure: the model receives a path-free deterministic metadata
+   hypothesis with each candidate tag's matched field and term. A non-empty display
+   title is used as the canonical title for this matching. When available, the model
+   also receives bounded local signal axes/activity/dynamics/rhythm.
+   These remain evidence, not automatic tags.
+5. Accept, reject, and reopen several suggestions. Only acceptance may add a manual tag.
+6. Confirm automatic playlists do not react to pending or rejected model suggestions;
    they may react after an accepted suggestion becomes a manual tag.
 
 ### Manual-tag cleanup
 
-1. Run local conservative cleanup first.
-2. Run model cleanup only after reviewing its disclosure: it receives normalized manual
-   tag names and usage counts, not songs or generated analysis.
+1. Review local conservative cleanup first. The combined harness also runs these rules
+   before its provider boundary and does not spend a provider request when they resolve
+   every candidate.
+2. Run model cleanup only after reviewing its disclosure: it receives unresolved source
+   tags, allowed target tags and usage counts, not songs or generated analysis. Confirm
+   each proposal labels its origin as local rule or model.
 3. Select individual proposed renames. Confirm unselected items remain unchanged and a
    stale proposal is rejected rather than guessed or partially repaired.
 
 ### EQ assistance
 
-1. Request a conservative test preset for familiar speakers or headphones.
-2. Confirm the draft contains the fixed ten frequencies and gains only from -12 to
-   +12 dB in 0.5 dB steps.
+1. Request a conservative test preset for familiar speakers or headphones. The server
+   creates a deterministic baseline and narrow safety envelope before the model sees the
+   goal; the model refines that baseline rather than inventing an unrestricted curve.
+2. Confirm the draft contains the fixed ten frequencies and every gain stays inside
+   the locally displayed envelope in 0.5 dB steps (and always inside the global
+   -12 to +12 dB preset bounds).
 3. Read the rationale and cautions, inspect the curve, and preview Authoring import.
 4. Explicitly create the preset, audition it at a safe level, and fine-tune it in normal
    Authoring. The model does not receive audio, songs, existing presets, or library data.

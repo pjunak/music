@@ -182,9 +182,11 @@ Runtime data lives outside the image.
   enable a role until the operator explicitly verifies its connection and its exact runtime
   configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the
   event loop, bounded by request size, time, and response size, and protected against redirects and
-  unsafe destinations. OpenAI-compatible structured requests must use JSON-object response mode,
-  and each fixed feature prompt must include a concrete example of its strict output shape. Include
-  the versioned conformance contract in the role runtime fingerprint so a transport-contract change
+  unsafe destinations. OpenAI-compatible structured requests must carry the generated task JSON
+  Schema. The standard adapter uses JSON-object response mode; the explicit strict adapter may use
+  `json_schema` only when selected and proven by conformance. Each fixed feature prompt includes a
+  locally validated example of its strict output shape. Include the versioned harness, conformance,
+  and per-role feature contracts in the runtime fingerprint so a transport or task-contract change
   makes existing model tests and quality results stale instead of silently reusing them. Feature
   code resolves usable roles through `prepare_role_execution()` and
   owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
@@ -213,10 +215,12 @@ Runtime data lives outside the image.
   response from the local candidate snapshot. Model results remain drafts and must use the existing
   Authoring import preview/select/commit path. Configured-model CLI evaluation separately requires
   the explicit `--send-suite-to-provider` disclosure flag.
-- The optional EQ assistant may run only through `assistant.model-eq-draft`. Require the exact
+- The optional EQ assistant may run only through `assistant.model-eq-draft`. Build a deterministic
+  intent baseline and per-band refinement envelope before the provider call. Require the exact
   current `eq-quality-v1` pass and disclosure consent, make jobs non-restartable, and send only the
-  operator's sound goal plus the fixed ten-band frequencies and gain limits. Accept exactly ten
-  gains from -12 to +12 dB in 0.5 dB steps; construct every frequency and Authoring field locally.
+  operator's sound goal plus the fixed ten-band frequencies, local guidance, and gain limits.
+  Accept exactly ten gains in the local envelope and in 0.5 dB steps; construct every frequency
+  and Authoring field locally.
   The result is a review-only draft and may create a preset only through the existing Authoring
   import preview/select/commit transaction. Never send songs, audio, library metadata, paths,
   playlists, existing presets, or credentials to the EQ role.
@@ -224,19 +228,23 @@ Runtime data lives outside the image.
   `assistant.model-music-tagging`. Require the exact current
   `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider
   request, and keep jobs non-restartable. Provider input is limited to indexed descriptive metadata,
-  duration, BPM, numeric track IDs, the fixed D&D vocabulary, and—when current—bounded
-  `local-audio/v1` energy, brightness, tension, tempo, and confidence values. Never send paths,
-  audio, waveforms, detailed signal metrics, manual tags, local generated tags, playlists, or review
-  history. Store output under `model-evidence-tagger/v2` in `track_analyses`, bind its source
+  duration, BPM, numeric track IDs, the fixed D&D vocabulary, path-free deterministic metadata
+  tag hypotheses with matched fields/terms and canonical-title provenance, and—when current—
+  bounded `local-audio/v1` energy, brightness, tension, tempo, activity, normalized dynamics,
+  rhythmic density/stability, and confidence values. Never send paths, audio, waveforms, detailed signal
+  metrics, manual tags, stored local generated tags, playlists, or review history. Store output
+  under `model-evidence-tagger/v3` in `track_analyses`, bind its source
   signature to metadata, the optional local-audio source signature, and the role fingerprint, and
   expose it only through the existing generated-tag review surface. The model may
   never add a `track_user_tags` row directly. Accepted suggestions become manual tags only through
   the existing explicit single or bulk review transaction.
 - Optional model-assisted manual-tag cleanup may run only through
-  `assistant.model-tag-cleanup`. Require the exact current `tag-cleanup-quality-v1` pass and
-  versioned disclosure consent, allow at most 500 catalog tags, make the provider job
-  non-restartable, and send only normalized manual tag names, their usage counts, and the fixed D&D
-  starter vocabulary. Never send song metadata, paths, audio, playlists, generated tags, review
+  `assistant.model-tag-cleanup`. Run deterministic spelling/plural cleanup first and make no
+  provider call when it resolves every candidate. Require the exact current
+  `tag-cleanup-quality-v1` pass and versioned disclosure consent, allow at most 500 catalog tags,
+  make the provider job non-restartable, and send only unresolved normalized source tags, allowed
+  targets, their usage counts, and the fixed D&D starter vocabulary. Never send song metadata,
+  paths, audio, playlists, generated tags, review
   history, or credentials. Store only a review-only proposal bound to the exact role fingerprint
   and catalog signature. Apply only explicitly selected source/target pairs from that stored job,
   reject stale or invented selections, and commit all selected manual-tag renames atomically.

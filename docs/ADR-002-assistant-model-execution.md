@@ -16,6 +16,11 @@ of the role runtime fingerprint, so this transport change makes previous model
 tests and quality reports stale. Schema failures expose only a bounded field path
 and validation type; provider-generated values remain private.
 
+**Superseded in part by:** [ADR-007](ADR-007-algorithm-first-structured-model-harness.md),
+which generates the prompt and provider schema from the same strict output model,
+adds an explicit strict-JSON-Schema adapter, and fingerprints each role's feature
+contract.
+
 ## Context
 
 Provider connections and task roles can be configured without proving that a

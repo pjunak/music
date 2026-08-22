@@ -19,11 +19,15 @@ paths, titles, tags, evidence, scores, or explanations that appear server-owned.
 
 ## Decision
 
-- Implement `model-playlist-planner/v1` behind the existing
+- Implement the versioned model playlist planner (currently
+  `model-playlist-planner/v2`) behind the existing
   `PlaylistSuggestionEngine` protocol, without changing the live Assistant API.
 - Run the local planner first with an expanded but bounded candidate limit. It
   remains authoritative for exclusions, BPM eligibility, current analysis,
   manual/generated tag separation, numeric evidence, and source metadata.
+- Send the deterministic local rank, default selection, playback sequence, effective
+  BPM source, and duration plan so the model refines a complete local baseline rather
+  than reconstructing one.
 - Send at most 100 candidates to the model. The provider payload excludes
   library-relative paths and local explanation text. Candidate titles, artists,
   albums, origins, genres, tags, and numeric evidence remain explicitly marked

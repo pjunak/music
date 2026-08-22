@@ -58,8 +58,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   [`backend/app/assistant/evaluation_suites/`](backend/app/assistant/evaluation_suites/);
   see [`backend/evaluation/README.md`](backend/evaluation/README.md) for the harness guide.
 - **Review-first EQ Assistant** — connect a separately chosen structured-text model and describe
-  the sound you want. The task can return only ten fixed graphic-EQ bands with gains from -12 to
-  +12 dB in 0.5 dB steps; frequencies and the final preset document are constructed locally. A
+  the sound you want. A deterministic intent map first creates a conservative ten-band baseline
+  and per-band safety envelope; the model may refine only inside that envelope in 0.5 dB steps.
+  Frequencies and the final preset document are constructed locally. A
   current synthetic EQ quality pass and an explicit per-request disclosure are required. Jobs are
   durable across browser refreshes, and results remain inert until the operator previews and
   explicitly commits the preset through the normal create-only Authoring import.
@@ -73,8 +74,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   key is saved plus a masked hint. A saved key can be deleted without deleting its connection or
   role drafts; deletion and replacement both invalidate verification and model-quality gates until
   the operator explicitly completes them again. The shared execution harness is bounded and
-  provider-neutral, requests OpenAI-compatible JSON-object output, and supplies each task's exact
-  output shape before validating the response locally. A harness contract upgrade makes existing
+  provider-neutral. Every task generates its provider schema, prompt contract, example, and local
+  validator from one strict output model. The standard adapter requests broadly compatible
+  JSON-object output; the separate strict JSON Schema adapter uses native schema constraints when
+  the chosen provider supports them. A harness or task contract upgrade makes existing
   model tests and quality reports stale so they must be rerun explicitly. The harness is not
   exposed as a general prompt API. Provider adapters declare
   supported transports such as structured text or future bounded audio input; verification records
@@ -86,12 +89,19 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates and returns a draft. Music tagging sends metadata
   in batches of at most 20, may choose only from the fixed D&D vocabulary, and stores suggestions
-  under `model-evidence-tagger/v2` for explicit per-tag review. When current local signal analysis
-  exists, tagging may also send its bounded energy, brightness, tension, tempo, and confidence
-  values; audio files, waveforms, paths, and detailed measurements remain on the server. Neither
+  under `model-evidence-tagger/v3` for explicit per-tag review. Before each request the server
+  builds a path-free deterministic metadata hypothesis from the disclosed fields, including the
+  exact field and term behind each controlled-vocabulary candidate; a non-empty display title is
+  canonical for this matching. When current local signal analysis exists, tagging may also send
+  bounded energy, brightness, tension, tempo,
+  activity, normalized dynamic range, rhythmic density/stability, and confidence values; audio
+  files, waveforms, paths, and detailed measurements remain on the server. Neither
   path can write a playlist or
-  manual tag directly. Tag cleanup sends only normalized manual tag names, their usage counts, and
-  the fixed D&D starter vocabulary in one bounded request; its stored proposal remains inert until
+  manual tag directly. Tag cleanup resolves unambiguous spelling and plural cases locally first,
+  then sends only unresolved source tags, allowed targets, usage counts, and the fixed D&D starter
+  vocabulary in one bounded request. Local-only cleanup makes no provider call, and every stored
+  suggestion identifies whether it came from a local rule or the model. The proposal remains inert
+  until
   the user selects specific renames, and stale proposals are rejected. Quality, playlist, tagging,
   and cleanup jobs retain their attempted request count,
   provider-reported model IDs, and reported input/output token totals; the UI identifies calls where
