@@ -4,6 +4,7 @@ import { confirmDialog } from "@/components/confirmDialog";
 import { inputDialog } from "@/components/inputDialog";
 import { type BackgroundJob, jobsApi } from "@/core/api";
 import type {
+  ModelConformance,
   ModelQualityEvaluation,
   ModelRole,
   ModelRoleUpdate,
@@ -17,7 +18,7 @@ import { toast } from "@/core/toast";
 
 import { CredentialStorageCard } from "./CredentialStorageCard";
 import { ModelRoleCard } from "./ModelRoleCard";
-import { ModelQualityEvaluationCard } from "./ModelQualityEvaluationCard";
+import { ModelTestConsole } from "./ModelTestConsole";
 import {
   isModelEvaluationJobActive,
   MODEL_QUALITY_TARGETS,
@@ -49,6 +50,15 @@ export function AssistantAiSetupView() {
   const [qualityLoading, setQualityLoading] = useState(true);
   const [qualityLoadError, setQualityLoadError] = useState<string | null>(null);
   const [qualityRefreshKey, setQualityRefreshKey] = useState(0);
+  const [selectedTestRoleId, setSelectedTestRoleId] = useState<string | null>(
+    null,
+  );
+  const [modelTestResults, setModelTestResults] = useState<
+    Record<string, ModelConformance | undefined>
+  >({});
+  const [modelTestErrors, setModelTestErrors] = useState<
+    Record<string, string | undefined>
+  >({});
 
   const [name, setName] = useState("");
   const [adapterId, setAdapterId] = useState("");
@@ -139,6 +149,25 @@ export function AssistantAiSetupView() {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [qualityRefreshKey]);
+
+  useEffect(() => {
+    setSelectedTestRoleId((current) => {
+      if (
+        current !== null &&
+        roles.some(
+          (role) => role.role_id === current && role.configuration_available,
+        )
+      ) {
+        return current;
+      }
+      const activeRoleId = qualityHistory.find(isModelEvaluationJobActive)
+        ?.parameters.role_id;
+      if (typeof activeRoleId === "string") return activeRoleId;
+      const firstEvaluationRole = qualityEvaluations[0]?.role_id;
+      if (firstEvaluationRole !== undefined) return firstEvaluationRole;
+      return roles.find((role) => role.configuration_available)?.role_id ?? null;
+    });
+  }, [qualityEvaluations, qualityHistory, roles]);
 
   async function initializeCredentialStorage() {
     setStorageInitializing(true);
@@ -371,6 +400,16 @@ export function AssistantAiSetupView() {
     setBusyItem(`role:${roleId}`);
     try {
       await assistantProvidersApi.deleteRole(roleId);
+      setModelTestResults((current) => {
+        const next = { ...current };
+        delete next[roleId];
+        return next;
+      });
+      setModelTestErrors((current) => {
+        const next = { ...current };
+        delete next[roleId];
+        return next;
+      });
       toast.success("Model task cleared");
       refresh();
       refreshQuality();
@@ -382,9 +421,16 @@ export function AssistantAiSetupView() {
   }
 
   async function testRole(roleId: string) {
+    setSelectedTestRoleId(roleId);
+    setModelTestErrors((current) => {
+      const next = { ...current };
+      delete next[roleId];
+      return next;
+    });
     setBusyItem(`role-test:${roleId}`);
     try {
       const result = await assistantProvidersApi.testRole(roleId);
+      setModelTestResults((current) => ({ ...current, [roleId]: result }));
       setRoles((current) =>
         current.map((role) =>
           role.role_id === roleId ? result.role : role,
@@ -398,31 +444,37 @@ export function AssistantAiSetupView() {
       } else {
         toast.error("Model test failed", modelTestFailureMessage(result.error_code));
       }
-      return result;
     } catch (error) {
-      toast.error("Model test could not run", errorMessage(error));
-      return null;
+      const message = errorMessage(error);
+      setModelTestErrors((current) => ({ ...current, [roleId]: message }));
+      toast.error("Model test could not run", message);
     } finally {
       setBusyItem(null);
     }
   }
 
   async function startQualityEvaluation(evaluation: ModelQualityEvaluation) {
+    setSelectedTestRoleId(evaluation.role_id);
     const isMusicTagging = evaluation.role_id === "music_tagger";
     const isTagCleanup = evaluation.role_id === "tag_cleanup";
+    const isEqAssistance = evaluation.role_id === "eq_assistant";
     const confirmed = await confirmDialog({
       title: isMusicTagging
         ? "Run music tagging model quality check?"
         : isTagCleanup
           ? "Run song-tag cleanup model quality check?"
-          : "Run playlist model quality check?",
+          : isEqAssistance
+            ? "Run EQ assistant model quality check?"
+            : "Run playlist model quality check?",
       body:
         `The provider will receive fixed synthetic ${
           isMusicTagging
             ? "music metadata cases"
             : isTagCleanup
               ? "tag-catalog cleanup cases"
-              : "playlist scenarios"
+              : isEqAssistance
+                ? "EQ drafting scenarios"
+                : "playlist scenarios"
         }. ` +
         "No songs or live library data are sent, but repeated model calls may incur cost.",
       confirmLabel: "Run quality check",
@@ -452,6 +504,9 @@ export function AssistantAiSetupView() {
   }
 
   async function cancelQualityEvaluation(jobId: string) {
+    const roleId = qualityHistory.find((job) => job.id === jobId)?.parameters
+      .role_id;
+    if (typeof roleId === "string") setSelectedTestRoleId(roleId);
     setBusyItem("evaluation-cancel");
     try {
       const job = await jobsApi.cancel(jobId);
@@ -692,15 +747,25 @@ export function AssistantAiSetupView() {
           <div>
             <h2>Model tasks</h2>
             <p>
-              Each task independently chooses a connection and model. Several tasks
-              may reuse one connection, while specialized tasks may use separate
-              keys. The server permits only compatible, verified connections. Every
-              available model task must also pass its own synthetic test before you
-              can enable it; planned tasks remain locked until their complete safety
-              and review contract exists.
+              Choose a connection and model for each task, then follow the two checks
+              shown on its card. The shared console keeps progress, failures, and
+              troubleshooting details together.
             </p>
           </div>
-          <span>{roles.filter((role) => role.effective_enabled).length} enabled</span>
+          <span>
+            {
+              roles.filter(
+                (role) =>
+                  role.effective_enabled &&
+                  qualityEvaluations.some(
+                    (evaluation) =>
+                      evaluation.role_id === role.role_id &&
+                      evaluation.status === "passed",
+                  ),
+              ).length
+            }{" "}
+            ready
+          </span>
         </div>
         {connections.length === 0 ? (
           <div className="surface-card assistant-provider-empty">
@@ -709,75 +774,61 @@ export function AssistantAiSetupView() {
           </div>
         ) : (
           <div className="assistant-role-grid">
-            {roles.map((role) => (
-              <ModelRoleCard
-                key={role.role_id}
-                role={role}
-                connections={connections}
-                adapters={status.adapters}
-                capabilities={status.capabilities}
-                credentialStorageReady={status.credential_storage_ready}
-                busy={busyItem === `role:${role.role_id}`}
-                testing={busyItem === `role-test:${role.role_id}`}
-                onSave={saveRole}
-                onTest={testRole}
-                onRemove={removeRole}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="assistant-provider-section assistant-quality-section">
-        <div className="assistant-section-heading">
-          <div>
-            <h2>Model quality checks</h2>
-            <p>
-              Basic model tests prove the response format. These longer checks
-              measure each model against fixed task-specific scenarios before it can
-              use live library metadata for that task.
-            </p>
-          </div>
-          <span>
-            {qualityEvaluations.filter((item) => item.status === "passed").length}{" "}
-            passed
-          </span>
-        </div>
-        {qualityLoadError !== null ? (
-          <div className="assistant-analysis-error" role="alert">
-            <span>{qualityLoadError}</span>
-            <button type="button" onClick={refreshQuality}>
-              Retry
-            </button>
-          </div>
-        ) : null}
-        {qualityEvaluations.length === 0 && qualityLoading ? (
-          <div className="surface-card assistant-provider-empty">
-            <p>Loading model quality checks…</p>
-          </div>
-        ) : qualityEvaluations.length === 0 && qualityLoadError === null ? (
-          <div className="surface-card assistant-provider-empty">
-            <h3>No quality checks are registered</h3>
-            <p>Task-specific checks will appear here when the server provides them.</p>
-          </div>
-        ) : (
-          qualityEvaluations.map((evaluation) => (
-            <ModelQualityEvaluationCard
-              key={`${evaluation.role_id}:${evaluation.evaluation_id}`}
-              evaluation={evaluation}
-              role={roles.find((role) => role.role_id === evaluation.role_id)}
-              history={qualityHistory.filter(
+            {roles.map((role) => {
+              const evaluation = qualityEvaluations.find(
+                (item) => item.role_id === role.role_id,
+              );
+              const evaluationHistory = qualityHistory.filter(
                 (job) =>
-                  job.parameters.role_id === evaluation.role_id &&
-                  job.parameters.evaluation_id === evaluation.evaluation_id,
-              )}
-              loading={qualityLoading}
-              actionBusy={busyItem?.startsWith("evaluation") === true}
-              onStart={() => void startQualityEvaluation(evaluation)}
-              onCancel={(jobId) => void cancelQualityEvaluation(jobId)}
-            />
-          ))
+                  job.parameters.role_id === role.role_id &&
+                  job.parameters.evaluation_id === evaluation?.evaluation_id,
+              );
+              return (
+                <ModelRoleCard
+                  key={role.role_id}
+                  role={role}
+                  connections={connections}
+                  adapters={status.adapters}
+                  capabilities={status.capabilities}
+                  credentialStorageReady={status.credential_storage_ready}
+                  busy={busyItem === `role:${role.role_id}`}
+                  testing={busyItem === `role-test:${role.role_id}`}
+                  qualityEvaluation={evaluation}
+                  qualityHistory={evaluationHistory}
+                  qualityLoading={qualityLoading}
+                  qualityActionBusy={busyItem?.startsWith("evaluation") === true}
+                  onSave={saveRole}
+                  onTest={testRole}
+                  onStartQuality={(item) => void startQualityEvaluation(item)}
+                  onCancelQuality={(jobId) => void cancelQualityEvaluation(jobId)}
+                  onViewTestLog={() => setSelectedTestRoleId(role.role_id)}
+                  onRemove={removeRole}
+                />
+              );
+            })}
+          </div>
         )}
+        {connections.length > 0 ? (
+          <ModelTestConsole
+            roles={roles}
+            evaluations={qualityEvaluations}
+            history={qualityHistory}
+            connections={connections}
+            adapters={status.adapters}
+            selectedRoleId={selectedTestRoleId}
+            testingRoleId={
+              busyItem?.startsWith("role-test:") === true
+                ? busyItem.slice("role-test:".length)
+                : null
+            }
+            modelTestResults={modelTestResults}
+            modelTestErrors={modelTestErrors}
+            qualityLoading={qualityLoading}
+            qualityLoadError={qualityLoadError}
+            onSelectRole={setSelectedTestRoleId}
+            onRetryQuality={refreshQuality}
+          />
+        ) : null}
       </section>
 
       <aside className="assistant-provider-boundary">

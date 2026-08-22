@@ -650,29 +650,31 @@ describe("AssistantAiSetupView", () => {
       ),
     );
     expect(
-      screen.getByText(
+      screen.getAllByText(
         "The model did not return the required machine-readable JSON object.",
       ),
-    ).toBeInTheDocument();
+    ).toHaveLength(2);
     expect(
       screen.getByLabelText("Allow this model for this task"),
     ).toBeDisabled();
-    expect(screen.getByText(/no song or library data/i)).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Playlist planner model test result JSON"),
-    ).toHaveTextContent('"reported_model_id": "planner-large-2026"');
+      screen.getByText(/no songs or live library data/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Selected model task diagnostics JSON"),
+    ).toHaveTextContent(/"provider_model_id":\s*"planner-large-2026"/);
     await user.click(
-      screen.getByRole("button", {
-        name: "Copy Playlist planner model test result",
-      }),
+      screen.getByRole("button", { name: "Copy details" }),
     );
-    await expect(navigator.clipboard.readText()).resolves.toContain(
-      '"duration_ms": 947',
+    const copiedDetails = await navigator.clipboard.readText();
+    expect(copiedDetails).toContain('"duration_ms": 947');
+    expect(copiedDetails).toContain(
+      '"adapter_label": "OpenAI-compatible API"',
     );
-    expect(toast.success).toHaveBeenCalledWith(
-      "Test result copied",
-      "Playlist planner model test result",
+    expect(copiedDetails).toContain(
+      '"base_url": "https://models.example/v1"',
     );
+    expect(toast.success).toHaveBeenCalledWith("Test diagnostics copied");
   });
 
   it("keeps local tools available when encrypted storage is not configured", async () => {
@@ -885,11 +887,13 @@ describe("AssistantAiSetupView", () => {
       }),
     ).toHaveValue(2);
 
-    await user.click(screen.getByRole("button", { name: "Cancel check" }));
+    await user.click(
+      screen.getByRole("button", { name: "Cancel quality check" }),
+    );
     expect(jobsApi.cancel).toHaveBeenCalledWith("quality-job-1");
   });
 
-  it("keeps an obsolete interrupted attempt as collapsed history", async () => {
+  it("keeps an obsolete interrupted attempt in the troubleshooting log", async () => {
     const interrupted = qualityJob({
       status: "failed",
       error: "ProviderServiceError: Test this model configuration before using the role.",
@@ -915,26 +919,20 @@ describe("AssistantAiSetupView", () => {
       qualityEvaluation,
     ]);
     vi.mocked(jobsApi.list).mockResolvedValue([interrupted]);
-    const user = userEvent.setup();
     render(<AssistantAiSetupView />);
 
-    expect(await screen.findByText("No quality report yet")).toBeInTheDocument();
-    expect(screen.getByText("Not run")).toBeInTheDocument();
     expect(
-      screen.queryByText("The evaluation did not finish"),
-    ).not.toBeInTheDocument();
+      await screen.findByText(/quality suite has not run/i),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Not run")).not.toHaveLength(0);
     expect(
-      screen.getByRole("button", { name: "Run quality check" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Run quality check" }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Test model" })).toBeEnabled();
     expect(
-      screen.getByRole("link", {
-        name: "Review the playlist planning model task above",
-      }),
-    ).toHaveAttribute("href", "#assistant-role-playlist_planner");
-
-    await user.click(screen.getByText("Show previous interrupted attempt"));
-    expect(
-      screen.getByText("Test this model configuration before using the role."),
+      within(screen.getByRole("log")).getByText(
+        /Test this model configuration before using the role\./,
+      ),
     ).toBeVisible();
   });
 
@@ -967,12 +965,11 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     expect(
-      await screen.findByText("The evaluation did not finish"),
+      await screen.findByText("Provider request timed out."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Provider request timed out.")).toBeInTheDocument();
-    expect(screen.getByText("Run interrupted")).toBeInTheDocument();
+    expect(screen.getAllByText("Interrupted")).not.toHaveLength(0);
     expect(
-      screen.getByRole("button", { name: "Run quality check again" }),
+      screen.getByRole("button", { name: "Run quality again" }),
     ).toBeEnabled();
   });
 
@@ -1026,6 +1023,41 @@ describe("AssistantAiSetupView", () => {
     );
   });
 
+  it("describes EQ quality checks as EQ work, not playlist work", async () => {
+    const eqRole: ModelRole = {
+      ...musicTaggingRole,
+      role_id: "eq_assistant",
+      label: "EQ assistance",
+      model_id: "planner-large",
+    };
+    const eqEvaluation: ModelQualityEvaluation = {
+      ...qualityEvaluation,
+      evaluation_id: "eq-quality-v1",
+      role_id: "eq_assistant",
+      label: "EQ drafting quality",
+      suite_id: "eq-quality-v1",
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([eqRole]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockImplementation(
+      async (roleId) => (roleId === "eq_assistant" ? [eqEvaluation] : []),
+    );
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    const user = userEvent.setup();
+    render(<AssistantAiSetupView />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Run quality check" }),
+    );
+
+    expect(confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Run EQ assistant model quality check?",
+        body: expect.stringContaining("fixed synthetic EQ drafting scenarios"),
+      }),
+    );
+  });
+
   it("keeps music tagging quality separate from playlist planning", async () => {
     const queued = qualityJob({
       id: "tagging-quality-job",
@@ -1055,7 +1087,7 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     const heading = await screen.findByRole("heading", {
-      name: "Music tagging quality",
+      name: "Music tagger",
     });
     const card = heading.closest("article");
     expect(card).not.toBeNull();
@@ -1122,18 +1154,22 @@ describe("AssistantAiSetupView", () => {
     const user = userEvent.setup();
     render(<AssistantAiSetupView />);
 
-    expect(await screen.findByText("Passed 3 of 5 scenarios")).toBeInTheDocument();
-    await user.click(screen.getByText("Review 1 failed scenario"));
-    expect(screen.getByText("Tavern dancing")).toBeInTheDocument();
-    expect(screen.getByText("recall_at_k below threshold")).toBeInTheDocument();
-    const qualityCard = screen
-      .getByRole("heading", { name: "Playlist planning quality" })
+    expect(
+      await screen.findByText(/Task quality passed 3 of 5 scenarios/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Tavern dancing: recall_at_k below threshold"),
+    ).toBeInTheDocument();
+    const taskCard = screen
+      .getByRole("heading", { name: "Playlist planner" })
       .closest("article");
-    expect(qualityCard).not.toBeNull();
+    expect(taskCard).not.toBeNull();
+    expect(within(taskCard as HTMLElement).getByText("3 / 5")).toBeInTheDocument();
+    expect(
+      within(taskCard as HTMLElement).getByText("Quality check failed"),
+    ).toBeInTheDocument();
     await user.click(
-      within(qualityCard as HTMLElement).getByRole("button", {
-        name: "Copy Playlist planning quality result",
-      }),
+      screen.getByRole("button", { name: "Copy details" }),
     );
     await expect(navigator.clipboard.readText()).resolves.toContain(
       '"recall_at_k below threshold"',

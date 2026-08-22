@@ -5945,7 +5945,8 @@ kbd,
 .assistant-role-state.is-ready {
   color: var(--ok);
 }
-.assistant-provider-status.is-failed {
+.assistant-provider-status.is-failed,
+.assistant-role-state.is-problem {
   color: var(--danger);
 }
 .assistant-provider-url {
@@ -6200,6 +6201,75 @@ kbd,
   color: var(--muted-strong);
   font-size: var(--text-sm);
 }
+.assistant-role-authorization {
+  display: grid;
+  gap: var(--space-3);
+}
+.assistant-role-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.assistant-role-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+.assistant-role-check::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+.assistant-role-check span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-role-check strong {
+  margin-left: auto;
+  color: currentColor;
+  white-space: nowrap;
+}
+.assistant-role-check.is-info {
+  border-color: color-mix(in srgb, var(--accent2) 45%, var(--border));
+  color: var(--accent2-strong);
+  background: var(--accent2-soft);
+}
+.assistant-role-check.is-success {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.assistant-role-check.is-warning {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.assistant-role-check.is-failure {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.assistant-role-check:hover {
+  border-color: currentColor;
+}
+.assistant-role-check:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .assistant-role-limits {
   padding: var(--space-3) 0;
   border-top: 1px solid var(--border);
@@ -6216,104 +6286,161 @@ kbd,
 .assistant-role-actions {
   margin-top: auto;
 }
-.assistant-quality-card {
-  display: flex;
-  flex-direction: column;
+.assistant-test-console {
   gap: var(--space-4);
-  min-width: 0;
+  margin-top: var(--space-6);
   border-top: 2px solid var(--accent2);
 }
-.assistant-quality-card h3,
-.assistant-quality-card > p,
-.assistant-quality-result p {
-  margin: 0;
-}
-.assistant-quality-card > p,
-.assistant-quality-result p,
-.assistant-quality-disclosure {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  line-height: var(--leading-base);
-}
-.assistant-quality-result {
+.assistant-test-console-heading {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent2);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-.assistant-quality-result.is-failed {
-  border-left-color: var(--danger);
-}
-.assistant-quality-failures {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-.assistant-quality-history {
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--muted);
-  font-size: var(--text-xs);
-}
-.assistant-quality-history summary {
-  cursor: pointer;
-}
-.assistant-quality-history > div {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-}
-.assistant-quality-history p {
-  margin: 0;
-}
-.assistant-test-report {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-.assistant-test-report-heading {
-  display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-5);
 }
-.assistant-test-report-heading > div {
-  display: grid;
-  gap: 0.1rem;
+.assistant-test-console-heading h3,
+.assistant-test-console-heading p {
+  margin: 0;
 }
-.assistant-test-report-heading strong {
+.assistant-test-console-heading h3 {
+  color: var(--fg);
+  font-size: var(--text-lg);
+}
+.assistant-test-console-heading > div > p:last-child {
+  margin-top: var(--space-2);
+  color: var(--muted);
   font-size: var(--text-sm);
 }
-.assistant-test-report-heading span {
+.assistant-test-console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.assistant-test-task-tabs {
+  display: flex;
+  overflow-x: auto;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+.assistant-test-task-tab {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0.1rem;
+  min-width: 9.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
   color: var(--muted);
+  background: var(--surface-2);
+  cursor: pointer;
+  text-align: left;
+}
+.assistant-test-task-tab span {
   font-size: var(--text-xs);
 }
-.assistant-test-report-heading .btn-ghost {
-  flex: 0 0 auto;
+.assistant-test-task-tab strong {
+  color: currentColor;
+  font-size: var(--text-sm);
 }
-.assistant-test-report details {
-  border-top: 1px solid var(--border);
+.assistant-test-task-tab.is-success {
+  color: var(--ok);
 }
-.assistant-test-report summary {
+.assistant-test-task-tab.is-warning {
+  color: var(--warn);
+}
+.assistant-test-task-tab.is-failure {
+  color: var(--danger);
+}
+.assistant-test-task-tab.is-info {
+  color: var(--accent2-strong);
+}
+.assistant-test-task-tab[aria-pressed="true"] {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 10%, var(--surface-2));
+  box-shadow: inset 0 -2px 0 currentColor;
+}
+.assistant-test-task-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.assistant-test-console-progress {
+  width: 100%;
+  height: 0.55rem;
+  accent-color: var(--accent2);
+}
+.assistant-test-log {
+  overflow: auto;
+  min-height: 13rem;
+  max-height: 28rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2) 0;
+  background: var(--bg);
+  font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: var(--text-xs);
+}
+.assistant-test-log-line {
+  display: grid;
+  grid-template-columns: 5.75rem 3.25rem minmax(0, 1fr);
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
+  border-left: 2px solid transparent;
+  line-height: 1.55;
+}
+.assistant-test-log-line time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.assistant-test-log-line strong {
+  color: currentColor;
+  font-size: inherit;
+}
+.assistant-test-log-line span {
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}
+.assistant-test-log-line.is-info {
+  border-left-color: var(--accent2);
+  color: var(--accent2-strong);
+}
+.assistant-test-log-line.is-success {
+  border-left-color: var(--ok);
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok-soft) 45%, transparent);
+}
+.assistant-test-log-line.is-warning {
+  border-left-color: var(--warn);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn-soft) 45%, transparent);
+}
+.assistant-test-log-line.is-failure {
+  border-left-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger-soft) 45%, transparent);
+}
+.assistant-test-log-line.is-muted {
+  color: var(--muted);
+}
+.assistant-test-log-empty {
+  margin: 0;
+  padding: var(--space-5) var(--space-4);
+  color: var(--muted);
+}
+.assistant-test-console-details {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+.assistant-test-console-details summary {
   color: var(--muted-strong);
   cursor: pointer;
   font-size: var(--text-xs);
 }
-.assistant-test-report pre {
+.assistant-test-console-details pre {
   overflow: auto;
   max-height: 24rem;
-  margin: 0;
-  border-top: 1px solid var(--border);
+  margin: var(--space-3) 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: var(--space-4);
   color: var(--muted-strong);
   background: var(--bg);
@@ -6322,19 +6449,6 @@ kbd,
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.assistant-quality-meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-5);
-  color: var(--muted);
-  font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-  font-size: var(--text-xs);
-}
-.assistant-quality-disclosure {
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border);
 }
 .assistant-provider-boundary {
   display: grid;
@@ -6939,6 +7053,18 @@ input.volume-slider::-moz-range-thumb {
   .assistant-provider-storage-actions {
     justify-content: flex-start;
   }
+  .assistant-test-console-heading {
+    flex-direction: column;
+  }
+  .assistant-test-console-actions {
+    justify-content: flex-start;
+  }
+  .assistant-test-log-line {
+    grid-template-columns: 5.75rem 3.25rem;
+  }
+  .assistant-test-log-line span {
+    grid-column: 1 / -1;
+  }
   .assistant-intent-grid,
   .assistant-filter-grid {
     grid-template-columns: 1fr;
@@ -7327,6 +7453,14 @@ input.volume-slider::-moz-range-thumb {
 }
 
 @media (max-width: 480px) {
+  .assistant-role-checks {
+    grid-template-columns: 1fr;
+  }
+  .assistant-test-console-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   /* Last-mile mobile: even tighter typography so long titles fit. */
   .app-header {
     padding: var(--space-2) var(--space-3);

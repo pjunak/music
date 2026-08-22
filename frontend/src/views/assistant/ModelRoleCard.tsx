@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
+import type { BackgroundJob } from "@/core/api";
 import type {
-  ModelConformance,
+  ModelQualityEvaluation,
   ModelRole,
   ModelRoleUpdate,
   ProviderAdapter,
@@ -10,8 +11,14 @@ import type {
 } from "@/core/assistantProvidersApi";
 
 import { ModelPicker } from "./ModelPicker";
+import {
+  modelQualityView,
+  modelTestStatusLabel,
+  modelTestTone,
+  qualityStatusLabel,
+  qualityTone,
+} from "./modelQualityUi";
 import { modelTestFailureMessage, roleConnection } from "./providerUi";
-import { TestResultReport } from "./TestResultReport";
 
 interface Props {
   role: ModelRole;
@@ -21,62 +28,16 @@ interface Props {
   credentialStorageReady: boolean;
   busy: boolean;
   testing: boolean;
+  qualityEvaluation: ModelQualityEvaluation | undefined;
+  qualityHistory: BackgroundJob[];
+  qualityLoading: boolean;
+  qualityActionBusy: boolean;
   onSave: (roleId: string, payload: ModelRoleUpdate) => Promise<void>;
-  onTest: (roleId: string) => Promise<ModelConformance | null>;
+  onTest: (roleId: string) => Promise<void>;
+  onStartQuality: (evaluation: ModelQualityEvaluation) => void;
+  onCancelQuality: (jobId: string) => void;
+  onViewTestLog: () => void;
   onRemove: (roleId: string) => Promise<void>;
-}
-
-function modelTestReport(
-  role: ModelRole,
-  connection: ProviderConnection | undefined,
-  adapter: ProviderAdapter | undefined,
-  result: ModelConformance | null,
-): object {
-  const errorCode = role.conformance_error_code;
-  return {
-    schema_version: "assistant-model-test-report/v1",
-    status: role.conformance_status,
-    tested_at: role.last_conformance_at,
-    task: {
-      id: role.role_id,
-      label: role.label,
-      required_capabilities: role.required_capability_ids,
-    },
-    connection: {
-      id: connection?.id ?? role.connection_id,
-      name: connection?.name ?? role.connection_name,
-      adapter_id: connection?.adapter_id ?? null,
-      adapter_label: adapter?.label ?? null,
-      base_url: connection?.base_url ?? null,
-      verification_status: connection?.verification_status ?? null,
-      last_verified_at: connection?.last_verified_at ?? null,
-      verified_model_count: connection?.verified_models.length ?? 0,
-      verified_capabilities: connection?.verified_capability_ids ?? [],
-    },
-    request: {
-      model_id: role.model_id,
-      model_was_in_verified_list:
-        connection?.verified_models.includes(role.model_id) ?? false,
-      timeout_seconds: role.timeout_seconds,
-      maximum_response_tokens: role.max_output_tokens,
-    },
-    provider_response: {
-      contract_version:
-        result?.contract_version ?? "assistant-provider-conformance/v3",
-      reported_model_id: result?.provider_model_id ?? null,
-      finish_reason: result?.finish_reason ?? null,
-      input_tokens: result?.input_tokens ?? null,
-      output_tokens: result?.output_tokens ?? null,
-      duration_ms: result?.duration_ms ?? null,
-    },
-    error:
-      errorCode === null
-        ? null
-        : {
-            code: errorCode,
-            message: modelTestFailureMessage(errorCode),
-          },
-  };
 }
 
 function includesEveryCapability(
@@ -94,9 +55,17 @@ function roleStateLabel(
   configured: boolean,
   credentialSaved: boolean,
   capabilitiesSatisfied: boolean,
+  qualityEvaluation: ModelQualityEvaluation | undefined,
+  qualityActive: boolean,
 ): string {
   if (!role.configuration_available) return "Planned";
-  if (role.effective_enabled) return "Enabled";
+  if (role.effective_enabled) {
+    if (qualityActive) return "Checking quality";
+    if (qualityEvaluation?.status === "passed") return "Ready";
+    if (qualityEvaluation?.status === "failed") return "Quality check failed";
+    if (qualityEvaluation?.status === "stale") return "Checks outdated";
+    return "Enabled, checks pending";
+  }
   if (role.enabled) {
     if (!credentialSaved) return "API key removed";
     if (role.verification_status !== "verified") return "Waiting for verification";
@@ -118,8 +87,15 @@ export function ModelRoleCard({
   credentialStorageReady,
   busy,
   testing,
+  qualityEvaluation,
+  qualityHistory,
+  qualityLoading,
+  qualityActionBusy,
   onSave,
   onTest,
+  onStartQuality,
+  onCancelQuality,
+  onViewTestLog,
   onRemove,
 }: Props) {
   const [connectionId, setConnectionId] = useState(role.connection_id ?? "");
@@ -127,8 +103,6 @@ export function ModelRoleCard({
   const [enabled, setEnabled] = useState(role.enabled);
   const [timeoutSeconds, setTimeoutSeconds] = useState(role.timeout_seconds);
   const [maxOutputTokens, setMaxOutputTokens] = useState(role.max_output_tokens);
-  const [lastTestResult, setLastTestResult] =
-    useState<ModelConformance | null>(null);
 
   useEffect(() => {
     setConnectionId(role.connection_id ?? "");
@@ -136,25 +110,11 @@ export function ModelRoleCard({
     setEnabled(role.enabled);
     setTimeoutSeconds(role.timeout_seconds);
     setMaxOutputTokens(role.max_output_tokens);
-    setLastTestResult((current) =>
-      current?.role.connection_id === role.connection_id &&
-      current.role.model_id === role.model_id &&
-      current.role.last_conformance_at === role.last_conformance_at
-        ? current
-        : null,
-    );
   }, [role]);
 
   const connection = roleConnection(connections, connectionId);
-  const configuredConnection = roleConnection(
-    connections,
-    role.connection_id ?? "",
-  );
   const connectionAdapter = adapters.find(
     (adapter) => adapter.id === connection?.adapter_id,
-  );
-  const configuredConnectionAdapter = adapters.find(
-    (adapter) => adapter.id === configuredConnection?.adapter_id,
   );
   const adapterSupportsRole = includesEveryCapability(
     connectionAdapter?.capability_ids,
@@ -180,6 +140,7 @@ export function ModelRoleCard({
     modelId.trim() === role.model_id &&
     timeoutSeconds === role.timeout_seconds &&
     maxOutputTokens === role.max_output_tokens;
+  const taskDraftMatches = configurationMatches && enabled === role.enabled;
   const canTest =
     credentialStorageReady &&
     configured &&
@@ -191,6 +152,26 @@ export function ModelRoleCard({
     verifiedCapabilitiesSatisfied;
   const canEnable =
     canTest && role.conformance_status === "passed";
+  const quality = modelQualityView(qualityEvaluation, role, qualityHistory);
+  const qualityLabel = qualityStatusLabel(
+    qualityEvaluation,
+    quality,
+    qualityLoading,
+  );
+  const qualityStatusTone = qualityTone(
+    qualityEvaluation,
+    quality,
+    qualityLoading,
+  );
+  const activeQualityJob = quality.activeJob;
+  const qualityActive = activeQualityJob !== undefined;
+  const canRunQuality =
+    role.effective_enabled &&
+    taskDraftMatches &&
+    qualityEvaluation !== undefined &&
+    !qualityLoading &&
+    !qualityActive;
+  const actionsBusy = busy || testing || qualityActionBusy || qualityActive;
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -215,8 +196,8 @@ export function ModelRoleCard({
   }
 
   async function testModel() {
-    const result = await onTest(role.role_id);
-    if (result !== null) setLastTestResult(result);
+    onViewTestLog();
+    await onTest(role.role_id);
   }
 
   const stateLabel = roleStateLabel(
@@ -224,6 +205,8 @@ export function ModelRoleCard({
     configured,
     connection?.credential_saved === true,
     verifiedCapabilitiesSatisfied,
+    qualityEvaluation,
+    qualityActive,
   );
 
   if (!role.configuration_available) {
@@ -251,7 +234,7 @@ export function ModelRoleCard({
           <button
             className="btn-ghost"
             type="button"
-            disabled={busy || testing}
+            disabled={actionsBusy}
             onClick={() => void onRemove(role.role_id)}
           >
             Clear old draft
@@ -268,7 +251,15 @@ export function ModelRoleCard({
     >
       <div className="assistant-role-heading">
         <div>
-          <span className={`assistant-role-state${role.effective_enabled ? " is-ready" : ""}`}>
+          <span
+            className={`assistant-role-state${
+              role.effective_enabled && qualityEvaluation?.status === "passed"
+                ? " is-ready"
+                : qualityEvaluation?.status === "failed"
+                  ? " is-problem"
+                  : ""
+            }`}
+          >
             {stateLabel}
           </span>
           <h3>{role.label}</h3>
@@ -291,7 +282,6 @@ export function ModelRoleCard({
                   : "",
               );
               setEnabled(false);
-              setLastTestResult(null);
             }}
           >
             <option value="">Choose a connection</option>
@@ -338,15 +328,35 @@ export function ModelRoleCard({
           />
         </div>
 
-        <label className="checkbox-row assistant-role-enabled">
-          <input
-            type="checkbox"
-            checked={enabled}
-            disabled={!enabled && !canEnable}
-            onChange={(event) => setEnabled(event.target.checked)}
-          />
-          <span>Allow this model for this task</span>
-        </label>
+        <div className="assistant-role-authorization">
+          <label className="checkbox-row assistant-role-enabled">
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={qualityActive || (!enabled && !canEnable)}
+              onChange={(event) => setEnabled(event.target.checked)}
+            />
+            <span>Allow this model for this task</span>
+          </label>
+          <div className="assistant-role-checks" aria-label={`${role.label} checks`}>
+            <a
+              className={`assistant-role-check is-${modelTestTone(role)}`}
+              href="#assistant-test-console"
+              onClick={onViewTestLog}
+            >
+              <span>Model test</span>
+              <strong>{modelTestStatusLabel(role)}</strong>
+            </a>
+            <a
+              className={`assistant-role-check is-${qualityStatusTone}`}
+              href="#assistant-test-console"
+              onClick={onViewTestLog}
+            >
+              <span>Quality</span>
+              <strong>{qualityLabel}</strong>
+            </a>
+          </div>
+        </div>
         {!canEnable && connectionId ? (
           <p className="field-hint">
             {connection?.credential_saved !== true
@@ -373,19 +383,6 @@ export function ModelRoleCard({
           </p>
         ) : null}
 
-        {configured && role.conformance_status !== "never" ? (
-          <TestResultReport
-            label={`${role.label} model test result`}
-            report={modelTestReport(
-              role,
-              configuredConnection,
-              configuredConnectionAdapter,
-              lastTestResult,
-            )}
-            openByDefault={role.conformance_status === "failed"}
-          />
-        ) : null}
-
         <details className="assistant-role-limits">
           <summary>Request limits</summary>
           <div className="field-row">
@@ -395,6 +392,7 @@ export function ModelRoleCard({
                 type="number"
                 min={5}
                 max={300}
+                disabled={qualityActive}
                 value={timeoutSeconds}
                 onChange={(event) => {
                   setTimeoutSeconds(Number(event.target.value));
@@ -408,6 +406,7 @@ export function ModelRoleCard({
                 type="number"
                 min={128}
                 max={65536}
+                disabled={qualityActive}
                 value={maxOutputTokens}
                 onChange={(event) => {
                   setMaxOutputTokens(Number(event.target.value));
@@ -422,37 +421,83 @@ export function ModelRoleCard({
           <button
             className="btn-primary"
             type="submit"
-            disabled={busy || testing || !connectionId || !selectedModelAvailable}
+            disabled={
+              actionsBusy || !connectionId || !selectedModelAvailable
+            }
           >
             {busy ? "Saving…" : "Save task"}
           </button>
-          {configured ? (
+          {configured && role.conformance_status !== "passed" ? (
             <button
               className="btn-secondary"
               type="button"
-              disabled={busy || testing || !canTest}
+              disabled={busy || testing || qualityActive || !canTest}
               onClick={() => void testModel()}
             >
               {testing ? "Testing…" : "Test model"}
             </button>
           ) : null}
+          {configured && role.conformance_status === "passed" ? (
+            activeQualityJob !== undefined ? (
+              <button
+                className="btn-secondary"
+                type="button"
+                disabled={
+                  qualityActionBusy ||
+                  activeQualityJob.status === "cancel_requested"
+                }
+                onClick={() => {
+                  onViewTestLog();
+                  onCancelQuality(activeQualityJob.id);
+                }}
+              >
+                {activeQualityJob.status === "cancel_requested"
+                  ? "Cancelling…"
+                  : "Cancel quality check"}
+              </button>
+            ) : (
+              <button
+                className="btn-secondary"
+                type="button"
+                disabled={qualityActionBusy || !canRunQuality}
+                onClick={() => {
+                  if (qualityEvaluation === undefined) return;
+                  onViewTestLog();
+                  onStartQuality(qualityEvaluation);
+                }}
+              >
+                {qualityActionBusy
+                  ? "Starting…"
+                  : qualityEvaluation?.status === "never" &&
+                      quality.currentJob === undefined
+                    ? "Run quality check"
+                    : "Run quality again"}
+              </button>
+            )
+          ) : null}
           {configured ? (
             <button
               className="btn-ghost"
               type="button"
-              disabled={busy || testing}
+              disabled={actionsBusy}
               onClick={() => void onRemove(role.role_id)}
             >
               Clear
             </button>
           ) : null}
         </div>
-        {configured && !configurationMatches ? (
-          <p className="field-hint">Save these changes before testing the model.</p>
-        ) : null}
-        {configured ? (
+        {configured && !taskDraftMatches ? (
+          <p className="field-hint">Save these changes before running checks.</p>
+        ) : role.conformance_status === "passed" && !role.effective_enabled ? (
           <p className="field-hint">
-            The test sends only a one-time synthetic challenge—no song or library data.
+            {role.enabled
+              ? "Restore and verify this task’s connection before running quality scenarios."
+              : "Allow and save this task before running its quality scenarios."}
+          </p>
+        ) : configured ? (
+          <p className="field-hint">
+            Checks use only fixed synthetic inputs—no songs or live library data.
+            Quality scenarios can make repeated provider calls.
           </p>
         ) : null}
       </form>
