@@ -1599,6 +1599,10 @@ def test_failed_model_test_is_persisted_without_enabling_role(
         lambda *args, **kwargs: ProviderConformanceResult(
             False,
             "invalid_structured_output",
+            provider_model_id="tagger-small-2026",
+            finish_reason="stop",
+            input_tokens=31,
+            output_tokens=9,
         ),
     )
 
@@ -1615,6 +1619,12 @@ def test_failed_model_test_is_persisted_without_enabling_role(
     assert tested.status_code == 200
     assert tested.json()["passed"] is False
     assert tested.json()["error_code"] == "invalid_structured_output"
+    assert tested.json()["contract_version"] == "assistant-provider-conformance/v3"
+    assert tested.json()["provider_model_id"] == "tagger-small-2026"
+    assert tested.json()["finish_reason"] == "stop"
+    assert tested.json()["input_tokens"] == 31
+    assert tested.json()["output_tokens"] == 9
+    assert tested.json()["duration_ms"] >= 0
     assert tested.json()["role"]["conformance_status"] == "failed"
     assert enable.status_code == 409
     assert enable.json()["detail"]["code"] == "model_not_tested"

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Literal
 
 from app.assistant.providers.definitions import (
     OPENAI_COMPATIBLE_ADAPTER,
@@ -20,7 +21,9 @@ from app.assistant.providers.transport import (
     safe_http_error_code,
 )
 
-CONFORMANCE_CONTRACT = "assistant-provider-conformance/v3"
+CONFORMANCE_CONTRACT: Literal["assistant-provider-conformance/v3"] = (
+    "assistant-provider-conformance/v3"
+)
 _MAX_EXECUTION_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
@@ -59,6 +62,10 @@ class StructuredModelResult:
 class ProviderConformanceResult:
     passed: bool
     error_code: str | None
+    provider_model_id: str | None = None
+    finish_reason: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 def _optional_bounded_text(value: object, *, max_length: int) -> str | None:
@@ -76,30 +83,60 @@ def _optional_token_count(value: object) -> int | None:
 def _parse_openai_compatible_response(payload: object) -> StructuredModelResult:
     if not isinstance(payload, dict):
         return StructuredModelResult(False, "invalid_response")
+    provider_model_id = _optional_bounded_text(payload.get("model"), max_length=256)
+    usage = payload.get("usage")
+    usage_dict = usage if isinstance(usage, dict) else {}
+    input_tokens = _optional_token_count(usage_dict.get("prompt_tokens"))
+    output_tokens = _optional_token_count(usage_dict.get("completion_tokens"))
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        return StructuredModelResult(False, "invalid_response")
+        return StructuredModelResult(
+            False,
+            "invalid_response",
+            provider_model_id=provider_model_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
     choice = choices[0]
+    finish_reason = _optional_bounded_text(choice.get("finish_reason"), max_length=64)
     message = choice.get("message")
     if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-        return StructuredModelResult(False, "invalid_response")
+        return StructuredModelResult(
+            False,
+            "invalid_response",
+            provider_model_id=provider_model_id,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
     try:
         structured = json.loads(message["content"])
     except json.JSONDecodeError:
-        return StructuredModelResult(False, "invalid_structured_output")
+        return StructuredModelResult(
+            False,
+            "invalid_structured_output",
+            provider_model_id=provider_model_id,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
     if not isinstance(structured, dict):
-        return StructuredModelResult(False, "invalid_structured_output")
-
-    usage = payload.get("usage")
-    usage_dict = usage if isinstance(usage, dict) else {}
+        return StructuredModelResult(
+            False,
+            "invalid_structured_output",
+            provider_model_id=provider_model_id,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
     return StructuredModelResult(
         True,
         None,
         structured,
-        provider_model_id=_optional_bounded_text(payload.get("model"), max_length=256),
-        finish_reason=_optional_bounded_text(choice.get("finish_reason"), max_length=64),
-        input_tokens=_optional_token_count(usage_dict.get("prompt_tokens")),
-        output_tokens=_optional_token_count(usage_dict.get("completion_tokens")),
+        provider_model_id=provider_model_id,
+        finish_reason=finish_reason,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
 
 
@@ -202,11 +239,32 @@ def run_provider_conformance(
     )
     result = execute_structured_model_request(target, request)
     if not result.succeeded:
-        return ProviderConformanceResult(False, result.error_code)
+        return ProviderConformanceResult(
+            False,
+            result.error_code,
+            provider_model_id=result.provider_model_id,
+            finish_reason=result.finish_reason,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
     if result.payload != {
         "contract": CONFORMANCE_CONTRACT,
         "challenge": challenge,
         "accepted": True,
     }:
-        return ProviderConformanceResult(False, "conformance_mismatch")
-    return ProviderConformanceResult(True, None)
+        return ProviderConformanceResult(
+            False,
+            "conformance_mismatch",
+            provider_model_id=result.provider_model_id,
+            finish_reason=result.finish_reason,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+    return ProviderConformanceResult(
+        True,
+        None,
+        provider_model_id=result.provider_model_id,
+        finish_reason=result.finish_reason,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+    )

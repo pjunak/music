@@ -314,6 +314,43 @@ describe("AssistantAiSetupView", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows only the models verified for the selected connection", async () => {
+    const user = userEvent.setup();
+    const localConnection: ProviderConnection = {
+      ...connection,
+      id: "connection-2",
+      name: "Local models",
+      base_url: "http://host.docker.internal:11434/v1",
+      allow_private_network: true,
+      verified_models: ["local-instruct", "local-reasoning"],
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([
+      connection,
+      localConnection,
+    ]);
+    render(<AssistantAiSetupView />);
+
+    const connectionPicker = await screen.findByLabelText("Connection");
+    await user.selectOptions(connectionPicker, connection.id);
+    await user.click(screen.getByLabelText("Model"));
+    expect(
+      screen.getByRole("option", { name: "planner-large" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "local-instruct" }),
+    ).not.toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await user.selectOptions(connectionPicker, localConnection.id);
+    await user.click(screen.getByLabelText("Model"));
+    expect(
+      screen.getByRole("option", { name: "local-instruct" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "planner-large" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("saves a provider connection and clears the API key from the form", async () => {
     const user = userEvent.setup();
     vi.mocked(assistantProvidersApi.createConnection).mockResolvedValue({
@@ -517,11 +554,26 @@ describe("AssistantAiSetupView", () => {
       role: testedRole,
       passed: true,
       error_code: null,
+      contract_version: "assistant-provider-conformance/v3",
+      provider_model_id: "planner-large-2026",
+      finish_reason: "stop",
+      input_tokens: 42,
+      output_tokens: 18,
+      duration_ms: 812,
     });
     render(<AssistantAiSetupView />);
 
     await user.selectOptions(await screen.findByLabelText("Connection"), connection.id);
-    await user.type(screen.getByLabelText("Model"), "planner-large");
+    const modelPicker = screen.getByLabelText("Model");
+    await user.click(modelPicker);
+    expect(screen.getByText("2 available models")).toBeInTheDocument();
+    await user.type(modelPicker, "planner");
+    expect(screen.getByText("1 of 2 models")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "tagger-small" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "planner-large" }));
+    expect(modelPicker).toHaveValue("planner-large");
     await user.click(screen.getByRole("button", { name: "Save task" }));
 
     await waitFor(() =>
@@ -580,6 +632,12 @@ describe("AssistantAiSetupView", () => {
       role: failedRole,
       passed: false,
       error_code: "invalid_structured_output",
+      contract_version: "assistant-provider-conformance/v3",
+      provider_model_id: "planner-large-2026",
+      finish_reason: "stop",
+      input_tokens: 39,
+      output_tokens: 11,
+      duration_ms: 947,
     });
     render(<AssistantAiSetupView />);
 
@@ -600,6 +658,21 @@ describe("AssistantAiSetupView", () => {
       screen.getByLabelText("Allow this model for this task"),
     ).toBeDisabled();
     expect(screen.getByText(/no song or library data/i)).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Playlist planner model test result JSON"),
+    ).toHaveTextContent('"reported_model_id": "planner-large-2026"');
+    await user.click(
+      screen.getByRole("button", {
+        name: "Copy Playlist planner model test result",
+      }),
+    );
+    await expect(navigator.clipboard.readText()).resolves.toContain(
+      '"duration_ms": 947',
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Test result copied",
+      "Playlist planner model test result",
+    );
   });
 
   it("keeps local tools available when encrypted storage is not configured", async () => {
@@ -1053,5 +1126,17 @@ describe("AssistantAiSetupView", () => {
     await user.click(screen.getByText("Review 1 failed scenario"));
     expect(screen.getByText("Tavern dancing")).toBeInTheDocument();
     expect(screen.getByText("recall_at_k below threshold")).toBeInTheDocument();
+    const qualityCard = screen
+      .getByRole("heading", { name: "Playlist planning quality" })
+      .closest("article");
+    expect(qualityCard).not.toBeNull();
+    await user.click(
+      within(qualityCard as HTMLElement).getByRole("button", {
+        name: "Copy Playlist planning quality result",
+      }),
+    );
+    await expect(navigator.clipboard.readText()).resolves.toContain(
+      '"recall_at_k below threshold"',
+    );
   });
 });

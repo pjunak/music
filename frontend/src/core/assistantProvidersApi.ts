@@ -114,6 +114,12 @@ export interface ModelConformance {
   role: ModelRole;
   passed: boolean;
   error_code: string | null;
+  contract_version: "assistant-provider-conformance/v3";
+  provider_model_id: string | null;
+  finish_reason: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  duration_ms: number;
 }
 
 export interface ModelQualityEvaluation {

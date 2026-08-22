@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
+from time import monotonic
 from typing import NoReturn
 
 from fastapi import APIRouter, HTTPException, Request
@@ -13,7 +14,10 @@ from app.assistant.model_evaluation import (
     evaluation_job_parameters,
     list_role_evaluations,
 )
-from app.assistant.providers.execution import run_provider_conformance
+from app.assistant.providers.execution import (
+    CONFORMANCE_CONTRACT,
+    run_provider_conformance,
+)
 from app.assistant.providers.schemas import (
     ModelConformanceOut,
     ModelQualityEvaluationOut,
@@ -307,6 +311,7 @@ async def test_role_model(
 
     # The challenge contains synthetic data only. Network and model work stays
     # off the event loop and uses the same bounded transport as verification.
+    started_at = monotonic()
     result = await run_in_threadpool(
         partial(
             run_provider_conformance,
@@ -314,6 +319,7 @@ async def test_role_model(
             target.challenge,
         )
     )
+    duration_ms = max(0, round((monotonic() - started_at) * 1000))
     try:
         role = finish_role_conformance(db, target, result)
     except ProviderServiceError as exc:
@@ -322,4 +328,10 @@ async def test_role_model(
         role=role,
         passed=result.passed,
         error_code=result.error_code,
+        contract_version=CONFORMANCE_CONTRACT,
+        provider_model_id=result.provider_model_id,
+        finish_reason=result.finish_reason,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        duration_ms=duration_ms,
     )

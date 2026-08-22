@@ -178,6 +178,12 @@ class ModelConformanceOut(StrictProviderModel):
     role: ModelRoleOut
     passed: bool
     error_code: str | None
+    contract_version: Literal["assistant-provider-conformance/v3"]
+    provider_model_id: str | None
+    finish_reason: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    duration_ms: int
 
 
 class ModelQualityEvaluationOut(StrictProviderModel):

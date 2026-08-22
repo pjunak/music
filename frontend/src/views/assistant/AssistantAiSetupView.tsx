@@ -398,8 +398,10 @@ export function AssistantAiSetupView() {
       } else {
         toast.error("Model test failed", modelTestFailureMessage(result.error_code));
       }
+      return result;
     } catch (error) {
       toast.error("Model test could not run", errorMessage(error));
+      return null;
     } finally {
       setBusyItem(null);
     }

@@ -143,7 +143,16 @@ def test_execution_rejects_non_object_or_wrapped_output(
         "request_json",
         lambda *a, **k: JsonHttpResponse(
             200,
-            {"choices": [{"message": {"content": content}}]},
+            {
+                "model": "planner-large-2026",
+                "choices": [
+                    {
+                        "message": {"content": content},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 17, "completion_tokens": 4},
+            },
         ),
     )
 
@@ -154,6 +163,10 @@ def test_execution_rejects_non_object_or_wrapped_output(
 
     assert result.succeeded is False
     assert result.error_code == error_code
+    assert result.provider_model_id == "planner-large-2026"
+    assert result.finish_reason == "stop"
+    assert result.input_tokens == 17
+    assert result.output_tokens == 4
 
 
 def test_execution_returns_safe_transport_error_without_secret(
@@ -185,6 +198,7 @@ def test_conformance_requires_exact_challenge_response(
         return JsonHttpResponse(
             200,
             {
+                "model": "planner-large-2026",
                 "choices": [
                     {
                         "message": {
@@ -193,9 +207,11 @@ def test_conformance_requires_exact_challenge_response(
                                 + CONFORMANCE_CONTRACT
                                 + '","challenge":"challenge-123","accepted":true}'
                             )
-                        }
+                        },
+                        "finish_reason": "stop",
                     }
-                ]
+                ],
+                "usage": {"prompt_tokens": 23, "completion_tokens": 8},
             },
         )
 
@@ -205,4 +221,8 @@ def test_conformance_requires_exact_challenge_response(
     mismatched = execution.run_provider_conformance(_target(), "different")
 
     assert passed.passed is True
+    assert passed.provider_model_id == "planner-large-2026"
+    assert passed.finish_reason == "stop"
+    assert passed.input_tokens == 23
+    assert passed.output_tokens == 8
     assert mismatched.error_code == "conformance_mismatch"

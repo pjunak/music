@@ -7,6 +7,7 @@ import type {
 import { readableBackgroundJobError } from "./backgroundJobs";
 import { isModelEvaluationJobActive } from "./modelEvaluationJobs";
 import { ModelUsageSummary } from "./ModelUsageSummary";
+import { TestResultReport } from "./TestResultReport";
 
 interface FailedScenario {
   id: string;
@@ -60,6 +61,60 @@ function previousAttemptLabel(job: BackgroundJob): string {
   if (job.status === "failed") return "Show previous interrupted attempt";
   if (job.status === "cancelled") return "Show previous cancelled attempt";
   return "Show previous attempt";
+}
+
+function qualityTestReport(
+  evaluation: ModelQualityEvaluation,
+  role: ModelRole | undefined,
+  job: BackgroundJob | undefined,
+): object {
+  return {
+    schema_version: "assistant-model-quality-report/v1",
+    status: evaluation.status,
+    evaluation: {
+      id: evaluation.evaluation_id,
+      label: evaluation.label,
+      suite_id: evaluation.suite_id,
+      passed_cases: evaluation.passed_cases,
+      total_cases: evaluation.total_cases,
+      last_evaluated_at: evaluation.last_evaluated_at,
+    },
+    task: {
+      id: role?.role_id ?? evaluation.role_id,
+      label: role?.label ?? null,
+      connection_id: role?.connection_id ?? null,
+      connection_name: role?.connection_name ?? null,
+      model_id: role?.model_id ?? null,
+      conformance_status: role?.conformance_status ?? null,
+      last_conformance_at: role?.last_conformance_at ?? null,
+    },
+    job:
+      job === undefined
+        ? null
+        : {
+            id: job.id,
+            kind: job.kind,
+            status: job.status,
+            attempts: job.attempts,
+            created_at: job.created_at,
+            started_at: job.started_at,
+            finished_at: job.finished_at,
+            progress: {
+              phase: job.progress_phase,
+              message: job.progress_message,
+              current: job.progress_current,
+              total: job.progress_total,
+            },
+            error:
+              job.error === null
+                ? null
+                : readableBackgroundJobError(
+                    job.error,
+                    "The quality check did not finish.",
+                  ),
+          },
+    result: job?.result ?? null,
+  };
 }
 
 function statusLabel(
@@ -259,6 +314,16 @@ export function ModelQualityEvaluationCard({
       ) : null}
 
       <ModelUsageSummary job={currentJob} />
+
+      {currentJob !== undefined || evaluation.status !== "never" ? (
+        <TestResultReport
+          label={`${evaluation.label} result`}
+          report={qualityTestReport(evaluation, role, currentJob)}
+          openByDefault={
+            evaluation.status === "failed" || currentJob?.status === "failed"
+          }
+        />
+      ) : null}
 
       {historicalJob !== undefined ? (
         <details className="assistant-quality-history">

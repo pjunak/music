@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type {
+  ModelConformance,
   ModelRole,
   ModelRoleUpdate,
   ProviderAdapter,
@@ -8,7 +9,9 @@ import type {
   ProviderConnection,
 } from "@/core/assistantProvidersApi";
 
+import { ModelPicker } from "./ModelPicker";
 import { modelTestFailureMessage, roleConnection } from "./providerUi";
+import { TestResultReport } from "./TestResultReport";
 
 interface Props {
   role: ModelRole;
@@ -19,8 +22,61 @@ interface Props {
   busy: boolean;
   testing: boolean;
   onSave: (roleId: string, payload: ModelRoleUpdate) => Promise<void>;
-  onTest: (roleId: string) => Promise<void>;
+  onTest: (roleId: string) => Promise<ModelConformance | null>;
   onRemove: (roleId: string) => Promise<void>;
+}
+
+function modelTestReport(
+  role: ModelRole,
+  connection: ProviderConnection | undefined,
+  adapter: ProviderAdapter | undefined,
+  result: ModelConformance | null,
+): object {
+  const errorCode = role.conformance_error_code;
+  return {
+    schema_version: "assistant-model-test-report/v1",
+    status: role.conformance_status,
+    tested_at: role.last_conformance_at,
+    task: {
+      id: role.role_id,
+      label: role.label,
+      required_capabilities: role.required_capability_ids,
+    },
+    connection: {
+      id: connection?.id ?? role.connection_id,
+      name: connection?.name ?? role.connection_name,
+      adapter_id: connection?.adapter_id ?? null,
+      adapter_label: adapter?.label ?? null,
+      base_url: connection?.base_url ?? null,
+      verification_status: connection?.verification_status ?? null,
+      last_verified_at: connection?.last_verified_at ?? null,
+      verified_model_count: connection?.verified_models.length ?? 0,
+      verified_capabilities: connection?.verified_capability_ids ?? [],
+    },
+    request: {
+      model_id: role.model_id,
+      model_was_in_verified_list:
+        connection?.verified_models.includes(role.model_id) ?? false,
+      timeout_seconds: role.timeout_seconds,
+      maximum_response_tokens: role.max_output_tokens,
+    },
+    provider_response: {
+      contract_version:
+        result?.contract_version ?? "assistant-provider-conformance/v3",
+      reported_model_id: result?.provider_model_id ?? null,
+      finish_reason: result?.finish_reason ?? null,
+      input_tokens: result?.input_tokens ?? null,
+      output_tokens: result?.output_tokens ?? null,
+      duration_ms: result?.duration_ms ?? null,
+    },
+    error:
+      errorCode === null
+        ? null
+        : {
+            code: errorCode,
+            message: modelTestFailureMessage(errorCode),
+          },
+  };
 }
 
 function includesEveryCapability(
@@ -71,6 +127,8 @@ export function ModelRoleCard({
   const [enabled, setEnabled] = useState(role.enabled);
   const [timeoutSeconds, setTimeoutSeconds] = useState(role.timeout_seconds);
   const [maxOutputTokens, setMaxOutputTokens] = useState(role.max_output_tokens);
+  const [lastTestResult, setLastTestResult] =
+    useState<ModelConformance | null>(null);
 
   useEffect(() => {
     setConnectionId(role.connection_id ?? "");
@@ -78,11 +136,25 @@ export function ModelRoleCard({
     setEnabled(role.enabled);
     setTimeoutSeconds(role.timeout_seconds);
     setMaxOutputTokens(role.max_output_tokens);
+    setLastTestResult((current) =>
+      current?.role.connection_id === role.connection_id &&
+      current.role.model_id === role.model_id &&
+      current.role.last_conformance_at === role.last_conformance_at
+        ? current
+        : null,
+    );
   }, [role]);
 
   const connection = roleConnection(connections, connectionId);
+  const configuredConnection = roleConnection(
+    connections,
+    role.connection_id ?? "",
+  );
   const connectionAdapter = adapters.find(
     (adapter) => adapter.id === connection?.adapter_id,
+  );
+  const configuredConnectionAdapter = adapters.find(
+    (adapter) => adapter.id === configuredConnection?.adapter_id,
   );
   const adapterSupportsRole = includesEveryCapability(
     connectionAdapter?.capability_ids,
@@ -92,6 +164,11 @@ export function ModelRoleCard({
     connection?.verified_capability_ids,
     role.required_capability_ids,
   );
+  const verifiedModels =
+    connection?.verification_status === "verified"
+      ? connection.verified_models
+      : [];
+  const selectedModelAvailable = verifiedModels.includes(modelId);
   const requiredCapabilityLabels = role.required_capability_ids.map(
     (capabilityId) =>
       capabilities.find((capability) => capability.id === capabilityId)?.label ??
@@ -110,14 +187,20 @@ export function ModelRoleCard({
     role.configuration_available &&
     connection?.credential_saved === true &&
     connection?.verification_status === "verified" &&
+    connection.verified_models.includes(role.model_id) &&
     verifiedCapabilitiesSatisfied;
   const canEnable =
     canTest && role.conformance_status === "passed";
-  const listId = `assistant-models-${role.role_id}`;
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    if (!role.configuration_available || !connectionId || !modelId.trim()) return;
+    if (
+      !role.configuration_available ||
+      !connectionId ||
+      !selectedModelAvailable
+    ) {
+      return;
+    }
     try {
       await onSave(role.role_id, {
         connection_id: connectionId,
@@ -129,6 +212,11 @@ export function ModelRoleCard({
     } catch {
       // The parent reports the failure and preserves this draft for correction.
     }
+  }
+
+  async function testModel() {
+    const result = await onTest(role.role_id);
+    if (result !== null) setLastTestResult(result);
   }
 
   const stateLabel = roleStateLabel(
@@ -195,8 +283,15 @@ export function ModelRoleCard({
             aria-label="Connection"
             value={connectionId}
             onChange={(event) => {
-              setConnectionId(event.target.value);
+              const nextConnectionId = event.target.value;
+              setConnectionId(nextConnectionId);
+              setModelId(
+                nextConnectionId === (role.connection_id ?? "")
+                  ? role.model_id
+                  : "",
+              );
               setEnabled(false);
+              setLastTestResult(null);
             }}
           >
             <option value="">Choose a connection</option>
@@ -228,28 +323,20 @@ export function ModelRoleCard({
           </span>
         </label>
 
-        <label className="field">
-          <span className="field-label">Model</span>
-          <input
+        <div className="field">
+          <label className="field-label" htmlFor={`assistant-model-${role.role_id}`}>
+            Model
+          </label>
+          <ModelPicker
+            id={`assistant-model-${role.role_id}`}
             value={modelId}
-            list={listId}
-            maxLength={256}
-            placeholder={
-              connection?.verified_models.length
-                ? "Choose or type a model ID"
-                : "Enter the provider's model ID"
-            }
-            onChange={(event) => {
-              setModelId(event.target.value);
+            models={verifiedModels}
+            onChange={(nextModelId) => {
+              setModelId(nextModelId);
               setEnabled(false);
             }}
           />
-          <datalist id={listId}>
-            {connection?.verified_models.map((item) => (
-              <option key={item} value={item} />
-            ))}
-          </datalist>
-        </label>
+        </div>
 
         <label className="checkbox-row assistant-role-enabled">
           <input
@@ -284,6 +371,19 @@ export function ModelRoleCard({
           <p className="assistant-provider-problem" role="status">
             {modelTestFailureMessage(role.conformance_error_code)}
           </p>
+        ) : null}
+
+        {configured && role.conformance_status !== "never" ? (
+          <TestResultReport
+            label={`${role.label} model test result`}
+            report={modelTestReport(
+              role,
+              configuredConnection,
+              configuredConnectionAdapter,
+              lastTestResult,
+            )}
+            openByDefault={role.conformance_status === "failed"}
+          />
         ) : null}
 
         <details className="assistant-role-limits">
@@ -322,7 +422,7 @@ export function ModelRoleCard({
           <button
             className="btn-primary"
             type="submit"
-            disabled={busy || testing || !connectionId || !modelId.trim()}
+            disabled={busy || testing || !connectionId || !selectedModelAvailable}
           >
             {busy ? "Saving…" : "Save task"}
           </button>
@@ -331,7 +431,7 @@ export function ModelRoleCard({
               className="btn-secondary"
               type="button"
               disabled={busy || testing || !canTest}
-              onClick={() => void onTest(role.role_id)}
+              onClick={() => void testModel()}
             >
               {testing ? "Testing…" : "Test model"}
             </button>
