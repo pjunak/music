@@ -76,7 +76,7 @@ def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
             "/api/assistant/library-tags/catalog/model-cleanup-jobs",
             json={
                 "disclosure_version": (
-                    "assistant-model-tag-cleanup-disclosure/v1"
+                    "assistant-model-tag-cleanup-disclosure/v2"
                 ),
                 "consent": True,
             },

@@ -104,11 +104,11 @@ function completedJob(
     started_at: "2026-08-19T12:00:01Z",
     finished_at: "2026-08-19T12:00:03Z",
     result: {
-      schema_version: "assistant-model-tag-cleanup-job-result/v1",
+      schema_version: "assistant-model-tag-cleanup-job-result/v2",
       disclosure_version: MODEL_TAG_CLEANUP_DISCLOSURE_VERSION,
       role_id: "tag_cleanup",
       role_fingerprint: "b".repeat(64),
-      engine_id: "model-tag-cleanup/v1",
+      engine_id: "model-tag-cleanup/v2",
       catalog_signature: catalogSignature,
       catalog_tags: 17,
       suggestions: [
@@ -116,6 +116,7 @@ function completedJob(
           id: "c".repeat(64),
           source: "tavarn",
           target: "tavern",
+          origin: "local-rule",
           confidence: "high",
           reason: "Likely spelling variant of the starter tag.",
           source_track_count: 3,

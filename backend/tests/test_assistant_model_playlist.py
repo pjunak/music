@@ -131,11 +131,17 @@ def test_model_planner_sends_reduced_candidates_and_reconstructs_sources() -> No
 
     assert len(executor.requests) == 1
     request_payload = json.loads(executor.requests[0].user_prompt)
-    assert request_payload["schema_version"] == "assistant-playlist-planner-input/v1"
+    assert request_payload["schema_version"] == "assistant-playlist-planner-input/v2"
+    assert request_payload["local_plan"]["selected_track_ids"] == [101, 102]
+    assert request_payload["candidates"][0]["local_rank"] == 1
+    assert executor.requests[0].output_schema_name == (
+        "assistant-playlist-planner-response"
+    )
+    assert executor.requests[0].output_schema is not None
     assert all("path" not in candidate for candidate in request_payload["candidates"])
     assert "untrusted data" in executor.requests[0].system_prompt
     assert "Example JSON shape" in executor.requests[0].system_prompt
-    assert response.engine == "model-playlist-planner/v1"
+    assert response.engine == "model-playlist-planner/v2"
     assert [candidate.track_id for candidate in response.candidates] == [102, 101]
     source_by_id = {track.id: track for track in tracks}
     baseline_by_id = {candidate.track_id: candidate for candidate in baseline.candidates}
@@ -310,7 +316,7 @@ def test_model_planner_skips_provider_when_local_filter_has_no_candidates() -> N
         signal_profiles=signals,
     )
 
-    assert response.engine == "model-playlist-planner/v1"
+    assert response.engine == "model-playlist-planner/v2"
     assert response.eligible_tracks == 0
     assert response.candidates == []
 
@@ -321,7 +327,7 @@ def test_reference_model_planner_passes_provider_neutral_suite() -> None:
     result = evaluate_playlist_engine(ModelPlaylistPlanner(ReferenceExecutor()), suite)
 
     assert result.passed is True
-    assert result.engine_id == "model-playlist-planner/v1"
+    assert result.engine_id == "model-playlist-planner/v2"
     assert result.summary.passed_cases == 8
     assert all(case.metrics.contract_valid for case in result.cases)
     assert all(case.metrics.deterministic is True for case in result.cases)

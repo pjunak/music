@@ -62,7 +62,13 @@ MODEL_TAGGING_DISCLOSURE = ModelTaggingDisclosure(
         "Track durations and BPM values when available",
         (
             "Current local audio-signal proxies when available: energy, brightness, "
-            "tension, tempo estimate, and confidence"
+            "tension, tempo, activity, dynamic range, rhythmic density, rhythmic "
+            "stability, and confidence"
+        ),
+        (
+            "A deterministic local-metadata hypothesis: candidate tags with matched "
+            "fields and terms, canonical-title source, energy, brightness, tension, "
+            "and confidence"
         ),
         "A server-assigned numeric track ID used only to match the response",
         "The fixed D&D tag vocabulary the model is allowed to choose from",
@@ -70,7 +76,7 @@ MODEL_TAGGING_DISCLOSURE = ModelTaggingDisclosure(
     never_shared=[
         "Audio files, waveforms, detailed signal measurements, or cover artwork",
         "Filesystem or library-relative paths",
-        "Your manual tags or local generated tags",
+        "Your manual tags, generated-tag review decisions, or accepted/rejected state",
         "Playlists, review decisions, and provider credentials",
     ],
     allowed_tags=list(MODEL_TAG_VOCABULARY),
@@ -84,7 +90,7 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v2"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v3"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     force: bool
@@ -212,6 +218,18 @@ def _track_input(
     track: Track,
     audio_profile: CurrentAudioProfile | None,
 ) -> ModelTagTrackInput:
+    def normalized_metric(key: str, low: float, high: float) -> float | None:
+        if audio_profile is None:
+            return None
+        raw = audio_profile.metrics.get(key)
+        if (
+            not isinstance(raw, (int, float))
+            or isinstance(raw, bool)
+            or not math.isfinite(raw)
+        ):
+            return None
+        return round(max(0.0, min(1.0, (float(raw) - low) / (high - low))), 6)
+
     audio_evidence = (
         ModelTagAudioEvidence(
             analyzer_id=audio_profile.analyzer_id,
@@ -219,6 +237,10 @@ def _track_input(
             brightness=audio_profile.brightness,
             tension=audio_profile.tension,
             tempo_bpm=audio_profile.tempo_bpm,
+            activity=normalized_metric("activity_ratio", 0.0, 1.0),
+            dynamic_range=normalized_metric("level_spread_db", 0.0, 24.0),
+            rhythmic_density=normalized_metric("onset_rate_hz", 0.0, 5.0),
+            rhythmic_stability=normalized_metric("tempo_confidence", 0.0, 1.0),
             confidence=audio_profile.confidence,
         )
         if audio_profile is not None
@@ -377,7 +399,7 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v1",
-                        "input_contract": "assistant-music-tagger-input/v2",
+                        "input_contract": "assistant-music-tagger-input/v3",
                         "used_audio_evidence": snapshot.id in audio_profiles,
                         "role_fingerprint": parameters.role_fingerprint,
                     },
@@ -395,7 +417,7 @@ def run_model_music_tagging(
         )
 
     return ModelTaggingJobResult(
-        schema_version="assistant-model-music-tagging-job-result/v2",
+        schema_version="assistant-model-music-tagging-job-result/v3",
         disclosure_version=parameters.disclosure_version,
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,

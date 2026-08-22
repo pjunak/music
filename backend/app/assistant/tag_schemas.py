@@ -147,12 +147,12 @@ class TagCleanupApplyResult(StrictTagModel):
 
 
 MODEL_TAG_CLEANUP_DISCLOSURE_VERSION: Literal[
-    "assistant-model-tag-cleanup-disclosure/v1"
-] = "assistant-model-tag-cleanup-disclosure/v1"
+    "assistant-model-tag-cleanup-disclosure/v2"
+] = "assistant-model-tag-cleanup-disclosure/v2"
 
 
 class ModelTagCleanupDisclosure(StrictTagModel):
-    version: Literal["assistant-model-tag-cleanup-disclosure/v1"]
+    version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
     shared_with_provider: list[str]
     never_shared: list[str]
     maximum_tags: int = Field(ge=1, le=500)
@@ -174,7 +174,7 @@ class ModelTagCleanupAvailability(StrictTagModel):
 
 
 class ModelTagCleanupStartRequest(StrictTagModel):
-    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v1"]
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
     consent: Literal[True]
 
 
@@ -182,6 +182,7 @@ class ModelTagCleanupSuggestionOut(StrictTagModel):
     id: str = Field(pattern=r"^[a-f0-9]{64}$")
     source: str
     target: str
+    origin: Literal["local-rule", "model"]
     confidence: Literal["high", "medium", "low"]
     reason: str = Field(min_length=1, max_length=512)
     source_track_count: int = Field(ge=1)
@@ -190,11 +191,11 @@ class ModelTagCleanupSuggestionOut(StrictTagModel):
 
 
 class ModelTagCleanupJobResult(StrictTagModel):
-    schema_version: Literal["assistant-model-tag-cleanup-job-result/v1"]
-    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v1"]
+    schema_version: Literal["assistant-model-tag-cleanup-job-result/v2"]
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
     role_id: Literal["tag_cleanup"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    engine_id: Literal["model-tag-cleanup/v1"]
+    engine_id: Literal["model-tag-cleanup/v2"]
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
     catalog_tags: int = Field(ge=1, le=500)
     suggestions: list[ModelTagCleanupSuggestionOut] = Field(max_length=100)
@@ -309,12 +310,12 @@ class LibraryTagPage(StrictTagModel):
 
 
 MODEL_TAGGING_DISCLOSURE_VERSION: Literal[
-    "assistant-model-music-tagging-disclosure/v2"
-] = "assistant-model-music-tagging-disclosure/v2"
+    "assistant-model-music-tagging-disclosure/v3"
+] = "assistant-model-music-tagging-disclosure/v3"
 
 
 class ModelTaggingDisclosure(StrictTagModel):
-    version: Literal["assistant-model-music-tagging-disclosure/v2"]
+    version: Literal["assistant-model-music-tagging-disclosure/v3"]
     shared_with_provider: list[str]
     never_shared: list[str]
     allowed_tags: list[str]
@@ -340,16 +341,16 @@ class ModelTaggingAvailability(StrictTagModel):
 
 class ModelTaggingStartRequest(StrictTagModel):
     force: bool = False
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v2"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v3"]
     consent: Literal[True]
 
 
 class ModelTaggingJobResult(StrictTagModel):
-    schema_version: Literal["assistant-model-music-tagging-job-result/v2"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v2"]
+    schema_version: Literal["assistant-model-music-tagging-job-result/v3"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v3"]
     role_id: Literal["music_tagger"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    analyzer_id: Literal["model-evidence-tagger/v2"]
+    analyzer_id: Literal["model-evidence-tagger/v3"]
     library_tracks: int = Field(ge=0)
     updated_profiles: int = Field(ge=0)
     unchanged_profiles: int = Field(ge=0)

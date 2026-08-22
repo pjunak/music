@@ -39,6 +39,7 @@ MODEL_EQ_DISCLOSURE = ModelEqDisclosure(
     shared_with_provider=[
         "The preset goal you type",
         "The fixed ten EQ band frequencies and supported gain limits",
+        "A deterministic local baseline and per-band safety envelope derived from the goal",
     ],
     never_shared=[
         "Songs, audio, waveforms, or library metadata",
@@ -53,7 +54,7 @@ class _ModelEqJobParameters(BaseModel):
 
     role_id: Literal["eq_assistant"]
     quality_evaluation_id: Literal["eq-quality-v1"]
-    disclosure_version: Literal["assistant-eq-draft-disclosure/v1"]
+    disclosure_version: Literal["assistant-eq-draft-disclosure/v2"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     request: EqDraftRequest

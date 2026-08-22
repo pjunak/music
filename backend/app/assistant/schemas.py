@@ -95,12 +95,12 @@ class PlaylistSuggestionResponse(StrictAssistantModel):
 
 
 MODEL_PLAYLIST_DISCLOSURE_VERSION: Literal[
-    "assistant-playlist-model-disclosure/v1"
-] = "assistant-playlist-model-disclosure/v1"
+    "assistant-playlist-model-disclosure/v2"
+] = "assistant-playlist-model-disclosure/v2"
 
 
 class ModelPlaylistDisclosure(StrictAssistantModel):
-    version: Literal["assistant-playlist-model-disclosure/v1"]
+    version: Literal["assistant-playlist-model-disclosure/v2"]
     shared_with_provider: list[str]
     never_shared: list[str]
     maximum_candidates: int = Field(ge=1, le=100)
@@ -120,21 +120,21 @@ class ModelPlaylistAvailability(StrictAssistantModel):
 
 class ModelPlaylistSuggestionStartRequest(StrictAssistantModel):
     request: PlaylistSuggestionRequest
-    disclosure_version: Literal["assistant-playlist-model-disclosure/v1"]
+    disclosure_version: Literal["assistant-playlist-model-disclosure/v2"]
     consent: Literal[True]
 
 
 class ModelPlaylistSuggestionJobResult(StrictAssistantModel):
     schema_version: Literal["assistant-playlist-suggestion-job-result/v1"]
-    disclosure_version: Literal["assistant-playlist-model-disclosure/v1"]
+    disclosure_version: Literal["assistant-playlist-model-disclosure/v2"]
     role_id: Literal["playlist_planner"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     suggestion: PlaylistSuggestionResponse
     usage: ProviderUsageSummary
 
 
-MODEL_EQ_DISCLOSURE_VERSION: Literal["assistant-eq-draft-disclosure/v1"] = (
-    "assistant-eq-draft-disclosure/v1"
+MODEL_EQ_DISCLOSURE_VERSION: Literal["assistant-eq-draft-disclosure/v2"] = (
+    "assistant-eq-draft-disclosure/v2"
 )
 
 
@@ -149,7 +149,7 @@ class EqDraftRequest(StrictAssistantModel):
 
 
 class ModelEqDisclosure(StrictAssistantModel):
-    version: Literal["assistant-eq-draft-disclosure/v1"]
+    version: Literal["assistant-eq-draft-disclosure/v2"]
     shared_with_provider: list[str]
     never_shared: list[str]
     may_incur_cost: bool
@@ -168,16 +168,16 @@ class ModelEqAvailability(StrictAssistantModel):
 
 class ModelEqDraftStartRequest(StrictAssistantModel):
     request: EqDraftRequest
-    disclosure_version: Literal["assistant-eq-draft-disclosure/v1"]
+    disclosure_version: Literal["assistant-eq-draft-disclosure/v2"]
     consent: Literal[True]
 
 
 class ModelEqDraftJobResult(StrictAssistantModel):
     schema_version: Literal["assistant-eq-draft-job-result/v1"]
-    disclosure_version: Literal["assistant-eq-draft-disclosure/v1"]
+    disclosure_version: Literal["assistant-eq-draft-disclosure/v2"]
     role_id: Literal["eq_assistant"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    engine_id: Literal["model-graphic-eq/v1"]
+    engine_id: Literal["model-graphic-eq/v2"]
     draft: EqPresetDraft
     usage: ProviderUsageSummary
 

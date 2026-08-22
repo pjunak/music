@@ -222,7 +222,7 @@ export function EqAssistantView() {
             normal Authoring import.
           </p>
         </div>
-        <span className="assistant-algorithm">model-graphic-eq/v1</span>
+        <span className="assistant-algorithm">model-graphic-eq/v2</span>
       </header>
 
       <div className="assistant-workbench">

@@ -224,8 +224,8 @@ describe("ModelTaggingPanel", () => {
       status: "succeeded",
       progress_current: 40,
       result: {
-        schema_version: "assistant-model-music-tagging-job-result/v2",
-        analyzer_id: "model-evidence-tagger/v2",
+        schema_version: "assistant-model-music-tagging-job-result/v3",
+        analyzer_id: "model-evidence-tagger/v3",
         library_tracks: 45,
         updated_profiles: 40,
         unchanged_profiles: 5,

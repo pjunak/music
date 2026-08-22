@@ -42,7 +42,7 @@ export function modelSuggestionFromJob(
   const suggestion = objectValue(result.suggestion);
   if (
     suggestion === null ||
-    suggestion.engine !== "model-playlist-planner/v1" ||
+    suggestion.engine !== "model-playlist-planner/v2" ||
     !Array.isArray(suggestion.candidates) ||
     objectValue(suggestion.intent) === null ||
     objectValue(suggestion.plan) === null

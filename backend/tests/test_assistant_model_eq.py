@@ -28,7 +28,7 @@ from app.models.background_job import BackgroundJob
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-eq-draft-disclosure/v1"
+DISCLOSURE_VERSION = "assistant-eq-draft-disclosure/v2"
 
 
 @pytest.fixture(autouse=True)
@@ -183,8 +183,11 @@ def test_eq_contract_builds_only_canonical_bands() -> None:
     ]
     assert draft.bands[3].gain == 2.0
     assert json.loads(observed[0].user_prompt)["goal"] == "warm wooden tavern"
-    assert "untrusted user data" in observed[0].system_prompt
+    assert "untrusted data" in observed[0].system_prompt
     assert "Example JSON shape" in observed[0].system_prompt
+    guidance = json.loads(observed[0].user_prompt)["local_guidance"]
+    assert guidance["matched_rules"] == ["warmth"]
+    assert guidance["bands"][3]["baseline_gain_db"] == 1.5
 
 
 def test_eq_contract_rejects_non_half_db_steps() -> None:
@@ -241,7 +244,7 @@ def test_eq_endpoints_are_consent_bound_durable_and_review_only(
     finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
     assert finished["kind"] == MODEL_EQ_DRAFT_JOB_KIND
     assert finished["result"]["draft"]["name"] == "Warm Tavern"
-    assert finished["result"]["engine_id"] == "model-graphic-eq/v1"
+    assert finished["result"]["engine_id"] == "model-graphic-eq/v2"
     assert finished["result"]["usage"]["attempted_requests"] == 1
     assert TEST_PROVIDER_API_KEY not in json.dumps(finished)
 

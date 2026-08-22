@@ -28,7 +28,7 @@ from app.models.playlist import Playlist
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-playlist-model-disclosure/v1"
+DISCLOSURE_VERSION = "assistant-playlist-model-disclosure/v2"
 
 
 @pytest.fixture(autouse=True)
@@ -284,7 +284,7 @@ def test_model_suggestion_is_path_free_durable_and_preview_only(
         "assistant-playlist-suggestion-job-result/v1"
     )
     assert finished["result"]["suggestion"]["engine"] == (
-        "model-playlist-planner/v1"
+        "model-playlist-planner/v2"
     )
     assert finished["result"]["usage"] == {
         "schema_version": "assistant-provider-usage/v1",

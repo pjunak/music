@@ -114,7 +114,7 @@ const modelTaggingUnavailable: ModelTaggingAvailability = {
   tracks_needing_tags: 120,
   estimated_provider_requests: 6,
   disclosure: {
-    version: "assistant-model-music-tagging-disclosure/v2",
+    version: "assistant-model-music-tagging-disclosure/v3",
     shared_with_provider: [],
     never_shared: [],
     allowed_tags: ["medieval", "tavern"],
@@ -135,7 +135,7 @@ const modelTagCleanupUnavailable: ModelTagCleanupAvailability = {
   manual_tags: 0,
   estimated_provider_requests: 0,
   disclosure: {
-    version: "assistant-model-tag-cleanup-disclosure/v1",
+    version: "assistant-model-tag-cleanup-disclosure/v2",
     shared_with_provider: [],
     never_shared: [],
     maximum_tags: 500,

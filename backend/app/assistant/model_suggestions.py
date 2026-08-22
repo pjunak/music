@@ -46,6 +46,7 @@ MODEL_PLAYLIST_DISCLOSURE = ModelPlaylistDisclosure(
         "Up to 100 locally prefiltered candidate IDs and descriptive metadata",
         "Candidate titles, artists, albums, origins, genres, durations, and BPM values",
         "Your manual tags, generated analysis tags, and numeric audio-signal summaries",
+        "The deterministic local ranking, default selection, sequence, and duration plan",
     ],
     never_shared=[
         "Audio files or cover artwork",
@@ -63,7 +64,7 @@ class _ModelSuggestionJobParameters(BaseModel):
 
     role_id: Literal["playlist_planner"]
     quality_evaluation_id: Literal["playlist-quality-v1"]
-    disclosure_version: Literal["assistant-playlist-model-disclosure/v1"]
+    disclosure_version: Literal["assistant-playlist-model-disclosure/v2"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     request: PlaylistSuggestionRequest

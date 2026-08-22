@@ -128,7 +128,7 @@ const suggestion: PlaylistSuggestion = {
 
 const modelSuggestion: PlaylistSuggestion = {
   ...suggestion,
-  engine: "model-playlist-planner/v1",
+  engine: "model-playlist-planner/v2",
 };
 
 const modelAvailability: ModelPlaylistAvailability = {
@@ -140,7 +140,7 @@ const modelAvailability: ModelPlaylistAvailability = {
   quality_evaluation_id: "playlist-quality-v1",
   job_kind: "assistant.model-playlist-suggestion",
   disclosure: {
-    version: "assistant-playlist-model-disclosure/v1",
+    version: "assistant-playlist-model-disclosure/v2",
     shared_with_provider: [
       "Your mood prompt and filters",
       "Up to 100 locally prefiltered candidate IDs and metadata",
@@ -161,7 +161,7 @@ function modelJob(
     status,
     parameters: {
       consent: true,
-      disclosure_version: "assistant-playlist-model-disclosure/v1",
+      disclosure_version: "assistant-playlist-model-disclosure/v2",
       request: {
         prompt: "misty medieval forest",
         target_minutes: 45,
@@ -174,7 +174,7 @@ function modelJob(
       status === "succeeded"
         ? {
             schema_version: "assistant-playlist-suggestion-job-result/v1",
-            disclosure_version: "assistant-playlist-model-disclosure/v1",
+            disclosure_version: "assistant-playlist-model-disclosure/v2",
             role_id: "playlist_planner",
             role_fingerprint: "a".repeat(64),
             suggestion: modelSuggestion,
@@ -444,7 +444,7 @@ describe("PlaylistBuilderView", () => {
     );
     expect(assistantApi.startModelPlaylistSuggestion).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: "misty medieval forest" }),
-      "assistant-playlist-model-disclosure/v1",
+      "assistant-playlist-model-disclosure/v2",
     );
     expect(
       await screen.findByRole("progressbar", {

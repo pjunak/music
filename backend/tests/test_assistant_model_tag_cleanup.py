@@ -99,8 +99,9 @@ def _reference_cleanup_model(
 ) -> StructuredModelResult:
     assert "Example JSON shape" in request.system_prompt
     payload = json.loads(request.user_prompt)
-    used = {item["tag"] for item in payload["used_tags"]}
-    allowed = used | set(payload["starter_tags"])
+    used = {item["tag"] for item in payload["candidate_sources"]}
+    allowed = {item["tag"] for item in payload["allowed_targets"]}
+    assert payload["remaining_suggestion_slots"] <= 100
     suggestions = [
         {
             "source": source,
@@ -270,6 +271,51 @@ def test_cleanup_model_reports_safe_schema_diagnostic() -> None:
     assert "suggestions.0.confidence" in invalid.value.diagnostic
 
 
+def test_cleanup_resolves_unambiguous_sources_without_provider_call() -> None:
+    def should_not_run(_request: StructuredModelRequest) -> StructuredModelResult:
+        raise AssertionError("deterministic cleanup must not call the provider")
+
+    suggestions = suggest_model_tag_cleanup(
+        [
+            TagUsage(tag="medival", track_count=3),
+            TagUsage(tag="medieval", track_count=12),
+            TagUsage(tag="taverns", track_count=2),
+        ],
+        should_not_run,
+    )
+
+    assert {(item.source, item.target) for item in suggestions} == {
+        ("medival", "medieval"),
+        ("taverns", "tavern"),
+    }
+    assert all(item.confidence == "high" for item in suggestions)
+
+
+def test_cleanup_model_receives_only_remaining_result_capacity() -> None:
+    observed_slots: list[int] = []
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        observed_slots.append(json.loads(request.user_prompt)["remaining_suggestion_slots"])
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
+                "suggestions": [],
+            },
+        )
+
+    suggest_model_tag_cleanup(
+        [
+            TagUsage(tag="medival", track_count=3),
+            TagUsage(tag="inn", track_count=2),
+        ],
+        execute,
+    )
+
+    assert observed_slots == [99]
+
+
 def test_reference_cleanup_model_passes_fixed_quality_suite() -> None:
     suite = load_tag_cleanup_quality_suite(_SUITE_PATH)
     result = evaluate_model_tag_cleanup(
@@ -304,11 +350,11 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     assert finished["result"]["evaluation"]["passed"] is True
     assert finished["result"]["usage"] == {
         "schema_version": "assistant-provider-usage/v1",
-        "attempted_requests": 8,
-        "input_tokens": 480,
-        "output_tokens": 120,
-        "input_tokens_reported_requests": 8,
-        "output_tokens_reported_requests": 8,
+        "attempted_requests": 5,
+        "input_tokens": 300,
+        "output_tokens": 75,
+        "input_tokens_reported_requests": 5,
+        "output_tokens_reported_requests": 5,
         "provider_model_ids": ["cleanup-response-model"],
         "provider_model_ids_truncated": False,
     }
@@ -342,10 +388,11 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
     assert status.json()["manual_tags"] == 2
     assert status.json()["estimated_provider_requests"] == 1
     assert status.json()["disclosure"] == {
-        "version": "assistant-model-tag-cleanup-disclosure/v1",
+        "version": "assistant-model-tag-cleanup-disclosure/v2",
         "shared_with_provider": [
-            "Your normalized manual tag names",
-            "The number of tracks using each manual tag",
+            "Manual source tags not already resolved by deterministic cleanup rules",
+            "Allowed existing or starter target tags",
+            "The number of tracks using each shared source or target tag",
             "The fixed D&D starter-tag vocabulary",
         ],
         "never_shared": [
@@ -364,7 +411,7 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
     started = auth_client.post(
         "/api/assistant/library-tags/catalog/model-cleanup-jobs",
         json={
-            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v1",
+            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v2",
             "consent": True,
         },
     )
@@ -377,6 +424,7 @@ def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(
             "id": finished["result"]["suggestions"][0]["id"],
             "source": "inn",
             "target": "tavern",
+            "origin": "model",
             "confidence": "high",
             "reason": "Synthetic reference synonym or spelling match",
             "source_track_count": 1,
@@ -429,7 +477,7 @@ def test_model_tag_cleanup_apply_rejects_stale_or_invented_selection(
     started = auth_client.post(
         "/api/assistant/library-tags/catalog/model-cleanup-jobs",
         json={
-            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v1",
+            "disclosure_version": "assistant-model-tag-cleanup-disclosure/v2",
             "consent": True,
         },
     )

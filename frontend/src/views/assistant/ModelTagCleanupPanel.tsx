@@ -395,7 +395,10 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
                       {suggestion.source} → {suggestion.target}
                     </strong>
                     <small>
-                      {suggestion.confidence} confidence · {suggestion.reason}
+                      {suggestion.origin === "local-rule"
+                        ? "local rule"
+                        : "model"}{" "}
+                      · {suggestion.confidence} confidence · {suggestion.reason}
                     </small>
                     <small>
                       {suggestion.source_track_count} source track

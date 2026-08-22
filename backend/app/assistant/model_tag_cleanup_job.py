@@ -17,6 +17,7 @@ from app.assistant.model_tag_cleanup import (
     MODEL_TAG_CLEANUP_ENGINE_ID,
     ModelTagCleanupSuggestion,
     suggest_model_tag_cleanup,
+    unresolved_model_cleanup_usage,
 )
 from app.assistant.providers.execution import (
     StructuredModelRequest,
@@ -28,7 +29,7 @@ from app.assistant.providers.service import (
     current_role_runtime_fingerprint,
 )
 from app.assistant.providers.usage import ProviderUsageAccumulator
-from app.assistant.tag_cleanup import tag_catalog_snapshot
+from app.assistant.tag_cleanup import build_tag_cleanup_preview, tag_catalog_snapshot
 from app.assistant.tag_schemas import (
     MODEL_TAG_CLEANUP_DISCLOSURE_VERSION,
     ModelTagCleanupAvailability,
@@ -47,8 +48,9 @@ MODEL_TAG_CLEANUP_JOB_KIND = "assistant.model-tag-cleanup"
 MODEL_TAG_CLEANUP_DISCLOSURE = ModelTagCleanupDisclosure(
     version=MODEL_TAG_CLEANUP_DISCLOSURE_VERSION,
     shared_with_provider=[
-        "Your normalized manual tag names",
-        "The number of tracks using each manual tag",
+        "Manual source tags not already resolved by deterministic cleanup rules",
+        "Allowed existing or starter target tags",
+        "The number of tracks using each shared source or target tag",
         "The fixed D&D starter-tag vocabulary",
     ],
     never_shared=[
@@ -66,7 +68,7 @@ class _ModelTagCleanupJobParameters(BaseModel):
 
     role_id: Literal["tag_cleanup"]
     quality_evaluation_id: Literal["tag-cleanup-quality-v1"]
-    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v1"]
+    disclosure_version: Literal["assistant-model-tag-cleanup-disclosure/v2"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -92,6 +94,7 @@ def model_tag_cleanup_availability(db: Session) -> ModelTagCleanupAvailability:
         else None
     )
     snapshot = tag_catalog_snapshot(db)
+    unresolved = unresolved_model_cleanup_usage(snapshot.usage)
     reason_code: str | None = None
     try:
         prepare_quality_gated_role_execution(
@@ -115,7 +118,7 @@ def model_tag_cleanup_availability(db: Session) -> ModelTagCleanupAvailability:
         job_kind=MODEL_TAG_CLEANUP_JOB_KIND,
         catalog_signature=snapshot.signature,
         manual_tags=len(snapshot.usage),
-        estimated_provider_requests=1 if snapshot.usage else 0,
+        estimated_provider_requests=1 if unresolved else 0,
         disclosure=MODEL_TAG_CLEANUP_DISCLOSURE,
     )
 
@@ -207,11 +210,20 @@ def run_model_tag_cleanup(
         context.checkpoint_result(usage.checkpoint())
         return result
 
+    unresolved = unresolved_model_cleanup_usage(snapshot.usage)
     context.update_progress(
         0,
         1,
-        phase="Waiting for tag cleanup model",
-        message="The provider is reviewing tag names and usage counts",
+        phase=(
+            "Waiting for tag cleanup model"
+            if unresolved
+            else "Applying deterministic cleanup rules"
+        ),
+        message=(
+            f"The provider is reviewing {len(unresolved)} unresolved tag names"
+            if unresolved
+            else "All cleanup candidates were resolved locally"
+        ),
     )
     suggestions = suggest_model_tag_cleanup(snapshot.usage, execute)
     context.check_cancelled()
@@ -219,6 +231,10 @@ def run_model_tag_cleanup(
         _require_unchanged_role(db, parameters)
 
     counts = {item.tag: item.track_count for item in snapshot.usage}
+    local_pairs = {
+        (item.source, item.target)
+        for item in build_tag_cleanup_preview(snapshot.usage).suggestions
+    }
     output = [
         ModelTagCleanupSuggestionOut(
             id=_suggestion_id(
@@ -228,6 +244,11 @@ def run_model_tag_cleanup(
             ),
             source=suggestion.source,
             target=suggestion.target,
+            origin=(
+                "local-rule"
+                if (suggestion.source, suggestion.target) in local_pairs
+                else "model"
+            ),
             confidence=suggestion.confidence,
             reason=suggestion.reason,
             source_track_count=counts[suggestion.source],
@@ -243,7 +264,7 @@ def run_model_tag_cleanup(
         message=f"Saved {len(output)} review-only suggestions",
     )
     return ModelTagCleanupJobResult(
-        schema_version="assistant-model-tag-cleanup-job-result/v1",
+        schema_version="assistant-model-tag-cleanup-job-result/v2",
         disclosure_version=parameters.disclosure_version,
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,

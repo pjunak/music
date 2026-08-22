@@ -8,11 +8,11 @@ import { isBackgroundJobActive } from "./backgroundJobs";
 export const MODEL_TAG_CLEANUP_JOB_KIND = "assistant.model-tag-cleanup";
 
 export interface ModelTagCleanupJobResult {
-  schema_version: "assistant-model-tag-cleanup-job-result/v1";
-  disclosure_version: "assistant-model-tag-cleanup-disclosure/v1";
+  schema_version: "assistant-model-tag-cleanup-job-result/v2";
+  disclosure_version: "assistant-model-tag-cleanup-disclosure/v2";
   role_id: "tag_cleanup";
   role_fingerprint: string;
-  engine_id: "model-tag-cleanup/v1";
+  engine_id: "model-tag-cleanup/v2";
   catalog_signature: string;
   catalog_tags: number;
   suggestions: ModelTagCleanupSuggestion[];
@@ -36,6 +36,7 @@ function suggestionFromUnknown(
     item.source.length === 0 ||
     typeof item.target !== "string" ||
     item.target.length === 0 ||
+    !["local-rule", "model"].includes(String(item.origin)) ||
     !["high", "medium", "low"].includes(String(item.confidence)) ||
     typeof item.reason !== "string" ||
     item.reason.length === 0 ||
@@ -60,13 +61,13 @@ export function modelTagCleanupResultFromJob(
 ): ModelTagCleanupJobResult | null {
   const result = job?.result;
   if (
-    result?.schema_version !== "assistant-model-tag-cleanup-job-result/v1" ||
+    result?.schema_version !== "assistant-model-tag-cleanup-job-result/v2" ||
     result.disclosure_version !==
-      "assistant-model-tag-cleanup-disclosure/v1" ||
+      "assistant-model-tag-cleanup-disclosure/v2" ||
     result.role_id !== "tag_cleanup" ||
     typeof result.role_fingerprint !== "string" ||
     !SIGNATURE.test(result.role_fingerprint) ||
-    result.engine_id !== "model-tag-cleanup/v1" ||
+    result.engine_id !== "model-tag-cleanup/v2" ||
     typeof result.catalog_signature !== "string" ||
     !SIGNATURE.test(result.catalog_signature) ||
     !isCount(result.catalog_tags) ||

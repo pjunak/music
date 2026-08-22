@@ -5,8 +5,8 @@ import { isBackgroundJobActive } from "./backgroundJobs";
 export const MODEL_TAGGING_JOB_KIND = "assistant.model-music-tagging";
 
 export interface ModelTaggingJobResult {
-  schema_version: "assistant-model-music-tagging-job-result/v2";
-  analyzer_id: "model-evidence-tagger/v2";
+  schema_version: "assistant-model-music-tagging-job-result/v3";
+  analyzer_id: "model-evidence-tagger/v3";
   library_tracks: number;
   updated_profiles: number;
   unchanged_profiles: number;
@@ -26,8 +26,8 @@ export function modelTaggingResultFromJob(
   const isCount = (value: unknown): value is number =>
     typeof value === "number" && Number.isInteger(value) && value >= 0;
   if (
-    result?.schema_version !== "assistant-model-music-tagging-job-result/v2" ||
-    result.analyzer_id !== "model-evidence-tagger/v2" ||
+    result?.schema_version !== "assistant-model-music-tagging-job-result/v3" ||
+    result.analyzer_id !== "model-evidence-tagger/v3" ||
     !isCount(result.library_tracks) ||
     !isCount(result.updated_profiles) ||
     !isCount(result.unchanged_profiles) ||

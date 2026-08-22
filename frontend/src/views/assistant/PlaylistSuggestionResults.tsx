@@ -123,7 +123,7 @@ export function PlaylistSuggestionResults({
         <div className="assistant-section-heading">
           <div>
             <p className="assistant-eyebrow">
-              {suggestion.engine === "model-playlist-planner/v1"
+              {suggestion.engine === "model-playlist-planner/v2"
                 ? "Ranked with connected model"
                 : "Ranked locally"}
             </p>

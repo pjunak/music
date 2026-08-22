@@ -131,7 +131,7 @@ export function PlaylistBuilderView() {
   const activeModelJob =
     modelJob !== null && isModelSuggestionJobActive(modelJob) ? modelJob : null;
   const modelJobActive = activeModelJob !== null;
-  const suggestionUsesModel = suggestion?.engine === "model-playlist-planner/v1";
+  const suggestionUsesModel = suggestion?.engine === "model-playlist-planner/v2";
   const importSourceName = suggestionUsesModel
     ? "Assistant model playlist builder"
     : "Assistant local playlist builder";

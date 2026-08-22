@@ -328,7 +328,7 @@ export interface PlaylistSuggestionRequest {
 }
 
 export const MODEL_PLAYLIST_DISCLOSURE_VERSION =
-  "assistant-playlist-model-disclosure/v1" as const;
+  "assistant-playlist-model-disclosure/v2" as const;
 
 export interface ModelPlaylistDisclosure {
   version: typeof MODEL_PLAYLIST_DISCLOSURE_VERSION;
@@ -350,7 +350,7 @@ export interface ModelPlaylistAvailability {
 }
 
 export const MODEL_EQ_DISCLOSURE_VERSION =
-  "assistant-eq-draft-disclosure/v1" as const;
+  "assistant-eq-draft-disclosure/v2" as const;
 
 export interface ModelEqDisclosure {
   version: typeof MODEL_EQ_DISCLOSURE_VERSION;
@@ -379,7 +379,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v2" as const;
+  "assistant-model-music-tagging-disclosure/v3" as const;
 
 export interface ModelTaggingDisclosure {
   version: typeof MODEL_TAGGING_DISCLOSURE_VERSION;
@@ -407,7 +407,7 @@ export interface ModelTaggingAvailability {
 }
 
 export const MODEL_TAG_CLEANUP_DISCLOSURE_VERSION =
-  "assistant-model-tag-cleanup-disclosure/v1" as const;
+  "assistant-model-tag-cleanup-disclosure/v2" as const;
 
 export interface ModelTagCleanupDisclosure {
   version: typeof MODEL_TAG_CLEANUP_DISCLOSURE_VERSION;
@@ -435,6 +435,7 @@ export interface ModelTagCleanupSuggestion {
   id: string;
   source: string;
   target: string;
+  origin: "local-rule" | "model";
   confidence: "high" | "medium" | "low";
   reason: string;
   source_track_count: number;
