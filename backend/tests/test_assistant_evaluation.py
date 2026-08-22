@@ -61,6 +61,83 @@ class ReorderedEngine:
         )
 
 
+class EquivalentCoreEngine:
+    engine_id = "evaluation-equivalent-core/v1"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def suggest(
+        self,
+        tracks: Sequence[TrackLike],
+        request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
+        signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
+    ) -> PlaylistSuggestionResponse:
+        response = local_playlist_planner.suggest(
+            tracks,
+            request,
+            profiles=profiles,
+            manual_tags=manual_tags,
+            signal_profiles=signal_profiles,
+        )
+        self.calls += 1
+        candidates = list(response.candidates)
+        if self.calls % 2 == 0:
+            candidates = [candidates[1], candidates[0], *reversed(candidates[2:])]
+        return response.model_copy(
+            update={"engine": self.engine_id, "candidates": candidates}
+        )
+
+
+class ChangedPlaybackSequenceEngine:
+    engine_id = "evaluation-changed-playback-sequence/v1"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def suggest(
+        self,
+        tracks: Sequence[TrackLike],
+        request: PlaylistSuggestionRequest,
+        profiles: Mapping[int, TrackAnalysisProfile] | None = None,
+        manual_tags: Mapping[int, Sequence[str]] | None = None,
+        signal_profiles: Mapping[int, TrackSignalProfile] | None = None,
+    ) -> PlaylistSuggestionResponse:
+        response = local_playlist_planner.suggest(
+            tracks,
+            request,
+            profiles=profiles,
+            manual_tags=manual_tags,
+            signal_profiles=signal_profiles,
+        )
+        self.calls += 1
+        candidates = list(response.candidates)
+        if self.calls % 2 == 0:
+            selected = [
+                candidate for candidate in candidates if candidate.default_selected
+            ]
+            swapped_positions = {
+                selected[0].track_id: selected[1].sequence_position,
+                selected[1].track_id: selected[0].sequence_position,
+            }
+            candidates = [
+                candidate.model_copy(
+                    update={
+                        "sequence_position": swapped_positions.get(
+                            candidate.track_id,
+                            candidate.sequence_position,
+                        )
+                    }
+                )
+                for candidate in candidates
+            ]
+        return response.model_copy(
+            update={"engine": self.engine_id, "candidates": candidates}
+        )
+
+
 class UnknownTrackEngine:
     engine_id = "evaluation-unknown-track/v1"
 
@@ -149,14 +226,55 @@ def test_evaluator_reports_ranking_regressions() -> None:
     assert "recall_at_k below threshold" in result.cases[0].failures
 
 
-def test_evaluator_reports_nondeterministic_local_contract() -> None:
+def test_evaluator_checks_repeated_response_quality_and_top_candidate_set() -> None:
     suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
 
     result = evaluate_playlist_engine(ReorderedEngine(alternate=True), suite)
 
     assert result.passed is False
     assert result.cases[0].metrics.deterministic is False
-    assert result.cases[0].failures == ["engine response is not deterministic"]
+    assert result.cases[0].exact_response_match is False
+    assert result.cases[0].repeated_top_track_ids == [103, 104]
+    assert "repeated response precision_at_k below threshold" in result.cases[0].failures
+    assert (
+        "repeated response changed the top candidate set: "
+        "first [101, 102], repeated [103, 104]"
+    ) in result.cases[0].failures
+
+
+def test_evaluator_accepts_equivalent_core_with_incidental_order_changes() -> None:
+    suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
+
+    result = evaluate_playlist_engine(EquivalentCoreEngine(), suite)
+
+    assert result.passed is True
+    assert result.cases[0].metrics.deterministic is True
+    assert result.cases[0].exact_response_match is False
+    assert result.cases[0].top_track_ids == [101, 102]
+    assert result.cases[0].repeated_top_track_ids == [102, 101]
+    assert result.cases[0].selected_track_ids == [101, 102]
+    assert result.cases[0].repeated_selected_track_ids == [101, 102]
+    assert (
+        result.cases[0].response_fingerprint
+        != result.cases[0].repeated_response_fingerprint
+    )
+    assert result.cases[0].failures == []
+
+
+def test_evaluator_rejects_changed_selected_playback_sequence() -> None:
+    suite = one_case_suite(load_evaluation_suite(SUITE_PATH))
+
+    result = evaluate_playlist_engine(ChangedPlaybackSequenceEngine(), suite)
+
+    assert result.passed is False
+    assert result.cases[0].metrics.deterministic is False
+    assert result.cases[0].top_track_ids == result.cases[0].repeated_top_track_ids
+    assert result.cases[0].selected_track_ids == [101, 102]
+    assert result.cases[0].repeated_selected_track_ids == [102, 101]
+    assert result.cases[0].failures == [
+        "repeated response changed the selected playback sequence: "
+        "first [101, 102], repeated [102, 101]"
+    ]
 
 
 def test_evaluator_rejects_unknown_model_track_ids() -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -179,7 +180,12 @@ class EvaluationMetrics(StrictEvaluationModel):
     unknown_candidate_count: int = Field(ge=0)
     excluded_candidate_count: int = Field(ge=0)
     source_mismatch_count: int = Field(ge=0)
-    deterministic: bool | None
+    deterministic: bool | None = Field(
+        description=(
+            "Whether repeated runs preserved top-k membership and the selected "
+            "playback sequence."
+        )
+    )
     contract_valid: bool
 
 
@@ -192,6 +198,10 @@ class EvaluationCaseResult(StrictEvaluationModel):
     top_track_ids: list[int]
     selected_track_ids: list[int]
     response_fingerprint: str
+    repeated_top_track_ids: list[int] | None = None
+    repeated_selected_track_ids: list[int] | None = None
+    repeated_response_fingerprint: str | None = None
+    exact_response_match: bool | None = None
 
 
 class EvaluationSummary(StrictEvaluationModel):
@@ -236,49 +246,37 @@ def _mean(values: Iterable[float]) -> float | None:
     return round(sum(collected) / len(collected), 4)
 
 
-def _evaluate_case(
+@dataclass(frozen=True)
+class _ResponseAssessment:
+    metrics: EvaluationMetrics
+    failures: tuple[str, ...]
+    top_track_ids: tuple[int, ...]
+    selected_track_ids: tuple[int, ...]
+    response_fingerprint: str
+
+
+def _assess_response(
     engine: PlaylistSuggestionEngine,
     case: PlaylistEvaluationCase,
-) -> EvaluationCaseResult:
-    tracks = list(case.tracks)
-    profiles = {
-        track.id: track.analysis.to_engine_profile()
-        for track in tracks
-        if track.analysis is not None
-    }
-    manual_tags = {
-        track.id: tuple(track.manual_tags)
-        for track in tracks
-        if track.manual_tags
-    }
-    signals = {
-        track.id: track.signal
-        for track in tracks
-        if track.signal is not None
-    }
-    response = engine.suggest(
-        tracks,
-        case.request,
-        profiles=profiles,
-        manual_tags=manual_tags,
-        signal_profiles=signals,
-    )
-    deterministic: bool | None = None
-    if case.thresholds.require_deterministic:
-        repeated = engine.suggest(
-            tracks,
-            case.request,
-            profiles=profiles,
-            manual_tags=manual_tags,
-            signal_profiles=signals,
-        )
-        deterministic = response.model_dump(mode="json") == repeated.model_dump(mode="json")
-
+    tracks: list[EvaluationTrack],
+    response: PlaylistSuggestionResponse,
+) -> _ResponseAssessment:
     candidates = response.candidates
     candidate_ids = [candidate.track_id for candidate in candidates]
     top_ids = candidate_ids[: case.expectations.top_k]
     selected = [candidate for candidate in candidates if candidate.default_selected]
     selected_ids = [candidate.track_id for candidate in selected]
+    selected_sequence_ids = [
+        candidate.track_id
+        for candidate in sorted(
+            selected,
+            key=lambda candidate: (
+                candidate.sequence_position is None,
+                candidate.sequence_position or 0,
+                candidate_ids.index(candidate.track_id),
+            ),
+        )
+    ]
     relevant = set(case.expectations.relevant_track_ids)
     relevant_in_top = sum(track_id in relevant for track_id in top_ids)
     precision = relevant_in_top / len(top_ids) if top_ids else 0.0
@@ -381,7 +379,7 @@ def _evaluate_case(
         unknown_candidate_count=unknown_count,
         excluded_candidate_count=excluded_count,
         source_mismatch_count=source_mismatch_count,
-        deterministic=deterministic,
+        deterministic=None,
         contract_valid=contract_valid,
     )
     thresholds = case.thresholds
@@ -406,10 +404,102 @@ def _evaluate_case(
         failures.append("reason_coverage below threshold")
     if metrics.forbidden_candidate_count > thresholds.max_forbidden_candidates:
         failures.append("forbidden candidate limit exceeded")
-    if thresholds.require_deterministic and metrics.deterministic is not True:
-        failures.append("engine response is not deterministic")
     if not metrics.contract_valid:
         failures.append("suggestion response violates the evaluation contract")
+
+    return _ResponseAssessment(
+        metrics=metrics,
+        failures=tuple(failures),
+        top_track_ids=tuple(top_ids),
+        selected_track_ids=tuple(selected_sequence_ids),
+        response_fingerprint=_response_fingerprint(response),
+    )
+
+
+def _format_track_ids(track_ids: tuple[int, ...]) -> str:
+    return "[" + ", ".join(str(track_id) for track_id in track_ids) + "]"
+
+
+def _evaluate_case(
+    engine: PlaylistSuggestionEngine,
+    case: PlaylistEvaluationCase,
+) -> EvaluationCaseResult:
+    tracks = list(case.tracks)
+    profiles = {
+        track.id: track.analysis.to_engine_profile()
+        for track in tracks
+        if track.analysis is not None
+    }
+    manual_tags = {
+        track.id: tuple(track.manual_tags)
+        for track in tracks
+        if track.manual_tags
+    }
+    signals = {
+        track.id: track.signal
+        for track in tracks
+        if track.signal is not None
+    }
+
+    def suggest() -> PlaylistSuggestionResponse:
+        return engine.suggest(
+            tracks,
+            case.request,
+            profiles=profiles,
+            manual_tags=manual_tags,
+            signal_profiles=signals,
+        )
+
+    response = suggest()
+    assessment = _assess_response(engine, case, tracks, response)
+    metrics = assessment.metrics
+    failures = list(assessment.failures)
+    repeated_assessment: _ResponseAssessment | None = None
+    exact_response_match: bool | None = None
+
+    if case.thresholds.require_deterministic:
+        repeated = suggest()
+        repeated_assessment = _assess_response(engine, case, tracks, repeated)
+        # Exact equality remains useful diagnostic evidence, but model wording and
+        # tie ordering are not quality failures when the operator-visible choices
+        # and both independently validated responses remain equivalent.
+        exact_response_match = (
+            assessment.response_fingerprint
+            == repeated_assessment.response_fingerprint
+        )
+        top_candidates_stable = set(assessment.top_track_ids) == set(
+            repeated_assessment.top_track_ids
+        )
+        selected_sequence_stable = (
+            assessment.selected_track_ids
+            == repeated_assessment.selected_track_ids
+        )
+        metrics = metrics.model_copy(
+            update={
+                "deterministic": top_candidates_stable
+                and selected_sequence_stable
+            }
+        )
+
+        if not exact_response_match:
+            failures.extend(
+                f"repeated response {failure}"
+                for failure in repeated_assessment.failures
+            )
+        if not top_candidates_stable:
+            failures.append(
+                "repeated response changed the top candidate set: "
+                f"first {_format_track_ids(assessment.top_track_ids)}, "
+                "repeated "
+                f"{_format_track_ids(repeated_assessment.top_track_ids)}"
+            )
+        if not selected_sequence_stable:
+            failures.append(
+                "repeated response changed the selected playback sequence: "
+                f"first {_format_track_ids(assessment.selected_track_ids)}, "
+                "repeated "
+                f"{_format_track_ids(repeated_assessment.selected_track_ids)}"
+            )
 
     return EvaluationCaseResult(
         id=case.id,
@@ -417,9 +507,25 @@ def _evaluate_case(
         passed=not failures,
         metrics=metrics,
         failures=failures,
-        top_track_ids=top_ids,
-        selected_track_ids=selected_ids,
-        response_fingerprint=_response_fingerprint(response),
+        top_track_ids=list(assessment.top_track_ids),
+        selected_track_ids=list(assessment.selected_track_ids),
+        response_fingerprint=assessment.response_fingerprint,
+        repeated_top_track_ids=(
+            list(repeated_assessment.top_track_ids)
+            if repeated_assessment is not None
+            else None
+        ),
+        repeated_selected_track_ids=(
+            list(repeated_assessment.selected_track_ids)
+            if repeated_assessment is not None
+            else None
+        ),
+        repeated_response_fingerprint=(
+            repeated_assessment.response_fingerprint
+            if repeated_assessment is not None
+            else None
+        ),
+        exact_response_match=exact_response_match,
     )
 
 
