@@ -156,7 +156,7 @@ const qualityEvaluation: ModelQualityEvaluation = {
     "No songs or live library data are sent."
   ),
   status: "never",
-  suite_id: "local-dnd-playlist-baseline-v2",
+  suite_id: "local-dnd-playlist-baseline-v3",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -183,7 +183,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Music tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "dnd-evidence-tagging-baseline-v3",
+  suite_id: "dnd-evidence-tagging-baseline-v4",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -319,7 +319,9 @@ describe("AssistantAiSetupView", () => {
     expect(
       within(connectionCard as HTMLElement).getByText("None confirmed"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Test model" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Test model and allow" }),
+    ).toBeDisabled();
     expect(
       screen.getByText(/Verification did not confirm Structured text/),
     ).toBeInTheDocument();
@@ -538,7 +540,7 @@ describe("AssistantAiSetupView", () => {
     );
   });
 
-  it("saves, tests, and then enables one model task", async () => {
+  it("saves, tests, and automatically allows one model task", async () => {
     const user = userEvent.setup();
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
     const configuredRole: ModelRole = {
@@ -578,6 +580,12 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     await user.selectOptions(await screen.findByLabelText("Connection"), connection.id);
+    const allowCheckbox = screen.getByLabelText(
+      "Allow this model for this task",
+    );
+    expect(allowCheckbox.closest(".assistant-role-heading")).not.toBeNull();
+    expect(screen.getByRole("group", { name: "Request settings" })).toBeVisible();
+    expect(screen.getByLabelText("Provider default")).toBeVisible();
     const modelPicker = screen.getByLabelText("Model");
     await user.click(modelPicker);
     expect(screen.getByText("2 available models")).toBeInTheDocument();
@@ -588,7 +596,6 @@ describe("AssistantAiSetupView", () => {
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "planner-large" }));
     expect(modelPicker).toHaveValue("planner-large");
-    await user.click(screen.getByText("Request settings"));
     await user.click(screen.getByLabelText("Off"));
     await user.click(screen.getByRole("button", { name: "Save task" }));
 
@@ -605,15 +612,14 @@ describe("AssistantAiSetupView", () => {
         },
       ),
     );
-    await user.click(await screen.findByRole("button", { name: "Test model" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Test model and allow" }),
+    );
     await waitFor(() =>
       expect(assistantProvidersApi.testRole).toHaveBeenCalledWith(
         "playlist_planner",
       ),
     );
-    await user.click(screen.getByLabelText("Allow this model for this task"));
-    await user.click(screen.getByRole("button", { name: "Save task" }));
-
     await waitFor(() =>
       expect(assistantProvidersApi.updateRole).toHaveBeenLastCalledWith(
         "playlist_planner",
@@ -627,6 +633,63 @@ describe("AssistantAiSetupView", () => {
         },
       ),
     );
+    expect(
+      screen.getByLabelText("Allow this model for this task"),
+    ).toBeChecked();
+    expect(toast.success).toHaveBeenCalledWith(
+      "Model tested and allowed",
+      "Playlist planner",
+    );
+  });
+
+  it("keeps a passed model disabled when the automatic allow save fails", async () => {
+    const user = userEvent.setup();
+    const configuredRole: ModelRole = {
+      ...role,
+      connection_id: connection.id,
+      connection_name: connection.name,
+      model_id: "planner-large",
+      verification_status: "verified",
+    };
+    const testedRole: ModelRole = {
+      ...configuredRole,
+      conformance_status: "passed",
+      last_conformance_at: "2026-08-19T11:00:00Z",
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([configuredRole]);
+    vi.mocked(assistantProvidersApi.testRole).mockResolvedValue({
+      role: testedRole,
+      passed: true,
+      error_code: null,
+      contract_version: "assistant-provider-conformance/v3",
+      provider_model_id: "planner-large-2026",
+      finish_reason: "stop",
+      input_tokens: 42,
+      output_tokens: 18,
+      duration_ms: 812,
+    });
+    vi.mocked(assistantProvidersApi.updateRole).mockRejectedValue(
+      new Error("Role changed while the model test was running."),
+    );
+    render(<AssistantAiSetupView />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Test model and allow" }),
+    );
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Model passed but could not be allowed",
+        "Role changed while the model test was running.",
+      ),
+    );
+    expect(
+      screen.getByLabelText("Allow this model for this task"),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(/Model test passed\. Select “Allow for task”/),
+    ).toBeVisible();
   });
 
   it("keeps a failed model test visible and the task disabled", async () => {
@@ -659,7 +722,9 @@ describe("AssistantAiSetupView", () => {
     });
     render(<AssistantAiSetupView />);
 
-    await user.click(await screen.findByRole("button", { name: "Test model" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Test model and allow" }),
+    );
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -947,7 +1012,9 @@ describe("AssistantAiSetupView", () => {
     expect(
       screen.queryByRole("button", { name: "Run quality check" }),
     ).toBeNull();
-    expect(screen.getByRole("button", { name: "Test model" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Test model and allow" }),
+    ).toBeEnabled();
     expect(
       within(screen.getByRole("log")).getByText(
         /Test this model configuration before using the role\./,

@@ -34,6 +34,10 @@ const MODEL_TEST_FAILURES: Record<string, string> = {
   invalid_response: "The provider returned a response we could not understand.",
   invalid_structured_output:
     "The model did not return the required machine-readable JSON object.",
+  empty_structured_output:
+    "The model returned an empty response instead of the required JSON object.",
+  incomplete_structured_output:
+    "The model ran out of response tokens before completing the JSON object.",
   conformance_mismatch:
     "The model did not copy the one-time test values exactly.",
   timeout: "The model did not respond within this task's timeout.",

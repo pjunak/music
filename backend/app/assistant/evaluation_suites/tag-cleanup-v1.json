@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-model-tag-cleanup-evaluation/v1",
-  "id": "dnd-tag-cleanup-baseline-v1",
+  "id": "dnd-tag-cleanup-baseline-v2",
   "cases": [
     {
       "id": "inn-to-tavern",
@@ -111,6 +111,41 @@
       "required_pairs": [{"source": "ocean voyage", "target": "seafaring"}],
       "forbidden_pairs": [{"source": "travel", "target": "seafaring"}],
       "maximum_suggestions": 1
+    },
+    {
+      "id": "investigation-rest-synonyms",
+      "description": "Normalizes two clear scene synonyms in one structured response",
+      "used_tags": [
+        {"tag": "detective work", "track_count": 6},
+        {"tag": "quiet sleep", "track_count": 4},
+        {"tag": "investigation", "track_count": 13},
+        {"tag": "rest", "track_count": 15}
+      ],
+      "required_pairs": [
+        {"source": "detective work", "target": "investigation"},
+        {"source": "quiet sleep", "target": "rest"}
+      ],
+      "forbidden_pairs": [],
+      "maximum_suggestions": 2
+    },
+    {
+      "id": "melancholy-romantic-synonyms",
+      "description": "Normalizes explicit mood synonyms without merging the canonical moods together",
+      "used_tags": [
+        {"tag": "sad", "track_count": 5},
+        {"tag": "love theme", "track_count": 3},
+        {"tag": "melancholy", "track_count": 12},
+        {"tag": "romantic", "track_count": 9}
+      ],
+      "required_pairs": [
+        {"source": "sad", "target": "melancholy"},
+        {"source": "love theme", "target": "romantic"}
+      ],
+      "forbidden_pairs": [
+        {"source": "sad", "target": "romantic"},
+        {"source": "love theme", "target": "melancholy"}
+      ],
+      "maximum_suggestions": 2
     }
   ]
 }

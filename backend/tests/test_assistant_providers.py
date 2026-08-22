@@ -277,10 +277,10 @@ def test_playlist_model_quality_job_persists_progress_and_current_gate(
     job_id = started.json()["id"]
     finished = _wait_for_job(auth_client, job_id, {"succeeded"})
     assert finished["kind"] == PLAYLIST_QUALITY_JOB_KIND
-    assert finished["progress_current"] == 8
-    assert finished["progress_total"] == 8
+    assert finished["progress_current"] == 9
+    assert finished["progress_total"] == 9
     assert finished["result"]["evaluation"]["passed"] is True
-    assert finished["result"]["evaluation"]["summary"]["passed_cases"] == 8
+    assert finished["result"]["evaluation"]["summary"]["passed_cases"] == 9
     assert TEST_PROVIDER_API_KEY not in json.dumps(finished)
     assert "path" not in json.dumps(finished["parameters"])
 
@@ -304,9 +304,9 @@ def test_playlist_model_quality_job_persists_progress_and_current_gate(
                 "No songs or live library data are sent."
             ),
             "status": "passed",
-            "suite_id": "local-dnd-playlist-baseline-v2",
-            "passed_cases": 8,
-            "total_cases": 8,
+            "suite_id": "local-dnd-playlist-baseline-v3",
+            "passed_cases": 9,
+            "total_cases": 9,
             "last_job_id": job_id,
             "last_evaluated_at": quality.json()[0]["last_evaluated_at"],
         }
@@ -378,7 +378,7 @@ def test_playlist_quality_status_is_stale_when_suite_version_changes(
 
     assert quality.status_code == 200
     assert quality.json()[0]["status"] == "stale"
-    assert quality.json()[0]["suite_id"] == "local-dnd-playlist-baseline-v2"
+    assert quality.json()[0]["suite_id"] == "local-dnd-playlist-baseline-v3"
     assert quality.json()[0]["last_job_id"] == finished["id"]
 
 
@@ -402,10 +402,10 @@ def test_failed_playlist_quality_is_a_completed_report_not_a_broken_job(
     ).json()[0]
 
     assert finished["result"]["evaluation"]["passed"] is False
-    assert finished["result"]["evaluation"]["summary"]["failed_cases"] == 8
+    assert finished["result"]["evaluation"]["summary"]["failed_cases"] == 9
     assert quality["status"] == "failed"
     assert quality["passed_cases"] == 0
-    assert quality["total_cases"] == 8
+    assert quality["total_cases"] == 9
 
 
 def test_every_model_role_has_a_runtime_contract() -> None:

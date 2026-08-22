@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v2",
-  "id": "dnd-evidence-tagging-baseline-v3",
+  "id": "dnd-evidence-tagging-baseline-v4",
   "cases": [
     {
       "id": "medieval-tavern-dance",
@@ -178,6 +178,44 @@
       },
       "required_tags": ["medieval", "temple", "mysterious"],
       "forbidden_tags": ["tavern", "dancing", "festive"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "village-banquet",
+      "description": "Recognizes an explicit village feast without inventing danger or dungeon context",
+      "track": {
+        "track_id": 10,
+        "title": "Lantern Feast in Willow Village",
+        "display_title": "",
+        "artist": "The Harvest Players",
+        "album": "Village Banquets and Festivals",
+        "origin": "Willow Hamlet",
+        "genre": "festive folk",
+        "length_s": 232.0,
+        "bpm": 112
+      },
+      "required_tags": ["village", "feast", "festive"],
+      "forbidden_tags": ["combat", "dungeon", "dark"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "melancholy-ruins-expedition",
+      "description": "Recognizes an explicit melancholy ruins expedition without romantic or festive tags",
+      "track": {
+        "track_id": 11,
+        "title": "Sorrow among the Ruins",
+        "display_title": "",
+        "artist": "The Ashen Cartographers",
+        "album": "Melancholy Expedition",
+        "origin": "Ancient Ruined Kingdom",
+        "genre": "melancholic ambient",
+        "length_s": 287.0,
+        "bpm": 68
+      },
+      "required_tags": ["ruins", "exploration", "melancholy"],
+      "forbidden_tags": ["romantic", "festive", "combat"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1
     }

@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.assistant.providers.execution import StructuredModelRequest, StructuredModelResult
 from app.assistant.schema_diagnostics import safe_validation_diagnostic
@@ -121,6 +128,14 @@ class EqBandExpectation(_StrictModel):
     minimum_gain_db: float = Field(ge=-12.0, le=12.0)
     maximum_gain_db: float = Field(ge=-12.0, le=12.0)
 
+    @model_validator(mode="after")
+    def valid_band_range(self) -> EqBandExpectation:
+        if self.frequency_hz not in EQ_FREQUENCIES:
+            raise ValueError("EQ expectation must use a canonical band frequency")
+        if self.minimum_gain_db > self.maximum_gain_db:
+            raise ValueError("EQ expectation minimum cannot exceed its maximum")
+        return self
+
 
 class EqQualityCase(_StrictModel):
     id: str = Field(min_length=1, max_length=128)
@@ -128,11 +143,25 @@ class EqQualityCase(_StrictModel):
     goal: str = Field(min_length=2, max_length=1000)
     expectations: list[EqBandExpectation] = Field(min_length=1, max_length=10)
 
+    @model_validator(mode="after")
+    def unique_expected_bands(self) -> EqQualityCase:
+        frequencies = [item.frequency_hz for item in self.expectations]
+        if len(set(frequencies)) != len(frequencies):
+            raise ValueError("EQ expectation frequencies must be unique within a case")
+        return self
+
 
 class EqQualitySuite(_StrictModel):
     schema_version: Literal["assistant-eq-quality/v1"]
     id: str = Field(min_length=1, max_length=128)
     cases: list[EqQualityCase] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_case_ids(self) -> EqQualitySuite:
+        case_ids = [case.id for case in self.cases]
+        if len(set(case_ids)) != len(case_ids):
+            raise ValueError("case IDs must be unique within an EQ suite")
+        return self
 
 
 class EqQualityCaseResult(_StrictModel):

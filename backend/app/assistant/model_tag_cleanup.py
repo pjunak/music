@@ -117,6 +117,9 @@ class TagCleanupQualityCase(_StrictModel):
 
     @model_validator(mode="after")
     def valid_expectations(self) -> TagCleanupQualityCase:
+        used_tags = [item.tag for item in self.used_tags]
+        if len(set(used_tags)) != len(used_tags):
+            raise ValueError("used cleanup tags must be unique")
         required = {(item.source, item.target) for item in self.required_pairs}
         forbidden = {(item.source, item.target) for item in self.forbidden_pairs}
         if required & forbidden:
@@ -125,6 +128,24 @@ class TagCleanupQualityCase(_StrictModel):
             raise ValueError("required cleanup pairs must be unique")
         if len(forbidden) != len(self.forbidden_pairs):
             raise ValueError("forbidden cleanup pairs must be unique")
+        known_sources = set(used_tags)
+        if unknown_sources := sorted(
+            {source for source, _target in required | forbidden} - known_sources
+        ):
+            raise ValueError(
+                f"cleanup expectations reference unknown sources: {unknown_sources}"
+            )
+        allowed_targets = known_sources | _STARTER_TAG_SET
+        if unknown_targets := sorted(
+            {target for _source, target in required | forbidden} - allowed_targets
+        ):
+            raise ValueError(
+                f"cleanup expectations reference unknown targets: {unknown_targets}"
+            )
+        if len(required) > self.maximum_suggestions:
+            raise ValueError(
+                "maximum suggestions cannot be smaller than the required pairs"
+            )
         return self
 
 
@@ -132,6 +153,13 @@ class TagCleanupQualitySuite(_StrictModel):
     schema_version: Literal["assistant-model-tag-cleanup-evaluation/v1"]
     id: str = Field(min_length=1, max_length=128)
     cases: list[TagCleanupQualityCase] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_case_ids(self) -> TagCleanupQualitySuite:
+        case_ids = [case.id for case in self.cases]
+        if len(set(case_ids)) != len(case_ids):
+            raise ValueError("case IDs must be unique within a cleanup suite")
+        return self
 
 
 class TagCleanupQualityCaseResult(_StrictModel):
@@ -260,7 +288,14 @@ def suggest_model_tag_cleanup(
             ModelTagCleanupOutput,
             output_example={
                 "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
-                "suggestions": [],
+                "suggestions": [
+                    {
+                        "source": "alehouse",
+                        "target": "tavern",
+                        "confidence": "high",
+                        "reason": "Both labels describe the same catalog setting.",
+                    }
+                ],
             },
             max_output_tokens=_MAX_MODEL_OUTPUT_TOKENS,
         )

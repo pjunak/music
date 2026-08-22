@@ -202,7 +202,7 @@ export function ModelRoleCard({
     }
   }
 
-  async function testModel() {
+  async function testModelAndAllow() {
     onViewTestLog();
     await onTest(role.role_id);
   }
@@ -271,6 +271,16 @@ export function ModelRoleCard({
           </span>
           <h3>{role.label}</h3>
         </div>
+        <label className="checkbox-row assistant-role-enabled">
+          <input
+            type="checkbox"
+            aria-label="Allow this model for this task"
+            checked={enabled}
+            disabled={qualityActive || (!enabled && !canEnable)}
+            onChange={(event) => setEnabled(event.target.checked)}
+          />
+          <span>Allow for task</span>
+        </label>
       </div>
       <p>{role.description}</p>
 
@@ -381,21 +391,13 @@ export function ModelRoleCard({
           </p>
         ) : null}
 
-        <details className="assistant-role-limits">
-          <summary>
-            Request settings
-            <span>
-              {timeoutSeconds}s · {maxOutputTokens.toLocaleString()} tokens ·
-              Thinking{" "}
-              {thinkingMode === "provider_default"
-                ? "default"
-                : thinkingMode === "enabled"
-                  ? "on"
-                  : "off"}
-            </span>
-          </summary>
+        <div
+          className="assistant-role-settings"
+          role="group"
+          aria-label="Request settings"
+        >
           <fieldset className="assistant-thinking-mode">
-            <legend>Thinking mode</legend>
+            <legend>Thinking</legend>
             <div className="assistant-thinking-options">
               {(
                 [
@@ -420,54 +422,38 @@ export function ModelRoleCard({
                 </label>
               ))}
             </div>
-            <p>
-              Provider default sends no override. On or Off is confirmed when you
-              run this model's test.
-            </p>
           </fieldset>
-          <div className="field-row">
-            <label className="field">
-              <span className="field-label">Timeout (seconds)</span>
-              <input
-                type="number"
-                min={5}
-                max={300}
-                disabled={qualityActive}
-                value={timeoutSeconds}
-                onChange={(event) => {
-                  setTimeoutSeconds(Number(event.target.value));
-                  setEnabled(false);
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Maximum response tokens</span>
-              <input
-                type="number"
-                min={128}
-                max={65536}
-                disabled={qualityActive}
-                value={maxOutputTokens}
-                onChange={(event) => {
-                  setMaxOutputTokens(Number(event.target.value));
-                  setEnabled(false);
-                }}
-              />
-            </label>
-          </div>
-        </details>
+          <label className="field">
+            <span className="field-label">Timeout (seconds)</span>
+            <input
+              type="number"
+              min={5}
+              max={300}
+              disabled={qualityActive}
+              value={timeoutSeconds}
+              onChange={(event) => {
+                setTimeoutSeconds(Number(event.target.value));
+                setEnabled(false);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Maximum response tokens</span>
+            <input
+              type="number"
+              min={128}
+              max={65536}
+              disabled={qualityActive}
+              value={maxOutputTokens}
+              onChange={(event) => {
+                setMaxOutputTokens(Number(event.target.value));
+                setEnabled(false);
+              }}
+            />
+          </label>
+        </div>
 
         <div className="assistant-role-actions">
-          <label className="checkbox-row assistant-role-enabled">
-            <input
-              type="checkbox"
-              aria-label="Allow this model for this task"
-              checked={enabled}
-              disabled={qualityActive || (!enabled && !canEnable)}
-              onChange={(event) => setEnabled(event.target.checked)}
-            />
-            <span>Allow for task</span>
-          </label>
           <button
             className="btn-primary"
             type="submit"
@@ -482,9 +468,9 @@ export function ModelRoleCard({
               className="btn-secondary"
               type="button"
               disabled={busy || testing || qualityActive || !canTest}
-              onClick={() => void testModel()}
+              onClick={() => void testModelAndAllow()}
             >
-              {testing ? "Testing…" : "Test model"}
+              {testing ? "Testing and allowing…" : "Test model and allow"}
             </button>
           ) : null}
           {configured && role.conformance_status === "passed" ? (
@@ -527,7 +513,7 @@ export function ModelRoleCard({
           ) : null}
           {configured ? (
             <button
-              className="btn-ghost"
+              className="btn-ghost assistant-role-clear"
               type="button"
               disabled={actionsBusy}
               onClick={() => void onRemove(role.role_id)}

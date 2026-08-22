@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-eq-quality/v1",
-  "id": "graphic-eq-safety-baseline-v1",
+  "id": "graphic-eq-safety-baseline-v2",
   "cases": [
     {
       "id": "warm-tavern",
@@ -27,6 +27,24 @@
       "expectations": [
         {"frequency_hz": 2000, "minimum_gain_db": 0.0, "maximum_gain_db": 4.0},
         {"frequency_hz": 32, "minimum_gain_db": -3.0, "maximum_gain_db": 1.0}
+      ]
+    },
+    {
+      "id": "reduce-mud",
+      "description": "A muddy and boomy source is cleaned up in the low mids without adding harsh presence.",
+      "goal": "Reduce muddy, boomy low mids without adding harshness or excessive brightness.",
+      "expectations": [
+        {"frequency_hz": 250, "minimum_gain_db": -5.0, "maximum_gain_db": -0.5},
+        {"frequency_hz": 4000, "minimum_gain_db": -2.0, "maximum_gain_db": 0.5}
+      ]
+    },
+    {
+      "id": "restrained-bass-weight",
+      "description": "A bass-weight request adds controlled lows without an extreme sub-bass boost.",
+      "goal": "Add a little bass weight and low-end thump while preserving headroom and avoiding an exaggerated sub-bass curve.",
+      "expectations": [
+        {"frequency_hz": 64, "minimum_gain_db": 0.5, "maximum_gain_db": 4.0},
+        {"frequency_hz": 32, "minimum_gain_db": 0.0, "maximum_gain_db": 3.0}
       ]
     }
   ]

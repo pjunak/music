@@ -94,7 +94,7 @@ PLAYLIST_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic D&D playlist scenarios through this model. "
         "No songs or live library data are sent."
     ),
-    suite_id="local-dnd-playlist-baseline-v2",
+    suite_id="local-dnd-playlist-baseline-v3",
     suite_path=_PLAYLIST_SUITE_PATH,
     job_kind=PLAYLIST_QUALITY_JOB_KIND,
 )
@@ -107,7 +107,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic D&D metadata and signal-evidence tagging cases. "
         "No songs or live library data are sent."
     ),
-    suite_id="dnd-evidence-tagging-baseline-v3",
+    suite_id="dnd-evidence-tagging-baseline-v4",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -120,7 +120,7 @@ TAG_CLEANUP_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic D&D tag-catalog cleanup cases through this model. "
         "No songs or live library data are sent."
     ),
-    suite_id="dnd-tag-cleanup-baseline-v1",
+    suite_id="dnd-tag-cleanup-baseline-v2",
     suite_path=_TAG_CLEANUP_SUITE_PATH,
     job_kind=TAG_CLEANUP_QUALITY_JOB_KIND,
 )
@@ -132,7 +132,7 @@ EQ_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic sound goals through this model and checks bounded, "
         "conservative graphic-EQ behavior. No songs or live presets are sent."
     ),
-    suite_id="graphic-eq-safety-baseline-v1",
+    suite_id="graphic-eq-safety-baseline-v2",
     suite_path=_EQ_SUITE_PATH,
     job_kind=EQ_QUALITY_JOB_KIND,
 )

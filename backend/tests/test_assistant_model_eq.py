@@ -77,9 +77,17 @@ def _reference_eq_model(
     if "warm" in goal or "tavern" in goal:
         gains[3] = 2.0
         gains[8] = -1.0
+    elif "muddy" in goal or "boomy" in goal:
+        gains[2] = -1.0
+        gains[3] = -2.0
+        gains[4] = -1.0
     elif "harsh" in goal or "fatigue" in goal:
         gains[7] = -2.0
         gains[9] = -1.0
+    elif "bass weight" in goal or "thump" in goal:
+        gains[0] = 1.0
+        gains[1] = 2.0
+        gains[2] = 1.0
     else:
         gains[0] = -1.0
         gains[6] = 2.0

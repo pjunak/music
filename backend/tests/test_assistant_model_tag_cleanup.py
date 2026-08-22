@@ -90,6 +90,10 @@ _REFERENCE_MERGES = {
     "taverns": "tavern",
     "ruin": "ruins",
     "ocean voyage": "seafaring",
+    "detective work": "investigation",
+    "quiet sleep": "rest",
+    "sad": "melancholy",
+    "love theme": "romantic",
 }
 
 
@@ -324,7 +328,7 @@ def test_reference_cleanup_model_passes_fixed_quality_suite() -> None:
     )
 
     assert result.passed is True
-    assert result.passed_cases == result.total_cases == 8
+    assert result.passed_cases == result.total_cases == 10
 
 
 def test_tag_cleanup_quality_job_persists_certification_and_usage(
@@ -345,16 +349,16 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
 
     assert finished["kind"] == TAG_CLEANUP_QUALITY_JOB_KIND
-    assert finished["progress_current"] == 8
-    assert finished["progress_total"] == 8
+    assert finished["progress_current"] == 10
+    assert finished["progress_total"] == 10
     assert finished["result"]["evaluation"]["passed"] is True
     assert finished["result"]["usage"] == {
         "schema_version": "assistant-provider-usage/v1",
-        "attempted_requests": 5,
-        "input_tokens": 300,
-        "output_tokens": 75,
-        "input_tokens_reported_requests": 5,
-        "output_tokens_reported_requests": 5,
+        "attempted_requests": 7,
+        "input_tokens": 420,
+        "output_tokens": 105,
+        "input_tokens_reported_requests": 7,
+        "output_tokens_reported_requests": 7,
         "provider_model_ids": ["cleanup-response-model"],
         "provider_model_ids_truncated": False,
     }
@@ -365,7 +369,7 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     )
     assert evaluations.status_code == 200, evaluations.text
     assert evaluations.json()[0]["status"] == "passed"
-    assert evaluations.json()[0]["suite_id"] == "dnd-tag-cleanup-baseline-v1"
+    assert evaluations.json()[0]["suite_id"] == "dnd-tag-cleanup-baseline-v2"
 
 
 def test_model_tag_cleanup_job_discloses_catalog_only_and_applies_selection(

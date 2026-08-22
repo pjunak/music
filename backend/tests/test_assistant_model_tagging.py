@@ -119,6 +119,8 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
         "quiet tavern lullaby": ["tavern", "rest", "calm"],
         "black sails": ["seafaring", "combat", "tense"],
         "temple vigil": ["medieval", "temple", "mysterious"],
+        "lantern feast": ["village", "feast", "festive"],
+        "sorrow among the ruins": ["ruins", "exploration", "melancholy"],
     }
     for marker, values in mapping.items():
         if marker in text:

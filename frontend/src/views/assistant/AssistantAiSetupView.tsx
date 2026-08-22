@@ -444,10 +444,32 @@ export function AssistantAiSetupView() {
         ),
       );
       if (result.passed) {
-        toast.success(
-          "Model test passed",
-          "You can now enable this model for its assigned task.",
-        );
+        try {
+          const testedConnectionId = result.role.connection_id;
+          if (testedConnectionId === null) {
+            throw new Error("The tested task no longer has a connection.");
+          }
+          const allowed = await assistantProvidersApi.updateRole(roleId, {
+            connection_id: testedConnectionId,
+            model_id: result.role.model_id,
+            enabled: true,
+            thinking_mode: result.role.thinking_mode,
+            timeout_seconds: result.role.timeout_seconds,
+            max_output_tokens: result.role.max_output_tokens,
+          });
+          setRoles((current) =>
+            current.map((role) =>
+              role.role_id === roleId ? allowed : role,
+            ),
+          );
+          toast.success("Model tested and allowed", allowed.label);
+          refreshQuality();
+        } catch (error) {
+          toast.error(
+            "Model passed but could not be allowed",
+            errorMessage(error),
+          );
+        }
       } else {
         toast.error("Model test failed", modelTestFailureMessage(result.error_code));
       }

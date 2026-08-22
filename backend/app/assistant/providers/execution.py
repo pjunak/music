@@ -111,12 +111,26 @@ def _parse_openai_compatible_response(payload: object) -> StructuredModelResult:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+    content = message["content"]
+    if not content.strip():
+        return StructuredModelResult(
+            False,
+            "empty_structured_output",
+            provider_model_id=provider_model_id,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
     try:
-        structured = json.loads(message["content"])
+        structured = json.loads(content)
     except json.JSONDecodeError:
         return StructuredModelResult(
             False,
-            "invalid_structured_output",
+            (
+                "incomplete_structured_output"
+                if finish_reason in {"length", "max_tokens"}
+                else "invalid_structured_output"
+            ),
             provider_model_id=provider_model_id,
             finish_reason=finish_reason,
             input_tokens=input_tokens,

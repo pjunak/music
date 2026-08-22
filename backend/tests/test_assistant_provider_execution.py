@@ -160,6 +160,8 @@ def test_strict_adapter_requires_a_schema() -> None:
     [
         ("```json\n{}\n```", "invalid_structured_output"),
         ("[]", "invalid_structured_output"),
+        ("", "empty_structured_output"),
+        ("   \n", "empty_structured_output"),
     ],
 )
 def test_execution_rejects_non_object_or_wrapped_output(
@@ -196,6 +198,35 @@ def test_execution_rejects_non_object_or_wrapped_output(
     assert result.finish_reason == "stop"
     assert result.input_tokens == 17
     assert result.output_tokens == 4
+
+
+def test_execution_distinguishes_truncated_json_from_malformed_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        execution,
+        "request_json",
+        lambda *a, **k: JsonHttpResponse(
+            200,
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"answer":'},
+                        "finish_reason": "length",
+                    }
+                ]
+            },
+        ),
+    )
+
+    result = execution.execute_structured_model_request(
+        _target(),
+        StructuredModelRequest("system", "user", 512),
+    )
+
+    assert result.succeeded is False
+    assert result.error_code == "incomplete_structured_output"
+    assert result.finish_reason == "length"
 
 
 def test_execution_returns_safe_transport_error_without_secret(

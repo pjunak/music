@@ -176,6 +176,10 @@ class TagQualityCase(_StrictModel):
         expected = set(self.required_tags) | set(self.forbidden_tags)
         if not expected <= _MODEL_TAG_SET:
             raise ValueError("evaluation tags must use the controlled vocabulary")
+        if len(set(self.required_tags)) != len(self.required_tags):
+            raise ValueError("required tags must be unique")
+        if len(set(self.forbidden_tags)) != len(self.forbidden_tags):
+            raise ValueError("forbidden tags must be unique")
         if set(self.required_tags) & set(self.forbidden_tags):
             raise ValueError("required and forbidden tags must be disjoint")
         if len(set(self.allowed_confidences)) != len(self.allowed_confidences):
@@ -187,6 +191,16 @@ class TagQualitySuite(_StrictModel):
     schema_version: Literal["assistant-music-tagger-evaluation/v2"]
     id: str = Field(min_length=1, max_length=128)
     cases: list[TagQualityCase] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_case_and_track_ids(self) -> TagQualitySuite:
+        case_ids = [case.id for case in self.cases]
+        if len(set(case_ids)) != len(case_ids):
+            raise ValueError("case IDs must be unique within a tagging suite")
+        track_ids = [case.track.track_id for case in self.cases]
+        if len(set(track_ids)) != len(track_ids):
+            raise ValueError("track IDs must be unique within a tagging suite")
+        return self
 
 
 class TagQualityCaseResult(_StrictModel):
