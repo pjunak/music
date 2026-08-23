@@ -206,10 +206,10 @@ def test_tag_vocabulary_is_editable_revisioned_and_drives_catalog(
     mood_group = next(group for group in groups if group["key"] == "mood")
     mood_group["tags"].append(
         {
-            "id": "mood.wondrous",
-            "name": "wondrous",
-            "description": "Awe, magical discovery, and expansive wonder.",
-            "aliases": ["wonder-filled"],
+            "id": "mood.poignant",
+            "name": "poignant",
+            "description": "Deeply affecting, emotionally sharp, or moving.",
+            "aliases": ["emotionally affecting"],
         }
     )
     saved = auth_client.put(
@@ -231,7 +231,7 @@ def test_tag_vocabulary_is_editable_revisioned_and_drives_catalog(
         for group in catalog.json()["starter_groups"]
         if group["key"] == "mood"
     )
-    assert "wondrous" in mood_tags
+    assert "poignant" in mood_tags
 
     conflict = auth_client.put(
         "/api/assistant/library-tags/vocabulary",
@@ -242,6 +242,61 @@ def test_tag_vocabulary_is_editable_revisioned_and_drives_catalog(
         },
     )
     assert conflict.status_code == 409
+
+
+def test_expanded_vocabulary_seed_merges_once_without_resetting_custom_tags(
+    auth_client: TestClient,
+) -> None:
+    import json
+
+    from app.core.db import SessionLocal
+    from app.models.assistant_tag_vocabulary import AssistantTagVocabulary
+
+    legacy_document = {
+        "schema_version": "assistant-tag-vocabulary/v1",
+        "groups": [
+            {
+                "key": "mood",
+                "label": "My moods",
+                "description": "Operator-curated choices.",
+                "tags": [
+                    {
+                        "id": "mood.personal-favorite",
+                        "name": "personal favorite",
+                        "description": "A private operator-defined mood label.",
+                        "aliases": [],
+                    }
+                ],
+            }
+        ],
+    }
+    with SessionLocal() as db:
+        db.add(
+            AssistantTagVocabulary(
+                key="library",
+                revision=7,
+                seed_version=1,
+                document_json=json.dumps(legacy_document),
+            )
+        )
+        db.commit()
+
+    migrated = auth_client.get("/api/assistant/library-tags/vocabulary")
+    repeated = auth_client.get("/api/assistant/library-tags/vocabulary")
+
+    assert migrated.status_code == 200, migrated.text
+    assert migrated.json()["revision"] == 8
+    assert repeated.json()["revision"] == 8
+    names = {
+        tag["name"]
+        for group in migrated.json()["groups"]
+        for tag in group["tags"]
+    }
+    assert {"personal favorite", "desert", "combat", "calm"} <= names
+    custom_group = next(
+        group for group in migrated.json()["groups"] if group["key"] == "mood"
+    )
+    assert custom_group["label"] == "My moods"
 
 
 def test_manual_and_analysis_tags_remain_separate(
@@ -375,7 +430,12 @@ def test_analysis_tag_reviews_are_durable_and_keep_manual_tags_independent(
     assert rejected.json()["manual_tags"] == ["dark"]
 
     listing = auth_client.get("/api/assistant/library-tags")
-    suggestions = listing.json()["items"][0]["analysis_suggestions"]
+    listed_track = next(
+        item
+        for item in listing.json()["items"]
+        if item["track_id"] == seeded_track_id
+    )
+    suggestions = listed_track["analysis_suggestions"]
     assert {item["tag"]: item["status"] for item in suggestions} == {
         "dark": "accepted",
         "tense": "rejected",
@@ -401,7 +461,12 @@ def test_analysis_tag_reviews_are_durable_and_keep_manual_tags_independent(
     assert reopened.json()["manual_tags"] == ["dark"]
 
     refreshed = auth_client.get("/api/assistant/library-tags")
-    refreshed_suggestions = refreshed.json()["items"][0]["analysis_suggestions"]
+    refreshed_track = next(
+        item
+        for item in refreshed.json()["items"]
+        if item["track_id"] == seeded_track_id
+    )
+    refreshed_suggestions = refreshed_track["analysis_suggestions"]
     assert {item["tag"]: item["status"] for item in refreshed_suggestions} == {
         "dark": "pending",
         "tense": "rejected",

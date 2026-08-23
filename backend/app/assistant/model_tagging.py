@@ -8,7 +8,7 @@ import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.assistant.analysis import track_source_signature
@@ -42,6 +42,7 @@ from app.assistant.tag_schemas import (
     ModelTaggingAvailability,
     ModelTaggingDisclosure,
     ModelTaggingJobResult,
+    ModelTaggingScope,
 )
 from app.assistant.tag_vocabulary import (
     TagVocabularySnapshot,
@@ -49,6 +50,7 @@ from app.assistant.tag_vocabulary import (
 )
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
+from app.library import index as library_index
 from app.models.assistant_model_role import AssistantModelRole
 from app.models.assistant_provider_connection import AssistantProviderConnection
 from app.models.base import utcnow
@@ -58,6 +60,40 @@ from app.models.track_analysis import TrackAnalysis
 MODEL_TAGGING_JOB_KIND = "assistant.model-music-tagging"
 MODEL_TAGGING_ROLE_ID: Literal["music_tagger"] = "music_tagger"
 
+
+def resolve_model_tagging_scope(
+    db: Session,
+    scope: ModelTaggingScope,
+) -> list[Track]:
+    """Resolve a validated library-relative scope without touching media files."""
+
+    if scope.type == "tracks":
+        rows = {
+            track.id: track
+            for track in db.scalars(
+                select(Track).where(Track.id.in_(scope.track_ids))
+            ).all()
+        }
+        return [rows[track_id] for track_id in scope.track_ids if track_id in rows]
+    if scope.type == "folder":
+        if not scope.path:
+            stmt = select(Track)
+            if not scope.recursive:
+                stmt = stmt.where(~Track.path.like("%/%"))
+        else:
+            prefix = library_index.like_escape(f"{scope.path}/")
+            escape = library_index.LIKE_ESCAPE_CHAR
+            stmt = select(Track).where(
+                Track.path.like(f"{prefix}%", escape=escape)
+            )
+            if not scope.recursive:
+                stmt = stmt.where(
+                    ~Track.path.like(f"{prefix}%/%", escape=escape)
+                )
+        return list(db.scalars(stmt.order_by(Track.id)).all())
+    return list(db.scalars(select(Track).order_by(Track.id)).all())
+
+
 def _model_tagging_disclosure(
     vocabulary: TagVocabularySnapshot,
 ) -> ModelTaggingDisclosure:
@@ -65,6 +101,10 @@ def _model_tagging_disclosure(
         version=MODEL_TAGGING_DISCLOSURE_VERSION,
         shared_with_provider=[
             "Indexed titles, display titles, artists, albums, origins, and genres",
+            (
+                "Canonical library-relative paths, including folder and file names, "
+                "treated as untrusted descriptive context"
+            ),
             "Track durations and BPM values when available",
             (
                 "Current local audio-signal proxies when available: energy, brightness, "
@@ -84,9 +124,9 @@ def _model_tagging_disclosure(
         ],
         never_shared=[
             "Audio files, waveforms, detailed signal measurements, or cover artwork",
-            "Filesystem or library-relative paths",
+            "The absolute media root or filesystem paths outside the indexed library",
             (
-                "Your manual tags, generated-tag review decisions, or accepted/rejected "
+                "Your database mood tags, generated-tag review decisions, or accepted/rejected "
                 "state"
             ),
             "Playlists, review decisions, and provider credentials",
@@ -102,10 +142,11 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v4"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v5"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    scope: ModelTaggingScope
     force: bool
 
 
@@ -157,14 +198,19 @@ def _current_profile_count(
     )
 
 
-def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
+def model_tagging_availability(
+    db: Session,
+    scope: ModelTaggingScope | None = None,
+) -> ModelTaggingAvailability:
+    scope = scope or ModelTaggingScope()
     role = db.get(AssistantModelRole, MODEL_TAGGING_ROLE_ID)
     connection = (
         db.get(AssistantProviderConnection, role.connection_id)
         if role is not None
         else None
     )
-    tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
+    tracks = resolve_model_tagging_scope(db, scope)
+    library_tracks = int(db.scalar(select(func.count()).select_from(Track)) or 0)
     vocabulary = load_tag_vocabulary(db)
     audio_profiles = load_current_audio_profiles(db, tracks)
     reason_code: str | None = None
@@ -195,7 +241,8 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
         model_id=role.model_id if role is not None else None,
         quality_evaluation_id=TAGGING_QUALITY_EVALUATION_ID,
         job_kind=MODEL_TAGGING_JOB_KIND,
-        library_tracks=len(tracks),
+        library_tracks=library_tracks,
+        scope_tracks=len(tracks),
         tracks_with_audio_evidence=len(audio_profiles),
         current_profiles=current,
         tracks_needing_tags=needed,
@@ -204,7 +251,12 @@ def model_tagging_availability(db: Session) -> ModelTaggingAvailability:
     )
 
 
-def model_tagging_job_parameters(db: Session, *, force: bool) -> dict[str, Any]:
+def model_tagging_job_parameters(
+    db: Session,
+    *,
+    force: bool,
+    scope: ModelTaggingScope | None = None,
+) -> dict[str, Any]:
     resolved = prepare_quality_gated_role_execution(
         db,
         MODEL_TAGGING_ROLE_ID,
@@ -218,6 +270,7 @@ def model_tagging_job_parameters(db: Session, *, force: bool) -> dict[str, Any]:
         consent=True,
         role_fingerprint=resolved.fingerprint,
         vocabulary_fingerprint=vocabulary.fingerprint,
+        scope=scope or ModelTaggingScope(),
         force=force,
     ).model_dump(mode="json")
 
@@ -234,7 +287,7 @@ def _require_unchanged_quality_gate(
     if resolved.fingerprint != parameters.role_fingerprint:
         raise ProviderServiceError(
             "role_changed",
-            "The music tagging model changed while the job was running. Run it again.",
+            "The mood-tagging model changed while the job was running. Run it again.",
             409,
         )
     if load_tag_vocabulary(db).fingerprint != parameters.vocabulary_fingerprint:
@@ -285,6 +338,7 @@ def _track_input(
         album=track.album,
         origin=track.origin,
         genre=track.genre,
+        library_path=track.path,
         length_s=track.length_s,
         bpm=track.bpm,
         audio_evidence=audio_evidence,
@@ -305,7 +359,7 @@ def run_model_music_tagging(
         if resolved.fingerprint != parameters.role_fingerprint:
             raise ProviderServiceError(
                 "role_changed",
-                "The music tagging model changed before the job started. Run it again.",
+                "The mood-tagging model changed before the job started. Run it again.",
                 409,
             )
         vocabulary = load_tag_vocabulary(db)
@@ -315,7 +369,8 @@ def run_model_music_tagging(
                 "The tag vocabulary changed before the job started. Run it again.",
                 409,
             )
-        tracks = list(db.scalars(select(Track).order_by(Track.id)).all())
+        tracks = resolve_model_tagging_scope(db, parameters.scope)
+        library_tracks = int(db.scalar(select(func.count()).select_from(Track)) or 0)
         existing = {
             row.track_id: row
             for row in db.scalars(
@@ -365,7 +420,7 @@ def run_model_music_tagging(
         context.update_progress(
             start,
             total,
-            phase="Waiting for music tagging model",
+            phase="Waiting for mood-tagging model",
             message=(
                 f"Classifying tracks {start + 1}-{start + len(batch)} of {total}"
             ),
@@ -440,7 +495,7 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v2",
-                        "input_contract": "assistant-music-tagger-input/v4",
+                        "input_contract": "assistant-music-tagger-input/v5",
                         "used_audio_evidence": snapshot.id in audio_profiles,
                         "role_fingerprint": parameters.role_fingerprint,
                         "vocabulary_fingerprint": (
@@ -461,13 +516,15 @@ def run_model_music_tagging(
         )
 
     return ModelTaggingJobResult(
-        schema_version="assistant-model-music-tagging-job-result/v4",
+        schema_version="assistant-model-music-tagging-job-result/v5",
         disclosure_version=parameters.disclosure_version,
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,
         analyzer_id=MODEL_TAG_ANALYZER_ID,
         vocabulary_fingerprint=parameters.vocabulary_fingerprint,
-        library_tracks=len(tracks),
+        library_tracks=library_tracks,
+        scope=parameters.scope,
+        scope_tracks=len(tracks),
         updated_profiles=updated,
         unchanged_profiles=max(0, len(tracks) - len(work)),
         skipped_changed_tracks=skipped_changed,

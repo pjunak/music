@@ -489,9 +489,9 @@ export function AssistantAiSetupView() {
     const isEqAssistance = evaluation.role_id === "eq_assistant";
     const confirmed = await confirmDialog({
       title: isMusicTagging
-        ? "Run music tagging model quality check?"
+        ? "Run mood tagging model quality check?"
         : isTagCleanup
-          ? "Run song-tag cleanup model quality check?"
+          ? "Run mood-tag cleanup model quality check?"
           : isEqAssistance
             ? "Run EQ assistant model quality check?"
             : "Run playlist model quality check?",

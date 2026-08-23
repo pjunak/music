@@ -83,8 +83,10 @@ PROVIDER_ADAPTER_BY_ID = {adapter.id: adapter for adapter in PROVIDER_ADAPTERS}
 MODEL_ROLES = (
     ModelRoleDefinition(
         id="music_tagger",
-        label="Music tagging",
-        description="Suggest reviewable semantic tags from approved track evidence.",
+        label="Mood tagging",
+        description=(
+            "Suggest reviewable terrain, scene, and mood database tags from approved track evidence."
+        ),
         required_capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
         configuration_available=True,
     ),
@@ -97,9 +99,9 @@ MODEL_ROLES = (
     ),
     ModelRoleDefinition(
         id="tag_cleanup",
-        label="Song-tag cleanup",
+        label="Mood-tag cleanup",
         description=(
-            "Suggests review-only consistent names and merges from the manual tag catalog."
+            "Suggests review-only consistent names and merges from the mood-tag catalog."
         ),
         required_capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
         configuration_available=True,
@@ -135,7 +137,7 @@ MODEL_ROLE_BY_ID = {role.id: role for role in MODEL_ROLES}
 # Feature prompt/input/output changes must invalidate conformance and quality
 # results even when a connection, model, and runtime limits are unchanged.
 MODEL_ROLE_RUNTIME_CONTRACTS: dict[str, str] = {
-    "music_tagger": "assistant-music-tagger-input/v4+output/v2",
+    "music_tagger": "assistant-music-tagger-input/v5+output/v2",
     "playlist_planner": "assistant-playlist-planner-input/v2+output/v1+closed-ids/v1",
     "tag_cleanup": "assistant-model-tag-cleanup-input/v3+output/v2",
     "library_cleanup": "reserved-library-cleanup/v1",

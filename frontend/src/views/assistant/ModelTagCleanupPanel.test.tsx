@@ -163,17 +163,17 @@ describe("ModelTagCleanupPanel", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Review manual tag consistency",
+        name: "Review mood-tag consistency",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Audio or media files")).toBeInTheDocument();
     await user.click(
-      screen.getByRole("button", { name: "Review 17 manual tags" }),
+      screen.getByRole("button", { name: "Review 17 mood-library tags" }),
     );
 
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Send your manual tag catalog to the cleanup model?",
+        title: "Send your mood-tag catalog to the cleanup model?",
         body: expect.stringContaining("No songs, audio, titles"),
         confirmLabel: "Request cleanup suggestions",
       }),

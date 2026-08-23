@@ -256,7 +256,7 @@ def _apply_reviewed_tag_renames_locked(
     current_signature = catalog_signature(current_usage)
     if current_signature != expected_signature:
         raise StaleTagCleanupError(
-            "manual tags changed after this cleanup preview was created"
+            "database mood tags changed after this cleanup preview was created"
         )
     if invalid := [
         item
@@ -277,7 +277,7 @@ def _apply_reviewed_tag_renames_locked(
     for row in source_rows:
         rows_by_source.setdefault(row.tag, []).append(row)
     if missing := sorted(sources - rows_by_source.keys()):
-        raise StaleTagCleanupError(f"manual tag no longer exists: {missing[0]}")
+        raise StaleTagCleanupError(f"database mood tag no longer exists: {missing[0]}")
     existing_targets = {
         (int(track_id), str(tag))
         for track_id, tag in db.execute(

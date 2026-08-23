@@ -123,7 +123,7 @@ describe("LibraryTagEditor", () => {
     expect(screen.getByText("120.0 BPM")).toBeInTheDocument();
     expect(screen.getByText("festive")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Accept tavern as manual tag" }),
+      screen.getByRole("button", { name: "Accept tavern into mood library" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Rejected")).toBeInTheDocument();
     expect(
@@ -154,7 +154,7 @@ describe("LibraryTagEditor", () => {
       await screen.findByText(/model-evidence-tagger\/v4/),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Accept dancing as manual tag" }),
+      screen.getByRole("button", { name: "Accept dancing into mood library" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Your tags")).toBeInTheDocument();
   });
@@ -173,7 +173,7 @@ describe("LibraryTagEditor", () => {
     await user.click(screen.getByRole("button", { name: "tavern" }));
     await user.type(screen.getByLabelText("Create custom tags"), "Boss Room");
     await user.click(screen.getByRole("button", { name: "Add" }));
-    await user.click(screen.getByRole("button", { name: "Save manual tags" }));
+    await user.click(screen.getByRole("button", { name: "Save mood tags" }));
 
     await waitFor(() =>
       expect(assistantApi.patchManualTags).toHaveBeenCalledWith(
@@ -183,7 +183,7 @@ describe("LibraryTagEditor", () => {
       ),
     );
     expect(toast.success).toHaveBeenCalledWith(
-      "Manual tags saved",
+      "Mood tags saved",
       "Playlist suggestions use them immediately.",
     );
   });
@@ -196,7 +196,7 @@ describe("LibraryTagEditor", () => {
 
     await screen.findByRole("heading", { name: "Tavern Dance" });
     await user.click(await screen.findByRole("button", { name: "Remove tag medieval" }));
-    await user.click(screen.getByRole("button", { name: "Save manual tags" }));
+    await user.click(screen.getByRole("button", { name: "Save mood tags" }));
 
     await waitFor(() =>
       expect(assistantApi.patchManualTags).toHaveBeenCalledWith(7, [], ["medieval"]),
@@ -218,7 +218,7 @@ describe("LibraryTagEditor", () => {
 
     await screen.findByRole("heading", { name: "Tavern Dance" });
     await user.click(
-      screen.getByRole("button", { name: "Accept tavern as manual tag" }),
+      screen.getByRole("button", { name: "Accept tavern into mood library" }),
     );
 
     await waitFor(() =>
@@ -234,7 +234,7 @@ describe("LibraryTagEditor", () => {
     expect(screen.getByText("Accepted")).toBeInTheDocument();
     expect(toast.success).toHaveBeenCalledWith(
       "Tag added",
-      "“tavern” is now one of your manual tags.",
+      "“tavern” is now in your mood library.",
     );
   });
 
@@ -261,7 +261,7 @@ describe("LibraryTagEditor", () => {
       ),
     );
     expect(
-      screen.getByRole("button", { name: "Accept festive as manual tag" }),
+      screen.getByRole("button", { name: "Accept festive into mood library" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Remove tag medieval" }),
@@ -321,7 +321,7 @@ describe("LibraryTagEditor", () => {
 
     expect(confirmDialog).toHaveBeenCalledWith({
       title: "Add selected suggestions to your tags?",
-      body: "1 selected suggestion will be copied into your manual tags.",
+      body: "1 selected suggestion will be copied into your mood library.",
       confirmLabel: "Add selected tags",
     });
     await waitFor(() =>

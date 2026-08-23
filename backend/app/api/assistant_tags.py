@@ -17,10 +17,12 @@ from app.assistant.model_tag_cleanup_job import (
     model_tag_cleanup_availability,
     model_tag_cleanup_job_parameters,
 )
+from app.assistant.model_tagger import MODEL_TAG_ANALYZER_ID
 from app.assistant.model_tagging import (
     MODEL_TAGGING_JOB_KIND,
     model_tagging_availability,
     model_tagging_job_parameters,
+    resolve_model_tagging_scope,
 )
 from app.assistant.providers.service import ProviderServiceError
 from app.assistant.tag_cleanup import (
@@ -66,6 +68,8 @@ from app.assistant.tag_schemas import (
     ModelTagCleanupJobResult,
     ModelTagCleanupStartRequest,
     ModelTaggingAvailability,
+    ModelTaggingPlanRequest,
+    ModelTaggingReviewQuery,
     ModelTaggingStartRequest,
     StarterTagGroupOut,
     TagCleanupApplyRequest,
@@ -155,12 +159,57 @@ def _track_out(
     )
 
 
+def _library_tag_page(
+    db: DbSession,
+    tracks: list[Track],
+    *,
+    total: int,
+    offset: int,
+    limit: int,
+    analyzer_ids: tuple[str, ...] | None = None,
+) -> LibraryTagPage:
+    track_ids = [track.id for track in tracks]
+    manual_by_track = load_manual_tags(db, track_ids)
+    profiles = load_current_metadata_profiles(db, tracks)
+    audio_profiles = load_current_audio_profiles(db, tracks)
+    suggestions = load_current_analysis_tag_suggestions(
+        db,
+        tracks,
+        analyzer_ids,
+    )
+    items: list[LibraryTagTrack] = []
+    for track in tracks:
+        profile = profiles.get(track.id)
+        items.append(
+            _track_out(
+                track,
+                list(manual_by_track.get(track.id, ())),
+                analysis_tags=list(profile.moods) if profile is not None else [],
+                analysis_confidence=(
+                    profile.confidence if profile is not None else None
+                ),
+                analysis_suggestions=list(suggestions.get(track.id, ())),
+                audio_profile=audio_profiles.get(track.id),
+            )
+        )
+    return LibraryTagPage(items=items, total=total, offset=offset, limit=limit)
+
+
 @router.get("/model-status", response_model=ModelTaggingAvailability)
 def model_music_tagging_status(
     _user: CurrentUser,
     db: DbSession,
 ) -> ModelTaggingAvailability:
     return model_tagging_availability(db)
+
+
+@router.post("/model-plan", response_model=ModelTaggingAvailability)
+def plan_model_music_tagging(
+    payload: ModelTaggingPlanRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> ModelTaggingAvailability:
+    return model_tagging_availability(db, payload.scope)
 
 
 @router.post(
@@ -174,7 +223,11 @@ def start_model_music_tagging(
     db: DbSession,
 ) -> BackgroundJobOut:
     try:
-        parameters = model_tagging_job_parameters(db, force=payload.force)
+        parameters = model_tagging_job_parameters(
+            db,
+            force=payload.force,
+            scope=payload.scope,
+        )
     except ProviderServiceError as exc:
         _raise_provider_error(exc)
     job, created = enqueue_unique_active_job(
@@ -569,6 +622,37 @@ def update_analysis_tag_reviews_bulk(
     )
 
 
+@router.post("/query", response_model=LibraryTagPage)
+def query_model_library_tags(
+    payload: ModelTaggingReviewQuery,
+    _user: CurrentUser,
+    db: DbSession,
+) -> LibraryTagPage:
+    scoped = resolve_model_tagging_scope(db, payload.scope)
+    reviewable = filter_tracks_by_review_status(
+        db,
+        scoped,
+        payload.review,
+        (MODEL_TAG_ANALYZER_ID,),
+    )
+    ordered = sorted(
+        reviewable,
+        key=lambda track: (
+            (track.display_title or track.title).casefold(),
+            track.id,
+        ),
+    )
+    tracks = list(ordered[payload.offset : payload.offset + payload.limit])
+    return _library_tag_page(
+        db,
+        tracks,
+        total=len(ordered),
+        offset=payload.offset,
+        limit=payload.limit,
+        analyzer_ids=(MODEL_TAG_ANALYZER_ID,),
+    )
+
+
 @router.get("", response_model=LibraryTagPage)
 def list_library_tags(
     _user: CurrentUser,
@@ -639,25 +723,13 @@ def list_library_tags(
                 .limit(limit)
             ).all()
         )
-    track_ids = [track.id for track in tracks]
-    manual_by_track = load_manual_tags(db, track_ids)
-    profiles = load_current_metadata_profiles(db, tracks)
-    audio_profiles = load_current_audio_profiles(db, tracks)
-    suggestions = load_current_analysis_tag_suggestions(db, tracks)
-    items: list[LibraryTagTrack] = []
-    for track in tracks:
-        profile = profiles.get(track.id)
-        items.append(
-            _track_out(
-                track,
-                list(manual_by_track.get(track.id, ())),
-                analysis_tags=list(profile.moods) if profile is not None else [],
-                analysis_confidence=(profile.confidence if profile is not None else None),
-                analysis_suggestions=list(suggestions.get(track.id, ())),
-                audio_profile=audio_profiles.get(track.id),
-            )
-        )
-    return LibraryTagPage(items=items, total=total, offset=offset, limit=limit)
+    return _library_tag_page(
+        db,
+        tracks,
+        total=total,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.patch("/{track_id}", response_model=LibraryTagTrack)

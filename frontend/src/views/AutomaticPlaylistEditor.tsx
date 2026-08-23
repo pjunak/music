@@ -293,7 +293,7 @@ export function AutomaticPlaylistEditor({
               setTagSources(event.target.value as "manual" | "manual_and_local")
             }
           >
-            <option value="manual">Accepted/manual tags only</option>
+            <option value="manual">Database mood tags only</option>
             <option value="manual_and_local">Manual + current local analysis</option>
           </select>
         </Field>

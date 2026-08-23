@@ -37,7 +37,7 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   names or IDs are reported for review rather than overwritten. See
   [`clients/authoring-import-v1.md`](clients/authoring-import-v1.md).
 - **Review-first playlist Assistant** — describe a mood or scene and get song suggestions from your
-  manual tags, current metadata profiles, and any available measured audio signals. The local,
+  database mood tags, current metadata profiles, and any available measured audio signals. The local,
   explainable planner remains the default and makes no external calls. An explicitly selected,
   quality-certified provider model can optionally rerank a locally filtered pool after a versioned
   disclosure and confirmation. Both methods produce the same read-only draft: you choose the final
@@ -84,20 +84,23 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   the capabilities actually confirmed, and tasks accept only compatible verified connections.
   Reserved future tasks remain visible as planned work but cannot be configured before their
   feature-specific input, quality, consent, and review contracts exist. The playlist planner,
-  metadata music tagger, manual-tag cleanup reviewer, and EQ draft assistant are the implemented
+  metadata mood tagger, mood-tag cleanup reviewer, and EQ draft assistant are the implemented
   optional model tasks.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates, constrains the response to those exact track
-  IDs, and returns a draft. Music tagging sends metadata in batches of at most 20, may choose only
+  IDs, and returns a draft. Mood tagging sends metadata and canonical library-relative paths in
+  batches of at most 20, may choose only
   stable IDs from the revisioned operator vocabulary, and stores suggestions under
-  `model-evidence-tagger/v4` for explicit per-tag review. The Tag Vocabulary Assistant tab exposes
+  `model-evidence-tagger/v4` for explicit per-tag review. The Mood Vocabulary Assistant tab exposes
   every canonical name, definition, group, and exact alias for manual editing. Before each request the server
-  builds a path-free deterministic metadata hypothesis from the disclosed fields, including the
+  builds a deterministic metadata-and-path hypothesis from the disclosed fields, including the
   exact field and term behind each controlled-vocabulary candidate; a non-empty display title is
   canonical for this matching. When current local signal analysis exists, tagging may also send
   bounded energy, brightness, tension, tempo,
   activity, normalized dynamic range, rhythmic density/stability, and confidence values; audio
-  files, waveforms, paths, and detailed measurements remain on the server. Neither
+  files, waveforms, the absolute media root, paths outside the indexed library, database mood tags,
+  and detailed measurements remain on the server. Library-relative paths are treated as untrusted
+  descriptive evidence and never as model instructions. Neither
   path can write a playlist or
   manual tag directly. Tag cleanup resolves declared aliases and unambiguous spelling/plural cases
   locally first, then sends only unresolved source IDs/names and usage counts plus canonical ID
@@ -127,8 +130,10 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   tags or semantic mood claims automatically. The production image includes FFmpeg for the indexed
   MP3, FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV
   fallback.
-- **Manual playlist tags** — attach operator-owned context such as `medieval`, `tavern`, `dancing`,
-  or any custom tag without modifying the audio file. Manual and generated tags remain visibly and
+- **Database mood tags** — attach operator-owned terrain, scene, and mood context such as
+  `medieval`, `tavern`, `dancing`, `combat`, or any custom term without modifying the audio file or
+  its embedded album, artist, year, genre, and similar metadata. Database mood tags and generated
+  suggestions remain visibly and
   structurally separate, while local playlist ranking gives explicit manual matches priority.
   Multi-select actions apply tags across a batch, and usage-aware rename can merge overlapping tags
   without leaving duplicates. A conservative local cleanup preview applies operator-declared aliases
@@ -141,9 +146,13 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   Review-state filters and explicitly selected bulk decisions make larger libraries manageable;
   stale or invalid suggestions are reported individually instead of blocking valid selections.
   An optional quality-certified metadata tagging model can populate the same review surface through
-  a durable server job. It never receives paths, audio, existing tags, or review decisions, skips
-  unchanged model profiles, and cannot promote its output without an explicit acceptance.
-  A separately assigned, quality-certified cleanup model can review only the manual tag catalog and
+  a durable server job for the whole library, the current folder (recursive or direct children), or
+  explicitly selected tracks. Its Library dialog previews counts and provider calls, restores
+  durable progress, lets the operator audition each song, and preselects only high/medium-confidence
+  suggestions for explicit acceptance. It receives canonical library-relative paths but never the
+  absolute media root, audio, existing database mood tags, or review decisions; it skips unchanged
+  model profiles and cannot promote its output without acceptance.
+  A separately assigned, quality-certified cleanup model can review only the database mood-tag catalog and
   usage counts. It proposes renames in a durable server job, selects nothing by default, and can
   apply only the individually checked, still-current proposal items in one atomic transaction.
 - **Automatic playlists** — switch a normal playlist to a versioned local tag/BPM rule after

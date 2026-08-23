@@ -38,6 +38,7 @@ from app.assistant.tag_vocabulary import (
     TagVocabularyEntry,
     TagVocabularyGroup,
     TagVocabularySnapshot,
+    default_tag_vocabulary,
     vocabulary_fingerprint,
 )
 from app.core.db import SessionLocal
@@ -53,7 +54,7 @@ from app.models.track_user_tag import TrackUserTag
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v4"
+DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v5"
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1]
     / "app"
@@ -117,7 +118,14 @@ def _wait_for_job(
 def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
     text = " ".join(
         str(track.get(field, ""))
-        for field in ("title", "artist", "album", "origin", "genre")
+        for field in (
+            "title",
+            "artist",
+            "album",
+            "origin",
+            "genre",
+            "library_path",
+        )
     ).casefold()
     tags: list[str] = []
     mapping = {
@@ -130,6 +138,7 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
         "temple vigil": ["medieval", "temple", "mysterious"],
         "lantern feast": ["village", "feast", "festive"],
         "sorrow among the ruins": ["ruins", "exploration", "melancholy"],
+        "desert caravan": ["desert", "travel", "adventurous"],
     }
     for marker, values in mapping.items():
         if marker in text:
@@ -373,7 +382,7 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
     evidence = observed[0]["metadata_evidence"]
     assert evidence["analyzer_id"] == "local-metadata-evidence/v1"
     assert evidence["canonical_title_source"] == "display_title"
-    assert {"setting.tavern", "scene.rest", "mood.calm"} <= set(
+    assert {"setting.tavern", "scene.rest"} <= set(
         evidence["candidate_tag_ids"]
     )
     assert "scene.combat" not in evidence["candidate_tag_ids"]
@@ -471,6 +480,26 @@ def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
     assert result[1].tags == ["wondrous"]
 
 
+@pytest.mark.parametrize(
+    "library_path",
+    ["/srv/music/private.flac", "C:\\Music\\private.flac", "safe/../private.flac"],
+)
+def test_model_tagger_rejects_non_library_relative_paths(library_path: str) -> None:
+    with pytest.raises(ValueError, match="library_path"):
+        ModelTagTrackInput(
+            track_id=1,
+            title="Private",
+            display_title="",
+            artist="",
+            album="",
+            origin="",
+            genre="",
+            library_path=library_path,
+            length_s=120,
+            bpm=None,
+        )
+
+
 def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
     suite = load_tag_quality_suite(_SUITE_PATH)
     observed: dict[int, set[str]] = {}
@@ -511,8 +540,16 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
 
     tag_tracks([case.track for case in suite.cases], execute)
 
+    non_mood_tags = {
+        tag.name
+        for group in default_tag_vocabulary().groups
+        if group.key != "mood"
+        for tag in group.tags
+    }
     for case in suite.cases:
-        assert set(case.required_tags) <= observed[case.track.track_id], case.id
+        assert set(case.required_tags) & non_mood_tags <= observed[
+            case.track.track_id
+        ], case.id
 
 
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
@@ -607,7 +644,8 @@ def test_tagging_quality_gate_and_disclosure_status(
     assert payload["tracks_with_audio_evidence"] == 0
     assert "tavern" in payload["disclosure"]["allowed_tags"]
     assert any(
-        "Filesystem" in item for item in payload["disclosure"]["never_shared"]
+        "absolute media root" in item
+        for item in payload["disclosure"]["never_shared"]
     )
     assert any(
         "local audio-signal proxies" in item
@@ -641,7 +679,7 @@ def test_model_tagging_requires_exact_current_consent(
     assert response.status_code == 422
 
 
-def test_model_tagging_is_path_free_durable_and_review_only(
+def test_model_tagging_shares_only_relative_path_and_stays_review_only(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     seeded_track_id: int,
@@ -694,7 +732,8 @@ def test_model_tagging_is_path_free_durable_and_review_only(
     assert TEST_PROVIDER_API_KEY not in json.dumps(finished)
     assert observed
     provider_track = observed[0]["tracks"][0]
-    assert "path" not in provider_track
+    assert provider_track["library_path"] == "Demo/test-song.wav"
+    assert not provider_track["library_path"].startswith(("/", "\\"))
     assert "manual_tags" not in provider_track
     assert "analysis_tags" not in provider_track
     assert provider_track["audio_evidence"] == {
@@ -712,7 +751,7 @@ def test_model_tagging_is_path_free_durable_and_review_only(
     assert provider_track["metadata_evidence"]["analyzer_id"] == (
         "local-metadata-evidence/v1"
     )
-    assert {"medieval", "tavern", "dancing", "festive"} <= set(
+    candidate_names = set(
         next(
             item["name"]
             for item in observed[0]["vocabulary"]
@@ -720,6 +759,13 @@ def test_model_tagging_is_path_free_durable_and_review_only(
         )
         for tag_id in provider_track["metadata_evidence"]["candidate_tag_ids"]
     )
+    assert {"medieval", "tavern", "dancing"} <= candidate_names
+    assert "festive" in {
+        item["name"] for item in observed[0]["vocabulary"]
+    }
+    assert "astral realm" in {
+        item["name"] for item in observed[0]["vocabulary"]
+    }
     assert provider_track["metadata_evidence"]["tag_matches"]
 
     listing = auth_client.get("/api/assistant/library-tags")
@@ -759,6 +805,100 @@ def test_model_tagging_is_path_free_durable_and_review_only(
     with SessionLocal() as db:
         assert db.get(TrackAnalysis, (seeded_track_id, MODEL_TAG_ANALYZER_ID))
         assert db.get(TrackUserTag, (seeded_track_id, "tavern"))
+
+
+def test_model_tagging_plans_runs_and_reviews_only_the_requested_scope(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    selected_id = extra_seeded_track_ids[1]
+    with SessionLocal() as db:
+        selected_track = db.get(Track, selected_id)
+        assert selected_track is not None
+        selected_track.title = "The Minstrel's Jig"
+        selected_track.album = "Medieval Tavern Dances"
+        db.commit()
+
+    _configure_quality_passed_tagger(auth_client, monkeypatch)
+    observed: list[dict[str, Any]] = []
+
+    def capture(
+        target: object,
+        request: StructuredModelRequest,
+    ) -> StructuredModelResult:
+        observed.append(json.loads(request.user_prompt))
+        return _reference_music_tagger(target, request)
+
+    monkeypatch.setattr(
+        "app.assistant.model_tagging.execute_structured_model_request",
+        capture,
+    )
+    folder_plan = auth_client.post(
+        "/api/assistant/library-tags/model-plan",
+        json={
+            "scope": {"type": "folder", "path": "Extras", "recursive": True}
+        },
+    )
+    assert folder_plan.status_code == 200, folder_plan.text
+    assert folder_plan.json()["scope_tracks"] == 3
+    assert folder_plan.json()["tracks_needing_tags"] == 3
+
+    scope = {"type": "tracks", "track_ids": [selected_id]}
+    started = auth_client.post(
+        "/api/assistant/library-tags/model-jobs",
+        json={**_start_payload(), "scope": scope},
+    )
+    assert started.status_code == 202, started.text
+    finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+
+    assert finished["parameters"]["scope"] == {
+        "type": "tracks",
+        "path": "",
+        "recursive": True,
+        "track_ids": [selected_id],
+    }
+    assert finished["result"]["scope_tracks"] == 1
+    assert finished["result"]["library_tracks"] >= 4
+    assert observed[-1]["tracks"][0]["track_id"] == selected_id
+    assert observed[-1]["tracks"][0]["library_path"].startswith("Extras/")
+
+    review = auth_client.post(
+        "/api/assistant/library-tags/query",
+        json={"scope": scope, "review": "pending", "offset": 0, "limit": 50},
+    )
+    assert review.status_code == 200, review.text
+    assert review.json()["total"] == 1
+    assert review.json()["items"][0]["track_id"] == selected_id
+    assert review.json()["items"][0]["analysis_suggestions"]
+    assert all(
+        suggestion["analyzer_id"] == MODEL_TAG_ANALYZER_ID
+        for suggestion in review.json()["items"][0]["analysis_suggestions"]
+    )
+
+    outside = auth_client.post(
+        "/api/assistant/library-tags/query",
+        json={
+            "scope": {
+                "type": "tracks",
+                "track_ids": [extra_seeded_track_ids[0]],
+            }
+        },
+    )
+    assert outside.status_code == 200, outside.text
+    assert outside.json()["total"] == 0
+
+    invalid = auth_client.post(
+        "/api/assistant/library-tags/model-plan",
+        json={
+            "scope": {
+                "type": "folder",
+                "path": "C:\\outside",
+                "recursive": True,
+            }
+        },
+    )
+    assert invalid.status_code == 422
 
 
 def test_model_tagging_skips_current_profiles_without_provider_calls(
@@ -801,7 +941,9 @@ def test_model_tagging_skips_current_profiles_without_provider_calls(
     finished = _wait_for_job(auth_client, second.json()["id"], {"succeeded"})
     assert calls == 1
     assert finished["result"]["updated_profiles"] == 0
-    assert finished["result"]["unchanged_profiles"] == 1
+    assert finished["result"]["unchanged_profiles"] == finished["result"][
+        "scope_tracks"
+    ]
     assert finished["result"]["usage"]["attempted_requests"] == 0
 
 

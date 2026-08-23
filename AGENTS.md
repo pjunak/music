@@ -230,15 +230,19 @@ Runtime data lives outside the image.
   `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider
   request, and keep jobs non-restartable. Provider input is limited to indexed descriptive metadata,
   duration, BPM, numeric track IDs, the current revisioned operator vocabulary (stable IDs, names,
-  groups, definitions, and aliases), path-free deterministic metadata tag-ID hypotheses with matched
-  fields/terms and canonical-title provenance, and—when current—
+  groups, definitions, and aliases), canonical library-relative paths treated as untrusted data,
+  deterministic metadata-and-path tag-ID hypotheses with matched fields/terms and canonical-title
+  provenance, and—when current—
   bounded `local-audio/v1` energy, brightness, tension, tempo, activity, normalized dynamics,
-  rhythmic density/stability, and confidence values. Never send paths, audio, waveforms, detailed signal
-  metrics, manual tags, stored local generated tags, playlists, or review history. Store output
+  rhythmic density/stability, and confidence values. Never send the absolute media root, paths
+  outside the indexed library, audio, waveforms, detailed signal metrics, database mood tags,
+  stored local generated tags, playlists, or review history. Store output
   under `model-evidence-tagger/v4` in `track_analyses`, bind its source
   signature to metadata, the optional local-audio source signature, vocabulary fingerprint, and
   role fingerprint, and
-  expose it only through the existing generated-tag review surface. The model may
+  expose it only through the existing generated-tag review surface. Resolve the requested scope
+  locally and support the whole library, a folder with explicit recursive/non-recursive behavior,
+  or explicit track IDs. The model may
   never add a `track_user_tags` row directly. Accepted suggestions become manual tags only through
   the existing explicit single or bulk review transaction.
 - Optional model-assisted manual-tag cleanup may run only through
@@ -268,8 +272,9 @@ Runtime data lives outside the image.
   evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
   coexist. Suggestion engines may consume only current profiles and must fall back safely when a
   profile is absent, stale, or malformed.
-- Manual playlist tags are operator-owned rows in `track_user_tags`, independent from file tags and
-  generated analysis. Update them with additive/removal deltas, display their source explicitly,
+- Database mood tags are operator-owned rows in `track_user_tags`, independent from embedded file
+  tags such as album, artist, year, and genre and independent from generated analysis. Never write
+  these rows into media files. Update them with additive/removal deltas, display their source explicitly,
   and pass them separately to suggestion engines. An analyzer or provider must never overwrite or
   silently promote its output into manual tags. Bulk updates commit valid tracks together and
   report missing/limited tracks; library-wide rename merges duplicate target rows atomically.

@@ -20,7 +20,7 @@ describe("AssistantShell", () => {
     expect(screen.getByRole("link", { name: "Playlist Builder" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "EQ Assistant" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Library Analysis" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Tag Vocabulary" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Mood Vocabulary" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "AI Setup" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Cleanup" })).not.toBeInTheDocument();
   });

@@ -8276,3 +8276,185 @@ input.volume-slider::-moz-range-thumb {
   flex-direction: column;
   gap: var(--space-4);
 }
+
+/* --- Database mood tagging ---------------------------------------------
+ * The common workflow mirrors cleanup's scoped review, but the persistent
+ * play control is its distinguishing feature: judgment can happen while the
+ * track is audible, without leaving the proposed-tag list. */
+
+.modal.modal-mood-tagging {
+  width: min(980px, 96vw);
+}
+.modal-mood-tagging > .modal-actions {
+  flex-wrap: wrap;
+  padding: 0 var(--space-6) var(--space-5);
+}
+.mood-tagging-options,
+.mood-tagging-running,
+.mood-tagging-done {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.mood-tagging-plan {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--space-4);
+}
+.mood-tagging-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.mood-tagging-stats span {
+  display: flex;
+  flex-direction: column;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.mood-tagging-stats strong {
+  color: var(--fg);
+  font-size: var(--text-lg);
+}
+.mood-tagging-unavailable {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+  color: var(--warn);
+}
+.mood-tagging-unavailable span {
+  flex: 1 1 22rem;
+  color: var(--muted-strong);
+}
+.mood-tagging-force {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-4);
+}
+.mood-tagging-boundary {
+  border-radius: var(--radius-sm);
+  background: var(--accent2-soft);
+  color: var(--muted-strong);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+.mood-tagging-review-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 18rem;
+}
+.mood-tagging-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: min(58vh, 44rem);
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+.mood-tagging-track {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--space-3) var(--space-4);
+}
+.mood-tagging-track-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.mood-tagging-track-heading > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mood-tagging-track-heading span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mood-tagging-play {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border-radius: 999px;
+  border-color: var(--accent2);
+  color: var(--accent2-strong);
+  background: var(--accent2-soft);
+}
+.mood-tagging-play svg {
+  width: 1rem;
+  height: 1rem;
+}
+.mood-tagging-existing {
+  margin-top: var(--space-2) !important;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.mood-tagging-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.mood-tagging-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+.mood-tagging-suggestion:has(input:checked) {
+  border-color: var(--accent2);
+  background: var(--accent2-soft);
+  color: var(--accent2-strong);
+}
+.mood-tagging-suggestion small {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+}
+.mood-tagging-suggestion.is-low small {
+  color: var(--warn);
+}
+.mood-tagging-evidence {
+  margin-top: var(--space-3);
+  color: var(--muted-strong);
+  font-size: var(--text-sm);
+}
+.mood-tagging-evidence ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-6);
+}
+.mood-tagging-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+@media (max-width: 700px) {
+  .mood-tagging-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+  .modal-mood-tagging > .modal-actions > button {
+    flex: 1 1 auto;
+  }
+  .mood-tagging-track-heading span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

@@ -241,7 +241,7 @@ export function LibraryAnalysisView() {
       <Suspense
         fallback={
           <section className="surface-card assistant-tag-workspace">
-            <p className="muted">Loading manual tag editor…</p>
+            <p className="muted">Loading mood-library editor…</p>
           </section>
         }
       >

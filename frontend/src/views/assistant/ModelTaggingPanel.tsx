@@ -30,15 +30,15 @@ function errorMessage(error: unknown): string {
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the music tagging quality check in AI Setup first.";
+      return "Run and pass the mood tagging quality check in AI Setup first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable a music tagging model in AI Setup first.";
+      return "Assign and enable a mood tagging model in AI Setup first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned music tagging model in AI Setup first.";
+      return "Verify and test the assigned mood tagging model in AI Setup first.";
     default:
-      return "The connected music tagging model is not ready yet.";
+      return "The connected mood tagging model is not ready yet.";
   }
 }
 
@@ -133,9 +133,9 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       };
     }
     return {
-      tracks: availability.library_tracks,
+      tracks: availability.scope_tracks,
       requests: Math.ceil(
-        availability.library_tracks /
+        availability.scope_tracks /
           Math.max(1, availability.disclosure.tracks_per_request),
       ),
     };
@@ -144,14 +144,14 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
   async function start() {
     if (availability === null || !availability.available) return;
     const confirmed = await confirmDialog({
-      title: "Send library evidence to your tagging model?",
+      title: "Send library evidence to your mood-tagging model?",
       body:
         `${requestPlan.tracks} track${requestPlan.tracks === 1 ? "" : "s"} will be ` +
         `processed in about ${requestPlan.requests} provider request${
           requestPlan.requests === 1 ? "" : "s"
-        }. Indexed titles, artists, albums, origins, genres, durations, and BPM ` +
-        "may be sent with a numeric matching ID and your current controlled vocabulary. When current local audio analysis exists, bounded energy, brightness, tension, tempo, and confidence values may also be sent. " +
-        "Audio files, waveforms, paths, manual tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
+        }. Indexed titles, artists, albums, origins, genres, durations, BPM, ` +
+        "and library-relative paths may be sent with a numeric matching ID and your current controlled vocabulary. When current local audio analysis exists, bounded energy, brightness, tension, tempo, and confidence values may also be sent. " +
+        "Audio files, waveforms, the absolute media root, database mood tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
       confirmLabel: requestPlan.tracks === 0 ? "Check current tags" : "Suggest tags",
       tone: "primary",
     });
@@ -199,10 +199,10 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       <div className="assistant-analyzer-heading">
         <div>
           <p className="assistant-eyebrow">Optional connected model</p>
-          <h2>Suggest D&amp;D tags from library evidence</h2>
+          <h2>Suggest mood-library tags from track evidence</h2>
           <p>
-            Add a second, clearly labelled source of suggestions. Results remain
-            generated evidence until you accept individual tags below.
+            Create review-only terrain, scene, and mood suggestions for the
+            separate database tag library. Audio-file metadata is never changed.
           </p>
         </div>
         <span className={`assistant-job-status is-${headingStatusClass}`}>
@@ -219,7 +219,7 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
         </div>
       ) : null}
       {loading && availability === null && job === null ? (
-        <p className="muted">Checking the music tagging model…</p>
+        <p className="muted">Checking the mood tagging model…</p>
       ) : null}
       {availability !== null && !availability.available && !active ? (
         <div className="assistant-model-tagging-unavailable">
@@ -251,7 +251,7 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
 
           <div
             className="assistant-model-disclosure assistant-model-tagging-disclosure"
-            aria-label="Music tagging model data disclosure"
+            aria-label="Mood tagging model data disclosure"
           >
             <div className="assistant-model-disclosure-heading">
               <div>
@@ -305,10 +305,10 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
             ) : null}
           </div>
           {job.progress_total === null ? (
-            <progress aria-label="Model music tagging progress" />
+            <progress aria-label="Model mood tagging progress" />
           ) : (
             <progress
-              aria-label="Model music tagging progress"
+              aria-label="Model mood tagging progress"
               value={job.progress_current}
               max={Math.max(1, job.progress_total)}
             />

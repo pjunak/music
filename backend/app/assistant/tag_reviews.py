@@ -126,16 +126,25 @@ def _profile_tags(row: TrackAnalysis) -> tuple[str, ...] | None:
 def load_current_analysis_tag_suggestions(
     db: Session,
     tracks: Sequence[Track],
+    analyzer_ids: Sequence[str] | None = None,
 ) -> Mapping[int, tuple[AnalysisTagSuggestion, ...]]:
     """Load reviewable tags from every current, approved analysis profile."""
 
     track_by_id = {track.id: track for track in tracks}
     if not track_by_id:
         return {}
+    requested_analyzers = tuple(analyzer_ids or _REVIEWABLE_ANALYZERS)
+    approved_analyzers = tuple(
+        analyzer_id
+        for analyzer_id in requested_analyzers
+        if analyzer_id in _REVIEWABLE_ANALYZERS
+    )
+    if not approved_analyzers:
+        return {}
     rows = list(
         db.scalars(
             select(TrackAnalysis).where(
-                TrackAnalysis.analyzer_id.in_(_REVIEWABLE_ANALYZERS),
+                TrackAnalysis.analyzer_id.in_(approved_analyzers),
                 TrackAnalysis.track_id.in_(track_by_id),
             ).order_by(TrackAnalysis.track_id, TrackAnalysis.analyzer_id)
         ).all()
@@ -145,7 +154,7 @@ def load_current_analysis_tag_suggestions(
         for review in db.scalars(
             select(TrackAnalysisTagReview).where(
                 TrackAnalysisTagReview.track_id.in_(track_by_id),
-                TrackAnalysisTagReview.analyzer_id.in_(_REVIEWABLE_ANALYZERS),
+                TrackAnalysisTagReview.analyzer_id.in_(approved_analyzers),
             )
         ).all()
     }
@@ -232,13 +241,18 @@ def filter_tracks_by_review_status(
     db: Session,
     tracks: Sequence[Track],
     status: ReviewStatus,
+    analyzer_ids: Sequence[str] | None = None,
 ) -> tuple[Track, ...]:
     """Return tracks with at least one current suggestion in ``status``."""
 
     matched: list[Track] = []
     for start in range(0, len(tracks), 500):
         chunk = tracks[start : start + 500]
-        suggestions = load_current_analysis_tag_suggestions(db, chunk)
+        suggestions = load_current_analysis_tag_suggestions(
+            db,
+            chunk,
+            analyzer_ids,
+        )
         matched.extend(
             track
             for track in chunk

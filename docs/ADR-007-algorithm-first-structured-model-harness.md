@@ -70,14 +70,19 @@ indexed metadata / local audio / operator request
   sequencing. The model receives that baseline and can return only ranked and
   selected IDs from an exact request-specific enum. The example starts from the local
   plan rather than an empty response. Public data and reasons are reconstructed locally.
-- **Music tagging:** the server derives a path-free `local-metadata-evidence/v1`
+- **Music tagging:** the server derives a `local-metadata-evidence/v1`
   hypothesis with controlled-tag ID, matched-field, matched-term, and canonical-title
-  provenance from the same descriptive fields sent to the provider. Current
+  provenance from the same descriptive fields and canonical library-relative path sent
+  to the provider. Paths and metadata are labelled untrusted; the absolute media root
+  and paths outside the indexed library never cross the provider boundary. Current
   `local-audio/v1` evidence is reduced to bounded axes, tempo, activity, dynamic range, rhythmic
   density, rhythmic stability, and confidence. These are labelled hypotheses and
   signal proxies; they cannot establish semantic setting or scene context by themselves.
   A revisioned operator vocabulary supplies stable IDs, names, groups, definitions, and
-  aliases. The model returns only exact IDs; names are restored locally.
+  aliases. The complete bounded vocabulary is sent once per batch so the model can infer
+  a valid terrain or scene even when no literal alias appears in metadata. The local
+  hypothesis highlights exact matches but does not remove other operator-approved
+  choices. The model returns only exact IDs; names are restored locally.
 - **Manual-tag cleanup:** declared aliases plus deterministic spelling and plural rules
   run first. Those suggestions require no provider request. The model sees only
   unresolved sources plus canonical ID definitions, then must return one ordered

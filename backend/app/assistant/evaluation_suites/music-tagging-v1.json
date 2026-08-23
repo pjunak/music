@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v3",
-  "id": "controlled-vocabulary-tagging-baseline-v6",
+  "id": "controlled-vocabulary-tagging-baseline-v7",
   "cases": [
     {
       "id": "medieval-tavern-dance",
@@ -216,6 +216,26 @@
       },
       "required_tags": ["ruins", "exploration", "melancholy"],
       "forbidden_tags": ["romantic", "festive", "combat"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "library-path-desert-caravan",
+      "description": "Uses an explicit relative folder path as terrain and travel context without inventing unrelated settings",
+      "track": {
+        "track_id": 12,
+        "title": "Instrumental 12",
+        "display_title": "Daylight Crossing",
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "orchestral",
+        "library_path": "Campaign/Terrain/Desert Caravan/Daylight Crossing.flac",
+        "length_s": 246.0,
+        "bpm": 92
+      },
+      "required_tags": ["desert", "travel"],
+      "forbidden_tags": ["ocean", "underwater", "dungeon", "combat"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1
     }

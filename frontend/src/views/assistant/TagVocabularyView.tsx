@@ -182,12 +182,12 @@ export function TagVocabularyView() {
       setVocabulary(saved);
       setGroups(cloneGroups(saved.groups));
       toast.success(
-        "Tag vocabulary saved",
+        "Mood vocabulary saved",
         "New model runs will use this exact revision; older suggestions are now stale.",
       );
       refresh();
     } catch (error) {
-      toast.error("Tag vocabulary was not saved", errorMessage(error));
+      toast.error("Mood vocabulary was not saved", errorMessage(error));
       if (error instanceof ApiError && error.status === 409) refresh();
     } finally {
       setSaving(false);
@@ -198,12 +198,12 @@ export function TagVocabularyView() {
     <div className="assistant-vocabulary-view">
       <header className="assistant-page-header assistant-vocabulary-header">
         <div>
-          <p className="assistant-eyebrow">Server-owned choices</p>
-          <h1>Tag vocabulary</h1>
+          <p className="assistant-eyebrow">Database-only music context</p>
+          <h1>Mood tag vocabulary</h1>
           <p>
-            Define the only tags the connected models may choose. Stable IDs travel
-            through the AI pipeline; these names and descriptions are restored only
-            after the response passes strict validation.
+            Define the terrain, scene, and mood tags connected models may choose.
+            They live in the music database, independently of album, year, genre,
+            and other metadata embedded in audio files.
           </p>
         </div>
         <div className="assistant-vocabulary-summary" aria-label="Vocabulary summary">
@@ -352,7 +352,7 @@ export function TagVocabularyView() {
                   <p className="assistant-eyebrow">Library exceptions</p>
                   <h2>Used outside the vocabulary</h2>
                   <p>
-                    These manual tags remain valid operator data, but models cannot
+                    These database mood tags remain valid operator data, but models cannot
                     generate them until you promote them to a canonical group.
                   </p>
                 </div>

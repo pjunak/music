@@ -332,12 +332,60 @@ class LibraryTagPage(StrictTagModel):
 
 
 MODEL_TAGGING_DISCLOSURE_VERSION: Literal[
-    "assistant-model-music-tagging-disclosure/v4"
-] = "assistant-model-music-tagging-disclosure/v4"
+    "assistant-model-music-tagging-disclosure/v5"
+] = "assistant-model-music-tagging-disclosure/v5"
+
+
+class ModelTaggingScope(StrictTagModel):
+    type: Literal["all", "folder", "tracks"] = "all"
+    path: str = Field(default="", max_length=1024)
+    recursive: bool = True
+    track_ids: list[int] = Field(default_factory=list, max_length=5000)
+
+    @field_validator("path")
+    @classmethod
+    def normalize_relative_path(cls, value: str) -> str:
+        raw = value.strip()
+        if raw.startswith(("/", "\\")) or (
+            len(raw) >= 2 and raw[1] == ":"
+        ):
+            raise ValueError("scope path must be relative to the music library")
+        normalized = raw.replace("\\", "/").strip("/")
+        if any(part in {".", ".."} for part in normalized.split("/") if part):
+            raise ValueError("scope path cannot contain dot segments")
+        return normalized
+
+    @field_validator("track_ids")
+    @classmethod
+    def normalize_scope_track_ids(cls, value: list[int]) -> list[int]:
+        if any(track_id <= 0 for track_id in value):
+            raise ValueError("track_ids must contain only positive IDs")
+        return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def consistent_scope(self) -> ModelTaggingScope:
+        if self.type == "tracks" and not self.track_ids:
+            raise ValueError("a tracks scope must contain at least one track ID")
+        if self.type != "tracks" and self.track_ids:
+            raise ValueError("track_ids are only valid for a tracks scope")
+        if self.type != "folder" and self.path:
+            raise ValueError("path is only valid for a folder scope")
+        return self
+
+
+class ModelTaggingPlanRequest(StrictTagModel):
+    scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
+
+
+class ModelTaggingReviewQuery(StrictTagModel):
+    scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
+    review: Literal["pending", "accepted", "rejected"] = "pending"
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=100)
 
 
 class ModelTaggingDisclosure(StrictTagModel):
-    version: Literal["assistant-model-music-tagging-disclosure/v4"]
+    version: Literal["assistant-model-music-tagging-disclosure/v5"]
     shared_with_provider: list[str]
     never_shared: list[str]
     allowed_tags: list[str]
@@ -354,6 +402,7 @@ class ModelTaggingAvailability(StrictTagModel):
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
     job_kind: str
     library_tracks: int = Field(ge=0)
+    scope_tracks: int = Field(ge=0)
     tracks_with_audio_evidence: int = Field(ge=0)
     current_profiles: int = Field(ge=0)
     tracks_needing_tags: int = Field(ge=0)
@@ -363,18 +412,21 @@ class ModelTaggingAvailability(StrictTagModel):
 
 class ModelTaggingStartRequest(StrictTagModel):
     force: bool = False
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v4"]
+    scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v5"]
     consent: Literal[True]
 
 
 class ModelTaggingJobResult(StrictTagModel):
-    schema_version: Literal["assistant-model-music-tagging-job-result/v4"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v4"]
+    schema_version: Literal["assistant-model-music-tagging-job-result/v5"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v5"]
     role_id: Literal["music_tagger"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     analyzer_id: Literal["model-evidence-tagger/v4"]
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     library_tracks: int = Field(ge=0)
+    scope: ModelTaggingScope
+    scope_tracks: int = Field(ge=0)
     updated_profiles: int = Field(ge=0)
     unchanged_profiles: int = Field(ge=0)
     skipped_changed_tracks: int = Field(ge=0)

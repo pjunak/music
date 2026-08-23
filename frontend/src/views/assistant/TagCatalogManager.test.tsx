@@ -111,7 +111,7 @@ describe("TagCatalogManager", () => {
     );
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Apply selected tag cleanup?",
+        title: "Apply selected mood-tag cleanup?",
         confirmLabel: "Apply selected",
       }),
     );

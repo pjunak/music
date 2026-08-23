@@ -55,6 +55,7 @@ const availability: ModelTaggingAvailability = {
   quality_evaluation_id: "music-tagging-quality-v1",
   job_kind: "assistant.model-music-tagging",
   library_tracks: 45,
+  scope_tracks: 45,
   tracks_with_audio_evidence: 32,
   current_profiles: 5,
   tracks_needing_tags: 40,
@@ -83,7 +84,7 @@ function taggingJob(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
     error: null,
     progress_current: 20,
     progress_total: 40,
-    progress_phase: "Waiting for music tagging model",
+    progress_phase: "Waiting for mood-tagging model",
     progress_message: "Processed 20 of 40 tracks",
     attempts: 1,
     retry_of_id: null,
@@ -129,7 +130,7 @@ describe("ModelTaggingPanel", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Suggest D&D tags from library evidence",
+        name: "Suggest mood-library tags from track evidence",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Filesystem paths")).toBeInTheDocument();
@@ -139,7 +140,7 @@ describe("ModelTaggingPanel", () => {
 
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Send library evidence to your tagging model?",
+        title: "Send library evidence to your mood-tagging model?",
         confirmLabel: "Suggest tags",
       }),
     );
@@ -174,7 +175,7 @@ describe("ModelTaggingPanel", () => {
       screen.getByText("Model readiness is temporarily unavailable."),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("progressbar", { name: "Model music tagging progress" }),
+      screen.getByRole("progressbar", { name: "Model mood tagging progress" }),
     ).toHaveValue(20);
     expect(screen.getByText(/Safe to close/)).toBeInTheDocument();
 
@@ -224,10 +225,11 @@ describe("ModelTaggingPanel", () => {
       status: "succeeded",
       progress_current: 40,
       result: {
-        schema_version: "assistant-model-music-tagging-job-result/v4",
+        schema_version: "assistant-model-music-tagging-job-result/v5",
         analyzer_id: "model-evidence-tagger/v4",
         vocabulary_fingerprint: "b".repeat(64),
         library_tracks: 45,
+        scope_tracks: 45,
         updated_profiles: 40,
         unchanged_profiles: 5,
         skipped_changed_tracks: 0,

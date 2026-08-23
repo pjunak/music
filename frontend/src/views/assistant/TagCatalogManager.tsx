@@ -66,7 +66,7 @@ export function TagCatalogManager({ catalog, onChanged }: Props) {
       selectedCleanupIds.has(item.id),
     );
     const confirmed = await confirmDialog({
-      title: "Apply selected tag cleanup?",
+      title: "Apply selected mood-tag cleanup?",
       body: `${selected.length} selected ${selected.length === 1 ? "rename" : "renames"} will be applied across the library in one update. Unselected suggestions will remain unchanged.`,
       confirmLabel: "Apply selected",
       tone: "primary",
@@ -85,7 +85,7 @@ export function TagCatalogManager({ catalog, onChanged }: Props) {
         0,
       );
       toast.success(
-        "Selected tag cleanup applied",
+        "Selected mood-tag cleanup applied",
         `${result.applied.length} ${result.applied.length === 1 ? "tag was" : "tags were"} cleaned, updating ${affectedTracks} ${affectedTracks === 1 ? "tag assignment" : "tag assignments"}.`,
       );
       setCleanupPreview(null);
@@ -93,7 +93,7 @@ export function TagCatalogManager({ catalog, onChanged }: Props) {
       onChanged();
     } catch (error) {
       toast.error(
-        "Tag cleanup could not be applied",
+        "Mood-tag cleanup could not be applied",
         error instanceof Error ? error.message : undefined,
       );
     } finally {
@@ -197,7 +197,7 @@ export function TagCatalogManager({ catalog, onChanged }: Props) {
               <div
                 className="assistant-tag-cleanup-list"
                 role="group"
-                aria-label="Tag cleanup suggestions"
+                aria-label="Mood-tag cleanup suggestions"
               >
                 {cleanupPreview.suggestions.map((item) => (
                   <label key={item.id}>
@@ -238,7 +238,7 @@ export function TagCatalogManager({ catalog, onChanged }: Props) {
       {catalog === null ? (
         <p className="muted">Loading tag usage…</p>
       ) : catalog.tag_usage.length === 0 ? (
-        <p className="muted">No manual tags have been used yet.</p>
+        <p className="muted">No mood-library tags have been used yet.</p>
       ) : (
         <div className="assistant-tag-usage-list">
           {catalog.tag_usage.map((item) => (

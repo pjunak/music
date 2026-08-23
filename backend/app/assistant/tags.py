@@ -16,13 +16,6 @@ MAX_TAG_LENGTH = 64
 
 
 @dataclass(frozen=True)
-class StarterTagGroup:
-    key: str
-    label: str
-    tags: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class TagUsage:
     tag: str
     track_count: int
@@ -49,55 +42,6 @@ class RenameTagOutcome:
     target: str
     affected_tracks: int
     merged: bool
-
-
-DND_STARTER_TAG_GROUPS: tuple[StarterTagGroup, ...] = (
-    StarterTagGroup(
-        "setting",
-        "Setting",
-        (
-            "medieval",
-            "tavern",
-            "dungeon",
-            "castle",
-            "village",
-            "forest",
-            "wilderness",
-            "temple",
-            "ruins",
-            "seafaring",
-        ),
-    ),
-    StarterTagGroup(
-        "scene",
-        "Scene",
-        (
-            "dancing",
-            "feast",
-            "travel",
-            "exploration",
-            "combat",
-            "stealth",
-            "investigation",
-            "rest",
-        ),
-    ),
-    StarterTagGroup(
-        "mood",
-        "Mood",
-        (
-            "festive",
-            "heroic",
-            "mysterious",
-            "tense",
-            "dark",
-            "calm",
-            "eerie",
-            "melancholy",
-            "romantic",
-        ),
-    ),
-)
 
 
 class TagLimitError(ValueError):

@@ -45,7 +45,7 @@ MODEL_PLAYLIST_DISCLOSURE = ModelPlaylistDisclosure(
         "Your mood prompt, duration, tempo filters, and requested energy flow",
         "Up to 100 locally prefiltered candidate IDs and descriptive metadata",
         "Candidate titles, artists, albums, origins, genres, durations, and BPM values",
-        "Your manual tags, generated analysis tags, and numeric audio-signal summaries",
+        "Your database mood tags, generated analysis tags, and numeric audio-signal summaries",
         "The deterministic local ranking, default selection, sequence, and duration plan",
     ],
     never_shared=[

@@ -10,9 +10,9 @@ first-time setup and functional checks, not release prerequisites.
 ## What is ready
 
 - Local metadata and server-side audio-signal analysis run as durable jobs.
-- Manual D&D-oriented tags remain separate from generated suggestions.
+- Database mood tags remain separate from embedded file metadata and generated suggestions.
 - The local playlist planner creates a reviewable draft and is the default.
-- Optional provider models can assist playlist planning, music tagging, manual-tag
+- Optional provider models can assist playlist planning, mood tagging, mood-tag
   cleanup, and ten-band EQ drafting.
 - Every model task has a separate role. Roles may share one connection and key or
   use different connections, providers, models, and keys.
@@ -51,9 +51,9 @@ data, not because this release introduces a special risk to them.
    and reopened without losing progress.
 3. Optionally run local audio analysis. It decodes audio on the server and stores
    bounded numeric evidence; it does not send audio anywhere or invent semantic tags.
-4. Review generated tags and accept only the useful ones. Add or edit manual tags such
+4. Review generated tags and accept only the useful ones. Add or edit database mood tags such
    as `medieval`, `tavern`, `dancing`, `combat`, `travel`, and custom campaign terms.
-5. Open **Assistant -> Tag Vocabulary**. Review the canonical names, definitions, and
+5. Open **Assistant -> Mood Vocabulary**. Review the canonical names, definitions, and
    aliases that models may use; promote any deliberate custom term that models should
    be able to generate.
 6. Open **Assistant -> Playlist Builder**, create at least one local suggestion, audition
@@ -135,7 +135,7 @@ model task.
 
 ## 5. Configure each model role
 
-Repeat this sequence for playlist planning, music tagging, song-tag cleanup, and EQ
+Repeat this sequence for playlist planning, mood tagging, mood-tag cleanup, and EQ
 assistance. The same connection/model may be selected for all four, or each role may use
 a specialized model and separate key.
 
@@ -172,25 +172,32 @@ Use a small, representative sample before running across the whole library.
 6. Confirm a failed model request remains visibly failed and does not silently replace
    its provenance with a local result.
 
-### Music tagging
+### Mood tagging
 
-1. Review the disclosed counts and estimated provider requests in Library Analysis.
-2. Start with a small library/sample if provider cost or output quality is uncertain.
+1. In the Library, select **Mood tags**. Choose the whole library, the current folder
+   (with or without subfolders), or the currently checked tracks. Review the scoped
+   counts and estimated provider requests before continuing.
+2. Start with a small representative folder or selection if provider cost or output
+   quality is uncertain.
 3. Confirm model output appears as generated `model-evidence-tagger/v4` suggestions,
-   separate from local analysis and manual tags.
-4. Inspect the disclosure: the model receives a path-free deterministic metadata
+   separate from local analysis and database mood tags.
+4. Inspect the disclosure: the model receives a deterministic metadata-and-path
    hypothesis with each candidate tag ID's matched field and term plus the current
    canonical ID/name/definition list. A non-empty display
-   title is used as the canonical title for this matching. When available, the model
+   title is used as the canonical title for this matching. The path is canonical and
+   library-relative, is treated as untrusted data, and may reveal useful folder context;
+   the absolute media root is never sent. When available, the model
    also receives bounded local signal axes/activity/dynamics/rhythm.
    These remain evidence, not automatic tags.
-5. Accept, reject, and reopen several suggestions. Only acceptance may add a manual tag.
+5. Audition several tracks inside the review dialog, then accept, reject, and reopen
+   suggestions. Only explicit acceptance may add a database mood tag; the audio file and
+   its embedded artist, album, year, genre, and similar tags remain unchanged.
 6. Confirm automatic playlists do not react to pending or rejected model suggestions;
    they may react after an accepted suggestion becomes a manual tag.
 
-### Manual-tag cleanup
+### Mood-tag cleanup
 
-1. Open **Assistant -> Tag Vocabulary** and review local conservative cleanup there.
+1. Open **Assistant -> Mood Vocabulary** and review local conservative cleanup there.
    Declared aliases, spelling, and plural rules run
    before its provider boundary and does not spend a provider request when they resolve
    every candidate.

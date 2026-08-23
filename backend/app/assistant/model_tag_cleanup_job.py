@@ -146,7 +146,7 @@ def model_tag_cleanup_job_parameters(db: Session) -> dict[str, Any]:
     if not snapshot.usage:
         raise ProviderServiceError(
             "tag_catalog_empty",
-            "Add at least one manual tag before requesting model cleanup.",
+            "Add at least one mood-library tag before requesting model cleanup.",
             409,
         )
     if len(snapshot.usage) > MAX_MODEL_CLEANUP_TAGS:
@@ -211,7 +211,7 @@ def run_model_tag_cleanup(
     if snapshot.signature != parameters.catalog_signature:
         raise ProviderServiceError(
             "tag_catalog_changed",
-            "Manual tags changed before model cleanup started. Run it again.",
+            "Mood-library tags changed before model cleanup started. Run it again.",
             409,
         )
     if vocabulary.fingerprint != parameters.vocabulary_fingerprint:
@@ -225,7 +225,7 @@ def run_model_tag_cleanup(
         0,
         1,
         phase="Preparing tag catalog",
-        message=f"Preparing {len(snapshot.usage)} manual tags for review",
+        message=f"Preparing {len(snapshot.usage)} mood-library tags for review",
     )
     usage = ProviderUsageAccumulator()
 
@@ -259,7 +259,7 @@ def run_model_tag_cleanup(
         if tag_catalog_snapshot(db).signature != parameters.catalog_signature:
             raise ProviderServiceError(
                 "tag_catalog_changed",
-                "Manual tags changed while model cleanup was running. Run it again.",
+                "Mood-library tags changed while model cleanup was running. Run it again.",
                 409,
             )
 

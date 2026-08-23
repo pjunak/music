@@ -379,7 +379,12 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v4" as const;
+  "assistant-model-music-tagging-disclosure/v5" as const;
+
+export type ModelTaggingScope =
+  | { type: "all" }
+  | { type: "folder"; path: string; recursive: boolean }
+  | { type: "tracks"; track_ids: number[] };
 
 export interface ModelTaggingDisclosure {
   version: typeof MODEL_TAGGING_DISCLOSURE_VERSION;
@@ -399,6 +404,7 @@ export interface ModelTaggingAvailability {
   quality_evaluation_id: "music-tagging-quality-v1";
   job_kind: string;
   library_tracks: number;
+  scope_tracks: number;
   tracks_with_audio_evidence: number;
   current_profiles: number;
   tracks_needing_tags: number;
@@ -709,12 +715,19 @@ export const assistantApi = {
     api.get<ModelTaggingAvailability>(
       "/api/assistant/library-tags/model-status",
     ),
+  planModelTagging: (scope: ModelTaggingScope) =>
+    api.post<ModelTaggingAvailability>(
+      "/api/assistant/library-tags/model-plan",
+      { scope },
+    ),
   startModelTagging: (
     force: boolean,
     disclosureVersion: typeof MODEL_TAGGING_DISCLOSURE_VERSION,
+    scope: ModelTaggingScope = { type: "all" },
   ) =>
     api.post<BackgroundJob>("/api/assistant/library-tags/model-jobs", {
       force,
+      scope,
       disclosure_version: disclosureVersion,
       consent: true,
     }),
@@ -749,6 +762,18 @@ export const assistantApi = {
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return api.get<LibraryTagPage>(`/api/assistant/library-tags${suffix}`);
   },
+  queryModelLibraryTags: (
+    scope: ModelTaggingScope,
+    review: AnalysisTagReviewDecision = "pending",
+    offset = 0,
+    limit = 50,
+  ) =>
+    api.post<LibraryTagPage>("/api/assistant/library-tags/query", {
+      scope,
+      review,
+      offset,
+      limit,
+    }),
   patchManualTags: (trackId: number, add: string[], remove: string[]) =>
     api.patch<LibraryTagTrack>(
       `/api/assistant/library-tags/${encodeURIComponent(trackId)}`,

@@ -98,6 +98,11 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("playlists", "automatic_rule_json", "TEXT NOT NULL DEFAULT ''"),
     ("playlists", "automatic_source_signature", "VARCHAR(64)"),
     ("playlists", "automatic_refreshed_at", "DATETIME"),
+    (
+        "assistant_tag_vocabularies",
+        "seed_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    ),
 ]
 
 

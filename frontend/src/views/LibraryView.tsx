@@ -11,6 +11,7 @@ import { FolderPickerModal } from "@/components/FolderPickerModal";
 import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
+import { MoodTaggingDialog } from "@/components/MoodTaggingDialog";
 import {
   EditIcon,
   FolderOpenIcon,
@@ -24,6 +25,7 @@ import {
   SearchIcon,
   ShuffleIcon,
   SparkleIcon,
+  TagIcon,
   TrashIcon,
   XIcon,
 } from "@/components/icons";
@@ -93,6 +95,7 @@ export function LibraryView() {
   // "selected tracks" as a scope.
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [moodTaggingOpen, setMoodTaggingOpen] = useState(false);
 
   // The operator-resized tree width overrides the `--rail-tree` token on
   // this view only. Applied as a direct CSS-var write (not a React style
@@ -179,6 +182,16 @@ export function LibraryView() {
         ) : null}
         {root === "music" ? (
           <IconButton
+            label="Create and review database mood tags"
+            icon={<TagIcon />}
+            className="library-mood-tagging-btn"
+            onClick={() => setMoodTaggingOpen(true)}
+          >
+            Mood tags
+          </IconButton>
+        ) : null}
+        {root === "music" ? (
+          <IconButton
             label="Find and batch-fix common filename/tag issues"
             icon={<SparkleIcon />}
             className="library-cleanup-btn"
@@ -196,6 +209,15 @@ export function LibraryView() {
           checkedIds={[...checked]}
           onClose={() => setCleanupOpen(false)}
           onApplied={() => setRefreshKey((k) => k + 1)}
+        />
+      ) : null}
+
+      {moodTaggingOpen && root === "music" ? (
+        <MoodTaggingDialog
+          path={path}
+          checkedIds={[...checked]}
+          onClose={() => setMoodTaggingOpen(false)}
+          onChanged={() => setRefreshKey((key) => key + 1)}
         />
       ) : null}
 

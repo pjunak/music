@@ -102,12 +102,12 @@ PLAYLIST_QUALITY_EVALUATION = ModelEvaluationDefinition(
 TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
     id=TAGGING_QUALITY_EVALUATION_ID,
     role_id="music_tagger",
-    label="Music tagging quality",
+    label="Mood tagging quality",
     description=(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v6",
+    suite_id="controlled-vocabulary-tagging-baseline-v7",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -115,7 +115,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
 TAG_CLEANUP_QUALITY_EVALUATION = ModelEvaluationDefinition(
     id=TAG_CLEANUP_QUALITY_EVALUATION_ID,
     role_id="tag_cleanup",
-    label="Song-tag cleanup quality",
+    label="Mood-tag cleanup quality",
     description=(
         "Runs fixed synthetic canonical-ID and no-match tag-cleanup cases through "
         "this model. No songs or live library data are sent."

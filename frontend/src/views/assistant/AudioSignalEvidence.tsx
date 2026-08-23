@@ -36,7 +36,7 @@ export function AudioSignalEvidence({ profile }: AudioSignalEvidenceProps) {
           <strong>Audio signal evidence</strong>
           <span>
             Read-only measurements from {profile.analyzer_id}; never promoted to
-            manual tags automatically.
+            mood-library tags automatically.
           </span>
         </div>
         <span className={`assistant-confidence is-${profile.confidence}`}>

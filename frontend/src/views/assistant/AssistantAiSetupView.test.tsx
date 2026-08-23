@@ -180,7 +180,7 @@ const musicTaggingRole: ModelRole = {
 const tagCleanupRole: ModelRole = {
   ...musicTaggingRole,
   role_id: "tag_cleanup",
-  label: "Song-tag cleanup",
+  label: "Mood-tag cleanup",
   description: "Maps existing song tags onto the controlled vocabulary.",
   model_id: "cleanup-fast",
 };
@@ -188,10 +188,10 @@ const tagCleanupRole: ModelRole = {
 const musicTaggingEvaluation: ModelQualityEvaluation = {
   evaluation_id: "music-tagging-quality-v1",
   role_id: "music_tagger",
-  label: "Music tagging quality",
+  label: "Mood tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "controlled-vocabulary-tagging-baseline-v6",
+  suite_id: "controlled-vocabulary-tagging-baseline-v7",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -256,7 +256,7 @@ describe("AssistantAiSetupView", () => {
     ).toBeInTheDocument();
     expect(
       within(family as HTMLElement).getByRole("heading", {
-        name: "Song-tag cleanup",
+        name: "Mood-tag cleanup",
       }),
     ).toBeInTheDocument();
     expect(
@@ -1226,7 +1226,7 @@ describe("AssistantAiSetupView", () => {
 
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Run music tagging model quality check?",
+        title: "Run mood tagging model quality check?",
       }),
     );
     await waitFor(() =>

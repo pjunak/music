@@ -85,8 +85,8 @@ measures playlist quality instead of freezing one accidental exact ranking.
 ## Music metadata tagging evaluation
 
 `app/assistant/evaluation_suites/music-tagging-v1.json` applies the same versioned quality-gate
-rule to the optional metadata tagger. Its synthetic cases cover explicit tavern,
-dungeon, castle, travel, seafaring, and temple contexts; sparse metadata;
+rule to the optional metadata tagger. Its twelve synthetic cases cover explicit tavern,
+dungeon, castle, travel, seafaring, temple, and path-only desert contexts; sparse metadata;
 instructions embedded in untrusted metadata; forbidden tags; and the confidence
 and evidence expected for reviewable suggestions. The tagger must return every
 numeric track ID exactly once, use only stable IDs from the controlled vocabulary, and avoid

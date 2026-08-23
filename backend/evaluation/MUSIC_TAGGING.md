@@ -6,11 +6,12 @@ quality check from **Assistant → AI Setup** after configuring, testing, and
 enabling the `music_tagger` role.
 
 The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains synthetic
-titles, artists, albums, origins, genres, durations, BPM values, and one bounded local-signal
+titles, artists, albums, origins, genres, synthetic library-relative paths, durations,
+BPM values, and one bounded local-signal
 evidence case. It tests clear D&D cases such
 as medieval tavern dancing, dark dungeons, heroic castles, calm travel, and
-insufficient evidence. No real library data, paths, media, manual tags, or review
-history are part of the suite. The signal case confirms that high activity alone
+insufficient evidence. No real library data, private paths, media, database mood tags, or
+review history are part of the suite. The signal case confirms that high activity alone
 does not justify inventing a D&D setting.
 
 The provider must return one strict profile for every supplied synthetic track:
@@ -28,9 +29,12 @@ declares required and forbidden tags. All cases must pass for the exact model
 runtime fingerprint to be certified.
 
 Live tagging is a separate action and requires its own versioned disclosure and
-confirmation. It sends at most 20 path-free evidence records per provider call,
+confirmation. It sends at most 20 bounded evidence records per provider call,
 ranging from metadata-only records to metadata plus bounded current local energy,
-brightness, tension, tempo, and confidence values. It runs as a durable
+brightness, tension, tempo, and confidence values. Each record includes the canonical
+library-relative path as untrusted descriptive evidence; the absolute media root and
+paths outside the indexed library remain local. A run can target the whole library, a
+folder, or selected tracks. It runs as a durable
 non-restartable job, skips unchanged profiles, and stores only
-generated suggestions. Suggestions cannot become manual tags until the operator
-accepts them in the existing tag-review workspace.
+generated suggestions. The Library review dialog can audition tracks, but suggestions
+cannot become database mood tags until the operator explicitly accepts them.

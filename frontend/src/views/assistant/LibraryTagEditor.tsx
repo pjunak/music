@@ -190,13 +190,13 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     if (additions.some((tag) => tag.length > MAX_TAG_LENGTH)) {
       toast.error(
         "Tag is too long",
-        `Each manual tag can contain at most ${MAX_TAG_LENGTH} characters.`,
+        `Each mood-library tag can contain at most ${MAX_TAG_LENGTH} characters.`,
       );
       return;
     }
     const next = sortedUnique([...draftTags, ...additions]);
     if (next.length > MAX_TAGS) {
-      toast.error("Too many tags", `A track can have at most ${MAX_TAGS} manual tags.`);
+      toast.error("Too many tags", `A track can have at most ${MAX_TAGS} mood-library tags.`);
       return;
     }
     setDraftTags(next);
@@ -213,7 +213,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     if (additions.some((tag) => tag.length > MAX_TAG_LENGTH)) {
       toast.error(
         "Tag is too long",
-        `Each manual tag can contain at most ${MAX_TAG_LENGTH} characters.`,
+        `Each mood-library tag can contain at most ${MAX_TAG_LENGTH} characters.`,
       );
       return;
     }
@@ -286,7 +286,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
           : "Reject selected suggestions?",
       body:
         decision === "accepted"
-          ? `${count} selected ${count === 1 ? "suggestion" : "suggestions"} will be copied into your manual tags.`
+          ? `${count} selected ${count === 1 ? "suggestion" : "suggestions"} will be copied into your mood library.`
           : `${count} selected ${count === 1 ? "suggestion" : "suggestions"} will stop contributing tag labels to playlist matches. You can reopen decisions later.`,
       confirmLabel: decision === "accepted" ? "Add selected tags" : "Reject selected",
     });
@@ -406,7 +406,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
       if (tagFilter && !updated.manual_tags.includes(tagFilter)) {
         setReloadKey((value) => value + 1);
       }
-      toast.success("Manual tags saved", "Playlist suggestions use them immediately.");
+      toast.success("Mood tags saved", "Playlist suggestions use them immediately.");
     } catch (error) {
       toast.error(
         "Tags could not be saved",
@@ -461,11 +461,11 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     <section className="surface-card assistant-tag-workspace">
       <div className="assistant-section-heading">
         <div>
-          <p className="assistant-eyebrow">Human-owned library context</p>
-          <h2>Manual playlist tags</h2>
+          <p className="assistant-eyebrow">Human-owned database context</p>
+          <h2>Mood library tags</h2>
           <p>
-            Add your own D&amp;D settings, scenes, and moods. These labels stay
-            separate from local and model-generated suggestions.
+            Add terrain, scene, and mood labels without editing tags inside the
+            audio files. Generated suggestions remain separate until accepted.
           </p>
         </div>
         <span>{page.total} tracks</span>
@@ -492,7 +492,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
               setSelectedReviewItems(new Map());
             }}
           >
-            <option value="">All manual tags</option>
+            <option value="">All mood-library tags</option>
             {filterTags.map((tag) => (
               <option key={tag} value={tag}>
                 {tag}
@@ -543,7 +543,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
           </div>
           {dirty ? (
             <p className="assistant-review-note">
-              Save or discard the open manual-tag edits before applying this batch.
+              Save or discard the open mood-tag edits before applying this batch.
             </p>
           ) : null}
           <div className="assistant-bulk-actions">
@@ -687,7 +687,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
                     <span className="assistant-track-tag-preview">
                       {track.manual_tags.length > 0
                         ? track.manual_tags.join(" · ")
-                        : "No manual tags"}
+                        : "No mood tags"}
                     </span>
                     {pendingSuggestionCount(track) > 0 ? (
                       <span className="assistant-track-review-count">
@@ -752,7 +752,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
                 </div>
                 <div className="assistant-editable-tags">
                   {draftTags.length === 0 ? (
-                    <span className="muted small">No manual tags yet.</span>
+                    <span className="muted small">No mood-library tags yet.</span>
                   ) : (
                     draftTags.map((tag) => (
                       <button
@@ -834,7 +834,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
                   disabled={!dirty || saving}
                   onClick={() => void save()}
                 >
-                  {saving ? "Saving…" : "Save manual tags"}
+                  {saving ? "Saving…" : "Save mood tags"}
                 </button>
               </div>
             </>

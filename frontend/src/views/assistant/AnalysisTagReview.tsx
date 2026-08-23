@@ -54,7 +54,7 @@ export function AnalysisTagReview({
       if (decision === "accepted") {
         toast.success(
           "Tag added",
-          `“${suggestion.tag}” is now one of your manual tags.`,
+          `“${suggestion.tag}” is now in your mood library.`,
         );
       } else if (decision === "rejected") {
         toast.success(
@@ -64,7 +64,7 @@ export function AnalysisTagReview({
       } else {
         toast.success(
           "Decision reopened",
-          "The suggestion can be reviewed again. Existing manual tags were not removed.",
+          "The suggestion can be reviewed again. Existing mood-library tags were not removed.",
         );
       }
     } catch (error) {
@@ -83,12 +83,12 @@ export function AnalysisTagReview({
         <strong>Generated suggestions</strong>
         <span>
           Generated evidence stays separate. Only accepting a suggestion copies it
-          into your manual tags.
+          into your database mood library.
         </span>
       </div>
       {disabled ? (
         <p className="assistant-review-note">
-          Save or discard your current manual-tag edits before reviewing suggestions.
+          Save or discard your current mood-tag edits before reviewing suggestions.
         </p>
       ) : null}
       {suggestions.length === 0 ? (
@@ -153,7 +153,7 @@ export function AnalysisTagReview({
                         type="button"
                         className="btn-primary"
                         disabled={disabled || savingKey !== null}
-                        aria-label={`Accept ${suggestion.tag} as manual tag`}
+                        aria-label={`Accept ${suggestion.tag} into mood library`}
                         onClick={() => void review(suggestion, "accepted")}
                       >
                         {saving ? "Saving…" : "Add to my tags"}
@@ -176,7 +176,7 @@ export function AnalysisTagReview({
         </div>
       )}
       <p className="assistant-review-note">
-        Reopening a decision never removes a manual tag you already accepted.
+        Reopening a decision never removes a mood-library tag you already accepted.
       </p>
     </div>
   );

@@ -26,25 +26,25 @@ interface Props {
 function errorMessage(error: unknown): string {
   return error instanceof Error
     ? error.message
-    : "Model tag cleanup is unavailable.";
+    : "Mood-tag cleanup is unavailable.";
 }
 
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the tag cleanup quality check in AI Setup first.";
+      return "Run and pass the mood-tag cleanup quality check in AI Setup first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable a tag cleanup model in AI Setup first.";
+      return "Assign and enable a mood-tag cleanup model in AI Setup first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned tag cleanup model in AI Setup first.";
+      return "Verify and test the assigned mood-tag cleanup model in AI Setup first.";
     case "tag_catalog_empty":
-      return "Add at least one manual tag before asking a model to review the catalog.";
+      return "Add at least one mood-library tag before asking a model to review the catalog.";
     case "tag_catalog_too_large":
-      return "This model review currently supports at most 500 manual tags.";
+      return "This model review currently supports at most 500 mood-library tags.";
     default:
-      return "The connected tag cleanup model is not ready yet.";
+      return "The connected mood-tag cleanup model is not ready yet.";
   }
 }
 
@@ -117,9 +117,9 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
   async function start() {
     if (availability === null || !availability.available) return;
     const confirmed = await confirmDialog({
-      title: "Send your manual tag catalog to the cleanup model?",
+      title: "Send your mood-tag catalog to the cleanup model?",
       body:
-        `${availability.manual_tags} normalized manual tag name${
+        `${availability.manual_tags} normalized mood-tag name${
           availability.manual_tags === 1 ? "" : "s"
         } will be checked against your controlled vocabulary. ` +
         (availability.estimated_provider_requests > 0
@@ -140,12 +140,12 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
       setJob(nextJob);
       setSelectedIds(new Set());
       toast.success(
-        "Tag cleanup queued",
+        "Mood-tag cleanup queued",
         "You can close this page; the proposal and progress are stored on the server.",
       );
       setRefreshKey((value) => value + 1);
     } catch (error) {
-      toast.error("Tag cleanup could not start", errorMessage(error));
+      toast.error("Mood-tag cleanup could not start", errorMessage(error));
     } finally {
       setActionBusy(false);
     }
@@ -185,7 +185,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
       }?`,
       body:
         selected.map((item) => `${item.source} → ${item.target}`).join("; ") +
-        ". This changes only the selected manual tags. Unselected suggestions remain untouched.",
+        ". This changes only the selected database mood tags. Unselected suggestions remain untouched.",
       confirmLabel: "Apply selected renames",
       tone: "primary",
     });
@@ -218,12 +218,12 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
   return (
     <section
       className="surface-card assistant-model-tagging assistant-model-tag-cleanup"
-      aria-label="Connected model tag cleanup"
+      aria-label="Connected model mood-tag cleanup"
     >
       <div className="assistant-analyzer-heading">
         <div>
           <p className="assistant-eyebrow">Optional connected model</p>
-          <h2>Review manual tag consistency</h2>
+          <h2>Review mood-tag consistency</h2>
           <p>
             Ask the independently assigned cleanup model to propose duplicate,
             typo, or inconsistent tag renames. Nothing changes until you select
@@ -264,11 +264,11 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
         </div>
       ) : null}
       {loading && availability === null && job === null ? (
-        <p className="muted">Checking the tag cleanup model…</p>
+        <p className="muted">Checking the mood-tag cleanup model…</p>
       ) : null}
       {availability !== null && !availability.available && !active ? (
         <div className="assistant-model-tagging-unavailable">
-          <strong>Model tag cleanup is not ready</strong>
+          <strong>Model mood-tag cleanup is not ready</strong>
           <p>{unavailableMessage(availability.reason_code)}</p>
           {availability.reason_code !== "tag_catalog_empty" &&
           availability.reason_code !== "tag_catalog_too_large" ? (
@@ -280,7 +280,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
       {availability !== null && (availability.available || active) ? (
         <div
           className="assistant-model-disclosure assistant-model-tagging-disclosure"
-          aria-label="Tag cleanup model data disclosure"
+          aria-label="Mood-tag cleanup model data disclosure"
         >
           <div className="assistant-model-disclosure-heading">
             <div>
@@ -310,7 +310,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
           <p>
             {availability.connection_name ?? "Provider"} ·{" "}
             {availability.model_id ?? "assigned model"} · {availability.manual_tags}{" "}
-            manual tags · at most {availability.disclosure.maximum_tags} tags
+            mood-library tags · at most {availability.disclosure.maximum_tags} tags
             per review.
           </p>
         </div>
@@ -327,10 +327,10 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
             ) : null}
           </div>
           {job.progress_total === null ? (
-            <progress aria-label="Model tag cleanup progress" />
+            <progress aria-label="Model mood-tag cleanup progress" />
           ) : (
             <progress
-              aria-label="Model tag cleanup progress"
+              aria-label="Model mood-tag cleanup progress"
               value={job.progress_current}
               max={Math.max(1, job.progress_total)}
             />
@@ -340,7 +340,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
         </div>
       ) : job?.status === "failed" ? (
         <div className="assistant-quality-result is-failed">
-          <strong>The model tag cleanup did not finish</strong>
+          <strong>The model mood-tag cleanup did not finish</strong>
           <p>
             {readableBackgroundJobError(
               job.error,
@@ -350,8 +350,8 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
         </div>
       ) : job?.status === "cancelled" ? (
         <div className="assistant-quality-result">
-          <strong>The model tag cleanup was cancelled</strong>
-          <p>No manual tags were changed.</p>
+          <strong>The model mood-tag cleanup was cancelled</strong>
+          <p>No mood-library tags were changed.</p>
         </div>
       ) : null}
 
@@ -376,7 +376,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
           {!catalogIsCurrent ? (
             <div className="assistant-analysis-error" role="alert">
               <span>
-                The manual tag catalog or controlled vocabulary changed after this
+                The mood-tag catalog or controlled vocabulary changed after this
                 proposal was created. Run a new review; this proposal cannot be
                 applied.
               </span>
@@ -462,7 +462,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
               {actionBusy
                 ? "Starting…"
                 : result === null
-                  ? `Review ${availability.manual_tags} manual tags`
+                  ? `Review ${availability.manual_tags} mood-library tags`
                   : "Run a new review"}
             </button>
           ) : null}

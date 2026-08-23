@@ -7,11 +7,11 @@ from app.models.base import Base, UtcDateTime, utcnow
 
 
 class TrackUserTag(Base):
-    """Operator-owned playlist tag attached to one indexed track.
+    """Operator-owned terrain, scene, or mood tag attached to one track.
 
     These rows are deliberately independent from file metadata and generated
-    ``TrackAnalysis`` output. Re-indexing or rerunning an analyzer therefore
-    cannot overwrite an operator's classification.
+    ``TrackAnalysis`` output. They never write ID3/Vorbis fields such as album,
+    year, or genre, and re-indexing cannot overwrite the classification.
     """
 
     __tablename__ = "track_user_tags"
