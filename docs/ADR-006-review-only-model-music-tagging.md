@@ -48,8 +48,10 @@ observable after the browser closes without silently repeating uncertain calls.
   Context cues remain local and never act as cleanup mappings. Restrict output to zero through
   eight IDs from the current vocabulary plus bounded energy/brightness/tension values,
   confidence, and short evidence. Inject the exact track and tag ID enums into the
-  provider schema, then resolve validated IDs to names locally. Reject unknown tags,
-  malformed output, missing IDs, duplicate IDs, extra IDs, and truncated responses.
+  provider schema, then resolve validated IDs to names locally. Deterministically retain
+  only the first four bounded, well-typed evidence strings because they are incidental
+  review text. Reject unknown tags, invalid axes or confidence, malformed core output,
+  missing IDs, duplicate IDs, extra fields, and truncated responses.
 - Require the exact current `music-tagging-quality-v1` certification and a
   versioned disclosure confirmation before enqueueing live work. Recheck the
   role fingerprint and quality gate around every provider batch and database

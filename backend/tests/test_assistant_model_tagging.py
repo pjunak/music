@@ -336,6 +336,165 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
     assert "tracks" in incomplete.value.diagnostic
 
 
+def test_model_tagger_bounds_incidental_evidence_without_changing_core() -> None:
+    long_evidence = "x" * 600
+
+    def surplus(_request: StructuredModelRequest) -> StructuredModelResult:
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 7,
+                        "tag_ids": [
+                            "setting.seafaring",
+                            "scene.combat",
+                            "mood.tense",
+                        ],
+                        "energy": 0.83,
+                        "brightness": 0.41,
+                        "tension": 0.92,
+                        "confidence": "high",
+                        "evidence": [
+                            long_evidence,
+                            "Storm in the title.",
+                            "Sea battle in the album.",
+                            "Tense orchestral genre.",
+                            "Broken masts in the album.",
+                            "Black sails in the title.",
+                        ],
+                    }
+                ],
+            },
+        )
+
+    result = tag_tracks(
+        [
+            ModelTagTrackInput(
+                track_id=7,
+                title="Storm over the Black Sails",
+                display_title="",
+                artist="The Saltbound Fleet",
+                album="Sea Battles and Broken Masts",
+                origin="Shattered Coast",
+                genre="tense orchestral",
+                length_s=278,
+                bpm=138,
+            )
+        ],
+        surplus,
+    )[7]
+
+    assert result.tags == ["seafaring", "combat", "tense"]
+    assert (result.energy, result.brightness, result.tension) == (
+        0.83,
+        0.41,
+        0.92,
+    )
+    assert result.confidence == "high"
+    assert len(result.evidence) == 4
+    assert len(result.evidence[0]) == 512
+    assert result.evidence[0].endswith("...")
+    assert result.evidence[1:] == [
+        "Storm in the title.",
+        "Sea battle in the album.",
+        "Tense orchestral genre.",
+    ]
+
+
+def test_model_tagger_does_not_repair_invalid_core_with_surplus_evidence() -> None:
+    def invalid_core(_request: StructuredModelRequest) -> StructuredModelResult:
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": ["setting.tavern"],
+                        "energy": 1.2,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "high",
+                        "evidence": ["one", "two", "three", "four", "five"],
+                    }
+                ],
+            },
+        )
+
+    with pytest.raises(ModelTaggerError) as invalid:
+        tag_tracks(
+            [
+                ModelTagTrackInput(
+                    track_id=1,
+                    title="Tavern",
+                    display_title="",
+                    artist="",
+                    album="",
+                    origin="",
+                    genre="folk",
+                    length_s=120,
+                    bpm=100,
+                )
+            ],
+            invalid_core,
+        )
+
+    assert invalid.value.code == "model_output_schema_invalid"
+    assert invalid.value.diagnostic == "tracks.0.energy: less_than_equal"
+
+
+def test_model_tagger_does_not_discard_malformed_surplus_evidence() -> None:
+    def malformed(_request: StructuredModelRequest) -> StructuredModelResult:
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": ["setting.tavern"],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "high",
+                        "evidence": [
+                            "one",
+                            "two",
+                            "three",
+                            "four",
+                            {"unexpected": "object"},
+                        ],
+                    }
+                ],
+            },
+        )
+
+    with pytest.raises(ModelTaggerError) as invalid:
+        tag_tracks(
+            [
+                ModelTagTrackInput(
+                    track_id=1,
+                    title="Tavern",
+                    display_title="",
+                    artist="",
+                    album="",
+                    origin="",
+                    genre="folk",
+                    length_s=120,
+                    bpm=100,
+                )
+            ],
+            malformed,
+        )
+
+    assert invalid.value.code == "model_output_schema_invalid"
+
+
 def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None:
     observed: list[dict[str, Any]] = []
 

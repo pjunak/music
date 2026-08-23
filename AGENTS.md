@@ -239,7 +239,9 @@ Runtime data lives outside the image.
   outside the indexed library, audio, waveforms, detailed signal metrics, database mood tags,
   stored local generated tags, operator context-cue lists, playlists, or review history. Exact
   aliases remain one-to-one cleanup mappings; editable context cues may overlap and are used only
-  for local candidate evidence. Store output
+  for local candidate evidence. Provider responses may deterministically retain only the first four
+  bounded, well-typed explanatory evidence strings; never repair tag IDs, track IDs, confidence,
+  numeric axes, missing fields, or unexpected fields. Store output
   under `model-evidence-tagger/v4` in `track_analyses`, bind its source
   signature to metadata, the optional local-audio source signature, vocabulary fingerprint, and
   role fingerprint, and

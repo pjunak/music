@@ -23,8 +23,10 @@ The provider must return one strict profile for every supplied synthetic track:
 
 The server injects the exact synthetic track IDs and canonical tag IDs into the
 response schema, then resolves validated IDs to local names. Unknown tags, missing
-or duplicate IDs, malformed fields, truncated output, and
-unexpected tracks fail the contract instead of being repaired. Each case also
+or duplicate IDs, malformed core fields, truncated output, and
+unexpected tracks fail the contract instead of being repaired. Surplus or overlong
+well-typed explanatory evidence is the sole compatibility exception: the server keeps
+at most four bounded items without changing the classification. Each case also
 declares required and forbidden tags. All cases must pass for the exact model
 runtime fingerprint to be certified.
 

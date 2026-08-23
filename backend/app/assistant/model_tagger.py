@@ -48,6 +48,8 @@ MODEL_TAG_ANALYZER_ID: Literal["model-evidence-tagger/v4"] = (
 )
 MODEL_TAG_BATCH_SIZE = 20
 MAX_MODEL_TAGS_PER_TRACK = 8
+MAX_MODEL_EVIDENCE_ITEMS = 4
+MAX_MODEL_EVIDENCE_LENGTH = 512
 _MAX_MODEL_OUTPUT_TOKENS = 8_000
 _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9_]{1,64}$")
 
@@ -58,7 +60,10 @@ MODEL_TAG_VOCABULARY: tuple[str, ...] = tuple(
 _MODEL_TAG_SET = frozenset(MODEL_TAG_VOCABULARY)
 
 BoundedText = Annotated[str, Field(max_length=512)]
-BoundedEvidence = Annotated[str, Field(min_length=1, max_length=512)]
+BoundedEvidence = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_MODEL_EVIDENCE_LENGTH),
+]
 TagConfidence = Literal["high", "medium", "low"]
 
 
@@ -176,7 +181,23 @@ class ModelTagTrackChoice(_StrictModel):
     brightness: float = Field(ge=0.0, le=1.0)
     tension: float = Field(ge=0.0, le=1.0)
     confidence: TagConfidence
-    evidence: list[BoundedEvidence] = Field(max_length=4)
+    evidence: list[BoundedEvidence] = Field(max_length=MAX_MODEL_EVIDENCE_ITEMS)
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def bound_incidental_evidence(cls, value: object) -> object:
+        """Keep explanatory text bounded without repairing core classification data."""
+
+        if not isinstance(value, list):
+            return value
+        if not all(isinstance(item, str) for item in value):
+            return value
+        bounded: list[object] = []
+        for item in value[:MAX_MODEL_EVIDENCE_ITEMS]:
+            if isinstance(item, str) and len(item) > MAX_MODEL_EVIDENCE_LENGTH:
+                item = f"{item[: MAX_MODEL_EVIDENCE_LENGTH - 3].rstrip()}..."
+            bounded.append(item)
+        return bounded
 
     @model_validator(mode="after")
     def unique_tags(self) -> ModelTagTrackChoice:
@@ -206,7 +227,7 @@ class ModelTagTrackOutput(_StrictModel):
     brightness: float = Field(ge=0.0, le=1.0)
     tension: float = Field(ge=0.0, le=1.0)
     confidence: TagConfidence
-    evidence: list[BoundedEvidence] = Field(max_length=4)
+    evidence: list[BoundedEvidence] = Field(max_length=MAX_MODEL_EVIDENCE_ITEMS)
 
 
 class TagQualityCase(_StrictModel):
@@ -311,7 +332,7 @@ _TAGGING_TASK = StructuredTaskDefinition(
         "audio_evidence contains bounded signal proxies, never audio. It can support energy, brightness, tension, tempo, activity, dynamics, and rhythm, but cannot by itself prove an instrument, genre, setting, scene, culture, or D&D context.",
         "Do not turn generic high energy or tension into combat. Do not turn generic low energy into rest. Setting and scene tags require explicit semantic evidence.",
         "When evidence is sparse or conflicting, return fewer or no tags and lower confidence. Confidence describes the whole profile, not model certainty detached from evidence.",
-        "All numeric axes are in the closed range 0 to 1. Evidence strings must be short factual references to supplied fields or local evidence and must not contain recommendations or hidden reasoning.",
+        "All numeric axes are in the closed range 0 to 1. Return at most four short evidence strings containing factual references to supplied fields or local evidence; do not include recommendations or hidden reasoning.",
     ),
 )
 
