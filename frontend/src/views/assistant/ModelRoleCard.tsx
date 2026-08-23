@@ -48,6 +48,11 @@ const ROLE_OUTPUT_CONSTRAINTS: Record<string, string> = {
   eq_assistant: "Ten bounded EQ gains",
 };
 
+const ROLE_THINKING_RECOMMENDATIONS: Record<string, string> = {
+  playlist_planner: "Off recommended",
+  eq_assistant: "Off recommended",
+};
+
 function includesEveryCapability(
   availableIds: string[] | undefined,
   requiredIds: string[],
@@ -410,7 +415,14 @@ export function ModelRoleCard({
           aria-label="Request settings"
         >
           <fieldset className="assistant-thinking-mode">
-            <legend>Thinking</legend>
+            <legend>
+              <span>Thinking</span>
+              {ROLE_THINKING_RECOMMENDATIONS[role.role_id] !== undefined ? (
+                <span className="assistant-thinking-recommendation">
+                  {ROLE_THINKING_RECOMMENDATIONS[role.role_id]}
+                </span>
+              ) : null}
+            </legend>
             <div className="assistant-thinking-options">
               {(
                 [

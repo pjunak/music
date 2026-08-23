@@ -24,10 +24,12 @@ uv run music-cli evaluate-playlists app/assistant/evaluation_suites/playlist-loc
 Configured-model evaluation sends the suite's request text, synthetic titles,
 artists, albums, origins, genres, tags, analysis labels, and numeric evidence to
 the selected provider. It strips filesystem paths, locally enforces eligibility
-and exclusions, and sends at most 100 candidates per case. A deterministic case
-calls the model twice. The command may therefore incur provider cost. The flag
-is deliberately required each time; do not use it with a suite containing data
-you are unwilling to disclose.
+and exclusions, and sends at most 100 candidates per case. Cases marked for
+repeatability call the model twice; the bundled suite limits this to representative
+manual-priority, sequence, and untrusted-input boundaries instead of repeating every
+scenario. The command may therefore incur provider cost. The flag is deliberately
+required each time; do not use it with a suite containing data you are unwilling to
+disclose.
 
 The AI Setup screen can run the checked-in suite as a durable server job after
 the playlist model role is verified, tested, and enabled. Its progress and safe

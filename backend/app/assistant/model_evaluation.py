@@ -94,7 +94,7 @@ PLAYLIST_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic D&D playlist scenarios through this model. "
         "No songs or live library data are sent."
     ),
-    suite_id="local-dnd-playlist-baseline-v3",
+    suite_id="local-dnd-playlist-baseline-v4",
     suite_path=_PLAYLIST_SUITE_PATH,
     job_kind=PLAYLIST_QUALITY_JOB_KIND,
 )
@@ -107,7 +107,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v5",
+    suite_id="controlled-vocabulary-tagging-baseline-v6",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )

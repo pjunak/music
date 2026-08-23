@@ -124,7 +124,7 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
         "minstrel": ["medieval", "tavern", "dancing", "festive"],
         "crypt": ["dungeon", "dark", "eerie"],
         "crown guard": ["castle", "heroic"],
-        "green hills": ["travel", "wilderness", "calm"],
+        "open wilderness": ["travel", "wilderness", "calm"],
         "quiet tavern lullaby": ["tavern", "rest", "calm"],
         "black sails": ["seafaring", "combat", "tense"],
         "temple vigil": ["medieval", "temple", "mysterious"],

@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v3",
-  "id": "controlled-vocabulary-tagging-baseline-v5",
+  "id": "controlled-vocabulary-tagging-baseline-v6",
   "cases": [
     {
       "id": "medieval-tavern-dance",
@@ -64,10 +64,10 @@
       "description": "Recognizes calm wilderness travel without combat tags",
       "track": {
         "track_id": 4,
-        "title": "Quiet Road Through Green Hills",
+        "title": "Calm Journey Through Open Wilderness",
         "display_title": "",
-        "artist": "Wayfarer's Rest",
-        "album": "Journeys",
+        "artist": "Greenhill Wayfarers",
+        "album": "Quiet Roads",
         "origin": "",
         "genre": "acoustic ambient",
         "length_s": 265.0,

@@ -70,6 +70,36 @@ function thinkingModeLabel(mode: ModelRole["thinking_mode"]): string {
   return mode === "provider_default" ? "provider default" : mode;
 }
 
+function structuredOutputTroubleshooting(
+  role: ModelRole,
+  failures: string[],
+): string | null {
+  const outputBudgetFailure = failures.some(
+    (failure) =>
+      failure.includes("model_execution_empty_structured_output") ||
+      failure.includes("model_execution_incomplete_structured_output") ||
+      failure.includes("model_output_incomplete"),
+  );
+  if (!outputBudgetFailure) return null;
+  if (role.thinking_mode === "enabled") {
+    return (
+      "The provider returned no complete final JSON while Thinking was On. " +
+      "Turn Thinking Off for this task and rerun; raise the response-token limit " +
+      "only when reasoning is genuinely needed."
+    );
+  }
+  if (role.thinking_mode === "provider_default") {
+    return (
+      "The provider returned no complete final JSON. If it reasons by default, " +
+      "choose Thinking Off; otherwise raise the response-token limit before a deliberate rerun."
+    );
+  }
+  return (
+    "The provider returned no complete final JSON even with Thinking Off. " +
+    "Raise the response-token limit or try a different model before rerunning."
+  );
+}
+
 function currentModelTestResult(
   role: ModelRole,
   result: ModelConformance | undefined,
@@ -254,6 +284,18 @@ function buildLogEntries(
       tone: "failure",
       message: `${scenario.description}: ${scenario.failures.join("; ") || "Scenario failed."}`,
     });
+    const troubleshooting = structuredOutputTroubleshooting(
+      role,
+      scenario.failures,
+    );
+    if (troubleshooting !== null) {
+      entries.push({
+        id: `scenario-${scenario.id}-troubleshooting`,
+        time: evaluation?.last_evaluated_at ?? null,
+        tone: "warning",
+        message: troubleshooting,
+      });
+    }
   }
 
   const usage = providerUsageFromJob(quality.currentJob);

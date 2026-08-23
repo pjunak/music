@@ -304,7 +304,7 @@ def test_playlist_model_quality_job_persists_progress_and_current_gate(
                 "No songs or live library data are sent."
             ),
             "status": "passed",
-            "suite_id": "local-dnd-playlist-baseline-v3",
+            "suite_id": "local-dnd-playlist-baseline-v4",
             "passed_cases": 9,
             "total_cases": 9,
             "last_job_id": job_id,
@@ -378,7 +378,7 @@ def test_playlist_quality_status_is_stale_when_suite_version_changes(
 
     assert quality.status_code == 200
     assert quality.json()[0]["status"] == "stale"
-    assert quality.json()[0]["suite_id"] == "local-dnd-playlist-baseline-v3"
+    assert quality.json()[0]["suite_id"] == "local-dnd-playlist-baseline-v4"
     assert quality.json()[0]["last_job_id"] == finished["id"]
 
 

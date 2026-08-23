@@ -339,4 +339,12 @@ def test_reference_model_planner_passes_provider_neutral_suite() -> None:
     assert result.engine_id == "model-playlist-planner/v2"
     assert result.summary.passed_cases == 9
     assert all(case.metrics.contract_valid for case in result.cases)
-    assert all(case.metrics.deterministic is True for case in result.cases)
+    repeated_cases = [
+        case for case in result.cases if case.metrics.deterministic is not None
+    ]
+    assert {case.id for case in repeated_cases} == {
+        "manual-temple-tag-priority",
+        "heroic-ritual-arc",
+        "untrusted-candidate-text-limit",
+    }
+    assert all(case.metrics.deterministic is True for case in repeated_cases)

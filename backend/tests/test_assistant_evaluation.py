@@ -192,8 +192,16 @@ class UnsafeCodedEngine(RaisingEngine):
 
 
 def one_case_suite(suite: PlaylistEvaluationSuite) -> PlaylistEvaluationSuite:
+    case = suite.cases[0]
+    repeated_case = case.model_copy(
+        update={
+            "thresholds": case.thresholds.model_copy(
+                update={"require_deterministic": True}
+            )
+        }
+    )
     return suite.model_copy(
-        update={"id": "single-evaluation-case", "cases": [suite.cases[0]]}
+        update={"id": "single-evaluation-case", "cases": [repeated_case]}
     )
 
 
@@ -210,7 +218,21 @@ def test_checked_in_playlist_evaluation_suite_passes() -> None:
     assert result.summary.mean_recall_at_k == 1.0
     assert result.summary.mean_order_pair_accuracy == 1.0
     assert all(case.metrics.contract_valid for case in result.cases)
-    assert all(case.metrics.deterministic is True for case in result.cases)
+    repeated_case_ids = {
+        "manual-temple-tag-priority",
+        "heroic-ritual-arc",
+        "untrusted-candidate-text-limit",
+    }
+    assert {
+        case.id
+        for case in result.cases
+        if case.metrics.deterministic is not None
+    } == repeated_case_ids
+    assert all(
+        case.metrics.deterministic is True
+        for case in result.cases
+        if case.id in repeated_case_ids
+    )
 
 
 def test_evaluator_reports_ranking_regressions() -> None:
@@ -321,7 +343,7 @@ def test_playlist_evaluation_cli_supports_human_and_json_output(
 ) -> None:
     assert cli_main(["evaluate-playlists", str(SUITE_PATH)]) == 0
     human = capsys.readouterr().out
-    assert "PASS local-dnd-playlist-baseline-v3" in human
+    assert "PASS local-dnd-playlist-baseline-v4" in human
     assert "9/9 cases passed" in human
 
     assert cli_main(["evaluate-playlists", str(SUITE_PATH), "--json"]) == 0

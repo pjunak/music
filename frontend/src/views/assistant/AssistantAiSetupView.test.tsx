@@ -156,7 +156,7 @@ const qualityEvaluation: ModelQualityEvaluation = {
     "No songs or live library data are sent."
   ),
   status: "never",
-  suite_id: "local-dnd-playlist-baseline-v3",
+  suite_id: "local-dnd-playlist-baseline-v4",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -191,7 +191,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Music tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "controlled-vocabulary-tagging-baseline-v5",
+  suite_id: "controlled-vocabulary-tagging-baseline-v6",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -626,6 +626,7 @@ describe("AssistantAiSetupView", () => {
     expect(allowCheckbox.closest(".assistant-role-heading")).not.toBeNull();
     expect(screen.getByRole("group", { name: "Request settings" })).toBeVisible();
     expect(screen.getByLabelText("Provider default")).toBeVisible();
+    expect(screen.getByText("Off recommended")).toBeVisible();
     const modelPicker = screen.getByLabelText("Model");
     await user.click(modelPicker);
     expect(screen.getByText("2 available models")).toBeInTheDocument();
@@ -1247,7 +1248,10 @@ describe("AssistantAiSetupView", () => {
               id: "tavern-dance",
               description: "Tavern dancing",
               passed: false,
-              failures: ["recall_at_k below threshold"],
+              failures: [
+                "recall_at_k below threshold",
+                "engine error: model_execution_empty_structured_output",
+              ],
             },
           ],
         },
@@ -1264,6 +1268,7 @@ describe("AssistantAiSetupView", () => {
         model_id: "planner-large",
         enabled: true,
         effective_enabled: true,
+        thinking_mode: "enabled",
       },
     ]);
     vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
@@ -1284,7 +1289,13 @@ describe("AssistantAiSetupView", () => {
       await screen.findByText(/Task quality passed 3 of 5 scenarios/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Tavern dancing: recall_at_k below threshold"),
+      screen.queryByText("Tavern dancing: recall_at_k below threshold"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Tavern dancing: recall_at_k below threshold; engine error:/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Turn Thinking Off for this task and rerun/),
     ).toBeInTheDocument();
     const taskCard = screen
       .getByRole("heading", { name: "Playlist planner" })
