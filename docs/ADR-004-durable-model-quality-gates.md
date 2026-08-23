@@ -47,6 +47,16 @@ must never authorize a changed model.
 - Treat a completed but failing quality report as a successful job with a
   failed certification. Job failure is reserved for infrastructure,
   configuration, cancellation, or execution-lifecycle failure.
+- Let a task-specific suite distinguish blocking safety/contract failures from
+  scored semantic quality where that distinction is meaningful. Mood tagging
+  requires every safety case and rejects every forbidden false positive or
+  provider/contract failure, while ordinary recall cases must meet the suite's
+  explicit minimum pass rate. This avoids turning a larger nondeterministic
+  semantic suite into an accidental all-or-nothing gate.
+- Permit a bounded mood-tagging failed-scenario recheck only against the exact
+  current complete result. Run only its failed case IDs, merge replacements with
+  the saved complete case set, recompute the full gate, and then update current
+  certification. A partial run alone never certifies a model.
 - Do not treat a passing result as standing authorization for a live request.
   ADR-005 adds the playlist-specific consent, disclosure, bounded data, fallback,
   and review-to-import integration; other roles apply equivalent task-specific

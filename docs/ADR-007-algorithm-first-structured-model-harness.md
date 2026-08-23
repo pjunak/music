@@ -59,7 +59,10 @@ indexed metadata / local audio / operator request
   that document support. It fails before network I/O when a task omitted its schema.
 - Models return one JSON object only. Markdown, prose, arrays, type coercion,
   additional fields, incomplete output, unknown identities, and values outside local
-  constraints fail closed. The server does not repair or reinterpret them.
+  constraints fail closed. The server does not repair or reinterpret authoritative
+  IDs, mappings, ordering, confidence, or numeric decisions. Task contracts may
+  deterministically truncate bounded incidental review prose such as tagging evidence,
+  cleanup reasons, or EQ rationale/cautions; this never changes the core decision.
 - The harness and per-role feature-contract versions participate in the runtime
   fingerprint. A change makes conformance and quality certification stale.
 

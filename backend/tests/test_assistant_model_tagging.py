@@ -875,6 +875,79 @@ def test_metadata_evidence_bounds_dense_metadata_and_keeps_exact_terms() -> None
     )
 
 
+def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_quality_passed_tagger(auth_client, monkeypatch)
+
+    def miss_one_scene(
+        target: object,
+        request: StructuredModelRequest,
+    ) -> StructuredModelResult:
+        result = _reference_music_tagger(target, request)
+        assert result.payload is not None
+        tracks = result.payload["tracks"]
+        assert isinstance(tracks, list)
+        for track in tracks:
+            assert isinstance(track, dict)
+            if track["track_id"] == 7:
+                tag_ids = track["tag_ids"]
+                assert isinstance(tag_ids, list)
+                track["tag_ids"] = [
+                    tag_id for tag_id in tag_ids if tag_id != "scene.combat"
+                ]
+        return result
+
+    monkeypatch.setattr(
+        "app.assistant.model_evaluation.execute_structured_model_request",
+        miss_one_scene,
+    )
+    full = auth_client.post(
+        "/api/assistant/providers/roles/music_tagger/"
+        "evaluations/music-tagging-quality-v1/jobs"
+    )
+    assert full.status_code == 202, full.text
+    failed_case_result = _wait_for_job(
+        auth_client,
+        full.json()["id"],
+        {"succeeded"},
+    )
+    evaluation = failed_case_result["result"]["evaluation"]
+    assert evaluation["passed"] is True
+    assert [case["id"] for case in evaluation["cases"] if not case["passed"]] == [
+        "stormy-sea-battle"
+    ]
+
+    calls: list[list[int]] = []
+
+    def capture_retest(
+        target: object,
+        request: StructuredModelRequest,
+    ) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        calls.append([track["track_id"] for track in payload["tracks"]])
+        return _reference_music_tagger(target, request)
+
+    monkeypatch.setattr(
+        "app.assistant.model_evaluation.execute_structured_model_request",
+        capture_retest,
+    )
+    started = auth_client.post(
+        "/api/assistant/providers/roles/music_tagger/evaluations/"
+        "music-tagging-quality-v1/failed-scenarios/jobs"
+    )
+    assert started.status_code == 202, started.text
+    assert started.json()["parameters"]["case_ids"] == ["stormy-sea-battle"]
+    finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
+
+    assert calls == [[7]]
+    assert finished["result"]["evaluation"]["passed"] is True
+    assert finished["result"]["evaluation"]["passed_cases"] == 40
+    assert finished["result"]["evaluation"]["total_cases"] == 40
+    assert finished["result"]["usage"]["attempted_requests"] == 1
+
+
 @pytest.mark.parametrize(
     "library_path",
     ["/srv/music/private.flac", "C:\\Music\\private.flac", "safe/../private.flac"],
@@ -967,7 +1040,7 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v3",
+            "schema_version": "assistant-music-tagger-evaluation/v4",
             "id": "confidence-evidence-boundary",
             "cases": [
                 {
@@ -1022,10 +1095,126 @@ def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
     ]
 
 
+def test_tag_quality_separates_scored_recall_from_blocking_safety() -> None:
+    def case(track_id: int, *, gate: str = "quality") -> dict[str, object]:
+        return {
+            "id": f"case-{track_id}",
+            "description": f"Synthetic case {track_id}",
+            "gate": gate,
+            "track": {
+                "track_id": track_id,
+                "title": f"Untitled {track_id}",
+                "display_title": "",
+                "artist": "",
+                "album": "",
+                "origin": "",
+                "genre": "",
+                "length_s": 120,
+                "bpm": None,
+            },
+            "required_tags": ["tavern"] if track_id == 1 else [],
+            "forbidden_tags": ["combat"] if gate == "safety" else [],
+        }
+
+    suite = TagQualitySuite.model_validate(
+        {
+            "schema_version": "assistant-music-tagger-evaluation/v4",
+            "id": "scored-safety-boundary",
+            "minimum_quality_pass_rate": 0.5,
+            "cases": [case(1), case(2), case(3, gate="safety")],
+        }
+    )
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": track["track_id"],
+                        "tag_ids": [],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                    for track in payload["tracks"]
+                ],
+            },
+        )
+
+    result = evaluate_music_tagger(execute, suite)
+
+    assert result.passed is True
+    assert result.passed_cases == 2
+    assert result.quality_passed_cases == 1
+    assert result.quality_total_cases == 2
+    assert result.safety_passed_cases == result.safety_total_cases == 1
+    assert result.cases[0].blocking is False
+
+
+def test_tag_quality_forbidden_false_positive_is_always_blocking() -> None:
+    suite = TagQualitySuite.model_validate(
+        {
+            "schema_version": "assistant-music-tagger-evaluation/v4",
+            "id": "forbidden-tag-boundary",
+            "minimum_quality_pass_rate": 0.0,
+            "cases": [
+                {
+                    "id": "quality-case",
+                    "description": "A scored case still rejects false positives",
+                    "track": {
+                        "track_id": 1,
+                        "title": "Unrelated",
+                        "display_title": "",
+                        "artist": "",
+                        "album": "",
+                        "origin": "",
+                        "genre": "",
+                        "length_s": 120,
+                        "bpm": None,
+                    },
+                    "required_tags": [],
+                    "forbidden_tags": ["combat"],
+                }
+            ],
+        }
+    )
+
+    def execute(_request: StructuredModelRequest) -> StructuredModelResult:
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": ["scene.combat"],
+                        "energy": 0.8,
+                        "brightness": 0.5,
+                        "tension": 0.8,
+                        "confidence": "medium",
+                        "evidence": ["Unrelated"],
+                    }
+                ],
+            },
+        )
+
+    result = evaluate_music_tagger(execute, suite)
+
+    assert result.passed is False
+    assert result.cases[0].blocking is True
+
+
 def test_tag_quality_batches_tracks_but_reports_each_case() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v3",
+            "schema_version": "assistant-music-tagger-evaluation/v4",
             "id": "batched-quality-boundary",
             "cases": [
                 {

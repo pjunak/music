@@ -9,7 +9,14 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.assistant.providers.execution import StructuredModelRequest, StructuredModelResult
 from app.assistant.schema_diagnostics import safe_validation_diagnostic
@@ -93,6 +100,13 @@ class ModelTagCleanupDecision(_StrictModel):
     target_tag_id: str | None = Field(default=None, min_length=2, max_length=64)
     confidence: CleanupConfidence
     reason: BoundedReason
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def bound_incidental_reason(cls, value: object) -> object:
+        if isinstance(value, str) and len(value) > 512:
+            return f"{value[:509].rstrip()}..."
+        return value
 
 
 class ModelTagCleanupOutput(_StrictModel):

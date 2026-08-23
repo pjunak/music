@@ -496,7 +496,7 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v2",
-                        "input_contract": "assistant-music-tagger-input/v8",
+                        "input_contract": "assistant-music-tagger-input/v9",
                         "used_audio_evidence": snapshot.id in audio_profiles,
                         "role_fingerprint": parameters.role_fingerprint,
                         "vocabulary_fingerprint": (

@@ -197,6 +197,10 @@ export const assistantProvidersApi = {
     api.post<BackgroundJob>(
       `/api/assistant/providers/roles/${encodeURIComponent(roleId)}/evaluations/${encodeURIComponent(evaluationId)}/jobs`,
     ),
+  retestFailedScenarios: (roleId: string, evaluationId: string) =>
+    api.post<BackgroundJob>(
+      `/api/assistant/providers/roles/${encodeURIComponent(roleId)}/evaluations/${encodeURIComponent(evaluationId)}/failed-scenarios/jobs`,
+    ),
   deleteRole: (roleId: string) =>
     api.delete<void>(
       `/api/assistant/providers/roles/${encodeURIComponent(roleId)}`,

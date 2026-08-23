@@ -11,6 +11,7 @@ import { toast } from "@/core/toast";
 import { readableBackgroundJobError } from "./backgroundJobs";
 import {
   modelQualityView,
+  qualityGateSummary,
   qualityProgressLabel,
   qualityStatusLabel,
   qualityTone,
@@ -34,6 +35,8 @@ interface Props {
   qualityLoadError: string | null;
   onSelectRole: (roleId: string) => void;
   onRetryQuality: () => void;
+  onRetestFailed: (evaluation: ModelQualityEvaluation) => void;
+  qualityActionBusy: boolean;
 }
 
 interface LogEntry {
@@ -123,6 +126,7 @@ function buildLogEntries(
 ): LogEntry[] {
   const entries: LogEntry[] = [];
   const quality = modelQualityView(evaluation, role, jobs);
+  const gateSummary = qualityGateSummary(quality.reportJob);
   entries.push({
     id: "configuration",
     time: role.updated_at,
@@ -232,14 +236,20 @@ function buildLogEntries(
       id: "quality-passed",
       time: evaluation.last_evaluated_at,
       tone: "success",
-      message: `Task quality passed ${evaluation.passed_cases} of ${evaluation.total_cases} synthetic scenarios.`,
+      message:
+        gateSummary === null
+          ? `Task quality passed ${evaluation.passed_cases} of ${evaluation.total_cases} synthetic scenarios.`
+          : `Quality gate passed ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios: ${gateSummary.safetyPassedCases} of ${gateSummary.safetyTotalCases} safety checks and ${gateSummary.qualityPassedCases} of ${gateSummary.qualityTotalCases} scored checks (minimum ${Math.round(gateSummary.minimumQualityPassRate * 100)}%).`,
     });
   } else if (evaluation.status === "failed") {
     entries.push({
       id: "quality-failed",
       time: evaluation.last_evaluated_at,
       tone: "failure",
-      message: `Task quality passed ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios. Review the failures below.`,
+      message:
+        gateSummary === null
+          ? `Task quality passed ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios. Review the failures below.`
+          : `Quality gate failed after ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios: ${gateSummary.safetyPassedCases} of ${gateSummary.safetyTotalCases} safety checks and ${gateSummary.qualityPassedCases} of ${gateSummary.qualityTotalCases} scored checks (minimum ${Math.round(gateSummary.minimumQualityPassRate * 100)}%).`,
     });
   } else if (
     evaluation.status === "stale" ||
@@ -281,7 +291,7 @@ function buildLogEntries(
     entries.push({
       id: `scenario-${scenario.id}`,
       time: evaluation?.last_evaluated_at ?? null,
-      tone: "failure",
+      tone: scenario.blocking ? "failure" : "warning",
       message: `${scenario.description}: ${scenario.failures.join("; ") || "Scenario failed."}`,
     });
     const troubleshooting = structuredOutputTroubleshooting(
@@ -351,6 +361,8 @@ export function ModelTestConsole({
   qualityLoadError,
   onSelectRole,
   onRetryQuality,
+  onRetestFailed,
+  qualityActionBusy,
 }: Props) {
   const taskRoles = roles.filter((role) => role.configuration_available);
   const role =
@@ -460,6 +472,21 @@ export function ModelTestConsole({
           <p>One place for model checks, quality progress, and troubleshooting.</p>
         </div>
         <div className="assistant-test-console-actions">
+          {role?.role_id === "music_tagger" &&
+          evaluation !== undefined &&
+          quality.failures.length > 0 &&
+          quality.activeJob === undefined ? (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={qualityActionBusy}
+              onClick={() => onRetestFailed(evaluation)}
+            >
+              {qualityActionBusy
+                ? "Starting…"
+                : `Recheck ${quality.failures.length} failed ${quality.failures.length === 1 ? "scenario" : "scenarios"}`}
+            </button>
+          ) : null}
           {qualityLoadError !== null ? (
             <button type="button" className="btn-ghost" onClick={onRetryQuality}>
               Retry status

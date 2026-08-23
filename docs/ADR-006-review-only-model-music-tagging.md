@@ -59,7 +59,13 @@ observable after the browser closes without silently repeating uncertain calls.
 - Require the exact current `music-tagging-quality-v1` certification and a
   versioned disclosure confirmation before enqueueing live work. Recheck the
   role fingerprint and quality gate around every provider batch and database
-  commit.
+  commit. The synthetic suite separates blocking safety cases from scored
+  semantic recall: prompt-injection, sparse/signal-only invention, ambiguous
+  literal-word traps, provider/contract failures, and any forbidden false
+  positive remain blocking, while ordinary required-tag misses must meet a 90%
+  scored pass floor. The operator may recheck only failed cases from the exact
+  current complete report; the server merges them with that report before
+  recomputing certification.
 - Bind each profile source signature to the consumed track metadata, optional
   local-audio source signature, vocabulary fingerprint, input-contract version, and
   exact model-role runtime fingerprint. Changed metadata, audio evidence, vocabulary,

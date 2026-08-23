@@ -11,7 +11,16 @@ export type TestTone = "info" | "success" | "warning" | "failure" | "muted";
 export interface FailedScenario {
   id: string;
   description: string;
+  blocking: boolean;
   failures: string[];
+}
+
+export interface QualityGateSummary {
+  safetyPassedCases: number;
+  safetyTotalCases: number;
+  qualityPassedCases: number;
+  qualityTotalCases: number;
+  minimumQualityPassRate: number;
 }
 
 export interface ModelQualityView {
@@ -36,9 +45,36 @@ function failedScenarios(job: BackgroundJob | undefined): FailedScenario[] {
       ? value.failures.filter((item): item is string => typeof item === "string")
       : [];
     return typeof value.id === "string" && typeof value.description === "string"
-      ? [{ id: value.id, description: value.description, failures }]
+      ? [{
+          id: value.id,
+          description: value.description,
+          blocking: value.blocking !== false,
+          failures,
+        }]
       : [];
   });
+}
+
+export function qualityGateSummary(
+  job: BackgroundJob | undefined,
+): QualityGateSummary | null {
+  const evaluation = job?.result?.evaluation;
+  if (!isRecord(evaluation)) return null;
+  const values = [
+    evaluation.safety_passed_cases,
+    evaluation.safety_total_cases,
+    evaluation.quality_passed_cases,
+    evaluation.quality_total_cases,
+    evaluation.minimum_quality_pass_rate,
+  ];
+  if (!values.every((value) => typeof value === "number")) return null;
+  return {
+    safetyPassedCases: evaluation.safety_passed_cases as number,
+    safetyTotalCases: evaluation.safety_total_cases as number,
+    qualityPassedCases: evaluation.quality_passed_cases as number,
+    qualityTotalCases: evaluation.quality_total_cases as number,
+    minimumQualityPassRate: evaluation.minimum_quality_pass_rate as number,
+  };
 }
 
 function attemptFollowsCurrentModelTest(

@@ -46,6 +46,7 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
       testRole: vi.fn(),
       listRoleEvaluations: vi.fn(),
       startRoleEvaluation: vi.fn(),
+      retestFailedScenarios: vi.fn(),
       deleteRole: vi.fn(),
     },
   };
@@ -191,7 +192,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Mood tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "controlled-vocabulary-tagging-baseline-v9",
+  suite_id: "controlled-vocabulary-tagging-baseline-v10",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -1231,6 +1232,91 @@ describe("AssistantAiSetupView", () => {
     );
     await waitFor(() =>
       expect(assistantProvidersApi.startRoleEvaluation).toHaveBeenCalledWith(
+        "music_tagger",
+        "music-tagging-quality-v1",
+      ),
+    );
+  });
+
+  it("rechecks only failed mood scenarios from the test console", async () => {
+    const completed = qualityJob({
+      id: "tagging-complete-job",
+      kind: "assistant.model-evaluation.music-tagging-quality-v1",
+      status: "succeeded",
+      parameters: {
+        role_id: "music_tagger",
+        evaluation_id: "music-tagging-quality-v1",
+      },
+      result: {
+        evaluation: {
+          passed: true,
+          passed_cases: 39,
+          total_cases: 40,
+          safety_passed_cases: 7,
+          safety_total_cases: 7,
+          quality_passed_cases: 32,
+          quality_total_cases: 33,
+          minimum_quality_pass_rate: 0.9,
+          cases: [
+            {
+              id: "stormy-sea-battle",
+              description: "Recognizes a stormy sea battle",
+              passed: false,
+              blocking: false,
+              failures: ["Missing required tags: combat"],
+            },
+          ],
+        },
+      },
+      finished_at: "2026-08-23T12:05:00Z",
+    });
+    const queued = qualityJob({
+      id: "tagging-retest-job",
+      kind: "assistant.model-evaluation.music-tagging-quality-v1",
+      status: "queued",
+      parameters: {
+        role_id: "music_tagger",
+        evaluation_id: "music-tagging-quality-v1",
+        case_ids: ["stormy-sea-battle"],
+        baseline_job_id: completed.id,
+      },
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      musicTaggingRole,
+    ]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      {
+        ...musicTaggingEvaluation,
+        status: "passed",
+        passed_cases: 39,
+        total_cases: 40,
+        last_job_id: completed.id,
+        last_evaluated_at: completed.finished_at,
+      },
+    ]);
+    vi.mocked(jobsApi.list).mockResolvedValue([completed]);
+    vi.mocked(assistantProvidersApi.retestFailedScenarios).mockResolvedValue(
+      queued,
+    );
+    const user = userEvent.setup();
+    render(<AssistantAiSetupView />);
+
+    expect(
+      await screen.findByText(/Quality gate passed 39 of 40 scenarios/),
+    ).toBeInTheDocument();
+    const recheck = screen.getByRole("button", {
+      name: "Recheck 1 failed scenario",
+    });
+    await user.click(recheck);
+
+    expect(confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Recheck failed mood-tagging scenarios?",
+      }),
+    );
+    await waitFor(() =>
+      expect(assistantProvidersApi.retestFailedScenarios).toHaveBeenCalledWith(
         "music_tagger",
         "music-tagging-quality-v1",
       ),

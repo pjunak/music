@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, DbSession
 from app.assistant.model_evaluation import (
     evaluation_job_parameters,
+    failed_scenario_job_parameters,
     list_role_evaluations,
 )
 from app.assistant.providers.execution import (
@@ -261,6 +262,35 @@ def start_role_evaluation(
 ) -> BackgroundJobOut:
     try:
         definition, parameters = evaluation_job_parameters(
+            db,
+            role_id,
+            evaluation_id,
+        )
+    except ProviderServiceError as exc:
+        _raise_http(exc)
+    job, created = enqueue_unique_active_job(
+        db,
+        definition.job_kind,
+        parameters,
+    )
+    if created:
+        job_runner.wake()
+    return job_out(job)
+
+
+@router.post(
+    "/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs",
+    response_model=BackgroundJobOut,
+    status_code=202,
+)
+def start_failed_scenario_evaluation(
+    role_id: str,
+    evaluation_id: str,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BackgroundJobOut:
+    try:
+        definition, parameters = failed_scenario_job_parameters(
             db,
             role_id,
             evaluation_id,

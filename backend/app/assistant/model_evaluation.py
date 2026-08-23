@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
 
 from app.assistant.evaluation import (
@@ -29,8 +29,10 @@ from app.assistant.model_tag_cleanup import (
 from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
     TagQualityEvaluationResult,
+    TagQualitySuite,
     evaluate_music_tagger,
     load_tag_quality_suite,
+    summarize_music_tagger_quality,
 )
 from app.assistant.providers.definitions import MODEL_ROLE_BY_ID
 from app.assistant.providers.execution import (
@@ -52,6 +54,7 @@ from app.assistant.providers.usage import ProviderUsageAccumulator
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.models.assistant_model_evaluation import AssistantModelEvaluation
+from app.models.background_job import BackgroundJob
 from app.models.base import utcnow
 
 PLAYLIST_QUALITY_EVALUATION_ID: Literal["playlist-quality-v1"] = (
@@ -107,7 +110,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v9",
+    suite_id="controlled-vocabulary-tagging-baseline-v10",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -161,6 +164,16 @@ class _EvaluationJobParameters(BaseModel):
     role_id: str = Field(min_length=1, max_length=64)
     evaluation_id: str = Field(min_length=1, max_length=128)
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    case_ids: tuple[str, ...] = Field(default=(), max_length=100)
+    baseline_job_id: str | None = Field(default=None, min_length=32, max_length=32)
+
+    @model_validator(mode="after")
+    def valid_retest(self) -> _EvaluationJobParameters:
+        if bool(self.case_ids) != (self.baseline_job_id is not None):
+            raise ValueError("case IDs and a baseline job must be supplied together")
+        if len(set(self.case_ids)) != len(self.case_ids):
+            raise ValueError("retest case IDs must be unique")
+        return self
 
 
 def evaluation_definitions_for_role(
@@ -254,6 +267,146 @@ def evaluation_job_parameters(
         role_fingerprint=resolved.fingerprint,
     )
     return definition, parameters.model_dump(mode="json")
+
+
+def failed_scenario_job_parameters(
+    db: Session,
+    role_id: str,
+    evaluation_id: str,
+) -> tuple[ModelEvaluationDefinition, dict[str, Any]]:
+    """Build a bounded retest from the current complete mood-quality result."""
+
+    definition = require_evaluation_definition(role_id, evaluation_id)
+    if definition.id != TAGGING_QUALITY_EVALUATION_ID:
+        raise ProviderServiceError(
+            "evaluation_partial_retest_unavailable",
+            "Failed-scenario retesting is currently available for mood tagging.",
+            409,
+        )
+    resolved = prepare_role_execution_details(db, role_id)
+    row = db.get(AssistantModelEvaluation, (role_id, evaluation_id))
+    if (
+        row is None
+        or row.suite_id != definition.suite_id
+        or row.role_fingerprint != resolved.fingerprint
+        or row.job_id is None
+    ):
+        raise ProviderServiceError(
+            "evaluation_retest_baseline_unavailable",
+            "Run the complete current quality suite before rechecking failures.",
+            409,
+        )
+    baseline = db.get(BackgroundJob, row.job_id)
+    if baseline is None or baseline.status != "succeeded":
+        raise ProviderServiceError(
+            "evaluation_retest_baseline_unavailable",
+            "The saved complete quality result is not available.",
+            409,
+        )
+    try:
+        result = ModelQualityJobResult.model_validate_json(
+            baseline.result_json or "null"
+        )
+        evaluation = TagQualityEvaluationResult.model_validate(result.evaluation)
+        case_ids = tuple(
+            item.id for item in evaluation.cases if item.passed is False
+        )
+    except (ValidationError, ValueError) as exc:
+        raise ProviderServiceError(
+            "evaluation_retest_baseline_unavailable",
+            "The saved result cannot be used as a failed-scenario baseline.",
+            409,
+        ) from exc
+    if (
+        result.role_id != role_id
+        or result.evaluation_id != evaluation_id
+        or result.role_fingerprint != resolved.fingerprint
+        or evaluation.suite_id != definition.suite_id
+    ):
+        raise ProviderServiceError(
+            "evaluation_retest_baseline_stale",
+            "The saved quality result belongs to different model settings.",
+            409,
+        )
+    if not case_ids:
+        raise ProviderServiceError(
+            "evaluation_retest_not_needed",
+            "The current quality result has no failed scenarios to recheck.",
+            409,
+        )
+    parameters = _EvaluationJobParameters(
+        role_id=definition.role_id,
+        evaluation_id=definition.id,
+        role_fingerprint=resolved.fingerprint,
+        case_ids=case_ids,
+        baseline_job_id=row.job_id,
+    )
+    return definition, parameters.model_dump(mode="json")
+
+
+def _tagging_retest_suite(
+    suite: TagQualitySuite,
+    parameters: _EvaluationJobParameters,
+) -> TagQualitySuite:
+    if not parameters.case_ids:
+        return suite
+    requested = set(parameters.case_ids)
+    selected = [case for case in suite.cases if case.id in requested]
+    if {case.id for case in selected} != requested:
+        raise ProviderServiceError(
+            "evaluation_retest_baseline_stale",
+            "The saved failed scenarios do not match the current quality suite.",
+            409,
+        )
+    return suite.model_copy(update={"cases": selected})
+
+
+def _merge_tagging_retest(
+    suite: TagQualitySuite,
+    parameters: _EvaluationJobParameters,
+    retest: TagQualityEvaluationResult,
+) -> TagQualityEvaluationResult:
+    if parameters.baseline_job_id is None:
+        return retest
+    with SessionLocal() as db:
+        baseline = db.get(BackgroundJob, parameters.baseline_job_id)
+        if baseline is None or baseline.status != "succeeded":
+            raise ProviderServiceError(
+                "evaluation_retest_baseline_unavailable",
+                "The saved quality result is no longer available.",
+                409,
+            )
+        try:
+            result = ModelQualityJobResult.model_validate_json(
+                baseline.result_json or "null"
+            )
+            previous = TagQualityEvaluationResult.model_validate(result.evaluation)
+        except (ValidationError, ValueError) as exc:
+            raise ProviderServiceError(
+                "evaluation_retest_baseline_unavailable",
+                "The saved quality result cannot be merged safely.",
+                409,
+            ) from exc
+    if (
+        result.role_id != parameters.role_id
+        or result.evaluation_id != parameters.evaluation_id
+        or result.role_fingerprint != parameters.role_fingerprint
+        or previous.suite_id != suite.id
+    ):
+        raise ProviderServiceError(
+            "evaluation_retest_baseline_stale",
+            "The saved quality result belongs to different model settings.",
+            409,
+        )
+    replacements = {item.id: item for item in retest.cases}
+    merged = [replacements.get(item.id, item) for item in previous.cases]
+    if len(merged) != len(suite.cases):
+        raise ProviderServiceError(
+            "evaluation_retest_baseline_stale",
+            "The saved quality result does not cover the current suite.",
+            409,
+        )
+    return summarize_music_tagger_quality(suite, merged)
 
 
 def prepare_quality_gated_role_execution(
@@ -410,11 +563,16 @@ def run_tagging_quality_evaluation(
     suite = load_tag_quality_suite(definition.suite_path)
     if suite.id != definition.suite_id:
         raise RuntimeError("Configured model tagging suite ID does not match.")
+    execution_suite = _tagging_retest_suite(suite, parameters)
     context.update_progress(
         0,
-        len(suite.cases),
+        len(execution_suite.cases),
         phase="Preparing evaluation",
-        message="Loading fixed synthetic evidence-tagging cases",
+        message=(
+            "Loading failed synthetic evidence-tagging cases"
+            if parameters.case_ids
+            else "Loading fixed synthetic evidence-tagging cases"
+        ),
     )
 
     with SessionLocal() as db:
@@ -445,9 +603,10 @@ def run_tagging_quality_evaluation(
 
     result: TagQualityEvaluationResult = evaluate_music_tagger(
         execute,
-        suite,
+        execution_suite,
         on_case_complete=case_complete,
     )
+    result = _merge_tagging_retest(suite, parameters, result)
     context.check_cancelled()
     _record_result(
         context,

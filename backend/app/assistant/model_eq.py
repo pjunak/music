@@ -88,6 +88,25 @@ class EqDraftOutput(_StrictModel):
         max_length=5,
     )
 
+    @field_validator("rationale", mode="before")
+    @classmethod
+    def bound_incidental_rationale(cls, value: object) -> object:
+        if isinstance(value, str) and len(value) > 1000:
+            return f"{value[:997].rstrip()}..."
+        return value
+
+    @field_validator("cautions", mode="before")
+    @classmethod
+    def bound_incidental_cautions(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        bounded: list[object] = []
+        for item in value[:5]:
+            if isinstance(item, str) and len(item) > 256:
+                item = f"{item[:253].rstrip()}..."
+            bounded.append(item)
+        return bounded
+
     @field_validator("gains_db")
     @classmethod
     def gains_use_supported_step(cls, values: list[float]) -> list[float]:

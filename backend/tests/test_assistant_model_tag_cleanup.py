@@ -304,6 +304,31 @@ def test_cleanup_model_reports_safe_schema_diagnostic() -> None:
     assert "decisions.0.confidence" in invalid.value.diagnostic
 
 
+def test_cleanup_model_bounds_incidental_reason_text() -> None:
+    suggestions = suggest_model_tag_cleanup(
+        [TagUsage(tag="ale room", track_count=3)],
+        lambda _request: StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
+                "decisions": [
+                    {
+                        "source_id": "source-001",
+                        "target_tag_id": "setting.tavern",
+                        "confidence": "high",
+                        "reason": "r" * 700,
+                    }
+                ],
+            },
+        ),
+    )
+
+    assert len(suggestions) == 1
+    assert len(suggestions[0].reason) == 512
+    assert suggestions[0].reason.endswith("...")
+
+
 def test_cleanup_resolves_unambiguous_sources_without_provider_call() -> None:
     def should_not_run(_request: StructuredModelRequest) -> StructuredModelResult:
         raise AssertionError("deterministic cleanup must not call the provider")

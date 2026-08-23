@@ -532,6 +532,39 @@ export function AssistantAiSetupView() {
     }
   }
 
+  async function retestFailedScenarios(evaluation: ModelQualityEvaluation) {
+    setSelectedTestRoleId(evaluation.role_id);
+    const confirmed = await confirmDialog({
+      title: "Recheck failed mood-tagging scenarios?",
+      body:
+        "Only the failed scenarios from the last complete result will be sent again. " +
+        "Their new results are merged with that complete run before certification is updated.",
+      confirmLabel: "Recheck failures",
+      tone: "primary",
+    });
+    if (!confirmed) return;
+    setBusyItem(`evaluation-retest:${evaluation.evaluation_id}`);
+    try {
+      const job = await assistantProvidersApi.retestFailedScenarios(
+        evaluation.role_id,
+        evaluation.evaluation_id,
+      );
+      setQualityHistory((current) => [
+        job,
+        ...current.filter((item) => item.id !== job.id),
+      ]);
+      toast.success(
+        "Failed scenarios queued",
+        "Only the failed cases will call the provider.",
+      );
+      refreshQuality();
+    } catch (error) {
+      toast.error("Failed scenarios could not be queued", errorMessage(error));
+    } finally {
+      setBusyItem(null);
+    }
+  }
+
   async function cancelQualityEvaluation(jobId: string) {
     const roleId = qualityHistory.find((job) => job.id === jobId)?.parameters
       .role_id;
@@ -906,6 +939,8 @@ export function AssistantAiSetupView() {
             qualityLoadError={qualityLoadError}
             onSelectRole={setSelectedTestRoleId}
             onRetryQuality={refreshQuality}
+            onRetestFailed={(item) => void retestFailedScenarios(item)}
+            qualityActionBusy={busyItem?.startsWith("evaluation") === true}
           />
         ) : null}
       </section>

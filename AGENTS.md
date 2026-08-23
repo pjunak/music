@@ -221,7 +221,9 @@ Runtime data lives outside the image.
   current `eq-quality-v1` pass and disclosure consent, make jobs non-restartable, and send only the
   operator's sound goal plus the fixed ten-band frequencies, local guidance, and gain limits.
   Accept exactly ten gains in the local envelope and in 0.5 dB steps; construct every frequency
-  and Authoring field locally.
+  and Authoring field locally. Deterministically bound overlong rationale and caution text because
+  it is incidental review prose; never repair or coerce gains, frequency order, schema identity,
+  missing fields, or unexpected fields.
   The result is a review-only draft and may create a preset only through the existing Authoring
   import preview/select/commit transaction. Never send songs, audio, library metadata, paths,
   playlists, existing presets, or credentials to the EQ role.
@@ -259,7 +261,9 @@ Runtime data lives outside the image.
   `tag-cleanup-quality-v1` pass and versioned disclosure consent, allow at most 500 catalog tags,
   make the provider job non-restartable, batch at most 50 unresolved names per call, and send only
   source IDs/names and usage counts plus canonical vocabulary IDs, names, groups, and definitions.
-  Require one ordered canonical-ID-or-null decision per source. Never send song metadata,
+  Require one ordered canonical-ID-or-null decision per source. Bound overlong reason text locally,
+  but never repair source order, source or target IDs, confidence, missing decisions, or unexpected
+  fields. Never send song metadata,
   paths, audio, playlists, generated tags, review
   history, or credentials. Store only a review-only proposal bound to the exact role fingerprint
   catalog signature, and vocabulary fingerprint. Apply only explicitly selected source/target pairs from that stored job,
@@ -272,7 +276,11 @@ Runtime data lives outside the image.
   while their model jobs are queued or running; the UI must warn that deliberate reverification
   clears their model tests and quality results.
   The mood-tagging suite batches four synthetic tracks per provider request while preserving
-  per-scenario progress and diagnostics.
+  per-scenario progress and diagnostics. Safety cases, provider/contract failures, and forbidden
+  false positives block certification; ordinary semantic recall and review-text misses use the
+  suite's explicit minimum scored pass rate. A failed-scenario recheck may call the provider only
+  for failures from the exact current complete result, then must merge those results with that
+  baseline before updating certification.
 - Durable quality, playlist, tagging, and tag-cleanup model jobs record the shared bounded provider-usage
   summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
   Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep

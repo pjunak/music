@@ -217,6 +217,26 @@ def test_eq_contract_rejects_non_half_db_steps() -> None:
     assert "gains_db" in raised.value.diagnostic
 
 
+def test_eq_contract_bounds_incidental_review_text() -> None:
+    def verbose_output(_request: StructuredModelRequest) -> StructuredModelResult:
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": EQ_DRAFT_OUTPUT_CONTRACT,
+                "gains_db": [0.0] * 10,
+                "rationale": "r" * 1200,
+                "cautions": ["c" * 300 for _index in range(7)],
+            },
+        )
+
+    draft = generate_eq_draft("Verbose", "some sound goal", verbose_output)
+
+    assert len(draft.rationale) == 1000
+    assert len(draft.cautions) == 5
+    assert all(len(item) == 256 for item in draft.cautions)
+
+
 def test_eq_endpoints_are_consent_bound_durable_and_review_only(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

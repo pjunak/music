@@ -34,15 +34,15 @@ from app.assistant.tag_vocabulary import (
     default_tag_vocabulary_snapshot,
 )
 
-MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v8"] = (
-    "assistant-music-tagger-input/v8"
+MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v9"] = (
+    "assistant-music-tagger-input/v9"
 )
 MODEL_TAGGER_OUTPUT_CONTRACT: Literal["assistant-music-tagger-output/v2"] = (
     "assistant-music-tagger-output/v2"
 )
 MODEL_TAGGING_EVALUATION_CONTRACT: Literal[
-    "assistant-music-tagger-evaluation/v3"
-] = "assistant-music-tagger-evaluation/v3"
+    "assistant-music-tagger-evaluation/v4"
+] = "assistant-music-tagger-evaluation/v4"
 MODEL_TAG_ANALYZER_ID: Literal["model-evidence-tagger/v4"] = (
     "model-evidence-tagger/v4"
 )
@@ -177,7 +177,7 @@ class ModelTagDefinition(_StrictModel):
 
 
 class ModelTaggerInput(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-input/v8"]
+    schema_version: Literal["assistant-music-tagger-input/v9"]
     vocabulary: list[ModelTagIndexEntry] = Field(min_length=1, max_length=200)
     candidate_definitions: list[ModelTagDefinition] = Field(max_length=200)
     tracks: list[ModelTagTrackInput] = Field(min_length=1, max_length=20)
@@ -253,6 +253,7 @@ class TagQualityCase(_StrictModel):
         max_length=3,
     )
     minimum_evidence_items: int = Field(default=0, ge=0, le=4)
+    gate: Literal["quality", "safety"] = "quality"
 
     @model_validator(mode="after")
     def valid_expectations(self) -> TagQualityCase:
@@ -271,8 +272,9 @@ class TagQualityCase(_StrictModel):
 
 
 class TagQualitySuite(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-evaluation/v3"]
+    schema_version: Literal["assistant-music-tagger-evaluation/v4"]
     id: str = Field(min_length=1, max_length=128)
+    minimum_quality_pass_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     cases: list[TagQualityCase] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
@@ -290,19 +292,26 @@ class TagQualityCaseResult(_StrictModel):
     id: str
     description: str
     passed: bool
+    gate: Literal["quality", "safety"]
+    blocking: bool
     tags: list[str]
     failures: list[str]
 
 
 class TagQualityEvaluationResult(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-quality-result/v1"] = (
-        "assistant-music-tagger-quality-result/v1"
+    schema_version: Literal["assistant-music-tagger-quality-result/v2"] = (
+        "assistant-music-tagger-quality-result/v2"
     )
     suite_id: str
     engine_id: str = MODEL_TAG_ANALYZER_ID
     passed: bool
     passed_cases: int
     total_cases: int
+    safety_passed_cases: int
+    safety_total_cases: int
+    quality_passed_cases: int
+    quality_total_cases: int
+    minimum_quality_pass_rate: float
     cases: list[TagQualityCaseResult]
 
 
@@ -340,7 +349,7 @@ _TAGGING_TASK = StructuredTaskDefinition(
         "Explicit descriptive metadata is the strongest semantic evidence. metadata_evidence is a deterministic high-recall hypothesis, not ground truth; confirm it against the descriptive fields before using its candidate_tag_ids.",
         "metadata_evidence.tag_matches is ordered by independent field support, then exactness. field_support=multiple_fields is corroborated; single_field is weaker. context_cue_terms are overlapping hints; other matched terms are exact names or aliases. Confirm every match against the complete field phrase. When display_title is non-empty it is the canonical title; treat conflicting raw title text cautiously.",
         "Classify each track across every applicable vocabulary group and return every well-supported tag, up to the limit. Do not merely copy candidate_tag_ids or stop after finding one group. You may choose another ID from the full vocabulary index when supplied metadata explicitly supports it.",
-        "Interpret metadata phrases in context. An isolated tag word inside an artist, label, company, metaphor, or unrelated title is not sufficient when the remaining metadata contradicts that setting or scene. In particular, a single-field terrain, setting, or scene word must describe the literal situation; do not keep it merely because it exactly matches a vocabulary label when several other fields consistently establish a figurative mood or relationship meaning.",
+        "Interpret metadata phrases in context. An isolated tag word inside an artist, label, company, metaphor, or unrelated title is not sufficient when the remaining metadata contradicts that setting or scene. In particular, a single-field terrain or setting word must describe the literal situation; do not keep it merely because it exactly matches a vocabulary label when several other fields consistently establish a figurative mood or relationship meaning. Explicit scene actions such as battle, rescue, chase, escape, or ritual remain strong evidence even when they occur in only one descriptive field.",
         "audio_evidence contains bounded signal proxies, never audio. It can support energy, brightness, tension, tempo, activity, dynamics, and rhythm, but cannot by itself prove an instrument, genre, setting, scene, culture, or D&D context.",
         "Do not turn generic high energy or tension into combat. Do not turn generic low energy into rest. Setting and scene tags require explicit semantic evidence.",
         "When evidence is sparse or conflicting, return fewer or no tags and lower confidence. Confidence describes the whole profile, not model certainty detached from evidence.",
@@ -603,6 +612,46 @@ def load_tag_quality_suite(path: Path) -> TagQualitySuite:
     return TagQualitySuite.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+def summarize_music_tagger_quality(
+    suite: TagQualitySuite,
+    results: Sequence[TagQualityCaseResult],
+) -> TagQualityEvaluationResult:
+    """Apply the suite gate without treating every semantic miss as unsafe.
+
+    Safety cases, provider/contract failures, and forbidden false positives are
+    blocking. Ordinary recall, confidence, and evidence misses contribute to a
+    scored quality rate so a larger suite remains useful with nondeterministic
+    models instead of becoming an accidental all-or-nothing lottery.
+    """
+
+    expected = [(case.id, case.gate) for case in suite.cases]
+    actual = [(result.id, result.gate) for result in results]
+    if actual != expected:
+        raise ValueError("quality results must match suite case order and gates")
+    passed_cases = sum(result.passed for result in results)
+    safety_results = [result for result in results if result.gate == "safety"]
+    quality_results = [result for result in results if result.gate == "quality"]
+    quality_passed = sum(result.passed for result in quality_results)
+    quality_rate = (
+        quality_passed / len(quality_results) if quality_results else 1.0
+    )
+    return TagQualityEvaluationResult(
+        suite_id=suite.id,
+        passed=(
+            not any(result.blocking for result in results)
+            and quality_rate >= suite.minimum_quality_pass_rate
+        ),
+        passed_cases=passed_cases,
+        total_cases=len(results),
+        safety_passed_cases=sum(result.passed for result in safety_results),
+        safety_total_cases=len(safety_results),
+        quality_passed_cases=quality_passed,
+        quality_total_cases=len(quality_results),
+        minimum_quality_pass_rate=suite.minimum_quality_pass_rate,
+        cases=list(results),
+    )
+
+
 def evaluate_music_tagger(
     execute: StructuredTaggerExecutor,
     suite: TagQualitySuite,
@@ -625,6 +674,7 @@ def evaluate_music_tagger(
         for case in batch:
             failures: list[str] = []
             tags: list[str] = []
+            returned_forbidden = False
             if batch_failure is not None:
                 failures.append(batch_failure)
             else:
@@ -635,6 +685,7 @@ def evaluate_music_tagger(
                 if missing:
                     failures.append(f"Missing required tags: {', '.join(missing)}")
                 if forbidden:
+                    returned_forbidden = True
                     failures.append(f"Returned forbidden tags: {', '.join(forbidden)}")
                 if profile.confidence not in case.allowed_confidences:
                     failures.append(f"Returned disallowed confidence: {profile.confidence}")
@@ -648,17 +699,17 @@ def evaluate_music_tagger(
                     id=case.id,
                     description=case.description,
                     passed=not failures,
+                    gate=case.gate,
+                    blocking=bool(failures)
+                    and (
+                        case.gate == "safety"
+                        or batch_failure is not None
+                        or returned_forbidden
+                    ),
                     tags=tags,
                     failures=failures,
                 )
             )
             if on_case_complete is not None:
                 on_case_complete(len(results), total)
-    passed_cases = sum(result.passed for result in results)
-    return TagQualityEvaluationResult(
-        suite_id=suite.id,
-        passed=passed_cases == total,
-        passed_cases=passed_cases,
-        total_cases=total,
-        cases=results,
-    )
+    return summarize_music_tagger_quality(suite, results)
