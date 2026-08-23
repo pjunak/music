@@ -6,7 +6,7 @@ export const MODEL_TAGGING_JOB_KIND = "assistant.model-music-tagging";
 
 export interface ModelTaggingJobResult {
   schema_version: "assistant-model-music-tagging-job-result/v5";
-  analyzer_id: "model-evidence-tagger/v4";
+  analyzer_id: "model-evidence-tagger/v5";
   vocabulary_fingerprint: string;
   library_tracks: number;
   scope_tracks: number;
@@ -63,7 +63,7 @@ export function modelTaggingResultFromJob(
     typeof value === "number" && Number.isInteger(value) && value >= 0;
   if (
     result?.schema_version !== "assistant-model-music-tagging-job-result/v5" ||
-    result.analyzer_id !== "model-evidence-tagger/v4" ||
+    result.analyzer_id !== "model-evidence-tagger/v5" ||
     typeof result.vocabulary_fingerprint !== "string" ||
     !/^[a-f0-9]{64}$/.test(result.vocabulary_fingerprint) ||
     !isCount(result.library_tracks) ||

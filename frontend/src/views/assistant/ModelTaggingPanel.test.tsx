@@ -226,7 +226,7 @@ describe("ModelTaggingPanel", () => {
       progress_current: 40,
       result: {
         schema_version: "assistant-model-music-tagging-job-result/v5",
-        analyzer_id: "model-evidence-tagger/v4",
+        analyzer_id: "model-evidence-tagger/v5",
         vocabulary_fingerprint: "b".repeat(64),
         library_tracks: 45,
         scope_tracks: 45,

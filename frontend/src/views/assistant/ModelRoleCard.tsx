@@ -49,6 +49,7 @@ const ROLE_OUTPUT_CONSTRAINTS: Record<string, string> = {
 };
 
 const ROLE_THINKING_RECOMMENDATIONS: Record<string, string> = {
+  music_tagger: "Off recommended",
   playlist_planner: "Off recommended",
   eq_assistant: "Off recommended",
 };

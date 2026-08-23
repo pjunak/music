@@ -247,7 +247,7 @@ Runtime data lives outside the image.
   matches when support is otherwise equal. Provider responses may deterministically retain only the first four
   bounded, well-typed explanatory evidence strings; never repair tag IDs, track IDs, confidence,
   numeric axes, missing fields, or unexpected fields. Store output
-  under `model-evidence-tagger/v4` in `track_analyses`, bind its source
+  under `model-evidence-tagger/v5` in `track_analyses`, bind its source
   signature to metadata, the optional local-audio source signature, vocabulary fingerprint, and
   role fingerprint, and
   expose it only through the existing generated-tag review surface. Resolve the requested scope
@@ -276,11 +276,12 @@ Runtime data lives outside the image.
   while their model jobs are queued or running; the UI must warn that deliberate reverification
   clears their model tests and quality results.
   The mood-tagging suite batches four synthetic tracks per provider request while preserving
-  per-scenario progress and diagnostics. Safety cases, provider/contract failures, and forbidden
-  false positives block certification; ordinary semantic recall and review-text misses use the
-  suite's explicit minimum scored pass rate. A failed-scenario recheck may call the provider only
-  for failures from the exact current complete result, then must merge those results with that
-  baseline before updating certification.
+  per-scenario progress and diagnostics, then repeats every safety scenario once to catch unstable
+  forbidden output. Provider/contract failures and forbidden false positives block certification;
+  a scenario's safety label alone does not turn a required semantic-tag miss into a blocking error.
+  All scenarios contribute to the suite's explicit minimum scored pass rate. A
+  failed-scenario recheck may call the provider only for failures from the exact current complete
+  result, then must merge those results with that baseline before updating certification.
 - Durable quality, playlist, tagging, and tag-cleanup model jobs record the shared bounded provider-usage
   summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
   Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep

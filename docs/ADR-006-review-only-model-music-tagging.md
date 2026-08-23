@@ -23,18 +23,21 @@ observable after the browser closes without silently repeating uncertain calls.
 ## Decision
 
 - Reuse `track_analyses` and `track_analysis_tag_reviews` with the versioned
-  analyzer ID `model-evidence-tagger/v4`. Do not create a parallel AI-tag store.
+  analyzer ID `model-evidence-tagger/v5`. Do not create a parallel AI-tag store.
 - Limit model input to numeric track ID, indexed title, display title, artist,
   album, origin, genre, canonical library-relative path, duration, BPM, and an optional bounded projection of a
   current `local-audio/v1` profile: energy, brightness, tension, tempo estimate,
   activity, normalized dynamic range, rhythmic density, rhythmic stability, and
-  confidence. Also derive a `local-metadata-evidence/v3` hypothesis from the same
+  confidence. Also derive a `local-metadata-evidence/v4` hypothesis from the same
   disclosed descriptive fields and relative path, and send its bounded candidate tag IDs, the matched
   field and term for each candidate, whether a term was only a weaker context cue,
   whether one or several independent fields support it, canonical-title source, axes,
   and confidence. Corroborated candidates are presented before isolated candidates;
-  exact names and aliases take priority when dense metadata reaches the candidate bound. A
-  non-empty display title is canonical for deterministic title matching. Treat every
+  exact names and aliases take priority when dense metadata reaches the candidate bound.
+  Omit artist-only matches and known non-literal title phrases such as performer
+  competitions or romantic metaphors from the highlighted hypothesis so they cannot
+  anchor a fast model; the full vocabulary remains available for independently supported
+  choices. A non-empty display title is canonical for deterministic title matching. Treat every
   relative path and metadata string as untrusted data. Do not send the absolute media
   root, paths outside the indexed library, audio, waveforms, detailed signal measurements,
   database mood tags, stored local generated tags, playlists, or review history.
@@ -59,11 +62,11 @@ observable after the browser closes without silently repeating uncertain calls.
 - Require the exact current `music-tagging-quality-v1` certification and a
   versioned disclosure confirmation before enqueueing live work. Recheck the
   role fingerprint and quality gate around every provider batch and database
-  commit. The synthetic suite separates blocking safety cases from scored
-  semantic recall: prompt-injection, sparse/signal-only invention, ambiguous
-  literal-word traps, provider/contract failures, and any forbidden false
-  positive remain blocking, while ordinary required-tag misses must meet a 90%
-  scored pass floor. The operator may recheck only failed cases from the exact
+  commit. The synthetic suite repeats each safety scenario once and separates
+  blocking output-safety failures from scored semantic recall: provider/contract
+  failures and any forbidden false positive on either attempt remain blocking,
+  while required-tag misses—including those in safety scenarios—contribute to a
+  90% scored pass floor. The operator may recheck only failed cases from the exact
   current complete report; the server merges them with that report before
   recomputing certification.
 - Bind each profile source signature to the consumed track metadata, optional

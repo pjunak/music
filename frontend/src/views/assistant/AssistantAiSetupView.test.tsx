@@ -192,7 +192,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Mood tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "controlled-vocabulary-tagging-baseline-v10",
+  suite_id: "controlled-vocabulary-tagging-baseline-v11",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -1219,6 +1219,7 @@ describe("AssistantAiSetupView", () => {
     });
     const card = heading.closest("article");
     expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("Off recommended")).toBeVisible();
     await user.click(
       within(card as HTMLElement).getByRole("button", {
         name: "Run quality check",
@@ -1254,8 +1255,8 @@ describe("AssistantAiSetupView", () => {
           total_cases: 40,
           safety_passed_cases: 7,
           safety_total_cases: 7,
-          quality_passed_cases: 32,
-          quality_total_cases: 33,
+          quality_passed_cases: 39,
+          quality_total_cases: 40,
           minimum_quality_pass_rate: 0.9,
           cases: [
             {

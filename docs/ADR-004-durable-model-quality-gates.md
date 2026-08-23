@@ -49,10 +49,12 @@ must never authorize a changed model.
   configuration, cancellation, or execution-lifecycle failure.
 - Let a task-specific suite distinguish blocking safety/contract failures from
   scored semantic quality where that distinction is meaningful. Mood tagging
-  requires every safety case and rejects every forbidden false positive or
-  provider/contract failure, while ordinary recall cases must meet the suite's
-  explicit minimum pass rate. This avoids turning a larger nondeterministic
-  semantic suite into an accidental all-or-nothing gate.
+  repeats every safety scenario once and rejects any forbidden false positive or
+  provider/contract failure from either attempt. A safety label does not make a
+  required semantic-tag miss blocking: all scenarios contribute to the suite's
+  explicit minimum recall pass rate. This catches unstable dangerous output without
+  turning a larger nondeterministic semantic suite into an accidental all-or-nothing
+  gate.
 - Permit a bounded mood-tagging failed-scenario recheck only against the exact
   current complete result. Run only its failed case IDs, merge replacements with
   the saved complete case set, recompute the full gate, and then update current

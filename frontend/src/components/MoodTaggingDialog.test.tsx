@@ -79,7 +79,7 @@ const succeededJob: BackgroundJob = {
   parameters: {},
   result: {
     schema_version: "assistant-model-music-tagging-job-result/v5",
-    analyzer_id: "model-evidence-tagger/v4",
+    analyzer_id: "model-evidence-tagger/v5",
     vocabulary_fingerprint: "a".repeat(64),
     library_tracks: 90,
     scope_tracks: 1,
@@ -120,7 +120,7 @@ const reviewPage: LibraryTagPage = {
       analysis_suggestions: [
         {
           tag: "forest",
-          analyzer_id: "model-evidence-tagger/v4",
+          analyzer_id: "model-evidence-tagger/v5",
           source_signature: "source-1",
           confidence: "high",
           evidence: ["Library path contains Forest."],
@@ -128,7 +128,7 @@ const reviewPage: LibraryTagPage = {
         },
         {
           tag: "calm",
-          analyzer_id: "model-evidence-tagger/v4",
+          analyzer_id: "model-evidence-tagger/v5",
           source_signature: "source-1",
           confidence: "low",
           evidence: ["Bounded signal evidence is restrained."],

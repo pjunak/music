@@ -422,7 +422,7 @@ class ModelTaggingJobResult(StrictTagModel):
     disclosure_version: Literal["assistant-model-music-tagging-disclosure/v6"]
     role_id: Literal["music_tagger"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    analyzer_id: Literal["model-evidence-tagger/v4"]
+    analyzer_id: Literal["model-evidence-tagger/v5"]
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     library_tracks: int = Field(ge=0)
     scope: ModelTaggingScope

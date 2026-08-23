@@ -33,6 +33,7 @@ from app.assistant.model_tagger import (
     evaluate_music_tagger,
     load_tag_quality_suite,
     summarize_music_tagger_quality,
+    tag_quality_attempts,
 )
 from app.assistant.providers.definitions import MODEL_ROLE_BY_ID
 from app.assistant.providers.execution import (
@@ -110,7 +111,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v10",
+    suite_id="controlled-vocabulary-tagging-baseline-v11",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -566,7 +567,7 @@ def run_tagging_quality_evaluation(
     execution_suite = _tagging_retest_suite(suite, parameters)
     context.update_progress(
         0,
-        len(execution_suite.cases),
+        tag_quality_attempts(execution_suite),
         phase="Preparing evaluation",
         message=(
             "Loading failed synthetic evidence-tagging cases"

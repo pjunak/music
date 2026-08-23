@@ -578,7 +578,7 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
     )
 
     evidence = observed[0]["metadata_evidence"]
-    assert evidence["analyzer_id"] == "local-metadata-evidence/v3"
+    assert evidence["analyzer_id"] == "local-metadata-evidence/v4"
     assert evidence["canonical_title_source"] == "display_title"
     assert {"setting.tavern", "scene.rest", "mood.calm"} <= set(evidence["candidate_tag_ids"])
     assert "scene.combat" not in evidence["candidate_tag_ids"]
@@ -749,7 +749,7 @@ def test_model_tagger_sends_a_compact_full_index_and_candidate_details() -> None
     assert "context_cues" not in prompt
 
 
-def test_metadata_evidence_prioritizes_corroborated_context_over_title_word() -> None:
+def test_metadata_evidence_suppresses_known_title_metaphor() -> None:
     observed: dict[str, Any] = {}
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
@@ -802,9 +802,9 @@ def test_metadata_evidence_prioritizes_corroborated_context_over_title_word() ->
     ]
 
     assert matches_by_name["romantic"]["field_support"] == "multiple_fields"
-    assert matches_by_name["ocean"]["field_support"] == "single_field"
-    assert match_order.index("romantic") < match_order.index("ocean")
-    assert definition_order.index("romantic") < definition_order.index("ocean")
+    assert "ocean" not in matches_by_name
+    assert "ocean" not in match_order
+    assert "ocean" not in definition_order
 
 
 def test_metadata_evidence_bounds_dense_metadata_and_keeps_exact_terms() -> None:
@@ -1026,13 +1026,13 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
     for case in suite.cases:
         assert len(observed[case.track.track_id]) <= 20, case.id
 
-    # These cases intentionally give the local high-recall stage a plausible
-    # but wrong candidate. The model must interpret the phrase rather than copy
-    # an isolated tag word from a title, artist, or label.
-    assert "combat" in observed[35]
-    assert "castle" in observed[36]
-    assert "ocean" in observed[37]
-    assert "temple" in observed[38]
+    # Isolated artist names, title-only settings, and title-only scene aliases
+    # without contextual cues remain available in the full vocabulary but do
+    # not receive a highlighted local candidate definition.
+    assert "combat" not in observed[35]
+    assert "castle" not in observed[36]
+    assert "ocean" not in observed[37]
+    assert "temple" not in observed[38]
     assert observed_matches[1]["medieval"]["context_cue_terms"] == ["minstrel"]
     assert observed_matches[1]["dancing"]["context_cue_terms"] == []
 
@@ -1040,7 +1040,7 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v4",
+            "schema_version": "assistant-music-tagger-evaluation/v5",
             "id": "confidence-evidence-boundary",
             "cases": [
                 {
@@ -1112,15 +1112,21 @@ def test_tag_quality_separates_scored_recall_from_blocking_safety() -> None:
                 "length_s": 120,
                 "bpm": None,
             },
-            "required_tags": ["tavern"] if track_id == 1 else [],
+            "required_tags": (
+                ["tavern"]
+                if track_id == 1
+                else ["escape"]
+                if gate == "safety"
+                else []
+            ),
             "forbidden_tags": ["combat"] if gate == "safety" else [],
         }
 
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v4",
+            "schema_version": "assistant-music-tagger-evaluation/v5",
             "id": "scored-safety-boundary",
-            "minimum_quality_pass_rate": 0.5,
+            "minimum_quality_pass_rate": 0.3,
             "cases": [case(1), case(2), case(3, gate="safety")],
         }
     )
@@ -1150,17 +1156,90 @@ def test_tag_quality_separates_scored_recall_from_blocking_safety() -> None:
     result = evaluate_music_tagger(execute, suite)
 
     assert result.passed is True
-    assert result.passed_cases == 2
+    assert result.passed_cases == 1
     assert result.quality_passed_cases == 1
-    assert result.quality_total_cases == 2
+    assert result.quality_total_cases == 3
     assert result.safety_passed_cases == result.safety_total_cases == 1
     assert result.cases[0].blocking is False
+    assert result.cases[2].blocking is False
+    assert result.cases[2].safety_repeat_failures == [
+        "Missing required tags: escape"
+    ]
+
+
+def test_tag_quality_requires_two_clean_safety_attempts() -> None:
+    suite = TagQualitySuite.model_validate(
+        {
+            "schema_version": "assistant-music-tagger-evaluation/v5",
+            "id": "safety-stability-boundary",
+            "minimum_quality_pass_rate": 0.0,
+            "cases": [
+                {
+                    "id": "ambiguous-battle",
+                    "description": "A competition must not become combat",
+                    "gate": "safety",
+                    "track": {
+                        "track_id": 1,
+                        "title": "Battle of the Bards",
+                        "display_title": "",
+                        "artist": "City Minstrels",
+                        "album": "Festival Music Competition",
+                        "origin": "",
+                        "genre": "festive folk",
+                        "length_s": 120,
+                        "bpm": None,
+                    },
+                    "required_tags": [],
+                    "forbidden_tags": ["combat"],
+                }
+            ],
+        }
+    )
+    calls = 0
+    progress: list[tuple[int, int]] = []
+
+    def unstable_output(_request: StructuredModelRequest) -> StructuredModelResult:
+        nonlocal calls
+        calls += 1
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": [] if calls == 1 else ["scene.combat"],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                ],
+            },
+        )
+
+    result = evaluate_music_tagger(
+        unstable_output,
+        suite,
+        on_case_complete=lambda current, total: progress.append((current, total)),
+    )
+
+    assert result.passed is False
+    assert result.safety_passed_cases == 0
+    assert result.cases[0].blocking is True
+    assert result.cases[0].safety_repeat_tags == ["combat"]
+    assert result.cases[0].failures == [
+        "Safety repeat: Returned forbidden tags: combat"
+    ]
+    assert progress == [(1, 2), (2, 2)]
 
 
 def test_tag_quality_forbidden_false_positive_is_always_blocking() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v4",
+            "schema_version": "assistant-music-tagger-evaluation/v5",
             "id": "forbidden-tag-boundary",
             "minimum_quality_pass_rate": 0.0,
             "cases": [
@@ -1214,7 +1293,7 @@ def test_tag_quality_forbidden_false_positive_is_always_blocking() -> None:
 def test_tag_quality_batches_tracks_but_reports_each_case() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v4",
+            "schema_version": "assistant-music-tagger-evaluation/v5",
             "id": "batched-quality-boundary",
             "cases": [
                 {
@@ -1416,7 +1495,7 @@ def test_model_tagging_shares_only_relative_path_and_stays_review_only(
         "confidence": "high",
     }
     assert provider_track["metadata_evidence"]["analyzer_id"] == (
-        "local-metadata-evidence/v3"
+        "local-metadata-evidence/v4"
     )
     candidate_names = set(
         next(

@@ -73,7 +73,7 @@ indexed metadata / local audio / operator request
   sequencing. The model receives that baseline and can return only ranked and
   selected IDs from an exact request-specific enum. The example starts from the local
   plan rather than an empty response. Public data and reasons are reconstructed locally.
-- **Music tagging:** the server derives a `local-metadata-evidence/v3`
+- **Music tagging:** the server derives a `local-metadata-evidence/v4`
   hypothesis with controlled-tag ID, matched-field, matched-term, and canonical-title
   provenance from the same descriptive fields and canonical library-relative path sent
   to the provider. Paths and metadata are labelled untrusted; the absolute media root
@@ -90,7 +90,10 @@ indexed metadata / local audio / operator request
   metadata fields support the candidate. Corroborated candidates are ordered first so
   isolated title or artist words do not anchor fast models ahead of the surrounding
   context. Candidate and term lists are bounded deterministically, with exact matches
-  retained before cue-only matches when support is otherwise equal. The local hypothesis does not remove
+  retained before cue-only matches when support is otherwise equal. Artist-only
+  matches and known non-literal title contexts are not highlighted, preventing a
+  literal word from anchoring a fast model while keeping every controlled ID in the
+  full vocabulary. The local hypothesis does not remove
   other operator-approved choices. The model returns only exact IDs; names are restored
   locally.
 - **Manual-tag cleanup:** declared aliases plus deterministic spelling and plural rules
