@@ -5,12 +5,12 @@ The optional music evidence tagger must pass
 quality check from **Assistant → AI Setup** after configuring, testing, and
 enabling the `music_tagger` role.
 
-The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains synthetic
+The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains 40 synthetic
 titles, artists, albums, origins, genres, synthetic library-relative paths, durations,
 BPM values, and one bounded local-signal
-evidence case. It tests clear D&D cases such
-as medieval tavern dancing, dark dungeons, heroic castles, calm travel, and
-insufficient evidence. No real library data, private paths, media, database mood tags, or
+evidence case. It covers terrain, social and action scenes, emotional tone,
+insufficient evidence, signal-only evidence, metadata instructions, and ambiguous phrases
+such as a band or label name that resembles a setting. No real library data, private paths, media, database mood tags, or
 review history are part of the suite. The signal case confirms that high activity alone
 does not justify inventing a D&D setting.
 
@@ -27,13 +27,17 @@ or duplicate IDs, malformed core fields, truncated output, and
 unexpected tracks fail the contract instead of being repaired. Surplus or overlong
 well-typed explanatory evidence is the sole compatibility exception: the server keeps
 at most four bounded items without changing the classification. Each case also
-declares required and forbidden tags. All cases must pass for the exact model
+declares required and forbidden tags. The suite sends four tracks in each provider
+request, requiring ten calls for all 40 cases while still reporting each case separately.
+All cases must pass for the exact model
 runtime fingerprint to be certified.
 
 Before each call, deterministic metadata matching uses the operator vocabulary's
 canonical names, exact cleanup aliases, and separately editable context cues to build
 high-recall candidate evidence. Context cues may overlap across tags and never rename
-stored tags. The provider receives the complete compact ID/name/group index plus detailed
+stored tags. Candidate provenance distinguishes exact canonical names and aliases from
+weaker cue-only matches; dense metadata keeps exact matches first and remains bounded.
+The provider receives the complete compact ID/name/group index plus detailed
 definitions for those candidates, rather than the full 131-tag definition catalog on
 every scenario.
 

@@ -13,7 +13,7 @@ class AssistantTagVocabulary(Base):
 
     key: Mapped[str] = mapped_column(String(32), primary_key=True)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    seed_version: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    seed_version: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     document_json: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime,

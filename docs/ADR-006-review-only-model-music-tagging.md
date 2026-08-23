@@ -28,9 +28,11 @@ observable after the browser closes without silently repeating uncertain calls.
   album, origin, genre, canonical library-relative path, duration, BPM, and an optional bounded projection of a
   current `local-audio/v1` profile: energy, brightness, tension, tempo estimate,
   activity, normalized dynamic range, rhythmic density, rhythmic stability, and
-  confidence. Also derive a `local-metadata-evidence/v1` hypothesis from the same
+  confidence. Also derive a `local-metadata-evidence/v2` hypothesis from the same
   disclosed descriptive fields and relative path, and send its bounded candidate tag IDs, the matched
-  field and term for each candidate, canonical-title source, axes, and confidence. A
+  field and term for each candidate, whether a term was only a weaker context cue,
+  canonical-title source, axes, and confidence. Exact names and aliases take priority
+  when dense metadata reaches the candidate bound. A
   non-empty display title is canonical for deterministic title matching. Treat every
   relative path and metadata string as untrusted data. Do not send the absolute media
   root, paths outside the indexed library, audio, waveforms, detailed signal measurements,
@@ -43,7 +45,8 @@ observable after the browser closes without silently repeating uncertain calls.
   with explicit recursive or direct-child behavior, or an explicit set of track IDs.
 - Store one revisioned operator-managed vocabulary with stable IDs, normalized names,
   selection definitions, groups, exact cleanup aliases, and overlapping local context
-  cues. Send the full bounded ID/name/group index with each metadata batch, but send
+  cues. Every built-in tag has a small set of high-signal soundtrack context cues.
+  Send the full bounded ID/name/group index with each metadata batch, but send
   detailed definitions and exact aliases only for locally highlighted candidates.
   Context cues remain local and never act as cleanup mappings. Restrict output to zero through
   eight IDs from the current vocabulary plus bounded energy/brightness/tension values,

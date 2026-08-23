@@ -61,6 +61,17 @@ def _seed_analysis(track_id: int, moods_json: str = '["dark", "tense"]') -> str:
     return signature
 
 
+def test_default_vocabulary_gives_every_tag_bounded_context_cues() -> None:
+    from app.assistant.tag_vocabulary import default_tag_vocabulary_snapshot
+
+    vocabulary = default_tag_vocabulary_snapshot()
+
+    assert vocabulary.entries
+    assert all(tag.context_cues for tag in vocabulary.entries)
+    assert all(len(tag.context_cues) <= 8 for tag in vocabulary.entries)
+    assert all(len(tag.context_cues) == len(set(tag.context_cues)) for tag in vocabulary.entries)
+
+
 def test_manual_tag_endpoints_require_auth(client: TestClient) -> None:
     assert client.get("/api/assistant/library-tags").status_code == 401
     assert client.get("/api/assistant/library-tags/catalog").status_code == 401

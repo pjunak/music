@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v3",
-  "id": "controlled-vocabulary-tagging-baseline-v7",
+  "id": "controlled-vocabulary-tagging-baseline-v8",
   "cases": [
     {
       "id": "medieval-tavern-dance",
@@ -236,6 +236,538 @@
       },
       "required_tags": ["desert", "travel"],
       "forbidden_tags": ["ocean", "underwater", "dungeon", "combat"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "forest-hunt",
+      "description": "Recognizes a tense woodland hunt without inventing city or festival context",
+      "track": {
+        "track_id": 13,
+        "title": "Tracks Beneath the Ancient Pines",
+        "display_title": "",
+        "artist": "Ranger's Watch",
+        "album": "Woodland Hunt",
+        "origin": "",
+        "genre": "tense folk",
+        "length_s": 248.0,
+        "bpm": 104
+      },
+      "required_tags": ["forest", "hunting", "tense"],
+      "forbidden_tags": ["city", "festival", "festive"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "mountain-pass-journey",
+      "description": "Recognizes an adventurous mountain journey without underwater or combat tags",
+      "track": {
+        "track_id": 14,
+        "title": "Across the High Mountain Pass",
+        "display_title": "",
+        "artist": "The Wayfarers",
+        "album": "Alpine Journeys",
+        "origin": "",
+        "genre": "adventurous orchestral",
+        "length_s": 276.0,
+        "bpm": 96
+      },
+      "required_tags": ["mountains", "travel", "adventurous"],
+      "forbidden_tags": ["underwater", "combat"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "swamp-survival",
+      "description": "Recognizes desperate survival in a swamp without festive or romantic tags",
+      "track": {
+        "track_id": 15,
+        "title": "Stranded in the Murky Fen",
+        "display_title": "",
+        "artist": "Bog Lanterns",
+        "album": "Swamp Survival",
+        "origin": "",
+        "genre": "dark ambient",
+        "length_s": 312.0,
+        "bpm": 58
+      },
+      "required_tags": ["swamp", "survival", "desperate", "dark"],
+      "forbidden_tags": ["festive", "romantic"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "arctic-escape",
+      "description": "Recognizes an urgent escape across frozen wastes without warm tavern context",
+      "track": {
+        "track_id": 16,
+        "title": "Escape Across the Frozen Wastes",
+        "display_title": "",
+        "artist": "Icebound Company",
+        "album": "Arctic Flight",
+        "origin": "",
+        "genre": "urgent orchestral",
+        "length_s": 221.0,
+        "bpm": 128
+      },
+      "required_tags": ["arctic", "escape", "urgent", "cold"],
+      "forbidden_tags": ["warm", "tavern"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "underwater-discovery",
+      "description": "Recognizes a wondrous underwater discovery without desert or combat tags",
+      "track": {
+        "track_id": 17,
+        "title": "First Sight of the Sunken City",
+        "display_title": "",
+        "artist": "Pearl Divers",
+        "album": "Undersea Discoveries",
+        "origin": "",
+        "genre": "awe inspiring ambient",
+        "length_s": 293.0,
+        "bpm": 72
+      },
+      "required_tags": ["underwater", "discovery", "wondrous"],
+      "forbidden_tags": ["desert", "combat"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "sky-flight",
+      "description": "Recognizes a wondrous airship flight without dungeon or seafaring tags",
+      "track": {
+        "track_id": 18,
+        "title": "Airship Above the Cloud Kingdom",
+        "display_title": "",
+        "artist": "Highwind Navigators",
+        "album": "Sky Voyages",
+        "origin": "",
+        "genre": "wondrous orchestral",
+        "length_s": 255.0,
+        "bpm": 112
+      },
+      "required_tags": ["sky", "flying", "wondrous"],
+      "forbidden_tags": ["dungeon", "seafaring"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "fey-realm-whimsy",
+      "description": "Recognizes whimsical magic in a fey realm without dark or infernal tags",
+      "track": {
+        "track_id": 19,
+        "title": "Pixie Revels in the Fairy Court",
+        "display_title": "",
+        "artist": "Moonpetal Ensemble",
+        "album": "Feywild Tales",
+        "origin": "",
+        "genre": "whimsical enchanted folk",
+        "length_s": 207.0,
+        "bpm": 118
+      },
+      "required_tags": ["fey realm", "whimsical", "magical"],
+      "forbidden_tags": ["dark", "infernal realm"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "infernal-dark-ritual",
+      "description": "Recognizes an ominous infernal ritual without sacred or joyful tags",
+      "track": {
+        "track_id": 20,
+        "title": "Invocation at the Abyssal Gate",
+        "display_title": "",
+        "artist": "Ashen Summoners",
+        "album": "Demonic Rituals",
+        "origin": "",
+        "genre": "dark ominous ambient",
+        "length_s": 335.0,
+        "bpm": 54
+      },
+      "required_tags": ["infernal realm", "ritual", "dark", "ominous"],
+      "forbidden_tags": ["sacred", "joyful"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "city-court-intrigue",
+      "description": "Recognizes mysterious city intrigue without wilderness or combat tags",
+      "track": {
+        "track_id": 21,
+        "title": "Whispers in the Royal City",
+        "display_title": "",
+        "artist": "The Court Spies",
+        "album": "Secrets and Conspiracies",
+        "origin": "",
+        "genre": "mysterious chamber music",
+        "length_s": 264.0,
+        "bpm": 84
+      },
+      "required_tags": ["city", "intrigue", "mysterious"],
+      "forbidden_tags": ["wilderness", "combat"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "market-shopping",
+      "description": "Recognizes cheerful market shopping without dungeon or combat tags",
+      "track": {
+        "track_id": 22,
+        "title": "Morning at the Merchant Bazaar",
+        "display_title": "",
+        "artist": "Copper Coin Players",
+        "album": "Market Day",
+        "origin": "",
+        "genre": "cheerful folk",
+        "length_s": 198.0,
+        "bpm": 116
+      },
+      "required_tags": ["market", "shopping", "joyful"],
+      "forbidden_tags": ["dungeon", "combat"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "graveyard-requiem",
+      "description": "Recognizes solemn melancholy mourning in a graveyard without festive tags",
+      "track": {
+        "track_id": 23,
+        "title": "Requiem among the Tombstones",
+        "display_title": "",
+        "artist": "The Mourning Choir",
+        "album": "Cemetery Farewells",
+        "origin": "",
+        "genre": "melancholic choral",
+        "length_s": 346.0,
+        "bpm": 48
+      },
+      "required_tags": ["graveyard", "mourning", "melancholy", "solemn"],
+      "forbidden_tags": ["festive", "playful"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "moonlit-courtship",
+      "description": "Recognizes romantic courtship and dancing without combat or ominous tags",
+      "track": {
+        "track_id": 24,
+        "title": "Moonlit Waltz for Two Lovers",
+        "display_title": "",
+        "artist": "Silver Rose Quartet",
+        "album": "Courtship at the Palace",
+        "origin": "",
+        "genre": "romantic dreamy chamber music",
+        "length_s": 229.0,
+        "bpm": 82
+      },
+      "required_tags": ["dancing", "courtship", "romantic", "dreamy"],
+      "forbidden_tags": ["combat", "ominous"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "hopeful-homecoming",
+      "description": "Recognizes a hopeful reunion at dawn without ominous or fearful tags",
+      "track": {
+        "track_id": 25,
+        "title": "Homecoming at Dawn",
+        "display_title": "",
+        "artist": "Friends Reunited",
+        "album": "The Long Return Home",
+        "origin": "",
+        "genre": "hopeful orchestral",
+        "length_s": 244.0,
+        "bpm": 88
+      },
+      "required_tags": ["reunion", "hopeful", "uplifting"],
+      "forbidden_tags": ["ominous", "fearful"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "bittersweet-farewell",
+      "description": "Recognizes a bittersweet melancholy farewell without festive or joyful tags",
+      "track": {
+        "track_id": 26,
+        "title": "Last Goodbye at the Harbor",
+        "display_title": "",
+        "artist": "The Departing Crew",
+        "album": "Farewell to Home",
+        "origin": "",
+        "genre": "bittersweet strings",
+        "length_s": 271.0,
+        "bpm": 62
+      },
+      "required_tags": ["farewell", "bittersweet", "melancholy"],
+      "forbidden_tags": ["festive", "joyful"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "curious-puzzle",
+      "description": "Recognizes curious mysterious puzzle-solving without combat tags",
+      "track": {
+        "track_id": 27,
+        "title": "Riddle of the Hidden Mechanism",
+        "display_title": "",
+        "artist": "Clockwork Scholars",
+        "album": "Ancient Puzzle Chamber",
+        "origin": "",
+        "genre": "mysterious ambient",
+        "length_s": 286.0,
+        "bpm": 70
+      },
+      "required_tags": ["puzzle", "curious", "mysterious"],
+      "forbidden_tags": ["combat", "aggressive"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "determined-training",
+      "description": "Recognizes determined training without fearful or desperate tags",
+      "track": {
+        "track_id": 28,
+        "title": "Drills in the Practice Yard",
+        "display_title": "",
+        "artist": "Iron Banner Recruits",
+        "album": "Training before the Tournament",
+        "origin": "",
+        "genre": "focused percussion",
+        "length_s": 203.0,
+        "bpm": 124
+      },
+      "required_tags": ["training", "determined", "preparation"],
+      "forbidden_tags": ["fearful", "desperate"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "defiant-rebellion",
+      "description": "Recognizes a tense defiant uprising without calm or festive tags",
+      "track": {
+        "track_id": 29,
+        "title": "Uprising against the Iron Crown",
+        "display_title": "",
+        "artist": "The Resistance",
+        "album": "Songs of Rebellion",
+        "origin": "",
+        "genre": "tense orchestral",
+        "length_s": 238.0,
+        "bpm": 126
+      },
+      "required_tags": ["defiant", "tense"],
+      "forbidden_tags": ["calm", "festive"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "urgent-heroic-rescue",
+      "description": "Recognizes an urgent heroic rescue and chase without rest tags",
+      "track": {
+        "track_id": 30,
+        "title": "Race to Save the Captive",
+        "display_title": "",
+        "artist": "Dawnward Riders",
+        "album": "Rescue before Nightfall",
+        "origin": "",
+        "genre": "heroic orchestral",
+        "length_s": 218.0,
+        "bpm": 144
+      },
+      "required_tags": ["rescue", "chase", "urgent", "heroic"],
+      "forbidden_tags": ["rest", "calm"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "humorous-village-fair",
+      "description": "Recognizes playful humor at a village festival without dark or solemn tags",
+      "track": {
+        "track_id": 31,
+        "title": "The Jester's Prank at the Village Fair",
+        "display_title": "",
+        "artist": "Laughing Lutes",
+        "album": "Harvest Festival Antics",
+        "origin": "",
+        "genre": "comic folk",
+        "length_s": 192.0,
+        "bpm": 132
+      },
+      "required_tags": ["village", "festival", "humorous", "playful"],
+      "forbidden_tags": ["dark", "solemn"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "solemn-coronation",
+      "description": "Recognizes a solemn majestic coronation without playful or combat tags",
+      "track": {
+        "track_id": 32,
+        "title": "Coronation in the Throne Room",
+        "display_title": "",
+        "artist": "Royal Ceremonial Brass",
+        "album": "Court Observances",
+        "origin": "",
+        "genre": "solemn orchestral",
+        "length_s": 304.0,
+        "bpm": 68
+      },
+      "required_tags": ["court", "ceremony", "majestic", "solemn"],
+      "forbidden_tags": ["playful", "combat"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "magical-library-discovery",
+      "description": "Recognizes a magical mysterious discovery in a library without combat tags",
+      "track": {
+        "track_id": 33,
+        "title": "Discovery of the Spellbook",
+        "display_title": "",
+        "artist": "The Hidden Scholars",
+        "album": "Forbidden Archive",
+        "origin": "",
+        "genre": "mysterious magical ambient",
+        "length_s": 289.0,
+        "bpm": 66
+      },
+      "required_tags": ["library", "discovery", "magical", "mysterious"],
+      "forbidden_tags": ["combat", "aggressive"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "chaotic-storm-chase",
+      "description": "Recognizes a chaotic urgent storm chase without calm or rest tags",
+      "track": {
+        "track_id": 34,
+        "title": "Chase through the Collapsing Storm",
+        "display_title": "",
+        "artist": "Thunder Road Ensemble",
+        "album": "Frantic Pursuits",
+        "origin": "",
+        "genre": "urgent tense orchestral",
+        "length_s": 196.0,
+        "bpm": 152
+      },
+      "required_tags": ["chase", "urgent", "chaotic", "tense"],
+      "forbidden_tags": ["calm", "rest"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "battle-of-bards-ambiguity",
+      "description": "Treats battle in a music competition title as metaphor rather than combat",
+      "track": {
+        "track_id": 35,
+        "title": "Battle of the Bards",
+        "display_title": "",
+        "artist": "City Minstrels",
+        "album": "Festival Music Competition",
+        "origin": "",
+        "genre": "festive playful folk",
+        "length_s": 211.0,
+        "bpm": 120
+      },
+      "required_tags": ["festival", "festive", "playful"],
+      "forbidden_tags": ["combat", "battlefield", "dark"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "castle-records-ambiguity",
+      "description": "Treats a record-label name as data rather than inventing a castle setting",
+      "track": {
+        "track_id": 36,
+        "title": "Quiet Piano No. 2",
+        "display_title": "",
+        "artist": "Castle Records",
+        "album": "Studio Sessions",
+        "origin": "",
+        "genre": "calm piano",
+        "length_s": 184.0,
+        "bpm": 64
+      },
+      "required_tags": ["calm"],
+      "forbidden_tags": ["castle", "combat", "majestic"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "ocean-eyes-metaphor",
+      "description": "Treats ocean in a romantic song title as metaphor rather than seafaring context",
+      "track": {
+        "track_id": 37,
+        "title": "Ocean Eyes Love Theme",
+        "display_title": "",
+        "artist": "Soft Focus",
+        "album": "Romantic Ballads",
+        "origin": "",
+        "genre": "tender ambient",
+        "length_s": 226.0,
+        "bpm": 74
+      },
+      "required_tags": ["romantic"],
+      "forbidden_tags": ["ocean", "seafaring", "sailing"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "temple-band-name-ambiguity",
+      "description": "Treats a band name as data while recognizing an urgent urban chase",
+      "track": {
+        "track_id": 38,
+        "title": "Urban Chase",
+        "display_title": "",
+        "artist": "Temple of Sound",
+        "album": "City Escape",
+        "origin": "",
+        "genre": "urgent electronic",
+        "length_s": 201.0,
+        "bpm": 146
+      },
+      "required_tags": ["city", "chase", "escape", "urgent"],
+      "forbidden_tags": ["temple", "sacred", "worship"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "warm-campfire-story",
+      "description": "Recognizes warm calm rest and storytelling at a campfire without combat tags",
+      "track": {
+        "track_id": 39,
+        "title": "Gentle Tales by the Campfire",
+        "display_title": "",
+        "artist": "Roadside Storytellers",
+        "album": "Night Camp Rest",
+        "origin": "",
+        "genre": "calm acoustic",
+        "length_s": 267.0,
+        "bpm": 60
+      },
+      "required_tags": ["camp", "rest", "storytelling", "warm", "calm"],
+      "forbidden_tags": ["combat", "urgent"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "cold-tundra-survival",
+      "description": "Recognizes lonely cold survival on tundra without warm or festive tags",
+      "track": {
+        "track_id": 40,
+        "title": "Alone on the Frozen Heath",
+        "display_title": "",
+        "artist": "The Last Traveller",
+        "album": "Tundra Survival",
+        "origin": "",
+        "genre": "cold ambient",
+        "length_s": 318.0,
+        "bpm": 52
+      },
+      "required_tags": ["tundra", "survival", "cold", "lonely"],
+      "forbidden_tags": ["warm", "festive"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1
     }

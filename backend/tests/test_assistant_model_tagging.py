@@ -18,6 +18,7 @@ from app.assistant.audio_analysis import (
 from app.assistant.model_evaluation import TAGGING_QUALITY_JOB_KIND
 from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
+    MODEL_TAG_BATCH_SIZE,
     MODEL_TAGGER_OUTPUT_CONTRACT,
     ModelTaggerError,
     ModelTagTrackInput,
@@ -38,6 +39,7 @@ from app.assistant.tag_vocabulary import (
     TagVocabularyEntry,
     TagVocabularyGroup,
     TagVocabularySnapshot,
+    default_tag_vocabulary_snapshot,
     vocabulary_fingerprint,
 )
 from app.core.db import SessionLocal
@@ -138,6 +140,44 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
         "lantern feast": ["village", "feast", "festive"],
         "sorrow among the ruins": ["ruins", "exploration", "melancholy"],
         "desert caravan": ["desert", "travel", "adventurous"],
+        "ancient pines": ["forest", "hunting", "tense"],
+        "mountain pass": ["mountains", "travel", "adventurous"],
+        "murky fen": ["swamp", "survival", "desperate", "dark"],
+        "frozen wastes": ["arctic", "escape", "urgent", "cold"],
+        "sunken city": ["underwater", "discovery", "wondrous"],
+        "cloud kingdom": ["sky", "flying", "wondrous"],
+        "pixie revels": ["fey realm", "whimsical", "magical"],
+        "abyssal gate": ["infernal realm", "ritual", "dark", "ominous"],
+        "royal city": ["city", "intrigue", "mysterious"],
+        "merchant bazaar": ["market", "shopping", "joyful"],
+        "requiem among": [
+            "graveyard",
+            "mourning",
+            "melancholy",
+            "solemn",
+        ],
+        "moonlit waltz": ["dancing", "courtship", "romantic", "dreamy"],
+        "homecoming at dawn": ["reunion", "hopeful", "uplifting"],
+        "last goodbye": ["farewell", "bittersweet", "melancholy"],
+        "hidden mechanism": ["puzzle", "curious", "mysterious"],
+        "practice yard": ["training", "determined", "preparation"],
+        "uprising against": ["defiant", "tense"],
+        "race to save": ["rescue", "chase", "urgent", "heroic"],
+        "jester's prank": ["village", "festival", "humorous", "playful"],
+        "coronation in": ["court", "ceremony", "majestic", "solemn"],
+        "discovery of the spellbook": [
+            "library",
+            "discovery",
+            "magical",
+            "mysterious",
+        ],
+        "collapsing storm": ["chase", "urgent", "chaotic", "tense"],
+        "battle of the bards": ["festival", "festive", "playful"],
+        "quiet piano": ["calm"],
+        "ocean eyes": ["romantic"],
+        "urban chase": ["city", "chase", "escape", "urgent"],
+        "gentle tales": ["camp", "rest", "storytelling", "warm", "calm"],
+        "frozen heath": ["tundra", "survival", "cold", "lonely"],
     }
     for marker, values in mapping.items():
         if marker in text:
@@ -538,19 +578,24 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
     )
 
     evidence = observed[0]["metadata_evidence"]
-    assert evidence["analyzer_id"] == "local-metadata-evidence/v1"
+    assert evidence["analyzer_id"] == "local-metadata-evidence/v2"
     assert evidence["canonical_title_source"] == "display_title"
-    assert {"setting.tavern", "scene.rest", "mood.calm"} <= set(
-        evidence["candidate_tag_ids"]
-    )
+    assert {"setting.tavern", "scene.rest", "mood.calm"} <= set(evidence["candidate_tag_ids"])
     assert "scene.combat" not in evidence["candidate_tag_ids"]
     tavern_match = next(
-        item
-        for item in evidence["tag_matches"]
-        if item["tag_id"] == "setting.tavern"
+        item for item in evidence["tag_matches"] if item["tag_id"] == "setting.tavern"
     )
-    assert set(tavern_match["matched_fields"]) == {"origin", "title"}
-    assert set(tavern_match["matched_terms"]) == {"inn", "tavern"}
+    assert set(tavern_match["matched_fields"]) == {
+        "artist",
+        "origin",
+        "title",
+    }
+    assert set(tavern_match["matched_terms"]) == {
+        "hearthside",
+        "inn",
+        "tavern",
+    }
+    assert tavern_match["context_cue_terms"] == ["hearthside"]
 
 
 def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
@@ -703,6 +748,70 @@ def test_model_tagger_sends_a_compact_full_index_and_candidate_details() -> None
     assert "context_cues" not in prompt
 
 
+def test_metadata_evidence_bounds_dense_metadata_and_keeps_exact_terms() -> None:
+    vocabulary = default_tag_vocabulary_snapshot()
+    names: list[str] = []
+    for tag in sorted(vocabulary.entries, key=lambda item: len(item.name)):
+        candidate = " ".join([*names, tag.name])
+        if len(candidate) > 500:
+            break
+        names.append(tag.name)
+    assert len(names) > 32
+    observed: dict[str, Any] = {}
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        observed.update(payload["tracks"][0]["metadata_evidence"])
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": [],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                ],
+            },
+        )
+
+    tag_tracks(
+        [
+            ModelTagTrackInput(
+                track_id=1,
+                title=" ".join(names),
+                display_title="",
+                artist="",
+                album="",
+                origin="",
+                genre="",
+                length_s=120,
+                bpm=None,
+            )
+        ],
+        execute,
+        vocabulary,
+    )
+
+    assert len(observed["candidate_tag_ids"]) == 32
+    assert len(observed["tag_matches"]) == 32
+    assert all(len(match["matched_terms"]) <= 8 for match in observed["tag_matches"])
+    assert all(
+        set(match["context_cue_terms"]) <= set(match["matched_terms"])
+        for match in observed["tag_matches"]
+    )
+    assert all(
+        set(match["matched_terms"]) - set(match["context_cue_terms"])
+        for match in observed["tag_matches"]
+    )
+
+
 @pytest.mark.parametrize(
     "library_path",
     ["/srv/music/private.flac", "C:\\Music\\private.flac", "safe/../private.flac"],
@@ -726,17 +835,24 @@ def test_model_tagger_rejects_non_library_relative_paths(library_path: str) -> N
 def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
     suite = load_tag_quality_suite(_SUITE_PATH)
     observed: dict[int, set[str]] = {}
+    observed_matches: dict[int, dict[str, dict[str, Any]]] = {}
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
         payload = json.loads(request.user_prompt)
-        name_by_id = {
-            item["tag_id"]: item["name"] for item in payload["vocabulary"]
-        }
+        name_by_id = {item["tag_id"]: item["name"] for item in payload["vocabulary"]}
         observed.update(
             {
                 track["track_id"]: {
-                    name_by_id[tag_id]
-                    for tag_id in track["metadata_evidence"]["candidate_tag_ids"]
+                    name_by_id[tag_id] for tag_id in track["metadata_evidence"]["candidate_tag_ids"]
+                }
+                for track in payload["tracks"]
+            }
+        )
+        observed_matches.update(
+            {
+                track["track_id"]: {
+                    name_by_id[match["tag_id"]]: match
+                    for match in track["metadata_evidence"]["tag_matches"]
                 }
                 for track in payload["tracks"]
             }
@@ -761,10 +877,28 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
             },
         )
 
-    tag_tracks([case.track for case in suite.cases], execute)
+    tracks = [case.track for case in suite.cases]
+    for start in range(0, len(tracks), MODEL_TAG_BATCH_SIZE):
+        tag_tracks(tracks[start : start + MODEL_TAG_BATCH_SIZE], execute)
 
+    missing_candidates = {
+        case.id: sorted(set(case.required_tags) - observed[case.track.track_id])
+        for case in suite.cases
+        if set(case.required_tags) - observed[case.track.track_id]
+    }
+    assert missing_candidates == {}
     for case in suite.cases:
-        assert set(case.required_tags) <= observed[case.track.track_id], case.id
+        assert len(observed[case.track.track_id]) <= 20, case.id
+
+    # These cases intentionally give the local high-recall stage a plausible
+    # but wrong candidate. The model must interpret the phrase rather than copy
+    # an isolated tag word from a title, artist, or label.
+    assert "combat" in observed[35]
+    assert "castle" in observed[36]
+    assert "ocean" in observed[37]
+    assert "temple" in observed[38]
+    assert observed_matches[1]["medieval"]["context_cue_terms"] == ["minstrel"]
+    assert observed_matches[1]["dancing"]["context_cue_terms"] == []
 
 
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
@@ -823,6 +957,72 @@ def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
         "Returned disallowed confidence: low",
         "Returned too little evidence: expected at least 1 item(s)",
     ]
+
+
+def test_tag_quality_batches_tracks_but_reports_each_case() -> None:
+    suite = TagQualitySuite.model_validate(
+        {
+            "schema_version": "assistant-music-tagger-evaluation/v3",
+            "id": "batched-quality-boundary",
+            "cases": [
+                {
+                    "id": f"case-{track_id}",
+                    "description": f"Synthetic case {track_id}",
+                    "track": {
+                        "track_id": track_id,
+                        "title": f"Untitled {track_id}",
+                        "display_title": "",
+                        "artist": "",
+                        "album": "",
+                        "origin": "",
+                        "genre": "",
+                        "length_s": 120,
+                        "bpm": None,
+                    },
+                    "required_tags": [],
+                    "forbidden_tags": [],
+                }
+                for track_id in range(1, 6)
+            ],
+        }
+    )
+    batches: list[list[int]] = []
+    progress: list[tuple[int, int]] = []
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        track_ids = [track["track_id"] for track in payload["tracks"]]
+        batches.append(track_ids)
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": track_id,
+                        "tag_ids": [],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                    for track_id in track_ids
+                ],
+            },
+        )
+
+    result = evaluate_music_tagger(
+        execute,
+        suite,
+        on_case_complete=lambda current, total: progress.append((current, total)),
+    )
+
+    assert result.passed is True
+    assert result.passed_cases == result.total_cases == 5
+    assert batches == [[1, 2, 3, 4], [5]]
+    assert progress == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
 
 
 def test_model_tagging_endpoints_require_authentication(client: TestClient) -> None:
@@ -964,7 +1164,7 @@ def test_model_tagging_shares_only_relative_path_and_stays_review_only(
         "confidence": "high",
     }
     assert provider_track["metadata_evidence"]["analyzer_id"] == (
-        "local-metadata-evidence/v1"
+        "local-metadata-evidence/v2"
     )
     candidate_names = set(
         next(

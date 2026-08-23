@@ -232,14 +232,16 @@ Runtime data lives outside the image.
   duration, BPM, numeric track IDs, the current revisioned operator vocabulary's full compact
   ID/name/group index plus definitions and exact aliases for locally highlighted candidates,
   canonical library-relative paths treated as untrusted data,
-  deterministic metadata-and-path tag-ID hypotheses with matched fields/terms and canonical-title
+  deterministic metadata-and-path tag-ID hypotheses with matched fields/terms,
+  exact-versus-context-cue provenance, and canonical-title
   provenance, and—when current—
   bounded `local-audio/v1` energy, brightness, tension, tempo, activity, normalized dynamics,
   rhythmic density/stability, and confidence values. Never send the absolute media root, paths
   outside the indexed library, audio, waveforms, detailed signal metrics, database mood tags,
   stored local generated tags, operator context-cue lists, playlists, or review history. Exact
   aliases remain one-to-one cleanup mappings; editable context cues may overlap and are used only
-  for local candidate evidence. Provider responses may deterministically retain only the first four
+  for local candidate evidence. Bound candidates and matched terms, retaining exact names and
+  aliases ahead of cue-only matches. Provider responses may deterministically retain only the first four
   bounded, well-typed explanatory evidence strings; never repair tag IDs, track IDs, confidence,
   numeric axes, missing fields, or unexpected fields. Store output
   under `model-evidence-tagger/v4` in `track_analyses`, bind its source
@@ -268,6 +270,8 @@ Runtime data lives outside the image.
   Connection changes, credential deletion, and reverification must refuse to reset assigned roles
   while their model jobs are queued or running; the UI must warn that deliberate reverification
   clears their model tests and quality results.
+  The mood-tagging suite batches four synthetic tracks per provider request while preserving
+  per-scenario progress and diagnostics.
 - Durable quality, playlist, tagging, and tag-cleanup model jobs record the shared bounded provider-usage
   summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
   Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep

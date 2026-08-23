@@ -70,7 +70,7 @@ indexed metadata / local audio / operator request
   sequencing. The model receives that baseline and can return only ranked and
   selected IDs from an exact request-specific enum. The example starts from the local
   plan rather than an empty response. Public data and reasons are reconstructed locally.
-- **Music tagging:** the server derives a `local-metadata-evidence/v1`
+- **Music tagging:** the server derives a `local-metadata-evidence/v2`
   hypothesis with controlled-tag ID, matched-field, matched-term, and canonical-title
   provenance from the same descriptive fields and canonical library-relative path sent
   to the provider. Paths and metadata are labelled untrusted; the absolute media root
@@ -82,7 +82,10 @@ indexed metadata / local audio / operator request
   exact cleanup aliases, and overlapping context cues. The complete compact ID/name/group
   index is sent once per batch; detailed definitions and aliases are sent only for the
   locally highlighted candidates. Context cues stay local and may highlight related tags
-  across groups without becoming cleanup mappings. The local hypothesis does not remove
+  across groups without becoming cleanup mappings. Each candidate identifies which
+  matched terms came only from context cues so the provider can weigh exact names and
+  aliases more strongly. Candidate and term lists are bounded deterministically, with
+  exact matches retained before cue-only matches. The local hypothesis does not remove
   other operator-approved choices. The model returns only exact IDs; names are restored
   locally.
 - **Manual-tag cleanup:** declared aliases plus deterministic spelling and plural rules
@@ -108,6 +111,9 @@ indexed metadata / local audio / operator request
   candidates, 20 tagging tracks per batch, and 500 catalog tags in cleanup batches of
   at most 50 unresolved names. Deterministic cleanup can reduce those payloads or avoid
   provider calls completely.
+- The tagging quality suite submits four synthetic tracks per request. This exercises
+  the live multi-track contract while evaluating and reporting every scenario
+  independently.
 
 ## Trade-offs
 
