@@ -38,7 +38,6 @@ from app.assistant.tag_vocabulary import (
     TagVocabularyEntry,
     TagVocabularyGroup,
     TagVocabularySnapshot,
-    default_tag_vocabulary,
     vocabulary_fingerprint,
 )
 from app.core.db import SessionLocal
@@ -54,7 +53,7 @@ from app.models.track_user_tag import TrackUserTag
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v5"
+DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v6"
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1]
     / "app"
@@ -382,7 +381,7 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
     evidence = observed[0]["metadata_evidence"]
     assert evidence["analyzer_id"] == "local-metadata-evidence/v1"
     assert evidence["canonical_title_source"] == "display_title"
-    assert {"setting.tavern", "scene.rest"} <= set(
+    assert {"setting.tavern", "scene.rest", "mood.calm"} <= set(
         evidence["candidate_tag_ids"]
     )
     assert "scene.combat" not in evidence["candidate_tag_ids"]
@@ -408,6 +407,7 @@ def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
                         name="wondrous",
                         description="Awe and magical discovery.",
                         aliases=["wonder-filled", "magical wonder"],
+                        context_cues=["discovery"],
                     )
                 ],
             )
@@ -429,10 +429,16 @@ def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
                 "tag_id": "mood.wondrous",
                 "name": "wondrous",
                 "group": "Mood",
+            }
+        ]
+        assert payload["candidate_definitions"] == [
+            {
+                "tag_id": "mood.wondrous",
                 "description": "Awe and magical discovery.",
                 "aliases": ["wonder-filled", "magical wonder"],
             }
         ]
+        assert "context_cues" not in request.user_prompt
         assert payload["tracks"][0]["metadata_evidence"][
             "candidate_tag_ids"
         ] == ["mood.wondrous"]
@@ -478,6 +484,64 @@ def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
         "mood.wondrous"
     ]
     assert result[1].tags == ["wondrous"]
+
+
+def test_model_tagger_sends_a_compact_full_index_and_candidate_details() -> None:
+    observed: dict[str, Any] = {}
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        observed["prompt"] = request.user_prompt
+        observed["payload"] = json.loads(request.user_prompt)
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": [],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "low",
+                        "evidence": ["No accepted tag"],
+                    }
+                ],
+            },
+        )
+
+    tag_tracks(
+        [
+            ModelTagTrackInput(
+                track_id=1,
+                title="The Minstrel's Jig",
+                display_title="",
+                artist="The Village Players",
+                album="Medieval Tavern Dances",
+                origin="",
+                genre="folk",
+                length_s=186,
+                bpm=122,
+            )
+        ],
+        execute,
+    )
+
+    prompt = observed["prompt"]
+    payload = observed["payload"]
+    vocabulary = payload["vocabulary"]
+    names = {item["name"] for item in vocabulary}
+    candidate_ids = set(
+        payload["tracks"][0]["metadata_evidence"]["candidate_tag_ids"]
+    )
+    assert {"astral realm", "festive", "tavern"} <= names
+    assert all(set(item) == {"tag_id", "name", "group"} for item in vocabulary)
+    assert {
+        item["tag_id"] for item in payload["candidate_definitions"]
+    } == candidate_ids
+    assert len(prompt) < 12_000
+    assert "context_cues" not in prompt
 
 
 @pytest.mark.parametrize(
@@ -540,16 +604,8 @@ def test_local_metadata_hypotheses_cover_fixed_tagging_scenarios() -> None:
 
     tag_tracks([case.track for case in suite.cases], execute)
 
-    non_mood_tags = {
-        tag.name
-        for group in default_tag_vocabulary().groups
-        if group.key != "mood"
-        for tag in group.tags
-    }
     for case in suite.cases:
-        assert set(case.required_tags) & non_mood_tags <= observed[
-            case.track.track_id
-        ], case.id
+        assert set(case.required_tags) <= observed[case.track.track_id], case.id
 
 
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:

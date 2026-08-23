@@ -137,7 +137,7 @@ MODEL_ROLE_BY_ID = {role.id: role for role in MODEL_ROLES}
 # Feature prompt/input/output changes must invalidate conformance and quality
 # results even when a connection, model, and runtime limits are unchanged.
 MODEL_ROLE_RUNTIME_CONTRACTS: dict[str, str] = {
-    "music_tagger": "assistant-music-tagger-input/v5+output/v2",
+    "music_tagger": "assistant-music-tagger-input/v6+output/v2",
     "playlist_planner": "assistant-playlist-planner-input/v2+output/v1+closed-ids/v1",
     "tag_cleanup": "assistant-model-tag-cleanup-input/v3+output/v2",
     "library_cleanup": "reserved-library-cleanup/v1",

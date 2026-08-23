@@ -54,6 +54,7 @@ const vocabulary: TagVocabulary = {
           name: "tavern",
           description: "An inn, common room, or alehouse.",
           aliases: ["inn", "pub"],
+          context_cues: ["common room"],
         },
       ],
     },
@@ -67,6 +68,7 @@ const vocabulary: TagVocabulary = {
           name: "calm",
           description: "Peaceful and emotionally settled.",
           aliases: [],
+          context_cues: ["quiet", "lullaby"],
         },
       ],
     },
@@ -136,6 +138,9 @@ describe("TagVocabularyView", () => {
     );
     await user.clear(description);
     await user.type(description, "A social inn or alehouse scene.");
+    const contextCues = screen.getByDisplayValue("common room");
+    await user.clear(contextCues);
+    await user.type(contextCues, "hearth gathering, drinking song");
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Group for wondrous" }),
       "mood",
@@ -152,6 +157,7 @@ describe("TagVocabularyView", () => {
             expect.objectContaining({
               id: "setting.tavern",
               description: "A social inn or alehouse scene.",
+              context_cues: ["hearth gathering", "drinking song"],
             }),
           ],
         }),

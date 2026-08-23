@@ -42,8 +42,10 @@ observable after the browser closes without silently repeating uncertain calls.
 - Resolve scope before provider work. A run may target the whole library, a folder
   with explicit recursive or direct-child behavior, or an explicit set of track IDs.
 - Store one revisioned operator-managed vocabulary with stable IDs, normalized names,
-  selection definitions, groups, and exact aliases, and disclose that bounded vocabulary
-  with the metadata batch. Restrict output to zero through
+  selection definitions, groups, exact cleanup aliases, and overlapping local context
+  cues. Send the full bounded ID/name/group index with each metadata batch, but send
+  detailed definitions and exact aliases only for locally highlighted candidates.
+  Context cues remain local and never act as cleanup mappings. Restrict output to zero through
   eight IDs from the current vocabulary plus bounded energy/brightness/tension values,
   confidence, and short evidence. Inject the exact track and tag ID enums into the
   provider schema, then resolve validated IDs to names locally. Reject unknown tags,

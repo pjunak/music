@@ -229,14 +229,17 @@ Runtime data lives outside the image.
   `assistant.model-music-tagging`. Require the exact current
   `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider
   request, and keep jobs non-restartable. Provider input is limited to indexed descriptive metadata,
-  duration, BPM, numeric track IDs, the current revisioned operator vocabulary (stable IDs, names,
-  groups, definitions, and aliases), canonical library-relative paths treated as untrusted data,
+  duration, BPM, numeric track IDs, the current revisioned operator vocabulary's full compact
+  ID/name/group index plus definitions and exact aliases for locally highlighted candidates,
+  canonical library-relative paths treated as untrusted data,
   deterministic metadata-and-path tag-ID hypotheses with matched fields/terms and canonical-title
   provenance, and—when current—
   bounded `local-audio/v1` energy, brightness, tension, tempo, activity, normalized dynamics,
   rhythmic density/stability, and confidence values. Never send the absolute media root, paths
   outside the indexed library, audio, waveforms, detailed signal metrics, database mood tags,
-  stored local generated tags, playlists, or review history. Store output
+  stored local generated tags, operator context-cue lists, playlists, or review history. Exact
+  aliases remain one-to-one cleanup mappings; editable context cues may overlap and are used only
+  for local candidate evidence. Store output
   under `model-evidence-tagger/v4` in `track_analyses`, bind its source
   signature to metadata, the optional local-audio source signature, vocabulary fingerprint, and
   role fingerprint, and

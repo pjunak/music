@@ -379,7 +379,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v5" as const;
+  "assistant-model-music-tagging-disclosure/v6" as const;
 
 export type ModelTaggingScope =
   | { type: "all" }
@@ -506,6 +506,7 @@ export interface TagVocabularyEntry {
   name: string;
   description: string;
   aliases: string[];
+  context_cues: string[];
 }
 
 export interface TagVocabularyGroup {

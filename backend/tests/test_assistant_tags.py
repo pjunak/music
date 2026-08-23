@@ -210,6 +210,7 @@ def test_tag_vocabulary_is_editable_revisioned_and_drives_catalog(
             "name": "poignant",
             "description": "Deeply affecting, emotionally sharp, or moving.",
             "aliases": ["emotionally affecting"],
+            "context_cues": ["farewell"],
         }
     )
     saved = auth_client.put(
@@ -261,6 +262,12 @@ def test_expanded_vocabulary_seed_merges_once_without_resetting_custom_tags(
                 "description": "Operator-curated choices.",
                 "tags": [
                     {
+                        "id": "mood.calm",
+                        "name": "calm",
+                        "description": "My carefully tuned calm definition.",
+                        "aliases": ["serene"],
+                    },
+                    {
                         "id": "mood.personal-favorite",
                         "name": "personal favorite",
                         "description": "A private operator-defined mood label.",
@@ -297,6 +304,10 @@ def test_expanded_vocabulary_seed_merges_once_without_resetting_custom_tags(
         group for group in migrated.json()["groups"] if group["key"] == "mood"
     )
     assert custom_group["label"] == "My moods"
+    calm = next(tag for tag in custom_group["tags"] if tag["id"] == "mood.calm")
+    assert calm["description"] == "My carefully tuned calm definition."
+    assert calm["aliases"] == ["serene"]
+    assert {"quiet", "lullaby", "rest"} <= set(calm["context_cues"])
 
 
 def test_manual_and_analysis_tags_remain_separate(
@@ -882,7 +893,7 @@ def test_tag_cleanup_preview_is_conservative_and_read_only(
 ) -> None:
     first_extra, second_extra = extra_seeded_track_ids[:2]
     for track_id, tags in (
-        (seeded_track_id, ["medival", "ambient"]),
+        (seeded_track_id, ["medival", "ambient", "quiet"]),
         (first_extra, ["taverns"]),
         (second_extra, ["medieval"]),
     ):
@@ -909,7 +920,13 @@ def test_tag_cleanup_preview_is_conservative_and_read_only(
     ]
 
     catalog = auth_client.get("/api/assistant/library-tags/catalog").json()
-    assert catalog["used_tags"] == ["ambient", "medieval", "medival", "taverns"]
+    assert catalog["used_tags"] == [
+        "ambient",
+        "medieval",
+        "medival",
+        "quiet",
+        "taverns",
+    ]
 
 
 def test_tag_cleanup_applies_only_explicit_selection_atomically(

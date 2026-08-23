@@ -28,6 +28,13 @@ unexpected tracks fail the contract instead of being repaired. Each case also
 declares required and forbidden tags. All cases must pass for the exact model
 runtime fingerprint to be certified.
 
+Before each call, deterministic metadata matching uses the operator vocabulary's
+canonical names, exact cleanup aliases, and separately editable context cues to build
+high-recall candidate evidence. Context cues may overlap across tags and never rename
+stored tags. The provider receives the complete compact ID/name/group index plus detailed
+definitions for those candidates, rather than the full 131-tag definition catalog on
+every scenario.
+
 Live tagging is a separate action and requires its own versioned disclosure and
 confirmation. It sends at most 20 bounded evidence records per provider call,
 ranging from metadata-only records to metadata plus bounded current local energy,

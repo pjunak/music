@@ -4969,6 +4969,10 @@ kbd,
 .assistant-vocabulary-tag input {
   width: 100%;
 }
+.assistant-vocabulary-aliases {
+  display: grid;
+  gap: var(--space-2);
+}
 .assistant-vocabulary-tag-id {
   display: grid;
   align-self: stretch;

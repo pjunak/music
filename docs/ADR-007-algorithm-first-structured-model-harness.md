@@ -78,11 +78,13 @@ indexed metadata / local audio / operator request
   `local-audio/v1` evidence is reduced to bounded axes, tempo, activity, dynamic range, rhythmic
   density, rhythmic stability, and confidence. These are labelled hypotheses and
   signal proxies; they cannot establish semantic setting or scene context by themselves.
-  A revisioned operator vocabulary supplies stable IDs, names, groups, definitions, and
-  aliases. The complete bounded vocabulary is sent once per batch so the model can infer
-  a valid terrain or scene even when no literal alias appears in metadata. The local
-  hypothesis highlights exact matches but does not remove other operator-approved
-  choices. The model returns only exact IDs; names are restored locally.
+  A revisioned operator vocabulary supplies stable IDs, names, groups, definitions,
+  exact cleanup aliases, and overlapping context cues. The complete compact ID/name/group
+  index is sent once per batch; detailed definitions and aliases are sent only for the
+  locally highlighted candidates. Context cues stay local and may highlight related tags
+  across groups without becoming cleanup mappings. The local hypothesis does not remove
+  other operator-approved choices. The model returns only exact IDs; names are restored
+  locally.
 - **Manual-tag cleanup:** declared aliases plus deterministic spelling and plural rules
   run first. Those suggestions require no provider request. The model sees only
   unresolved sources plus canonical ID definitions, then must return one ordered
@@ -111,9 +113,10 @@ indexed metadata / local audio / operator request
 
 - Embedding JSON Schema increases input tokens, but removes a second hand-maintained
   description and gives compatible providers a native constraint.
-- Sending the vocabulary definitions costs input tokens, but removes the inefficient
-  create-tags-then-interpret-tags loop and makes unknown model output unrepresentable
-  for strict-schema providers.
+- Sending the compact vocabulary index plus candidate details costs input tokens, but
+  removes the inefficient create-tags-then-interpret-tags loop and makes unknown model
+  output unrepresentable for strict-schema providers. Keeping non-candidate definitions
+  local avoids repeating the full 131-tag reference for every small batch.
 - The strict adapter improves format reliability but is not universally supported;
   keeping it explicit avoids speculative retries or provider-name detection.
 - Supplying local hypotheses can anchor a model. The prompt therefore labels source

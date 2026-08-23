@@ -332,8 +332,8 @@ class LibraryTagPage(StrictTagModel):
 
 
 MODEL_TAGGING_DISCLOSURE_VERSION: Literal[
-    "assistant-model-music-tagging-disclosure/v5"
-] = "assistant-model-music-tagging-disclosure/v5"
+    "assistant-model-music-tagging-disclosure/v6"
+] = "assistant-model-music-tagging-disclosure/v6"
 
 
 class ModelTaggingScope(StrictTagModel):
@@ -385,7 +385,7 @@ class ModelTaggingReviewQuery(StrictTagModel):
 
 
 class ModelTaggingDisclosure(StrictTagModel):
-    version: Literal["assistant-model-music-tagging-disclosure/v5"]
+    version: Literal["assistant-model-music-tagging-disclosure/v6"]
     shared_with_provider: list[str]
     never_shared: list[str]
     allowed_tags: list[str]
@@ -413,13 +413,13 @@ class ModelTaggingAvailability(StrictTagModel):
 class ModelTaggingStartRequest(StrictTagModel):
     force: bool = False
     scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v5"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v6"]
     consent: Literal[True]
 
 
 class ModelTaggingJobResult(StrictTagModel):
     schema_version: Literal["assistant-model-music-tagging-job-result/v5"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v5"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v6"]
     role_id: Literal["music_tagger"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     analyzer_id: Literal["model-evidence-tagger/v4"]

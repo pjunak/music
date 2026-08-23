@@ -13,11 +13,39 @@ import { toast } from "@/core/toast";
 import { ModelTagCleanupPanel } from "./ModelTagCleanupPanel";
 import { TagCatalogManager } from "./TagCatalogManager";
 
+type TermListField = "aliases" | "context_cues";
+type TermDrafts = Record<string, Record<TermListField, string>>;
+
 function cloneGroups(groups: TagVocabularyGroup[]): TagVocabularyGroup[] {
   return groups.map((group) => ({
     ...group,
-    tags: group.tags.map((tag) => ({ ...tag, aliases: [...tag.aliases] })),
+    tags: group.tags.map((tag) => ({
+      ...tag,
+      aliases: [...tag.aliases],
+      context_cues: [...tag.context_cues],
+    })),
   }));
+}
+
+function draftTerms(groups: TagVocabularyGroup[]): TermDrafts {
+  return Object.fromEntries(
+    groups.flatMap((group) =>
+      group.tags.map((tag) => [
+        tag.id,
+        {
+          aliases: tag.aliases.join(", "),
+          context_cues: tag.context_cues.join(", "),
+        },
+      ]),
+    ),
+  );
+}
+
+function parseTerms(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function tagSlug(value: string): string {
@@ -59,6 +87,7 @@ export function TagVocabularyView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [targetGroups, setTargetGroups] = useState<Record<string, string>>({});
+  const [termDrafts, setTermDrafts] = useState<TermDrafts>({});
 
   const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
 
@@ -73,6 +102,7 @@ export function TagVocabularyView() {
         if (disposed) return;
         setVocabulary(nextVocabulary);
         setGroups(cloneGroups(nextVocabulary.groups));
+        setTermDrafts(draftTerms(nextVocabulary.groups));
         setCatalog(nextCatalog);
         setTargetGroups({});
         setLoadError(null);
@@ -120,6 +150,27 @@ export function TagVocabularyView() {
     }));
   }
 
+  function updateTerms(
+    groupKey: string,
+    tag: TagVocabularyEntry,
+    field: TermListField,
+    value: string,
+  ) {
+    setTermDrafts((current) => ({
+      ...current,
+      [tag.id]: {
+        aliases: current[tag.id]?.aliases ?? tag.aliases.join(", "),
+        context_cues:
+          current[tag.id]?.context_cues ?? tag.context_cues.join(", "),
+        [field]: value,
+      },
+    }));
+    updateTag(groupKey, tag.id, (item) => ({
+      ...item,
+      [field]: parseTerms(value),
+    }));
+  }
+
   async function addTag(groupKey: string) {
     const group = groups.find((item) => item.key === groupKey);
     if (group === undefined) return;
@@ -139,6 +190,10 @@ export function TagVocabularyView() {
     if (entered === null) return;
     const name = normalizedTagName(entered);
     const id = newTagId(group, name, groups);
+    setTermDrafts((current) => ({
+      ...current,
+      [id]: { aliases: "", context_cues: "" },
+    }));
     updateGroup(groupKey, (item) => ({
       ...item,
       tags: [
@@ -148,6 +203,7 @@ export function TagVocabularyView() {
           name,
           description: `Describe the precise meaning of ${name}.`,
           aliases: [],
+          context_cues: [],
         },
       ],
     }));
@@ -157,15 +213,21 @@ export function TagVocabularyView() {
     const groupKey = targetGroups[name] ?? groups[0]?.key;
     const group = groups.find((item) => item.key === groupKey);
     if (group === undefined) return;
+    const id = newTagId(group, name, groups);
+    setTermDrafts((current) => ({
+      ...current,
+      [id]: { aliases: "", context_cues: "" },
+    }));
     updateGroup(group.key, (item) => ({
       ...item,
       tags: [
         ...item.tags,
         {
-          id: newTagId(group, name, groups),
+          id,
           name,
           description: `Describe the precise meaning of ${name}.`,
           aliases: [],
+          context_cues: [],
         },
       ],
     }));
@@ -181,6 +243,7 @@ export function TagVocabularyView() {
       );
       setVocabulary(saved);
       setGroups(cloneGroups(saved.groups));
+      setTermDrafts(draftTerms(saved.groups));
       toast.success(
         "Mood vocabulary saved",
         "New model runs will use this exact revision; older suggestions are now stale.",
@@ -203,7 +266,8 @@ export function TagVocabularyView() {
           <p>
             Define the terrain, scene, and mood tags connected models may choose.
             They live in the music database, independently of album, year, genre,
-            and other metadata embedded in audio files.
+            and other metadata embedded in audio files. Exact aliases drive cleanup;
+            context cues may overlap and only help highlight likely AI choices.
           </p>
         </div>
         <div className="assistant-vocabulary-summary" aria-label="Vocabulary summary">
@@ -217,7 +281,7 @@ export function TagVocabularyView() {
         <div>
           <span>1</span>
           <strong>You define</strong>
-          <small>names, meanings, aliases</small>
+          <small>names, meanings, aliases, cues</small>
         </div>
         <div>
           <span>2</span>
@@ -313,23 +377,43 @@ export function TagVocabularyView() {
                           }
                         />
                       </label>
-                      <label className="field assistant-vocabulary-aliases">
-                        <span className="field-label">Exact aliases (comma-separated)</span>
-                        <input
-                          value={tag.aliases.join(", ")}
-                          placeholder="inn, pub, alehouse"
-                          disabled={saving}
-                          onChange={(event) =>
-                            updateTag(group.key, tag.id, (item) => ({
-                              ...item,
-                              aliases: event.target.value
-                                .split(",")
-                                .map((value) => value.trim())
-                                .filter(Boolean),
-                            }))
-                          }
-                        />
-                      </label>
+                      <div className="assistant-vocabulary-aliases">
+                        <label className="field">
+                          <span className="field-label">Exact aliases (comma-separated)</span>
+                          <input
+                            value={
+                              termDrafts[tag.id]?.aliases ?? tag.aliases.join(", ")
+                            }
+                            placeholder="inn, pub, alehouse"
+                            disabled={saving}
+                            onChange={(event) =>
+                              updateTerms(group.key, tag, "aliases", event.target.value)
+                            }
+                          />
+                        </label>
+                        <label
+                          className="field"
+                          title="Context cues may overlap between tags. They only highlight model candidates and never rename library tags."
+                        >
+                          <span className="field-label">Context cues (comma-separated)</span>
+                          <input
+                            value={
+                              termDrafts[tag.id]?.context_cues ??
+                              tag.context_cues.join(", ")
+                            }
+                            placeholder="dance, jig, banquet"
+                            disabled={saving}
+                            onChange={(event) =>
+                              updateTerms(
+                                group.key,
+                                tag,
+                                "context_cues",
+                                event.target.value,
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -404,7 +488,10 @@ export function TagVocabularyView() {
                 type="button"
                 className="btn-ghost"
                 disabled={saving}
-                onClick={() => setGroups(cloneGroups(vocabulary.groups))}
+                onClick={() => {
+                  setGroups(cloneGroups(vocabulary.groups));
+                  setTermDrafts(draftTerms(vocabulary.groups));
+                }}
               >
                 Discard changes
               </button>

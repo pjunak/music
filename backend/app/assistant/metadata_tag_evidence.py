@@ -1,6 +1,7 @@
 """Deterministic controlled-tag evidence from disclosed library context.
 
-This module finds explicit controlled-vocabulary terms and conservative aliases.
+This module finds explicit controlled-vocabulary terms, exact aliases, and
+operator-editable high-recall context cues.
 It does not decide or persist tags. Callers can disclose the matches as hypotheses
 for a model or present them directly for human review.
 """
@@ -41,23 +42,23 @@ def _tokens(value: str) -> frozenset[str]:
     return frozenset(_WORD_RE.findall(ascii_value))
 
 
-def infer_metadata_matches_for_aliases(
+def infer_metadata_matches_for_terms(
     fields: Mapping[MetadataField, str],
-    aliases_by_tag: Mapping[str, tuple[str, ...]],
+    terms_by_tag: Mapping[str, tuple[str, ...]],
 ) -> tuple[MetadataTagMatch, ...]:
-    """Match an operator vocabulary's exact names and aliases with provenance."""
+    """Match an operator vocabulary's local evidence terms with provenance."""
 
     field_tokens = {field: _tokens(value) for field, value in fields.items() if value.strip()}
     matches: list[MetadataTagMatch] = []
-    for tag, aliases in aliases_by_tag.items():
+    for tag, terms in terms_by_tag.items():
         matched_fields: set[MetadataField] = set()
         matched_terms: set[str] = set()
-        for alias in aliases:
-            alias_tokens = _tokens(alias)
+        for term in terms:
+            term_tokens = _tokens(term)
             for field, tokens in field_tokens.items():
-                if alias_tokens <= tokens:
+                if term_tokens <= tokens:
                     matched_fields.add(field)
-                    matched_terms.add(alias)
+                    matched_terms.add(term)
         if matched_fields:
             matches.append(
                 MetadataTagMatch(

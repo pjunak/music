@@ -19,7 +19,7 @@ TAG_VOCABULARY_KEY = "library"
 TAG_VOCABULARY_SCHEMA: Literal["assistant-tag-vocabulary/v1"] = (
     "assistant-tag-vocabulary/v1"
 )
-TAG_VOCABULARY_SEED_VERSION = 2
+TAG_VOCABULARY_SEED_VERSION = 3
 MAX_VOCABULARY_TAGS = 200
 
 
@@ -32,6 +32,7 @@ class TagVocabularyEntry(_StrictVocabularyModel):
     name: str = Field(min_length=1, max_length=64)
     description: str = Field(min_length=2, max_length=300)
     aliases: list[str] = Field(default_factory=list, max_length=24)
+    context_cues: list[str] = Field(default_factory=list, max_length=32)
 
     @field_validator("name")
     @classmethod
@@ -46,10 +47,10 @@ class TagVocabularyEntry(_StrictVocabularyModel):
             raise ValueError("a tag description must contain at least two characters")
         return normalized
 
-    @field_validator("aliases")
+    @field_validator("aliases", "context_cues")
     @classmethod
-    def normalize_aliases(cls, value: list[str]) -> list[str]:
-        return list(dict.fromkeys(normalize_manual_tag(alias) for alias in value))
+    def normalize_terms(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(normalize_manual_tag(term) for term in value))
 
     @model_validator(mode="after")
     def aliases_do_not_repeat_name(self) -> TagVocabularyEntry:
@@ -167,12 +168,14 @@ def _entry(
     name: str,
     description: str,
     *aliases: str,
+    context_cues: tuple[str, ...] = (),
 ) -> TagVocabularyEntry:
     return TagVocabularyEntry(
         id=f"{group}.{name.replace(' ', '-')}",
         name=name,
         description=description,
         aliases=list(aliases),
+        context_cues=list(context_cues),
     )
 
 
@@ -691,13 +694,65 @@ def default_tag_vocabulary() -> TagVocabularyDocument:
                 label="Mood",
                 description="The emotional tone the music supports.",
                 tags=[
-                    _entry("mood", "festive", "Revelrous, jubilant, celebratory, or holiday-like tone.", "revelry", "jubilant", "celebratory"),
-                    _entry("mood", "heroic", "Courageous, valorous, noble, or larger-than-life resolve.", "courageous", "valorous", "noble resolve"),
+                    _entry(
+                        "mood",
+                        "festive",
+                        "Revelrous, jubilant, celebratory, or holiday-like tone.",
+                        "revelry",
+                        "jubilant",
+                        "celebratory",
+                        context_cues=(
+                            "dance",
+                            "dances",
+                            "dancing",
+                            "jig",
+                            "feast",
+                            "banquet",
+                            "festival",
+                        ),
+                    ),
+                    _entry(
+                        "mood",
+                        "heroic",
+                        "Courageous, valorous, noble, or larger-than-life resolve.",
+                        "courageous",
+                        "valorous",
+                        "noble resolve",
+                        context_cues=(
+                            "crown guard",
+                            "royal guard",
+                            "royal procession",
+                            "heroic march",
+                        ),
+                    ),
                     _entry("mood", "mysterious", "Secretive, enigmatic, curious, or unexplained atmosphere.", "enigmatic", "secretive"),
                     _entry("mood", "tense", "Pressure, suspense, strain, or expectation of danger.", "suspenseful", "pressured"),
                     _entry("mood", "dark", "Bleak, sinister, morally shadowed, or oppressive tone.", "bleak", "sinister", "oppressive"),
-                    _entry("mood", "calm", "Peaceful, settled, gentle, or emotionally untroubled tone.", "peaceful", "tranquil", "relaxed"),
-                    _entry("mood", "eerie", "Uncanny, ghostly, strange, or quietly unsettling tone.", "uncanny", "haunting", "ghostly"),
+                    _entry(
+                        "mood",
+                        "calm",
+                        "Peaceful, settled, gentle, or emotionally untroubled tone.",
+                        "peaceful",
+                        "tranquil",
+                        "relaxed",
+                        context_cues=("quiet", "lullaby", "gentle", "stillness", "rest"),
+                    ),
+                    _entry(
+                        "mood",
+                        "eerie",
+                        "Uncanny, ghostly, strange, or quietly unsettling tone.",
+                        "uncanny",
+                        "haunting",
+                        "ghostly",
+                        context_cues=(
+                            "whisper",
+                            "whispers",
+                            "crypt",
+                            "catacomb",
+                            "catacombs",
+                            "haunted",
+                        ),
+                    ),
                     _entry("mood", "melancholy", "Wistful sadness, loss, reflection, or subdued grief.", "sad", "wistful", "sorrowful"),
                     _entry(
                         "mood",
@@ -775,7 +830,11 @@ def _merge_seed_vocabulary(
     groups = [group.model_copy(deep=True) for group in current.groups]
     groups_by_key = {group.key: group for group in groups}
     entries = [tag for group in groups for tag in group.tags]
-    used_ids = {tag.id for tag in entries}
+    locations_by_id = {
+        tag.id: (group, index, tag)
+        for group in groups
+        for index, tag in enumerate(group.tags)
+    }
     used_names = {tag.name for tag in entries}
     used_aliases = {alias for tag in entries for alias in tag.aliases}
 
@@ -791,9 +850,28 @@ def _merge_seed_vocabulary(
         for seed_tag in seed_group.tags:
             if len(entries) >= MAX_VOCABULARY_TAGS or len(target_group.tags) >= 100:
                 break
+            existing = locations_by_id.get(seed_tag.id)
+            if existing is not None:
+                existing_group, existing_index, existing_tag = existing
+                if existing_tag.name == seed_tag.name:
+                    context_cues = list(
+                        dict.fromkeys(
+                            [*existing_tag.context_cues, *seed_tag.context_cues]
+                        )
+                    )
+                    if context_cues != existing_tag.context_cues:
+                        updated = existing_tag.model_copy(
+                            update={"context_cues": context_cues}
+                        )
+                        existing_group.tags[existing_index] = updated
+                        locations_by_id[updated.id] = (
+                            existing_group,
+                            existing_index,
+                            updated,
+                        )
+                continue
             if (
-                seed_tag.id in used_ids
-                or seed_tag.name in used_names
+                seed_tag.name in used_names
                 or seed_tag.name in used_aliases
             ):
                 continue
@@ -806,9 +884,13 @@ def _merge_seed_vocabulary(
             added = seed_tag.model_copy(update={"aliases": aliases})
             target_group.tags.append(added)
             entries.append(added)
-            used_ids.add(added.id)
             used_names.add(added.name)
             used_aliases.update(added.aliases)
+            locations_by_id[added.id] = (
+                target_group,
+                len(target_group.tags) - 1,
+                added,
+            )
 
     return TagVocabularyDocument(groups=groups)
 
