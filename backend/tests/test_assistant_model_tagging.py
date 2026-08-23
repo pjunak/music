@@ -157,7 +157,7 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
             "solemn",
         ],
         "moonlit waltz": ["dancing", "courtship", "romantic", "dreamy"],
-        "homecoming at dawn": ["reunion", "hopeful", "uplifting"],
+        "homecoming at dawn": ["reunion", "hopeful"],
         "last goodbye": ["farewell", "bittersweet", "melancholy"],
         "hidden mechanism": ["puzzle", "curious", "mysterious"],
         "practice yard": ["training", "determined", "preparation"],
@@ -578,7 +578,7 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
     )
 
     evidence = observed[0]["metadata_evidence"]
-    assert evidence["analyzer_id"] == "local-metadata-evidence/v2"
+    assert evidence["analyzer_id"] == "local-metadata-evidence/v3"
     assert evidence["canonical_title_source"] == "display_title"
     assert {"setting.tavern", "scene.rest", "mood.calm"} <= set(evidence["candidate_tag_ids"])
     assert "scene.combat" not in evidence["candidate_tag_ids"]
@@ -596,6 +596,7 @@ def test_metadata_evidence_is_structured_and_prefers_the_display_title() -> None
         "tavern",
     }
     assert tavern_match["context_cue_terms"] == ["hearthside"]
+    assert tavern_match["field_support"] == "multiple_fields"
 
 
 def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
@@ -748,6 +749,64 @@ def test_model_tagger_sends_a_compact_full_index_and_candidate_details() -> None
     assert "context_cues" not in prompt
 
 
+def test_metadata_evidence_prioritizes_corroborated_context_over_title_word() -> None:
+    observed: dict[str, Any] = {}
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        observed.update(payload)
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 37,
+                        "tag_ids": [],
+                        "energy": 0.5,
+                        "brightness": 0.5,
+                        "tension": 0.5,
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                ],
+            },
+        )
+
+    tag_tracks(
+        [
+            ModelTagTrackInput(
+                track_id=37,
+                title="Ocean Eyes Love Theme",
+                display_title="",
+                artist="Soft Focus",
+                album="Romantic Ballads",
+                origin="",
+                genre="tender ambient",
+                length_s=226,
+                bpm=74,
+            )
+        ],
+        execute,
+    )
+
+    name_by_id = {
+        item["tag_id"]: item["name"] for item in observed["vocabulary"]
+    }
+    matches = observed["tracks"][0]["metadata_evidence"]["tag_matches"]
+    matches_by_name = {name_by_id[item["tag_id"]]: item for item in matches}
+    match_order = [name_by_id[item["tag_id"]] for item in matches]
+    definition_order = [
+        name_by_id[item["tag_id"]] for item in observed["candidate_definitions"]
+    ]
+
+    assert matches_by_name["romantic"]["field_support"] == "multiple_fields"
+    assert matches_by_name["ocean"]["field_support"] == "single_field"
+    assert match_order.index("romantic") < match_order.index("ocean")
+    assert definition_order.index("romantic") < definition_order.index("ocean")
+
+
 def test_metadata_evidence_bounds_dense_metadata_and_keeps_exact_terms() -> None:
     vocabulary = default_tag_vocabulary_snapshot()
     names: list[str] = []
@@ -808,6 +867,10 @@ def test_metadata_evidence_bounds_dense_metadata_and_keeps_exact_terms() -> None
     )
     assert all(
         set(match["matched_terms"]) - set(match["context_cue_terms"])
+        for match in observed["tag_matches"]
+    )
+    assert all(
+        match["field_support"] in {"single_field", "multiple_fields"}
         for match in observed["tag_matches"]
     )
 
@@ -1164,7 +1227,7 @@ def test_model_tagging_shares_only_relative_path_and_stays_review_only(
         "confidence": "high",
     }
     assert provider_track["metadata_evidence"]["analyzer_id"] == (
-        "local-metadata-evidence/v2"
+        "local-metadata-evidence/v3"
     )
     candidate_names = set(
         next(

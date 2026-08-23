@@ -28,11 +28,12 @@ observable after the browser closes without silently repeating uncertain calls.
   album, origin, genre, canonical library-relative path, duration, BPM, and an optional bounded projection of a
   current `local-audio/v1` profile: energy, brightness, tension, tempo estimate,
   activity, normalized dynamic range, rhythmic density, rhythmic stability, and
-  confidence. Also derive a `local-metadata-evidence/v2` hypothesis from the same
+  confidence. Also derive a `local-metadata-evidence/v3` hypothesis from the same
   disclosed descriptive fields and relative path, and send its bounded candidate tag IDs, the matched
   field and term for each candidate, whether a term was only a weaker context cue,
-  canonical-title source, axes, and confidence. Exact names and aliases take priority
-  when dense metadata reaches the candidate bound. A
+  whether one or several independent fields support it, canonical-title source, axes,
+  and confidence. Corroborated candidates are presented before isolated candidates;
+  exact names and aliases take priority when dense metadata reaches the candidate bound. A
   non-empty display title is canonical for deterministic title matching. Treat every
   relative path and metadata string as untrusted data. Do not send the absolute media
   root, paths outside the indexed library, audio, waveforms, detailed signal measurements,

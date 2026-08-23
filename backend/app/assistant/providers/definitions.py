@@ -138,7 +138,7 @@ MODEL_ROLE_BY_ID = {role.id: role for role in MODEL_ROLES}
 # results even when a connection, model, and runtime limits are unchanged.
 MODEL_ROLE_RUNTIME_CONTRACTS: dict[str, str] = {
     "music_tagger": (
-        "assistant-music-tagger-input/v7+output/v2+evidence-canonicalization/v1"
+        "assistant-music-tagger-input/v8+output/v2+evidence-canonicalization/v1"
     ),
     "playlist_planner": "assistant-playlist-planner-input/v2+output/v1+closed-ids/v1",
     "tag_cleanup": "assistant-model-tag-cleanup-input/v3+output/v2",

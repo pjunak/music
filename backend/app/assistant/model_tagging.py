@@ -113,8 +113,8 @@ def _model_tagging_disclosure(
             ),
             (
                 "A deterministic local-metadata hypothesis: candidate tag IDs with "
-                "matched fields and terms, context-cue provenance, canonical-title source, "
-                "energy, brightness, tension, and confidence"
+                "matched fields and terms, context-cue and field-support provenance, "
+                "canonical-title source, energy, brightness, tension, and confidence"
             ),
             "A server-assigned numeric track ID used only to match the response",
             (
@@ -496,7 +496,7 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v2",
-                        "input_contract": "assistant-music-tagger-input/v7",
+                        "input_contract": "assistant-music-tagger-input/v8",
                         "used_audio_evidence": snapshot.id in audio_profiles,
                         "role_fingerprint": parameters.role_fingerprint,
                         "vocabulary_fingerprint": (

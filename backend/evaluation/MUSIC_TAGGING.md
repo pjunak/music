@@ -36,7 +36,9 @@ Before each call, deterministic metadata matching uses the operator vocabulary's
 canonical names, exact cleanup aliases, and separately editable context cues to build
 high-recall candidate evidence. Context cues may overlap across tags and never rename
 stored tags. Candidate provenance distinguishes exact canonical names and aliases from
-weaker cue-only matches; dense metadata keeps exact matches first and remains bounded.
+weaker cue-only matches and marks whether one or several independent fields support a
+candidate. Corroborated meanings are presented before isolated title or artist words;
+dense metadata keeps exact matches first when support is otherwise equal and remains bounded.
 The provider receives the complete compact ID/name/group index plus detailed
 definitions for those candidates, rather than the full 131-tag definition catalog on
 every scenario.

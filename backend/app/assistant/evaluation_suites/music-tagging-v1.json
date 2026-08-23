@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v3",
-  "id": "controlled-vocabulary-tagging-baseline-v8",
+  "id": "controlled-vocabulary-tagging-baseline-v9",
   "cases": [
     {
       "id": "medieval-tavern-dance",
@@ -481,7 +481,7 @@
         "length_s": 244.0,
         "bpm": 88
       },
-      "required_tags": ["reunion", "hopeful", "uplifting"],
+      "required_tags": ["reunion", "hopeful"],
       "forbidden_tags": ["ominous", "fearful"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1

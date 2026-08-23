@@ -107,7 +107,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v8",
+    suite_id="controlled-vocabulary-tagging-baseline-v9",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
