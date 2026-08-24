@@ -69,19 +69,27 @@ function optionalNumber(value: string): number | undefined {
 function modelUnavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the playlist quality check in AI Setup first.";
+      return "Run and pass the playlist quality check in model settings first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable a playlist planning model in AI Setup first.";
+      return "Assign and enable a playlist planning model in model settings first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned playlist model in AI Setup first.";
+      return "Verify and test the assigned playlist model in model settings first.";
     default:
       return "The connected model is not ready. Check its setup before using it.";
   }
 }
 
-export function PlaylistBuilderView() {
+interface PlaylistBuilderViewProps {
+  embedded?: boolean;
+  onCreated?: (playlistName: string) => void | Promise<void>;
+}
+
+export function PlaylistBuilderView({
+  embedded = false,
+  onCreated,
+}: PlaylistBuilderViewProps = {}) {
   const activeModeId = usePlayerStore((state) => state.state?.active_mode_id ?? null);
   const ambientTrackId = usePlayerStore(
     (state) => state.state?.ambient?.current_track_id ?? null,
@@ -461,6 +469,7 @@ export function PlaylistBuilderView() {
     ) {
       return;
     }
+    let createdName: string | null = null;
     setCommitting(true);
     try {
       const result = await authoringImportApi.commitDocument(
@@ -475,29 +484,42 @@ export function PlaylistBuilderView() {
         return;
       }
       setCreated(true);
-      toast.success("Playlist created", `${playlistName.trim()} is ready in Authoring.`);
+      createdName = playlistName.trim();
+      toast.success("Playlist created", `${createdName} is ready in Authoring.`);
     } catch (error) {
       toast.error("Create failed", errorMessage(error));
     } finally {
       setCommitting(false);
     }
+    if (createdName !== null && onCreated !== undefined) {
+      try {
+        await onCreated(createdName);
+      } catch (error) {
+        toast.warn(
+          "Playlist created but could not be opened",
+          errorMessage(error),
+        );
+      }
+    }
   }
 
   return (
-    <div className="assistant-playlist-view">
-      <header className="assistant-page-header">
-        <div>
-          <p className="assistant-eyebrow">Local by default · review-first</p>
-          <h1>Build a playlist from a mood</h1>
-          <p>
-            Describe the scene or atmosphere, choose how to rank the matches, then
-            decide exactly which songs reach the normal Authoring review.
-          </p>
-        </div>
-        <span className="assistant-algorithm">
-          {suggestion?.engine ?? "local-planner/v2"}
-        </span>
-      </header>
+    <div className={`assistant-playlist-view${embedded ? " is-embedded" : ""}`}>
+      {!embedded ? (
+        <header className="assistant-page-header">
+          <div>
+            <p className="assistant-eyebrow">Local by default · review-first</p>
+            <h1>Build a playlist from a mood</h1>
+            <p>
+              Describe the scene or atmosphere, choose how to rank the matches, then
+              decide exactly which songs reach the normal Authoring review.
+            </p>
+          </div>
+          <span className="assistant-algorithm">
+            {suggestion?.engine ?? "local-planner/v2"}
+          </span>
+        </header>
+      ) : null}
 
       <div className="assistant-workbench">
         <aside
@@ -579,7 +601,7 @@ export function PlaylistBuilderView() {
                   {modelStatusError !== null
                     ? `Model status is unavailable: ${modelStatusError}`
                     : modelUnavailableMessage(modelAvailability?.reason_code ?? null)}{" "}
-                  <Link to="/assistant/ai">Open AI Setup</Link>
+                  <Link to="/assistant/settings/models">Open model settings</Link>
                 </p>
               ) : null}
             </fieldset>
@@ -784,7 +806,13 @@ export function PlaylistBuilderView() {
                     onClick={() => void createPlaylist()}
                     disabled={previewItem.status !== "ready" || committing || created}
                   >
-                    {created ? "Playlist created" : committing ? "Creating…" : "Create playlist"}
+                    {created
+                      ? "Playlist created"
+                      : committing
+                        ? "Creating…"
+                        : embedded
+                          ? "Create and continue editing"
+                          : "Create playlist"}
                   </button>
                   {created ? (
                     <Link className="btn-link" to="/authoring/playlists">

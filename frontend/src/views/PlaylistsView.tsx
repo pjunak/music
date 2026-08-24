@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { AuthoringAssistWorkspace } from "@/components/AuthoringAssistWorkspace";
 import { EmptyState } from "@/components/EmptyState";
 import { Field } from "@/components/Field";
 import { IconButton } from "@/components/IconButton";
@@ -9,6 +10,7 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   PlayIcon,
+  SparkleIcon,
   TrashIcon,
   XIcon,
 } from "@/components/icons";
@@ -22,6 +24,7 @@ import type { ModeSummary, PlaylistMeta, Track, TrackInPlaylist } from "@/core/t
 import { wsClient } from "@/core/ws";
 
 import { AutomaticPlaylistEditor } from "./AutomaticPlaylistEditor";
+import { PlaylistBuilderView } from "./assistant/PlaylistBuilderView";
 
 export function PlaylistsView() {
   // Playlists are per-mode now — this tab shows the active mode's only.
@@ -30,8 +33,9 @@ export function PlaylistsView() {
   const [playlists, setPlaylists] = useState<PlaylistMeta[]>([]);
   const [selected, setSelected] = useState<PlaylistMeta | null>(null);
   const [creating, setCreating] = useState(false);
+  const [assisting, setAssisting] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (selectName?: string) => {
     if (activeModeId === null) {
       setPlaylists([]);
       return;
@@ -43,9 +47,14 @@ export function PlaylistsView() {
       // via the functional update — depending on `selected` here would
       // re-mint refresh (and re-run the [refresh] effect = a full refetch)
       // on every list click.
-      setSelected((sel) =>
-        sel === null ? null : (list.find((playlist) => playlist.id === sel.id) ?? null),
-      );
+      setSelected((sel) => {
+        if (selectName !== undefined) {
+          return list.find((playlist) => playlist.name === selectName) ?? null;
+        }
+        return sel === null
+          ? null
+          : (list.find((playlist) => playlist.id === sel.id) ?? null);
+      });
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
     }
@@ -68,13 +77,30 @@ export function PlaylistsView() {
       <div className="two-pane-pane playlists-list-pane">
         <header className="playlists-header">
           <h2>Playlists</h2>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => setCreating(true)}
-          >
-            + New
-          </button>
+          <span className="header-actions">
+            <button
+              type="button"
+              className="btn-secondary authoring-assist-launch"
+              title="Draft a playlist with the Assistant"
+              onClick={() => {
+                setCreating(false);
+                setAssisting(true);
+              }}
+            >
+              <SparkleIcon aria-hidden="true" />
+              Assist
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                setAssisting(false);
+                setCreating(true);
+              }}
+            >
+              + New
+            </button>
+          </span>
         </header>
         <ul className="playlist-list">
           {playlists.length === 0 ? (
@@ -92,7 +118,11 @@ export function PlaylistsView() {
                   <button
                     type="button"
                     className="playlist-list-item-meta btn-ghost"
-                    onClick={() => setSelected(p)}
+                    onClick={() => {
+                      setCreating(false);
+                      setAssisting(false);
+                      setSelected(p);
+                    }}
                   >
                     <span className="playlist-name">{p.name}</span>
                     {p.category ? (
@@ -120,7 +150,21 @@ export function PlaylistsView() {
       </div>
 
       <div className="two-pane-pane playlists-detail-pane">
-        {creating ? (
+        {assisting ? (
+          <AuthoringAssistWorkspace
+            title="Draft a playlist"
+            description="Find and audition candidates here, then create the reviewed playlist and continue tuning its order in Authoring."
+            onClose={() => setAssisting(false)}
+          >
+            <PlaylistBuilderView
+              embedded
+              onCreated={async (name) => {
+                setAssisting(false);
+                await refresh(name);
+              }}
+            />
+          </AuthoringAssistWorkspace>
+        ) : creating ? (
           <CreatePlaylistForm
             modeId={activeModeId}
             onClose={() => setCreating(false)}

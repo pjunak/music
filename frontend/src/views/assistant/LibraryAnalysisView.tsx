@@ -136,7 +136,7 @@ export function LibraryAnalysisView() {
         <div className="assistant-algorithm-list" aria-label="Analysis contract">
           <span className="assistant-algorithm">local-context/v1</span>
           <span className="assistant-algorithm">checkpointed per track</span>
-          <Link to="/assistant/context">Browse track context</Link>
+          <Link to="/assistant/moods/context">Browse track context</Link>
         </div>
       </header>
 
@@ -178,7 +178,7 @@ export function LibraryAnalysisView() {
               <p className="assistant-eyebrow">Tagging readiness</p>
               <h2>Context coverage</h2>
             </div>
-            <Link to="/assistant/context">Inspect individual tracks</Link>
+            <Link to="/assistant/moods/context">Inspect individual tracks</Link>
           </div>
           <div className="assistant-model-tagging-stats">
             <div><strong>{summary.full_tracks}</strong><span>Full context</span></div>

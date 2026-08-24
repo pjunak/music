@@ -46,19 +46,27 @@ function errorMessage(error: unknown): string {
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the EQ quality check in AI Setup first.";
+      return "Run and pass the EQ quality check in model settings first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable an EQ model in AI Setup first.";
+      return "Assign and enable an EQ model in model settings first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned EQ model in AI Setup first.";
+      return "Verify and test the assigned EQ model in model settings first.";
     default:
       return "The connected EQ model is not ready yet.";
   }
 }
 
-export function EqAssistantView() {
+interface EqAssistantViewProps {
+  embedded?: boolean;
+  onCreated?: (presetId: string) => void | Promise<void>;
+}
+
+export function EqAssistantView({
+  embedded = false,
+  onCreated,
+}: EqAssistantViewProps = {}) {
   const activeModeId = usePlayerStore((state) => state.state?.active_mode_id ?? null);
   const [name, setName] = useState("Warm Tavern");
   const [goal, setGoal] = useState("");
@@ -187,6 +195,7 @@ export function EqAssistantView() {
     ) {
       return;
     }
+    let createdPresetId: string | null = null;
     setCommitting(true);
     try {
       const result = await authoringImportApi.commitDocument(
@@ -203,28 +212,40 @@ export function EqAssistantView() {
         return;
       }
       setCreated(true);
+      createdPresetId = previewItem.resource_id;
       toast.success("Preset created", `${draft?.name ?? "The EQ preset"} is ready.`);
     } catch (error) {
       toast.error("Create failed", errorMessage(error));
     } finally {
       setCommitting(false);
     }
+    if (createdPresetId !== null && onCreated !== undefined) {
+      try {
+        await onCreated(createdPresetId);
+      } catch (error) {
+        toast.warn("Preset created but could not be opened", errorMessage(error));
+      }
+    }
   }
 
   return (
-    <div className="assistant-playlist-view assistant-eq-view">
-      <header className="assistant-page-header">
-        <div>
-          <p className="assistant-eyebrow">Connected model · review-first</p>
-          <h1>Draft a custom EQ preset</h1>
-          <p>
-            Describe the sound you want. The model can suggest only bounded ten-band
-            EQ gains; you still preview and explicitly create the preset through the
-            normal Authoring import.
-          </p>
-        </div>
-        <span className="assistant-algorithm">model-graphic-eq/v2</span>
-      </header>
+    <div
+      className={`assistant-playlist-view assistant-eq-view${embedded ? " is-embedded" : ""}`}
+    >
+      {!embedded ? (
+        <header className="assistant-page-header">
+          <div>
+            <p className="assistant-eyebrow">Connected model · review-first</p>
+            <h1>Draft a custom EQ preset</h1>
+            <p>
+              Describe the sound you want. The model can suggest only bounded ten-band
+              EQ gains; you still preview and explicitly create the preset through the
+              normal Authoring review.
+            </p>
+          </div>
+          <span className="assistant-algorithm">model-graphic-eq/v2</span>
+        </header>
+      ) : null}
 
       <div className="assistant-workbench">
         <aside className="assistant-composer">
@@ -268,7 +289,7 @@ export function EqAssistantView() {
             {!availability?.available ? (
               <p className="field-hint">
                 {statusError ?? unavailableMessage(availability?.reason_code ?? null)}{" "}
-                <Link to="/assistant/ai">Open AI Setup</Link>
+                <Link to="/assistant/settings/models">Open model settings</Link>
               </p>
             ) : null}
           </form>
@@ -328,7 +349,7 @@ export function EqAssistantView() {
                 disabled={previewing || activeModeId === null}
                 onClick={() => void reviewDraft()}
               >
-                {previewing ? "Preparing review…" : "Preview Authoring import"}
+                {previewing ? "Preparing review…" : "Review preset"}
               </button>
               {activeModeId === null ? (
                 <p className="field-hint">Select a mode before reviewing this preset.</p>
@@ -353,7 +374,13 @@ export function EqAssistantView() {
                     disabled={committing || created || previewItem.status !== "ready"}
                     onClick={() => void createPreset()}
                   >
-                    {created ? "Preset created" : committing ? "Creating…" : "Create preset"}
+                    {created
+                      ? "Preset created"
+                      : committing
+                        ? "Creating…"
+                        : embedded
+                          ? "Create and continue editing"
+                          : "Create preset"}
                   </button>
                 </div>
               ) : null}

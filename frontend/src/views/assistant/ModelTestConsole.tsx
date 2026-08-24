@@ -22,6 +22,7 @@ import { providerUsageFromJob } from "./modelUsage";
 import { modelTestFailureMessage } from "./providerUi";
 
 interface Props {
+  open: boolean;
   roles: ModelRole[];
   evaluations: ModelQualityEvaluation[];
   history: BackgroundJob[];
@@ -37,6 +38,7 @@ interface Props {
   onRetryQuality: () => void;
   onRetestFailed: (evaluation: ModelQualityEvaluation) => void;
   qualityActionBusy: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 interface LogEntry {
@@ -348,6 +350,7 @@ function buildLogEntries(
 }
 
 export function ModelTestConsole({
+  open,
   roles,
   evaluations,
   history,
@@ -363,6 +366,7 @@ export function ModelTestConsole({
   onRetryQuality,
   onRetestFailed,
   qualityActionBusy,
+  onOpenChange,
 }: Props) {
   const taskRoles = roles.filter((role) => role.configuration_available);
   const role =
@@ -447,6 +451,12 @@ export function ModelTestConsole({
         ),
       ].join("\n")
     : "No configurable model task is available.";
+  const consoleStatus =
+    role === undefined
+      ? "No configurable task"
+      : role.conformance_status === "failed"
+        ? "Model test failed"
+        : qualityStatusLabel(evaluation, quality, qualityLoading);
 
   async function copy(text: string, kind: "log" | "diagnostics") {
     try {
@@ -460,15 +470,27 @@ export function ModelTestConsole({
   }
 
   return (
-    <section
+    <details
       id="assistant-test-console"
       className="surface-card assistant-test-console"
+      open={open}
+      onToggle={(event) => onOpenChange(event.currentTarget.open)}
       aria-labelledby="assistant-test-console-title"
     >
+      <summary className="assistant-test-console-summary">
+        <span>
+          <strong id="assistant-test-console-title">Test console</strong>
+          <small>{role?.label ?? "Model diagnostics"}</small>
+        </span>
+        <span>{consoleStatus}</span>
+      </summary>
+      <div className="assistant-test-console-body">
       <header className="assistant-test-console-heading">
         <div>
           <p className="assistant-eyebrow">Saved test activity</p>
-          <h3 id="assistant-test-console-title">Test console</h3>
+          <strong className="assistant-test-console-task-title">
+            {role?.label ?? "Model diagnostics"}
+          </strong>
           <p>One place for model checks, quality progress, and troubleshooting.</p>
         </div>
         <div className="assistant-test-console-actions">
@@ -589,6 +611,7 @@ export function ModelTestConsole({
         <summary>Technical details</summary>
         <pre aria-label="Selected model task diagnostics JSON">{diagnosticsText}</pre>
       </details>
-    </section>
+      </div>
+    </details>
   );
 }

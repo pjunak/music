@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import { AuthoringAssistWorkspace } from "@/components/AuthoringAssistWorkspace";
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { Fader } from "@/components/Fader";
 import { Field } from "@/components/Field";
 import { GraphicEqModule } from "@/components/GraphicEqModule";
 import { IconButton } from "@/components/IconButton";
-import { TrashIcon, XIcon } from "@/components/icons";
+import { SparkleIcon, TrashIcon, XIcon } from "@/components/icons";
 import { Knob } from "@/components/Knob";
 import { Switch } from "@/components/Switch";
 import { modesAdminApi, presetsAdminApi, presetsApi } from "@/core/api";
@@ -18,6 +19,8 @@ import { usePlayerArray, usePlayerStore } from "@/core/playerStore";
 import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
 import { wsClient } from "@/core/ws";
+
+import { EqAssistantView } from "./assistant/EqAssistantView";
 
 // Per-effect-type UI: a friendly label, a one-line blurb, and a control schema
 // for each numeric param. Param KEYS must match what the audio engine reads
@@ -171,8 +174,9 @@ export function PresetsView() {
   const [presets, setPresets] = useState<PresetManifest[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [assisting, setAssisting] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (selectId?: string) => {
     if (activeModeId === null) {
       setPresets([]);
       return;
@@ -183,9 +187,12 @@ export function PresetsView() {
       // Functional update — depending on `selectedId` here would re-mint
       // refresh (and re-run the [refresh] effect = a full refetch) on every
       // list click.
-      setSelectedId((sel) =>
-        sel !== null && !list.some((p) => p.id === sel) ? null : sel,
-      );
+      setSelectedId((sel) => {
+        if (selectId !== undefined) {
+          return list.some((preset) => preset.id === selectId) ? selectId : null;
+        }
+        return sel !== null && !list.some((preset) => preset.id === sel) ? null : sel;
+      });
     } catch (e) {
       toast.error("Load failed", e instanceof Error ? e.message : undefined);
     }
@@ -240,6 +247,18 @@ export function PresetsView() {
           <span className="header-actions">
             <button
               type="button"
+              className="btn-secondary authoring-assist-launch"
+              title="Draft a graphic EQ with the Assistant"
+              onClick={() => {
+                setCreating(false);
+                setAssisting(true);
+              }}
+            >
+              <SparkleIcon aria-hidden="true" />
+              Assist
+            </button>
+            <button
+              type="button"
               onClick={() => void reloadPresets()}
               title="Re-read every preset YAML from disk and report parse errors"
             >
@@ -248,7 +267,10 @@ export function PresetsView() {
             <button
               type="button"
               className="btn-primary"
-              onClick={() => setCreating(true)}
+              onClick={() => {
+                setAssisting(false);
+                setCreating(true);
+              }}
             >
               + New
             </button>
@@ -273,7 +295,11 @@ export function PresetsView() {
                 <button
                   type="button"
                   className="playlist-list-item-meta btn-ghost"
-                  onClick={() => setSelectedId(p.id)}
+                  onClick={() => {
+                    setCreating(false);
+                    setAssisting(false);
+                    setSelectedId(p.id);
+                  }}
                 >
                   <span className="playlist-name">{p.name}</span>
                   <span className="muted small">
@@ -287,7 +313,21 @@ export function PresetsView() {
       </div>
 
       <div className="two-pane-pane presets-detail-pane">
-        {creating ? (
+        {assisting ? (
+          <AuthoringAssistWorkspace
+            title="Draft a graphic EQ"
+            description="Generate a bounded starting curve, create it through the normal review, then tune every band and effect here."
+            onClose={() => setAssisting(false)}
+          >
+            <EqAssistantView
+              embedded
+              onCreated={async (presetId) => {
+                setAssisting(false);
+                await refresh(presetId);
+              }}
+            />
+          </AuthoringAssistWorkspace>
+        ) : creating ? (
           <PresetForm
             modeId={activeModeId}
             mode="create"

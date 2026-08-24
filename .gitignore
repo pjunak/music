@@ -116,3 +116,4 @@ coverage/
 # Local planning and mockups stay private; architecture decisions are shared.
 docs/*
 !docs/ADR-*.md
+!docs/assistant-ux-philosophy.md

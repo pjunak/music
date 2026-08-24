@@ -31,7 +31,11 @@ import { PlaylistBuilderView } from "@/views/assistant/PlaylistBuilderView";
 import { EqAssistantView } from "@/views/assistant/EqAssistantView";
 import { TagVocabularyView } from "@/views/assistant/TagVocabularyView";
 
-import { AssistantShell } from "./AssistantShell";
+import {
+  AssistantSettingsShell,
+  AssistantShell,
+  MoodLibraryShell,
+} from "./AssistantShell";
 import { AuthoringShell } from "./AuthoringShell";
 import { Header } from "./Header";
 import { indexTarget } from "./indexTarget";
@@ -182,9 +186,10 @@ export default function AppShell() {
             <Route path="presets" element={<PresetsView />} />
             <Route path="cues" element={<CuesView />} />
           </Route>
-          {/* Assistant is deliberately separate from the direct Authoring
-              editors. Its suggestions stay review-first and use Authoring's
-              existing import transaction for all writes. */}
+          {/* Assistant keeps its standalone workspaces, while playlist and EQ
+              drafting can also be opened as optional sidecars inside their
+              Authoring editors. Both paths use the same review-first jobs and
+              Authoring import transaction for every write. */}
           <Route
             path="assistant"
             element={
@@ -196,16 +201,38 @@ export default function AppShell() {
             <Route index element={<Navigate to="playlists" replace />} />
             <Route path="playlists" element={<PlaylistBuilderView />} />
             <Route path="eq" element={<EqAssistantView />} />
-            <Route path="analysis" element={<LibraryAnalysisView />} />
-            <Route path="context" element={<LibraryContextView />} />
-            <Route path="tags" element={<TagVocabularyView />} />
+            <Route path="moods" element={<MoodLibraryShell />}>
+              <Route index element={<Navigate to="workflow" replace />} />
+              <Route path="workflow" element={<LibraryAnalysisView />} />
+              <Route path="context" element={<LibraryContextView />} />
+            </Route>
+            <Route path="settings" element={<AssistantSettingsShell />}>
+              <Route index element={<Navigate to="models" replace />} />
+              <Route
+                path="models"
+                element={
+                  <Suspense fallback={<RouteSpinner />}>
+                    <AssistantAiSetupView />
+                  </Suspense>
+                }
+              />
+              <Route path="vocabulary" element={<TagVocabularyView />} />
+            </Route>
+            <Route
+              path="analysis"
+              element={<Navigate to="/assistant/moods/workflow" replace />}
+            />
+            <Route
+              path="context"
+              element={<Navigate to="/assistant/moods/context" replace />}
+            />
+            <Route
+              path="tags"
+              element={<Navigate to="/assistant/settings/vocabulary" replace />}
+            />
             <Route
               path="ai"
-              element={
-                <Suspense fallback={<RouteSpinner />}>
-                  <AssistantAiSetupView />
-                </Suspense>
-              }
+              element={<Navigate to="/assistant/settings/models" replace />}
             />
             {/* Preserve bookmarks for the removed placeholder page. */}
             <Route path="cleanup" element={<Navigate to="/library" replace />} />

@@ -11,6 +11,7 @@ import type {
   ProviderConnection,
 } from "@/core/assistantProvidersApi";
 
+import { AssistantInfoPopover } from "./AssistantInfoPopover";
 import { ModelPicker } from "./ModelPicker";
 import {
   modelQualityView,
@@ -270,7 +271,7 @@ export function ModelRoleCard({
       className="surface-card assistant-role-card"
     >
       <div className="assistant-role-heading">
-        <div>
+        <div className="assistant-role-heading-copy">
           <span
             className={`assistant-role-state${
               role.effective_enabled && qualityEvaluation?.status === "passed"
@@ -283,6 +284,15 @@ export function ModelRoleCard({
             {stateLabel}
           </span>
           <h3>{role.label}</h3>
+          <AssistantInfoPopover label="Task contract" title={role.label}>
+            <p>{role.description}</p>
+            {ROLE_OUTPUT_CONSTRAINTS[role.role_id] !== undefined ? (
+              <p>
+                <strong>Validated output:</strong>{" "}
+                {ROLE_OUTPUT_CONSTRAINTS[role.role_id]}
+              </p>
+            ) : null}
+          </AssistantInfoPopover>
         </div>
         <label className="checkbox-row assistant-role-enabled">
           <input
@@ -295,15 +305,8 @@ export function ModelRoleCard({
           <span>Allow for task</span>
         </label>
       </div>
-      <p>{role.description}</p>
-      {ROLE_OUTPUT_CONSTRAINTS[role.role_id] !== undefined ? (
-        <div className="assistant-role-contract">
-          <span>Validated output</span>
-          <strong>{ROLE_OUTPUT_CONSTRAINTS[role.role_id]}</strong>
-        </div>
-      ) : null}
 
-      <form onSubmit={(event) => void save(event)}>
+      <form className="assistant-role-route-form" onSubmit={(event) => void save(event)}>
         <label className="field">
           <span className="field-label">Connection</span>
           <select
@@ -410,74 +413,83 @@ export function ModelRoleCard({
           </p>
         ) : null}
 
-        <div
-          className="assistant-role-settings"
-          role="group"
-          aria-label="Request settings"
-        >
-          <fieldset className="assistant-thinking-mode">
-            <legend>
-              <span>Thinking</span>
-              {ROLE_THINKING_RECOMMENDATIONS[role.role_id] !== undefined ? (
-                <span className="assistant-thinking-recommendation">
-                  {ROLE_THINKING_RECOMMENDATIONS[role.role_id]}
-                </span>
-              ) : null}
-            </legend>
-            <div className="assistant-thinking-options">
-              {(
-                [
-                  ["provider_default", "Provider default"],
-                  ["enabled", "On"],
-                  ["disabled", "Off"],
-                ] as const
-              ).map(([value, label]) => (
-                <label key={value}>
-                  <input
-                    type="radio"
-                    name={`assistant-thinking-${role.role_id}`}
-                    value={value}
-                    checked={thinkingMode === value}
-                    disabled={qualityActive}
-                    onChange={() => {
-                      setThinkingMode(value);
-                      setEnabled(false);
-                    }}
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <label className="field">
-            <span className="field-label">Timeout (seconds)</span>
-            <input
-              type="number"
-              min={5}
-              max={300}
-              disabled={qualityActive}
-              value={timeoutSeconds}
-              onChange={(event) => {
-                setTimeoutSeconds(Number(event.target.value));
-                setEnabled(false);
-              }}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Maximum response tokens</span>
-            <input
-              type="number"
-              min={128}
-              max={65536}
-              disabled={qualityActive}
-              value={maxOutputTokens}
-              onChange={(event) => {
-                setMaxOutputTokens(Number(event.target.value));
-                setEnabled(false);
-              }}
-            />
-          </label>
-        </div>
+        <details className="assistant-role-advanced">
+          <summary>
+            <span>Request settings</span>
+            <small>
+              Thinking {thinkingMode === "provider_default" ? "default" : thinkingMode}
+              {" · "}{timeoutSeconds}s{" · "}{maxOutputTokens.toLocaleString()} tokens
+            </small>
+          </summary>
+          <div
+            className="assistant-role-settings"
+            role="group"
+            aria-label="Request settings"
+          >
+            <fieldset className="assistant-thinking-mode">
+              <legend>
+                <span>Thinking</span>
+                {ROLE_THINKING_RECOMMENDATIONS[role.role_id] !== undefined ? (
+                  <span className="assistant-thinking-recommendation">
+                    {ROLE_THINKING_RECOMMENDATIONS[role.role_id]}
+                  </span>
+                ) : null}
+              </legend>
+              <div className="assistant-thinking-options">
+                {(
+                  [
+                    ["provider_default", "Provider default"],
+                    ["enabled", "On"],
+                    ["disabled", "Off"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name={`assistant-thinking-${role.role_id}`}
+                      value={value}
+                      checked={thinkingMode === value}
+                      disabled={qualityActive}
+                      onChange={() => {
+                        setThinkingMode(value);
+                        setEnabled(false);
+                      }}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="field">
+              <span className="field-label">Timeout (seconds)</span>
+              <input
+                type="number"
+                min={5}
+                max={300}
+                disabled={qualityActive}
+                value={timeoutSeconds}
+                onChange={(event) => {
+                  setTimeoutSeconds(Number(event.target.value));
+                  setEnabled(false);
+                }}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Maximum response tokens</span>
+              <input
+                type="number"
+                min={128}
+                max={65536}
+                disabled={qualityActive}
+                value={maxOutputTokens}
+                onChange={(event) => {
+                  setMaxOutputTokens(Number(event.target.value));
+                  setEnabled(false);
+                }}
+              />
+            </label>
+          </div>
+        </details>
 
         <div className="assistant-role-actions">
           <button

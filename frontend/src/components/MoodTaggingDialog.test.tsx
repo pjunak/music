@@ -197,7 +197,7 @@ describe("MoodTaggingDialog", () => {
     );
     expect(screen.getByRole("link", { name: "Open context analysis" })).toHaveAttribute(
       "href",
-      "/assistant/context",
+      "/assistant/moods/context",
     );
   });
 

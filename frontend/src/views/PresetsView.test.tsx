@@ -6,6 +6,19 @@ import type * as ApiModule from "@/core/api";
 import type { PlayerState, PresetManifest } from "@/core/types";
 
 vi.mock("@/core/ws", () => ({ wsClient: { send: vi.fn() } }));
+vi.mock("./assistant/EqAssistantView", () => ({
+  EqAssistantView: ({
+    embedded,
+    onCreated,
+  }: {
+    embedded?: boolean;
+    onCreated?: (id: string) => void | Promise<void>;
+  }) => (
+    <button type="button" onClick={() => void onCreated?.("warm-tavern")}>
+      {embedded ? "Finish assisted EQ" : "Standalone EQ assistant"}
+    </button>
+  ),
+}));
 vi.mock("@/core/api", async (importActual) => {
   const actual = await importActual<typeof ApiModule>();
   return {
@@ -28,6 +41,12 @@ const cave: PresetManifest = {
   id: "cave",
   name: "Cave",
   effects: [{ type: "lowpass", frequency: 800, q: 0.7 }],
+};
+
+const warmTavern: PresetManifest = {
+  id: "warm-tavern",
+  name: "Warm Tavern",
+  effects: [{ type: "eq", bands: [] }],
 };
 
 beforeEach(() => {
@@ -74,5 +93,23 @@ describe("Preset live tuning", () => {
       type: "set_active_presets",
       preset_ids: ["hall"],
     });
+  });
+});
+
+describe("Preset Authoring assistance", () => {
+  it("opens the created Assistant preset in the ordinary editor", async () => {
+    vi.mocked(presetsApi.list)
+      .mockReset()
+      .mockResolvedValueOnce([cave])
+      .mockResolvedValue([cave, warmTavern]);
+    const user = userEvent.setup();
+    render(<PresetsView />);
+
+    await user.click(await screen.findByRole("button", { name: "Assist" }));
+    expect(screen.getByRole("heading", { name: "Draft a graphic EQ" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Finish assisted EQ" }));
+
+    expect(await screen.findByRole("heading", { name: "Warm Tavern" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeVisible();
   });
 });

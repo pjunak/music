@@ -127,7 +127,7 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
               ? "The audio file changed after this context was built. Analyze it again."
               : "No current analysis context is available for this track.")}
         </p>
-        <Link to="/assistant/analysis">Open context analysis</Link>
+        <Link to="/assistant/moods/workflow">Open context analysis</Link>
       </div>
     );
   }
@@ -313,7 +313,7 @@ export function LibraryContextView() {
           </p>
           <p>The local analyzer never proposes terrain, scene, or mood tags.</p>
         </AssistantInfoPopover>
-        <Link className="btn-secondary assistant-context-refresh" to="/assistant/analysis">
+        <Link className="btn-secondary assistant-context-refresh" to="/assistant/moods/workflow">
           Build or refresh
         </Link>
       </header>

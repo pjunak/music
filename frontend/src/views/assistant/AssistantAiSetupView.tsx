@@ -54,6 +54,7 @@ export function AssistantAiSetupView() {
   const [selectedTestRoleId, setSelectedTestRoleId] = useState<string | null>(
     null,
   );
+  const [testConsoleOpen, setTestConsoleOpen] = useState(false);
   const [modelTestResults, setModelTestResults] = useState<
     Record<string, ModelConformance | undefined>
   >({});
@@ -131,6 +132,13 @@ export function AssistantAiSetupView() {
           .sort((left, right) => right.created_at.localeCompare(left.created_at));
         setQualityEvaluations(nextEvaluations);
         setQualityHistory(nextHistory);
+        if (
+          initial &&
+          (nextHistory.some(isModelEvaluationJobActive) ||
+            nextEvaluations.some((evaluation) => evaluation.status === "failed"))
+        ) {
+          setTestConsoleOpen(true);
+        }
         setQualityLoadError(null);
         const hasActiveJob = nextHistory.some(isModelEvaluationJobActive);
         timer = window.setTimeout(
@@ -428,6 +436,7 @@ export function AssistantAiSetupView() {
 
   async function testRole(roleId: string) {
     setSelectedTestRoleId(roleId);
+    setTestConsoleOpen(true);
     setModelTestErrors((current) => {
       const next = { ...current };
       delete next[roleId];
@@ -483,6 +492,7 @@ export function AssistantAiSetupView() {
 
   async function startQualityEvaluation(evaluation: ModelQualityEvaluation) {
     setSelectedTestRoleId(evaluation.role_id);
+    setTestConsoleOpen(true);
     const isMusicTagging = evaluation.role_id === "music_tagger";
     const isTagCleanup = evaluation.role_id === "tag_cleanup";
     const isEqAssistance = evaluation.role_id === "eq_assistant";
@@ -533,6 +543,7 @@ export function AssistantAiSetupView() {
 
   async function retestFailedScenarios(evaluation: ModelQualityEvaluation) {
     setSelectedTestRoleId(evaluation.role_id);
+    setTestConsoleOpen(true);
     const confirmed = await confirmDialog({
       title: "Recheck failed mood-tagging scenarios?",
       body:
@@ -568,6 +579,7 @@ export function AssistantAiSetupView() {
     const roleId = qualityHistory.find((job) => job.id === jobId)?.parameters
       .role_id;
     if (typeof roleId === "string") setSelectedTestRoleId(roleId);
+    setTestConsoleOpen(true);
     setBusyItem("evaluation-cancel");
     try {
       const job = await jobsApi.cancel(jobId);
@@ -631,7 +643,10 @@ export function AssistantAiSetupView() {
         onTest={testRole}
         onStartQuality={(item) => void startQualityEvaluation(item)}
         onCancelQuality={(jobId) => void cancelQualityEvaluation(jobId)}
-        onViewTestLog={() => setSelectedTestRoleId(role.role_id)}
+        onViewTestLog={() => {
+          setSelectedTestRoleId(role.role_id);
+          setTestConsoleOpen(true);
+        }}
         onRemove={removeRole}
       />
     );
@@ -648,7 +663,7 @@ export function AssistantAiSetupView() {
     <div className="assistant-provider-view">
       <header className="assistant-page-header">
         <div>
-          <h1>AI connections</h1>
+          <h1>Models and providers</h1>
           <p>Connect providers, then assign and test a model for each task.</p>
         </div>
         <div className="assistant-page-tools">
@@ -877,6 +892,7 @@ export function AssistantAiSetupView() {
         )}
         {connections.length > 0 ? (
           <ModelTestConsole
+            open={testConsoleOpen}
             roles={roles}
             evaluations={qualityEvaluations}
             history={qualityHistory}
@@ -896,6 +912,7 @@ export function AssistantAiSetupView() {
             onRetryQuality={refreshQuality}
             onRetestFailed={(item) => void retestFailedScenarios(item)}
             qualityActionBusy={busyItem?.startsWith("evaluation") === true}
+            onOpenChange={setTestConsoleOpen}
           />
         ) : null}
       </section>

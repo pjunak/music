@@ -43,13 +43,14 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   disclosure and confirmation. Both methods produce the same read-only draft: you choose the final
   tracks, can audition each suggested song through the normal canonical playback controls without
   changing the selection, then use the existing preview and create-only Authoring import
-  transaction. Signal measurements remain numeric evidence and never become semantic mood tags
-  automatically.
+  transaction. The same builder is available as an optional sidecar in Authoring, where the
+  created playlist opens immediately for ordinary manual reordering and editing. Signal
+  measurements remain numeric evidence and never become semantic mood tags automatically.
 - **Playlist quality evaluation** — run versioned, synthetic D&D playlist scenarios through the
   provider-neutral suggestion contract. The harness measures relevance, required selection,
   ordering, explanations, determinism, and invented or excluded tracks, with explicit thresholds
   that fail regressions. A configured playlist model can be evaluated either through an explicit
-  CLI disclosure flag or an explicit durable job in AI Setup. The server stores progress and the
+  CLI disclosure flag or an explicit durable job in model settings. The server stores progress and the
   exact model-configuration fingerprint, so refreshes can restore the run and changed settings
   invalidate its result. Local filtering reduces each case to at most 100 candidates, paths are
   removed, and the model may return only known track IDs. A current pass is required before that
@@ -63,14 +64,16 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   Frequencies and the final preset document are constructed locally. A
   current synthetic EQ quality pass and an explicit per-request disclosure are required. Jobs are
   durable across browser refreshes, and results remain inert until the operator previews and
-  explicitly commits the preset through the normal create-only Authoring import.
+  explicitly commits the preset through the normal create-only Authoring import. Authoring can
+  open this workflow as a sidecar and then switches directly to the normal effect-rack editor for
+  listening and manual band adjustment.
 - **Optional AI connections** — save user-chosen OpenAI-compatible provider access in the
   dedicated Assistant tab, verify it from the server, and assign a model independently to each
   declared role. A connection owns one key: several roles can deliberately reuse it, or specialized
   roles can choose separate connections and keys even when they use the same provider. Every
   assignment must pass a fixed synthetic structured-output test before it can be enabled; changing
   its connection, model, timeout, or response limit invalidates that test.
-  API keys are encrypted at rest and never returned to the browser. AI Setup shows only whether a
+  API keys are encrypted at rest and never returned to the browser. Model settings show only whether a
   key is saved plus a masked hint. A saved key can be deleted without deleting its connection or
   role drafts; deletion and replacement both invalidate verification and model-quality gates until
   the operator explicitly completes them again. The shared execution harness is bounded and
@@ -91,8 +94,8 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   IDs, and returns a draft. Mood tagging sends metadata and canonical library-relative paths in
   batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
   stores suggestions under `model-context-tagger/v6` for explicit per-tag review. The Mood
-  Vocabulary Assistant tab exposes every canonical name, definition, group, and exact alias for
-  manual editing. When current comprehensive local context exists, tagging may also send bounded
+  **Assistant → Settings → Mood vocabulary** exposes every canonical name, definition, group, and
+  exact alias for manual editing. When current comprehensive local context exists, tagging may also send bounded
   whole-track trajectories, tempo development, major acoustic sections and transitions,
   repetition, analyzer confidence, and an explicit unknown voice status. It does not send locally
   generated tag hypotheses or ask the provider to recreate energy/brightness/tension axes. Audio
@@ -114,11 +117,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   It does not estimate charges because provider pricing is not part of the portable model contract.
   The Library Analysis screen restores tagging progress after refresh or reopen and shows model
   output beside local tools without merging their ownership. Vocabulary and cleanup share a separate
-  workspace, while AI Setup groups their cards but preserves independent model choices. The EQ workflow sends only
-  the operator's goal and fixed band limits; specialized audio-model workflows remain locked until
-  a concrete bounded audio transport receives its own reviewed contract.
+  workspace, while model settings group their routing rows but preserve independent model choices.
+  The EQ workflow sends only the operator's goal and fixed band limits; specialized audio-model
+  workflows remain locked until a concrete bounded audio transport receives its own reviewed contract.
   See [`ASSISTANT.md`](ASSISTANT.md) for the practical deployment, setup, verification, and
-  acceptance guide.
+  acceptance guide, and [`docs/assistant-ux-philosophy.md`](docs/assistant-ux-philosophy.md)
+  for the shared drafting, review, creation, and manual-tuning interaction contract.
 - **Durable library context analysis** — one restartable `local-context/v1` job decodes each new or
   changed track into factual whole-track context: loudness and intensity development, rhythmic
   drive, brightness, density, spectral change, local tempo behavior, major acoustic sections,
@@ -222,8 +226,8 @@ DB-backed tokens, nothing is signed.)
 | `SESSION_COOKIE_SECURE` | | `true` | Send the session cookie over HTTPS only. Set `false` only for a plain-HTTP (no-TLS) deployment |
 | `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
 | `ASSISTANT_CREDENTIAL_KEY` | Only for optional AI setup | — | URL-safe base64 32-byte key used to encrypt provider API keys in `app.db` |
-| `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional AI setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; AI Setup may create it once when its private parent mount exists |
-| `ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT` | | — | Optional non-secret host path shown in AI Setup's copyable mount/setup guide |
+| `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional model setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; model settings may create it once when its private parent mount exists |
+| `ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT` | | — | Optional non-secret host path shown in model settings' copyable mount/setup guide |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 
@@ -231,7 +235,7 @@ DB-backed tokens, nothing is signed.)
 
 The local Assistant does not need a model provider or a credential key. For the standard Docker
 image, mount the private directory shown in Quick start, sign in, open
-**Assistant → AI Setup**, and select **Initialize secure storage**. Music creates the fixed
+**Assistant → Settings → Models and providers**, and select **Initialize secure storage**. Music creates the fixed
 `/run/music-secrets/assistant-credential.key` file with a new random key. The key value is never
 sent to the browser, stored in `app.db`, or mixed into `/data`.
 
@@ -254,7 +258,7 @@ deployment's secret store, not in source control. A database backup and this key
 together; without the original key, saved provider credentials cannot be decrypted and must be
 entered again.
 
-For file-backed storage, AI Setup can delete every saved provider API key and the master key through
+For file-backed storage, model settings can delete every saved provider API key and the master key through
 **Reset AI secure storage** after a destructive-action warning and current-password confirmation.
 Connection and role drafts remain, active provider jobs block the reset, and a failed final file
 removal is reported separately after the credentials are already safely erased. Environment-backed

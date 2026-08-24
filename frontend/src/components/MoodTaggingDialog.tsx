@@ -57,13 +57,13 @@ function describeScope(scope: ModelTaggingScope): string {
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the music-tagging quality check in AI Setup first.";
+      return "Run and pass the music-tagging quality check in model settings first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable a music-tagging model in AI Setup first.";
+      return "Assign and enable a music-tagging model in model settings first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned music-tagging model in AI Setup first.";
+      return "Verify and test the assigned music-tagging model in model settings first.";
     default:
       return "The connected music-tagging model is not ready yet.";
   }
@@ -430,7 +430,7 @@ export function MoodTaggingDialog({
           <div className="mood-tagging-unavailable">
             <strong>Mood tagging is not ready</strong>
             <span>{unavailableMessage(plan.reason_code)}</span>
-            <Link to="/assistant/ai" onClick={onClose}>Open AI Setup</Link>
+            <Link to="/assistant/settings/models" onClick={onClose}>Open model settings</Link>
           </div>
         ) : null}
       </section>
@@ -475,7 +475,7 @@ export function MoodTaggingDialog({
               </span>
             </label>
           </div>
-          <Link to="/assistant/context" onClick={onClose}>
+          <Link to="/assistant/moods/context" onClick={onClose}>
             Open context analysis
           </Link>
         </section>
@@ -494,7 +494,7 @@ export function MoodTaggingDialog({
       </label>
 
       <p className="mood-tagging-boundary">
-        Suggestions use the editable <Link to="/assistant/tags" onClick={onClose}>terrain, scene, and mood vocabulary</Link>.
+        Suggestions use the editable <Link to="/assistant/settings/vocabulary" onClick={onClose}>terrain, scene, and mood vocabulary</Link>.
         Accepted tags live only in the music database; album, year, genre, and other file metadata are never rewritten.
       </p>
     </div>

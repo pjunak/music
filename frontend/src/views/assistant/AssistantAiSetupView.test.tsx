@@ -283,7 +283,7 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     expect(
-      await screen.findByRole("heading", { name: "AI connections" }),
+      await screen.findByRole("heading", { name: "Models and providers" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/Each connection stores one provider key/i),
@@ -419,7 +419,7 @@ describe("AssistantAiSetupView", () => {
     });
     render(<AssistantAiSetupView />);
 
-    await screen.findByRole("heading", { name: "AI connections" });
+    await screen.findByRole("heading", { name: "Models and providers" });
     await user.type(screen.getByLabelText("Connection name"), "Hosted models");
     await user.type(
       screen.getByLabelText("Provider address"),
@@ -632,6 +632,7 @@ describe("AssistantAiSetupView", () => {
       "Allow this model for this task",
     );
     expect(allowCheckbox.closest(".assistant-role-heading")).not.toBeNull();
+    await user.click(screen.getByText("Request settings"));
     expect(screen.getByRole("group", { name: "Request settings" })).toBeVisible();
     expect(screen.getByLabelText("Provider default")).toBeVisible();
     expect(screen.getByText("Off recommended")).toBeVisible();
@@ -1027,6 +1028,7 @@ describe("AssistantAiSetupView", () => {
   });
 
   it("keeps an obsolete interrupted attempt in the troubleshooting log", async () => {
+    const user = userEvent.setup();
     const interrupted = qualityJob({
       status: "failed",
       error: "ProviderServiceError: Test this model configuration before using the role.",
@@ -1064,6 +1066,7 @@ describe("AssistantAiSetupView", () => {
     expect(
       screen.getByRole("button", { name: "Test model and allow" }),
     ).toBeEnabled();
+    await user.click(screen.getByText("Test console"));
     expect(
       within(screen.getByRole("log")).getByText(
         /Test this model configuration before using the role\./,
@@ -1226,6 +1229,7 @@ describe("AssistantAiSetupView", () => {
     });
     const card = heading.closest("article");
     expect(card).not.toBeNull();
+    await user.click(within(card as HTMLElement).getByText("Request settings"));
     expect(within(card as HTMLElement).getByText("Off recommended")).toBeVisible();
     await user.click(
       within(card as HTMLElement).getByRole("button", {
