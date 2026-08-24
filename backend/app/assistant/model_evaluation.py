@@ -111,7 +111,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v12",
+    suite_id="controlled-vocabulary-tagging-baseline-v13",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -569,10 +569,10 @@ def run_tagging_quality_evaluation(
     safety_rerun_count = sum(
         case.gate == "safety" for case in execution_suite.cases
     )
-    execution_count = tag_quality_attempts(execution_suite)
+    scored_attempt_count = tag_quality_attempts(execution_suite)
     context.update_progress(
         0,
-        execution_count,
+        scored_attempt_count,
         phase="Preparing evaluation",
         message=(
             f"Loading {scenario_count} "
@@ -582,7 +582,7 @@ def run_tagging_quality_evaluation(
         + (
             f"; {safety_rerun_count} safety stability "
             f"{'rerun' if safety_rerun_count == 1 else 'reruns'} make "
-            f"{execution_count} model executions"
+            f"{scored_attempt_count} scored attempts"
             if safety_rerun_count
             else ""
         ),
@@ -612,7 +612,7 @@ def run_tagging_quality_evaluation(
             total,
             phase="Evaluating tagging model",
             message=(
-                f"Completed {current} of {total} model executions across "
+                f"Completed {current} of {total} scored attempts across "
                 f"{scenario_count} scored "
                 f"{'scenario' if scenario_count == 1 else 'scenarios'}"
             ),

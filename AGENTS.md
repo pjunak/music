@@ -244,6 +244,12 @@ Runtime data lives outside the image.
   factual and may never propose terrain, scene, mood, genre, or instrument tags.
   Context cues are global operator-managed vocabulary guidance, not per-track local tag
   hypotheses; the model must confirm them against the complete untrusted metadata phrase.
+  Keep each tag's ID, name, definition, aliases, and cues together in the provider input so the
+  model never has to join a compact index to a second definition table. A run may spend at most
+  two disclosed correction requests on malformed JSON, schema-invalid output, track-set mismatch,
+  or unsupported tag IDs. Each correction is a fresh strict classification; never edit, coerce,
+  or locally repair the rejected output, and never retry provider, network, timeout, or truncation
+  failures through this budget.
   The model must choose zero through eight exact IDs from the full controlled vocabulary and
   return confidence plus at most four bounded evidence strings. Do not ask it for signal axes and
   do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,

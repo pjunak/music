@@ -196,7 +196,7 @@ function buildLogEntries(
     gateSummary !== null &&
     gateSummary.safetyTotalCases > 0
   ) {
-    const totalExecutions =
+    const totalAttempts =
       evaluation.total_cases + gateSummary.safetyTotalCases;
     entries.push({
       id: "quality-suite-counts",
@@ -204,7 +204,7 @@ function buildLogEntries(
       tone: "info",
       message:
         `The score covers ${evaluation.total_cases} distinct scenarios. ` +
-        `${gateSummary.safetyTotalCases} safety ${gateSummary.safetyTotalCases === 1 ? "scenario runs" : "scenarios run"} twice for stability, so a full suite performs ${totalExecutions} model executions.`,
+        `${gateSummary.safetyTotalCases} safety ${gateSummary.safetyTotalCases === 1 ? "scenario runs" : "scenarios run"} twice for stability, so a full suite scores ${totalAttempts} model attempts. Any contract-recovery requests are recorded separately in provider usage.`,
     });
   }
 

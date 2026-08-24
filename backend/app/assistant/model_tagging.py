@@ -24,7 +24,10 @@ from app.assistant.model_evaluation import (
 from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
     MODEL_TAG_BATCH_SIZE,
+    MODEL_TAGGER_INPUT_CONTRACT,
+    MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT,
     ModelTagContextEvidence,
+    ModelTaggerRetryBudget,
     ModelTagTrackInput,
     tag_tracks,
 )
@@ -133,6 +136,7 @@ def _model_tagging_disclosure(
         ],
         allowed_tags=[tag.name for tag in vocabulary.entries],
         tracks_per_request=MODEL_TAG_BATCH_SIZE,
+        invalid_response_retry_limit=MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT,
         may_incur_cost=True,
     )
 
@@ -142,7 +146,7 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v9"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v10"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -452,6 +456,7 @@ def run_model_music_tagging(
     updated = 0
     skipped_changed = 0
     usage = ProviderUsageAccumulator()
+    retry_budget = ModelTaggerRetryBudget()
     for start in range(0, total, MODEL_TAG_BATCH_SIZE):
         context.check_cancelled()
         batch = work[start : start + MODEL_TAG_BATCH_SIZE]
@@ -481,6 +486,7 @@ def run_model_music_tagging(
             ],
             execute,
             vocabulary,
+            retry_budget=retry_budget,
         )
         context.check_cancelled()
         with SessionLocal() as db:
@@ -535,7 +541,7 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v3",
-                        "input_contract": "assistant-music-tagger-input/v13",
+                        "input_contract": MODEL_TAGGER_INPUT_CONTRACT,
                         "context_status": (
                             current_contexts[snapshot.id].completeness
                             if snapshot.id in current_contexts

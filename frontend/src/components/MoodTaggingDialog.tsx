@@ -421,7 +421,17 @@ export function MoodTaggingDialog({
             <div className="mood-tagging-stats">
               <span><strong>{plan.scope_tracks}</strong> tracks in scope</span>
               <span><strong>{plan.planned_tracks}</strong> eligible for this run</span>
-              <span><strong>{plan.estimated_provider_requests}</strong> provider requests</span>
+              <span><strong>{plan.estimated_provider_requests}</strong> expected provider requests</span>
+              <span>
+                <strong>
+                  {plan.estimated_provider_requests +
+                    Math.min(
+                      plan.estimated_provider_requests,
+                      plan.disclosure.invalid_response_retry_limit,
+                    )}
+                </strong>{" "}
+                maximum with contract recovery
+              </span>
               <span><strong>{plan.tracks_with_full_context}</strong> have full context</span>
             </div>
           ) : null}

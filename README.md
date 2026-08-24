@@ -94,6 +94,8 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   IDs, and returns a draft. Mood tagging sends metadata and canonical library-relative paths in
   batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
   stores suggestions under `model-context-tagger/v6` for explicit per-tag review.
+  The pre-run plan shows the normal batch estimate and a maximum that includes up to two
+  fresh contract-recovery requests; invalid output is never silently repaired.
   **Assistant → Settings → Mood vocabulary** exposes every canonical name, definition, group,
   exact alias, and bounded semantic context cue for manual editing. The provider receives those
   global cues to interpret soundtrack phrases, but no per-track local tag hypothesis. When current

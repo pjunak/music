@@ -192,7 +192,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Mood tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "controlled-vocabulary-tagging-baseline-v12",
+  suite_id: "controlled-vocabulary-tagging-baseline-v13",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -1034,7 +1034,7 @@ describe("AssistantAiSetupView", () => {
     expect(jobsApi.cancel).toHaveBeenCalledWith("quality-job-1");
   });
 
-  it("labels mood-tagging progress as executions rather than scored scenarios", async () => {
+  it("labels mood-tagging progress as scored attempts rather than scenarios", async () => {
     const running = qualityJob({
       kind: "assistant.model-evaluation.music-tagging-quality-v1",
       parameters: {
@@ -1045,7 +1045,7 @@ describe("AssistantAiSetupView", () => {
       progress_total: 50,
       progress_phase: "Evaluating music tagger",
       progress_message:
-        "Completed 4 of 50 model executions across 43 scored scenarios",
+        "Completed 4 of 50 scored attempts across 43 scored scenarios",
     });
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
@@ -1059,7 +1059,7 @@ describe("AssistantAiSetupView", () => {
 
     expect(
       await screen.findByText(
-        "Completed 4 of 50 model executions across 43 scored scenarios",
+        "Completed 4 of 50 scored attempts across 43 scored scenarios",
       ),
     ).toBeInTheDocument();
     const taggerCard = screen
@@ -1067,7 +1067,7 @@ describe("AssistantAiSetupView", () => {
       .closest("article");
     expect(taggerCard).not.toBeNull();
     expect(
-      within(taggerCard as HTMLElement).getByText("4 / 50 executions"),
+      within(taggerCard as HTMLElement).getByText("4 / 50 scored attempts"),
     ).toBeInTheDocument();
   });
 
@@ -1363,7 +1363,7 @@ describe("AssistantAiSetupView", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /score covers 40 distinct scenarios.*7 safety scenarios run twice.*47 model executions/i,
+        /score covers 40 distinct scenarios.*7 safety scenarios run twice.*47 model attempts.*contract-recovery requests.*provider usage/i,
       ),
     ).toBeInTheDocument();
     const recheck = screen.getByRole("button", {

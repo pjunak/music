@@ -18,8 +18,11 @@ from app.assistant.library_context import (
 from app.assistant.model_evaluation import TAGGING_QUALITY_JOB_KIND
 from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
+    MODEL_TAGGER_INPUT_CONTRACT,
+    MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT,
     MODEL_TAGGER_OUTPUT_CONTRACT,
     ModelTaggerError,
+    ModelTaggerRetryBudget,
     ModelTagTrackInput,
     TagQualitySuite,
     evaluate_music_tagger,
@@ -55,7 +58,7 @@ from app.models.track_user_tag import TrackUserTag
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v9"
+DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v10"
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1]
     / "app"
@@ -194,7 +197,9 @@ def _reference_music_tagger(
     assert "Example JSON shape" in request.system_prompt
     payload = json.loads(request.user_prompt)
     tag_id_by_name = {
-        item["name"]: item["tag_id"] for item in payload["vocabulary"]
+        item["name"]: item["tag_id"]
+        for group in payload["vocabulary_groups"]
+        for item in group["tags"]
     }
     return StructuredModelResult(
         True,
@@ -438,6 +443,91 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
     assert "tracks" in incomplete.value.diagnostic
 
 
+def test_model_tagger_uses_a_bounded_fresh_request_for_contract_recovery() -> None:
+    track = ModelTagTrackInput(
+        track_id=1,
+        title="Tavern Jig",
+        display_title="",
+        artist="",
+        album="Medieval Tavern Dances",
+        origin="",
+        genre="folk",
+        length_s=120,
+        bpm=120,
+    )
+    requests: list[StructuredModelRequest] = []
+
+    def invalid_then_valid(request: StructuredModelRequest) -> StructuredModelResult:
+        requests.append(request)
+        tag_ids = (
+            ["mood.invented-vibe"]
+            if len(requests) == 1
+            else ["setting.tavern", "scene.dancing", "mood.festive"]
+        )
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": 1,
+                        "tag_ids": tag_ids,
+                        "confidence": "high",
+                        "evidence": ["Explicit tavern dance metadata"],
+                    }
+                ],
+            },
+        )
+
+    budget = ModelTaggerRetryBudget()
+    result = tag_tracks(
+        [track],
+        invalid_then_valid,
+        retry_budget=budget,
+    )
+
+    assert result[1].tags == ["tavern", "dancing", "festive"]
+    assert len(requests) == 2
+    assert requests[0].user_prompt == requests[1].user_prompt
+    assert "CORRECTION ATTEMPT" not in requests[0].system_prompt
+    assert "CORRECTION ATTEMPT" in requests[1].system_prompt
+    assert budget.remaining == MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT - 1
+
+
+def test_model_tagger_does_not_spend_contract_recovery_on_provider_failure() -> None:
+    calls = 0
+
+    def timeout(_request: StructuredModelRequest) -> StructuredModelResult:
+        nonlocal calls
+        calls += 1
+        return StructuredModelResult(False, "timeout")
+
+    budget = ModelTaggerRetryBudget()
+    with pytest.raises(ModelTaggerError) as failed:
+        tag_tracks(
+            [
+                ModelTagTrackInput(
+                    track_id=1,
+                    title="Tavern Jig",
+                    display_title="",
+                    artist="",
+                    album="",
+                    origin="",
+                    genre="folk",
+                    length_s=120,
+                    bpm=120,
+                )
+            ],
+            timeout,
+            retry_budget=budget,
+        )
+
+    assert failed.value.code == "model_execution_timeout"
+    assert calls == 1
+    assert budget.remaining == MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT
+
+
 def test_model_tagger_bounds_incidental_evidence_without_changing_core() -> None:
     long_evidence = "x" * 600
 
@@ -658,19 +748,20 @@ def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
         assert request.output_schema is not None
         observed_schema.update(request.output_schema)
         payload = json.loads(request.user_prompt)
-        assert payload["vocabulary"] == [
+        assert payload["vocabulary_groups"] == [
             {
-                "tag_id": "mood.wondrous",
-                "name": "wondrous",
-                "group": "Mood",
-            }
-        ]
-        assert payload["definitions"] == [
-            {
-                "tag_id": "mood.wondrous",
-                "description": "Awe and magical discovery.",
-                "aliases": ["wonder-filled", "magical wonder"],
-                "context_cues": ["discovery"],
+                "key": "mood",
+                "label": "Mood",
+                "description": "Operator-defined emotional tones.",
+                "tags": [
+                    {
+                        "tag_id": "mood.wondrous",
+                        "name": "wondrous",
+                        "description": "Awe and magical discovery.",
+                        "aliases": ["wonder-filled", "magical wonder"],
+                        "context_cues": ["discovery"],
+                    }
+                ],
             }
         ]
         assert payload["tracks"][0]["context_evidence"] is None
@@ -758,14 +849,28 @@ def test_model_tagger_sends_full_vocabulary_guidance_for_high_recall() -> None:
 
     prompt = observed["prompt"]
     payload = observed["payload"]
-    vocabulary = payload["vocabulary"]
+    assert payload["schema_version"] == MODEL_TAGGER_INPUT_CONTRACT
+    assert "vocabulary" not in payload
+    assert "definitions" not in payload
+    assert prompt.index('"tracks"') < prompt.index('"vocabulary_groups"')
+    assert {group["label"] for group in payload["vocabulary_groups"]} == {
+        "Terrain & setting",
+        "Scene",
+        "Mood",
+    }
+    vocabulary = [
+        tag
+        for group in payload["vocabulary_groups"]
+        for tag in group["tags"]
+    ]
     names = {item["name"] for item in vocabulary}
     assert {"astral realm", "festive", "tavern"} <= names
-    assert all(set(item) == {"tag_id", "name", "group"} for item in vocabulary)
-    assert {
-        item["tag_id"] for item in payload["definitions"]
-    } == {item["tag_id"] for item in vocabulary}
-    definitions = {item["tag_id"]: item for item in payload["definitions"]}
+    assert all(
+        set(item)
+        == {"tag_id", "name", "description", "aliases", "context_cues"}
+        for item in vocabulary
+    )
+    definitions = {item["tag_id"]: item for item in vocabulary}
     expected_context_cues = {
         "mood.heroic": "crown guard",
         "mood.desperate": "stranded",
@@ -781,9 +886,12 @@ def test_model_tagger_sends_full_vocabulary_guidance_for_high_recall() -> None:
     for tag_id, cue in expected_context_cues.items():
         assert cue in definitions[tag_id]["context_cues"]
     assert payload["tracks"][0]["context_evidence"] is None
-    assert len(prompt) < 80_000
+    assert len(prompt) < 35_000
     assert "semantic context examples" in observed["system_prompt"]
-    assert "make a completeness pass" in observed["system_prompt"]
+    assert "use this decision procedure" in observed["system_prompt"]
+    assert "example intentionally uses empty low-confidence profiles" in observed[
+        "system_prompt"
+    ]
 
 
 def test_model_input_does_not_preinterpret_title_metaphors() -> None:
@@ -828,7 +936,12 @@ def test_model_input_does_not_preinterpret_title_metaphors() -> None:
     assert observed["tracks"][0]["title"] == "Ocean Eyes Love Theme"
     assert observed["tracks"][0]["context_evidence"] is None
     assert "metadata_evidence" not in observed["tracks"][0]
-    assert {item["name"] for item in observed["vocabulary"]} >= {
+    vocabulary = [
+        tag
+        for group in observed["vocabulary_groups"]
+        for tag in group["tags"]
+    ]
+    assert {item["name"] for item in vocabulary} >= {
         "ocean",
         "romantic",
     }
@@ -882,7 +995,12 @@ def test_model_input_keeps_dense_metadata_separate_from_tag_definitions() -> Non
         vocabulary,
     )
 
-    assert len(observed["definitions"]) == len(vocabulary.entries)
+    supplied_tags = [
+        tag
+        for group in observed["vocabulary_groups"]
+        for tag in group["tags"]
+    ]
+    assert len(supplied_tags) == len(vocabulary.entries)
     assert observed["tracks"][0]["title"] == " ".join(names)
     assert observed["tracks"][0]["context_evidence"] is None
 
@@ -929,7 +1047,7 @@ def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
     assert failed_case_result["progress_current"] == 50
     assert failed_case_result["progress_total"] == 50
     assert failed_case_result["progress_message"] == (
-        "Completed 50 of 50 model executions across 43 scored scenarios"
+        "Completed 50 of 50 scored attempts across 43 scored scenarios"
     )
     assert evaluation["passed"] is True
     assert [case["id"] for case in evaluation["cases"] if not case["passed"]] == [
@@ -989,6 +1107,7 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
     suite = load_tag_quality_suite(_SUITE_PATH)
 
     assert suite.schema_version == "assistant-music-tagger-evaluation/v6"
+    assert suite.id == "controlled-vocabulary-tagging-baseline-v13"
     assert len(suite.cases) == 43
     assert any(case.track.context_evidence is None for case in suite.cases)
     temporal = {
@@ -1006,6 +1125,11 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
     assert escape is not None
     assert escape.trajectories["intensity"].shape == "stepped_build"
     assert len(escape.sections) == 3
+    by_id = {case.id: case for case in suite.cases}
+    assert by_id["insufficient-evidence"].allowed_confidences == ["low"]
+    assert by_id[
+        "signal-evidence-does-not-invent-context"
+    ].allowed_confidences == ["medium", "low"]
 
 
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
@@ -1312,6 +1436,73 @@ def test_tag_quality_batches_tracks_but_reports_each_case() -> None:
     assert progress == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
 
 
+def test_tag_quality_shares_two_contract_recoveries_across_the_run() -> None:
+    suite = TagQualitySuite.model_validate(
+        {
+            "schema_version": "assistant-music-tagger-evaluation/v6",
+            "id": "bounded-contract-recovery",
+            "minimum_quality_pass_rate": 0.0,
+            "cases": [
+                {
+                    "id": f"case-{track_id}",
+                    "description": f"Synthetic case {track_id}",
+                    "track": {
+                        "track_id": track_id,
+                        "title": f"Untitled {track_id}",
+                        "display_title": "",
+                        "artist": "",
+                        "album": "",
+                        "origin": "",
+                        "genre": "",
+                        "length_s": 120,
+                        "bpm": None,
+                    },
+                    "required_tags": [],
+                    "forbidden_tags": [],
+                }
+                for track_id in range(1, 10)
+            ],
+        }
+    )
+    attempts: dict[tuple[int, ...], int] = {}
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        track_ids = tuple(track["track_id"] for track in payload["tracks"])
+        attempts[track_ids] = attempts.get(track_ids, 0) + 1
+        if attempts[track_ids] == 1:
+            return StructuredModelResult(False, "invalid_structured_output")
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": track_id,
+                        "tag_ids": [],
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                    for track_id in track_ids
+                ],
+            },
+        )
+
+    result = evaluate_music_tagger(execute, suite)
+
+    assert attempts == {
+        (1, 2, 3, 4): 2,
+        (5, 6, 7, 8): 2,
+        (9,): 1,
+    }
+    assert [case.passed for case in result.cases] == [True] * 8 + [False]
+    assert result.cases[-1].blocking is True
+    assert result.cases[-1].failures == [
+        "Tagger error: model_execution_invalid_structured_output"
+    ]
+
+
 def test_model_tagging_endpoints_require_authentication(client: TestClient) -> None:
     assert client.get("/api/assistant/library-tags/model-status").status_code == 401
     assert (
@@ -1343,6 +1534,10 @@ def test_tagging_quality_gate_and_disclosure_status(
     assert payload["connection_name"] == "Tagging models"
     assert payload["model_id"] == "tagger-small"
     assert payload["disclosure"]["tracks_per_request"] == 20
+    assert (
+        payload["disclosure"]["invalid_response_retry_limit"]
+        == MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT
+    )
     assert payload["tracks_with_full_context"] == 0
     assert payload["tracks_missing_context"] == payload["scope_tracks"]
     assert "tavern" in payload["disclosure"]["allowed_tags"]
@@ -1450,14 +1645,20 @@ def test_model_tagging_shares_only_relative_path_and_stays_review_only(
     assert context_evidence["sections"][0]["id"] == "s1"
     assert "metadata_evidence" not in provider_track
     assert "audio_evidence" not in provider_track
-    assert "festive" in {
-        item["name"] for item in observed[0]["vocabulary"]
-    }
-    assert "astral realm" in {
-        item["name"] for item in observed[0]["vocabulary"]
-    }
-    assert {item["tag_id"] for item in observed[0]["definitions"]} == {
-        item["tag_id"] for item in observed[0]["vocabulary"]
+    supplied_tags = [
+        tag
+        for group in observed[0]["vocabulary_groups"]
+        for tag in group["tags"]
+    ]
+    assert "festive" in {item["name"] for item in supplied_tags}
+    assert "astral realm" in {item["name"] for item in supplied_tags}
+    assert all(
+        {"tag_id", "name", "description", "aliases", "context_cues"}
+        == set(item)
+        for item in supplied_tags
+    )
+    assert {item["tag_id"] for item in supplied_tags} == {
+        tag.id for tag in default_tag_vocabulary_snapshot().entries
     }
 
     listing = auth_client.get("/api/assistant/library-tags")

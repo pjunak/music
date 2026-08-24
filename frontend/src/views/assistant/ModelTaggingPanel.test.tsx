@@ -69,6 +69,7 @@ const availability: ModelTaggingAvailability = {
     never_shared: ["Audio files", "Filesystem paths", "Your manual tags"],
     allowed_tags: ["medieval", "tavern", "dancing"],
     tracks_per_request: 20,
+    invalid_response_retry_limit: 2,
     may_incur_cost: true,
   },
 };

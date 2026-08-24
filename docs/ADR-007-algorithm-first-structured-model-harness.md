@@ -103,9 +103,11 @@ indexed metadata / local audio / operator request
   reusable after browser refresh.
 - Provider calls remain off the event loop, bounded by request/response size and role
   time/token limits, non-restartable after uncertain cost, and usage-checkpointed.
-- There is no automatic provider retry or schema-repair call. Either could duplicate
-  cost and hide an incompatible model. The operator deliberately retries after
-  reviewing the failure.
+- Provider retries are not generic. Mood tagging has one disclosed exception: a
+  run-scoped budget permits at most two fresh correction requests after malformed
+  JSON, schema-invalid output, a mismatched track set, or an unsupported tag ID.
+  The rejected output is never repaired or coerced locally, timeout/network failures
+  are not retried, and actual attempts remain usage-checkpointed.
 - Library scale is contained before the provider boundary: at most 100 playlist
   candidates, 20 tagging tracks per batch, and 500 catalog tags in cleanup batches of
   at most 50 unresolved names. Deterministic cleanup can reduce those payloads or avoid

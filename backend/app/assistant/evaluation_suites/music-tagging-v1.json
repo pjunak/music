@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v6",
-  "id": "controlled-vocabulary-tagging-baseline-v12",
+  "id": "controlled-vocabulary-tagging-baseline-v13",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -173,7 +173,7 @@
       },
       "required_tags": [],
       "forbidden_tags": ["medieval", "tavern", "combat", "castle", "dungeon", "temple"],
-      "allowed_confidences": ["low"],
+      "allowed_confidences": ["medium", "low"],
       "minimum_evidence_items": 1
     },
     {

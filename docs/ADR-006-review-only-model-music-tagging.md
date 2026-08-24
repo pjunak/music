@@ -14,9 +14,13 @@ playback-capable Library review dialog. The accepted tag store remains database-
 evidence. Output is now ID-only `model-context-tagger/v6`; the review-only ownership and
 promotion decisions in this ADR remain unchanged.
 
-**Implementation update (2026-08-24):** Input contract v13 sends the complete bounded
-operator vocabulary, including global semantic context cues, and requires a final
-setting/scene/mood completeness pass. It still sends no per-track candidate-tag hypothesis.
+**Implementation update (2026-08-25):** Input contract v14 places tracks before one
+grouped vocabulary whose IDs, meanings, aliases, and global semantic context cues are
+co-located instead of duplicated across two lookup tables. The prompt uses an explicit
+classify/map/audit procedure and warns that its empty output example demonstrates shape,
+not desired sparsity. It still sends no per-track candidate-tag hypothesis. A disclosed,
+run-scoped budget allows at most two fresh correction requests for contract-invalid output;
+the server never edits or coerces a rejected answer.
 
 ## Context
 
@@ -51,8 +55,8 @@ observable after the browser closes without silently repeating uncertain calls.
 - Store one revisioned operator-managed vocabulary with stable IDs, normalized names,
   selection definitions, groups, exact cleanup aliases, and overlapping local context
   cues. Every built-in tag has a small set of high-signal soundtrack context cues.
-  Send the full bounded ID/name/group index, detailed definitions, exact aliases, and
-  bounded semantic context cues with each metadata batch. Cues are global vocabulary
+  Send one full bounded group structure with every ID beside its name, definition, exact
+  aliases, and bounded semantic context cues in each metadata batch. Cues are global vocabulary
   guidance rather than per-track candidate IDs: the model must confirm them against the
   complete metadata phrase, and they never act as cleanup mappings. Restrict output to zero
   through eight IDs from the current vocabulary, confidence, and short evidence. Inject the exact
@@ -80,6 +84,9 @@ observable after the browser closes without silently repeating uncertain calls.
   batches, skip unchanged profiles, and do not automatically repeat a provider
   call after a server restart. A deliberate later run safely skips committed
   current profiles.
+- Within a running job only, allow at most two disclosed correction requests after a
+  response violates the JSON/tag-ID contract. Do not spend that budget on provider,
+  timeout, truncation, or network failures, and never reinterpret invalid core fields.
 - Keep model profiles out of automatic playlist evidence. They become preferred
   human context only when the operator explicitly accepts individual or selected
   suggestions through the existing review transaction, which copies the tag to
@@ -126,7 +133,8 @@ Selected.
 - Local and model suggestions can appear together without either overwriting
   database mood tags or automatically affecting playlists.
 - A large library may require many provider calls; the readiness endpoint shows
-  the scoped track count, remaining track count, and estimated batch count before consent.
+  the scoped track count, remaining track count, estimated batch count, and the
+  maximum two additional contract-recovery requests before consent.
 - Vocabulary edits are visible and revisioned. They invalidate generated model-tag
   profiles and in-flight results without deleting operator-owned database mood tags.
 - Closing or refreshing the page does not stop the server job. A server restart

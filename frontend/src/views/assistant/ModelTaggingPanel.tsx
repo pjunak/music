@@ -293,7 +293,9 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
               <>
                 {availability.connection_name ?? "Provider"} ·{" "}
                 {availability.model_id ?? "assigned model"} · up to{" "}
-                {availability.disclosure.tracks_per_request} tracks per request.
+                {availability.disclosure.tracks_per_request} tracks per request · up
+                to {availability.disclosure.invalid_response_retry_limit} additional
+                contract-recovery requests per run.
               </>
             }
           >

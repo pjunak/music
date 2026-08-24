@@ -75,11 +75,12 @@ const unavailableTagger: ModelTaggingAvailability = {
   tracks_needing_tags: 120,
   estimated_provider_requests: 6,
   disclosure: {
-    version: "assistant-model-music-tagging-disclosure/v9",
+    version: "assistant-model-music-tagging-disclosure/v10",
     shared_with_provider: [],
     never_shared: [],
     allowed_tags: ["calm"],
     tracks_per_request: 20,
+    invalid_response_retry_limit: 2,
     may_incur_cost: true,
   },
 };

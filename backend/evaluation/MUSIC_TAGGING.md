@@ -31,12 +31,13 @@ while still reporting each case separately, and repeats safety scenarios once. A
 of all scored scenarios must pass, and every provider/contract check and forbidden-tag safety
 check must remain clean for the exact model runtime fingerprint to be certified.
 
-The provider receives the complete operator vocabulary: stable IDs, names, groups,
-definitions, exact cleanup aliases, and bounded semantic context cues. Context cues may
+The provider receives the complete operator vocabulary as grouped, co-located entries:
+stable IDs, names, definitions, exact cleanup aliases, and bounded semantic context cues. Context cues may
 overlap across tags and never rename stored tags. They are global meaning examples rather
-than locally preselected candidates; the prompt requires the model to confirm each cue
-against the complete metadata phrase and make a final completeness pass across settings,
-scenes, and moods. No per-track local tag-ID hypothesis is sent.
+than locally preselected candidates; the prompt requires a classify/map/audit pass across
+settings, scenes, and moods, followed by an exact-ID audit. No per-track local tag-ID
+hypothesis is sent. Across the whole run, at most two contract-invalid responses may receive
+a fresh correction request; rejected output is never repaired locally and actual calls remain visible.
 
 Live tagging is a separate action and requires its own versioned disclosure and
 confirmation. It sends at most 20 bounded evidence records per provider call,

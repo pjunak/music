@@ -139,7 +139,7 @@ export function qualityStatusLabel(
     if (view.activeJob.status === "cancel_requested") return "Cancelling";
     if (view.activeJob.progress_total !== null) {
       const progressUnit =
-        evaluation.role_id === "music_tagger" ? "executions" : "scenarios";
+        evaluation.role_id === "music_tagger" ? "scored attempts" : "scenarios";
       return `${view.activeJob.progress_current} / ${view.activeJob.progress_total} ${progressUnit}`;
     }
     return view.activeJob.status === "queued" ? "Queued" : "Running";

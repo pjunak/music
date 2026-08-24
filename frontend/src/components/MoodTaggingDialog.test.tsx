@@ -71,6 +71,7 @@ const availability: ModelTaggingAvailability = {
     never_shared: ["Audio files"],
     allowed_tags: ["forest", "calm"],
     tracks_per_request: 20,
+    invalid_response_retry_limit: 2,
     may_incur_cost: true,
   },
 };
@@ -188,6 +189,12 @@ describe("MoodTaggingDialog", () => {
     expect(
       await screen.findByText("Some tracks do not have full analysis context"),
     ).toBeInTheDocument();
+    const plannedRun = screen.getByRole("heading", { name: "Planned run" }).closest(
+      "section",
+    );
+    expect(plannedRun).not.toBeNull();
+    expect(plannedRun).toHaveTextContent(/1 expected provider requests/);
+    expect(plannedRun).toHaveTextContent(/2 maximum with contract recovery/);
     await user.click(screen.getByRole("radio", { name: /Skip incomplete tracks/ }));
     await waitFor(() =>
       expect(assistantApi.planModelTagging).toHaveBeenLastCalledWith(
