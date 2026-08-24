@@ -134,6 +134,23 @@ indexed metadata / local audio / operator request
   predictability are preferred because this feature produces review drafts, not
   mastering decisions.
 
+## Sources and rationale
+
+These sources explain the standards and security practices behind the harness. They
+support the design; they do not prove that a provider follows a schema or that a model is
+safe. Local validation, request-specific identity checks, conformance, synthetic quality
+gates, minimized disclosure, and operator review remain required.
+
+| Source | What it establishes | How this project applies it |
+|---|---|---|
+| [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12) | A published vocabulary for describing and validating JSON structure. | Task output has one machine-readable contract. Request-specific enums and list bounds close that contract around the identities in the current request. |
+| [Pydantic JSON Schema](https://pydantic.dev/docs/validation/latest/concepts/json_schema/) | `model_json_schema()` derives Draft 2020-12 validation schemas from the same models used by Python validation. | The prompt, strict provider adapter, example validation, and local validator originate from one Pydantic output model rather than parallel hand-written shapes. |
+| [Pydantic strict mode](https://pydantic.dev/docs/validation/latest/concepts/strict_mode/) | Default validation may coerce types; strict models reject values of the wrong type. | Provider output models use strict validation and forbid extra fields. Incidental prose has explicit bounded normalization; authoritative IDs, order, confidence, and numeric choices are never coerced. |
+| [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) | A compatible API can accept a `json_schema` response format, but strict support is provider/model specific and supports a constrained schema subset. | Native schema enforcement lives behind the explicit `openai-compatible-json-schema/v1` adapter. The standard adapter stays on JSON-object mode, and both paths require local validation plus role conformance. |
+| [OWASP prompt-injection guidance](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html) | Instructions and untrusted data need explicit separation; prompt wording is only one defense layer. | The system prompt names untrusted fields and the user message is one JSON data document. More importantly, the model has no tools or direct write path and can return only a narrow validated draft. |
+| [OWASP LLM05: Improper Output Handling](https://genai.owasp.org/llmrisk/llm052025-improper-output-handling/) | Model output must be treated as untrusted before downstream use. | Output is parsed, strictly validated, checked against local identities and bounds, and reconstructed locally before reaching a review surface. It is never executed as code, SQL, a path, or a state mutation. |
+| [OWASP SSRF prevention](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html) | User-configured server URLs need scheme/address validation and redirect controls, especially around private networks. | Provider transport permits only reviewed HTTP behavior, refuses redirects, blocks unsafe destinations by default, and requires an explicit private-network opt-in for a deliberately trusted local provider. |
+
 ## Revisit when
 
 - a second provider protocol needs a native structured-output adapter;

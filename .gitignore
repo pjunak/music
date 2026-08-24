@@ -117,3 +117,5 @@ coverage/
 docs/*
 !docs/ADR-*.md
 !docs/assistant-ux-philosophy.md
+!docs/README.md
+!docs/ASSISTANT_ARCHITECTURE.md

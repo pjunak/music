@@ -7,9 +7,14 @@ are optional and fail closed when their setup or quality checks are incomplete.
 Only section 1 is relevant to deploying the code; the remaining sections are
 first-time setup and functional checks, not release prerequisites.
 
+For code ownership, current contract versions, provider disclosure boundaries, linked tests, and
+the safe change procedure, use the
+[Assistant architecture and contract map](docs/ASSISTANT_ARCHITECTURE.md). The numbered steps below
+remain the operator-facing acceptance procedure.
+
 ## What is ready
 
-- Local metadata and server-side audio-signal analysis run as durable jobs.
+- Comprehensive local track-context analysis runs as a durable job.
 - Optional local voice/instrumental analysis can enrich the same factual track context.
 - Database mood tags remain separate from embedded file metadata and generated suggestions.
 - The local playlist planner creates a reviewable draft and is the default.
@@ -54,8 +59,8 @@ data, not because this release introduces a special risk to them.
    semantic tags or send audio anywhere.
 3. Open **Assistant -> Track Context**, browse a representative set of folders, play several
    songs, and confirm that quiet openings, builds, peaks, and major sections look reasonable.
-4. Review model-generated tags and accept only the useful ones. Add or edit database mood tags such
-   as `medieval`, `tavern`, `dancing`, `combat`, `travel`, and custom campaign terms.
+4. Add or edit database mood tags such as `medieval`, `tavern`, `dancing`, `combat`, `travel`,
+   and custom campaign terms. Generated model tags are reviewed only after optional provider setup.
 5. Open **Assistant -> Mood Vocabulary**. Review the canonical names, definitions, and
    aliases that models may use; promote any deliberate custom term that models should
    be able to generate.
@@ -68,8 +73,8 @@ data, not because this release introduces a special risk to them.
    current songs remain.
 
 Do not continue to provider setup until this local path is satisfactory. It remains the
-privacy-preserving fallback and provides the tags and bounded candidates used by model
-planning.
+privacy-preserving fallback; operator-owned tags, indexed metadata, and local analysis provide
+the bounded evidence and candidates used by model workflows.
 
 ### Optional local voice analysis
 

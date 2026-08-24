@@ -6,6 +6,12 @@
 
 **Deciders:** Project maintainer
 
+**Implementation update (2026-08-25):** The voice stage initially advanced tagging to
+input v12 and disclosure v8. Follow-on grouped-vocabulary and contract-recovery changes
+advanced the current role to `assistant-music-tagger-input/v14` and disclosure v10. The
+classifier identity and local-only boundary in this ADR are unchanged; see the
+[living contract inventory](ASSISTANT_ARCHITECTURE.md#current-contract-inventory).
+
 ## Context
 
 `local-context/v1` deliberately reported voice as unknown because loudness, spectral shape, and

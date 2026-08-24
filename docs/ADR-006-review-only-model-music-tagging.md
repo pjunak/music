@@ -75,11 +75,11 @@ observable after the browser closes without silently repeating uncertain calls.
   90% scored pass floor. The operator may recheck only failed cases from the exact
   current complete report; the server merges them with that report before
   recomputing certification.
-- Bind each profile source signature to the consumed track metadata, optional
-  local-audio source signature, vocabulary fingerprint, input-contract version, and
+- Bind each profile source signature to the consumed track metadata, current local-context
+  signature (or its explicit absence), vocabulary fingerprint, input-contract version, and
   exact model-role runtime fingerprint. Changed metadata, audio evidence, vocabulary,
   or model settings make old suggestions stale rather than silently current. Adding a
-  first current audio profile also invalidates a metadata-only model result.
+  first current context row also invalidates a metadata-only model result.
 - Run the library pass as a durable, non-restartable job. Commit completed
   batches, skip unchanged profiles, and do not automatically repeat a provider
   call after a server restart. A deliberate later run safely skips committed
@@ -113,9 +113,8 @@ edit the controlled vocabulary, while models may only choose its stable IDs.
 
 This could improve consistency but expands disclosure and makes accepting one
 suggestion change the input signature for every remaining suggestion. Rejected.
-The selected path recomputes a privacy-reduced deterministic metadata-and-relative-path
-hypothesis from disclosed fields, so it cannot expose the media root or a past review
-decision.
+The selected path rebuilds provider input only from the disclosed indexed fields and
+bounded current context, so it cannot expose the media root or a past review decision.
 
 ### Store a separate model-tag table and review system
 

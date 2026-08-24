@@ -10,6 +10,9 @@ as controllers and optional audio outputs.
 - [`clients/README.md`](clients/README.md) before changing the external output
   protocol; the reference appliance is under `clients/headless/`.
 - [`backend/.env.example`](backend/.env.example) for storage/config defaults.
+- [`docs/README.md`](docs/README.md) for the maintained documentation index and
+  [`docs/ASSISTANT_ARCHITECTURE.md`](docs/ASSISTANT_ARCHITECTURE.md) before changing model tasks,
+  provider boundaries, disclosures, fingerprints, or review flows.
 - Protocol schemas and state transitions in `backend/app/sync/` before changing
   WebSocket messages or playback semantics.
 

@@ -6,6 +6,12 @@
 
 **Decider:** Project owner
 
+**Implementation update (2026-08-25):** The input named below was v11 when this
+decision landed. Follow-on voice evidence, grouped vocabulary, recall guidance, and
+contract-recovery work advanced the current role to `assistant-music-tagger-input/v14`
+and disclosure v10 without changing this ADR's local-context or privacy decision. See
+the [living contract inventory](ASSISTANT_ARCHITECTURE.md#current-contract-inventory).
+
 ## Context
 
 The previous library workflow had separate metadata and audio passes. Metadata analysis proposed

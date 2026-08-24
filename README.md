@@ -37,7 +37,7 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   names or IDs are reported for review rather than overwritten. See
   [`clients/authoring-import-v1.md`](clients/authoring-import-v1.md).
 - **Review-first playlist Assistant** — describe a mood or scene and get song suggestions from your
-  database mood tags, current metadata profiles, and any available measured audio signals. The local,
+  database mood tags, indexed metadata, and any available current local analysis. The local,
   explainable planner remains the default and makes no external calls. An explicitly selected,
   quality-certified provider model can optionally rerank a locally filtered pool after a versioned
   disclosure and confirmation. Both methods produce the same read-only draft: you choose the final
@@ -125,9 +125,11 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   workspace, while model settings group their routing rows but preserve independent model choices.
   The EQ workflow sends only the operator's goal and fixed band limits; specialized audio-model
   workflows remain locked until a concrete bounded audio transport receives its own reviewed contract.
-  See [`ASSISTANT.md`](ASSISTANT.md) for the practical deployment, setup, verification, and
-  acceptance guide, and [`docs/assistant-ux-philosophy.md`](docs/assistant-ux-philosophy.md)
-  for the shared drafting, review, creation, and manual-tuning interaction contract.
+  See [`ASSISTANT.md`](ASSISTANT.md) for practical deployment and acceptance,
+  [`docs/ASSISTANT_ARCHITECTURE.md`](docs/ASSISTANT_ARCHITECTURE.md) for the current source,
+  contract, privacy, test, and change map, and
+  [`docs/assistant-ux-philosophy.md`](docs/assistant-ux-philosophy.md) for the shared drafting,
+  review, creation, and manual-tuning interaction contract.
 - **Durable library context analysis** — one restartable `local-context/v1` job decodes each new or
   changed track into factual whole-track context: loudness and intensity development, rhythmic
   drive, brightness, density, spectral change, local tempo behavior, major acoustic sections,
@@ -370,6 +372,10 @@ npm run build
 ```
 
 ## Architecture
+
+The maintained documentation index is [`docs/README.md`](docs/README.md). In particular, use the
+[Assistant architecture and contract map](docs/ASSISTANT_ARCHITECTURE.md) before changing model
+inputs, outputs, disclosures, fingerprints, provider transport, or review behavior.
 
 ```
 backend/   FastAPI app. The sync package (app/sync/) is the authority: state-mutating
