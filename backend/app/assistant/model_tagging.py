@@ -117,8 +117,9 @@ def _model_tagging_disclosure(
             ),
             "A server-assigned numeric track ID used only to match the response",
             (
-                "The full operator-managed canonical tag ID, name, group, definition, and "
-                "exact-alias index; the model may return only IDs from this index"
+                "The full operator-managed canonical tag ID, name, group, definition, "
+                "exact-alias, and bounded semantic context cue index; the model may return "
+                "only IDs from this index"
             ),
         ],
         never_shared=[
@@ -141,7 +142,7 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v8"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v9"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -534,7 +535,7 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v3",
-                        "input_contract": "assistant-music-tagger-input/v12",
+                        "input_contract": "assistant-music-tagger-input/v13",
                         "context_status": (
                             current_contexts[snapshot.id].completeness
                             if snapshot.id in current_contexts

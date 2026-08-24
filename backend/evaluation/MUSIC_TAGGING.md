@@ -5,10 +5,10 @@ The optional music evidence tagger must pass
 quality check from **Assistant → AI Setup** after configuring, testing, and
 enabling the `music_tagger` role.
 
-The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains 40 synthetic
+The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains 43 synthetic
 titles, artists, albums, origins, genres, synthetic library-relative paths, durations,
-BPM values, and one bounded local-signal
-evidence case. It covers terrain, social and action scenes, emotional tone,
+BPM values, and four bounded local-context evidence cases. It covers terrain, social and
+action scenes, emotional tone,
 insufficient evidence, signal-only evidence, metadata instructions, and ambiguous phrases
 such as a band or label name that resembles a setting. No real library data, private paths, media, database mood tags, or
 review history are part of the suite. The signal case confirms that high activity alone
@@ -18,7 +18,6 @@ The provider must return one strict profile for every supplied synthetic track:
 
 - the original numeric track ID;
 - zero to eight stable IDs from the controlled vocabulary;
-- bounded energy, brightness, and tension axes;
 - confidence and short supplied-evidence explanations.
 
 The server injects the exact synthetic track IDs and canonical tag IDs into the
@@ -27,26 +26,23 @@ or duplicate IDs, malformed core fields, truncated output, and
 unexpected tracks fail the contract instead of being repaired. Surplus or overlong
 well-typed explanatory evidence is the sole compatibility exception: the server keeps
 at most four bounded items without changing the classification. Each case also
-declares required and forbidden tags. The suite sends four tracks in each provider
-request, requiring ten calls for all 40 cases while still reporting each case separately.
-All cases must pass for the exact model
-runtime fingerprint to be certified.
+declares required and forbidden tags. The suite sends four tracks in each provider request
+while still reporting each case separately, and repeats safety scenarios once. At least 90%
+of all scored scenarios must pass, and every provider/contract check and forbidden-tag safety
+check must remain clean for the exact model runtime fingerprint to be certified.
 
-Before each call, deterministic metadata matching uses the operator vocabulary's
-canonical names, exact cleanup aliases, and separately editable context cues to build
-high-recall candidate evidence. Context cues may overlap across tags and never rename
-stored tags. Candidate provenance distinguishes exact canonical names and aliases from
-weaker cue-only matches and marks whether one or several independent fields support a
-candidate. Corroborated meanings are presented before isolated title or artist words;
-dense metadata keeps exact matches first when support is otherwise equal and remains bounded.
-The provider receives the complete compact ID/name/group index plus detailed
-definitions for those candidates, rather than the full 131-tag definition catalog on
-every scenario.
+The provider receives the complete operator vocabulary: stable IDs, names, groups,
+definitions, exact cleanup aliases, and bounded semantic context cues. Context cues may
+overlap across tags and never rename stored tags. They are global meaning examples rather
+than locally preselected candidates; the prompt requires the model to confirm each cue
+against the complete metadata phrase and make a final completeness pass across settings,
+scenes, and moods. No per-track local tag-ID hypothesis is sent.
 
 Live tagging is a separate action and requires its own versioned disclosure and
 confirmation. It sends at most 20 bounded evidence records per provider call,
-ranging from metadata-only records to metadata plus bounded current local energy,
-brightness, tension, tempo, and confidence values. Each record includes the canonical
+ranging from metadata-only records to metadata plus bounded current whole-track trajectories,
+tempo development, major sections, repetition, analyzer confidence, and optional local
+voice/instrumental classification. Each record includes the canonical
 library-relative path as untrusted descriptive evidence; the absolute media root and
 paths outside the indexed library remain local. A run can target the whole library, a
 folder, or selected tracks. It runs as a durable

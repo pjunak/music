@@ -80,8 +80,10 @@ indexed metadata / local audio / operator request
   Metadata and canonical library-relative paths are labelled untrusted; the absolute media root,
   audio, waveforms, spectrograms, full timelines, database mood tags, and review state never cross
   the provider boundary. The model receives the full revisioned controlled vocabulary with stable
-  IDs, names, groups, definitions, and exact aliases. No local candidate-tag hypothesis is sent and
-  the model does not return signal axes. It may return only exact IDs, confidence, and bounded
+  IDs, names, groups, definitions, exact aliases, and bounded semantic context cues. The cues are
+  global vocabulary guidance that must be confirmed against complete metadata phrases; no local
+  per-track candidate-tag hypothesis is sent and the model does not return signal axes. It may
+  return only exact IDs, confidence, and bounded
   evidence; names are restored locally. Missing context falls back to conservative metadata/path
   interpretation only when the operator chooses “run anyway”; “skip incomplete” prevents those
   tracks from reaching the provider.
@@ -116,15 +118,16 @@ indexed metadata / local audio / operator request
 
 - Embedding JSON Schema increases input tokens, but removes a second hand-maintained
   description and gives compatible providers a native constraint.
-- Sending the compact vocabulary index plus candidate details costs input tokens, but
-  removes the inefficient create-tags-then-interpret-tags loop and makes unknown model
-  output unrepresentable for strict-schema providers. Keeping non-candidate definitions
-  local avoids repeating the full 131-tag reference for every small batch.
+- Sending the complete vocabulary index, definitions, aliases, and bounded semantic cues costs
+  input tokens, but removes an implicit join the provider could not reliably infer and makes
+  expected soundtrack meanings explicit. Exact response enums still make unknown model output
+  unrepresentable for strict-schema providers.
 - The strict adapter improves format reliability but is not universally supported;
   keeping it explicit avoids speculative retries or provider-name detection.
-- Supplying local hypotheses can anchor a model. The prompt therefore labels source
-  authority and uncertainty, excludes manual/review state from tagging, and retains
-  independent provenance in storage and UI.
+- Supplying local per-track hypotheses can anchor a model, so none cross the provider boundary.
+  Global vocabulary cues are labelled non-exhaustive examples rather than automatic matches;
+  the prompt requires confirmation against the full untrusted phrase and retains independent
+  provenance in storage and UI.
 - Conservative EQ envelopes may reject a creative but valid curve. Safety and
   predictability are preferred because this feature produces review drafts, not
   mastering decisions.

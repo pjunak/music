@@ -9,10 +9,14 @@
 canonical library-relative path as bounded untrusted evidence, and is launched from a
 playback-capable Library review dialog. The accepted tag store remains database-only.
 
-**Implementation update (2026-08-24):** ADR-008 replaces the local metadata-hypothesis and
-`local-audio/v1` axis input described below with comprehensive factual `local-context/v1`
+**Implementation update (2026-08-24):** ADR-008 replaces the former local metadata-hypothesis and
+`local-audio/v1` axis input with comprehensive factual `local-context/v1`
 evidence. Output is now ID-only `model-context-tagger/v6`; the review-only ownership and
 promotion decisions in this ADR remain unchanged.
+
+**Implementation update (2026-08-24):** Input contract v13 sends the complete bounded
+operator vocabulary, including global semantic context cues, and requires a final
+setting/scene/mood completeness pass. It still sends no per-track candidate-tag hypothesis.
 
 ## Context
 
@@ -28,25 +32,17 @@ observable after the browser closes without silently repeating uncertain calls.
 ## Decision
 
 - Reuse `track_analyses` and `track_analysis_tag_reviews` with the versioned
-  analyzer ID `model-evidence-tagger/v5`. Do not create a parallel AI-tag store.
+  analyzer ID `model-context-tagger/v6`. Do not create a parallel AI-tag store.
 - Limit model input to numeric track ID, indexed title, display title, artist,
-  album, origin, genre, canonical library-relative path, duration, BPM, and an optional bounded projection of a
-  current `local-audio/v1` profile: energy, brightness, tension, tempo estimate,
-  activity, normalized dynamic range, rhythmic density, rhythmic stability, and
-  confidence. Also derive a `local-metadata-evidence/v4` hypothesis from the same
-  disclosed descriptive fields and relative path, and send its bounded candidate tag IDs, the matched
-  field and term for each candidate, whether a term was only a weaker context cue,
-  whether one or several independent fields support it, canonical-title source, axes,
-  and confidence. Corroborated candidates are presented before isolated candidates;
-  exact names and aliases take priority when dense metadata reaches the candidate bound.
-  Omit artist-only matches and known non-literal title phrases such as performer
-  competitions or romantic metaphors from the highlighted hypothesis so they cannot
-  anchor a fast model; the full vocabulary remains available for independently supported
-  choices. A non-empty display title is canonical for deterministic title matching. Treat every
+  album, origin, genre, canonical library-relative path, duration, BPM, and an optional bounded
+  projection of current `local-context/v1`: whole-track trajectories, tempo development,
+  major sections and transitions, repetition, confidence, and optional local
+  voice/instrumental classification. Send no locally inferred candidate tag IDs. A non-empty
+  display title is canonical for title interpretation. Treat every
   relative path and metadata string as untrusted data. Do not send the absolute media
-  root, paths outside the indexed library, audio, waveforms, detailed signal measurements,
-  database mood tags, stored local generated tags, playlists, or review history.
-  Numeric signal evidence may refine generic mood and activity judgments but is
+  root, paths outside the indexed library, audio, waveforms, full-resolution timelines,
+  spectrograms, database mood tags, stored generated tags, playlists, or review history.
+  Bounded factual context may refine generic mood and activity judgments but is
   never proof of an instrument, genre, setting, scene, or D&D context.
 - Send at most 20 tracks per provider request. Treat every metadata string as
   untrusted prompt data and require one output profile for every input ID.
@@ -55,14 +51,15 @@ observable after the browser closes without silently repeating uncertain calls.
 - Store one revisioned operator-managed vocabulary with stable IDs, normalized names,
   selection definitions, groups, exact cleanup aliases, and overlapping local context
   cues. Every built-in tag has a small set of high-signal soundtrack context cues.
-  Send the full bounded ID/name/group index with each metadata batch, but send
-  detailed definitions and exact aliases only for locally highlighted candidates.
-  Context cues remain local and never act as cleanup mappings. Restrict output to zero through
-  eight IDs from the current vocabulary plus bounded energy/brightness/tension values,
-  confidence, and short evidence. Inject the exact track and tag ID enums into the
+  Send the full bounded ID/name/group index, detailed definitions, exact aliases, and
+  bounded semantic context cues with each metadata batch. Cues are global vocabulary
+  guidance rather than per-track candidate IDs: the model must confirm them against the
+  complete metadata phrase, and they never act as cleanup mappings. Restrict output to zero
+  through eight IDs from the current vocabulary, confidence, and short evidence. Inject the exact
+  track and tag ID enums into the
   provider schema, then resolve validated IDs to names locally. Deterministically retain
   only the first four bounded, well-typed evidence strings because they are incidental
-  review text. Reject unknown tags, invalid axes or confidence, malformed core output,
+  review text. Reject unknown tags, invalid confidence, malformed core output,
   missing IDs, duplicate IDs, extra fields, and truncated responses.
 - Require the exact current `music-tagging-quality-v1` certification and a
   versioned disclosure confirmation before enqueueing live work. Recheck the

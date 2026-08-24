@@ -55,7 +55,7 @@ from app.models.track_user_tag import TrackUserTag
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v8"
+DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v9"
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1]
     / "app"
@@ -670,9 +670,9 @@ def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
                 "tag_id": "mood.wondrous",
                 "description": "Awe and magical discovery.",
                 "aliases": ["wonder-filled", "magical wonder"],
+                "context_cues": ["discovery"],
             }
         ]
-        assert "context_cues" not in request.user_prompt
         assert payload["tracks"][0]["context_evidence"] is None
         assert "metadata_evidence" not in payload["tracks"][0]
         return StructuredModelResult(
@@ -716,10 +716,11 @@ def test_model_tagger_uses_runtime_vocabulary_ids_and_resolves_names() -> None:
     assert result[1].tags == ["wondrous"]
 
 
-def test_model_tagger_sends_the_full_controlled_index_and_definitions() -> None:
+def test_model_tagger_sends_full_vocabulary_guidance_for_high_recall() -> None:
     observed: dict[str, Any] = {}
 
     def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        observed["system_prompt"] = request.system_prompt
         observed["prompt"] = request.user_prompt
         observed["payload"] = json.loads(request.user_prompt)
         return StructuredModelResult(
@@ -764,9 +765,25 @@ def test_model_tagger_sends_the_full_controlled_index_and_definitions() -> None:
     assert {
         item["tag_id"] for item in payload["definitions"]
     } == {item["tag_id"] for item in vocabulary}
+    definitions = {item["tag_id"]: item for item in payload["definitions"]}
+    expected_context_cues = {
+        "mood.heroic": "crown guard",
+        "mood.desperate": "stranded",
+        "mood.cold": "frozen wastes",
+        "scene.shopping": "market day",
+        "mood.solemn": "requiem",
+        "mood.melancholy": "farewell",
+        "mood.curious": "riddle",
+        "scene.preparation": "before the tournament",
+        "mood.chaotic": "collapsing",
+        "mood.warm": "campfire",
+    }
+    for tag_id, cue in expected_context_cues.items():
+        assert cue in definitions[tag_id]["context_cues"]
     assert payload["tracks"][0]["context_evidence"] is None
     assert len(prompt) < 80_000
-    assert "context_cues" not in prompt
+    assert "semantic context examples" in observed["system_prompt"]
+    assert "make a completeness pass" in observed["system_prompt"]
 
 
 def test_model_input_does_not_preinterpret_title_metaphors() -> None:
@@ -1335,6 +1352,10 @@ def test_tagging_quality_gate_and_disclosure_status(
     )
     assert any(
         "Current bounded local track context" in item
+        for item in payload["disclosure"]["shared_with_provider"]
+    )
+    assert any(
+        "semantic context cue" in item
         for item in payload["disclosure"]["shared_with_provider"]
     )
     assert not any(

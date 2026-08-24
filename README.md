@@ -93,9 +93,11 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   planning sends at most 100 path-free candidates, constrains the response to those exact track
   IDs, and returns a draft. Mood tagging sends metadata and canonical library-relative paths in
   batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
-  stores suggestions under `model-context-tagger/v6` for explicit per-tag review. The Mood
-  **Assistant → Settings → Mood vocabulary** exposes every canonical name, definition, group, and
-  exact alias for manual editing. When current comprehensive local context exists, tagging may also send bounded
+  stores suggestions under `model-context-tagger/v6` for explicit per-tag review.
+  **Assistant → Settings → Mood vocabulary** exposes every canonical name, definition, group,
+  exact alias, and bounded semantic context cue for manual editing. The provider receives those
+  global cues to interpret soundtrack phrases, but no per-track local tag hypothesis. When current
+  comprehensive local context exists, tagging may also send bounded
   whole-track trajectories, tempo development, major acoustic sections and transitions,
   repetition, analyzer confidence, and optional local voice/instrumental classifier evidence (or an
   explicit unknown/unavailable status). It does not send locally

@@ -233,7 +233,8 @@ Runtime data lives outside the image.
   (recursive/direct), or explicit-track scope locally. Provider input is limited to indexed
   descriptive metadata, canonical library-relative paths treated as untrusted data, duration,
   BPM, numeric track IDs, the full revisioned operator vocabulary's IDs/names/groups/definitions/
-  exact aliases, and an optional bounded projection of current `local-context/v1` evidence:
+  exact aliases and bounded semantic context cues, and an optional bounded projection of current
+  `local-context/v1` evidence:
   loudness, intensity, rhythmic-drive, brightness, density and spectral-change trajectories;
   tempo development; major acoustic sections/transitions; repetition; confidence; and optional
   local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status).
@@ -241,6 +242,8 @@ Runtime data lives outside the image.
   audio, waveforms, spectrograms, full-resolution timelines, database mood tags, stored
   suggestions, playlists, review history, or credentials. Local context analysis must remain
   factual and may never propose terrain, scene, mood, genre, or instrument tags.
+  Context cues are global operator-managed vocabulary guidance, not per-track local tag
+  hypotheses; the model must confirm them against the complete untrusted metadata phrase.
   The model must choose zero through eight exact IDs from the full controlled vocabulary and
   return confidence plus at most four bounded evidence strings. Do not ask it for signal axes and
   do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,
