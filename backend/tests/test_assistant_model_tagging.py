@@ -55,7 +55,7 @@ from app.models.track_user_tag import TrackUserTag
 
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
-DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v7"
+DISCLOSURE_VERSION = "assistant-model-music-tagging-disclosure/v8"
 _SUITE_PATH = (
     Path(__file__).resolve().parents[1]
     / "app"

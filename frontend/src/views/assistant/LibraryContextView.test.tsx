@@ -144,4 +144,28 @@ describe("LibraryContextView", () => {
     expect(screen.queryByText("Campaign/Forest/Quiet Road.flac")).not.toBeInTheDocument();
     await waitFor(() => expect(assistantApi.getTrackContext).toHaveBeenCalledWith(9));
   });
+
+  it("shows bounded classifier score and coverage when voice analysis is configured", async () => {
+    vi.mocked(assistantApi.getTrackContext).mockResolvedValue({
+      ...detail,
+      summary: {
+        ...detail.summary,
+        voice: {
+          status: "classified",
+          voice_probability: 0.82,
+          vocal_coverage: 0.75,
+          note: "Voice is present across most analyzed windows.",
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <LibraryContextView />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Voice present")).toBeInTheDocument();
+    expect(screen.getByText(/82% voice score · 75% vocal coverage/)).toBeInTheDocument();
+  });
 });

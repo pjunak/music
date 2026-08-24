@@ -29,8 +29,8 @@ from app.assistant.tag_vocabulary import (
     default_tag_vocabulary_snapshot,
 )
 
-MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v11"] = (
-    "assistant-music-tagger-input/v11"
+MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v12"] = (
+    "assistant-music-tagger-input/v12"
 )
 MODEL_TAGGER_OUTPUT_CONTRACT: Literal["assistant-music-tagger-output/v3"] = (
     "assistant-music-tagger-output/v3"
@@ -209,7 +209,7 @@ class ModelTagDefinition(_StrictModel):
 
 
 class ModelTaggerInput(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-input/v11"]
+    schema_version: Literal["assistant-music-tagger-input/v12"]
     vocabulary: list[ModelTagIndexEntry] = Field(min_length=1, max_length=200)
     definitions: list[ModelTagDefinition] = Field(min_length=1, max_length=200)
     tracks: list[ModelTagTrackInput] = Field(min_length=1, max_length=20)

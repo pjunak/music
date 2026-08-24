@@ -22,6 +22,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+voice = [
+    # The purpose-trained model is optional because Essentia is AGPL and its
+    # downloadable weights are CC BY-NC-SA. The published wheel used by the
+    # production image is available for CPython 3.11-3.13 on Linux x86-64.
+    "essentia-tensorflow==2.1b6.dev1389; python_version < '3.14' and platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",

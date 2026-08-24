@@ -75,7 +75,8 @@ indexed metadata / local audio / operator request
   plan rather than an empty response. Public data and reasons are reconstructed locally.
 - **Music tagging:** comprehensive `local-context/v1` analysis remains factual and
   semantic-free. It supplies bounded whole-track trajectories, tempo development, major acoustic
-  sections/transitions, repetition, confidence, and explicit unknown voice status when current.
+  sections/transitions, repetition, confidence, and optional local voice/instrumental classifier
+  evidence or an explicit unknown/unavailable status when current.
   Metadata and canonical library-relative paths are labelled untrusted; the absolute media root,
   audio, waveforms, spectrograms, full timelines, database mood tags, and review state never cross
   the provider boundary. The model receives the full revisioned controlled vocabulary with stable

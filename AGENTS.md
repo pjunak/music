@@ -235,8 +235,9 @@ Runtime data lives outside the image.
   BPM, numeric track IDs, the full revisioned operator vocabulary's IDs/names/groups/definitions/
   exact aliases, and an optional bounded projection of current `local-context/v1` evidence:
   loudness, intensity, rhythmic-drive, brightness, density and spectral-change trajectories;
-  tempo development; major acoustic sections/transitions; repetition; confidence; and explicit
-  unknown voice status. Never send the absolute media root, paths outside the indexed library,
+  tempo development; major acoustic sections/transitions; repetition; confidence; and optional
+  local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status).
+  Never send the absolute media root, paths outside the indexed library,
   audio, waveforms, spectrograms, full-resolution timelines, database mood tags, stored
   suggestions, playlists, review history, or credentials. Local context analysis must remain
   factual and may never propose terrain, scene, mood, genre, or instrument tags.
@@ -289,6 +290,10 @@ Runtime data lives outside the image.
   semantic tag suggestions. Preserve source signatures, confidence, and analyzer versioning.
   Consumers may use only current, well-formed context/profiles and must fall back safely when data
   is absent, partial, stale, failed, or malformed.
+- Optional local voice analysis may use only the checksum-pinned Essentia MusiCNN model through the
+  explicit deployment setting. Keep it off by default, local-only, and non-fatal; include its
+  model/runtime identity in context staleness, preserve unknown/unavailable states, and never label
+  spectral heuristics as human-voice detection.
 - Database mood tags are operator-owned rows in `track_user_tags`, independent from embedded file
   tags such as album, artist, year, and genre and independent from generated analysis. Never write
   these rows into media files. Update them with additive/removal deltas, display their source explicitly,

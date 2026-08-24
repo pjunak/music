@@ -112,7 +112,8 @@ def _model_tagging_disclosure(
                 "Current bounded local track context when available: intensity, loudness, "
                 "rhythmic drive, brightness, density and spectral-change trajectories; "
                 "tempo development; major acoustic sections and transitions; structural "
-                "repetition; analyzer confidence; and explicit unknown voice status"
+                "repetition; analyzer confidence; and optional local voice/instrumental "
+                "classifier score and coverage (or explicit unknown/unavailable status)"
             ),
             "A server-assigned numeric track ID used only to match the response",
             (
@@ -140,7 +141,7 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v7"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v8"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -533,7 +534,7 @@ def run_model_music_tagging(
                 row.metrics_json = json.dumps(
                     {
                         "contract": "assistant-music-tagger-output/v3",
-                        "input_contract": "assistant-music-tagger-input/v11",
+                        "input_contract": "assistant-music-tagger-input/v12",
                         "context_status": (
                             current_contexts[snapshot.id].completeness
                             if snapshot.id in current_contexts

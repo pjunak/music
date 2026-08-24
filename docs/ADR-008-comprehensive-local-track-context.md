@@ -31,8 +31,8 @@ tagging scope has current context.
   checkpoint failure after every track so interrupted work resumes without repeating completed
   decoding.
 - Keep analysis semantic-free. It must not output terrain, scene, mood, genre, or instrument tags.
-  Voice status remains `not_classified` until a calibrated optional local classifier is installed;
-  spectral measurements must not be relabelled as voice detection.
+  Voice status remains `not_classified` unless the explicit optional local classifier described by
+  ADR-009 is installed; spectral measurements must not be relabelled as voice detection.
 - Give operators a Track Context tab mirroring library folders. The selected track view shows the
   timeline, trajectories, tempo/structure/voice status, acoustic sections, technical/stage details,
   and a playback control. The detail API omits the relative path because the browser selection
@@ -62,9 +62,8 @@ tagging scope has current context.
   literal setting or scene from signal measurements alone.
 - Context and semantic suggestions have separate storage and ownership. Deleting or rebuilding
   context cannot write mood tags, and accepting a model suggestion cannot alter audio-file metadata.
-- Voice/instrument recognition remains intentionally incomplete instead of presenting an
-  uncalibrated heuristic as fact. A future classifier can become an optional versioned stage without
-  changing the rest of the document.
+- Instrument recognition remains intentionally incomplete. ADR-009 adds the anticipated optional,
+  versioned voice stage without presenting a signal heuristic as voice detection.
 - Existing historical analysis endpoints may remain for compatibility, but the supported UI and
   new mood-tagging contract use only `local-context/v1`.
 

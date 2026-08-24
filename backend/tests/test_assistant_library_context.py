@@ -14,6 +14,7 @@ from sqlalchemy import delete
 
 from app.assistant.audio_context import AudioContextDocument, analyze_audio_context
 from app.assistant.library_context import LOCAL_CONTEXT_ANALYZER_ID
+from app.assistant.voice_analysis import VoiceAnalysis
 from app.core.db import SessionLocal
 from app.models.track_analysis_failure import TrackAnalysisFailure
 from app.models.track_context import TrackContext
@@ -275,3 +276,63 @@ def test_audio_context_describes_development_without_suggesting_tags(
     }
     assert "tags" not in document.summary
     assert "moods" not in document.summary
+
+
+def test_audio_context_includes_optional_voice_classifier_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "developing.wav"
+    _write_developing_tone(source)
+    monkeypatch.setattr("app.assistant.audio_context.shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        "app.assistant.audio_context.analyze_voice",
+        lambda *_args, **_kwargs: VoiceAnalysis(
+            summary={
+                "status": "classified",
+                "voice_probability": 0.82,
+                "vocal_coverage": 0.75,
+                "note": "Voice is present across most analyzed windows.",
+            },
+            stage={
+                "status": "complete",
+                "required": False,
+                "analyzer_id": "essentia-musicnn-voice/v1",
+            },
+        ),
+    )
+
+    document = analyze_audio_context(source)
+
+    assert document.summary["voice"] == {
+        "status": "classified",
+        "voice_probability": 0.82,
+        "vocal_coverage": 0.75,
+        "note": "Voice is present across most analyzed windows.",
+    }
+    assert document.stages["voice"] == {
+        "status": "complete",
+        "required": False,
+        "analyzer_id": "essentia-musicnn-voice/v1",
+    }
+
+
+def test_context_source_signature_changes_with_voice_analyzer(
+    db_session,  # type: ignore[no-untyped-def]
+    seeded_track_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.assistant import library_context
+    from app.models.track import Track
+
+    track = db_session.get(Track, seeded_track_id)
+    assert track is not None
+    monkeypatch.setattr(library_context, "voice_analyzer_signature", lambda: None)
+    without_voice = library_context.context_source_signature(track)
+    monkeypatch.setattr(
+        library_context,
+        "voice_analyzer_signature",
+        lambda: "essentia-musicnn-voice/v1:model:runtime-present",
+    )
+
+    assert library_context.context_source_signature(track) != without_voice

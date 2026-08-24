@@ -97,7 +97,8 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   **Assistant → Settings → Mood vocabulary** exposes every canonical name, definition, group, and
   exact alias for manual editing. When current comprehensive local context exists, tagging may also send bounded
   whole-track trajectories, tempo development, major acoustic sections and transitions,
-  repetition, analyzer confidence, and an explicit unknown voice status. It does not send locally
+  repetition, analyzer confidence, and optional local voice/instrumental classifier evidence (or an
+  explicit unknown/unavailable status). It does not send locally
   generated tag hypotheses or ask the provider to recreate energy/brightness/tension axes. Audio
   files, waveforms, full timelines, spectrograms, the absolute media root, paths outside the indexed
   library, database mood tags, and detailed measurements remain on the server. Library-relative
@@ -131,6 +132,11 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   tags. The Track Context tab mirrors the library folders, supports playback, and shows the full
   stored context for a selected song. The production image includes FFmpeg for the indexed MP3,
   FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV fallback.
+  An opt-in, checksum-pinned Essentia MusiCNN stage can add a normalized voice score and vocal-window
+  coverage. It is never downloaded or enabled automatically because its runtime and model have
+  separate AGPL and non-commercial/share-alike license obligations; see
+  [`ASSISTANT.md`](ASSISTANT.md#optional-local-voice-analysis) and
+  [`ADR-009`](docs/ADR-009-opt-in-local-voice-analysis.md).
 - **Database mood tags** — attach operator-owned terrain, scene, and mood context such as
   `medieval`, `tavern`, `dancing`, `combat`, or any custom term without modifying the audio file or
   its embedded album, artist, year, genre, and similar metadata. Database mood tags and generated
@@ -228,6 +234,7 @@ DB-backed tokens, nothing is signed.)
 | `ASSISTANT_CREDENTIAL_KEY` | Only for optional AI setup | — | URL-safe base64 32-byte key used to encrypt provider API keys in `app.db` |
 | `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional model setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; model settings may create it once when its private parent mount exists |
 | `ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT` | | — | Optional non-secret host path shown in model settings' copyable mount/setup guide |
+| `ASSISTANT_VOICE_MODEL_PATH` | Only for opt-in local voice analysis | — | Read-only path to the exact checksum-pinned Essentia voice/instrumental model |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 

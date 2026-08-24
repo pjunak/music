@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     # This is a host path and is never used for application filesystem access.
     assistant_credential_host_directory_hint: str | None = None
 
+    # Optional local-only music voice/instrumental classifier. The application
+    # accepts only the documented, checksum-pinned model and never downloads it
+    # at runtime. The dependency and model carry licenses that require an
+    # explicit operator choice, so the standard image leaves this unset.
+    assistant_voice_model_path: Path | None = None
+
     # Upload guard rails (per request). Generous enough for hi-res FLAC albums;
     # they exist to stop an authenticated client from exhausting the volume
     # backing MUSIC_DIR/SFX_LIBRARY_DIR with one unbounded request.

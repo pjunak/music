@@ -44,6 +44,20 @@ function seconds(value: unknown): string {
   return `${minutes}:${String(Math.round(number % 60)).padStart(2, "0")}`;
 }
 
+function voiceLabel(
+  status: string | null,
+  voiceProbability: number | null,
+  vocalCoverage: number | null,
+): string {
+  if (status !== "classified" || voiceProbability === null || vocalCoverage === null) {
+    return status?.replaceAll("_", " ") ?? "Unknown";
+  }
+  if (voiceProbability >= 0.65 && vocalCoverage >= 0.6) return "Voice present";
+  if (voiceProbability >= 0.55 && vocalCoverage >= 0.2) return "Partial voice";
+  if (voiceProbability <= 0.35 && vocalCoverage <= 0.2) return "Predominantly instrumental";
+  return "Mixed / uncertain voice";
+}
+
 function Timeline({ detail }: { detail: TrackContextDetail }) {
   if (detail.timeline.length < 2) {
     return <p className="muted">No condensed timeline is available.</p>;
@@ -113,6 +127,9 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
   const tempo = objectValue(summary?.tempo);
   const structure = objectValue(summary?.structure);
   const voice = objectValue(summary?.voice);
+  const voiceStatus = stringValue(voice?.status);
+  const voiceProbability = numberValue(voice?.voice_probability);
+  const vocalCoverage = numberValue(voice?.vocal_coverage);
 
   if (summary === null) {
     return (
@@ -193,8 +210,13 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
         </div>
         <div>
           <span>Voice</span>
-          <strong>{stringValue(voice?.status)?.replaceAll("_", " ") ?? "Unknown"}</strong>
-          <small>{stringValue(voice?.note) ?? "No voice classifier result"}</small>
+          <strong>{voiceLabel(voiceStatus, voiceProbability, vocalCoverage)}</strong>
+          <small>
+            {voiceStatus === "classified" && voiceProbability !== null && vocalCoverage !== null
+              ? `${percent(voiceProbability)} voice score · ${percent(vocalCoverage)} vocal coverage. `
+              : null}
+            {stringValue(voice?.note) ?? "No voice classifier result"}
+          </small>
         </div>
       </section>
 

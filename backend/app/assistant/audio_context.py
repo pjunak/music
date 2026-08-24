@@ -20,6 +20,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from app.assistant.audio_signal import AudioSignalError, _open_mono_pcm
+from app.assistant.voice_analysis import analyze_voice
 
 CONTEXT_SAMPLE_RATE = 16_000
 CONTEXT_FRAME_SECONDS = 0.5
@@ -723,15 +724,7 @@ def analyze_audio_context(
         ),
         "points": tempo_points[:20],
     }
-    voice = {
-        "status": "not_classified",
-        "voice_probability": None,
-        "vocal_coverage": None,
-        "note": (
-            "No calibrated local voice classifier is installed. Spectral measurements "
-            "are retained, but they are not presented as voice detection."
-        ),
-    }
+    voice_analysis = analyze_voice(path, check_cancelled=cancellation_check)
     loudness = _ebu_loudness(path)
     cancellation_check()
     if loudness is not None:
@@ -762,7 +755,7 @@ def analyze_audio_context(
                 "repetitive" if repeated_sections >= 2 else "sectional" if len(sections) >= 3 else "continuous"
             ),
         },
-        "voice": voice,
+        "voice": voice_analysis.summary,
         "evidence": [
             _trajectory_evidence("Intensity", trajectories["intensity"]),
             _trajectory_evidence("Rhythmic drive", trajectories["rhythmic_drive"]),
@@ -777,7 +770,7 @@ def analyze_audio_context(
         "tempo": {"status": tempo_summary["status"]},
         "structure": {"status": "complete"},
         "loudness": {"status": "complete" if loudness is not None else "proxy"},
-        "voice": {"status": "not_configured", "required": False},
+        "voice": voice_analysis.stage,
     }
     return AudioContextDocument(
         confidence=confidence,

@@ -43,6 +43,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
+# The purpose-trained voice classifier is deliberately opt-in because its
+# runtime and model carry stronger licenses than the base application.
+ARG INSTALL_VOICE_ANALYZER=false
+
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/app ./app
 
@@ -53,7 +57,8 @@ COPY backend/app ./app
 # --locked errors out if pyproject drifted from the lockfile instead of
 # silently building an unlocked graph.
 RUN pip install --no-cache-dir --upgrade pip wheel uv && \
-    uv export --locked --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt && \
+    if [ "$INSTALL_VOICE_ANALYZER" = "true" ]; then voice_extra="--extra voice"; else voice_extra=""; fi && \
+    uv export --locked --no-dev $voice_extra --no-hashes --no-emit-project -o /tmp/requirements.txt && \
     pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt . && \
     rm /tmp/requirements.txt
 
@@ -61,6 +66,8 @@ RUN pip install --no-cache-dir --upgrade pip wheel uv && \
 # Stage 3: python runtime
 # ============================================================================
 FROM python:3.12-slim AS runtime
+
+ARG INSTALL_VOICE_ANALYZER=false
 
 # Runtime deps. FFmpeg decodes the library's supported audio formats for the
 # optional server-side signal analyzer. It runs as one bounded subprocess per
@@ -79,7 +86,8 @@ WORKDIR /app
 # wheel itself.
 COPY --from=backend-builder /wheels /wheels
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --no-index --find-links=/wheels music-backend && \
+    if [ "$INSTALL_VOICE_ANALYZER" = "true" ]; then project="music-backend[voice]"; else project="music-backend"; fi && \
+    pip install --no-cache-dir --no-index --find-links=/wheels "$project" && \
     rm -rf /wheels
 
 # Fail the image build if a packaging change drops any of the read-only model

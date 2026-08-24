@@ -10,6 +10,7 @@ first-time setup and functional checks, not release prerequisites.
 ## What is ready
 
 - Local metadata and server-side audio-signal analysis run as durable jobs.
+- Optional local voice/instrumental analysis can enrich the same factual track context.
 - Database mood tags remain separate from embedded file metadata and generated suggestions.
 - The local playlist planner creates a reviewable draft and is the default.
 - Optional provider models can assist playlist planning, mood tagging, mood-tag
@@ -69,6 +70,48 @@ data, not because this release introduces a special risk to them.
 Do not continue to provider setup until this local path is satisfactory. It remains the
 privacy-preserving fallback and provides the tags and bounded candidates used by model
 planning.
+
+### Optional local voice analysis
+
+The base application intentionally reports voice as `not_classified`. The supported opt-in uses
+Essentia's purpose-trained `voice_instrumental-musicnn-msd-2.pb` model and never sends audio over the
+network. Essentia's TensorFlow runtime is AGPL-3.0-only and the MTG model weights are licensed
+CC BY-NC-SA 4.0; confirm those terms fit the deployment before proceeding. The application does not
+download or accept a different model silently.
+
+On a supported Linux x86-64 development environment with Python 3.11-3.13:
+
+```bash
+cd backend
+uv sync --locked --extra dev --extra voice
+mkdir -p ./models
+curl --fail --location \
+  --output ./models/voice_instrumental-musicnn-msd-2.pb \
+  https://essentia.upf.edu/models/classifiers/voice_instrumental/voice_instrumental-musicnn-msd-2.pb
+echo "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a  ./models/voice_instrumental-musicnn-msd-2.pb" | sha256sum --check
+export ASSISTANT_VOICE_MODEL_PATH="$PWD/models/voice_instrumental-musicnn-msd-2.pb"
+```
+
+The standard published image does not contain this optional runtime or model. For an explicit custom
+image, build and run it with a read-only model mount:
+
+```bash
+docker build --build-arg INSTALL_VOICE_ANALYZER=true -t music-voice .
+docker run -d --name music \
+  -p 8000:8000 \
+  -v /srv/music-data:/data \
+  -v /srv/music-models:/models:ro \
+  -e ASSISTANT_VOICE_MODEL_PATH=/models/voice_instrumental-musicnn-msd-2.pb \
+  music-voice
+```
+
+After restarting, existing context built without that exact classifier is shown as stale. Run the
+normal comprehensive context job, then inspect several known vocal, instrumental, and intermittent-
+vocal tracks in **Assistant -> Track Context**. The UI reports the normalized two-class score and
+the fraction of windows where voice led instrumental. These are classifier measurements, not a
+guarantee: real inference has not been validated against this private library by automated tests.
+Disabling or changing the model also requires a normal context rebuild. If the optional stage fails,
+the rest of the track context remains available and the voice stage reports `unavailable`.
 
 ## 3. Enable encrypted provider credentials
 
@@ -188,7 +231,8 @@ Use a small, representative sample before running across the whole library.
 5. Inspect the disclosure: the model receives descriptive metadata, the current full canonical
    ID/name/definition/alias list, and—when available—a bounded projection of locally measured
    whole-track trajectories, tempo development, major acoustic sections, repetition, confidence,
-   and explicit unknown voice status. It does not receive a local tag hypothesis or model-owned
+   and optional local voice/instrumental classifier evidence or explicit unknown/unavailable voice
+   status. It does not receive a local tag hypothesis or model-owned
    signal axes. The path is canonical and
    library-relative, is treated as untrusted data, and may reveal useful folder context;
    the absolute media root, audio, waveforms, full timelines, and spectrograms are never sent.

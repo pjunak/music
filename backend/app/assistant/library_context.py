@@ -17,6 +17,7 @@ from app.assistant.audio_context import (
 )
 from app.assistant.audio_signal import AudioSignalError
 from app.assistant.tag_schemas import ModelTaggingScope
+from app.assistant.voice_analysis import voice_analyzer_signature
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.library import index as library_index
@@ -44,8 +45,12 @@ class CurrentTrackContext:
 
 
 def context_source_signature(track: Track) -> str:
+    analyzer_signature = voice_analyzer_signature()
+    source_facts: list[object] = [track.path, track.size_bytes, track.mtime]
+    if analyzer_signature is not None:
+        source_facts.append(analyzer_signature)
     payload = json.dumps(
-        [track.path, track.size_bytes, track.mtime],
+        source_facts,
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
