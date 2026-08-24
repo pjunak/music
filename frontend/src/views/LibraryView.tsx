@@ -11,6 +11,7 @@ import { FolderPickerModal } from "@/components/FolderPickerModal";
 import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
+import { LibrarySidebarRail } from "@/components/LibrarySidebarRail";
 import { MoodTaggingDialog } from "@/components/MoodTaggingDialog";
 import {
   EditIcon,
@@ -45,7 +46,6 @@ import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { useDebouncedValue } from "@/core/useDebouncedValue";
-import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
 
 type Root = "music" | "sfx";
@@ -97,19 +97,6 @@ export function LibraryView() {
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [moodTaggingOpen, setMoodTaggingOpen] = useState(false);
 
-  // The operator-resized tree width overrides the `--rail-tree` token on
-  // this view only. Applied as a direct CSS-var write (not a React style
-  // prop) so SidebarRail's drag handler can write the same var during the
-  // drag without fighting React's style reconciliation.
-  const treeWidth = useUiStore((s) => s.libraryTreeWidth);
-  const viewRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = viewRef.current;
-    if (el === null) return;
-    if (treeWidth !== null) el.style.setProperty("--rail-tree", `${treeWidth}px`);
-    else el.style.removeProperty("--rail-tree");
-  }, [treeWidth]);
-
   // Search-as-you-type: debounce keystrokes and auto-submit the result.
   // The input is always visible in the toolbar (music mode only), so the
   // user never has to click "search" first. A non-empty `query` switches
@@ -133,7 +120,7 @@ export function LibraryView() {
   }
 
   return (
-    <div className="library-view" ref={viewRef}>
+    <div className="library-view">
       <header className="library-toolbar">
         <div className="segmented" role="tablist" aria-label="Library root">
           <button
@@ -410,7 +397,7 @@ function MusicWorkspace({
   return (
     <div className={`music-workspace${searching ? " no-tree" : ""}`}>
       {!searching ? (
-        <SidebarRail>
+        <LibrarySidebarRail>
           <FolderTree
             selectedPath={path}
             onSelect={onPathChange}
@@ -424,7 +411,7 @@ function MusicWorkspace({
             onChanged={onRefresh}
             onPathReset={() => onPathChange("")}
           />
-        </SidebarRail>
+        </LibrarySidebarRail>
       ) : null}
       <section className={`library-main${checked.size > 0 ? " has-selection" : ""}`}>
         {searching ? (
@@ -505,7 +492,7 @@ function LibraryShell({
 }) {
   return (
     <div className="library-body">
-      <SidebarRail>
+      <LibrarySidebarRail>
         <FolderTree
           selectedPath={selectedPath}
           onSelect={onPathChange}
@@ -519,7 +506,7 @@ function LibraryShell({
           onChanged={onRefresh}
           onPathReset={onPathReset}
         />
-      </SidebarRail>
+      </LibrarySidebarRail>
       <section className="library-main">
         <FolderBand
           root={rootKind}
@@ -532,103 +519,6 @@ function LibraryShell({
         {children}
       </section>
     </div>
-  );
-}
-
-const RAIL_MIN = 240;
-const RAIL_MAX = 560;
-
-/** The tree-column <aside> plus its drag-to-resize right edge. The chosen
- *  width is a persisted preference (uiStore.libraryTreeWidth) consumed as
- *  the `--rail-tree` var by the library grids. During a drag the var is
- *  written straight onto the `.library-view` element so layout tracks the
- *  pointer without a store commit (= React render) per move; the store is
- *  committed once on release. Double-click resets to the stylesheet
- *  default. */
-function SidebarRail({ children }: { children: React.ReactNode }) {
-  const setWidth = useUiStore((s) => s.setLibraryTreeWidth);
-  const storedWidth = useUiStore((s) => s.libraryTreeWidth);
-  const asideRef = useRef<HTMLElement | null>(null);
-
-  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    const aside = asideRef.current;
-    const host = aside?.closest<HTMLElement>(".library-view");
-    if (!aside || !host) return;
-    e.preventDefault();
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    const startX = e.clientX;
-    const startW = aside.getBoundingClientRect().width;
-    let lastW = startW;
-    const onMove = (ev: PointerEvent) => {
-      ev.preventDefault();
-      lastW = Math.round(
-        Math.max(RAIL_MIN, Math.min(RAIL_MAX, startW + (ev.clientX - startX))),
-      );
-      host.style.setProperty("--rail-tree", `${lastW}px`);
-    };
-    const onUp = () => {
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onUp);
-      // Commit; LibraryView's effect re-applies the same var from the store.
-      setWidth(lastW);
-    };
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-    handle.addEventListener("pointercancel", onUp);
-  }
-
-  // role="separator" implies keyboard operability: ←/→ nudge (Shift = coarse),
-  // Home/End snap to the limits, Delete/Backspace reset like double-click.
-  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    const aside = asideRef.current;
-    if (!aside) return;
-    const current = Math.round(aside.getBoundingClientRect().width);
-    const step = e.shiftKey ? 64 : 16;
-    let next: number | null | undefined;
-    switch (e.key) {
-      case "ArrowLeft":
-        next = Math.max(RAIL_MIN, current - step);
-        break;
-      case "ArrowRight":
-        next = Math.min(RAIL_MAX, current + step);
-        break;
-      case "Home":
-        next = RAIL_MIN;
-        break;
-      case "End":
-        next = RAIL_MAX;
-        break;
-      case "Delete":
-      case "Backspace":
-        next = null; // reset to the stylesheet default
-        break;
-      default:
-        return;
-    }
-    e.preventDefault();
-    setWidth(next);
-  }
-
-  return (
-    <aside ref={asideRef} className="library-sidebar">
-      {children}
-      <div
-        className="rail-resize"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the folder tree column"
-        aria-valuemin={RAIL_MIN}
-        aria-valuemax={RAIL_MAX}
-        aria-valuenow={storedWidth ?? undefined}
-        tabIndex={0}
-        title="Drag to resize — double-click or Delete to reset; arrow keys when focused"
-        onPointerDown={onPointerDown}
-        onDoubleClick={() => setWidth(null)}
-        onKeyDown={onKeyDown}
-      />
-    </aside>
   );
 }
 

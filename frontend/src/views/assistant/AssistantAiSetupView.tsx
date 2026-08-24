@@ -17,6 +17,7 @@ import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
 
 import { CredentialStorageCard } from "./CredentialStorageCard";
+import { AssistantInfoPopover } from "./AssistantInfoPopover";
 import { ModelRoleCard } from "./ModelRoleCard";
 import { ModelTestConsole } from "./ModelTestConsole";
 import {
@@ -65,8 +66,7 @@ export function AssistantAiSetupView() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [allowPrivate, setAllowPrivate] = useState(false);
-  const [connectionCreatorOpen, setConnectionCreatorOpen] = useState(true);
-  const [setupGuideOpen, setSetupGuideOpen] = useState(true);
+  const [setupHubOpen, setSetupHubOpen] = useState(true);
 
   const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
   const refreshQuality = useCallback(
@@ -87,8 +87,7 @@ export function AssistantAiSetupView() {
         setStatus(nextStatus);
         setConnections(nextConnections);
         setRoles(nextRoles);
-        setConnectionCreatorOpen(nextConnections.length === 0);
-        setSetupGuideOpen(nextConnections.length === 0);
+        setSetupHubOpen(nextConnections.length === 0);
         setAdapterId((current) => current || nextStatus.adapters[0]?.id || "");
         setLoadError(null);
       })
@@ -255,7 +254,7 @@ export function AssistantAiSetupView() {
       setBaseUrl("");
       setApiKey("");
       setAllowPrivate(false);
-      setConnectionCreatorOpen(false);
+      setSetupHubOpen(false);
       toast.success("Connection saved", "Verify it before assigning any model tasks.");
     } catch (error) {
       toast.error("Connection could not be saved", errorMessage(error));
@@ -348,7 +347,7 @@ export function AssistantAiSetupView() {
         (item) => item.id !== connection.id,
       );
       setConnections(remainingConnections);
-      if (remainingConnections.length === 0) setConnectionCreatorOpen(true);
+      if (remainingConnections.length === 0) setSetupHubOpen(true);
       toast.success("Connection deleted");
     } catch (error) {
       toast.error("Connection could not be deleted", errorMessage(error));
@@ -649,54 +648,123 @@ export function AssistantAiSetupView() {
     <div className="assistant-provider-view">
       <header className="assistant-page-header">
         <div>
-          <p className="assistant-eyebrow">Optional model routing</p>
           <h1>AI connections</h1>
-          {connections.length === 0 ? (
-            <p>
-              Each connection stores one provider key. Tasks may share it or use
-              separate connections, then choose and test their own model.
-            </p>
-          ) : null}
+          <p>Connect providers, then assign and test a model for each task.</p>
         </div>
-        <span className="assistant-algorithm">local tools stay active</span>
+        <div className="assistant-page-tools">
+          <AssistantInfoPopover label="Privacy and local tools" title="Setup stays synthetic">
+            <p>
+              Verification and quality checks use provider metadata or fixed test
+              inputs. They do not send songs, audio, filesystem paths, or live
+              library tags.
+            </p>
+            <p>
+              Local tools remain active. Real model requests show their own provider
+              boundary before anything is sent.
+            </p>
+          </AssistantInfoPopover>
+        </div>
       </header>
 
       <details
-        className="surface-card assistant-setup-guide"
-        open={setupGuideOpen}
-        onToggle={(event) => setSetupGuideOpen(event.currentTarget.open)}
+        className="surface-card assistant-setup-guide assistant-provider-onboarding"
+        open={setupHubOpen}
+        onToggle={(event) => setSetupHubOpen(event.currentTarget.open)}
       >
         <summary>
-          <span>How model setup works</span>
-          <small>Connect · Verify · Assign · Test · Evaluate</small>
+          <span>Add provider connection</span>
+          <small>Setup guide · address · encrypted API key</small>
         </summary>
-        <ol className="assistant-provider-path" aria-label="Connection setup steps">
-          <li>
-            <span>1</span>
-            <strong>Connect</strong>
-            <p>Save an address and API key.</p>
-          </li>
-          <li>
-            <span>2</span>
-            <strong>Verify</strong>
-            <p>Check access and load model names.</p>
-          </li>
-          <li>
-            <span>3</span>
-            <strong>Assign</strong>
-            <p>Choose one model for one task.</p>
-          </li>
-          <li>
-            <span>4</span>
-            <strong>Test &amp; enable</strong>
-            <p>Prove structured output before use.</p>
-          </li>
-          <li>
-            <span>5</span>
-            <strong>Evaluate</strong>
-            <p>Run task-specific quality checks.</p>
-          </li>
-        </ol>
+        <div className="assistant-provider-onboarding-body">
+          <div className="assistant-provider-onboarding-guide">
+            <h2>How setup works</h2>
+            <ol className="assistant-provider-path" aria-label="Connection setup steps">
+              <li><span>1</span><strong>Connect</strong><p>Save the key.</p></li>
+              <li><span>2</span><strong>Verify</strong><p>Load models.</p></li>
+              <li><span>3</span><strong>Assign</strong><p>Pick per task.</p></li>
+              <li><span>4</span><strong>Test</strong><p>Check format.</p></li>
+              <li><span>5</span><strong>Evaluate</strong><p>Check quality.</p></li>
+            </ol>
+          </div>
+          {status.credential_storage_ready ? (
+            <form
+              className="assistant-provider-create"
+              onSubmit={(event) => void createConnection(event)}
+            >
+              <label className="field">
+                <span className="field-label">Connection name</span>
+                <input
+                  value={name}
+                  maxLength={128}
+                  placeholder="For example: My hosted models"
+                  required
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Connection type</span>
+                <select
+                  value={adapterId}
+                  required
+                  onChange={(event) => setAdapterId(event.target.value)}
+                >
+                  {status.adapters.map((adapter) => (
+                    <option key={adapter.id} value={adapter.id}>{adapter.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field assistant-provider-address-field">
+                <span className="field-label">Provider address</span>
+                <input
+                  type="url"
+                  value={baseUrl}
+                  maxLength={2048}
+                  placeholder="https://provider.example/v1"
+                  required
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                />
+              </label>
+              <label className="field assistant-provider-key-field">
+                <span className="field-label">API key</span>
+                <input
+                  type="password"
+                  value={apiKey}
+                  maxLength={4096}
+                  autoComplete="new-password"
+                  required
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+              </label>
+              <label className="checkbox-row assistant-private-network">
+                <input
+                  type="checkbox"
+                  checked={allowPrivate}
+                  onChange={(event) => setAllowPrivate(event.target.checked)}
+                />
+                <span>Allow a provider on my private network</span>
+              </label>
+              {allowPrivate ? (
+                <p className="assistant-provider-private-note">
+                  Use this only for a model service you control on your own network.
+                </p>
+              ) : null}
+              <button
+                className="btn-primary"
+                type="submit"
+                disabled={
+                  busyItem !== null || !name.trim() || !adapterId ||
+                  !baseUrl.trim() || !apiKey.trim()
+                }
+              >
+                {busyItem === "create" ? "Saving…" : "Save connection"}
+              </button>
+            </form>
+          ) : (
+            <p className="assistant-provider-onboarding-locked">
+              Prepare encrypted key storage below before adding a connection.
+            </p>
+          )}
+        </div>
       </details>
 
       <section className="assistant-provider-section">
@@ -755,114 +823,6 @@ export function AssistantAiSetupView() {
               ))
             )}
           </div>
-
-          {status.credential_storage_ready ? (
-            <details
-              className="surface-card assistant-provider-create-disclosure"
-              open={connectionCreatorOpen}
-              onToggle={(event) =>
-                setConnectionCreatorOpen(event.currentTarget.open)
-              }
-            >
-              <summary>
-                <span>Add provider connection</span>
-                <small>Address and encrypted API key</small>
-              </summary>
-              <form
-                className="assistant-provider-create"
-                onSubmit={(event) => void createConnection(event)}
-              >
-                <label className="field">
-                  <span className="field-label">Connection name</span>
-                  <input
-                    value={name}
-                    maxLength={128}
-                    placeholder="For example: My hosted models"
-                    required
-                    onChange={(event) => setName(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span className="field-label">Connection type</span>
-                  <select
-                    value={adapterId}
-                    required
-                    onChange={(event) => setAdapterId(event.target.value)}
-                  >
-                    {status.adapters.map((adapter) => (
-                      <option key={adapter.id} value={adapter.id}>
-                        {adapter.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="field-hint">
-                    {status.adapters.find((adapter) => adapter.id === adapterId)
-                      ?.description ??
-                      "Choose how this provider exposes its models."}
-                  </span>
-                  <span className="field-hint">
-                    Supports: {status.adapters
-                      .find((adapter) => adapter.id === adapterId)
-                      ?.capability_ids.map(
-                        (capabilityId) =>
-                          status.capabilities.find(
-                            (capability) => capability.id === capabilityId,
-                          )?.label ?? capabilityId,
-                      )
-                      .join(" · ") || "No model-task capabilities"}
-                  </span>
-                </label>
-                <label className="field">
-                  <span className="field-label">Provider address</span>
-                  <input
-                    type="url"
-                    value={baseUrl}
-                    maxLength={2048}
-                    placeholder="https://provider.example/v1"
-                    required
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span className="field-label">API key</span>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    maxLength={4096}
-                    autoComplete="new-password"
-                    required
-                    onChange={(event) => setApiKey(event.target.value)}
-                  />
-                </label>
-                <label className="checkbox-row assistant-private-network">
-                  <input
-                    type="checkbox"
-                    checked={allowPrivate}
-                    onChange={(event) => setAllowPrivate(event.target.checked)}
-                  />
-                  <span>Allow a provider on my private network</span>
-                </label>
-                {allowPrivate ? (
-                  <p className="assistant-provider-private-note">
-                    Use this only for a model service you control on your own network.
-                  </p>
-                ) : null}
-                <button
-                  className="btn-primary"
-                  type="submit"
-                  disabled={
-                    busyItem !== null ||
-                    !name.trim() ||
-                    !adapterId ||
-                    !baseUrl.trim() ||
-                    !apiKey.trim()
-                  }
-                >
-                  {busyItem === "create" ? "Saving…" : "Save connection"}
-                </button>
-              </form>
-            </details>
-          ) : null}
         </div>
       </section>
 
@@ -870,11 +830,6 @@ export function AssistantAiSetupView() {
         <div className="assistant-section-heading">
           <div>
             <h2>Model tasks</h2>
-            <p>
-              Choose a connection and model for each task, then follow the two checks
-              shown on its card. The shared console keeps progress, failures, and
-              troubleshooting details together.
-            </p>
           </div>
           <span>
             {
@@ -945,16 +900,6 @@ export function AssistantAiSetupView() {
         ) : null}
       </section>
 
-      <aside className="assistant-provider-boundary">
-        <strong>Setup does not share your library</strong>
-        <p>
-          Verification, model tests, and quality checks use only provider metadata
-          or fixed synthetic inputs. No songs, audio, filesystem paths, or live
-          library tags are sent here. Passed models become optional choices in
-          Playlist Builder or Library Analysis. Each real request has its own data
-          disclosure and confirmation before anything is sent.
-        </p>
-      </aside>
     </div>
   );
 }

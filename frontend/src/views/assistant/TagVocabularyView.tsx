@@ -11,6 +11,7 @@ import { ApiError, assistantApi } from "@/core/api";
 import { toast } from "@/core/toast";
 
 import { ModelTagCleanupPanel } from "./ModelTagCleanupPanel";
+import { AssistantInfoPopover } from "./AssistantInfoPopover";
 import { TagCatalogManager } from "./TagCatalogManager";
 
 type TermListField = "aliases" | "context_cues";
@@ -263,42 +264,27 @@ export function TagVocabularyView() {
         <div>
           <p className="assistant-eyebrow">Database-only music context</p>
           <h1>Mood tag vocabulary</h1>
-          <p>
-            Define the terrain, scene, and mood tags connected models may choose.
-            They live in the music database, independently of album, year, genre,
-            and other metadata embedded in audio files. Exact aliases drive cleanup;
-            context cues may overlap and only help highlight likely AI choices.
-          </p>
+          <p>Define the exact terrain, scene, and mood choices used by tagging.</p>
         </div>
-        <div className="assistant-vocabulary-summary" aria-label="Vocabulary summary">
-          <strong>{tagCount}</strong>
-          <span>canonical tags</span>
-          <small>revision {vocabulary?.revision ?? "—"}</small>
+        <div className="assistant-vocabulary-header-tools">
+          <AssistantInfoPopover label="How it works" title="A controlled vocabulary">
+            <p>
+              These tags live only in the music database. They are separate from album,
+              year, genre, and other metadata embedded in audio files.
+            </p>
+            <p>
+              Models choose exact IDs, the server rejects unknown output, and every
+              suggestion still requires review. Aliases drive deterministic cleanup;
+              context cues only help highlight likely choices.
+            </p>
+          </AssistantInfoPopover>
+          <div className="assistant-vocabulary-summary" aria-label="Vocabulary summary">
+            <strong>{tagCount}</strong>
+            <span>canonical tags</span>
+            <small>revision {vocabulary?.revision ?? "—"}</small>
+          </div>
         </div>
       </header>
-
-      <section className="surface-card assistant-vocabulary-contract">
-        <div>
-          <span>1</span>
-          <strong>You define</strong>
-          <small>names, meanings, aliases, cues</small>
-        </div>
-        <div>
-          <span>2</span>
-          <strong>Model chooses IDs</strong>
-          <small>no free-form tag output</small>
-        </div>
-        <div>
-          <span>3</span>
-          <strong>Server validates</strong>
-          <small>unknown or incomplete output fails</small>
-        </div>
-        <div>
-          <span>4</span>
-          <strong>You review</strong>
-          <small>nothing silently edits the library</small>
-        </div>
-      </section>
 
       {loadError !== null ? (
         <div className="assistant-analysis-error" role="alert">
@@ -327,95 +313,99 @@ export function TagVocabularyView() {
                   </div>
                   <span>{group.tags.length} tags</span>
                 </div>
-                <div className="assistant-vocabulary-tags">
-                  {group.tags.map((tag) => (
-                    <div className="assistant-vocabulary-tag" key={tag.id}>
-                      <div className="assistant-vocabulary-tag-id">
-                        <code>{tag.id}</code>
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          disabled={saving}
-                          onClick={() =>
-                            updateGroup(group.key, (item) => ({
-                              ...item,
-                              tags: item.tags.filter((candidate) => candidate.id !== tag.id),
-                            }))
-                          }
-                          aria-label={`Remove ${tag.name} from the vocabulary`}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                      <label className="field">
-                        <span className="field-label">Canonical name</span>
-                        <input
-                          value={tag.name}
-                          maxLength={64}
-                          required
-                          disabled={saving}
-                          onChange={(event) =>
-                            updateTag(group.key, tag.id, (item) => ({
-                              ...item,
-                              name: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="field assistant-vocabulary-description">
-                        <span className="field-label">Selection meaning</span>
-                        <input
-                          value={tag.description}
-                          maxLength={300}
-                          required
-                          disabled={saving}
-                          onChange={(event) =>
-                            updateTag(group.key, tag.id, (item) => ({
-                              ...item,
-                              description: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <div className="assistant-vocabulary-aliases">
-                        <label className="field">
-                          <span className="field-label">Exact aliases (comma-separated)</span>
-                          <input
-                            value={
-                              termDrafts[tag.id]?.aliases ?? tag.aliases.join(", ")
-                            }
-                            placeholder="inn, pub, alehouse"
-                            disabled={saving}
-                            onChange={(event) =>
-                              updateTerms(group.key, tag, "aliases", event.target.value)
-                            }
-                          />
-                        </label>
-                        <label
-                          className="field"
-                          title="Context cues may overlap between tags. They only highlight model candidates and never rename library tags."
-                        >
-                          <span className="field-label">Context cues (comma-separated)</span>
-                          <input
-                            value={
-                              termDrafts[tag.id]?.context_cues ??
-                              tag.context_cues.join(", ")
-                            }
-                            placeholder="dance, jig, banquet"
-                            disabled={saving}
-                            onChange={(event) =>
-                              updateTerms(
-                                group.key,
-                                tag,
-                                "context_cues",
-                                event.target.value,
-                              )
-                            }
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  ))}
+                <div className="assistant-vocabulary-table-wrap">
+                  <table className="assistant-vocabulary-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Canonical tag</th>
+                        <th scope="col">Selection meaning</th>
+                        <th scope="col">Exact aliases</th>
+                        <th scope="col">Context cues</th>
+                        <th scope="col"><span className="sr-only">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.tags.map((tag) => (
+                        <tr key={tag.id}>
+                          <th scope="row">
+                            <input
+                              aria-label={`Canonical name for ${tag.id}`}
+                              value={tag.name}
+                              maxLength={64}
+                              required
+                              disabled={saving}
+                              onChange={(event) =>
+                                updateTag(group.key, tag.id, (item) => ({
+                                  ...item,
+                                  name: event.target.value,
+                                }))
+                              }
+                            />
+                            <code title={tag.id}>{tag.id}</code>
+                          </th>
+                          <td>
+                            <input
+                              aria-label={`Selection meaning for ${tag.name}`}
+                              value={tag.description}
+                              maxLength={300}
+                              required
+                              disabled={saving}
+                              onChange={(event) =>
+                                updateTag(group.key, tag.id, (item) => ({
+                                  ...item,
+                                  description: event.target.value,
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`Exact aliases for ${tag.name}`}
+                              value={termDrafts[tag.id]?.aliases ?? tag.aliases.join(", ")}
+                              placeholder="inn, pub, alehouse"
+                              disabled={saving}
+                              onChange={(event) =>
+                                updateTerms(group.key, tag, "aliases", event.target.value)
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              aria-label={`Context cues for ${tag.name}`}
+                              title="Cues may overlap. They highlight candidates but never rename library tags."
+                              value={
+                                termDrafts[tag.id]?.context_cues ??
+                                tag.context_cues.join(", ")
+                              }
+                              placeholder="dance, jig, banquet"
+                              disabled={saving}
+                              onChange={(event) =>
+                                updateTerms(group.key, tag, "context_cues", event.target.value)
+                              }
+                            />
+                          </td>
+                          <td className="assistant-vocabulary-table-action">
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              disabled={saving}
+                              onClick={() =>
+                                updateGroup(group.key, (item) => ({
+                                  ...item,
+                                  tags: item.tags.filter(
+                                    (candidate) => candidate.id !== tag.id,
+                                  ),
+                                }))
+                              }
+                              aria-label={`Remove ${tag.name} from the vocabulary`}
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
                 <button
                   type="button"

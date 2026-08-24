@@ -17,6 +17,7 @@ import { uniqueSlug } from "@/core/slugify";
 import { toast } from "@/core/toast";
 
 import { readableBackgroundJobError } from "./backgroundJobs";
+import { ProviderBoundaryPopover } from "./AssistantInfoPopover";
 import {
   MODEL_EQ_DRAFT_JOB_KIND,
   eqDraftFromJob,
@@ -247,34 +248,12 @@ export function EqAssistantView() {
             </Field>
 
             {availability !== null ? (
-              <section className="assistant-model-disclosure">
-                <div className="assistant-model-disclosure-heading">
-                  <div>
-                    <span>Provider boundary</span>
-                    <strong>Review what leaves the server</strong>
-                  </div>
-                  <span>quality checked</span>
-                </div>
-                <div className="assistant-model-disclosure-grid">
-                  <div>
-                    <strong>Shared after you click</strong>
-                    <ul>
-                      {availability.disclosure.shared_with_provider.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <strong>Stays here</strong>
-                    <ul>
-                      {availability.disclosure.never_shared.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-                <p>This request may incur provider cost.</p>
-              </section>
+              <ProviderBoundaryPopover
+                shared={availability.disclosure.shared_with_provider}
+                neverShared={availability.disclosure.never_shared}
+                sharedLabel="Shared after you click"
+                footer="This request may incur provider cost."
+              />
             ) : null}
 
             <button

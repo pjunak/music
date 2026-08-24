@@ -59,6 +59,20 @@ const vocabulary: TagVocabulary = {
       ],
     },
     {
+      key: "scene",
+      label: "Scene",
+      description: "What is happening in the scene.",
+      tags: [
+        {
+          id: "scene.travel",
+          name: "travel",
+          description: "Movement between locations.",
+          aliases: ["journey"],
+          context_cues: ["road"],
+        },
+      ],
+    },
+    {
       key: "mood",
       label: "Mood",
       description: "The emotional tone.",
@@ -130,6 +144,7 @@ describe("TagVocabularyView", () => {
     render(<TagVocabularyView />);
 
     expect(await screen.findByRole("heading", { name: "Setting" })).toBeVisible();
+    expect(screen.getAllByRole("table")).toHaveLength(3);
     expect(screen.getByText("setting.tavern")).toBeVisible();
     expect(screen.getByText("wondrous")).toBeVisible();
 

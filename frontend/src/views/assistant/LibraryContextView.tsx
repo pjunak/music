@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { FolderTree } from "@/components/FolderTree";
+import { LibrarySidebarRail } from "@/components/LibrarySidebarRail";
 import type { TrackContextDetail } from "@/core/api";
 import { assistantApi, libraryApi } from "@/core/api";
 import type { Track } from "@/core/types";
+
+import { AssistantInfoPopover } from "./AssistantInfoPopover";
 
 const TRAJECTORIES = [
   ["intensity", "Intensity"],
@@ -296,63 +299,81 @@ export function LibraryContextView() {
   );
 
   return (
-    <div className="assistant-context-view">
-      <header className="assistant-page-header">
-        <div>
-          <p className="assistant-eyebrow">Local evidence database</p>
+    <div className="library-view assistant-context-view">
+      <header className="library-toolbar assistant-context-toolbar">
+        <div className="assistant-context-toolbar-title">
           <h1>Track context</h1>
-          <p>
-            Browse the condensed evidence used by mood tagging. The directory tree provides
-            the path implicitly, so the selected track view focuses on what the audio actually does.
-          </p>
+          <span>Local evidence used by mood tagging</span>
         </div>
-        <Link to="/assistant/analysis">Build or refresh context</Link>
+        <AssistantInfoPopover label="About this data" title="Factual, local evidence">
+          <p>
+            This view mirrors the Library. The selected folder already supplies the
+            relative path, while the inspector shows condensed whole-track dynamics,
+            tempo, structure, and analysis confidence.
+          </p>
+          <p>The local analyzer never proposes terrain, scene, or mood tags.</p>
+        </AssistantInfoPopover>
+        <Link className="btn-secondary assistant-context-refresh" to="/assistant/analysis">
+          Build or refresh
+        </Link>
       </header>
 
-      <div className="assistant-context-browser">
-        <aside className="assistant-context-folders">
-          <button
-            type="button"
-            className={path === "" ? "active" : ""}
-            onClick={() => setPath("")}
-          >
-            Library root
-          </button>
+      <div className="music-workspace assistant-context-workspace">
+        <LibrarySidebarRail>
           <FolderTree selectedPath={path} onSelect={setPath} loadAll={loadFolders} />
-        </aside>
-        <section className="assistant-context-tracks" aria-label="Tracks in selected folder">
-          <div className="assistant-context-list-heading">
-            <strong>{path || "Library root"}</strong>
-            <span>{tracks.length} tracks</span>
+        </LibrarySidebarRail>
+        <section className="library-main assistant-context-tracks" aria-label="Tracks in selected folder">
+          <div className="folder-header assistant-context-folder-header">
+            <button type="button" className="btn-ghost" onClick={() => setPath("")}>Music</button>
+            <span>{path || "Library root"}</span>
+            <small>{tracks.length} track{tracks.length === 1 ? "" : "s"}</small>
           </div>
           {listError !== null ? <p className="error">{listError}</p> : null}
           {tracks.length === 0 && listError === null ? (
             <p className="muted">No tracks directly in this folder.</p>
           ) : (
-            tracks.map((track) => (
-              <button
-                type="button"
-                key={track.id}
-                className={track.id === selectedId ? "active" : ""}
-                onClick={() => setSelectedId(track.id)}
-              >
-                <strong>{track.display_title || track.title}</strong>
-                <span>{track.artist || "Unknown artist"}</span>
-              </button>
-            ))
+            <div className="track-table-wrap assistant-context-track-table-wrap">
+              <table className="track-table assistant-context-track-table">
+                <thead>
+                  <tr><th>Name</th><th>Artist</th></tr>
+                </thead>
+                <tbody>
+                  {tracks.map((track) => (
+                    <tr
+                      key={track.id}
+                      className={`track-row${track.id === selectedId ? " focused" : ""}`}
+                      aria-selected={track.id === selectedId}
+                      tabIndex={0}
+                      onClick={() => setSelectedId(track.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedId(track.id);
+                        }
+                      }}
+                    >
+                      <td><strong>{track.display_title || track.title}</strong></td>
+                      <td>{track.artist || "Unknown artist"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
-        <main className="surface-card assistant-context-main">
-          {detailError !== null ? (
-            <p className="error">{detailError}</p>
-          ) : selectedId !== null && detail === null ? (
-            <p className="muted">Loading {selectedTrack?.display_title || selectedTrack?.title || "track"}…</p>
-          ) : detail !== null ? (
-            <ContextDetail detail={detail} />
-          ) : (
-            <p className="muted">Select a track to inspect its context.</p>
-          )}
-        </main>
+        <aside className="library-inspector assistant-context-main">
+          <div className="tag-inspector assistant-context-inspector">
+            {detailError !== null ? (
+              <p className="error">{detailError}</p>
+            ) : selectedId !== null && detail === null ? (
+              <p className="muted">Loading {selectedTrack?.display_title || selectedTrack?.title || "track"}…</p>
+            ) : detail !== null ? (
+              <ContextDetail detail={detail} />
+            ) : (
+              <p className="muted">Select a track to inspect its context.</p>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );

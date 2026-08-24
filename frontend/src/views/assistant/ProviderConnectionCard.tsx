@@ -81,35 +81,23 @@ export function ProviderConnectionCard({
       capabilityId,
   );
   return (
-    <article className="surface-card assistant-provider-card">
-      <div className="assistant-provider-card-heading">
-        <div>
-          <span
-            className={`assistant-provider-status is-${connection.verification_status}`}
-          >
-            {verificationStatusLabel(connection.verification_status)}
-          </span>
+    <details className="surface-card assistant-provider-card">
+      <summary className="assistant-provider-card-summary">
+        <span
+          className={`assistant-provider-status is-${connection.verification_status}`}
+        >
+          {verificationStatusLabel(connection.verification_status)}
+        </span>
+        <span className="assistant-provider-card-identity">
           <h3>{connection.name}</h3>
-        </div>
-      </div>
-
-      <p className="assistant-provider-url">{connection.base_url}</p>
-      <div className="assistant-provider-facts" aria-label="Connection summary">
-        <span>
-          Key
-          <strong>
-            {connection.credential_saved
-              ? connection.key_hint ?? "Saved"
-              : "Missing"}
-          </strong>
+          <small>{connection.base_url}</small>
         </span>
-        <span>
-          Models <strong>{models.length}</strong>
+        <span className="assistant-provider-card-usage">
+          <strong>{models.length} model{models.length === 1 ? "" : "s"}</strong>
+          <small>{assignedRoleLabels.join(" · ") || "No assigned tasks"}</small>
         </span>
-        <span>
-          Tasks <strong>{assignedRoleLabels.length}</strong>
-        </span>
-      </div>
+      </summary>
+      <div className="assistant-provider-card-body">
       {connection.verification_status === "failed" ? (
         <p className="assistant-provider-problem" role="status">
           {verificationFailureMessage(connection.verification_error_code)}
@@ -144,20 +132,23 @@ export function ProviderConnectionCard({
           disabled={busy}
           onClick={() => void onDelete(connection)}
         >
-          Delete
+          Delete connection
         </button>
       </div>
 
-      <details className="assistant-provider-details">
-        <summary>Connection details</summary>
+      <div className="assistant-provider-details">
         <dl>
+          <div>
+            <dt>Saved key</dt>
+            <dd>
+              {connection.credential_saved
+                ? connection.key_hint ?? "Saved"
+                : "Missing"}
+            </dd>
+          </div>
           <div>
             <dt>Verified capabilities</dt>
             <dd>{verifiedCapabilityLabels.join(" · ") || "None confirmed"}</dd>
-          </div>
-          <div>
-            <dt>Assigned tasks</dt>
-            <dd>{assignedRoleLabels.join(" · ") || "None"}</dd>
           </div>
           <div>
             <dt>Available models</dt>
@@ -253,7 +244,8 @@ export function ProviderConnectionCard({
             </button>
           </form>
         </details>
-      </details>
-    </article>
+      </div>
+      </div>
+    </details>
   );
 }

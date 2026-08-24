@@ -12,6 +12,7 @@ import {
 import { toast } from "@/core/toast";
 
 import { readableBackgroundJobError } from "./backgroundJobs";
+import { ProviderBoundaryPopover } from "./AssistantInfoPopover";
 import {
   MODEL_TAG_CLEANUP_JOB_KIND,
   isModelTagCleanupJobActive,
@@ -278,42 +279,18 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
       ) : null}
 
       {availability !== null && (availability.available || active) ? (
-        <div
-          className="assistant-model-disclosure assistant-model-tagging-disclosure"
-          aria-label="Mood-tag cleanup model data disclosure"
-        >
-          <div className="assistant-model-disclosure-heading">
-            <div>
-              <span>Provider boundary</span>
-              <strong>Review what leaves the server</strong>
-            </div>
-            <span>quality checked</span>
-          </div>
-          <div className="assistant-model-disclosure-grid">
-            <div>
-              <strong>Shared after confirmation</strong>
-              <ul>
-                {availability.disclosure.shared_with_provider.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <strong>Stays here</strong>
-              <ul>
-                {availability.disclosure.never_shared.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-          <p>
-            {availability.connection_name ?? "Provider"} ·{" "}
-            {availability.model_id ?? "assigned model"} · {availability.manual_tags}{" "}
-            mood-library tags · at most {availability.disclosure.maximum_tags} tags
-            per review.
-          </p>
-        </div>
+        <ProviderBoundaryPopover
+          shared={availability.disclosure.shared_with_provider}
+          neverShared={availability.disclosure.never_shared}
+          footer={
+            <>
+              {availability.connection_name ?? "Provider"} ·{" "}
+              {availability.model_id ?? "assigned model"} · {availability.manual_tags}{" "}
+              mood-library tags · at most {availability.disclosure.maximum_tags} tags
+              per review.
+            </>
+          }
+        />
       ) : null}
 
       {active && job !== null ? (

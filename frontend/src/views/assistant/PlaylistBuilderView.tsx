@@ -27,6 +27,7 @@ import { toast } from "@/core/toast";
 import { wsClient } from "@/core/ws";
 
 import { PlaylistSuggestionResults } from "./PlaylistSuggestionResults";
+import { ProviderBoundaryPopover } from "./AssistantInfoPopover";
 import { ModelUsageSummary } from "./ModelUsageSummary";
 import {
   MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
@@ -583,43 +584,17 @@ export function PlaylistBuilderView() {
               ) : null}
             </fieldset>
             {planningMethod === "model" && modelAvailability !== null ? (
-              <section
-                className="assistant-model-disclosure"
-                aria-label="Connected model data disclosure"
-              >
-                <div className="assistant-model-disclosure-heading">
-                  <div>
-                    <span>Provider boundary</span>
-                    <strong>Review what leaves the server</strong>
-                  </div>
-                  <span>quality checked</span>
-                </div>
-                <div className="assistant-model-disclosure-grid">
-                  <div>
-                    <strong>Shared after confirmation</strong>
-                    <ul>
-                      {modelAvailability.disclosure.shared_with_provider.map(
-                        (item) => (
-                          <li key={item}>{item}</li>
-                        ),
-                      )}
-                    </ul>
-                  </div>
-                  <div>
-                    <strong>Stays here</strong>
-                    <ul>
-                      {modelAvailability.disclosure.never_shared.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-                <p>
+              <ProviderBoundaryPopover
+                shared={modelAvailability.disclosure.shared_with_provider}
+                neverShared={modelAvailability.disclosure.never_shared}
+                footer={
+                  <>
                   At most {modelAvailability.disclosure.maximum_candidates} locally
                   filtered songs. This request may incur provider cost and will run
                   only after you confirm it.
-                </p>
-              </section>
+                  </>
+                }
+              />
             ) : null}
             <Field label="Target length">
               <div className="assistant-number-field">

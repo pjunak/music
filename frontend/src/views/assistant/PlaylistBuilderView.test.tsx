@@ -429,7 +429,8 @@ describe("PlaylistBuilderView", () => {
     await user.click(
       await screen.findByRole("radio", { name: /Connected model/ }),
     );
-    expect(screen.getByText("Review what leaves the server")).toBeInTheDocument();
+    expect(screen.getByText("Provider boundary")).toBeInTheDocument();
+    expect(screen.getByText("What leaves the server")).toBeInTheDocument();
     expect(screen.getByText("Filesystem paths")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Mood or scene"), "misty medieval forest");
     await user.click(

@@ -288,7 +288,9 @@ describe("AssistantAiSetupView", () => {
     expect(
       screen.queryByText(/Each connection stores one provider key/i),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByText("Connection details"));
+    await userEvent.click(
+      screen.getByRole("heading", { name: "Hosted models" }).closest("summary")!,
+    );
     expect(screen.getByText("Playlist planner · Music tagger")).toBeInTheDocument();
     expect(screen.getByText("Structured text")).toBeInTheDocument();
     expect(
@@ -352,10 +354,11 @@ describe("AssistantAiSetupView", () => {
 
     const connectionCard = (await screen.findByRole("heading", {
       name: "Hosted models",
-    })).closest("article");
+    })).closest("details.assistant-provider-card");
     expect(connectionCard).not.toBeNull();
     await userEvent.click(
-      within(connectionCard as HTMLElement).getByText("Connection details"),
+      within(connectionCard as HTMLElement).getByRole("heading", { name: "Hosted models" })
+        .closest("summary")!,
     );
     expect(
       within(connectionCard as HTMLElement).getByText("None confirmed"),
@@ -500,7 +503,10 @@ describe("AssistantAiSetupView", () => {
     });
     render(<AssistantAiSetupView />);
 
-    await user.click(await screen.findByRole("button", { name: "Verify again" }));
+    await user.click(
+      (await screen.findByRole("heading", { name: "Hosted models" })).closest("summary")!,
+    );
+    await user.click(screen.getByRole("button", { name: "Verify again" }));
 
     expect(confirmDialog).toHaveBeenCalledWith({
       title: "Verify connection again?",
@@ -539,10 +545,11 @@ describe("AssistantAiSetupView", () => {
     expect(await screen.findByText("••••1234")).toBeInTheDocument();
     const connectionCard = screen
       .getByRole("heading", { name: "Hosted models" })
-      .closest("article");
+      .closest("details.assistant-provider-card");
     expect(connectionCard).not.toBeNull();
     await user.click(
-      within(connectionCard as HTMLElement).getByText("Connection details"),
+      within(connectionCard as HTMLElement).getByRole("heading", { name: "Hosted models" })
+        .closest("summary")!,
     );
     await user.click(
       within(connectionCard as HTMLElement).getByText("Connection settings"),

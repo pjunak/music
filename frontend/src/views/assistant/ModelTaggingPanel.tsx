@@ -13,6 +13,7 @@ import {
 import { toast } from "@/core/toast";
 
 import { readableBackgroundJobError } from "./backgroundJobs";
+import { ProviderBoundaryPopover } from "./AssistantInfoPopover";
 import {
   MODEL_TAGGING_JOB_KIND,
   isModelTaggingJobActive,
@@ -285,35 +286,17 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
             </div>
           ) : null}
 
-          <div
-            className="assistant-model-disclosure assistant-model-tagging-disclosure"
-            aria-label="Mood tagging model data disclosure"
+          <ProviderBoundaryPopover
+            shared={availability.disclosure.shared_with_provider}
+            neverShared={availability.disclosure.never_shared}
+            footer={
+              <>
+                {availability.connection_name ?? "Provider"} ·{" "}
+                {availability.model_id ?? "assigned model"} · up to{" "}
+                {availability.disclosure.tracks_per_request} tracks per request.
+              </>
+            }
           >
-            <div className="assistant-model-disclosure-heading">
-              <div>
-                <span>Provider boundary</span>
-                <strong>Review what leaves the server</strong>
-              </div>
-              <span>quality checked</span>
-            </div>
-            <div className="assistant-model-disclosure-grid">
-              <div>
-                <strong>Shared after confirmation</strong>
-                <ul>
-                  {availability.disclosure.shared_with_provider.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <strong>Stays here</strong>
-                <ul>
-                  {availability.disclosure.never_shared.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
             <details className="assistant-model-tagging-vocabulary">
               <summary>
                 Review the {availability.disclosure.allowed_tags.length}-tag
@@ -321,12 +304,7 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
               </summary>
               <p>{availability.disclosure.allowed_tags.join(" · ")}</p>
             </details>
-            <p>
-              {availability.connection_name ?? "Provider"} ·{" "}
-              {availability.model_id ?? "assigned model"} · up to{" "}
-              {availability.disclosure.tracks_per_request} tracks per request.
-            </p>
-          </div>
+          </ProviderBoundaryPopover>
         </>
       ) : null}
 
