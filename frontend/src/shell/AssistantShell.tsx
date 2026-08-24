@@ -1,18 +1,59 @@
+import type { ComponentType, SVGProps } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+
+import {
+  LightningIcon,
+  MusicNoteIcon,
+  SettingsIcon,
+  TagIcon,
+} from "@/components/icons";
 
 import { SectionNav } from "./SectionNav";
 
-const ASSISTANT_TABS = [
-  { to: "playlists", label: "Playlist Builder" },
-  { to: "eq", label: "EQ Assistant" },
-  { to: "moods", label: "Mood Library" },
-  { to: "settings", label: "Settings" },
+type AssistantTabIcon = ComponentType<SVGProps<SVGSVGElement>>;
+
+interface AssistantTab {
+  to: string;
+  label: string;
+  shortLabel: string;
+  description: string;
+  icon: AssistantTabIcon;
+}
+
+const ASSISTANT_TABS: AssistantTab[] = [
+  {
+    to: "playlists",
+    label: "Playlist builder",
+    shortLabel: "Playlists",
+    description: "Plan from a mood or scene",
+    icon: MusicNoteIcon,
+  },
+  {
+    to: "eq",
+    label: "EQ drafts",
+    shortLabel: "EQ",
+    description: "Shape a bounded preset",
+    icon: LightningIcon,
+  },
+  {
+    to: "moods",
+    label: "Mood library",
+    shortLabel: "Moods",
+    description: "Analyze, suggest, and review",
+    icon: TagIcon,
+  },
+  {
+    to: "settings",
+    label: "Assistant setup",
+    shortLabel: "Setup",
+    description: "Models and vocabulary",
+    icon: SettingsIcon,
+  },
 ];
 
 interface WorkspaceItem {
   to: string;
   label: string;
-  description: string;
 }
 
 function AssistantWorkspaceShell({
@@ -22,27 +63,7 @@ function AssistantWorkspaceShell({
   ariaLabel: string;
   items: WorkspaceItem[];
 }) {
-  return (
-    <div className="assistant-workspace-section">
-      <nav className="assistant-workspace-nav" aria-label={ariaLabel}>
-        {items.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              `assistant-workspace-nav-item${isActive ? " is-active" : ""}`
-            }
-          >
-            <strong>{item.label}</strong>
-            <span>{item.description}</span>
-          </NavLink>
-        ))}
-      </nav>
-      <div className="assistant-workspace-section-body">
-        <Outlet />
-      </div>
-    </div>
-  );
+  return <SectionNav ariaLabel={ariaLabel} items={items} />;
 }
 
 /**
@@ -51,7 +72,47 @@ function AssistantWorkspaceShell({
  * from complicating the direct editors and their stable write paths.
  */
 export function AssistantShell() {
-  return <SectionNav ariaLabel="Assistant sections" items={ASSISTANT_TABS} />;
+  return (
+    <div className="assistant-shell">
+      <nav className="assistant-task-nav" aria-label="Assistant sections">
+        <div className="assistant-task-nav-intro" aria-hidden="true">
+          <span>Assistant workbench</span>
+          <strong>Prepare, inspect, then create</strong>
+        </div>
+        <div className="assistant-task-nav-list">
+          {ASSISTANT_TABS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                aria-label={item.label}
+                className={({ isActive }) =>
+                  `assistant-task-nav-item${isActive ? " is-active" : ""}`
+                }
+              >
+                <Icon className="assistant-task-nav-icon" />
+                <span className="assistant-task-nav-copy">
+                  <strong>
+                    <span className="assistant-task-nav-label-long">
+                      {item.label}
+                    </span>
+                    <span className="assistant-task-nav-label-short">
+                      {item.shortLabel}
+                    </span>
+                  </strong>
+                  <span>{item.description}</span>
+                </span>
+              </NavLink>
+            );
+          })}
+        </div>
+      </nav>
+      <div className="assistant-task-body">
+        <Outlet />
+      </div>
+    </div>
+  );
 }
 
 export function MoodLibraryShell() {
@@ -62,12 +123,10 @@ export function MoodLibraryShell() {
         {
           to: "workflow",
           label: "Analyze and tag",
-          description: "Build evidence, suggest moods, and review changes",
         },
         {
           to: "context",
           label: "Track context",
-          description: "Inspect the factual evidence behind suggestions",
         },
       ]}
     />
@@ -82,12 +141,10 @@ export function AssistantSettingsShell() {
         {
           to: "models",
           label: "Models and providers",
-          description: "Connections, routing, tests, and limits",
         },
         {
           to: "vocabulary",
           label: "Mood vocabulary",
-          description: "Terrain, scene, and mood choices",
         },
       ]}
     />
