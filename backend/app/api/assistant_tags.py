@@ -209,7 +209,7 @@ def plan_model_music_tagging(
     _user: CurrentUser,
     db: DbSession,
 ) -> ModelTaggingAvailability:
-    return model_tagging_availability(db, payload.scope)
+    return model_tagging_availability(db, payload.scope, payload.context_policy)
 
 
 @router.post(
@@ -227,6 +227,7 @@ def start_model_music_tagging(
             db,
             force=payload.force,
             scope=payload.scope,
+            context_policy=payload.context_policy,
         )
     except ProviderServiceError as exc:
         _raise_provider_error(exc)

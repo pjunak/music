@@ -84,23 +84,21 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   the capabilities actually confirmed, and tasks accept only compatible verified connections.
   Reserved future tasks remain visible as planned work but cannot be configured before their
   feature-specific input, quality, consent, and review contracts exist. The playlist planner,
-  metadata mood tagger, mood-tag cleanup reviewer, and EQ draft assistant are the implemented
+  context-aware mood tagger, mood-tag cleanup reviewer, and EQ draft assistant are the implemented
   optional model tasks.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates, constrains the response to those exact track
   IDs, and returns a draft. Mood tagging sends metadata and canonical library-relative paths in
-  batches of at most 20, may choose only
-  stable IDs from the revisioned operator vocabulary, and stores suggestions under
-  `model-evidence-tagger/v4` for explicit per-tag review. The Mood Vocabulary Assistant tab exposes
-  every canonical name, definition, group, and exact alias for manual editing. Before each request the server
-  builds a deterministic metadata-and-path hypothesis from the disclosed fields, including the
-  exact field and term behind each controlled-vocabulary candidate; a non-empty display title is
-  canonical for this matching. When current local signal analysis exists, tagging may also send
-  bounded energy, brightness, tension, tempo,
-  activity, normalized dynamic range, rhythmic density/stability, and confidence values; audio
-  files, waveforms, the absolute media root, paths outside the indexed library, database mood tags,
-  and detailed measurements remain on the server. Library-relative paths are treated as untrusted
-  descriptive evidence and never as model instructions. Neither
+  batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
+  stores suggestions under `model-context-tagger/v6` for explicit per-tag review. The Mood
+  Vocabulary Assistant tab exposes every canonical name, definition, group, and exact alias for
+  manual editing. When current comprehensive local context exists, tagging may also send bounded
+  whole-track trajectories, tempo development, major acoustic sections and transitions,
+  repetition, analyzer confidence, and an explicit unknown voice status. It does not send locally
+  generated tag hypotheses or ask the provider to recreate energy/brightness/tension axes. Audio
+  files, waveforms, full timelines, spectrograms, the absolute media root, paths outside the indexed
+  library, database mood tags, and detailed measurements remain on the server. Library-relative
+  paths are treated as untrusted descriptive evidence and never as model instructions. Neither
   path can write a playlist or
   manual tag directly. Tag cleanup resolves declared aliases and unambiguous spelling/plural cases
   locally first, then sends only unresolved source IDs/names and usage counts plus canonical ID
@@ -121,15 +119,14 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   a concrete bounded audio transport receives its own reviewed contract.
   See [`ASSISTANT.md`](ASSISTANT.md) for the practical deployment, setup, verification, and
   acceptance guide.
-- **Durable library analysis** — build versioned per-track mood profiles in a server-side job that
-  stores progress, survives page refreshes, resumes safely after restart, skips unchanged tracks,
-  and keeps outputs from different analyzers side by side. `local-metadata/v1` produces reviewable
-  suggestions from existing metadata. `local-audio/v1` separately decodes files on the server and
-  stores measured level, dynamics, high-frequency, transient, and stable-tempo evidence. Signal
-  failures are checkpointed per track and retried later; signal measurements never become manual
-  tags or semantic mood claims automatically. The production image includes FFmpeg for the indexed
-  MP3, FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV
-  fallback.
+- **Durable library context analysis** — one restartable `local-context/v1` job decodes each new or
+  changed track into factual whole-track context: loudness and intensity development, rhythmic
+  drive, brightness, density, spectral change, local tempo behavior, major acoustic sections,
+  repetition, technical details, and explicit analysis-stage status. It stores condensed timelines
+  in a separate context table, checkpoints each completed/failed track, and never proposes semantic
+  tags. The Track Context tab mirrors the library folders, supports playback, and shows the full
+  stored context for a selected song. The production image includes FFmpeg for the indexed MP3,
+  FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV fallback.
 - **Database mood tags** — attach operator-owned terrain, scene, and mood context such as
   `medieval`, `tavern`, `dancing`, `combat`, or any custom term without modifying the audio file or
   its embedded album, artist, year, genre, and similar metadata. Database mood tags and generated
@@ -145,11 +142,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   playlist evidence, and never mutates authored data.
   Review-state filters and explicitly selected bulk decisions make larger libraries manageable;
   stale or invalid suggestions are reported individually instead of blocking valid selections.
-  An optional quality-certified metadata tagging model can populate the same review surface through
+  An optional quality-certified context-aware tagging model can populate the same review surface through
   a durable server job for the whole library, the current folder (recursive or direct children), or
-  explicitly selected tracks. Its Library dialog previews counts and provider calls, restores
-  durable progress, lets the operator audition each song, and preselects only high/medium-confidence
-  suggestions for explicit acceptance. It receives canonical library-relative paths but never the
+  explicitly selected tracks. Its Library dialog previews counts, provider calls, and full/partial/
+  missing context coverage; the operator may run with metadata/path fallback or skip tracks without
+  full current context. It restores durable progress, lets the operator audition each song, and
+  preselects only high/medium-confidence suggestions for explicit acceptance. It receives canonical library-relative paths but never the
   absolute media root, audio, existing database mood tags, or review decisions; it skips unchanged
   model profiles and cannot promote its output without acceptance.
   A separately assigned, quality-certified cleanup model can review only the database mood-tag catalog and

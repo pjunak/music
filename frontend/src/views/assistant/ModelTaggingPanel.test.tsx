@@ -15,7 +15,7 @@ vi.mock("@/core/api", async (importActual) => {
     ...actual,
     assistantApi: {
       ...actual.assistantApi,
-      getModelTaggingAvailability: vi.fn(),
+      planModelTagging: vi.fn(),
       startModelTagging: vi.fn(),
     },
     jobsApi: {
@@ -56,7 +56,10 @@ const availability: ModelTaggingAvailability = {
   job_kind: "assistant.model-music-tagging",
   library_tracks: 45,
   scope_tracks: 45,
-  tracks_with_audio_evidence: 32,
+  planned_tracks: 45,
+  tracks_with_full_context: 32,
+  tracks_with_partial_context: 5,
+  tracks_missing_context: 8,
   current_profiles: 5,
   tracks_needing_tags: 40,
   estimated_provider_requests: 2,
@@ -107,9 +110,7 @@ function renderPanel(onSuggestionsChanged = vi.fn()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(assistantApi.getModelTaggingAvailability).mockResolvedValue(
-    availability,
-  );
+  vi.mocked(assistantApi.planModelTagging).mockResolvedValue(availability);
   vi.mocked(jobsApi.list).mockResolvedValue([]);
   vi.mocked(confirmDialog).mockResolvedValue(true);
 });
@@ -148,6 +149,8 @@ describe("ModelTaggingPanel", () => {
       expect(assistantApi.startModelTagging).toHaveBeenCalledWith(
         false,
         MODEL_TAGGING_DISCLOSURE_VERSION,
+        { type: "all" },
+        "include",
       ),
     );
     expect(toast.success).toHaveBeenCalledWith(
@@ -158,7 +161,7 @@ describe("ModelTaggingPanel", () => {
 
   it("restores server progress after reopen and can cancel", async () => {
     const running = taggingJob();
-    vi.mocked(assistantApi.getModelTaggingAvailability).mockRejectedValue(
+    vi.mocked(assistantApi.planModelTagging).mockRejectedValue(
       new Error("Model readiness is temporarily unavailable."),
     );
     vi.mocked(jobsApi.list).mockResolvedValue([running]);
@@ -216,6 +219,8 @@ describe("ModelTaggingPanel", () => {
       expect(assistantApi.startModelTagging).toHaveBeenCalledWith(
         true,
         MODEL_TAGGING_DISCLOSURE_VERSION,
+        { type: "all" },
+        "include",
       ),
     );
   });
@@ -225,14 +230,16 @@ describe("ModelTaggingPanel", () => {
       status: "succeeded",
       progress_current: 40,
       result: {
-        schema_version: "assistant-model-music-tagging-job-result/v5",
-        analyzer_id: "model-evidence-tagger/v5",
+        schema_version: "assistant-model-music-tagging-job-result/v6",
+        analyzer_id: "model-context-tagger/v6",
         vocabulary_fingerprint: "b".repeat(64),
         library_tracks: 45,
         scope_tracks: 45,
         updated_profiles: 40,
         unchanged_profiles: 5,
         skipped_changed_tracks: 0,
+        context_policy: "include",
+        skipped_context_tracks: 0,
       },
       progress_phase: "Complete",
       progress_message: "Processed 40 of 40 tracks",

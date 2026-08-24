@@ -58,7 +58,10 @@ const availability: ModelTaggingAvailability = {
   job_kind: "assistant.model-music-tagging",
   library_tracks: 90,
   scope_tracks: 1,
-  tracks_with_audio_evidence: 1,
+  planned_tracks: 1,
+  tracks_with_full_context: 1,
+  tracks_with_partial_context: 0,
+  tracks_missing_context: 0,
   current_profiles: 0,
   tracks_needing_tags: 1,
   estimated_provider_requests: 1,
@@ -78,14 +81,16 @@ const succeededJob: BackgroundJob = {
   status: "succeeded",
   parameters: {},
   result: {
-    schema_version: "assistant-model-music-tagging-job-result/v5",
-    analyzer_id: "model-evidence-tagger/v5",
+    schema_version: "assistant-model-music-tagging-job-result/v6",
+    analyzer_id: "model-context-tagger/v6",
     vocabulary_fingerprint: "a".repeat(64),
     library_tracks: 90,
     scope_tracks: 1,
     updated_profiles: 1,
     unchanged_profiles: 0,
     skipped_changed_tracks: 0,
+    context_policy: "include",
+    skipped_context_tracks: 0,
   },
   error: null,
   progress_current: 1,
@@ -120,7 +125,7 @@ const reviewPage: LibraryTagPage = {
       analysis_suggestions: [
         {
           tag: "forest",
-          analyzer_id: "model-evidence-tagger/v5",
+          analyzer_id: "model-context-tagger/v6",
           source_signature: "source-1",
           confidence: "high",
           evidence: ["Library path contains Forest."],
@@ -128,7 +133,7 @@ const reviewPage: LibraryTagPage = {
         },
         {
           tag: "calm",
-          analyzer_id: "model-evidence-tagger/v5",
+          analyzer_id: "model-context-tagger/v6",
           source_signature: "source-1",
           confidence: "low",
           evidence: ["Bounded signal evidence is restrained."],
@@ -161,6 +166,41 @@ afterEach(() => {
 });
 
 describe("MoodTaggingDialog", () => {
+  it("warns about incomplete context and lets the operator skip those tracks", async () => {
+    vi.mocked(assistantApi.planModelTagging).mockResolvedValue({
+      ...availability,
+      tracks_with_full_context: 0,
+      tracks_with_partial_context: 0,
+      tracks_missing_context: 1,
+    });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <MoodTaggingDialog
+          path="Campaign/Forest"
+          checkedIds={[9]}
+          onClose={vi.fn()}
+          onChanged={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText("Some tracks do not have full analysis context"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: /Skip incomplete tracks/ }));
+    await waitFor(() =>
+      expect(assistantApi.planModelTagging).toHaveBeenLastCalledWith(
+        { type: "tracks", track_ids: [9] },
+        "skip",
+      ),
+    );
+    expect(screen.getByRole("link", { name: "Open context analysis" })).toHaveAttribute(
+      "href",
+      "/assistant/context",
+    );
+  });
+
   it("keeps existing database suggestions reviewable when the model is unavailable", async () => {
     vi.mocked(assistantApi.planModelTagging).mockResolvedValue({
       ...availability,
@@ -240,10 +280,10 @@ describe("MoodTaggingDialog", () => {
     );
 
     await waitFor(() =>
-      expect(assistantApi.planModelTagging).toHaveBeenCalledWith({
-        type: "tracks",
-        track_ids: [9],
-      }),
+      expect(assistantApi.planModelTagging).toHaveBeenCalledWith(
+        { type: "tracks", track_ids: [9] },
+        "include",
+      ),
     );
     expect(screen.getByRole("radio", { name: /Selected tracks/ })).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Create suggestions" }));
@@ -256,6 +296,7 @@ describe("MoodTaggingDialog", () => {
         false,
         MODEL_TAGGING_DISCLOSURE_VERSION,
         { type: "tracks", track_ids: [9] },
+        "include",
       ),
     );
 

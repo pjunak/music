@@ -6,6 +6,7 @@ import {
   type BackgroundJob,
   MODEL_TAGGING_DISCLOSURE_VERSION,
   type ModelTaggingAvailability,
+  type ModelTaggingContextPolicy,
   assistantApi,
   jobsApi,
 } from "@/core/api";
@@ -50,6 +51,8 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [force, setForce] = useState(false);
+  const [contextPolicy, setContextPolicy] =
+    useState<ModelTaggingContextPolicy>("include");
   const [refreshKey, setRefreshKey] = useState(0);
   const notifiedJobId = useRef<string | null>(null);
   const jobRef = useRef<BackgroundJob | null>(null);
@@ -61,7 +64,7 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
     async function poll(initial: boolean) {
       if (initial) setLoading(true);
       const [availabilityResult, historyResult] = await Promise.allSettled([
-        assistantApi.getModelTaggingAvailability(),
+        assistantApi.planModelTagging({ type: "all" }, contextPolicy),
         jobsApi.list({ kind: MODEL_TAGGING_JOB_KIND, limit: 1 }),
       ]);
       if (disposed) return;
@@ -96,7 +99,7 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [refreshKey]);
+  }, [contextPolicy, refreshKey]);
 
   useEffect(() => {
     if (job?.status !== "succeeded" || notifiedJobId.current === job.id) return;
@@ -133,9 +136,9 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       };
     }
     return {
-      tracks: availability.scope_tracks,
-      requests: Math.ceil(
-        availability.scope_tracks /
+        tracks: availability.planned_tracks,
+        requests: Math.ceil(
+        availability.planned_tracks /
           Math.max(1, availability.disclosure.tracks_per_request),
       ),
     };
@@ -150,8 +153,8 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
         `processed in about ${requestPlan.requests} provider request${
           requestPlan.requests === 1 ? "" : "s"
         }. Indexed titles, artists, albums, origins, genres, durations, BPM, ` +
-        "and library-relative paths may be sent with a numeric matching ID and your current controlled vocabulary. When current local audio analysis exists, bounded energy, brightness, tension, tempo, and confidence values may also be sent. " +
-        "Audio files, waveforms, the absolute media root, database mood tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
+        "and library-relative paths may be sent with a numeric matching ID and your current controlled vocabulary. When current local context exists, bounded trajectories, tempo development, major sections, repetition, and analyzer confidence may also be sent. " +
+        "Audio files, waveforms, full-resolution timelines, spectrograms, the absolute media root, database mood tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
       confirmLabel: requestPlan.tracks === 0 ? "Check current tags" : "Suggest tags",
       tone: "primary",
     });
@@ -161,6 +164,8 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       const nextJob = await assistantApi.startModelTagging(
         force,
         MODEL_TAGGING_DISCLOSURE_VERSION,
+        { type: "all" },
+        contextPolicy,
       );
       jobRef.current = nextJob;
       setJob(nextJob);
@@ -244,10 +249,41 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
               <span>Estimated requests</span>
             </div>
             <div>
-              <strong>{availability.tracks_with_audio_evidence}</strong>
-              <span>With local signal evidence</span>
+              <strong>{availability.tracks_with_full_context}</strong>
+              <span>With full track context</span>
             </div>
           </div>
+
+          {availability.tracks_with_partial_context + availability.tracks_missing_context > 0 ? (
+            <div className="mood-tagging-context-warning" role="alert">
+              <strong>Context is incomplete for part of the library</strong>
+              <p>
+                {availability.tracks_with_partial_context} partial and{" "}
+                {availability.tracks_missing_context} missing or stale.
+              </p>
+              <div className="cleanup-scope">
+                <label className="cleanup-choice">
+                  <input
+                    type="radio"
+                    name="analysis-model-context-policy"
+                    checked={contextPolicy === "include"}
+                    onChange={() => setContextPolicy("include")}
+                  />
+                  <span>Run anyway</span>
+                </label>
+                <label className="cleanup-choice">
+                  <input
+                    type="radio"
+                    name="analysis-model-context-policy"
+                    checked={contextPolicy === "skip"}
+                    onChange={() => setContextPolicy("skip")}
+                  />
+                  <span>Skip incomplete tracks</span>
+                </label>
+              </div>
+              <Link to="/assistant/context">Build or inspect context</Link>
+            </div>
+          ) : null}
 
           <div
             className="assistant-model-disclosure assistant-model-tagging-disclosure"

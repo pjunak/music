@@ -12,9 +12,9 @@ from app.assistant.analysis import (
     LOCAL_METADATA_ANALYZER_ID,
     track_source_signature,
 )
-from app.assistant.audio_analysis import (
-    CurrentAudioProfile,
-    load_current_audio_profiles,
+from app.assistant.library_context import (
+    CurrentTrackContext,
+    load_current_contexts,
 )
 from app.assistant.model_tagger import MODEL_TAG_ANALYZER_ID
 from app.assistant.model_tagging import (
@@ -163,7 +163,7 @@ def load_current_analysis_tag_suggestions(
         MODEL_TAGGING_ROLE_ID,
     )
     vocabulary_fingerprint = load_tag_vocabulary(db).fingerprint
-    audio_profiles = load_current_audio_profiles(db, list(track_by_id.values()))
+    audio_profiles = load_current_contexts(db, list(track_by_id.values()))
     suggestions: dict[int, list[AnalysisTagSuggestion]] = {}
     for row in rows:
         track = track_by_id.get(row.track_id)
@@ -221,7 +221,7 @@ def _current_source_signature(
     analyzer_id: str,
     model_role_fingerprint: str | None,
     vocabulary_fingerprint: str,
-    audio_profile: CurrentAudioProfile | None,
+    audio_profile: CurrentTrackContext | None,
 ) -> str | None:
     if analyzer_id == LOCAL_METADATA_ANALYZER_ID:
         return track_source_signature(track)
@@ -349,7 +349,7 @@ def review_analysis_tags_bulk(
             MODEL_TAGGING_ROLE_ID,
         )
         vocabulary_fingerprint = load_tag_vocabulary(db).fingerprint
-        audio_profiles = load_current_audio_profiles(db, list(tracks.values()))
+        audio_profiles = load_current_contexts(db, list(tracks.values()))
         for target in canonical:
             track = tracks.get(target.track_id)
             row = analyses.get((target.track_id, target.analyzer_id))

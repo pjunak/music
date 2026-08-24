@@ -16,6 +16,11 @@ from app.assistant.audio_analysis import (
     load_current_audio_profiles,
 )
 from app.assistant.engine import PlaylistSuggestionEngine
+from app.assistant.library_context import (
+    LIBRARY_CONTEXT_JOB_KIND,
+    context_detail,
+    context_summary,
+)
 from app.assistant.local import local_playlist_planner
 from app.assistant.model_eq_job import (
     MODEL_EQ_DRAFT_JOB_KIND,
@@ -31,12 +36,15 @@ from app.assistant.providers.service import ProviderServiceError
 from app.assistant.schemas import (
     LibraryAnalysisStartRequest,
     LibraryAnalysisSummary,
+    LibraryContextStartRequest,
+    LibraryContextSummary,
     ModelEqAvailability,
     ModelEqDraftStartRequest,
     ModelPlaylistAvailability,
     ModelPlaylistSuggestionStartRequest,
     PlaylistSuggestionRequest,
     PlaylistSuggestionResponse,
+    TrackContextDetail,
 )
 from app.assistant.tags import load_manual_tags
 from app.jobs.runner import job_runner
@@ -222,3 +230,62 @@ def library_audio_analysis_summary(
     db: DbSession,
 ) -> LibraryAnalysisSummary:
     return LibraryAnalysisSummary.model_validate(audio_analysis_summary(db))
+
+
+@router.post(
+    "/library-context/jobs",
+    response_model=BackgroundJobOut,
+    status_code=202,
+)
+def start_library_context_analysis(
+    payload: LibraryContextStartRequest,
+    _user: CurrentUser,
+    db: DbSession,
+) -> BackgroundJobOut:
+    parameters = {
+        "force": payload.force,
+        "scope": payload.scope.model_dump(mode="json"),
+    }
+    job, created = enqueue_unique_active_job(
+        db,
+        LIBRARY_CONTEXT_JOB_KIND,
+        parameters,
+    )
+    output = job_out(job)
+    if not created and output.parameters != parameters:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "library_context_in_progress",
+                "message": (
+                    "Another library context analysis is already running. "
+                    "Wait for it to finish or cancel it first."
+                ),
+            },
+        )
+    if created:
+        job_runner.wake()
+    return output
+
+
+@router.get("/library-context/summary", response_model=LibraryContextSummary)
+def library_context_summary(
+    _user: CurrentUser,
+    db: DbSession,
+) -> LibraryContextSummary:
+    return LibraryContextSummary.model_validate(context_summary(db))
+
+
+@router.get(
+    "/library-context/tracks/{track_id}",
+    response_model=TrackContextDetail,
+)
+def library_track_context(
+    track_id: int,
+    _user: CurrentUser,
+    db: DbSession,
+) -> TrackContextDetail:
+    track = db.get(Track, track_id)
+    if track is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+    return TrackContextDetail.model_validate(context_detail(db, track))

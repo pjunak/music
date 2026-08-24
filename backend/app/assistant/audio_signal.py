@@ -302,6 +302,7 @@ def _open_wav_pcm(path: Path) -> Iterator[tuple[int, Iterator[list[float]]]]:
 def _open_ffmpeg_pcm(
     path: Path,
     executable: str,
+    sample_rate: int = _TARGET_SAMPLE_RATE,
 ) -> Iterator[tuple[int, Iterator[list[float]]]]:
     command = [
         executable,
@@ -318,7 +319,7 @@ def _open_ffmpeg_pcm(
         "-ac",
         "1",
         "-ar",
-        str(_TARGET_SAMPLE_RATE),
+        str(sample_rate),
         "-f",
         "s16le",
         "-acodec",
@@ -365,7 +366,7 @@ def _open_ffmpeg_pcm(
 
     body_failed = False
     try:
-        yield _TARGET_SAMPLE_RATE, chunks()
+        yield sample_rate, chunks()
     except BaseException:
         body_failed = True
         raise
@@ -388,10 +389,13 @@ def _open_ffmpeg_pcm(
 
 
 @contextmanager
-def _open_mono_pcm(path: Path) -> Iterator[tuple[int, Iterator[list[float]]]]:
+def _open_mono_pcm(
+    path: Path,
+    sample_rate: int = _TARGET_SAMPLE_RATE,
+) -> Iterator[tuple[int, Iterator[list[float]]]]:
     executable = shutil.which("ffmpeg")
     if executable is not None:
-        with _open_ffmpeg_pcm(path, executable) as decoded:
+        with _open_ffmpeg_pcm(path, executable, sample_rate) as decoded:
             yield decoded
         return
     if path.suffix.lower() == ".wav":

@@ -12,9 +12,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.assistant.analysis import track_source_signature
-from app.assistant.audio_analysis import (
-    CurrentAudioProfile,
-    load_current_audio_profiles,
+from app.assistant.library_context import (
+    CurrentTrackContext,
+    compact_context_projection,
+    load_current_contexts,
 )
 from app.assistant.model_evaluation import (
     TAGGING_QUALITY_EVALUATION_ID,
@@ -23,7 +24,7 @@ from app.assistant.model_evaluation import (
 from app.assistant.model_tagger import (
     MODEL_TAG_ANALYZER_ID,
     MODEL_TAG_BATCH_SIZE,
-    ModelTagAudioEvidence,
+    ModelTagContextEvidence,
     ModelTagTrackInput,
     tag_tracks,
 )
@@ -40,6 +41,7 @@ from app.assistant.providers.usage import ProviderUsageAccumulator
 from app.assistant.tag_schemas import (
     MODEL_TAGGING_DISCLOSURE_VERSION,
     ModelTaggingAvailability,
+    ModelTaggingContextPolicy,
     ModelTaggingDisclosure,
     ModelTaggingJobResult,
     ModelTaggingScope,
@@ -107,24 +109,19 @@ def _model_tagging_disclosure(
             ),
             "Track durations and BPM values when available",
             (
-                "Current local audio-signal proxies when available: energy, brightness, "
-                "tension, tempo, activity, dynamic range, rhythmic density, rhythmic "
-                "stability, and confidence"
-            ),
-            (
-                "A deterministic local-metadata hypothesis: candidate tag IDs with "
-                "matched fields and terms, context-cue and field-support provenance, "
-                "canonical-title source, energy, brightness, tension, and confidence"
+                "Current bounded local track context when available: intensity, loudness, "
+                "rhythmic drive, brightness, density and spectral-change trajectories; "
+                "tempo development; major acoustic sections and transitions; structural "
+                "repetition; analyzer confidence; and explicit unknown voice status"
             ),
             "A server-assigned numeric track ID used only to match the response",
             (
-                "The full operator-managed canonical tag ID, name, and group index, plus "
-                "definitions and exact aliases for locally highlighted candidates; the model "
-                "may return only IDs from the full index"
+                "The full operator-managed canonical tag ID, name, group, definition, and "
+                "exact-alias index; the model may return only IDs from this index"
             ),
         ],
         never_shared=[
-            "Audio files, waveforms, detailed signal measurements, or cover artwork",
+            "Audio files, waveforms, full-resolution timelines, spectrograms, or cover artwork",
             "The absolute media root or filesystem paths outside the indexed library",
             (
                 "Your database mood tags, generated-tag review decisions, or accepted/rejected "
@@ -143,11 +140,12 @@ class _ModelTaggingJobParameters(BaseModel):
 
     role_id: Literal["music_tagger"]
     quality_evaluation_id: Literal["music-tagging-quality-v1"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v6"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v7"]
     consent: Literal[True]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     scope: ModelTaggingScope
+    context_policy: ModelTaggingContextPolicy
     force: bool
 
 
@@ -155,16 +153,16 @@ def model_tag_source_signature(
     track: Track,
     role_fingerprint: str,
     vocabulary_fingerprint: str,
-    audio_profile: CurrentAudioProfile | None,
+    track_context: CurrentTrackContext | None,
 ) -> str:
     """Bind a generated profile to exact metadata, optional audio evidence, and runtime."""
 
-    audio_signature = (
-        audio_profile.source_signature if audio_profile is not None else "no-audio-evidence"
+    context_signature = (
+        track_context.source_signature if track_context is not None else "no-track-context"
     )
     payload = (
         f"{MODEL_TAG_ANALYZER_ID}\0{role_fingerprint}\0"
-        f"{vocabulary_fingerprint}\0{track_source_signature(track)}\0{audio_signature}"
+        f"{vocabulary_fingerprint}\0{track_source_signature(track)}\0{context_signature}"
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -174,7 +172,7 @@ def _current_profile_count(
     tracks: list[Track],
     fingerprint: str | None,
     vocabulary_fingerprint: str,
-    audio_profiles: dict[int, CurrentAudioProfile],
+    contexts: dict[int, CurrentTrackContext],
 ) -> int:
     if not tracks or fingerprint is None:
         return 0
@@ -193,7 +191,7 @@ def _current_profile_count(
             track,
             fingerprint,
             vocabulary_fingerprint,
-            audio_profiles.get(track.id),
+            contexts.get(track.id),
         )
         for track in tracks
     )
@@ -202,6 +200,7 @@ def _current_profile_count(
 def model_tagging_availability(
     db: Session,
     scope: ModelTaggingScope | None = None,
+    context_policy: ModelTaggingContextPolicy = "include",
 ) -> ModelTaggingAvailability:
     scope = scope or ModelTaggingScope()
     role = db.get(AssistantModelRole, MODEL_TAGGING_ROLE_ID)
@@ -213,7 +212,22 @@ def model_tagging_availability(
     tracks = resolve_model_tagging_scope(db, scope)
     library_tracks = int(db.scalar(select(func.count()).select_from(Track)) or 0)
     vocabulary = load_tag_vocabulary(db)
-    audio_profiles = load_current_audio_profiles(db, tracks)
+    contexts = load_current_contexts(db, tracks)
+    full_contexts = {
+        track_id: context
+        for track_id, context in contexts.items()
+        if context.completeness == "full"
+    }
+    partial_contexts = {
+        track_id: context
+        for track_id, context in contexts.items()
+        if context.completeness == "partial"
+    }
+    planned_tracks = (
+        [track for track in tracks if track.id in full_contexts]
+        if context_policy == "skip"
+        else tracks
+    )
     reason_code: str | None = None
     fingerprint: str | None = None
     try:
@@ -228,12 +242,12 @@ def model_tagging_availability(
         fingerprint = current_role_runtime_fingerprint(db, MODEL_TAGGING_ROLE_ID)
     current = _current_profile_count(
         db,
-        tracks,
+        planned_tracks,
         fingerprint,
         vocabulary.fingerprint,
-        audio_profiles,
+        contexts,
     )
-    needed = max(0, len(tracks) - current)
+    needed = max(0, len(planned_tracks) - current)
     return ModelTaggingAvailability(
         available=reason_code is None,
         reason_code=reason_code,
@@ -244,7 +258,10 @@ def model_tagging_availability(
         job_kind=MODEL_TAGGING_JOB_KIND,
         library_tracks=library_tracks,
         scope_tracks=len(tracks),
-        tracks_with_audio_evidence=len(audio_profiles),
+        planned_tracks=len(planned_tracks),
+        tracks_with_full_context=len(full_contexts),
+        tracks_with_partial_context=len(partial_contexts),
+        tracks_missing_context=max(0, len(tracks) - len(contexts)),
         current_profiles=current,
         tracks_needing_tags=needed,
         estimated_provider_requests=math.ceil(needed / MODEL_TAG_BATCH_SIZE),
@@ -257,6 +274,7 @@ def model_tagging_job_parameters(
     *,
     force: bool,
     scope: ModelTaggingScope | None = None,
+    context_policy: ModelTaggingContextPolicy = "include",
 ) -> dict[str, Any]:
     resolved = prepare_quality_gated_role_execution(
         db,
@@ -272,6 +290,7 @@ def model_tagging_job_parameters(
         role_fingerprint=resolved.fingerprint,
         vocabulary_fingerprint=vocabulary.fingerprint,
         scope=scope or ModelTaggingScope(),
+        context_policy=context_policy,
         force=force,
     ).model_dump(mode="json")
 
@@ -301,34 +320,11 @@ def _require_unchanged_quality_gate(
 
 def _track_input(
     track: Track,
-    audio_profile: CurrentAudioProfile | None,
+    track_context: CurrentTrackContext | None,
 ) -> ModelTagTrackInput:
-    def normalized_metric(key: str, low: float, high: float) -> float | None:
-        if audio_profile is None:
-            return None
-        raw = audio_profile.metrics.get(key)
-        if (
-            not isinstance(raw, (int, float))
-            or isinstance(raw, bool)
-            or not math.isfinite(raw)
-        ):
-            return None
-        return round(max(0.0, min(1.0, (float(raw) - low) / (high - low))), 6)
-
-    audio_evidence = (
-        ModelTagAudioEvidence(
-            analyzer_id=audio_profile.analyzer_id,
-            energy=audio_profile.energy,
-            brightness=audio_profile.brightness,
-            tension=audio_profile.tension,
-            tempo_bpm=audio_profile.tempo_bpm,
-            activity=normalized_metric("activity_ratio", 0.0, 1.0),
-            dynamic_range=normalized_metric("level_spread_db", 0.0, 24.0),
-            rhythmic_density=normalized_metric("onset_rate_hz", 0.0, 5.0),
-            rhythmic_stability=normalized_metric("tempo_confidence", 0.0, 1.0),
-            confidence=audio_profile.confidence,
-        )
-        if audio_profile is not None
+    context_evidence = (
+        ModelTagContextEvidence.model_validate(compact_context_projection(track_context))
+        if track_context is not None
         else None
     )
     return ModelTagTrackInput(
@@ -342,8 +338,39 @@ def _track_input(
         library_path=track.path,
         length_s=track.length_s,
         bpm=track.bpm,
-        audio_evidence=audio_evidence,
+        context_evidence=context_evidence,
     )
+
+
+def _local_context_axes(
+    track_context: CurrentTrackContext | None,
+) -> tuple[float, float, float]:
+    if track_context is None:
+        return 0.5, 0.5, 0.5
+    trajectories = track_context.summary.get("trajectories")
+    if not isinstance(trajectories, dict):
+        return 0.5, 0.5, 0.5
+
+    def value(name: str, field: str, default: float) -> float:
+        trajectory = trajectories.get(name)
+        if not isinstance(trajectory, dict):
+            return default
+        raw = trajectory.get(field)
+        if (
+            not isinstance(raw, (int, float))
+            or isinstance(raw, bool)
+            or not math.isfinite(raw)
+        ):
+            return default
+        return max(0.0, min(1.0, float(raw)))
+
+    energy = value("intensity", "typical", 0.5)
+    brightness = value("brightness", "typical", 0.5)
+    tension_proxy = max(
+        value("intensity", "variability", 0.5),
+        value("rhythmic_drive", "typical", 0.5),
+    )
+    return round(energy, 6), round(brightness, 6), round(tension_proxy, 6)
 
 
 def run_model_music_tagging(
@@ -380,14 +407,24 @@ def run_model_music_tagging(
                 )
             ).all()
         }
-        audio_profiles = load_current_audio_profiles(db, tracks)
+        contexts = load_current_contexts(db, tracks)
+
+    scoped_tracks = tracks
+    if parameters.context_policy == "skip":
+        tracks = [
+            track
+            for track in tracks
+            if (track_context := contexts.get(track.id)) is not None
+            and track_context.completeness == "full"
+        ]
+    skipped_context_tracks = len(scoped_tracks) - len(tracks)
 
     signatures = {
         track.id: model_tag_source_signature(
             track,
             parameters.role_fingerprint,
             parameters.vocabulary_fingerprint,
-            audio_profiles.get(track.id),
+            contexts.get(track.id),
         )
         for track in tracks
     }
@@ -437,7 +474,7 @@ def run_model_music_tagging(
 
         profiles = tag_tracks(
             [
-                _track_input(track, audio_profiles.get(track.id))
+                _track_input(track, contexts.get(track.id))
                 for track in batch
             ],
             execute,
@@ -460,7 +497,7 @@ def run_model_music_tagging(
                 for snapshot in batch
                 if (current_track := db.get(Track, snapshot.id)) is not None
             }
-            current_audio_profiles = load_current_audio_profiles(
+            current_contexts = load_current_contexts(
                 db,
                 list(current_tracks.values()),
             )
@@ -472,7 +509,7 @@ def run_model_music_tagging(
                         current_track,
                         parameters.role_fingerprint,
                         parameters.vocabulary_fingerprint,
-                        current_audio_profiles.get(snapshot.id),
+                        current_contexts.get(snapshot.id),
                     )
                     != signatures[snapshot.id]
                 ):
@@ -488,16 +525,20 @@ def run_model_music_tagging(
                     db.add(row)
                 row.source_signature = signatures[snapshot.id]
                 row.job_id = context.job_id
-                row.energy = profile.energy
-                row.brightness = profile.brightness
-                row.tension = profile.tension
+                row.energy, row.brightness, row.tension = _local_context_axes(
+                    current_contexts.get(snapshot.id)
+                )
                 row.moods_json = json.dumps(profile.tags, ensure_ascii=False)
                 row.evidence_json = json.dumps(profile.evidence, ensure_ascii=False)
                 row.metrics_json = json.dumps(
                     {
-                        "contract": "assistant-music-tagger-output/v2",
-                        "input_contract": "assistant-music-tagger-input/v10",
-                        "used_audio_evidence": snapshot.id in audio_profiles,
+                        "contract": "assistant-music-tagger-output/v3",
+                        "input_contract": "assistant-music-tagger-input/v11",
+                        "context_status": (
+                            current_contexts[snapshot.id].completeness
+                            if snapshot.id in current_contexts
+                            else "missing"
+                        ),
                         "role_fingerprint": parameters.role_fingerprint,
                         "vocabulary_fingerprint": (
                             parameters.vocabulary_fingerprint
@@ -517,7 +558,7 @@ def run_model_music_tagging(
         )
 
     return ModelTaggingJobResult(
-        schema_version="assistant-model-music-tagging-job-result/v5",
+        schema_version="assistant-model-music-tagging-job-result/v6",
         disclosure_version=parameters.disclosure_version,
         role_id=parameters.role_id,
         role_fingerprint=parameters.role_fingerprint,
@@ -525,7 +566,9 @@ def run_model_music_tagging(
         vocabulary_fingerprint=parameters.vocabulary_fingerprint,
         library_tracks=library_tracks,
         scope=parameters.scope,
-        scope_tracks=len(tracks),
+        scope_tracks=len(scoped_tracks),
+        context_policy=parameters.context_policy,
+        skipped_context_tracks=skipped_context_tracks,
         updated_profiles=updated,
         unchanged_profiles=max(0, len(tracks) - len(work)),
         skipped_changed_tracks=skipped_changed,

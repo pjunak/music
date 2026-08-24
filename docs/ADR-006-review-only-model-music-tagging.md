@@ -1,6 +1,6 @@
 # ADR-006: Review-only model evidence tagging
 
-**Status:** Accepted
+**Status:** Accepted; provider-input details superseded by ADR-008
 
 **Date:** 2026-08-19
 **Decider:** Project owner
@@ -8,6 +8,11 @@
 **Implementation update (2026-08-23):** Tagging is now scope-aware, may use the
 canonical library-relative path as bounded untrusted evidence, and is launched from a
 playback-capable Library review dialog. The accepted tag store remains database-only.
+
+**Implementation update (2026-08-24):** ADR-008 replaces the local metadata-hypothesis and
+`local-audio/v1` axis input described below with comprehensive factual `local-context/v1`
+evidence. Output is now ID-only `model-context-tagger/v6`; the review-only ownership and
+promotion decisions in this ADR remain unchanged.
 
 ## Context
 

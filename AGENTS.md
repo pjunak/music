@@ -227,34 +227,30 @@ Runtime data lives outside the image.
   The result is a review-only draft and may create a preset only through the existing Authoring
   import preview/select/commit transaction. Never send songs, audio, library metadata, paths,
   playlists, existing presets, or credentials to the EQ role.
-- The optional metadata music tagger may run only through
-  `assistant.model-music-tagging`. Require the exact current
-  `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks per provider
-  request, and keep jobs non-restartable. Provider input is limited to indexed descriptive metadata,
-  duration, BPM, numeric track IDs, the current revisioned operator vocabulary's full compact
-  ID/name/group index plus definitions and exact aliases for locally highlighted candidates,
-  canonical library-relative paths treated as untrusted data,
-  deterministic metadata-and-path tag-ID hypotheses with matched fields/terms,
-  exact-versus-context-cue provenance, single-versus-multiple-field support, and canonical-title
-  provenance, and—when current—
-  bounded `local-audio/v1` energy, brightness, tension, tempo, activity, normalized dynamics,
-  rhythmic density/stability, and confidence values. Never send the absolute media root, paths
-  outside the indexed library, audio, waveforms, detailed signal metrics, database mood tags,
-  stored local generated tags, operator context-cue lists, playlists, or review history. Exact
-  aliases remain one-to-one cleanup mappings; editable context cues may overlap and are used only
-  for local candidate evidence. Bound candidates and matched terms, ordering corroborated
-  candidates before isolated matches and retaining exact names and aliases ahead of cue-only
-  matches when support is otherwise equal. Provider responses may deterministically retain only the first four
-  bounded, well-typed explanatory evidence strings; never repair tag IDs, track IDs, confidence,
-  numeric axes, missing fields, or unexpected fields. Store output
-  under `model-evidence-tagger/v5` in `track_analyses`, bind its source
-  signature to metadata, the optional local-audio source signature, vocabulary fingerprint, and
-  role fingerprint, and
-  expose it only through the existing generated-tag review surface. Resolve the requested scope
-  locally and support the whole library, a folder with explicit recursive/non-recursive behavior,
-  or explicit track IDs. The model may
-  never add a `track_user_tags` row directly. Accepted suggestions become manual tags only through
-  the existing explicit single or bulk review transaction.
+- Optional mood tagging may run only through `assistant.model-music-tagging`. Require the
+  exact current `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks
+  per provider request, and keep jobs non-restartable. Resolve whole-library, folder
+  (recursive/direct), or explicit-track scope locally. Provider input is limited to indexed
+  descriptive metadata, canonical library-relative paths treated as untrusted data, duration,
+  BPM, numeric track IDs, the full revisioned operator vocabulary's IDs/names/groups/definitions/
+  exact aliases, and an optional bounded projection of current `local-context/v1` evidence:
+  loudness, intensity, rhythmic-drive, brightness, density and spectral-change trajectories;
+  tempo development; major acoustic sections/transitions; repetition; confidence; and explicit
+  unknown voice status. Never send the absolute media root, paths outside the indexed library,
+  audio, waveforms, spectrograms, full-resolution timelines, database mood tags, stored
+  suggestions, playlists, review history, or credentials. Local context analysis must remain
+  factual and may never propose terrain, scene, mood, genre, or instrument tags.
+  The model must choose zero through eight exact IDs from the full controlled vocabulary and
+  return confidence plus at most four bounded evidence strings. Do not ask it for signal axes and
+  do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,
+  missing track IDs, malformed confidence, extra fields, and truncated output; only incidental
+  evidence text may be bounded. Store output under `model-context-tagger/v6` in
+  `track_analyses` and bind its source signature to metadata, current context signature (or its
+  absence), vocabulary fingerprint, contract version, and role fingerprint.
+  Before a live run, report full, partial, missing/stale, and failed context coverage. Let the
+  operator either include incomplete tracks using metadata/path alone or skip every track without
+  full current context. The model may never write `track_user_tags`; accepted suggestions become
+  database mood tags only through explicit single or bulk review.
 - Optional model-assisted manual-tag cleanup may run only through
   `assistant.model-tag-cleanup`. Run declared-alias and deterministic spelling/plural cleanup first and make no
   provider call when it resolves every candidate. Require the exact current
@@ -287,10 +283,12 @@ Runtime data lives outside the image.
   Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep
   the usage already incurred. Preserve missing-usage counts explicitly; never infer unreported
   tokens or portable cost from provider-specific pricing.
-- Track analysis profiles are keyed by `(track_id, analyzer_id)`. Preserve source signatures,
-  evidence, confidence, and analyzer versioning so metadata, signal, and optional model outputs can
-  coexist. Suggestion engines may consume only current profiles and must fall back safely when a
-  profile is absent, stale, or malformed.
+- Generated tag profiles remain keyed by `(track_id, analyzer_id)` in `track_analyses`.
+  Comprehensive factual audio context is keyed the same way in `track_contexts` and stores its
+  summary, condensed timeline, major sections, technical facts, and stage status separately from
+  semantic tag suggestions. Preserve source signatures, confidence, and analyzer versioning.
+  Consumers may use only current, well-formed context/profiles and must fall back safely when data
+  is absent, partial, stale, failed, or malformed.
 - Database mood tags are operator-owned rows in `track_user_tags`, independent from embedded file
   tags such as album, artist, year, and genre and independent from generated analysis. Never write
   these rows into media files. Update them with additive/removal deltas, display their source explicitly,

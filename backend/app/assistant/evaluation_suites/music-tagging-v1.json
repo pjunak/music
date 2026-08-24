@@ -1,6 +1,6 @@
 {
-  "schema_version": "assistant-music-tagger-evaluation/v5",
-  "id": "controlled-vocabulary-tagging-baseline-v11",
+  "schema_version": "assistant-music-tagger-evaluation/v6",
+  "id": "controlled-vocabulary-tagging-baseline-v12",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -152,13 +152,23 @@
         "genre": "",
         "length_s": 180.0,
         "bpm": null,
-        "audio_evidence": {
-          "analyzer_id": "local-audio/v1",
-          "energy": 0.86,
-          "brightness": 0.71,
-          "tension": 0.82,
-          "tempo_bpm": 132.0,
-          "confidence": "high"
+        "context_evidence": {
+          "analyzer_id": "local-context/v1",
+          "completeness": "full",
+          "confidence": "high",
+          "trajectories": {
+            "loudness": {"typical": 0.8, "low": 0.65, "high": 0.92, "range": 0.27, "variability": 0.18, "slope": 0.0, "start": 0.8, "end": 0.8, "peak_at_fraction": 0.5, "high_fraction": 0.75, "shape": "steady"},
+            "intensity": {"typical": 0.86, "low": 0.72, "high": 0.95, "range": 0.23, "variability": 0.16, "slope": 0.0, "start": 0.84, "end": 0.86, "peak_at_fraction": 0.6, "high_fraction": 0.8, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.78, "low": 0.62, "high": 0.9, "range": 0.28, "variability": 0.2, "slope": 0.0, "start": 0.76, "end": 0.8, "peak_at_fraction": 0.7, "high_fraction": 0.7, "shape": "steady"},
+            "brightness": {"typical": 0.71, "low": 0.55, "high": 0.84, "range": 0.29, "variability": 0.18, "slope": 0.0, "start": 0.7, "end": 0.72, "peak_at_fraction": 0.4, "high_fraction": 0.6, "shape": "steady"},
+            "density": {"typical": 0.76, "low": 0.61, "high": 0.88, "range": 0.27, "variability": 0.17, "slope": 0.0, "start": 0.74, "end": 0.78, "peak_at_fraction": 0.6, "high_fraction": 0.7, "shape": "steady"},
+            "spectral_flux": {"typical": 0.7, "low": 0.5, "high": 0.88, "range": 0.38, "variability": 0.24, "slope": 0.0, "start": 0.68, "end": 0.72, "peak_at_fraction": 0.5, "high_fraction": 0.6, "shape": "volatile"}
+          },
+          "tempo": {"status": "measured", "typical_bpm": 132.0, "low_bpm": 128.0, "high_bpm": 136.0, "variability": 0.13, "points": []},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.86, "rhythmic_drive": 0.78, "brightness": 0.71, "density": 0.76, "tempo_bpm": 132.0, "tempo_confidence": 0.8, "changes_from_previous": [], "repeats_section_ids": []}],
+          "evidence": ["High intensity remains steady throughout the track."]
         }
       },
       "required_tags": [],
@@ -776,6 +786,122 @@
       },
       "required_tags": ["tundra", "survival", "cold", "lonely"],
       "forbidden_tags": ["warm", "festive"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "quiet-intro-urgent-escape",
+      "description": "Uses the whole-track development rather than mistaking a quiet intro for rest",
+      "track": {
+        "track_id": 41,
+        "title": "Escape from the Sleeping Keep",
+        "display_title": "",
+        "artist": "Night Pursuit Orchestra",
+        "album": "The Chase Begins",
+        "origin": "",
+        "genre": "urgent cinematic",
+        "library_path": "Campaign/Escape from the Sleeping Keep.flac",
+        "length_s": 240.0,
+        "bpm": 132,
+        "context_evidence": {
+          "analyzer_id": "local-context/v1",
+          "completeness": "full",
+          "confidence": "high",
+          "trajectories": {
+            "loudness": {"typical": 0.62, "low": 0.16, "high": 0.93, "range": 0.77, "variability": 0.55, "slope": 0.8, "start": 0.14, "end": 0.91, "peak_at_fraction": 0.94, "high_fraction": 0.32, "shape": "stepped_build"},
+            "intensity": {"typical": 0.68, "low": 0.12, "high": 0.96, "range": 0.84, "variability": 0.62, "slope": 0.92, "start": 0.1, "end": 0.95, "peak_at_fraction": 0.96, "high_fraction": 0.38, "shape": "stepped_build"},
+            "rhythmic_drive": {"typical": 0.7, "low": 0.08, "high": 0.94, "range": 0.86, "variability": 0.6, "slope": 0.88, "start": 0.06, "end": 0.93, "peak_at_fraction": 0.9, "high_fraction": 0.4, "shape": "gradual_rise"},
+            "brightness": {"typical": 0.48, "low": 0.28, "high": 0.69, "range": 0.41, "variability": 0.25, "slope": 0.2, "start": 0.3, "end": 0.61, "peak_at_fraction": 0.84, "high_fraction": 0.18, "shape": "gradual_rise"},
+            "density": {"typical": 0.66, "low": 0.15, "high": 0.94, "range": 0.79, "variability": 0.58, "slope": 0.85, "start": 0.13, "end": 0.92, "peak_at_fraction": 0.92, "high_fraction": 0.36, "shape": "stepped_build"},
+            "spectral_flux": {"typical": 0.58, "low": 0.18, "high": 0.9, "range": 0.72, "variability": 0.52, "slope": 0.55, "start": 0.16, "end": 0.84, "peak_at_fraction": 0.76, "high_fraction": 0.32, "shape": "volatile"}
+          },
+          "tempo": {"status": "measured", "typical_bpm": 132.0, "low_bpm": 68.0, "high_bpm": 138.0, "variability": 0.72, "points": []},
+          "structure": {"section_count": 3, "major_change_count": 2, "repeated_section_count": 0, "development": "sectional"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "sections": [
+            {"id": "s1", "start_fraction": 0.0, "end_fraction": 0.28, "intensity": 0.12, "rhythmic_drive": 0.08, "brightness": 0.3, "density": 0.14, "tempo_bpm": 68.0, "tempo_confidence": 0.45, "changes_from_previous": [], "repeats_section_ids": []},
+            {"id": "s2", "start_fraction": 0.28, "end_fraction": 0.68, "intensity": 0.62, "rhythmic_drive": 0.69, "brightness": 0.48, "density": 0.61, "tempo_bpm": 128.0, "tempo_confidence": 0.75, "changes_from_previous": ["more_intense", "more_rhythmic", "denser"], "repeats_section_ids": []},
+            {"id": "s3", "start_fraction": 0.68, "end_fraction": 1.0, "intensity": 0.94, "rhythmic_drive": 0.92, "brightness": 0.61, "density": 0.91, "tempo_bpm": 138.0, "tempo_confidence": 0.88, "changes_from_previous": ["more_intense", "more_rhythmic", "denser"], "repeats_section_ids": []}
+          ],
+          "evidence": ["The restrained opening develops into a sustained high-intensity pursuit."]
+        }
+      },
+      "required_tags": ["escape", "chase", "urgent"],
+      "forbidden_tags": ["rest", "calm"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "slow-tempo-high-intensity-siege",
+      "description": "Does not infer calm or rest from slow tempo when the whole track stays intense",
+      "track": {
+        "track_id": 42,
+        "title": "Siege Beneath Silent Snow",
+        "display_title": "",
+        "artist": "Northern War Drums",
+        "album": "Frozen Battlefield",
+        "origin": "",
+        "genre": "slow heavy battle",
+        "length_s": 286.0,
+        "bpm": 58,
+        "context_evidence": {
+          "analyzer_id": "local-context/v1",
+          "completeness": "full",
+          "confidence": "high",
+          "trajectories": {
+            "loudness": {"typical": 0.84, "low": 0.75, "high": 0.94, "range": 0.19, "variability": 0.12, "slope": 0.0, "start": 0.82, "end": 0.86, "peak_at_fraction": 0.72, "high_fraction": 0.86, "shape": "steady"},
+            "intensity": {"typical": 0.88, "low": 0.78, "high": 0.97, "range": 0.19, "variability": 0.13, "slope": 0.0, "start": 0.86, "end": 0.9, "peak_at_fraction": 0.78, "high_fraction": 0.9, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.72, "low": 0.62, "high": 0.82, "range": 0.2, "variability": 0.14, "slope": 0.0, "start": 0.7, "end": 0.74, "peak_at_fraction": 0.65, "high_fraction": 0.64, "shape": "steady"},
+            "brightness": {"typical": 0.34, "low": 0.25, "high": 0.46, "range": 0.21, "variability": 0.12, "slope": 0.0, "start": 0.33, "end": 0.35, "peak_at_fraction": 0.45, "high_fraction": 0.02, "shape": "steady"},
+            "density": {"typical": 0.9, "low": 0.8, "high": 0.97, "range": 0.17, "variability": 0.1, "slope": 0.0, "start": 0.88, "end": 0.91, "peak_at_fraction": 0.7, "high_fraction": 0.92, "shape": "steady"},
+            "spectral_flux": {"typical": 0.64, "low": 0.48, "high": 0.8, "range": 0.32, "variability": 0.2, "slope": 0.0, "start": 0.62, "end": 0.66, "peak_at_fraction": 0.58, "high_fraction": 0.45, "shape": "steady"}
+          },
+          "tempo": {"status": "measured", "typical_bpm": 58.0, "low_bpm": 56.0, "high_bpm": 60.0, "variability": 0.07, "points": []},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.88, "rhythmic_drive": 0.72, "brightness": 0.34, "density": 0.9, "tempo_bpm": 58.0, "tempo_confidence": 0.9, "changes_from_previous": [], "repeats_section_ids": []}],
+          "evidence": ["Slow pulse accompanies sustained high intensity and density."]
+        }
+      },
+      "required_tags": ["combat", "tense"],
+      "forbidden_tags": ["rest", "calm"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "fast-tempo-light-market-dance",
+      "description": "Does not equate a fast but light playful dance with combat",
+      "track": {
+        "track_id": 43,
+        "title": "Quick-Footed Market Dance",
+        "display_title": "",
+        "artist": "The Copper Jesters",
+        "album": "Festival Street Frolics",
+        "origin": "",
+        "genre": "playful folk dance",
+        "length_s": 174.0,
+        "bpm": 154,
+        "context_evidence": {
+          "analyzer_id": "local-context/v1",
+          "completeness": "full",
+          "confidence": "high",
+          "trajectories": {
+            "loudness": {"typical": 0.48, "low": 0.38, "high": 0.61, "range": 0.23, "variability": 0.15, "slope": 0.0, "start": 0.46, "end": 0.5, "peak_at_fraction": 0.62, "high_fraction": 0.08, "shape": "steady"},
+            "intensity": {"typical": 0.46, "low": 0.35, "high": 0.58, "range": 0.23, "variability": 0.14, "slope": 0.0, "start": 0.44, "end": 0.47, "peak_at_fraction": 0.56, "high_fraction": 0.04, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.86, "low": 0.74, "high": 0.94, "range": 0.2, "variability": 0.12, "slope": 0.0, "start": 0.84, "end": 0.87, "peak_at_fraction": 0.5, "high_fraction": 0.85, "shape": "steady"},
+            "brightness": {"typical": 0.72, "low": 0.61, "high": 0.83, "range": 0.22, "variability": 0.13, "slope": 0.0, "start": 0.7, "end": 0.73, "peak_at_fraction": 0.46, "high_fraction": 0.62, "shape": "steady"},
+            "density": {"typical": 0.44, "low": 0.32, "high": 0.56, "range": 0.24, "variability": 0.15, "slope": 0.0, "start": 0.42, "end": 0.45, "peak_at_fraction": 0.6, "high_fraction": 0.02, "shape": "steady"},
+            "spectral_flux": {"typical": 0.4, "low": 0.28, "high": 0.55, "range": 0.27, "variability": 0.17, "slope": 0.0, "start": 0.38, "end": 0.41, "peak_at_fraction": 0.52, "high_fraction": 0.05, "shape": "steady"}
+          },
+          "tempo": {"status": "measured", "typical_bpm": 154.0, "low_bpm": 151.0, "high_bpm": 157.0, "variability": 0.1, "points": []},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 1, "development": "repetitive"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.46, "rhythmic_drive": 0.86, "brightness": 0.72, "density": 0.44, "tempo_bpm": 154.0, "tempo_confidence": 0.92, "changes_from_previous": [], "repeats_section_ids": []}],
+          "evidence": ["Fast steady pulse remains light in intensity and density."]
+        }
+      },
+      "required_tags": ["dancing", "festive", "playful"],
+      "forbidden_tags": ["combat", "aggressive"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1
     }

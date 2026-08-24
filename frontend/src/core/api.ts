@@ -379,12 +379,14 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v6" as const;
+  "assistant-model-music-tagging-disclosure/v7" as const;
 
 export type ModelTaggingScope =
   | { type: "all" }
   | { type: "folder"; path: string; recursive: boolean }
   | { type: "tracks"; track_ids: number[] };
+
+export type ModelTaggingContextPolicy = "include" | "skip";
 
 export interface ModelTaggingDisclosure {
   version: typeof MODEL_TAGGING_DISCLOSURE_VERSION;
@@ -405,7 +407,10 @@ export interface ModelTaggingAvailability {
   job_kind: string;
   library_tracks: number;
   scope_tracks: number;
-  tracks_with_audio_evidence: number;
+  planned_tracks: number;
+  tracks_with_full_context: number;
+  tracks_with_partial_context: number;
+  tracks_missing_context: number;
   current_profiles: number;
   tracks_needing_tags: number;
   estimated_provider_requests: number;
@@ -487,6 +492,29 @@ export interface LibraryAnalysisSummary {
   medium_confidence: number;
   low_confidence: number;
   last_updated_at: string | null;
+}
+
+export interface LibraryContextSummary extends LibraryAnalysisSummary {
+  analyzer: "local-context/v1";
+  full_tracks: number;
+  partial_tracks: number;
+  missing_tracks: number;
+}
+
+export interface TrackContextDetail {
+  track_id: number;
+  title: string;
+  artist: string;
+  status: "full" | "partial" | "missing" | "stale" | "failed";
+  analyzer_id: "local-context/v1";
+  confidence: "high" | "medium" | "low" | null;
+  updated_at: string | null;
+  summary: Record<string, unknown> | null;
+  timeline: Array<Record<string, number>>;
+  sections: Array<Record<string, unknown>>;
+  technical: Record<string, unknown> | null;
+  stages: Record<string, unknown> | null;
+  error: string | null;
 }
 
 export interface StarterTagGroup {
@@ -712,23 +740,42 @@ export const assistantApi = {
     api.get<LibraryAnalysisSummary>(
       "/api/assistant/library-audio-analysis/summary",
     ),
+  startLibraryContextAnalysis: (
+    force = false,
+    scope: ModelTaggingScope = { type: "all" },
+  ) =>
+    api.post<BackgroundJob>("/api/assistant/library-context/jobs", {
+      force,
+      scope,
+    }),
+  getLibraryContextSummary: () =>
+    api.get<LibraryContextSummary>("/api/assistant/library-context/summary"),
+  getTrackContext: (trackId: number) =>
+    api.get<TrackContextDetail>(
+      `/api/assistant/library-context/tracks/${encodeURIComponent(trackId)}`,
+    ),
   getModelTaggingAvailability: () =>
     api.get<ModelTaggingAvailability>(
       "/api/assistant/library-tags/model-status",
     ),
-  planModelTagging: (scope: ModelTaggingScope) =>
+  planModelTagging: (
+    scope: ModelTaggingScope,
+    contextPolicy: ModelTaggingContextPolicy = "include",
+  ) =>
     api.post<ModelTaggingAvailability>(
       "/api/assistant/library-tags/model-plan",
-      { scope },
+      { scope, context_policy: contextPolicy },
     ),
   startModelTagging: (
     force: boolean,
     disclosureVersion: typeof MODEL_TAGGING_DISCLOSURE_VERSION,
     scope: ModelTaggingScope = { type: "all" },
+    contextPolicy: ModelTaggingContextPolicy = "include",
   ) =>
     api.post<BackgroundJob>("/api/assistant/library-tags/model-jobs", {
       force,
       scope,
+      context_policy: contextPolicy,
       disclosure_version: disclosureVersion,
       consent: true,
     }),

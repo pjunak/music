@@ -73,29 +73,17 @@ indexed metadata / local audio / operator request
   sequencing. The model receives that baseline and can return only ranked and
   selected IDs from an exact request-specific enum. The example starts from the local
   plan rather than an empty response. Public data and reasons are reconstructed locally.
-- **Music tagging:** the server derives a `local-metadata-evidence/v4`
-  hypothesis with controlled-tag ID, matched-field, matched-term, and canonical-title
-  provenance from the same descriptive fields and canonical library-relative path sent
-  to the provider. Paths and metadata are labelled untrusted; the absolute media root
-  and paths outside the indexed library never cross the provider boundary. Current
-  `local-audio/v1` evidence is reduced to bounded axes, tempo, activity, dynamic range, rhythmic
-  density, rhythmic stability, and confidence. These are labelled hypotheses and
-  signal proxies; they cannot establish semantic setting or scene context by themselves.
-  A revisioned operator vocabulary supplies stable IDs, names, groups, definitions,
-  exact cleanup aliases, and overlapping context cues. The complete compact ID/name/group
-  index is sent once per batch; detailed definitions and aliases are sent only for the
-  locally highlighted candidates. Context cues stay local and may highlight related tags
-  across groups without becoming cleanup mappings. Each candidate identifies which
-  matched terms came only from context cues and whether one or several independent
-  metadata fields support the candidate. Corroborated candidates are ordered first so
-  isolated title or artist words do not anchor fast models ahead of the surrounding
-  context. Candidate and term lists are bounded deterministically, with exact matches
-  retained before cue-only matches when support is otherwise equal. Artist-only
-  matches and known non-literal title contexts are not highlighted, preventing a
-  literal word from anchoring a fast model while keeping every controlled ID in the
-  full vocabulary. The local hypothesis does not remove
-  other operator-approved choices. The model returns only exact IDs; names are restored
-  locally.
+- **Music tagging:** comprehensive `local-context/v1` analysis remains factual and
+  semantic-free. It supplies bounded whole-track trajectories, tempo development, major acoustic
+  sections/transitions, repetition, confidence, and explicit unknown voice status when current.
+  Metadata and canonical library-relative paths are labelled untrusted; the absolute media root,
+  audio, waveforms, spectrograms, full timelines, database mood tags, and review state never cross
+  the provider boundary. The model receives the full revisioned controlled vocabulary with stable
+  IDs, names, groups, definitions, and exact aliases. No local candidate-tag hypothesis is sent and
+  the model does not return signal axes. It may return only exact IDs, confidence, and bounded
+  evidence; names are restored locally. Missing context falls back to conservative metadata/path
+  interpretation only when the operator chooses “run anyway”; “skip incomplete” prevents those
+  tracks from reaching the provider.
 - **Manual-tag cleanup:** declared aliases plus deterministic spelling and plural rules
   run first. Those suggestions require no provider request. The model sees only
   unresolved sources plus canonical ID definitions, then must return one ordered

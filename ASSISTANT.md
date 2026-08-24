@@ -47,11 +47,13 @@ data, not because this release introduces a special risk to them.
 ## 2. Establish the local baseline first
 
 1. Open **Assistant -> Library Analysis**.
-2. Run local metadata analysis. The job is server-owned, so the page may be closed
-   and reopened without losing progress.
-3. Optionally run local audio analysis. It decodes audio on the server and stores
-   bounded numeric evidence; it does not send audio anywhere or invent semantic tags.
-4. Review generated tags and accept only the useful ones. Add or edit database mood tags such
+2. Run the comprehensive local context analysis. The job is server-owned, checkpoints each
+   track, and may be closed and reopened without losing progress. It decodes audio locally into
+   condensed dynamics, rhythm, spectrum, tempo, and structural development; it does not suggest
+   semantic tags or send audio anywhere.
+3. Open **Assistant -> Track Context**, browse a representative set of folders, play several
+   songs, and confirm that quiet openings, builds, peaks, and major sections look reasonable.
+4. Review model-generated tags and accept only the useful ones. Add or edit database mood tags such
    as `medieval`, `tavern`, `dancing`, `combat`, `travel`, and custom campaign terms.
 5. Open **Assistant -> Mood Vocabulary**. Review the canonical names, definitions, and
    aliases that models may use; promote any deliberate custom term that models should
@@ -179,20 +181,21 @@ Use a small, representative sample before running across the whole library.
    counts and estimated provider requests before continuing.
 2. Start with a small representative folder or selection if provider cost or output
    quality is uncertain.
-3. Confirm model output appears as generated `model-evidence-tagger/v4` suggestions,
+3. If the selected scope contains partial, stale, failed, or unanalyzed tracks, choose explicitly
+   between running them with metadata/path context or skipping every track without full context.
+4. Confirm model output appears as generated `model-context-tagger/v6` suggestions,
    separate from local analysis and database mood tags.
-4. Inspect the disclosure: the model receives a deterministic metadata-and-path
-   hypothesis with each candidate tag ID's matched field and term plus the current
-   canonical ID/name/definition list. A non-empty display
-   title is used as the canonical title for this matching. The path is canonical and
+5. Inspect the disclosure: the model receives descriptive metadata, the current full canonical
+   ID/name/definition/alias list, and—when available—a bounded projection of locally measured
+   whole-track trajectories, tempo development, major acoustic sections, repetition, confidence,
+   and explicit unknown voice status. It does not receive a local tag hypothesis or model-owned
+   signal axes. The path is canonical and
    library-relative, is treated as untrusted data, and may reveal useful folder context;
-   the absolute media root is never sent. When available, the model
-   also receives bounded local signal axes/activity/dynamics/rhythm.
-   These remain evidence, not automatic tags.
-5. Audition several tracks inside the review dialog, then accept, reject, and reopen
+   the absolute media root, audio, waveforms, full timelines, and spectrograms are never sent.
+6. Audition several tracks inside the review dialog, then accept, reject, and reopen
    suggestions. Only explicit acceptance may add a database mood tag; the audio file and
    its embedded artist, album, year, genre, and similar tags remain unchanged.
-6. Confirm automatic playlists do not react to pending or rejected model suggestions;
+7. Confirm automatic playlists do not react to pending or rejected model suggestions;
    they may react after an accepted suggestion becomes a manual tag.
 
 ### Mood-tag cleanup

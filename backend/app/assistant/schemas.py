@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.assistant.model_eq import EqPresetDraft
 from app.assistant.providers.schemas import ProviderUsageSummary
+from app.assistant.tag_schemas import ModelTaggingScope
 
 
 class StrictAssistantModel(BaseModel):
@@ -196,3 +197,39 @@ class LibraryAnalysisSummary(StrictAssistantModel):
     medium_confidence: int = Field(ge=0)
     low_confidence: int = Field(ge=0)
     last_updated_at: datetime | None
+
+
+class LibraryContextStartRequest(StrictAssistantModel):
+    force: bool = False
+    scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
+
+
+class LibraryContextSummary(StrictAssistantModel):
+    analyzer: Literal["local-context/v1"]
+    library_tracks: int = Field(ge=0)
+    analyzed_tracks: int = Field(ge=0)
+    full_tracks: int = Field(ge=0)
+    partial_tracks: int = Field(ge=0)
+    missing_tracks: int = Field(ge=0)
+    failed_tracks: int = Field(ge=0)
+    stale_tracks: int = Field(ge=0)
+    high_confidence: int = Field(ge=0)
+    medium_confidence: int = Field(ge=0)
+    low_confidence: int = Field(ge=0)
+    last_updated_at: datetime | None
+
+
+class TrackContextDetail(StrictAssistantModel):
+    track_id: int = Field(gt=0)
+    title: str
+    artist: str
+    status: Literal["full", "partial", "missing", "stale", "failed"]
+    analyzer_id: Literal["local-context/v1"]
+    confidence: Literal["high", "medium", "low"] | None
+    updated_at: datetime | None
+    summary: dict[str, object] | None
+    timeline: list[dict[str, float]]
+    sections: list[dict[str, object]]
+    technical: dict[str, object] | None
+    stages: dict[str, object] | None
+    error: str | None

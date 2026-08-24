@@ -332,8 +332,10 @@ class LibraryTagPage(StrictTagModel):
 
 
 MODEL_TAGGING_DISCLOSURE_VERSION: Literal[
-    "assistant-model-music-tagging-disclosure/v6"
-] = "assistant-model-music-tagging-disclosure/v6"
+    "assistant-model-music-tagging-disclosure/v7"
+] = "assistant-model-music-tagging-disclosure/v7"
+
+ModelTaggingContextPolicy = Literal["include", "skip"]
 
 
 class ModelTaggingScope(StrictTagModel):
@@ -375,6 +377,7 @@ class ModelTaggingScope(StrictTagModel):
 
 class ModelTaggingPlanRequest(StrictTagModel):
     scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
+    context_policy: ModelTaggingContextPolicy = "include"
 
 
 class ModelTaggingReviewQuery(StrictTagModel):
@@ -385,7 +388,7 @@ class ModelTaggingReviewQuery(StrictTagModel):
 
 
 class ModelTaggingDisclosure(StrictTagModel):
-    version: Literal["assistant-model-music-tagging-disclosure/v6"]
+    version: Literal["assistant-model-music-tagging-disclosure/v7"]
     shared_with_provider: list[str]
     never_shared: list[str]
     allowed_tags: list[str]
@@ -403,7 +406,10 @@ class ModelTaggingAvailability(StrictTagModel):
     job_kind: str
     library_tracks: int = Field(ge=0)
     scope_tracks: int = Field(ge=0)
-    tracks_with_audio_evidence: int = Field(ge=0)
+    planned_tracks: int = Field(ge=0)
+    tracks_with_full_context: int = Field(ge=0)
+    tracks_with_partial_context: int = Field(ge=0)
+    tracks_missing_context: int = Field(ge=0)
     current_profiles: int = Field(ge=0)
     tracks_needing_tags: int = Field(ge=0)
     estimated_provider_requests: int = Field(ge=0)
@@ -413,20 +419,23 @@ class ModelTaggingAvailability(StrictTagModel):
 class ModelTaggingStartRequest(StrictTagModel):
     force: bool = False
     scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v6"]
+    context_policy: ModelTaggingContextPolicy = "include"
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v7"]
     consent: Literal[True]
 
 
 class ModelTaggingJobResult(StrictTagModel):
-    schema_version: Literal["assistant-model-music-tagging-job-result/v5"]
-    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v6"]
+    schema_version: Literal["assistant-model-music-tagging-job-result/v6"]
+    disclosure_version: Literal["assistant-model-music-tagging-disclosure/v7"]
     role_id: Literal["music_tagger"]
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
-    analyzer_id: Literal["model-evidence-tagger/v5"]
+    analyzer_id: Literal["model-context-tagger/v6"]
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     library_tracks: int = Field(ge=0)
     scope: ModelTaggingScope
     scope_tracks: int = Field(ge=0)
+    context_policy: ModelTaggingContextPolicy
+    skipped_context_tracks: int = Field(ge=0)
     updated_profiles: int = Field(ge=0)
     unchanged_profiles: int = Field(ge=0)
     skipped_changed_tracks: int = Field(ge=0)

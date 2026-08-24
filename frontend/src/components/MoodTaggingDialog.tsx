@@ -11,6 +11,7 @@ import {
   type LibraryTagPage,
   MODEL_TAGGING_DISCLOSURE_VERSION,
   type ModelTaggingAvailability,
+  type ModelTaggingContextPolicy,
   type ModelTaggingScope,
   assistantApi,
   jobsApi,
@@ -85,6 +86,8 @@ export function MoodTaggingDialog({
   );
   const [recursive, setRecursive] = useState(true);
   const [force, setForce] = useState(false);
+  const [contextPolicy, setContextPolicy] =
+    useState<ModelTaggingContextPolicy>("include");
   const [plan, setPlan] = useState<ModelTaggingAvailability | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(true);
@@ -139,7 +142,7 @@ export function MoodTaggingDialog({
     setPlanLoading(true);
     setPlanError(null);
     void assistantApi
-      .planModelTagging(scope)
+      .planModelTagging(scope, contextPolicy)
       .then((next) => {
         if (!disposed) setPlan(next);
       })
@@ -155,7 +158,7 @@ export function MoodTaggingDialog({
     return () => {
       disposed = true;
     };
-  }, [scope, step]);
+  }, [contextPolicy, scope, step]);
 
   const loadReview = useCallback(
     async (nextOffset: number, targetScope: ModelTaggingScope = reviewScope) => {
@@ -249,9 +252,9 @@ export function MoodTaggingDialog({
 
   async function startTagging() {
     if (plan === null || !plan.available || plan.scope_tracks === 0) return;
-    const workTracks = force ? plan.scope_tracks : plan.tracks_needing_tags;
+    const workTracks = force ? plan.planned_tracks : plan.tracks_needing_tags;
     const requests = force
-      ? Math.ceil(plan.scope_tracks / plan.disclosure.tracks_per_request)
+      ? Math.ceil(plan.planned_tracks / plan.disclosure.tracks_per_request)
       : plan.estimated_provider_requests;
     if (workTracks === 0) {
       setReviewScope(scope);
@@ -262,7 +265,7 @@ export function MoodTaggingDialog({
       title: "Create mood-library suggestions?",
       body:
         `${workTracks} track${workTracks === 1 ? "" : "s"} in ${scopeLabel} will use about ` +
-        `${requests} provider request${requests === 1 ? "" : "s"}. Titles, file and folder names from the library-relative path, descriptive metadata, and bounded local signal evidence may be sent. Audio, the absolute media root, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
+        `${requests} provider request${requests === 1 ? "" : "s"}. Titles, file and folder names from the library-relative path, descriptive metadata, and bounded time-aware local context may be sent. Audio, waveforms, full-resolution timelines, the absolute media root, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
       confirmLabel: workTracks === 0 ? "Check current suggestions" : "Create suggestions",
       tone: "primary",
     });
@@ -273,6 +276,7 @@ export function MoodTaggingDialog({
         force,
         MODEL_TAGGING_DISCLOSURE_VERSION,
         scope,
+        contextPolicy,
       );
       setReviewScope(scope);
       setJob(started);
@@ -416,9 +420,9 @@ export function MoodTaggingDialog({
           ) : plan !== null ? (
             <div className="mood-tagging-stats">
               <span><strong>{plan.scope_tracks}</strong> tracks in scope</span>
-              <span><strong>{plan.tracks_needing_tags}</strong> need suggestions</span>
+              <span><strong>{plan.planned_tracks}</strong> eligible for this run</span>
               <span><strong>{plan.estimated_provider_requests}</strong> provider requests</span>
-              <span><strong>{plan.tracks_with_audio_evidence}</strong> have signal evidence</span>
+              <span><strong>{plan.tracks_with_full_context}</strong> have full context</span>
             </div>
           ) : null}
         </div>
@@ -430,6 +434,52 @@ export function MoodTaggingDialog({
           </div>
         ) : null}
       </section>
+
+      {plan !== null &&
+      plan.tracks_with_partial_context + plan.tracks_missing_context > 0 ? (
+        <section className="mood-tagging-context-warning" role="alert">
+          <div>
+            <strong>Some tracks do not have full analysis context</strong>
+            <p>
+              {plan.tracks_with_partial_context} partial and {plan.tracks_missing_context} missing or stale.
+              You can still run the model, or limit this run to fully analyzed tracks.
+            </p>
+          </div>
+          <div className="cleanup-scope">
+            <label className="cleanup-choice">
+              <input
+                type="radio"
+                name="mood-tagging-context-policy"
+                checked={contextPolicy === "include"}
+                onChange={() => setContextPolicy("include")}
+              />
+              <span>
+                Run anyway
+                <span className="cleanup-hint muted">
+                  The model receives metadata and path context for tracks without full analysis.
+                </span>
+              </span>
+            </label>
+            <label className="cleanup-choice">
+              <input
+                type="radio"
+                name="mood-tagging-context-policy"
+                checked={contextPolicy === "skip"}
+                onChange={() => setContextPolicy("skip")}
+              />
+              <span>
+                Skip incomplete tracks
+                <span className="cleanup-hint muted">
+                  Only tracks with complete current context are sent.
+                </span>
+              </span>
+            </label>
+          </div>
+          <Link to="/assistant/context" onClick={onClose}>
+            Open context analysis
+          </Link>
+        </section>
+      ) : null}
 
       <label className="cleanup-choice mood-tagging-force">
         <input

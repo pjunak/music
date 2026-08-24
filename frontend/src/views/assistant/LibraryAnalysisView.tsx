@@ -1,13 +1,7 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
-import type { BackgroundJob, LibraryAnalysisSummary } from "@/core/api";
+import type { BackgroundJob, LibraryContextSummary } from "@/core/api";
 import { assistantApi, jobsApi } from "@/core/api";
 import { toast } from "@/core/toast";
 
@@ -24,21 +18,14 @@ const LibraryTagEditor = lazy(async () => {
   return { default: module.LibraryTagEditor };
 });
 
-const METADATA_JOB_KIND = "assistant.library-analysis";
-const AUDIO_JOB_KIND = "assistant.library-audio-analysis";
-type AnalyzerKey = "metadata" | "audio";
+export const LIBRARY_CONTEXT_JOB_KIND = "assistant.library-context-analysis";
 
 export function LibraryAnalysisView() {
-  const [metadataHistory, setMetadataHistory] = useState<BackgroundJob[]>([]);
-  const [audioHistory, setAudioHistory] = useState<BackgroundJob[]>([]);
-  const [metadataSummary, setMetadataSummary] =
-    useState<LibraryAnalysisSummary | null>(null);
-  const [audioSummary, setAudioSummary] = useState<LibraryAnalysisSummary | null>(
-    null,
-  );
+  const [history, setHistory] = useState<BackgroundJob[]>([]);
+  const [summary, setSummary] = useState<LibraryContextSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busyAnalyzer, setBusyAnalyzer] = useState<AnalyzerKey | null>(null);
+  const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [tagEditorRefreshKey, setTagEditorRefreshKey] = useState(0);
   const refreshTagSuggestions = useCallback(
@@ -53,22 +40,18 @@ export function LibraryAnalysisView() {
     async function poll(initial: boolean) {
       if (initial) setLoading(true);
       try {
-        const [metadataJobs, audioJobs, nextMetadataSummary, nextAudioSummary] =
-          await Promise.all([
-            jobsApi.list({ kind: METADATA_JOB_KIND, limit: 10 }),
-            jobsApi.list({ kind: AUDIO_JOB_KIND, limit: 10 }),
-            assistantApi.getLibraryAnalysisSummary(),
-            assistantApi.getLibraryAudioAnalysisSummary(),
-          ]);
+        const [nextHistory, nextSummary] = await Promise.all([
+          jobsApi.list({ kind: LIBRARY_CONTEXT_JOB_KIND, limit: 10 }),
+          assistantApi.getLibraryContextSummary(),
+        ]);
         if (disposed) return;
-        setMetadataHistory(metadataJobs);
-        setAudioHistory(audioJobs);
-        setMetadataSummary(nextMetadataSummary);
-        setAudioSummary(nextAudioSummary);
+        setHistory(nextHistory);
+        setSummary(nextSummary);
         setLoadError(null);
-        const hasActiveJob =
-          isAnalysisJobActive(metadataJobs[0]) || isAnalysisJobActive(audioJobs[0]);
-        timer = window.setTimeout(() => void poll(false), hasActiveJob ? 1500 : 5000);
+        timer = window.setTimeout(
+          () => void poll(false),
+          isAnalysisJobActive(nextHistory[0]) ? 1500 : 5000,
+        );
       } catch (error) {
         if (disposed) return;
         setLoadError(
@@ -87,80 +70,54 @@ export function LibraryAnalysisView() {
     };
   }, [refreshKey]);
 
-  const combinedHistory = useMemo(
-    () =>
-      [...metadataHistory, ...audioHistory].sort((left, right) =>
-        right.created_at.localeCompare(left.created_at),
-      ),
-    [audioHistory, metadataHistory],
-  );
-
-  function historyFor(analyzer: AnalyzerKey): BackgroundJob[] {
-    return analyzer === "metadata" ? metadataHistory : audioHistory;
-  }
-
-  function replaceLatest(analyzer: AnalyzerKey, job: BackgroundJob, refresh = false) {
-    const setter = analyzer === "metadata" ? setMetadataHistory : setAudioHistory;
-    setter((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+  function replaceLatest(job: BackgroundJob, refresh = false) {
+    setHistory((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     if (refresh) setRefreshKey((value) => value + 1);
   }
 
-  async function start(analyzer: AnalyzerKey, force: boolean) {
-    setBusyAnalyzer(analyzer);
+  async function start(force: boolean) {
+    setBusy(true);
     try {
-      const job =
-        analyzer === "metadata"
-          ? await assistantApi.startLibraryAnalysis(force)
-          : await assistantApi.startLibraryAudioAnalysis(force);
-      replaceLatest(analyzer, job);
-      const title =
-        analyzer === "metadata"
-          ? force
-            ? "Library rebuild queued"
-            : "Library analysis queued"
-          : force
-            ? "Audio rebuild queued"
-            : "Audio analysis queued";
-      toast.success(title, "You can leave this page; progress is stored on the server.");
+      const job = await assistantApi.startLibraryContextAnalysis(force);
+      replaceLatest(job);
+      toast.success(
+        force ? "Context rebuild queued" : "Context analysis queued",
+        "The multistep analysis continues on the server and checkpoints every track.",
+      );
       setRefreshKey((value) => value + 1);
     } catch (error) {
       toast.error(
-        "Analysis could not start",
+        "Context analysis could not start",
         error instanceof Error ? error.message : undefined,
       );
     } finally {
-      setBusyAnalyzer(null);
+      setBusy(false);
     }
   }
 
-  async function cancel(analyzer: AnalyzerKey) {
-    const latest = historyFor(analyzer)[0];
+  async function cancel() {
+    const latest = history[0];
     if (latest === undefined) return;
-    setBusyAnalyzer(analyzer);
+    setBusy(true);
     try {
-      const job = await jobsApi.cancel(latest.id);
-      replaceLatest(analyzer, job, true);
+      replaceLatest(await jobsApi.cancel(latest.id), true);
     } catch (error) {
-      toast.error(
-        "Cancellation failed",
-        error instanceof Error ? error.message : undefined,
-      );
+      toast.error("Cancellation failed", error instanceof Error ? error.message : undefined);
     } finally {
-      setBusyAnalyzer(null);
+      setBusy(false);
     }
   }
 
-  async function retry(analyzer: AnalyzerKey) {
-    const latest = historyFor(analyzer)[0];
+  async function retry() {
+    const latest = history[0];
     if (latest === undefined) return;
-    setBusyAnalyzer(analyzer);
+    setBusy(true);
     try {
-      const job = await jobsApi.retry(latest.id);
-      replaceLatest(analyzer, job, true);
+      replaceLatest(await jobsApi.retry(latest.id), true);
     } catch (error) {
       toast.error("Retry failed", error instanceof Error ? error.message : undefined);
     } finally {
-      setBusyAnalyzer(null);
+      setBusy(false);
     }
   }
 
@@ -168,18 +125,18 @@ export function LibraryAnalysisView() {
     <div className="assistant-analysis-view">
       <header className="assistant-page-header assistant-analysis-header">
         <div>
-          <p className="assistant-eyebrow">Durable server-side work</p>
-          <h1>Library analysis</h1>
+          <p className="assistant-eyebrow">One durable local workflow</p>
+          <h1>Library context analysis</h1>
           <p>
-            Build reusable evidence for the whole library with local analyzers and
-            an optional connected tagging model. Jobs continue on the server and
-            this page restores their progress after refresh or reopen.
+            Decode each track once into factual, time-aware context for mood tagging:
+            dynamics, rhythmic development, spectral movement, tempo, sections, and
+            repetition. The analyzer never suggests mood tags itself.
           </p>
         </div>
-        <div className="assistant-algorithm-list" aria-label="Available analyzers">
-          <span className="assistant-algorithm">local-metadata/v1</span>
-          <span className="assistant-algorithm">local-audio/v1</span>
-          <span className="assistant-algorithm">optional model tagging</span>
+        <div className="assistant-algorithm-list" aria-label="Analysis contract">
+          <span className="assistant-algorithm">local-context/v1</span>
+          <span className="assistant-algorithm">checkpointed per track</span>
+          <Link to="/assistant/context">Browse track context</Link>
         </div>
       </header>
 
@@ -193,48 +150,44 @@ export function LibraryAnalysisView() {
       ) : null}
 
       <LibraryAnalyzerPanel
-        id="metadata-analysis"
-        title="Metadata profiles"
-        description="Turn filenames, paths, genres, origins, and BPM tags into explainable local suggestions."
-        analyzer="local-metadata/v1"
-        history={metadataHistory}
-        summary={metadataSummary}
+        id="context-analysis"
+        title="Comprehensive track context"
+        description="Measure the whole track, preserve important changes over time, and condense the result into bounded evidence the tagging model can use."
+        analyzer="local-context/v1"
+        history={history}
+        summary={summary}
         loading={loading}
-        actionBusy={busyAnalyzer === "metadata"}
-        progressLabel="Library analysis progress"
-        emptyTitle="No library analysis has run yet"
-        emptyDescription="Start the local pass to turn existing metadata and BPM values into reusable, versioned mood profiles."
-        analyzeLabel="Analyze library"
-        checkLabel="Check for changes"
-        rebuildTitle="Recompute every profile even when its source metadata is unchanged"
-        coverageNote="This pass uses existing metadata only. Its generated tags remain separate until you explicitly review them below."
-        showFailureStat={false}
-        onStart={(force) => void start("metadata", force)}
-        onCancel={() => void cancel("metadata")}
-        onRetry={() => void retry("metadata")}
+        actionBusy={busy}
+        progressLabel="Library context analysis progress"
+        emptyTitle="No track context has been built yet"
+        emptyDescription="Start the server-side pass. It can take considerably longer than the old signal scan, but completed tracks are saved immediately and do not need to be repeated."
+        analyzeLabel="Build library context"
+        checkLabel="Analyze new and changed tracks"
+        rebuildTitle="Decode and recompute every track even when its indexed source is unchanged"
+        coverageNote="The output is descriptive evidence only. It does not claim a mood, genre, instrument, terrain, or scene and it never writes tags to audio files."
+        showFailureStat
+        onStart={(force) => void start(force)}
+        onCancel={() => void cancel()}
+        onRetry={() => void retry()}
       />
 
-      <LibraryAnalyzerPanel
-        id="audio-analysis"
-        title="Audio signal profiles"
-        description="Measure level, dynamics, high-frequency content, transient activity, and a tempo estimate when the pulse is stable."
-        analyzer="local-audio/v1"
-        history={audioHistory}
-        summary={audioSummary}
-        loading={loading}
-        actionBusy={busyAnalyzer === "audio"}
-        progressLabel="Audio signal analysis progress"
-        emptyTitle="No audio signal analysis has run yet"
-        emptyDescription="Start the server-side pass. It processes one track at a time, checkpoints failures, and can continue after a restart."
-        analyzeLabel="Analyze audio signals"
-        checkLabel="Check audio changes"
-        rebuildTitle="Decode and remeasure every track even when the indexed file is unchanged"
-        coverageNote="These are measured signal features and conservative proxies. They do not automatically claim a mood, genre, instrument, or D&D scene tag."
-        showFailureStat
-        onStart={(force) => void start("audio", force)}
-        onCancel={() => void cancel("audio")}
-        onRetry={() => void retry("audio")}
-      />
+      {summary !== null ? (
+        <section className="surface-card assistant-context-coverage">
+          <div className="assistant-section-heading">
+            <div>
+              <p className="assistant-eyebrow">Tagging readiness</p>
+              <h2>Context coverage</h2>
+            </div>
+            <Link to="/assistant/context">Inspect individual tracks</Link>
+          </div>
+          <div className="assistant-model-tagging-stats">
+            <div><strong>{summary.full_tracks}</strong><span>Full context</span></div>
+            <div><strong>{summary.partial_tracks}</strong><span>Partial context</span></div>
+            <div><strong>{summary.missing_tracks}</strong><span>Not analyzed</span></div>
+            <div><strong>{summary.failed_tracks + summary.stale_tracks}</strong><span>Failed or stale</span></div>
+          </div>
+        </section>
+      ) : null}
 
       <ModelTaggingPanel onSuggestionsChanged={refreshTagSuggestions} />
 
@@ -252,19 +205,19 @@ export function LibraryAnalysisView() {
         <div className="assistant-section-heading">
           <div>
             <p className="assistant-eyebrow">Persistent history</p>
-            <h2>Recent analysis jobs</h2>
+            <h2>Recent context jobs</h2>
           </div>
         </div>
-        {combinedHistory.length === 0 ? (
+        {history.length === 0 ? (
           <p className="muted">Completed and interrupted runs will appear here.</p>
         ) : (
           <div className="assistant-job-history-list">
-            {combinedHistory.map((job) => (
+            {history.map((job) => (
               <div className="assistant-job-history-row" key={job.id}>
                 <span className={`assistant-job-status is-${job.status}`}>
                   {analysisStatusLabel(job.status)}
                 </span>
-                <span>{job.kind === AUDIO_JOB_KIND ? "Audio signal" : "Metadata"}</span>
+                <span>Track context</span>
                 <span>{job.progress_phase || "Queued"}</span>
                 <span>{formatAnalysisTime(job.created_at)}</span>
                 <span>Attempt {job.attempts || 1}</span>

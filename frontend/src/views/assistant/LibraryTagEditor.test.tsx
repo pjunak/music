@@ -141,7 +141,7 @@ describe("LibraryTagEditor", () => {
             {
               ...track.analysis_suggestions[0],
               tag: "dancing",
-              analyzer_id: "model-evidence-tagger/v5",
+              analyzer_id: "model-context-tagger/v6",
               evidence: ["Title and genre support a dancing scene."],
             },
           ],
@@ -151,7 +151,7 @@ describe("LibraryTagEditor", () => {
     render(<LibraryTagEditor />);
 
     expect(
-      await screen.findByText(/model-evidence-tagger\/v5/),
+      await screen.findByText(/model-context-tagger\/v6/),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Accept dancing into mood library" }),
