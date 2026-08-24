@@ -13,7 +13,6 @@ from app.models.background_job import BackgroundJob
 from app.models.base import utcnow
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "cancel_requested")
-TERMINAL_JOB_STATUSES = ("succeeded", "failed", "cancelled")
 _enqueue_lock = threading.Lock()
 
 

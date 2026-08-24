@@ -31,7 +31,6 @@ EQ_DRAFT_INPUT_CONTRACT: Literal["assistant-eq-draft-input/v2"] = (
 EQ_DRAFT_OUTPUT_CONTRACT: Literal["assistant-eq-draft-output/v1"] = (
     "assistant-eq-draft-output/v1"
 )
-EQ_QUALITY_CONTRACT: Literal["assistant-eq-quality/v1"] = "assistant-eq-quality/v1"
 EQ_DRAFT_ENGINE_ID: Literal["model-graphic-eq/v2"] = "model-graphic-eq/v2"
 EQ_FREQUENCIES: tuple[int, ...] = (
     32,

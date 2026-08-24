@@ -729,18 +729,6 @@ export const assistantApi = {
       disclosure_version: disclosureVersion,
       consent: true,
     }),
-  startLibraryAnalysis: (force = false) =>
-    api.post<BackgroundJob>("/api/assistant/library-analysis/jobs", { force }),
-  getLibraryAnalysisSummary: () =>
-    api.get<LibraryAnalysisSummary>("/api/assistant/library-analysis/summary"),
-  startLibraryAudioAnalysis: (force = false) =>
-    api.post<BackgroundJob>("/api/assistant/library-audio-analysis/jobs", {
-      force,
-    }),
-  getLibraryAudioAnalysisSummary: () =>
-    api.get<LibraryAnalysisSummary>(
-      "/api/assistant/library-audio-analysis/summary",
-    ),
   startLibraryContextAnalysis: (
     force = false,
     scope: ModelTaggingScope = { type: "all" },
@@ -754,10 +742,6 @@ export const assistantApi = {
   getTrackContext: (trackId: number) =>
     api.get<TrackContextDetail>(
       `/api/assistant/library-context/tracks/${encodeURIComponent(trackId)}`,
-    ),
-  getModelTaggingAvailability: () =>
-    api.get<ModelTaggingAvailability>(
-      "/api/assistant/library-tags/model-status",
     ),
   planModelTagging: (
     scope: ModelTaggingScope,
@@ -1132,8 +1116,6 @@ export const libraryApi = {
       items,
     }),
   rescan: () => api.post<RescanResult>("/api/library/rescan"),
-  updateMetadata: (id: number, payload: MetadataUpdate) =>
-    api.patch<Track>(`/api/library/tracks/${id}/metadata`, payload),
   updateBulkMetadata: (payload: BulkMetadataUpdate) =>
     api.patch<BulkMetadataResult>("/api/library/tracks/bulk-metadata", payload),
   moveTrack: (id: number, destination: string, newFilename?: string) =>

@@ -20,10 +20,6 @@ from app.core.config import get_settings
 
 VOICE_ANALYZER_ID = "essentia-musicnn-voice/v1"
 VOICE_MODEL_FILENAME = "voice_instrumental-musicnn-msd-2.pb"
-VOICE_MODEL_URL = (
-    "https://essentia.upf.edu/models/classifiers/voice_instrumental/"
-    f"{VOICE_MODEL_FILENAME}"
-)
 VOICE_MODEL_SHA256 = "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a"
 
 

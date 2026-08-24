@@ -26,10 +26,7 @@ from app.assistant.providers.execution import (
     StructuredModelResult,
     execute_structured_model_request,
 )
-from app.assistant.providers.service import (
-    ProviderServiceError,
-    current_role_runtime_fingerprint,
-)
+from app.assistant.providers.service import ProviderServiceError
 from app.assistant.providers.usage import ProviderUsageAccumulator
 from app.assistant.tag_cleanup import build_tag_cleanup_preview, tag_catalog_snapshot
 from app.assistant.tag_schemas import (
@@ -312,12 +309,6 @@ def run_model_tag_cleanup(
         suggestions=output,
         usage=usage.summary(),
     ).model_dump(mode="json")
-
-
-def current_cleanup_role_fingerprint(db: Session) -> str | None:
-    return current_role_runtime_fingerprint(db, MODEL_TAG_CLEANUP_ROLE_ID)
-
-
 register_job_handler(
     MODEL_TAG_CLEANUP_JOB_KIND,
     run_model_tag_cleanup,

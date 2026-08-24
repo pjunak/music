@@ -341,8 +341,3 @@ class CredentialVault:
             return cleartext.decode("utf-8")
         except (InvalidTag, UnicodeDecodeError, ValueError, binascii.Error) as exc:
             raise CredentialVaultError("credential_unreadable") from exc
-
-
-def credential_vault_status() -> tuple[bool, str | None]:
-    status = credential_storage_status()
-    return status.ready, status.error
