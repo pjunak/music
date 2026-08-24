@@ -138,13 +138,15 @@ export function qualityStatusLabel(
   if (view.activeJob !== undefined) {
     if (view.activeJob.status === "cancel_requested") return "Cancelling";
     if (view.activeJob.progress_total !== null) {
-      return `${view.activeJob.progress_current} / ${view.activeJob.progress_total} runs`;
+      const progressUnit =
+        evaluation.role_id === "music_tagger" ? "executions" : "scenarios";
+      return `${view.activeJob.progress_current} / ${view.activeJob.progress_total} ${progressUnit}`;
     }
     return view.activeJob.status === "queued" ? "Queued" : "Running";
   }
   if (evaluation.status === "passed" || evaluation.status === "failed") {
     return evaluation.total_cases > 0
-      ? `${evaluation.passed_cases} / ${evaluation.total_cases}`
+      ? `${evaluation.passed_cases} / ${evaluation.total_cases} scenarios`
       : evaluation.status === "passed"
         ? "Passed"
         : "Failed";

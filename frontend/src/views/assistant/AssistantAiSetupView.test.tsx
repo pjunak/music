@@ -1020,11 +1020,55 @@ describe("AssistantAiSetupView", () => {
         name: "Playlist model quality progress",
       }),
     ).toHaveValue(2);
+    const plannerCard = screen
+      .getByRole("heading", { name: "Playlist planner" })
+      .closest("article");
+    expect(plannerCard).not.toBeNull();
+    expect(
+      within(plannerCard as HTMLElement).getByText("2 / 5 scenarios"),
+    ).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "Cancel quality check" }),
     );
     expect(jobsApi.cancel).toHaveBeenCalledWith("quality-job-1");
+  });
+
+  it("labels mood-tagging progress as executions rather than scored scenarios", async () => {
+    const running = qualityJob({
+      kind: "assistant.model-evaluation.music-tagging-quality-v1",
+      parameters: {
+        role_id: "music_tagger",
+        evaluation_id: "music-tagging-quality-v1",
+      },
+      progress_current: 4,
+      progress_total: 50,
+      progress_phase: "Evaluating music tagger",
+      progress_message:
+        "Completed 4 of 50 model executions across 43 scored scenarios",
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      musicTaggingRole,
+    ]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      musicTaggingEvaluation,
+    ]);
+    vi.mocked(jobsApi.list).mockResolvedValue([running]);
+    render(<AssistantAiSetupView />);
+
+    expect(
+      await screen.findByText(
+        "Completed 4 of 50 model executions across 43 scored scenarios",
+      ),
+    ).toBeInTheDocument();
+    const taggerCard = screen
+      .getByRole("heading", { name: "Music tagger" })
+      .closest("article");
+    expect(taggerCard).not.toBeNull();
+    expect(
+      within(taggerCard as HTMLElement).getByText("4 / 50 executions"),
+    ).toBeInTheDocument();
   });
 
   it("keeps an obsolete interrupted attempt in the troubleshooting log", async () => {
@@ -1404,7 +1448,9 @@ describe("AssistantAiSetupView", () => {
       .getByRole("heading", { name: "Playlist planner" })
       .closest("article");
     expect(taskCard).not.toBeNull();
-    expect(within(taskCard as HTMLElement).getByText("3 / 5")).toBeInTheDocument();
+    expect(
+      within(taskCard as HTMLElement).getByText("3 / 5 scenarios"),
+    ).toBeInTheDocument();
     expect(
       within(taskCard as HTMLElement).getByText("Quality check failed"),
     ).toBeInTheDocument();
