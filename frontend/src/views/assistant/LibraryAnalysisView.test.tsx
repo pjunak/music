@@ -172,6 +172,9 @@ describe("LibraryAnalysisView", () => {
     ).toHaveValue(42);
     expect(screen.getByText("Full context")).toBeInTheDocument();
     expect(screen.getByText("Partial context")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Evidence ready for tagging" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(jobsApi.cancel).toHaveBeenCalledWith("context-job-1");
   });

@@ -208,8 +208,8 @@ export function LibraryAnalyzerPanel({
         <div className="surface-card assistant-analysis-summary">
           <div className="assistant-section-heading">
             <div>
-              <p className="assistant-eyebrow">Stored profiles</p>
-              <h3>Coverage</h3>
+              <p className="assistant-eyebrow">Analyzer coverage</p>
+              <h3>Stored track context</h3>
             </div>
             <span>{summary?.analyzer ?? analyzer}</span>
           </div>

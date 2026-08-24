@@ -86,6 +86,7 @@
                          dragged width overrides this per-view via uiStore) */
   --rail-inspector: 340px; /* Library tag-inspector column */
   --form-width: 520px; /* create / meta cards, narrow forms */
+  --workspace-max: 112rem; /* wide operator workspaces on desktop monitors */
   --footer-h: 5.5rem; /* NowPlayingBar height — drives the toaster offset */
 
   /* --- rack (Knob / Fader / EQ) material palette -------------------- *
@@ -4480,7 +4481,7 @@ kbd,
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
-  max-width: 1180px;
+  max-width: var(--workspace-max);
   margin: 0 auto var(--space-4);
 }
 .assistant-page-header h1,
@@ -4529,7 +4530,7 @@ kbd,
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   align-items: start;
   gap: var(--space-5);
-  max-width: 1180px;
+  max-width: var(--workspace-max);
   margin: 0 auto;
 }
 .assistant-composer {
@@ -5093,7 +5094,7 @@ kbd,
 .assistant-vocabulary-library-tools,
 .assistant-vocabulary-view > .assistant-analysis-error,
 .assistant-vocabulary-view > .assistant-model-tag-cleanup {
-  width: min(100%, 1280px);
+  width: min(100%, var(--workspace-max));
   margin-right: auto;
   margin-left: auto;
 }
@@ -5363,9 +5364,10 @@ kbd,
 .assistant-analysis-header,
 .assistant-analysis-grid,
 .assistant-analyzer-section,
+.assistant-context-coverage,
 .assistant-analysis-history,
 .assistant-analysis-error {
-  width: min(100%, 1180px);
+  width: min(100%, var(--workspace-max));
   margin-right: auto;
   margin-left: auto;
 }
@@ -5376,6 +5378,9 @@ kbd,
   gap: var(--space-2);
 }
 .assistant-analyzer-section {
+  margin-bottom: var(--space-6);
+}
+.assistant-context-coverage {
   margin-bottom: var(--space-6);
 }
 .assistant-analyzer-heading {
@@ -5590,7 +5595,7 @@ kbd,
   white-space: nowrap;
 }
 .assistant-model-tagging {
-  width: min(100%, 1180px);
+  width: min(100%, var(--workspace-max));
   margin: 0 auto var(--space-6);
   border-top: 2px solid var(--accent2);
 }
@@ -5711,7 +5716,7 @@ kbd,
   font-size: var(--text-xs);
 }
 .assistant-tag-workspace {
-  width: min(100%, 1180px);
+  width: min(100%, var(--workspace-max));
   margin: var(--space-5) auto 0;
 }
 .assistant-tag-workspace .assistant-section-heading p {
@@ -6216,7 +6221,7 @@ kbd,
 .assistant-provider-section,
 .assistant-provider-boundary,
 .assistant-provider-load-error {
-  width: min(100%, 1180px);
+  width: min(100%, var(--workspace-max));
   margin-right: auto;
   margin-left: auto;
 }
@@ -7433,15 +7438,44 @@ kbd,
 
 .settings-view {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  padding: var(--space-7);
-  max-width: 720px;
   width: 100%;
-  margin: 0 auto;
-  overflow-y: auto;
   min-height: 0;
+  padding: var(--space-7);
+  overflow-y: auto;
+}
+.settings-page-header,
+.settings-grid {
+  width: min(100%, var(--workspace-max));
+  margin-right: auto;
+  margin-left: auto;
+}
+.settings-page-header {
+  margin-bottom: var(--space-6);
+}
+.settings-page-header h1 {
+  margin: var(--space-1) 0 0;
+  font-size: clamp(1.55rem, 3vw, 2.25rem);
+  letter-spacing: -0.025em;
+}
+.settings-page-header > p:last-child {
+  max-width: 66ch;
+  margin: var(--space-2) 0 0;
+  color: var(--muted-strong);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-6);
+}
+.settings-card {
+  min-width: 0;
+}
+.settings-card h2 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-lg);
 }
 /* --- devices registry (Settings) ------------------------------------- */
 .device-list {
@@ -7901,6 +7935,9 @@ input.volume-slider::-moz-range-thumb {
  * Every change is reversible — wider widths get the desktop layout. */
 
 @media (max-width: 900px) {
+  .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .assistant-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -9123,7 +9160,7 @@ input.volume-slider::-moz-range-thumb {
 }
 .assistant-context-view > .assistant-page-header,
 .assistant-context-browser {
-  width: min(100%, 1540px);
+  width: min(100%, var(--workspace-max));
   margin-right: auto;
   margin-left: auto;
 }

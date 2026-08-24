@@ -176,7 +176,7 @@ export function LibraryAnalysisView() {
           <div className="assistant-section-heading">
             <div>
               <p className="assistant-eyebrow">Tagging readiness</p>
-              <h2>Context coverage</h2>
+              <h2>Evidence ready for tagging</h2>
             </div>
             <Link to="/assistant/moods/context">Inspect individual tracks</Link>
           </div>

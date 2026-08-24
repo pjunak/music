@@ -23,58 +23,70 @@ export function SettingsView() {
 
   return (
     <div className="settings-view">
-      <section className="surface-card">
-        <h3>Display</h3>
-        <Switch
-          checked={hidePlayerArt}
-          onChange={(e) => setHidePlayerArt(e.target.checked)}
-          label="Hide cover art on Player tab (blackout)"
-        />
-        <p className="muted small">
-          Useful when this tab is the room display and you don't want the art
-          dominating the view.
+      <header className="settings-page-header">
+        <p className="assistant-eyebrow">Application</p>
+        <h1>Settings</h1>
+        <p>
+          Manage this browser, remembered devices, account access, and recovery
+          from one desktop workspace.
         </p>
-      </section>
+      </header>
 
-      <DevicesPanel />
+      <div className="settings-grid">
+        <section className="surface-card settings-card">
+          <h2>Display</h2>
+          <Switch
+            checked={hidePlayerArt}
+            onChange={(e) => setHidePlayerArt(e.target.checked)}
+            label="Hide cover art on Player tab (blackout)"
+          />
+          <p className="muted small">
+            Useful when this tab is the room display and you don't want the art
+            dominating the view.
+          </p>
+        </section>
 
-      <section className="surface-card">
-        <h3>Account</h3>
-        <p className="muted small">
-          Signed in as <strong>{user?.username ?? "(unknown)"}</strong>.
-        </p>
-        <div>
-          <button type="button" className="btn-danger" onClick={() => void logout()}>
-            Sign out
-          </button>
-        </div>
-      </section>
+        <section className="surface-card settings-card">
+          <h2>Account</h2>
+          <p className="muted small">
+            Signed in as <strong>{user?.username ?? "(unknown)"}</strong>. Signing
+            out here ends only this browser session.
+          </p>
+          <div>
+            <button type="button" className="btn-danger" onClick={() => void logout()}>
+              Sign out
+            </button>
+          </div>
+        </section>
 
-      <ActiveSessionsPanel />
+        <DevicesPanel />
 
-      <BackupPanel />
+        <ActiveSessionsPanel />
 
-      <section className="surface-card">
-        <h3>Diagnostics</h3>
-        <p className="muted small">
-          For debugging "no audio" or "device not showing up" issues. Opens in
-          a new tab so you can keep it open while clicking around in the main
-          window.
-        </p>
-        <div>
-          <a
-            href="/diagnostics"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-link"
-            role="button"
-          >
-            <SettingsIcon aria-hidden="true" />
-            Open diagnostics
-            <span aria-hidden="true" className="btn-link-external">↗</span>
-          </a>
-        </div>
-      </section>
+        <BackupPanel />
+
+        <section className="surface-card settings-card">
+          <h2>Diagnostics</h2>
+          <p className="muted small">
+            For debugging "no audio" or "device not showing up" issues. Opens in
+            a new tab so you can keep it open while clicking around in the main
+            window.
+          </p>
+          <div>
+            <a
+              href="/diagnostics"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-link"
+              role="button"
+            >
+              <SettingsIcon aria-hidden="true" />
+              Open diagnostics
+              <span aria-hidden="true" className="btn-link-external">↗</span>
+            </a>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
@@ -149,8 +161,8 @@ function DevicesPanel() {
   }
 
   return (
-    <section className="surface-card">
-      <h3>Devices</h3>
+    <section className="surface-card settings-card">
+      <h2>Devices</h2>
       <p className="muted small">
         Remember and name your devices. Marking one{" "}
         <strong>output by default</strong> makes it auto-turn-on as a speaker
@@ -296,8 +308,8 @@ function BackupPanel() {
   }
 
   return (
-    <section className="surface-card">
-      <h3>Backup</h3>
+    <section className="surface-card settings-card">
+      <h2>Backup</h2>
       <p className="muted small">
         Download a tar.gz of <code>app.db</code>, <code>modes/</code> (including
         each mode's EQ presets), and the saved <code>devices.json</code> — the
@@ -378,8 +390,8 @@ function ActiveSessionsPanel() {
   }
 
   return (
-    <section className="surface-card">
-      <h3>Active sessions</h3>
+    <section className="surface-card settings-card">
+      <h2>Active sessions</h2>
       <p className="muted small">
         Every browser or TV tab signed in to this account. Sign out an
         individual session to evict a forgotten tab without disturbing the
