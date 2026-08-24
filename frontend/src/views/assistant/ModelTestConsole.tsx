@@ -190,6 +190,24 @@ function buildLogEntries(
     });
   }
 
+  if (
+    role.role_id === "music_tagger" &&
+    evaluation !== undefined &&
+    gateSummary !== null &&
+    gateSummary.safetyTotalCases > 0
+  ) {
+    const totalExecutions =
+      evaluation.total_cases + gateSummary.safetyTotalCases;
+    entries.push({
+      id: "quality-suite-counts",
+      time: null,
+      tone: "info",
+      message:
+        `The score covers ${evaluation.total_cases} distinct scenarios. ` +
+        `${gateSummary.safetyTotalCases} safety ${gateSummary.safetyTotalCases === 1 ? "scenario runs" : "scenarios run"} twice for stability, so a full suite performs ${totalExecutions} model executions.`,
+    });
+  }
+
   if (role.conformance_status === "passed" && !role.effective_enabled) {
     entries.push({
       id: "enable-task",

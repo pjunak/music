@@ -422,6 +422,7 @@ def test_model_tagger_rejects_unknown_tags_and_incomplete_track_sets() -> None:
     with pytest.raises(ModelTaggerError) as invalid:
         tag_tracks(tracks, unknown)
     assert invalid.value.code == "model_output_unknown_tag_id"
+    assert invalid.value.diagnostic == "tracks.0.tag_ids: 1 unsupported value"
 
     def missing(_request: StructuredModelRequest) -> StructuredModelResult:
         return StructuredModelResult(
@@ -908,6 +909,11 @@ def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
         {"succeeded"},
     )
     evaluation = failed_case_result["result"]["evaluation"]
+    assert failed_case_result["progress_current"] == 50
+    assert failed_case_result["progress_total"] == 50
+    assert failed_case_result["progress_message"] == (
+        "Completed 50 of 50 model executions across 43 scored scenarios"
+    )
     assert evaluation["passed"] is True
     assert [case["id"] for case in evaluation["cases"] if not case["passed"]] == [
         "stormy-sea-battle"

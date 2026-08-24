@@ -138,7 +138,7 @@ export function qualityStatusLabel(
   if (view.activeJob !== undefined) {
     if (view.activeJob.status === "cancel_requested") return "Cancelling";
     if (view.activeJob.progress_total !== null) {
-      return `${view.activeJob.progress_current} / ${view.activeJob.progress_total}`;
+      return `${view.activeJob.progress_current} / ${view.activeJob.progress_total} runs`;
     }
     return view.activeJob.status === "queued" ? "Queued" : "Running";
   }

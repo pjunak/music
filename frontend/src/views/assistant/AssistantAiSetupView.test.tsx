@@ -1317,6 +1317,11 @@ describe("AssistantAiSetupView", () => {
     expect(
       await screen.findByText(/Quality gate passed 39 of 40 scenarios/),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /score covers 40 distinct scenarios.*7 safety scenarios run twice.*47 model executions/i,
+      ),
+    ).toBeInTheDocument();
     const recheck = screen.getByRole("button", {
       name: "Recheck 1 failed scenario",
     });

@@ -503,9 +503,16 @@ def tag_tracks(
         raise ModelTaggerError("model_output_track_set_mismatch")
     tags_by_id = vocabulary.by_id
     resolved: dict[int, ModelTagTrackOutput] = {}
-    for track in output.tracks:
-        if not set(track.tag_ids) <= allowed_ids:
-            raise ModelTaggerError("model_output_unknown_tag_id")
+    for index, track in enumerate(output.tracks):
+        unknown_count = len(set(track.tag_ids) - allowed_ids)
+        if unknown_count:
+            raise ModelTaggerError(
+                "model_output_unknown_tag_id",
+                diagnostic=(
+                    f"tracks.{index}.tag_ids: {unknown_count} unsupported "
+                    f"{'value' if unknown_count == 1 else 'values'}"
+                ),
+            )
         resolved[track.track_id] = ModelTagTrackOutput(
             track_id=track.track_id,
             tags=[tags_by_id[tag_id].name for tag_id in track.tag_ids],

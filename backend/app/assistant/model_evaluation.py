@@ -565,14 +565,26 @@ def run_tagging_quality_evaluation(
     if suite.id != definition.suite_id:
         raise RuntimeError("Configured model tagging suite ID does not match.")
     execution_suite = _tagging_retest_suite(suite, parameters)
+    scenario_count = len(execution_suite.cases)
+    safety_rerun_count = sum(
+        case.gate == "safety" for case in execution_suite.cases
+    )
+    execution_count = tag_quality_attempts(execution_suite)
     context.update_progress(
         0,
-        tag_quality_attempts(execution_suite),
+        execution_count,
         phase="Preparing evaluation",
         message=(
-            "Loading failed synthetic evidence-tagging cases"
-            if parameters.case_ids
-            else "Loading fixed synthetic evidence-tagging cases"
+            f"Loading {scenario_count} "
+            f"{'failed' if parameters.case_ids else 'fixed'} tagging "
+            f"{'scenario' if scenario_count == 1 else 'scenarios'}"
+        )
+        + (
+            f"; {safety_rerun_count} safety stability "
+            f"{'rerun' if safety_rerun_count == 1 else 'reruns'} make "
+            f"{execution_count} model executions"
+            if safety_rerun_count
+            else ""
         ),
     )
 
@@ -599,7 +611,11 @@ def run_tagging_quality_evaluation(
             current,
             total,
             phase="Evaluating tagging model",
-            message=f"Completed {current} of {total} synthetic cases",
+            message=(
+                f"Completed {current} of {total} model executions across "
+                f"{scenario_count} scored "
+                f"{'scenario' if scenario_count == 1 else 'scenarios'}"
+            ),
         )
 
     result: TagQualityEvaluationResult = evaluate_music_tagger(
