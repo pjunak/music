@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 OPENAI_COMPATIBLE_ADAPTER = "openai-compatible/v1"
 OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER = "openai-compatible-json-schema/v1"
+OPENAI_RESPONSES_ADAPTER = "openai-responses/v1"
 GOOGLE_GEMINI_OPENAI_ADAPTER = "google-gemini-openai/v1"
 GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER = "google-gemini-openai-json-schema/v1"
 STRUCTURED_TEXT_CAPABILITY = "structured-text/v1"
@@ -61,10 +62,20 @@ PROVIDER_CAPABILITY_BY_ID = {
 
 PROVIDER_ADAPTERS = (
     ProviderAdapterDefinition(
-        id=OPENAI_COMPATIBLE_ADAPTER,
-        label="OpenAI-compatible API",
+        id=OPENAI_RESPONSES_ADAPTER,
+        label="OpenAI API (Responses)",
         description=(
-            "Maximum compatibility using JSON-object response mode plus strict local validation."
+            "OpenAI's native Responses API with reasoning controls and strict "
+            "JSON Schema output."
+        ),
+        capability_ids=(STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY),
+    ),
+    ProviderAdapterDefinition(
+        id=OPENAI_COMPATIBLE_ADAPTER,
+        label="Other OpenAI-compatible API",
+        description=(
+            "Maximum third-party compatibility using JSON-object response mode plus "
+            "strict local validation."
         ),
         capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
     ),
@@ -81,10 +92,10 @@ PROVIDER_ADAPTERS = (
         id=GOOGLE_GEMINI_OPENAI_ADAPTER,
         label="Google Gemini API",
         description=(
-            "Gemini's OpenAI-compatible API with canonical model IDs and "
-            "provider-specific thinking controls."
+            "Gemini's OpenAI-compatible API with canonical model IDs, provider-specific "
+            "thinking controls, and native JSON Schema output."
         ),
-        capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
+        capability_ids=(STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY),
     ),
     ProviderAdapterDefinition(
         id=GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,

@@ -10,11 +10,36 @@ import ipaddress
 import json
 import socket
 import ssl
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 _MAX_REQUEST_BYTES = 256 * 1024
+_ALLOWED_ADDITIONAL_HEADERS = {"x-goog-api-client"}
+_SAFE_PROVIDER_ERROR_CODES = {
+    "api_error": "upstream_error",
+    "authentication_error": "unauthorized",
+    "deadline_exceeded": "provider_timeout",
+    "failed_precondition": "failed_precondition",
+    "insufficient_quota": "quota_exceeded",
+    "invalid_api_key": "unauthorized",
+    "invalid_argument": "invalid_request",
+    "invalid_request": "invalid_request",
+    "invalid_request_error": "invalid_request",
+    "invalid_value": "invalid_request",
+    "model_not_found": "model_not_found",
+    "parameter_unknown": "parameter_unknown",
+    "permission_denied": "forbidden",
+    "quota_exceeded": "quota_exceeded",
+    "rate_limit_exceeded": "rate_limited",
+    "resource_exhausted": "rate_limited",
+    "server_error": "upstream_error",
+    "service_unavailable": "service_unavailable",
+    "unavailable": "service_unavailable",
+    "unimplemented": "unsupported_provider_feature",
+    "unsupported_parameter": "parameter_unknown",
+}
 
 
 class ProviderUrlError(ValueError):
@@ -97,7 +122,6 @@ def _read_json_response(
     response: Any,
     *,
     max_response_bytes: int,
-    parse_json: bool = True,
 ) -> object:
     content_length = response.getheader("Content-Length")
     if content_length is not None:
@@ -109,8 +133,6 @@ def _read_json_response(
     body = response.read(max_response_bytes + 1)
     if len(body) > max_response_bytes:
         raise ProviderTransportError("response_too_large")
-    if not parse_json:
-        return None
     try:
         return json.loads(body.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -127,6 +149,7 @@ def _http_json(
     timeout_seconds: float,
     max_response_bytes: int,
     user_agent: str,
+    additional_headers: Mapping[str, str] | None = None,
 ) -> JsonHttpResponse:
     parsed = urlsplit(url)
     assert parsed.hostname is not None
@@ -137,6 +160,16 @@ def _http_json(
         "Authorization": f"Bearer {api_key}",
         "User-Agent": user_agent,
     }
+    for name, value in (additional_headers or {}).items():
+        normalized_name = name.lower()
+        if (
+            normalized_name not in _ALLOWED_ADDITIONAL_HEADERS
+            or not value
+            or len(value) > 256
+            or any(character in "\r\n" or ord(character) < 32 for character in value)
+        ):
+            raise ProviderTransportError("invalid_request_headers")
+        headers[name] = value
     if body is not None:
         headers["Content-Type"] = "application/json"
         headers["Content-Length"] = str(len(body))
@@ -174,11 +207,15 @@ def _http_json(
                 raw_socket = None
             connection.request(method, path, body=body, headers=headers)
             response = connection.getresponse()
-            payload = _read_json_response(
-                response,
-                max_response_bytes=max_response_bytes,
-                parse_json=200 <= response.status < 300,
-            )
+            try:
+                payload = _read_json_response(
+                    response,
+                    max_response_bytes=max_response_bytes,
+                )
+            except ProviderTransportError as exc:
+                if 200 <= response.status < 300 or exc.code != "invalid_response":
+                    raise
+                payload = None
             return JsonHttpResponse(response.status, payload)
         except ssl.SSLError as exc:
             raise ProviderTransportError("tls_error") from exc
@@ -208,6 +245,7 @@ def request_json(
     max_response_bytes: int,
     user_agent: str,
     payload: object | None = None,
+    additional_headers: Mapping[str, str] | None = None,
 ) -> JsonHttpResponse:
     """Send one JSON request without redirects or a second DNS lookup."""
 
@@ -235,13 +273,33 @@ def request_json(
         timeout_seconds=timeout_seconds,
         max_response_bytes=max_response_bytes,
         user_agent=user_agent,
+        additional_headers=additional_headers,
     )
+
+
+def safe_provider_error_code(payload: object, *, fallback: str) -> str:
+    """Return only an allowlisted provider error classification, never its message."""
+
+    if not isinstance(payload, dict):
+        return fallback
+    error = payload.get("error")
+    details = error if isinstance(error, dict) else payload
+    for key in ("code", "type", "status"):
+        value = details.get(key)
+        if not isinstance(value, str) or len(value) > 128:
+            continue
+        normalized = value.strip().lower()
+        mapped = _SAFE_PROVIDER_ERROR_CODES.get(normalized)
+        if mapped is not None:
+            return mapped
+    return fallback
 
 
 def safe_http_error_code(
     status_code: int,
     *,
     not_found_code: str,
+    payload: object = None,
 ) -> str:
     if 300 <= status_code < 400:
         return "redirect_blocked"
@@ -249,6 +307,9 @@ def safe_http_error_code(
         return "unauthorized"
     if status_code == 403:
         return "forbidden"
+    provider_code = safe_provider_error_code(payload, fallback="")
+    if provider_code:
+        return provider_code
     if status_code == 404:
         return not_found_code
     if status_code == 429:

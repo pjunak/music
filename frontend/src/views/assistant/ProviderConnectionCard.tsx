@@ -8,6 +8,7 @@ import type {
 } from "@/core/assistantProvidersApi";
 
 import {
+  providerAddressAfterAdapterChange,
   verificationFailureMessage,
   verificationStatusLabel,
 } from "./providerUi";
@@ -185,7 +186,17 @@ export function ProviderConnectionCard({
               <span className="field-label">Connection type</span>
               <select
                 value={adapterId}
-                onChange={(event) => setAdapterId(event.target.value)}
+                onChange={(event) => {
+                  const nextAdapterId = event.target.value;
+                  setBaseUrl((current) =>
+                    providerAddressAfterAdapterChange(
+                      current,
+                      adapterId,
+                      nextAdapterId,
+                    ),
+                  );
+                  setAdapterId(nextAdapterId);
+                }}
               >
                 {adapters.map((adapter) => (
                   <option key={adapter.id} value={adapter.id}>
@@ -193,6 +204,9 @@ export function ProviderConnectionCard({
                   </option>
                 ))}
               </select>
+              <small className="field-hint">
+                {adapters.find((adapter) => adapter.id === adapterId)?.description}
+              </small>
             </label>
             <label className="field">
               <span className="field-label">Provider address</span>

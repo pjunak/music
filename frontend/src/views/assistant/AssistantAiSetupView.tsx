@@ -26,7 +26,9 @@ import {
 } from "./modelEvaluationJobs";
 import { ProviderConnectionCard } from "./ProviderConnectionCard";
 import {
+  defaultProviderAddress,
   modelTestFailureMessage,
+  providerAddressAfterAdapterChange,
   verificationFailureMessage,
 } from "./providerUi";
 
@@ -89,7 +91,9 @@ export function AssistantAiSetupView() {
         setConnections(nextConnections);
         setRoles(nextRoles);
         setSetupHubOpen(nextConnections.length === 0);
-        setAdapterId((current) => current || nextStatus.adapters[0]?.id || "");
+        const defaultAdapterId = nextStatus.adapters[0]?.id || "";
+        setAdapterId((current) => current || defaultAdapterId);
+        setBaseUrl((current) => current || defaultProviderAddress(defaultAdapterId));
         setLoadError(null);
       })
       .catch((error: unknown) => {
@@ -721,12 +725,26 @@ export function AssistantAiSetupView() {
                 <select
                   value={adapterId}
                   required
-                  onChange={(event) => setAdapterId(event.target.value)}
+                  onChange={(event) => {
+                    const nextAdapterId = event.target.value;
+                    setBaseUrl((current) =>
+                      providerAddressAfterAdapterChange(
+                        current,
+                        adapterId,
+                        nextAdapterId,
+                      ),
+                    );
+                    setAdapterId(nextAdapterId);
+                  }}
                 >
                   {status.adapters.map((adapter) => (
                     <option key={adapter.id} value={adapter.id}>{adapter.label}</option>
                   ))}
                 </select>
+                <small className="field-hint">
+                  {status.adapters.find((adapter) => adapter.id === adapterId)
+                    ?.description}
+                </small>
               </label>
               <label className="field assistant-provider-address-field">
                 <span className="field-label">Provider address</span>

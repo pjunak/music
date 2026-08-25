@@ -452,6 +452,7 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
         == "master_key_already_configured"
     )
     assert [adapter["id"] for adapter in payload["adapters"]] == [
+        "openai-responses/v1",
         "openai-compatible/v1",
         "openai-compatible-json-schema/v1",
         "google-gemini-openai/v1",
@@ -481,13 +482,22 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
             ),
         },
     ]
-    assert payload["adapters"][0]["capability_ids"] == ["structured-text/v1"]
-    assert payload["adapters"][1]["capability_ids"] == [
+    assert payload["adapters"][0]["capability_ids"] == [
         "structured-text/v1",
         "strict-json-schema/v1",
     ]
-    assert payload["adapters"][2]["capability_ids"] == ["structured-text/v1"]
+    assert payload["adapters"][1]["capability_ids"] == [
+        "structured-text/v1",
+    ]
+    assert payload["adapters"][2]["capability_ids"] == [
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    ]
     assert payload["adapters"][3]["capability_ids"] == [
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    ]
+    assert payload["adapters"][4]["capability_ids"] == [
         "structured-text/v1",
         "strict-json-schema/v1",
     ]
@@ -1009,6 +1019,35 @@ def test_gemini_connection_requires_the_documented_api_address(
     assert accepted.json()["base_url"] == (
         "https://generativelanguage.googleapis.com/v1beta/openai"
     )
+
+
+def test_openai_connection_requires_the_documented_api_address(
+    auth_client: TestClient,
+) -> None:
+    rejected = auth_client.post(
+        "/api/assistant/providers/connections",
+        json=_connection_payload(
+            adapter_id="openai-responses/v1",
+            base_url="https://models.example.test/v1",
+        ),
+    )
+
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == {
+        "code": "invalid_provider_url",
+        "message": "This connection type requires https://api.openai.com/v1.",
+    }
+
+    accepted = auth_client.post(
+        "/api/assistant/providers/connections",
+        json=_connection_payload(
+            adapter_id="openai-responses/v1",
+            base_url="https://api.openai.com/v1/",
+        ),
+    )
+
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()["base_url"] == "https://api.openai.com/v1"
 
 
 def test_connection_names_are_unique_without_case_sensitivity(

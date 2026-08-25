@@ -49,6 +49,7 @@ def _verify_openai_compatible(
             timeout_seconds=_VERIFICATION_TIMEOUT_SECONDS,
             max_response_bytes=_MAX_VERIFICATION_BYTES,
             user_agent="music-assistant-provider-verifier/1",
+            additional_headers=dict(handler.additional_headers),
         )
     except ProviderTransportError as exc:
         return ProviderVerificationResult(False, exc.code)
@@ -59,6 +60,7 @@ def _verify_openai_compatible(
             safe_http_error_code(
                 response.status_code,
                 not_found_code="models_endpoint_not_found",
+                payload=response.payload,
             ),
         )
     payload = response.payload

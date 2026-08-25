@@ -14,6 +14,7 @@ from app.assistant.providers.transport import (
     ProviderTransportError,
     request_json,
     safe_http_error_code,
+    safe_provider_error_code,
 )
 
 CONFORMANCE_CONTRACT: Literal["assistant-provider-conformance/v3"] = (
@@ -77,36 +78,14 @@ def _optional_token_count(value: object) -> int | None:
     return None
 
 
-def _parse_openai_compatible_response(payload: object) -> StructuredModelResult:
-    if not isinstance(payload, dict):
-        return StructuredModelResult(False, "invalid_response")
-    provider_model_id = _optional_bounded_text(payload.get("model"), max_length=256)
-    usage = payload.get("usage")
-    usage_dict = usage if isinstance(usage, dict) else {}
-    input_tokens = _optional_token_count(usage_dict.get("prompt_tokens"))
-    output_tokens = _optional_token_count(usage_dict.get("completion_tokens"))
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        return StructuredModelResult(
-            False,
-            "invalid_response",
-            provider_model_id=provider_model_id,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-    choice = choices[0]
-    finish_reason = _optional_bounded_text(choice.get("finish_reason"), max_length=64)
-    message = choice.get("message")
-    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-        return StructuredModelResult(
-            False,
-            "invalid_response",
-            provider_model_id=provider_model_id,
-            finish_reason=finish_reason,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-    content = message["content"]
+def _parse_structured_text(
+    content: str,
+    *,
+    provider_model_id: str | None,
+    finish_reason: str | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+) -> StructuredModelResult:
     if not content.strip():
         return StructuredModelResult(
             False,
@@ -151,6 +130,127 @@ def _parse_openai_compatible_response(payload: object) -> StructuredModelResult:
     )
 
 
+def _parse_openai_compatible_response(payload: object) -> StructuredModelResult:
+    if not isinstance(payload, dict):
+        return StructuredModelResult(False, "invalid_response")
+    provider_model_id = _optional_bounded_text(payload.get("model"), max_length=256)
+    usage = payload.get("usage")
+    usage_dict = usage if isinstance(usage, dict) else {}
+    input_tokens = _optional_token_count(usage_dict.get("prompt_tokens"))
+    output_tokens = _optional_token_count(usage_dict.get("completion_tokens"))
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return StructuredModelResult(
+            False,
+            "invalid_response",
+            provider_model_id=provider_model_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    choice = choices[0]
+    finish_reason = _optional_bounded_text(choice.get("finish_reason"), max_length=64)
+    message = choice.get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        return StructuredModelResult(
+            False,
+            "invalid_response",
+            provider_model_id=provider_model_id,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    return _parse_structured_text(
+        message["content"],
+        provider_model_id=provider_model_id,
+        finish_reason=finish_reason,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def _parse_openai_responses_response(payload: object) -> StructuredModelResult:
+    if not isinstance(payload, dict):
+        return StructuredModelResult(False, "invalid_response")
+    provider_model_id = _optional_bounded_text(payload.get("model"), max_length=256)
+    usage = payload.get("usage")
+    usage_dict = usage if isinstance(usage, dict) else {}
+    input_tokens = _optional_token_count(usage_dict.get("input_tokens"))
+    output_tokens = _optional_token_count(usage_dict.get("output_tokens"))
+    status = payload.get("status")
+    if status == "failed":
+        return StructuredModelResult(
+            False,
+            safe_provider_error_code(payload, fallback="upstream_error"),
+            provider_model_id=provider_model_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    if status == "incomplete":
+        incomplete_details = payload.get("incomplete_details")
+        finish_reason = (
+            _optional_bounded_text(incomplete_details.get("reason"), max_length=64)
+            if isinstance(incomplete_details, dict)
+            else None
+        )
+        return StructuredModelResult(
+            False,
+            "incomplete_structured_output",
+            provider_model_id=provider_model_id,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    if status != "completed":
+        return StructuredModelResult(
+            False,
+            "invalid_response",
+            provider_model_id=provider_model_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return StructuredModelResult(
+            False,
+            "invalid_response",
+            provider_model_id=provider_model_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    text_parts: list[str] = []
+    refused = False
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "output_text" and isinstance(part.get("text"), str):
+                text_parts.append(part["text"])
+            elif part.get("type") == "refusal":
+                refused = True
+    if not text_parts:
+        return StructuredModelResult(
+            False,
+            "model_refusal" if refused else "empty_structured_output",
+            provider_model_id=provider_model_id,
+            finish_reason="stop",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    return _parse_structured_text(
+        "".join(text_parts),
+        provider_model_id=provider_model_id,
+        finish_reason="stop",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
 def _execute_provider_handler(
     target: ProviderExecutionTarget,
     request: StructuredModelRequest,
@@ -170,18 +270,35 @@ def _execute_provider_handler(
                 "schema": request.output_schema,
             },
         }
-    payload: dict[str, object] = {
-        "model": handler.normalize_model_id(target.model_id),
-        "messages": [
-            {"role": "system", "content": request.system_prompt},
-            {"role": "user", "content": request.user_prompt},
-        ],
-        "max_tokens": min(
-            request.max_output_tokens,
-            target.max_output_tokens,
-        ),
-        "response_format": response_format,
-    }
+    maximum_output_tokens = min(request.max_output_tokens, target.max_output_tokens)
+    if handler.execution_api_style == "responses":
+        assert request.output_schema_name is not None
+        assert request.output_schema is not None
+        payload: dict[str, object] = {
+            "model": handler.normalize_model_id(target.model_id),
+            "instructions": request.system_prompt,
+            "input": request.user_prompt,
+            "max_output_tokens": maximum_output_tokens,
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": request.output_schema_name,
+                    "strict": True,
+                    "schema": request.output_schema,
+                }
+            },
+            "store": False,
+        }
+    else:
+        payload = {
+            "model": handler.normalize_model_id(target.model_id),
+            "messages": [
+                {"role": "system", "content": request.system_prompt},
+                {"role": "user", "content": request.user_prompt},
+            ],
+            "max_tokens": maximum_output_tokens,
+            "response_format": response_format,
+        }
     handler.apply_thinking_mode(payload, target.thinking_mode)
     try:
         response = request_json(
@@ -193,6 +310,7 @@ def _execute_provider_handler(
             max_response_bytes=_MAX_EXECUTION_RESPONSE_BYTES,
             user_agent="music-assistant-model-executor/1",
             payload=payload,
+            additional_headers=dict(handler.additional_headers),
         )
     except ProviderTransportError as exc:
         return StructuredModelResult(False, exc.code)
@@ -203,8 +321,11 @@ def _execute_provider_handler(
             safe_http_error_code(
                 response.status_code,
                 not_found_code="completion_endpoint_not_found",
+                payload=response.payload,
             ),
         )
+    if handler.execution_api_style == "responses":
+        return _parse_openai_responses_response(response.payload)
     return _parse_openai_compatible_response(response.payload)
 
 

@@ -14,13 +14,20 @@ from app.assistant.providers.definitions import (
     GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
     OPENAI_COMPATIBLE_ADAPTER,
     OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
+    OPENAI_RESPONSES_ADAPTER,
 )
 
 StructuredOutputMode = Literal["json_object", "json_schema"]
-ThinkingParameterStyle = Literal["thinking_object", "reasoning_effort"]
+ThinkingParameterStyle = Literal[
+    "thinking_object",
+    "reasoning_effort",
+    "reasoning_object",
+]
+ExecutionApiStyle = Literal["chat_completions", "responses"]
 ThinkingMode = Literal["provider_default", "enabled", "disabled"]
 
 GOOGLE_GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 
 
 class ProviderHandlerConfigurationError(ValueError):
@@ -32,10 +39,12 @@ class ProviderAdapterHandler:
     adapter_id: str
     structured_output_mode: StructuredOutputMode
     thinking_parameter_style: ThinkingParameterStyle
+    execution_api_style: ExecutionApiStyle = "chat_completions"
     expected_base_url: str | None = None
     model_resource_prefix: str | None = None
     models_path: str = "/models"
     completion_path: str = "/chat/completions"
+    additional_headers: tuple[tuple[str, str], ...] = ()
 
     def validate_base_url(self, base_url: str) -> None:
         if self.expected_base_url is not None and base_url != self.expected_base_url:
@@ -67,6 +76,11 @@ class ProviderAdapterHandler:
         if self.thinking_parameter_style == "reasoning_effort":
             payload["reasoning_effort"] = "high" if thinking_mode == "enabled" else "none"
             return
+        if self.thinking_parameter_style == "reasoning_object":
+            payload["reasoning"] = {
+                "effort": "high" if thinking_mode == "enabled" else "none"
+            }
+            return
         # Preserve the existing extension used by already-configured compatible
         # services. New provider-specific variations belong in an explicit
         # versioned handler instead of URL or model-name inference here.
@@ -74,6 +88,14 @@ class ProviderAdapterHandler:
 
 
 PROVIDER_ADAPTER_HANDLERS = (
+    ProviderAdapterHandler(
+        adapter_id=OPENAI_RESPONSES_ADAPTER,
+        structured_output_mode="json_schema",
+        thinking_parameter_style="reasoning_object",
+        execution_api_style="responses",
+        expected_base_url=OPENAI_API_BASE_URL,
+        completion_path="/responses",
+    ),
     ProviderAdapterHandler(
         adapter_id=OPENAI_COMPATIBLE_ADAPTER,
         structured_output_mode="json_object",
@@ -86,10 +108,11 @@ PROVIDER_ADAPTER_HANDLERS = (
     ),
     ProviderAdapterHandler(
         adapter_id=GOOGLE_GEMINI_OPENAI_ADAPTER,
-        structured_output_mode="json_object",
+        structured_output_mode="json_schema",
         thinking_parameter_style="reasoning_effort",
         expected_base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
         model_resource_prefix="models/",
+        additional_headers=(("x-goog-api-client", "music-assistant-oai/1.0"),),
     ),
     ProviderAdapterHandler(
         adapter_id=GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
@@ -97,6 +120,7 @@ PROVIDER_ADAPTER_HANDLERS = (
         thinking_parameter_style="reasoning_effort",
         expected_base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
         model_resource_prefix="models/",
+        additional_headers=(("x-goog-api-client", "music-assistant-oai/1.0"),),
     ),
 )
 PROVIDER_ADAPTER_HANDLER_BY_ID = {

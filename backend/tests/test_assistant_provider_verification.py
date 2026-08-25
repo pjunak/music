@@ -3,7 +3,10 @@ import json
 import pytest
 
 from app.assistant.providers import transport, verification
-from app.assistant.providers.handlers import GOOGLE_GEMINI_OPENAI_BASE_URL
+from app.assistant.providers.handlers import (
+    GOOGLE_GEMINI_OPENAI_BASE_URL,
+    OPENAI_API_BASE_URL,
+)
 from app.assistant.providers.transport import JsonHttpResponse, ProviderTransportError
 
 
@@ -108,6 +111,34 @@ def test_strict_adapter_verification_advertises_schema_capability(
     )
 
 
+def test_openai_verification_uses_the_native_adapter_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(args=args, kwargs=kwargs)
+        return JsonHttpResponse(200, {"data": [{"id": "gpt-5.6-luna"}]})
+
+    monkeypatch.setattr(verification, "request_json", request)
+    result = verification.verify_provider_connection(
+        "openai-responses/v1",
+        OPENAI_API_BASE_URL,
+        "key",
+        allow_private_network=False,
+    )
+
+    assert result.verified is True
+    assert result.models == ("gpt-5.6-luna",)
+    assert result.capability_ids == (
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    )
+    args = observed["args"]
+    assert isinstance(args, tuple)
+    assert args[1] == f"{OPENAI_API_BASE_URL}/models"
+
+
 def test_gemini_verification_normalizes_resource_model_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -136,10 +167,18 @@ def test_gemini_verification_normalizes_resource_model_ids(
 
     assert result.verified is True
     assert result.models == ("gemini-3.7-flash", "gemini-2.5-flash")
-    assert result.capability_ids == ("structured-text/v1",)
+    assert result.capability_ids == (
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    )
     args = observed["args"]
     assert isinstance(args, tuple)
     assert args[1] == f"{GOOGLE_GEMINI_OPENAI_BASE_URL}/models"
+    kwargs = observed["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["additional_headers"] == {
+        "x-goog-api-client": "music-assistant-oai/1.0"
+    }
 
 
 def test_gemini_strict_verification_advertises_schema_capability(
@@ -273,3 +312,56 @@ def test_transport_maps_provider_validation_statuses(status_code: int) -> None:
         )
         == "invalid_request"
     )
+
+
+@pytest.mark.parametrize(
+    "provider_error,expected",
+    [
+        ({"code": "unsupported_parameter"}, "parameter_unknown"),
+        ({"type": "insufficient_quota"}, "quota_exceeded"),
+        ({"status": "UNAVAILABLE"}, "service_unavailable"),
+        ({"status": "DEADLINE_EXCEEDED"}, "provider_timeout"),
+    ],
+)
+def test_transport_maps_only_allowlisted_provider_error_details(
+    provider_error: dict[str, str],
+    expected: str,
+) -> None:
+    payload = {"error": {**provider_error, "message": "private provider detail"}}
+
+    result = transport.safe_http_error_code(
+        400,
+        not_found_code="endpoint_not_found",
+        payload=payload,
+    )
+
+    assert result == expected
+    assert "private provider detail" not in result
+
+
+def test_transport_keeps_authentication_status_authoritative() -> None:
+    assert (
+        transport.safe_http_error_code(
+            401,
+            not_found_code="endpoint_not_found",
+            payload={"error": {"type": "invalid_request_error"}},
+        )
+        == "unauthorized"
+    )
+
+
+def test_transport_rejects_unapproved_additional_headers() -> None:
+    with pytest.raises(ProviderTransportError) as error:
+        transport._http_json(
+            "GET",
+            "https://models.example/v1/models",
+            "key",
+            (),
+            body=None,
+            timeout_seconds=10,
+            max_response_bytes=1024,
+            user_agent="test/1",
+            additional_headers={"X-Unsafe": "value"},
+        )
+
+    assert error.value.code == "invalid_request_headers"

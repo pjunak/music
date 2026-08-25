@@ -95,10 +95,20 @@ Shared contracts:
 
 - harness: `assistant-structured-harness/v3`
 - provider conformance: `assistant-provider-conformance/v3`
+- OpenAI Responses adapter: `openai-responses/v1`
 - standard adapter: `openai-compatible/v1`
 - strict-schema adapter: `openai-compatible-json-schema/v1`
 - Google Gemini adapter: `google-gemini-openai/v1`
 - Google Gemini strict-schema adapter: `google-gemini-openai-json-schema/v1`
+
+Use `openai-responses/v1` with the exact base URL `https://api.openai.com/v1` for OpenAI. It sends
+native Responses requests with `max_output_tokens`, `reasoning.effort`, and the task schema under
+`text.format`; the generic adapters are reserved for third-party OpenAI-compatible services.
+Both Gemini adapter IDs use the exact base URL
+`https://generativelanguage.googleapis.com/v1beta/openai`, canonicalize `models/` resource IDs,
+send Google's integration-identification header, and constrain results with the task's JSON Schema.
+The older Gemini strict-schema ID remains a saved-connection compatibility alias. Provider error
+payloads may contribute only allowlisted machine codes; upstream messages never reach diagnostics.
 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|

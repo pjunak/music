@@ -9,11 +9,19 @@ from app.assistant.providers.execution import (
 )
 from app.assistant.providers.handlers import (
     GOOGLE_GEMINI_OPENAI_BASE_URL,
+    OPENAI_API_BASE_URL,
     PROVIDER_ADAPTER_HANDLER_BY_ID,
 )
 from app.assistant.providers.transport import JsonHttpResponse, ProviderTransportError
 
 from .assistant_test_values import TEST_SHORT_API_KEY
+
+_ANSWER_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["answer"],
+    "properties": {"answer": {"type": "string"}},
+}
 
 
 def _target(
@@ -112,6 +120,144 @@ def test_execution_sends_explicit_thinking_override(
 
 
 @pytest.mark.parametrize(
+    "thinking_mode,reasoning",
+    [
+        ("provider_default", None),
+        ("enabled", {"effort": "high"}),
+        ("disabled", {"effort": "none"}),
+    ],
+)
+def test_openai_responses_handler_uses_native_request_and_response_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    thinking_mode: execution.ThinkingMode,
+    reasoning: dict[str, str] | None,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(args=args, kwargs=kwargs)
+        return JsonHttpResponse(
+            200,
+            {
+                "status": "completed",
+                "model": "gpt-5.6-luna-2026-08-01",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": '{"answer":"ok"}'}
+                        ],
+                    }
+                ],
+                "usage": {"input_tokens": 31, "output_tokens": 9},
+            },
+        )
+
+    monkeypatch.setattr(execution, "request_json", request)
+    result = execution.execute_structured_model_request(
+        _target(
+            "openai-responses/v1",
+            thinking_mode,
+            base_url=OPENAI_API_BASE_URL,
+            model_id="gpt-5.6-luna",
+        ),
+        StructuredModelRequest(
+            "system",
+            "user",
+            512,
+            output_schema_name="test-answer",
+            output_schema=_ANSWER_SCHEMA,
+        ),
+    )
+
+    assert result.succeeded is True
+    assert result.payload == {"answer": "ok"}
+    assert result.provider_model_id == "gpt-5.6-luna-2026-08-01"
+    assert result.finish_reason == "stop"
+    assert result.input_tokens == 31
+    assert result.output_tokens == 9
+    args = observed["args"]
+    assert isinstance(args, tuple)
+    assert args[1] == f"{OPENAI_API_BASE_URL}/responses"
+    kwargs = observed["kwargs"]
+    assert isinstance(kwargs, dict)
+    payload = kwargs["payload"]
+    assert isinstance(payload, dict)
+    assert payload == {
+        "model": "gpt-5.6-luna",
+        "instructions": "system",
+        "input": "user",
+        "max_output_tokens": 512,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "test-answer",
+                "strict": True,
+                "schema": _ANSWER_SCHEMA,
+            }
+        },
+        "store": False,
+        **({"reasoning": reasoning} if reasoning is not None else {}),
+    }
+
+
+@pytest.mark.parametrize(
+    "provider_payload,error_code,finish_reason",
+    [
+        (
+            {
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": {"input_tokens": 12, "output_tokens": 3},
+            },
+            "incomplete_structured_output",
+            "max_output_tokens",
+        ),
+        (
+            {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "refusal", "refusal": "private"}],
+                    }
+                ],
+            },
+            "model_refusal",
+            "stop",
+        ),
+    ],
+)
+def test_openai_responses_handler_classifies_incomplete_and_refused_results(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_payload: dict[str, object],
+    error_code: str,
+    finish_reason: str,
+) -> None:
+    monkeypatch.setattr(
+        execution,
+        "request_json",
+        lambda *a, **k: JsonHttpResponse(200, provider_payload),
+    )
+
+    result = execution.execute_structured_model_request(
+        _target("openai-responses/v1", base_url=OPENAI_API_BASE_URL),
+        StructuredModelRequest(
+            "system",
+            "user",
+            512,
+            output_schema_name="test-answer",
+            output_schema=_ANSWER_SCHEMA,
+        ),
+    )
+
+    assert result.succeeded is False
+    assert result.error_code == error_code
+    assert result.finish_reason == finish_reason
+    assert "private" not in repr(result)
+
+
+@pytest.mark.parametrize(
     "thinking_mode,reasoning_effort",
     [("enabled", "high"), ("disabled", "none")],
 )
@@ -137,7 +283,13 @@ def test_gemini_handler_normalizes_model_and_maps_thinking_controls(
             base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
             model_id="models/gemini-3.7-flash",
         ),
-        StructuredModelRequest("system", "user", 512),
+        StructuredModelRequest(
+            "system",
+            "user",
+            512,
+            output_schema_name="test-answer",
+            output_schema=_ANSWER_SCHEMA,
+        ),
     )
 
     assert result.succeeded is True
@@ -151,6 +303,17 @@ def test_gemini_handler_normalizes_model_and_maps_thinking_controls(
     assert payload["model"] == "gemini-3.7-flash"
     assert payload["reasoning_effort"] == reasoning_effort
     assert "thinking" not in payload
+    assert payload["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "test-answer",
+            "strict": True,
+            "schema": _ANSWER_SCHEMA,
+        },
+    }
+    assert kwargs["additional_headers"] == {
+        "x-goog-api-client": "music-assistant-oai/1.0"
+    }
 
 
 def test_gemini_handler_omits_provider_default_thinking_override(
@@ -172,7 +335,13 @@ def test_gemini_handler_omits_provider_default_thinking_override(
             base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
             model_id="models/gemini-3.7-flash",
         ),
-        StructuredModelRequest("system", "user", 512),
+        StructuredModelRequest(
+            "system",
+            "user",
+            512,
+            output_schema_name="test-answer",
+            output_schema=_ANSWER_SCHEMA,
+        ),
     )
 
     assert result.succeeded is True
@@ -186,6 +355,10 @@ def test_gemini_handler_omits_provider_default_thinking_override(
     "adapter_id,base_url",
     [
         ("openai-compatible-json-schema/v1", "https://models.example/v1"),
+        (
+            "google-gemini-openai/v1",
+            GOOGLE_GEMINI_OPENAI_BASE_URL,
+        ),
         (
             "google-gemini-openai-json-schema/v1",
             GOOGLE_GEMINI_OPENAI_BASE_URL,
@@ -206,12 +379,6 @@ def test_strict_adapter_sends_exact_task_json_schema(
             {"choices": [{"message": {"content": '{"answer":"ok"}'}}]},
         )
 
-    schema: dict[str, object] = {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["answer"],
-        "properties": {"answer": {"type": "string"}},
-    }
     monkeypatch.setattr(execution, "request_json", request)
 
     result = execution.execute_structured_model_request(
@@ -221,7 +388,7 @@ def test_strict_adapter_sends_exact_task_json_schema(
             "user",
             512,
             output_schema_name="test-answer",
-            output_schema=schema,
+            output_schema=_ANSWER_SCHEMA,
         ),
     )
 
@@ -233,7 +400,7 @@ def test_strict_adapter_sends_exact_task_json_schema(
         "json_schema": {
             "name": "test-answer",
             "strict": True,
-            "schema": schema,
+            "schema": _ANSWER_SCHEMA,
         },
     }
 
@@ -254,7 +421,15 @@ def test_execution_maps_provider_validation_failures_separately(
     monkeypatch.setattr(
         execution,
         "request_json",
-        lambda *a, **k: JsonHttpResponse(400, {"error": {"message": "private"}}),
+        lambda *a, **k: JsonHttpResponse(
+            400,
+            {
+                "error": {
+                    "code": "unsupported_parameter",
+                    "message": "private",
+                }
+            },
+        ),
     )
 
     result = execution.execute_structured_model_request(
@@ -263,7 +438,7 @@ def test_execution_maps_provider_validation_failures_separately(
     )
 
     assert result.succeeded is False
-    assert result.error_code == "invalid_request"
+    assert result.error_code == "parameter_unknown"
     assert "private" not in repr(result)
 
 
