@@ -201,4 +201,14 @@ describe("boot beacon contract (main.tsx)", () => {
     expect(rootAt).toBeGreaterThan(-1);
     expect(beaconAt).toBeLessThan(rootAt);
   });
+
+  it("reloads through the current index when a deployed route chunk is stale", () => {
+    const src = readProjectFile("src/main.tsx");
+    const handlerAt = src.indexOf('addEventListener("vite:preloadError"');
+    const preventDefaultAt = src.indexOf("event.preventDefault()", handlerAt);
+    const reloadAt = src.indexOf("window.location.reload()", handlerAt);
+    expect(handlerAt).toBeGreaterThan(-1);
+    expect(preventDefaultAt).toBeGreaterThan(handlerAt);
+    expect(reloadAt).toBeGreaterThan(preventDefaultAt);
+  });
 });

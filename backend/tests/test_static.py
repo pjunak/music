@@ -30,14 +30,19 @@ def test_production_spa_mount_serves_assets_and_client_routes(
     root = client.get("/")
     assert root.status_code == 200
     assert "Music test shell" in root.text
+    assert root.headers["cache-control"] == "no-cache"
 
     client_route = client.get("/settings/playback")
     assert client_route.status_code == 200
     assert client_route.text == root.text
+    assert client_route.headers["cache-control"] == "no-cache"
 
     asset = client.get("/assets/app.js")
     assert asset.status_code == 200
     assert asset.text == "window.musicLoaded = true;"
+    assert asset.headers["cache-control"] == (
+        "public, max-age=31536000, immutable"
+    )
 
 
 def test_production_spa_mount_does_not_shadow_api_routes(

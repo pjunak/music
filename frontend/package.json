@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build --manifest && node scripts/check-entry-bundle.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "lint": "oxlint --report-unused-disable-directives --deny-warnings .",

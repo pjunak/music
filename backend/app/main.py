@@ -52,12 +52,30 @@ class SpaStaticFiles(StaticFiles):
     routers, so API paths still win."""
 
     async def get_response(self, path: str, scope):  # type: ignore[override]
+        spa_fallback = False
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except HTTPException as exc:
             if exc.status_code == 404:
-                return await super().get_response("index.html", scope)
-            raise
+                response = await super().get_response("index.html", scope)
+                spa_fallback = True
+            else:
+                raise
+
+        content_type = response.headers.get("content-type", "")
+        normalized_path = path.replace("\\", "/").lstrip("/")
+        if spa_fallback or content_type.startswith("text/html"):
+            # Route-chunk recovery must revalidate the entry document so a
+            # reload cannot keep pointing at assets removed by a deployment.
+            response.headers["Cache-Control"] = "no-cache"
+        elif normalized_path.startswith("assets/"):
+            # Vite assets are content-hashed; cache them without revalidation.
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            # Stable public filenames such as compat-mode.js may change between
+            # releases and therefore follow the entry document's policy.
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def _configure_logging(level: str) -> None:

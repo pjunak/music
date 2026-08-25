@@ -25,6 +25,14 @@ declare global {
 // "the bundle ran".
 window.__SPA_BOOTED__ = true;
 
+// A long-lived tab may request an old hashed route chunk after a deployment.
+// Reload through the current index instead of leaving the active workspace
+// behind a failed dynamic import.
+window.addEventListener("vite:preloadError", (event) => {
+  event.preventDefault();
+  window.location.reload();
+});
+
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("root element not found");
 
