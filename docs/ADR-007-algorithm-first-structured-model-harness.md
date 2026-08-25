@@ -86,7 +86,8 @@ indexed metadata / local audio / operator request
   scan every vocabulary group and return every positively supported primary or secondary tag up to
   the fixed limit. Physical setting and period feel remain separate: locations such as temples do
   not imply an era, release date is not period evidence, and unknown period evidence produces no
-  period tag. It may return only exact IDs, confidence, and bounded
+  period tag. Period feel is a zero-or-one categorical choice; `cross era` replaces rather than
+  accompanies its component period tags. It may return only exact IDs, confidence, and bounded
   evidence; names are restored locally. Missing context falls back to conservative metadata/path
   interpretation only when the operator chooses “run anyway”; “skip incomplete” prevents those
   tracks from reaching the provider.

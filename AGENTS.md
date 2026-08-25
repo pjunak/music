@@ -261,8 +261,9 @@ Runtime data lives outside the image.
   or locally repair the rejected output, and never retry provider, network, timeout, or truncation
   failures through this budget.
   Period feel is separate from physical setting and describes the era evoked by the complete
-  evidence, not release date or recording technology. The model must choose zero through eight
-  exact IDs from the full controlled vocabulary and
+  evidence, not release date or recording technology. It is a zero-or-one categorical group;
+  `cross era` replaces rather than accompanies its component period tags. The model must choose
+  zero through eight exact IDs from the full controlled vocabulary and
   return confidence plus at most four bounded evidence strings. Do not ask it for signal axes and
   do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,
   missing track IDs, malformed confidence, extra fields, and truncated output; only incidental

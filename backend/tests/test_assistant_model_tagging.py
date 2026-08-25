@@ -895,6 +895,10 @@ def test_model_tagger_sends_full_vocabulary_guidance_for_high_recall() -> None:
     assert "semantic context examples" in observed["system_prompt"]
     assert "use this coverage procedure" in observed["system_prompt"]
     assert "Include secondary tags that genuinely fit" in observed["system_prompt"]
+    assert "Return at most one tag from the Period feel group" in observed[
+        "system_prompt"
+    ]
+    assert "never return its ancient, medieval" in observed["system_prompt"]
     assert "A temple, court, market" in observed["system_prompt"]
     assert "example intentionally uses empty low-confidence profiles" in observed[
         "system_prompt"
@@ -1152,7 +1156,7 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
     suite = load_tag_quality_suite(_SUITE_PATH)
 
     assert suite.schema_version == "assistant-music-tagger-evaluation/v6"
-    assert suite.id == "controlled-vocabulary-tagging-baseline-v15"
+    assert suite.id == "controlled-vocabulary-tagging-baseline-v16"
     assert len(suite.cases) == 49
     assert any(case.track.context_evidence is None for case in suite.cases)
     temporal = {
@@ -1177,6 +1181,7 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
         if group.key == "period"
     )
     period_tags = {tag.name for tag in period_group.tags}
+    assert "mutually exclusive group" in period_group.description
     assert period_tags == {
         "ancient",
         "medieval",
@@ -1187,6 +1192,11 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
         "timeless",
         "cross era",
     }
+    cross_era = next(tag for tag in period_group.tags if tag.name == "cross era")
+    assert "never alongside" in cross_era.description
+    cross_era_case = by_id["explicit-cross-era-castle"]
+    assert "cross era" in cross_era_case.required_tags
+    assert set(cross_era_case.forbidden_tags) == period_tags - {"cross era"}
     assert by_id["ancient-temple-vigil"].required_tags[:2] == [
         "ancient",
         "temple",

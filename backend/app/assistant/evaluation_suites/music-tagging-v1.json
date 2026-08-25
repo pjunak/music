@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v6",
-  "id": "controlled-vocabulary-tagging-baseline-v15",
+  "id": "controlled-vocabulary-tagging-baseline-v16",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -1015,7 +1015,7 @@
         "bpm": 128
       },
       "required_tags": ["cross era", "castle"],
-      "forbidden_tags": ["ancient", "medieval", "modern", "futuristic", "timeless"],
+      "forbidden_tags": ["ancient", "medieval", "early modern", "industrial", "modern", "futuristic", "timeless"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1
     }

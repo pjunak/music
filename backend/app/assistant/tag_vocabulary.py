@@ -837,7 +837,8 @@ def default_tag_vocabulary() -> TagVocabularyDocument:
                 label="Period feel",
                 description=(
                     "The historical or imagined era the music evokes, independent of "
-                    "its physical setting and recording or release date."
+                    "its physical setting and recording or release date. This is a "
+                    "mutually exclusive group: return zero or one period tag."
                 ),
                 tags=[
                     _entry(
@@ -896,7 +897,9 @@ def default_tag_vocabulary() -> TagVocabularyDocument:
                     _entry(
                         "period",
                         "cross era",
-                        "Intentional blend of clearly different eras or anachronistic styles.",
+                        "Intentional blend of clearly different eras or anachronistic "
+                        "styles. Use this instead of, never alongside, its component "
+                        "period tags.",
                         "anachronistic",
                         "mixed era",
                         "era blend",

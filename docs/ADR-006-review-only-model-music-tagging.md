@@ -30,6 +30,11 @@ distinguishes the era a track evokes from its physical setting and release date.
 era-neutral and `cross era` means an explicit intentional blend; unknown period evidence yields no
 period tag.
 
+**Implementation update (2026-08-26):** Input contract v16 resolves an ambiguity between the
+general high-recall rule and the categorical `Period feel` group. A track may return zero or one
+period tag. For an explicit intentional blend, `cross era` is the single result and replaces the
+named component eras even when terms such as medieval or futuristic are literal metadata evidence.
+
 ## Context
 
 Manual D&D playlist tags are operator-owned, while local metadata analysis
