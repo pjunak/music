@@ -1,9 +1,6 @@
-import { useMemo } from "react";
-
-import { EmptyState } from "@/components/EmptyState";
 import type {
   BackgroundJob,
-  LibraryAnalysisSummary,
+  LibraryContextSummary,
 } from "@/core/api";
 
 import {
@@ -37,11 +34,8 @@ function resultFailureSamples(job: BackgroundJob): AnalysisFailureSample[] {
 
 interface LibraryAnalyzerPanelProps {
   id: string;
-  title: string;
-  description: string;
-  analyzer: string;
   history: BackgroundJob[];
-  summary: LibraryAnalysisSummary | null;
+  summary: LibraryContextSummary | null;
   loading: boolean;
   actionBusy: boolean;
   progressLabel: string;
@@ -50,18 +44,27 @@ interface LibraryAnalyzerPanelProps {
   analyzeLabel: string;
   checkLabel: string;
   rebuildTitle: string;
-  coverageNote: string;
-  showFailureStat: boolean;
   onStart: (force: boolean) => void;
   onCancel: () => void;
   onRetry: () => void;
 }
 
+function analysisStateTitle(
+  latest: BackgroundJob | undefined,
+  active: boolean,
+  currentTracks: number,
+): string {
+  if (active) return "Analysis in progress";
+  if (latest?.status === "failed") return "Analysis needs attention";
+  if (latest?.status === "cancelled") return "Analysis was cancelled";
+  if (latest?.status === "succeeded" || currentTracks > 0) {
+    return "Library context is ready";
+  }
+  return "Build library context";
+}
+
 export function LibraryAnalyzerPanel({
   id,
-  title,
-  description,
-  analyzer,
   history,
   summary,
   loading,
@@ -72,190 +75,183 @@ export function LibraryAnalyzerPanel({
   analyzeLabel,
   checkLabel,
   rebuildTitle,
-  coverageNote,
-  showFailureStat,
   onStart,
   onCancel,
   onRetry,
 }: LibraryAnalyzerPanelProps) {
   const latest = history[0];
   const active = isAnalysisJobActive(latest);
-  const confidenceTotal = useMemo(
-    () =>
-      summary === null
-        ? 0
-        : summary.high_confidence +
-          summary.medium_confidence +
-          summary.low_confidence,
-    [summary],
-  );
+  const currentTracks =
+    summary === null ? 0 : summary.full_tracks + summary.partial_tracks;
+  const coveragePercent =
+    summary === null || summary.library_tracks === 0
+      ? 0
+      : Math.round((currentTracks / summary.library_tracks) * 100);
   const failed = latest === undefined ? null : resultNumber(latest, "failed");
   const failureSamples = latest === undefined ? [] : resultFailureSamples(latest);
+  const stateTitle = analysisStateTitle(latest, active, currentTracks);
 
   return (
-    <section className="assistant-analyzer-section" aria-labelledby={`${id}-title`}>
-      <div className="assistant-analyzer-heading">
+    <section
+      className="surface-card assistant-context-analysis-card"
+      aria-labelledby={`${id}-title`}
+    >
+      <div className="assistant-context-analysis-heading">
         <div>
-          <p className="assistant-eyebrow">Local analyzer</p>
-          <h2 id={`${id}-title`}>{title}</h2>
-          <p>{description}</p>
+          <h2 id={`${id}-title`}>{stateTitle}</h2>
+          {summary !== null ? (
+            <p>
+              {currentTracks} of {summary.library_tracks} tracks have current local
+              context.
+            </p>
+          ) : null}
         </div>
-        <span className="assistant-algorithm">{analyzer}</span>
+        {latest !== undefined ? (
+          <span className={`assistant-job-status is-${latest.status}`}>
+            {analysisStatusLabel(latest.status)}
+          </span>
+        ) : null}
       </div>
 
-      <div className="assistant-analysis-grid">
-        <div className="surface-card authoring-card assistant-analysis-current">
-          <div className="assistant-section-heading">
-            <div>
-              <p className="assistant-eyebrow">Current work</p>
-              <h3>{active ? "Analysis in progress" : "Analysis is ready"}</h3>
-            </div>
-            {latest !== undefined ? (
-              <span className={`assistant-job-status is-${latest.status}`}>
-                {analysisStatusLabel(latest.status)}
+      {loading && latest === undefined ? (
+        <p className="muted">Loading analysis history…</p>
+      ) : latest === undefined ? (
+        <div className="assistant-context-analysis-empty">
+          <strong>{emptyTitle}</strong>
+          <span>{emptyDescription}</span>
+        </div>
+      ) : (
+        <div className="assistant-job-progress assistant-context-analysis-progress">
+          <div className="assistant-job-progress-label">
+            <strong>
+              {latest.progress_phase || analysisStatusLabel(latest.status)}
+            </strong>
+            {latest.progress_total !== null ? (
+              <span>
+                {latest.progress_current} / {latest.progress_total}
               </span>
             ) : null}
           </div>
-
-          {loading && latest === undefined ? (
-            <p className="muted">Loading analysis history…</p>
-          ) : latest === undefined ? (
-            <EmptyState title={emptyTitle}>{emptyDescription}</EmptyState>
+          {latest.progress_total === null ? (
+            <progress aria-label={progressLabel} />
           ) : (
-            <div className="assistant-job-progress">
-              <div className="assistant-job-progress-label">
-                <strong>
-                  {latest.progress_phase || analysisStatusLabel(latest.status)}
-                </strong>
-                {latest.progress_total !== null ? (
-                  <span>
-                    {latest.progress_current} / {latest.progress_total}
-                  </span>
-                ) : null}
-              </div>
-              {latest.progress_total === null ? (
-                <progress aria-label={progressLabel} />
-              ) : (
-                <progress
-                  aria-label={progressLabel}
-                  value={latest.progress_current}
-                  max={Math.max(1, latest.progress_total)}
-                />
-              )}
-              {latest.progress_message ? <p>{latest.progress_message}</p> : null}
-              {latest.error ? <p className="error">{latest.error}</p> : null}
-              {latest.status === "succeeded" ? (
-                <p>
-                  {resultNumber(latest, "updated") ?? 0} profiles updated ·{" "}
-                  {resultNumber(latest, "unchanged") ?? 0} already current
-                </p>
-              ) : null}
-              {latest.status === "succeeded" && failed !== null && failed > 0 ? (
-                <>
-                  <p className="error">
-                    {failed} {failed === 1 ? "track" : "tracks"} could not be
-                    decoded. A later check will retry them.
-                  </p>
-                  {failureSamples.length > 0 ? (
-                    <details className="assistant-job-failures">
-                      <summary>Review failed tracks</summary>
-                      <ul>
-                        {failureSamples.map((sample) => (
-                          <li key={`${sample.path}:${sample.error}`}>
-                            <strong>{sample.path || "Unknown track"}</strong>
-                            <span>{sample.error}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
+            <progress
+              aria-label={progressLabel}
+              value={latest.progress_current}
+              max={Math.max(1, latest.progress_total)}
+            />
           )}
-
-          <div className="assistant-analysis-actions">
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => onStart(false)}
-              disabled={active || actionBusy}
-            >
-              {latest?.status === "succeeded" ? checkLabel : analyzeLabel}
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => onStart(true)}
-              disabled={active || actionBusy}
-              title={rebuildTitle}
-            >
-              Rebuild all profiles
-            </button>
-            {active ? (
-              <button type="button" onClick={onCancel} disabled={actionBusy}>
-                {latest?.status === "cancel_requested" ? "Cancelling…" : "Cancel"}
-              </button>
-            ) : null}
-            {latest?.status === "failed" || latest?.status === "cancelled" ? (
-              <button type="button" onClick={onRetry} disabled={actionBusy}>
-                Retry last job
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="surface-card assistant-analysis-summary">
-          <div className="assistant-section-heading">
-            <div>
-              <p className="assistant-eyebrow">Analyzer coverage</p>
-              <h3>Stored track context</h3>
-            </div>
-            <span>{summary?.analyzer ?? analyzer}</span>
-          </div>
-          <div className="assistant-analysis-stats">
-            <div>
-              <strong>{summary?.analyzed_tracks ?? 0}</strong>
-              <span>Analyzed</span>
-            </div>
-            <div>
-              <strong>{summary?.library_tracks ?? 0}</strong>
-              <span>Library tracks</span>
-            </div>
-            <div>
-              <strong>{summary?.high_confidence ?? 0}</strong>
-              <span>High confidence</span>
-            </div>
-            <div>
-              <strong>
-                {showFailureStat
-                  ? (summary?.failed_tracks ?? 0)
-                  : (summary?.low_confidence ?? 0)}
-              </strong>
-              <span>{showFailureStat ? "Failed tracks" : "Needs richer data"}</span>
-            </div>
-          </div>
-          {summary !== null && summary.library_tracks > 0 ? (
-            <div className="assistant-analysis-coverage">
-              <span
-                style={{
-                  width: `${Math.round((confidenceTotal / summary.library_tracks) * 100)}%`,
-                }}
-              />
-            </div>
-          ) : null}
-          {summary !== null && summary.stale_tracks > 0 ? (
-            <p className="muted small">
-              {summary.stale_tracks} stale{" "}
-              {summary.stale_tracks === 1 ? "profile needs" : "profiles need"} a
-              refresh.
+          {latest.progress_message ? <p>{latest.progress_message}</p> : null}
+          {latest.error ? <p className="error">{latest.error}</p> : null}
+          {latest.status === "succeeded" ? (
+            <p>
+              {resultNumber(latest, "updated") ?? 0} profiles updated ·{" "}
+              {resultNumber(latest, "unchanged") ?? 0} already current
             </p>
           ) : null}
-          <p className="assistant-analysis-note">{coverageNote}</p>
-          <p className="muted small">
-            Last updated: {formatAnalysisTime(summary?.last_updated_at ?? null)}
+          {latest.status === "succeeded" && failed !== null && failed > 0 ? (
+            <>
+              <p className="error">
+                {failed} {failed === 1 ? "track" : "tracks"} could not be decoded.
+                A later check will retry them.
+              </p>
+              {failureSamples.length > 0 ? (
+                <details className="assistant-job-failures">
+                  <summary>Review failed tracks</summary>
+                  <ul>
+                    {failureSamples.map((sample) => (
+                      <li key={`${sample.path}:${sample.error}`}>
+                        <strong>{sample.path || "Unknown track"}</strong>
+                        <span>{sample.error}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      )}
+
+      {summary !== null ? (
+        <div className="assistant-context-coverage-summary">
+          <div className="assistant-context-coverage-heading">
+            <div>
+              <strong>Library coverage</strong>
+              <span>{coveragePercent}% ready for tagging</span>
+            </div>
+          </div>
+          <div
+            className="assistant-context-coverage-meter"
+            role="img"
+            aria-label={`${summary.full_tracks} full, ${summary.partial_tracks} partial, ${summary.missing_tracks} missing or stale, and ${summary.failed_tracks} failed tracks`}
+          >
+            <span
+              className="is-full"
+              style={{
+                width: `${(summary.full_tracks / Math.max(1, summary.library_tracks)) * 100}%`,
+              }}
+            />
+            <span
+              className="is-partial"
+              style={{
+                width: `${(summary.partial_tracks / Math.max(1, summary.library_tracks)) * 100}%`,
+              }}
+            />
+            <span className="is-unavailable" />
+          </div>
+          <div className="assistant-context-coverage-stats">
+            <div>
+              <strong>{summary.full_tracks}</strong>
+              <span>Full</span>
+            </div>
+            <div>
+              <strong>{summary.partial_tracks}</strong>
+              <span>Partial</span>
+            </div>
+            <div>
+              <strong>{summary.missing_tracks}</strong>
+              <span>Missing or stale</span>
+            </div>
+            <div>
+              <strong>{summary.failed_tracks}</strong>
+              <span>Failed</span>
+            </div>
+          </div>
+          <p className="assistant-context-coverage-updated">
+            Updated {formatAnalysisTime(summary.last_updated_at)}
           </p>
         </div>
+      ) : null}
+
+      <div className="assistant-analysis-actions">
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => onStart(false)}
+          disabled={active || actionBusy}
+        >
+          {latest?.status === "succeeded" ? checkLabel : analyzeLabel}
+        </button>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => onStart(true)}
+          disabled={active || actionBusy}
+          title={rebuildTitle}
+        >
+          Rebuild all profiles
+        </button>
+        {active ? (
+          <button type="button" onClick={onCancel} disabled={actionBusy}>
+            {latest?.status === "cancel_requested" ? "Cancelling…" : "Cancel"}
+          </button>
+        ) : null}
+        {latest?.status === "failed" || latest?.status === "cancelled" ? (
+          <button type="button" onClick={onRetry} disabled={actionBusy}>
+            Retry last job
+          </button>
+        ) : null}
       </div>
     </section>
   );

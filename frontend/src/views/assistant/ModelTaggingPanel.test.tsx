@@ -100,13 +100,12 @@ function taggingJob(overrides: Partial<BackgroundJob> = {}): BackgroundJob {
   };
 }
 
-function renderPanel(onSuggestionsChanged = vi.fn()) {
+function renderPanel() {
   render(
     <MemoryRouter>
-      <ModelTaggingPanel onSuggestionsChanged={onSuggestionsChanged} />
+      <ModelTaggingPanel />
     </MemoryRouter>,
   );
-  return onSuggestionsChanged;
 }
 
 beforeEach(() => {
@@ -132,7 +131,7 @@ describe("ModelTaggingPanel", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Suggest mood-library tags from track evidence",
+        name: "Optional model suggestions",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Filesystem paths")).toBeInTheDocument();
@@ -226,7 +225,7 @@ describe("ModelTaggingPanel", () => {
     );
   });
 
-  it("refreshes review suggestions when a completed run is restored", async () => {
+  it("links a completed run to the standalone review workspace", async () => {
     const completed = taggingJob({
       status: "succeeded",
       progress_current: 40,
@@ -247,12 +246,15 @@ describe("ModelTaggingPanel", () => {
       finished_at: "2026-08-19T12:05:00Z",
     });
     vi.mocked(jobsApi.list).mockResolvedValue([completed]);
-    const onSuggestionsChanged = renderPanel();
+    renderPanel();
 
     expect(
       await screen.findByText("Generated suggestions are ready for review"),
     ).toBeInTheDocument();
     expect(screen.getByText(/Updated 40 profiles/)).toBeInTheDocument();
-    await waitFor(() => expect(onSuggestionsChanged).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("link", { name: "Review mood tags" })).toHaveAttribute(
+      "href",
+      "/assistant/moods/tags",
+    );
   });
 });

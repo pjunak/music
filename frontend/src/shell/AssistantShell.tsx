@@ -122,11 +122,15 @@ export function MoodLibraryShell() {
       items={[
         {
           to: "workflow",
-          label: "Analyze and tag",
+          label: "Analysis",
         },
         {
           to: "context",
           label: "Track context",
+        },
+        {
+          to: "tags",
+          label: "Mood tags",
         },
       ]}
     />

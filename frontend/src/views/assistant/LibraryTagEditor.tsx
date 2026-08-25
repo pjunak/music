@@ -461,11 +461,9 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     <section className="surface-card assistant-tag-workspace">
       <div className="assistant-section-heading">
         <div>
-          <p className="assistant-eyebrow">Human-owned database context</p>
-          <h2>Mood library tags</h2>
+          <h1>Mood tags</h1>
           <p>
-            Add terrain, scene, and mood labels without editing tags inside the
-            audio files. Generated suggestions remain separate until accepted.
+            Review suggestions or edit your own database-only tags.
           </p>
         </div>
         <span>{page.total} tracks</span>

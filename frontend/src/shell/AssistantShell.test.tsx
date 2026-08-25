@@ -53,13 +53,14 @@ describe("AssistantShell", () => {
     expect(screen.getByText("Model setup")).toBeVisible();
   });
 
-  it("keeps analysis and evidence inside one Mood Library workspace", () => {
+  it("keeps analysis, evidence, and human-owned tags in distinct Mood Library tabs", () => {
     render(
       <MemoryRouter initialEntries={["/assistant/moods/workflow"]}>
         <Routes>
           <Route path="/assistant/moods" element={<MoodLibraryShell />}>
             <Route path="workflow" element={<div>Mood workflow</div>} />
             <Route path="context" element={<div>Context browser</div>} />
+            <Route path="tags" element={<div>Mood tag editor</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -67,12 +68,17 @@ describe("AssistantShell", () => {
 
     expect(
       screen.getByRole("link", {
-        name: /Analyze and tag/,
+        name: /Analysis/,
       }),
     ).toHaveClass("section-nav-tab-active");
     expect(
       screen.getByRole("link", {
         name: /Track context/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", {
+        name: /Mood tags/,
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Mood workflow")).toBeVisible();

@@ -21,10 +21,6 @@ import {
 } from "./modelTaggingJobs";
 import { ModelUsageSummary } from "./ModelUsageSummary";
 
-interface Props {
-  onSuggestionsChanged: () => void;
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Model tagging is unavailable.";
 }
@@ -44,7 +40,7 @@ function unavailableMessage(reasonCode: string | null): string {
   }
 }
 
-export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
+export function ModelTaggingPanel() {
   const [availability, setAvailability] =
     useState<ModelTaggingAvailability | null>(null);
   const [job, setJob] = useState<BackgroundJob | null>(null);
@@ -55,7 +51,6 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
   const [contextPolicy, setContextPolicy] =
     useState<ModelTaggingContextPolicy>("include");
   const [refreshKey, setRefreshKey] = useState(0);
-  const notifiedJobId = useRef<string | null>(null);
   const jobRef = useRef<BackgroundJob | null>(null);
 
   useEffect(() => {
@@ -101,12 +96,6 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [contextPolicy, refreshKey]);
-
-  useEffect(() => {
-    if (job?.status !== "succeeded" || notifiedJobId.current === job.id) return;
-    notifiedJobId.current = job.id;
-    onSuggestionsChanged();
-  }, [job, onSuggestionsChanged]);
 
   const active = isModelTaggingJobActive(job);
   const result = modelTaggingResultFromJob(job);
@@ -202,18 +191,20 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
       className="surface-card assistant-model-tagging"
       aria-label="Connected model tag suggestions"
     >
-      <div className="assistant-analyzer-heading">
+      <div className="assistant-model-tagging-heading">
         <div>
-          <p className="assistant-eyebrow">Optional connected model</p>
-          <h2>Suggest mood-library tags from track evidence</h2>
+          <h2>Optional model suggestions</h2>
           <p>
-            Create review-only terrain, scene, and mood suggestions for the
-            separate database tag library. Audio-file metadata is never changed.
+            Suggest controlled mood tags from local track evidence. Nothing changes
+            until you review it.
           </p>
         </div>
-        <span className={`assistant-job-status is-${headingStatusClass}`}>
-          {headingStatusLabel}
-        </span>
+        <div className="assistant-model-tagging-heading-actions">
+          <span className={`assistant-job-status is-${headingStatusClass}`}>
+            {headingStatusLabel}
+          </span>
+          <Link to="/assistant/moods/tags">Review mood tags</Link>
+        </div>
       </div>
 
       {loadError !== null ? (
@@ -239,19 +230,19 @@ export function ModelTaggingPanel({ onSuggestionsChanged }: Props) {
           <div className="assistant-model-tagging-stats">
             <div>
               <strong>{availability.current_profiles}</strong>
-              <span>Current model profiles</span>
+              <span>Saved profiles</span>
             </div>
             <div>
               <strong>{availability.tracks_needing_tags}</strong>
-              <span>Tracks needing suggestions</span>
+              <span>Need suggestions</span>
             </div>
             <div>
               <strong>{availability.estimated_provider_requests}</strong>
-              <span>Estimated requests</span>
+              <span>Provider requests</span>
             </div>
             <div>
               <strong>{availability.tracks_with_full_context}</strong>
-              <span>With full track context</span>
+              <span>Full context</span>
             </div>
           </div>
 

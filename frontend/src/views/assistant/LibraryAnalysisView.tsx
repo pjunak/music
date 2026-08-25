@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import type { BackgroundJob, LibraryContextSummary } from "@/core/api";
@@ -13,11 +13,6 @@ import {
 import { LibraryAnalyzerPanel } from "./LibraryAnalyzerPanel";
 import { ModelTaggingPanel } from "./ModelTaggingPanel";
 
-const LibraryTagEditor = lazy(async () => {
-  const module = await import("./LibraryTagEditor");
-  return { default: module.LibraryTagEditor };
-});
-
 export const LIBRARY_CONTEXT_JOB_KIND = "assistant.library-context-analysis";
 
 export function LibraryAnalysisView() {
@@ -27,11 +22,6 @@ export function LibraryAnalysisView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [tagEditorRefreshKey, setTagEditorRefreshKey] = useState(0);
-  const refreshTagSuggestions = useCallback(
-    () => setTagEditorRefreshKey((value) => value + 1),
-    [],
-  );
 
   useEffect(() => {
     let disposed = false;
@@ -124,20 +114,10 @@ export function LibraryAnalysisView() {
   return (
     <div className="assistant-analysis-view">
       <header className="assistant-page-header assistant-analysis-header">
-        <div>
-          <p className="assistant-eyebrow">One durable local workflow</p>
-          <h1>Library context analysis</h1>
-          <p>
-            Decode each track once into factual, time-aware context for mood tagging:
-            dynamics, rhythmic development, spectral movement, tempo, sections, and
-            repetition. The analyzer never suggests mood tags itself.
-          </p>
-        </div>
-        <div className="assistant-algorithm-list" aria-label="Analysis contract">
-          <span className="assistant-algorithm">local-context/v1</span>
-          <span className="assistant-algorithm">checkpointed per track</span>
-          <Link to="/assistant/moods/context">Browse track context</Link>
-        </div>
+        <h1>Library context analysis</h1>
+        <Link className="btn-link" to="/assistant/moods/context">
+          Browse track context
+        </Link>
       </header>
 
       {loadError !== null ? (
@@ -151,60 +131,26 @@ export function LibraryAnalysisView() {
 
       <LibraryAnalyzerPanel
         id="context-analysis"
-        title="Comprehensive track context"
-        description="Measure the whole track, preserve important changes over time, and condense the result into bounded evidence the tagging model can use."
-        analyzer="local-context/v1"
         history={history}
         summary={summary}
         loading={loading}
         actionBusy={busy}
         progressLabel="Library context analysis progress"
         emptyTitle="No track context has been built yet"
-        emptyDescription="Start the server-side pass. It can take considerably longer than the old signal scan, but completed tracks are saved immediately and do not need to be repeated."
+        emptyDescription="Build factual context for each track. Completed tracks are saved as the analysis runs."
         analyzeLabel="Build library context"
         checkLabel="Analyze new and changed tracks"
         rebuildTitle="Decode and recompute every track even when its indexed source is unchanged"
-        coverageNote="The output is descriptive evidence only. It does not claim a mood, genre, instrument, terrain, or scene and it never writes tags to audio files."
-        showFailureStat
         onStart={(force) => void start(force)}
         onCancel={() => void cancel()}
         onRetry={() => void retry()}
       />
 
-      {summary !== null ? (
-        <section className="surface-card assistant-context-coverage">
-          <div className="assistant-section-heading">
-            <div>
-              <p className="assistant-eyebrow">Tagging readiness</p>
-              <h2>Evidence ready for tagging</h2>
-            </div>
-            <Link to="/assistant/moods/context">Inspect individual tracks</Link>
-          </div>
-          <div className="assistant-model-tagging-stats">
-            <div><strong>{summary.full_tracks}</strong><span>Full context</span></div>
-            <div><strong>{summary.partial_tracks}</strong><span>Partial context</span></div>
-            <div><strong>{summary.missing_tracks}</strong><span>Not analyzed</span></div>
-            <div><strong>{summary.failed_tracks + summary.stale_tracks}</strong><span>Failed or stale</span></div>
-          </div>
-        </section>
-      ) : null}
-
-      <ModelTaggingPanel onSuggestionsChanged={refreshTagSuggestions} />
-
-      <Suspense
-        fallback={
-          <section className="surface-card assistant-tag-workspace">
-            <p className="muted">Loading mood-library editor…</p>
-          </section>
-        }
-      >
-        <LibraryTagEditor refreshKey={tagEditorRefreshKey} />
-      </Suspense>
+      <ModelTaggingPanel />
 
       <section className="surface-card assistant-analysis-history">
         <div className="assistant-section-heading">
           <div>
-            <p className="assistant-eyebrow">Persistent history</p>
             <h2>Recent context jobs</h2>
           </div>
         </div>

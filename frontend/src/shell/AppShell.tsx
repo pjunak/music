@@ -27,6 +27,7 @@ import { SettingsView } from "@/views/SettingsView";
 import { SoundboardsView } from "@/views/SoundboardsView";
 import { LibraryAnalysisView } from "@/views/assistant/LibraryAnalysisView";
 import { LibraryContextView } from "@/views/assistant/LibraryContextView";
+import { LibraryTagsView } from "@/views/assistant/LibraryTagsView";
 import { PlaylistBuilderView } from "@/views/assistant/PlaylistBuilderView";
 import { EqAssistantView } from "@/views/assistant/EqAssistantView";
 import { TagVocabularyView } from "@/views/assistant/TagVocabularyView";
@@ -205,6 +206,7 @@ export default function AppShell() {
               <Route index element={<Navigate to="workflow" replace />} />
               <Route path="workflow" element={<LibraryAnalysisView />} />
               <Route path="context" element={<LibraryContextView />} />
+              <Route path="tags" element={<LibraryTagsView />} />
             </Route>
             <Route path="settings" element={<AssistantSettingsShell />}>
               <Route index element={<Navigate to="models" replace />} />

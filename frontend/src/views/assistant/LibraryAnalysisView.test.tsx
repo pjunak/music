@@ -171,11 +171,14 @@ describe("LibraryAnalysisView", () => {
     expect(
       screen.getByRole("progressbar", { name: "Library context analysis progress" }),
     ).toHaveValue(42);
-    expect(screen.getByText("Full context")).toBeInTheDocument();
-    expect(screen.getByText("Partial context")).toBeInTheDocument();
+    expect(screen.getByText("Full")).toBeInTheDocument();
+    expect(screen.getByText("Partial")).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Evidence ready for tagging" }),
+      screen.getByRole("heading", { name: "Analysis in progress" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Evidence ready for tagging" }),
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(jobsApi.cancel).toHaveBeenCalledWith("context-job-1");
   });
@@ -187,7 +190,7 @@ describe("LibraryAnalysisView", () => {
     renderView();
 
     const panel = await screen.findByRole("region", {
-      name: "Comprehensive track context",
+      name: "Build library context",
     });
     await user.click(within(panel).getByRole("button", { name: "Build library context" }));
     await waitFor(() =>
@@ -207,7 +210,7 @@ describe("LibraryAnalysisView", () => {
     renderView();
 
     const panel = await screen.findByRole("region", {
-      name: "Comprehensive track context",
+      name: "Build library context",
     });
     await user.click(
       within(panel).getByRole("button", { name: "Rebuild all profiles" }),
