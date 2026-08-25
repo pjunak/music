@@ -105,3 +105,7 @@ def test_audio_context_documents_cross_the_process_boundary(tmp_path: Path) -> N
     assert {result.track_id for result in results} == {1, 2}
     assert all(result.document is not None for result in results)
     assert all(result.error is None and not result.fatal for result in results)
+    assert all(
+        result.document is not None and result.document.performance is not None
+        for result in results
+    )

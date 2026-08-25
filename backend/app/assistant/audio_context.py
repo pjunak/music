@@ -7,7 +7,6 @@ sections so a later, review-only classifier can make those semantic choices.
 
 from __future__ import annotations
 
-import cmath
 import json
 import math
 import re
@@ -18,18 +17,31 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 from app.assistant.audio_signal import AudioSignalError, _open_mono_pcm
 from app.assistant.voice_analysis import analyze_voice
+
+# The repository retains Python 3.11 compatibility through NumPy 2.4 while
+# newer interpreters use 2.5. A narrow local MyPy compatibility surface keeps
+# the 3.11 syntax target from parsing 2.5's Python 3.12-only alias declarations;
+# runtime locking and numerical regression tests verify the real implementation.
 
 CONTEXT_SAMPLE_RATE = 16_000
 CONTEXT_FRAME_SECONDS = 0.5
 CONTEXT_TIMELINE_SECONDS = 2.0
 CONTEXT_ANALYZER_ID = "local-context/v1"
+# Keep the public v1 evidence contract while making implementation changes
+# explicit in staleness fingerprints. local-context/v2 remains reserved for
+# recalibrated measurement semantics rather than a performance-only rewrite.
+CONTEXT_IMPLEMENTATION_ID = "local-context/v1+numpy-rfft/v1"
 _FFT_SIZE = 2_048
 _MAX_SECTIONS = 10
 _MIN_SECTION_SECONDS = 10.0
 _LOUDNORM_JSON = re.compile(r"\{\s*\"input_i\".*?\}", re.DOTALL)
+_SPECTRUM_WINDOW = np.hanning(_FFT_SIZE)
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -71,39 +83,6 @@ def _round(value: float, digits: int = 5) -> float:
     return round(value, digits)
 
 
-def _fft(values: list[complex]) -> list[complex]:
-    """Iterative radix-2 FFT kept local to avoid a heavyweight runtime."""
-
-    size = len(values)
-    if size == 0 or size & (size - 1):
-        raise ValueError("FFT input length must be a power of two")
-    output = values.copy()
-    j = 0
-    for i in range(1, size):
-        bit = size >> 1
-        while j & bit:
-            j ^= bit
-            bit >>= 1
-        j ^= bit
-        if i < j:
-            output[i], output[j] = output[j], output[i]
-    length = 2
-    while length <= size:
-        angle = -2.0 * math.pi / length
-        root = cmath.exp(1j * angle)
-        half = length // 2
-        for start in range(0, size, length):
-            factor = 1 + 0j
-            for offset in range(half):
-                even = output[start + offset]
-                odd = output[start + offset + half] * factor
-                output[start + offset] = even + odd
-                output[start + offset + half] = even - odd
-                factor *= root
-        length <<= 1
-    return output
-
-
 @dataclass(frozen=True)
 class _Spectrum:
     centroid_hz: float
@@ -116,47 +95,45 @@ class _Spectrum:
     peak_concentration: float
 
 
-def _spectrum(samples: Sequence[float], sample_rate: int) -> _Spectrum:
+def _spectrum(
+    samples: Sequence[float] | Any,
+    sample_rate: int,
+) -> _Spectrum:
+    values = np.asarray(samples, dtype=np.float64)
     if len(samples) >= _FFT_SIZE:
         start = (len(samples) - _FFT_SIZE) // 2
-        selected = list(samples[start : start + _FFT_SIZE])
+        selected = values[start : start + _FFT_SIZE]
     else:
-        selected = [*samples, *([0.0] * (_FFT_SIZE - len(samples)))]
-    windowed = [
-        complex(value * (0.5 - 0.5 * math.cos(2.0 * math.pi * index / (_FFT_SIZE - 1))))
-        for index, value in enumerate(selected)
-    ]
-    transformed = _fft(windowed)[: _FFT_SIZE // 2]
-    powers = [max(1e-18, value.real * value.real + value.imag * value.imag) for value in transformed]
-    total = sum(powers)
+        selected = np.pad(values, (0, _FFT_SIZE - len(samples)))
+    # rfft uses the native pocketfft path and avoids constructing the mirrored
+    # half of a real-valued spectrum. Drop Nyquist to preserve the established
+    # v1 bin contract (the previous implementation returned exactly 1024 bins).
+    transformed = np.fft.rfft(selected * _SPECTRUM_WINDOW)[:-1]
+    powers = np.maximum(1e-18, np.square(transformed.real) + np.square(transformed.imag))
+    total = float(np.sum(powers, dtype=np.float64))
     if total <= 1e-12:
         return _Spectrum(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     bin_hz = sample_rate / _FFT_SIZE
-    frequencies = [index * bin_hz for index in range(len(powers))]
-    centroid = sum(freq * power for freq, power in zip(frequencies, powers, strict=True)) / total
-    variance = sum(
-        ((freq - centroid) ** 2) * power
-        for freq, power in zip(frequencies, powers, strict=True)
-    ) / total
+    frequencies = np.arange(len(powers), dtype=np.float64) * bin_hz
+    centroid = float(np.sum(frequencies * powers, dtype=np.float64) / total)
+    variance = float(
+        np.sum(np.square(frequencies - centroid) * powers, dtype=np.float64) / total
+    )
     threshold = total * 0.85
-    cumulative = 0.0
-    rolloff = 0.0
-    for frequency, power in zip(frequencies, powers, strict=True):
-        cumulative += power
-        if cumulative >= threshold:
-            rolloff = frequency
-            break
-    geometric = math.exp(sum(math.log(power) for power in powers) / len(powers))
+    rolloff_index = min(
+        int(np.searchsorted(np.cumsum(powers), threshold, side="left")),
+        len(frequencies) - 1,
+    )
+    rolloff = float(frequencies[rolloff_index])
+    geometric = math.exp(float(np.mean(np.log(powers))))
     flatness = _clamp(geometric / (total / len(powers)))
 
     def band(low: float, high: float) -> float:
-        return sum(
-            power
-            for frequency, power in zip(frequencies, powers, strict=True)
-            if low <= frequency < high
-        ) / total
+        selected_powers = powers[(frequencies >= low) & (frequencies < high)]
+        return float(np.sum(selected_powers, dtype=np.float64) / total)
 
-    strongest = sum(sorted(powers, reverse=True)[: max(4, len(powers) // 100)]) / total
+    strongest_count = max(4, len(powers) // 100)
+    strongest = float(np.sum(np.sort(powers)[-strongest_count:], dtype=np.float64) / total)
     return _Spectrum(
         centroid_hz=centroid,
         bandwidth_hz=math.sqrt(max(0.0, variance)),
@@ -191,60 +168,94 @@ class _ContextAccumulator:
         self.total_squares = 0.0
         self.peak = 0.0
         self.framed_samples = 0
-        self.pending: list[float] = []
+        self.pending: Any = np.empty(0, dtype=np.float64)
         self.short_samples = 0
         self.short_squares = 0.0
         self.short_levels: list[float] = []
         self.frames: list[_Frame] = []
+        self.spectrum_seconds = 0.0
 
     def add(self, samples: Sequence[float]) -> None:
-        for raw in samples:
-            sample = _clamp(float(raw), -1.0, 1.0)
-            self.total_samples += 1
-            self.total_squares += sample * sample
-            self.peak = max(self.peak, abs(sample))
-            self.pending.append(sample)
-            self.short_samples += 1
-            self.short_squares += sample * sample
-            if self.short_samples >= self.short_size:
+        values = np.asarray(samples, dtype=np.float64)
+        if values.size == 0:
+            return
+        values = np.clip(values, -1.0, 1.0)
+        self.total_samples += int(values.size)
+        self.total_squares += float(np.sum(np.square(values), dtype=np.float64))
+        self.peak = max(self.peak, float(np.max(np.abs(values))))
+        self._add_short_levels(values)
+
+        combined = np.concatenate((self.pending, values)) if self.pending.size else values
+        framed_count = (combined.size // self.frame_size) * self.frame_size
+        if framed_count:
+            for frame in combined[:framed_count].reshape(-1, self.frame_size):
+                self._finish_frame(frame)
+        self.pending = combined[framed_count:].copy()
+
+    def _add_short_levels(self, values: Any) -> None:
+        position = 0
+        if self.short_samples:
+            take = min(self.short_size - self.short_samples, int(values.size))
+            block = values[:take]
+            self.short_squares += float(np.sum(np.square(block), dtype=np.float64))
+            self.short_samples += take
+            position = take
+            if self.short_samples == self.short_size:
                 self.short_levels.append(math.sqrt(self.short_squares / self.short_samples))
                 self.short_samples = 0
                 self.short_squares = 0.0
-            if len(self.pending) >= self.frame_size:
-                self._finish_frame(self.pending[: self.frame_size])
-                del self.pending[: self.frame_size]
 
-    def _finish_frame(self, samples: Sequence[float]) -> None:
-        if not samples:
+        remaining = values[position:]
+        full_count = remaining.size // self.short_size
+        if full_count:
+            full_end = full_count * self.short_size
+            blocks = remaining[:full_end].reshape(full_count, self.short_size)
+            means = np.mean(np.square(blocks), axis=1)
+            self.short_levels.extend(np.sqrt(means).tolist())
+            remaining = remaining[full_end:]
+        if remaining.size:
+            self.short_samples = int(remaining.size)
+            self.short_squares = float(np.sum(np.square(remaining), dtype=np.float64))
+
+    def _finish_frame(self, samples: Any) -> None:
+        if samples.size == 0:
             return
-        squares = sum(value * value for value in samples)
-        rms = math.sqrt(squares / len(samples))
-        peak = max(abs(value) for value in samples)
-        zero_crossings = sum(
-            (current < 0.0 <= previous) or (previous < 0.0 <= current)
-            for previous, current in pairwise(samples)
+        squares = float(np.sum(np.square(samples), dtype=np.float64))
+        rms = math.sqrt(squares / samples.size)
+        peak = float(np.max(np.abs(samples)))
+        previous = samples[:-1]
+        current = samples[1:]
+        zero_crossings = int(
+            np.count_nonzero(
+                ((current < 0.0) & (previous >= 0.0))
+                | ((previous < 0.0) & (current >= 0.0))
+            )
         )
-        difference_squares = sum((current - previous) ** 2 for previous, current in pairwise(samples))
+        differences = np.diff(samples)
+        difference_squares = float(np.sum(np.square(differences), dtype=np.float64))
         start_s = self.framed_samples / self.sample_rate
+        spectrum_started = time.perf_counter()
+        spectrum = _spectrum(samples, self.sample_rate)
+        self.spectrum_seconds += time.perf_counter() - spectrum_started
         self.frames.append(
             _Frame(
                 start_s=start_s,
-                duration_s=len(samples) / self.sample_rate,
+                duration_s=samples.size / self.sample_rate,
                 loudness_dbfs=_dbfs(rms),
                 peak_dbfs=_dbfs(peak),
-                zero_crossing_rate=zero_crossings / max(1, len(samples) - 1),
+                zero_crossing_rate=zero_crossings / max(1, samples.size - 1),
                 difference_ratio=math.sqrt(difference_squares / max(4.0 * squares, 1e-12)),
-                spectrum=_spectrum(samples, self.sample_rate),
+                spectrum=spectrum,
             )
         )
-        self.framed_samples += len(samples)
+        self.framed_samples += int(samples.size)
 
     def finish(self) -> tuple[list[_Frame], list[float], dict[str, float]]:
         if self.short_samples:
             self.short_levels.append(math.sqrt(self.short_squares / self.short_samples))
-        if self.pending:
+        if self.pending.size:
             self._finish_frame(self.pending)
-            self.pending = []
+            self.pending = np.empty(0, dtype=np.float64)
         duration = self.total_samples / self.sample_rate
         if duration < 0.1 or not self.frames:
             raise AudioSignalError("decoded audio is empty or too short to analyze")
@@ -692,6 +703,13 @@ def _ebu_loudness(
 
 
 @dataclass(frozen=True)
+class AudioContextPerformance:
+    audio_seconds: float
+    elapsed_seconds: float
+    stage_seconds: dict[str, float]
+
+
+@dataclass(frozen=True)
 class AudioContextDocument:
     confidence: str
     completeness: str
@@ -700,6 +718,7 @@ class AudioContextDocument:
     sections: list[dict[str, object]]
     technical: dict[str, object]
     stages: dict[str, object]
+    performance: AudioContextPerformance | None = None
 
 
 def analyze_audio_context(
@@ -709,10 +728,16 @@ def analyze_audio_context(
 ) -> AudioContextDocument:
     """Decode a full recording and build bounded temporal context."""
 
+    analysis_started = time.perf_counter()
     if not path.is_file():
         raise AudioSignalError("audio file is missing")
     cancellation_check = check_cancelled or (lambda: None)
+
+    probe_started = time.perf_counter()
     technical = _technical_probe(path)
+    stage_seconds = {"probe": time.perf_counter() - probe_started}
+
+    decode_started = time.perf_counter()
     with _open_mono_pcm(path, CONTEXT_SAMPLE_RATE) as (sample_rate, chunks):
         accumulator = _ContextAccumulator(sample_rate)
         last_check = time.monotonic()
@@ -724,6 +749,14 @@ def analyze_audio_context(
             accumulator.add(samples)
         cancellation_check()
         frames, short_levels, global_metrics = accumulator.finish()
+    decode_and_frame_seconds = time.perf_counter() - decode_started
+    stage_seconds["spectrum"] = accumulator.spectrum_seconds
+    stage_seconds["decode_and_frames"] = max(
+        0.0,
+        decode_and_frame_seconds - accumulator.spectrum_seconds,
+    )
+
+    feature_started = time.perf_counter()
     rows = _timeline_frames(frames, short_levels)
     duration_s = global_metrics["duration_s"]
     tempo_points = _tempo_curve(short_levels, duration_s)
@@ -748,9 +781,18 @@ def analyze_audio_context(
         ),
         "points": tempo_points[:20],
     }
+
+    stage_seconds["feature_summary"] = time.perf_counter() - feature_started
+    voice_started = time.perf_counter()
     voice_analysis = analyze_voice(path, check_cancelled=cancellation_check)
+    stage_seconds["voice"] = time.perf_counter() - voice_started
+
+    loudness_started = time.perf_counter()
     loudness = _ebu_loudness(path, check_cancelled=cancellation_check)
+    stage_seconds["ebu_loudness"] = time.perf_counter() - loudness_started
     cancellation_check()
+
+    finalize_started = time.perf_counter()
     if loudness is not None:
         technical["loudness"] = {"status": "ebu_r128", **loudness}
     else:
@@ -790,12 +832,18 @@ def analyze_audio_context(
     stages: dict[str, object] = {
         "decode": {"status": "complete"},
         "signal": {"status": "complete", "frame_seconds": CONTEXT_FRAME_SECONDS},
-        "spectrum": {"status": "complete", "fft_size": _FFT_SIZE},
+        "spectrum": {
+            "status": "complete",
+            "fft_size": _FFT_SIZE,
+            "implementation": "numpy-rfft/v1",
+        },
         "tempo": {"status": tempo_summary["status"]},
         "structure": {"status": "complete"},
         "loudness": {"status": "complete" if loudness is not None else "proxy"},
         "voice": voice_analysis.stage,
     }
+    stage_seconds["finalize"] = time.perf_counter() - finalize_started
+    elapsed_seconds = time.perf_counter() - analysis_started
     return AudioContextDocument(
         confidence=confidence,
         completeness="full",
@@ -804,6 +852,11 @@ def analyze_audio_context(
         sections=sections,
         technical=technical,
         stages=stages,
+        performance=AudioContextPerformance(
+            audio_seconds=duration_s,
+            elapsed_seconds=elapsed_seconds,
+            stage_seconds=stage_seconds,
+        ),
     )
 
 

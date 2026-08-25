@@ -135,7 +135,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
 - **Durable library context analysis** — one restartable `local-context/v1` job decodes each new or
   changed track into factual whole-track context: loudness and intensity development, rhythmic
   drive, brightness, density, spectral change, local tempo behavior, major acoustic sections,
-  repetition, technical details, and explicit analysis-stage status. It stores condensed timelines
+  repetition, technical details, explicit analysis-stage status, and bounded performance timings.
+  Native NumPy frame/spectrum math preserves the v1 evidence contract while accelerating the
+  repeated numerical stages. It stores condensed timelines
   in a separate context table, checkpoints each completed/failed track, and never proposes semantic
   tags. The Track Context tab mirrors the library folders, supports playback, and shows the full
   stored context for a selected song. The production image includes FFmpeg for the indexed MP3,

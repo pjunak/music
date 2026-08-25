@@ -12,7 +12,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
-from app.assistant.audio_context import AudioContextDocument, analyze_audio_context
+from app.assistant.audio_context import (
+    AudioContextDocument,
+    AudioContextPerformance,
+    _spectrum,
+    analyze_audio_context,
+)
 from app.assistant.context_workers import ContextAnalysisResult
 from app.assistant.library_context import LOCAL_CONTEXT_ANALYZER_ID
 from app.assistant.voice_analysis import VoiceAnalysis
@@ -124,6 +129,19 @@ def _document() -> AudioContextDocument:
         ],
         technical={"probe_status": "unavailable"},
         stages={"voice": {"status": "not_configured", "required": False}},
+        performance=AudioContextPerformance(
+            audio_seconds=120.0,
+            elapsed_seconds=6.0,
+            stage_seconds={
+                "probe": 0.1,
+                "decode_and_frames": 1.0,
+                "spectrum": 2.0,
+                "feature_summary": 0.5,
+                "voice": 1.0,
+                "ebu_loudness": 1.0,
+                "finalize": 0.4,
+            },
+        ),
     )
 
 
@@ -233,6 +251,11 @@ def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
     assert finished["status"] == "succeeded", finished
     assert finished["result"]["analysis_workers"] == 3
     assert finished["result"]["updated"] == 4
+    assert finished["result"]["performance"]["tracks_profiled"] == 4
+    assert finished["result"]["performance"]["audio_seconds"] == 480.0
+    assert finished["result"]["performance"]["worker_seconds"] == 24.0
+    assert finished["result"]["performance"]["dominant_stage"] == "spectrum"
+    assert finished["result"]["performance"]["stage_seconds"]["spectrum"] == 8.0
     assert captured == {"track_ids": track_ids, "max_workers": 3}
 
     with SessionLocal() as db:
@@ -319,6 +342,42 @@ def test_audio_context_describes_development_without_suggesting_tags(
     }
     assert "tags" not in document.summary
     assert "moods" not in document.summary
+    assert document.stages["spectrum"] == {
+        "status": "complete",
+        "fft_size": 2_048,
+        "implementation": "numpy-rfft/v1",
+    }
+    assert document.performance is not None
+    assert document.performance.audio_seconds == pytest.approx(12.0)
+    assert document.performance.elapsed_seconds > 0.0
+    assert set(document.performance.stage_seconds) == {
+        "probe",
+        "decode_and_frames",
+        "spectrum",
+        "feature_summary",
+        "voice",
+        "ebu_loudness",
+        "finalize",
+    }
+
+
+def test_numpy_spectrum_preserves_the_previous_v1_measurement_baseline() -> None:
+    samples = [
+        0.55 * math.sin(2.0 * math.pi * 440.0 * index / 16_000)
+        + 0.2 * math.sin(2.0 * math.pi * 1_700.0 * index / 16_000)
+        for index in range(8_000)
+    ]
+
+    spectrum = _spectrum(samples, 16_000)
+
+    assert spectrum.centroid_hz == pytest.approx(587.1532847193931, rel=1e-11)
+    assert spectrum.bandwidth_hz == pytest.approx(404.696694336264, rel=1e-11)
+    assert spectrum.rolloff_hz == 445.3125
+    assert spectrum.flatness == pytest.approx(7.769654402753437e-14, rel=1e-8)
+    assert spectrum.bass_ratio == pytest.approx(7.36736002722439e-10, rel=1e-8)
+    assert spectrum.mid_ratio == pytest.approx(0.999999999247039, rel=1e-11)
+    assert spectrum.high_ratio == pytest.approx(1.605474666777969e-11, rel=1e-8)
+    assert spectrum.peak_concentration == pytest.approx(0.9998252798468769, rel=1e-11)
 
 
 def test_audio_context_includes_optional_voice_classifier_evidence(
@@ -379,3 +438,23 @@ def test_context_source_signature_changes_with_voice_analyzer(
     )
 
     assert library_context.context_source_signature(track) != without_voice
+
+
+def test_context_source_signature_changes_with_implementation(
+    db_session,  # type: ignore[no-untyped-def]
+    seeded_track_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.assistant import library_context
+    from app.models.track import Track
+
+    track = db_session.get(Track, seeded_track_id)
+    assert track is not None
+    current = library_context.context_source_signature(track)
+    monkeypatch.setattr(
+        library_context,
+        "CONTEXT_IMPLEMENTATION_ID",
+        "local-context/v1+different-implementation/v1",
+    )
+
+    assert library_context.context_source_signature(track) != current

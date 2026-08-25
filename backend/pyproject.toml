@@ -19,6 +19,11 @@ dependencies = [
     "cryptography==50.0.0",
     "pyyaml==6.0.3",
     "mutagen==1.48.1",
+    # Context analysis uses NumPy's native FFT/vector operations. Keep the
+    # Python 3.11 wheel on the last compatible line while newer interpreters
+    # share the current pin.
+    "numpy==2.4.6; python_version < '3.12'",
+    "numpy==2.5.2; python_version >= '3.12'",
 ]
 
 [project.optional-dependencies]
@@ -70,6 +75,7 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.11"
 files = ["app", "tests"]
+mypy_path = "typings"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

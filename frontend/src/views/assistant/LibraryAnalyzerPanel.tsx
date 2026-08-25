@@ -14,6 +14,81 @@ function resultNumber(job: BackgroundJob, key: string): number | null {
   return typeof value === "number" ? value : null;
 }
 
+interface AnalysisPerformance {
+  tracksProfiled: number;
+  wallSeconds: number;
+  realtimeFactor: number | null;
+  dominantStage: string | null;
+  stages: Array<{ id: string; seconds: number; sharePercent: number | null }>;
+}
+
+function numberProperty(value: object, key: string): number | null {
+  const property = Reflect.get(value, key);
+  return typeof property === "number" && Number.isFinite(property) ? property : null;
+}
+
+function analysisPerformance(job: BackgroundJob): AnalysisPerformance | null {
+  const value = job.result?.performance;
+  if (typeof value !== "object" || value === null) return null;
+  const tracksProfiled = numberProperty(value, "tracks_profiled");
+  const wallSeconds = numberProperty(value, "wall_seconds");
+  const rawStages = Reflect.get(value, "stage_seconds");
+  const rawShares = Reflect.get(value, "stage_share_percent");
+  if (
+    tracksProfiled === null ||
+    wallSeconds === null ||
+    typeof rawStages !== "object" ||
+    rawStages === null
+  ) {
+    return null;
+  }
+  const stages = Object.entries(rawStages)
+    .flatMap(([id, seconds]) => {
+      if (typeof seconds !== "number" || !Number.isFinite(seconds)) return [];
+      const share =
+        typeof rawShares === "object" && rawShares !== null
+          ? Reflect.get(rawShares, id)
+          : null;
+      return [
+        {
+          id,
+          seconds,
+          sharePercent:
+            typeof share === "number" && Number.isFinite(share) ? share : null,
+        },
+      ];
+    })
+    .sort((left, right) => right.seconds - left.seconds);
+  const dominantStage = Reflect.get(value, "dominant_stage");
+  return {
+    tracksProfiled,
+    wallSeconds,
+    realtimeFactor: numberProperty(value, "audio_realtime_factor"),
+    dominantStage: typeof dominantStage === "string" ? dominantStage : null,
+    stages,
+  };
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  const minutes = Math.floor(seconds / 60);
+  const remaining = Math.round(seconds - minutes * 60);
+  return `${minutes}m ${remaining}s`;
+}
+
+function stageLabel(id: string): string {
+  const labels: Record<string, string> = {
+    probe: "File probe",
+    decode_and_frames: "Decode and frame metrics",
+    spectrum: "Spectrum (NumPy FFT)",
+    feature_summary: "Feature summaries",
+    voice: "Voice model",
+    ebu_loudness: "EBU loudness",
+    finalize: "Final document",
+  };
+  return labels[id] ?? id.replaceAll("_", " ");
+}
+
 interface AnalysisFailureSample {
   path: string;
   error: string;
@@ -89,6 +164,9 @@ export function LibraryAnalyzerPanel({
       : Math.round((currentTracks / summary.library_tracks) * 100);
   const failed = latest === undefined ? null : resultNumber(latest, "failed");
   const failureSamples = latest === undefined ? [] : resultFailureSamples(latest);
+  const performance = latest === undefined ? null : analysisPerformance(latest);
+  const analysisWorkers =
+    latest === undefined ? null : resultNumber(latest, "analysis_workers");
   const stateTitle = analysisStateTitle(latest, active, currentTracks);
 
   return (
@@ -148,6 +226,39 @@ export function LibraryAnalyzerPanel({
               {resultNumber(latest, "updated") ?? 0} profiles updated ·{" "}
               {resultNumber(latest, "unchanged") ?? 0} already current
             </p>
+          ) : null}
+          {latest.status === "succeeded" && performance?.tracksProfiled ? (
+            <details className="assistant-analysis-performance">
+              <summary>Performance profile</summary>
+              <p>
+                {performance.tracksProfiled} tracks profiled ·{" "}
+                {formatDuration(performance.wallSeconds)} wall time
+                {performance.realtimeFactor === null
+                  ? ""
+                  : ` · ${performance.realtimeFactor.toFixed(1)}× real-time`}
+                {analysisWorkers === null
+                  ? ""
+                  : ` · ${analysisWorkers} ${analysisWorkers === 1 ? "worker" : "workers"}`}
+              </p>
+              {performance.dominantStage !== null ? (
+                <p>
+                  Largest measured stage: {stageLabel(performance.dominantStage)}
+                </p>
+              ) : null}
+              <dl>
+                {performance.stages.map((stage) => (
+                  <div key={stage.id}>
+                    <dt>{stageLabel(stage.id)}</dt>
+                    <dd>
+                      {formatDuration(stage.seconds)}
+                      {stage.sharePercent === null
+                        ? ""
+                        : ` · ${stage.sharePercent.toFixed(1)}%`}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
           ) : null}
           {latest.status === "succeeded" && failed !== null && failed > 0 ? (
             <>

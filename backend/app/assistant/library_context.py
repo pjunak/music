@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -12,7 +13,9 @@ from sqlalchemy.orm import Session
 
 from app.assistant.audio_context import (
     CONTEXT_ANALYZER_ID,
+    CONTEXT_IMPLEMENTATION_ID,
     AudioContextDocument,
+    AudioContextPerformance,
     analyze_audio_context,
 )
 from app.assistant.audio_signal import AudioSignalError
@@ -52,7 +55,12 @@ class CurrentTrackContext:
 
 def context_source_signature(track: Track) -> str:
     analyzer_signature = voice_analyzer_signature()
-    source_facts: list[object] = [track.path, track.size_bytes, track.mtime]
+    source_facts: list[object] = [
+        CONTEXT_IMPLEMENTATION_ID,
+        track.path,
+        track.size_bytes,
+        track.mtime,
+    ]
     if analyzer_signature is not None:
         source_facts.append(analyzer_signature)
     payload = json.dumps(
@@ -283,10 +291,49 @@ def _store_analysis_result(
     return False
 
 
+def _performance_summary(
+    samples: list[AudioContextPerformance],
+    *,
+    wall_seconds: float,
+) -> dict[str, object]:
+    stage_seconds: dict[str, float] = {}
+    for sample in samples:
+        for stage, seconds in sample.stage_seconds.items():
+            stage_seconds[stage] = stage_seconds.get(stage, 0.0) + seconds
+    measured_stage_seconds = sum(stage_seconds.values())
+    audio_seconds = sum(sample.audio_seconds for sample in samples)
+    worker_seconds = sum(sample.elapsed_seconds for sample in samples)
+    dominant_stage = (
+        max(stage_seconds, key=lambda stage: stage_seconds[stage]) if stage_seconds else None
+    )
+
+    return {
+        "schema_version": "library-context-performance/v1",
+        "tracks_profiled": len(samples),
+        "wall_seconds": round(wall_seconds, 3),
+        "worker_seconds": round(worker_seconds, 3),
+        "audio_seconds": round(audio_seconds, 3),
+        "audio_realtime_factor": (
+            round(audio_seconds / wall_seconds, 3) if wall_seconds > 0.0 else None
+        ),
+        "dominant_stage": dominant_stage,
+        "stage_seconds": {
+            stage: round(seconds, 3) for stage, seconds in sorted(stage_seconds.items())
+        },
+        "stage_share_percent": {
+            stage: round(seconds * 100.0 / measured_stage_seconds, 1)
+            for stage, seconds in sorted(stage_seconds.items())
+        }
+        if measured_stage_seconds > 0.0
+        else {},
+    }
+
+
 def run_library_context_analysis(
     context: JobExecutionContext,
     parameters: dict[str, object],
 ) -> dict[str, object]:
+    job_started = time.perf_counter()
     force = parameters.get("force") is True
     scope = ModelTaggingScope.model_validate(parameters.get("scope", {"type": "all"}))
     with SessionLocal() as db:
@@ -310,6 +357,7 @@ def run_library_context_analysis(
     checkpointed = 0
     updated_track_ids: set[int] = set()
     failed_track_ids: set[int] = set()
+    performance_samples: list[AudioContextPerformance] = []
     for track in tracks:
         signature = signatures[track.id]
         profile = existing.get(track.id)
@@ -368,6 +416,8 @@ def run_library_context_analysis(
                     library_index.to_absolute(track.path),
                     check_cancelled=context.check_cancelled,
                 )
+                if document.performance is not None:
+                    performance_samples.append(document.performance)
                 _store_document(track, signature, context, document)
                 updated_track_ids.add(track.id)
             except (AudioSignalError, OSError) as exc:
@@ -396,6 +446,8 @@ def run_library_context_analysis(
         )
         for processed, result in enumerate(results, start=1):
             track = tracks_by_id[result.track_id]
+            if result.document is not None and result.document.performance is not None:
+                performance_samples.append(result.document.performance)
             if _store_analysis_result(track, signatures[track.id], context, result):
                 updated_track_ids.add(track.id)
             else:
@@ -428,7 +480,7 @@ def run_library_context_analysis(
         if row.track_id in failed_track_ids
     ][:_FAILURE_SAMPLE_LIMIT]
     return {
-        "schema_version": "assistant-library-context-job-result/v1",
+        "schema_version": "assistant-library-context-job-result/v2",
         "analyzer": LOCAL_CONTEXT_ANALYZER_ID,
         "scope": scope.model_dump(mode="json"),
         "tracks": len(tracks),
@@ -439,6 +491,10 @@ def run_library_context_analysis(
         "current_contexts": len(current_contexts),
         "current_failures": len(current_failures),
         "failure_samples": failure_samples,
+        "performance": _performance_summary(
+            performance_samples,
+            wall_seconds=time.perf_counter() - job_started,
+        ),
     }
 
 

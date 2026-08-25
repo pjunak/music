@@ -219,4 +219,48 @@ describe("LibraryAnalysisView", () => {
       expect(assistantApi.startLibraryContextAnalysis).toHaveBeenCalledWith(true),
     );
   });
+
+  it("shows bounded performance profiling for a completed context run", async () => {
+    vi.mocked(jobsApi.list).mockImplementation(async (params) =>
+      params?.kind === "assistant.library-context-analysis"
+        ? [
+            job({
+              status: "succeeded",
+              progress_current: 3,
+              progress_total: 3,
+              progress_message: "Processed 3 of 3 tracks with 3 workers",
+              finished_at: "2026-08-24T10:02:00Z",
+              result: {
+                updated: 3,
+                unchanged: 0,
+                failed: 0,
+                analysis_workers: 3,
+                performance: {
+                  schema_version: "library-context-performance/v1",
+                  tracks_profiled: 3,
+                  wall_seconds: 75.2,
+                  worker_seconds: 210.0,
+                  audio_seconds: 1_800.0,
+                  audio_realtime_factor: 23.936,
+                  dominant_stage: "spectrum",
+                  stage_seconds: { spectrum: 125.0, voice: 60.0 },
+                  stage_share_percent: { spectrum: 67.6, voice: 32.4 },
+                },
+              },
+            }),
+          ]
+        : [],
+    );
+
+    renderView();
+
+    expect(await screen.findByText("Performance profile")).toBeInTheDocument();
+    expect(screen.getByText(/3 tracks profiled/)).toHaveTextContent(
+      "3 tracks profiled · 1m 15s wall time · 23.9× real-time · 3 workers",
+    );
+    expect(
+      screen.getByText("Largest measured stage: Spectrum (NumPy FFT)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("2m 5s · 67.6%")).toBeInTheDocument();
+  });
 });
