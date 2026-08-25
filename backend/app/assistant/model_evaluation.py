@@ -305,6 +305,9 @@ def failed_scenario_job_parameters(
             409,
         )
     try:
+        baseline_parameters = _EvaluationJobParameters.model_validate_json(
+            baseline.parameters_json
+        )
         result = ModelQualityJobResult.model_validate_json(
             baseline.result_json or "null"
         )
@@ -319,7 +322,10 @@ def failed_scenario_job_parameters(
             409,
         ) from exc
     if (
-        result.role_id != role_id
+        baseline_parameters.case_ids
+        or baseline_parameters.baseline_job_id is not None
+        or result.execution_scope != "full_suite"
+        or result.role_id != role_id
         or result.evaluation_id != evaluation_id
         or result.role_fingerprint != resolved.fingerprint
         or evaluation.suite_id != definition.suite_id
@@ -625,17 +631,21 @@ def run_tagging_quality_evaluation(
     )
     result = _merge_tagging_retest(suite, parameters, result)
     context.check_cancelled()
-    _record_result(
-        context,
-        parameters,
-        passed=result.passed,
-        suite_id=result.suite_id,
-        engine_id=MODEL_TAG_ANALYZER_ID,
-        passed_cases=result.passed_cases,
-        total_cases=result.total_cases,
-    )
+    if not parameters.case_ids:
+        _record_result(
+            context,
+            parameters,
+            passed=result.passed,
+            suite_id=result.suite_id,
+            engine_id=MODEL_TAG_ANALYZER_ID,
+            passed_cases=result.passed_cases,
+            total_cases=result.total_cases,
+        )
     return ModelQualityJobResult(
         schema_version="assistant-model-quality-result/v1",
+        execution_scope=(
+            "diagnostic_retest" if parameters.case_ids else "full_suite"
+        ),
         role_id=parameters.role_id,
         evaluation_id=parameters.evaluation_id,
         role_fingerprint=parameters.role_fingerprint,

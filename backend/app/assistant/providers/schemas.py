@@ -205,6 +205,7 @@ class ModelQualityEvaluationOut(StrictProviderModel):
 
 class ModelQualityJobResult(StrictProviderModel):
     schema_version: Literal["assistant-model-quality-result/v1"]
+    execution_scope: Literal["full_suite", "diagnostic_retest"] = "full_suite"
     role_id: str = Field(min_length=1, max_length=64)
     evaluation_id: str = Field(min_length=1, max_length=128)
     role_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")

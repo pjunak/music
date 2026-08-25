@@ -1081,6 +1081,44 @@ def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
     assert finished["result"]["evaluation"]["passed_cases"] == 43
     assert finished["result"]["evaluation"]["total_cases"] == 43
     assert finished["result"]["usage"]["attempted_requests"] == 1
+    assert finished["result"]["execution_scope"] == "diagnostic_retest"
+
+    saved = auth_client.get(
+        "/api/assistant/providers/roles/music_tagger/evaluations"
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()[0]["last_job_id"] == failed_case_result["id"]
+    assert saved.json()[0]["passed_cases"] == evaluation["passed_cases"]
+
+
+def test_failed_scenario_retest_rejects_legacy_partial_certification(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_quality_passed_tagger(auth_client, monkeypatch)
+
+    full = auth_client.post(
+        "/api/assistant/providers/roles/music_tagger/"
+        "evaluations/music-tagging-quality-v1/jobs"
+    )
+    assert full.status_code == 202, full.text
+    finished = _wait_for_job(auth_client, full.json()["id"], {"succeeded"})
+
+    with SessionLocal() as db:
+        job = db.get(BackgroundJob, finished["id"])
+        assert job is not None
+        parameters = json.loads(job.parameters_json)
+        parameters["case_ids"] = ["stormy-sea-battle"]
+        parameters["baseline_job_id"] = "0" * 32
+        job.parameters_json = json.dumps(parameters)
+        db.commit()
+
+    response = auth_client.post(
+        "/api/assistant/providers/roles/music_tagger/evaluations/"
+        "music-tagging-quality-v1/failed-scenarios/jobs"
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "evaluation_retest_baseline_stale"
 
 
 @pytest.mark.parametrize(

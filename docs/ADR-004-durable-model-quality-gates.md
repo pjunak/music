@@ -57,8 +57,10 @@ must never authorize a changed model.
   gate.
 - Permit a bounded mood-tagging failed-scenario recheck only against the exact
   current complete result. Run only its failed case IDs, merge replacements with
-  the saved complete case set, recompute the full gate, and then update current
-  certification. A partial run alone never certifies a model.
+  the saved complete case set, and show the recomputed report for diagnosis.
+  Never update certification from a selective rerun: only a new complete suite
+  can change the gate. This prevents repeated sampling from gradually replacing
+  one coherent evaluation with only favorable attempts.
 - Do not treat a passing result as standing authorization for a live request.
   ADR-005 adds the playlist-specific consent, disclosure, bounded data, fallback,
   and review-to-import integration; other roles apply equivalent task-specific

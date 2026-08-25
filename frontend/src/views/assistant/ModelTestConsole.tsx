@@ -351,6 +351,10 @@ function buildLogEntries(
   }
 
   if (quality.historicalJob !== undefined) {
+    const diagnosticRetest =
+      quality.historicalJob.result?.execution_scope === "diagnostic_retest" ||
+      (Array.isArray(quality.historicalJob.parameters.case_ids) &&
+        quality.historicalJob.parameters.case_ids.length > 0);
     const historicalError = readableBackgroundJobError(
       quality.historicalJob.error,
       "The previous attempt did not finish.",
@@ -360,8 +364,10 @@ function buildLogEntries(
       time: quality.historicalJob.finished_at,
       tone: "warning",
       message:
-        `Previous attempt: ${historicalError} ` +
-        "It is retained for troubleshooting but does not certify the current task settings.",
+        diagnosticRetest && quality.historicalJob.status === "succeeded"
+          ? "Diagnostic recheck finished. Its merged report is retained for troubleshooting; run the complete suite to change certification."
+          : `Previous attempt: ${historicalError} ` +
+            "It is retained for troubleshooting but does not certify the current task settings.",
     });
   }
   return entries;

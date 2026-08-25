@@ -73,8 +73,8 @@ observable after the browser closes without silently repeating uncertain calls.
   failures and any forbidden false positive on either attempt remain blocking,
   while required-tag misses—including those in safety scenarios—contribute to a
   90% scored pass floor. The operator may recheck only failed cases from the exact
-  current complete report; the server merges them with that report before
-  recomputing certification.
+  current complete report; the server merges them with that report for diagnosis,
+  but only a subsequent complete suite may change certification.
 - Bind each profile source signature to the consumed track metadata, current local-context
   signature (or its explicit absence), vocabulary fingerprint, input-contract version, and
   exact model-role runtime fingerprint. Changed metadata, audio evidence, vocabulary,

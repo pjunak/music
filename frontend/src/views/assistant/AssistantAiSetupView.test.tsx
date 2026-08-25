@@ -1374,6 +1374,7 @@ describe("AssistantAiSetupView", () => {
     expect(confirmDialog).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Recheck failed mood-tagging scenarios?",
+        body: expect.stringMatching(/diagnostic only.*complete suite/i),
       }),
     );
     await waitFor(() =>

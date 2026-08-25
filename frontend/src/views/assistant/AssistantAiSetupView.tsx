@@ -548,7 +548,7 @@ export function AssistantAiSetupView() {
       title: "Recheck failed mood-tagging scenarios?",
       body:
         "Only the failed scenarios from the last complete result will be sent again. " +
-        "Their new results are merged with that complete run before certification is updated.",
+        "The merged report is diagnostic only. Run the complete suite before certification can change.",
       confirmLabel: "Recheck failures",
       tone: "primary",
     });
@@ -565,7 +565,7 @@ export function AssistantAiSetupView() {
       ]);
       toast.success(
         "Failed scenarios queued",
-        "Only the failed cases will call the provider.",
+        "Only the failed cases will call the provider; this will not change certification.",
       );
       refreshQuality();
     } catch (error) {
