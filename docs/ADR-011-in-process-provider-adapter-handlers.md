@@ -46,10 +46,15 @@ review-only results.
   `reasoning.effort=high/none`; Provider default sends no override.
 - Add explicit Google Gemini profiles. They pin the documented Google AI Studio base URL,
   canonicalize the `models/` resource prefix, and map thinking On/Off to
-  `reasoning_effort=high/none`; Provider default sends no override. Both saved adapter IDs now send
-  the exact task JSON Schema because Gemini's compatibility API supports structured output. The
-  older strict-schema ID remains a compatibility alias rather than forcing existing connections to
-  migrate. Send the documented `x-goog-api-client` integration-identification header.
+  `reasoning_effort=high/none`; Provider default sends no override. Both saved adapter IDs send a
+  provider-compatible projection of the exact task JSON Schema because Gemini structured output
+  supports only a documented subset of JSON Schema. Unsupported wire constraints such as string
+  length, pattern, uniqueness, and exclusive bounds are omitted, and scalar `const` becomes a
+  single-value `enum`. The complete generated schema remains in the fixed task prompt and the
+  unchanged Pydantic model validates every response locally, so this transport projection does not
+  weaken the application contract. The older strict-schema ID remains a compatibility alias rather
+  than forcing existing connections to migrate. Send the documented `x-goog-api-client`
+  integration-identification header.
 - Include handler source in every model-role runtime fingerprint. A handler change invalidates old
   conformance and quality records even when the saved connection and model are unchanged.
 - Continue reducing upstream failures to bounded machine-readable codes. Read error JSON within the
@@ -92,6 +97,8 @@ validation, disclosure, and review boundary. Selected.
 
 - Gemini and future explicit profiles can be supported without provider branches in playlist,
   tagging, cleanup, or EQ code.
+- A provider-side schema projection can express fewer constraints than the canonical task schema;
+  strict local validation remains the authoritative fail-closed boundary.
 - OpenAI reasoning models no longer receive obsolete Chat Completions fields such as `max_tokens`
   or Music's generic `thinking` extension.
 - Adding a native non-OpenAI protocol still requires a deliberate handler and possibly a reviewed

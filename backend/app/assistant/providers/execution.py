@@ -258,22 +258,27 @@ def _execute_provider_handler(
     handler = get_provider_adapter_handler(target.adapter_id)
     if handler is None:
         return StructuredModelResult(False, "unsupported_adapter")
+    provider_output_schema = (
+        handler.prepare_output_schema(request.output_schema)
+        if request.output_schema is not None
+        else None
+    )
     response_format: dict[str, object] = {"type": "json_object"}
     if handler.structured_output_mode == "json_schema":
-        if request.output_schema_name is None or request.output_schema is None:
+        if request.output_schema_name is None or provider_output_schema is None:
             return StructuredModelResult(False, "output_schema_required")
         response_format = {
             "type": "json_schema",
             "json_schema": {
                 "name": request.output_schema_name,
                 "strict": True,
-                "schema": request.output_schema,
+                "schema": provider_output_schema,
             },
         }
     maximum_output_tokens = min(request.max_output_tokens, target.max_output_tokens)
     if handler.execution_api_style == "responses":
         assert request.output_schema_name is not None
-        assert request.output_schema is not None
+        assert provider_output_schema is not None
         payload: dict[str, object] = {
             "model": handler.normalize_model_id(target.model_id),
             "instructions": request.system_prompt,
@@ -284,7 +289,7 @@ def _execute_provider_handler(
                     "type": "json_schema",
                     "name": request.output_schema_name,
                     "strict": True,
-                    "schema": request.output_schema,
+                    "schema": provider_output_schema,
                 }
             },
             "store": False,

@@ -106,7 +106,10 @@ native Responses requests with `max_output_tokens`, `reasoning.effort`, and the 
 `text.format`; the generic adapters are reserved for third-party OpenAI-compatible services.
 Both Gemini adapter IDs use the exact base URL
 `https://generativelanguage.googleapis.com/v1beta/openai`, canonicalize `models/` resource IDs,
-send Google's integration-identification header, and constrain results with the task's JSON Schema.
+send Google's integration-identification header, and constrain results with a Gemini-compatible
+projection of the task's JSON Schema. The complete generated schema remains in the fixed prompt and
+is always enforced by the task's local Pydantic validation; the provider projection removes only
+JSON Schema keywords outside Gemini's documented structured-output subset.
 The older Gemini strict-schema ID remains a saved-connection compatibility alias. Provider error
 payloads may contribute only allowlisted machine codes; upstream messages never reach diagnostics.
 

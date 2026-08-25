@@ -6,6 +6,7 @@ continue to share the pinned-DNS, no-redirect, bounded transport in
 model resource names and thinking parameters.
 """
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
@@ -25,9 +26,48 @@ ThinkingParameterStyle = Literal[
 ]
 ExecutionApiStyle = Literal["chat_completions", "responses"]
 ThinkingMode = Literal["provider_default", "enabled", "disabled"]
+OutputSchemaDialect = Literal["full", "gemini_subset"]
 
 GOOGLE_GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+
+
+def _gemini_compatible_output_schema(value: object) -> object:
+    """Project canonical JSON Schema into Gemini's documented subset.
+
+    Feature code and the shared prompt continue to own the complete generated
+    schema. Gemini structured output accepts only a subset of JSON Schema, so
+    its wire schema omits unsupported validation annotations. The unchanged
+    task model still validates every returned payload locally.
+    """
+
+    if isinstance(value, list):
+        return [_gemini_compatible_output_schema(item) for item in value]
+    if not isinstance(value, dict):
+        return deepcopy(value)
+
+    compatible: dict[str, object] = {}
+    for key, item in value.items():
+        if key in {
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+            "maxLength",
+            "minLength",
+            "multipleOf",
+            "pattern",
+            "uniqueItems",
+        }:
+            continue
+        if key == "const":
+            # Gemini documents enum for string and numeric values, but not
+            # const. Boolean const constraints remain enforced by the prompt
+            # and local task validation rather than adding an undocumented
+            # boolean enum to the provider request.
+            if isinstance(item, (str, int, float)) and not isinstance(item, bool):
+                compatible["enum"] = [deepcopy(item)]
+            continue
+        compatible[key] = _gemini_compatible_output_schema(item)
+    return compatible
 
 
 class ProviderHandlerConfigurationError(ValueError):
@@ -45,6 +85,7 @@ class ProviderAdapterHandler:
     models_path: str = "/models"
     completion_path: str = "/chat/completions"
     additional_headers: tuple[tuple[str, str], ...] = ()
+    output_schema_dialect: OutputSchemaDialect = "full"
 
     def validate_base_url(self, base_url: str) -> None:
         if self.expected_base_url is not None and base_url != self.expected_base_url:
@@ -65,6 +106,16 @@ class ProviderAdapterHandler:
             if normalized:
                 return normalized
         return model_id
+
+    def prepare_output_schema(
+        self,
+        output_schema: dict[str, object],
+    ) -> dict[str, object]:
+        if self.output_schema_dialect == "full":
+            return output_schema
+        compatible = _gemini_compatible_output_schema(output_schema)
+        assert isinstance(compatible, dict)
+        return compatible
 
     def apply_thinking_mode(
         self,
@@ -113,6 +164,7 @@ PROVIDER_ADAPTER_HANDLERS = (
         expected_base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
         model_resource_prefix="models/",
         additional_headers=(("x-goog-api-client", "music-assistant-oai/1.0"),),
+        output_schema_dialect="gemini_subset",
     ),
     ProviderAdapterHandler(
         adapter_id=GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
@@ -121,6 +173,7 @@ PROVIDER_ADAPTER_HANDLERS = (
         expected_base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
         model_resource_prefix="models/",
         additional_headers=(("x-goog-api-client", "music-assistant-oai/1.0"),),
+        output_schema_dialect="gemini_subset",
     ),
 )
 PROVIDER_ADAPTER_HANDLER_BY_ID = {

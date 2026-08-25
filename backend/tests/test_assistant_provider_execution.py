@@ -355,14 +355,6 @@ def test_gemini_handler_omits_provider_default_thinking_override(
     "adapter_id,base_url",
     [
         ("openai-compatible-json-schema/v1", "https://models.example/v1"),
-        (
-            "google-gemini-openai/v1",
-            GOOGLE_GEMINI_OPENAI_BASE_URL,
-        ),
-        (
-            "google-gemini-openai-json-schema/v1",
-            GOOGLE_GEMINI_OPENAI_BASE_URL,
-        ),
     ],
 )
 def test_strict_adapter_sends_exact_task_json_schema(
@@ -402,6 +394,137 @@ def test_strict_adapter_sends_exact_task_json_schema(
             "strict": True,
             "schema": _ANSWER_SCHEMA,
         },
+    }
+
+
+@pytest.mark.parametrize(
+    "adapter_id",
+    [
+        "google-gemini-openai/v1",
+        "google-gemini-openai-json-schema/v1",
+    ],
+)
+def test_gemini_handler_projects_task_schema_to_supported_subset(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter_id: str,
+) -> None:
+    observed: dict[str, object] = {}
+    task_schema: dict[str, object] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["schema_version", "tracks", "accepted"],
+        "properties": {
+            "schema_version": {
+                "type": "string",
+                "const": "assistant-music-tagger-output/v3",
+            },
+            "tracks": {
+                "type": "array",
+                "minItems": 20,
+                "maxItems": 20,
+                "uniqueItems": True,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "track_id": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "enum": [1, 2],
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512,
+                            "pattern": ".+",
+                        },
+                    },
+                    "required": ["track_id", "evidence"],
+                    "additionalProperties": False,
+                },
+            },
+            "accepted": {"type": "boolean", "const": True},
+        },
+    }
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(kwargs)
+        return JsonHttpResponse(
+            200,
+            {"choices": [{"message": {"content": '{"answer":"ok"}'}}]},
+        )
+
+    monkeypatch.setattr(execution, "request_json", request)
+    result = execution.execute_structured_model_request(
+        _target(adapter_id, base_url=GOOGLE_GEMINI_OPENAI_BASE_URL),
+        StructuredModelRequest(
+            "system",
+            "user",
+            512,
+            output_schema_name="test-answer",
+            output_schema=task_schema,
+        ),
+    )
+
+    assert result.succeeded is True
+    payload = observed["payload"]
+    assert isinstance(payload, dict)
+    response_format = payload["response_format"]
+    assert isinstance(response_format, dict)
+    json_schema = response_format["json_schema"]
+    assert isinstance(json_schema, dict)
+    provider_schema = json_schema["schema"]
+    assert isinstance(provider_schema, dict)
+    assert provider_schema["properties"] == {
+        "schema_version": {
+            "type": "string",
+            "enum": ["assistant-music-tagger-output/v3"],
+        },
+        "tracks": {
+            "type": "array",
+            "minItems": 20,
+            "maxItems": 20,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "track_id": {"type": "integer", "enum": [1, 2]},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["track_id", "evidence"],
+                "additionalProperties": False,
+            },
+        },
+        "accepted": {"type": "boolean"},
+    }
+    assert task_schema["properties"] == {
+        "schema_version": {
+            "type": "string",
+            "const": "assistant-music-tagger-output/v3",
+        },
+        "tracks": {
+            "type": "array",
+            "minItems": 20,
+            "maxItems": 20,
+            "uniqueItems": True,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "track_id": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "enum": [1, 2],
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                        "pattern": ".+",
+                    },
+                },
+                "required": ["track_id", "evidence"],
+                "additionalProperties": False,
+            },
+        },
+        "accepted": {"type": "boolean", "const": True},
     }
 
 
