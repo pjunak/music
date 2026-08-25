@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v6",
-  "id": "controlled-vocabulary-tagging-baseline-v14",
+  "id": "controlled-vocabulary-tagging-baseline-v15",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -177,21 +177,21 @@
       "minimum_evidence_items": 1
     },
     {
-      "id": "medieval-temple-vigil",
-      "description": "Recognizes an explicit medieval temple vigil without tavern or dancing tags",
+      "id": "ancient-temple-vigil",
+      "description": "Separates an explicitly ancient mysterious temple vigil from medieval or modern sacred settings",
       "track": {
         "track_id": 8,
         "title": "Ancient Temple Vigil",
         "display_title": "",
         "artist": "Chapel of the Veiled Star",
-        "album": "Medieval Sacred Mysteries",
-        "origin": "Old Kingdom",
-        "genre": "mysterious choral",
+        "album": "Sacred Mysteries of Antiquity",
+        "origin": "Ancient Kingdom",
+        "genre": "ancient mysterious choral",
         "length_s": 324.0,
         "bpm": null
       },
-      "required_tags": ["medieval", "temple", "mysterious"],
-      "forbidden_tags": ["tavern", "dancing", "festive"],
+      "required_tags": ["ancient", "temple", "mysterious"],
+      "forbidden_tags": ["medieval", "modern", "futuristic", "tavern", "festive"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1
     },
@@ -902,6 +902,120 @@
       },
       "required_tags": ["dancing", "festive", "playful"],
       "forbidden_tags": ["combat", "aggressive"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "modern-temple-service",
+      "description": "Keeps the temple setting while identifying an explicitly present-day worship service as modern rather than historical",
+      "track": {
+        "track_id": 44,
+        "title": "Present-Day Temple Service",
+        "display_title": "",
+        "artist": "Contemporary Worship Ensemble",
+        "album": "Modern City Devotions",
+        "origin": "",
+        "genre": "modern sacred electronic",
+        "length_s": 236.0,
+        "bpm": 92
+      },
+      "required_tags": ["modern", "temple", "worship", "sacred"],
+      "forbidden_tags": ["ancient", "medieval", "futuristic", "cross era"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "early-modern-court-masquerade",
+      "description": "Recognizes a Renaissance court dance as early modern instead of collapsing every pre-modern court into medieval",
+      "track": {
+        "track_id": 45,
+        "title": "Masquerade at the Renaissance Court",
+        "display_title": "",
+        "artist": "The Baroque Chamber Players",
+        "album": "Age of Sail Court Dances",
+        "origin": "",
+        "genre": "renaissance chamber dance",
+        "length_s": 207.0,
+        "bpm": 116
+      },
+      "required_tags": ["early modern", "court", "dancing", "festive"],
+      "forbidden_tags": ["ancient", "medieval", "industrial", "modern", "futuristic"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "industrial-gaslamp-workshop",
+      "description": "Recognizes explicit Victorian steam-age machinery as industrial period character",
+      "track": {
+        "track_id": 46,
+        "title": "Gaslamp Factory at Midnight",
+        "display_title": "",
+        "artist": "Victorian Steamworks",
+        "album": "Clockwork Factory District",
+        "origin": "",
+        "genre": "tense industrial orchestral",
+        "length_s": 252.0,
+        "bpm": 108
+      },
+      "required_tags": ["industrial", "workshop", "tense"],
+      "forbidden_tags": ["ancient", "medieval", "modern", "futuristic", "calm"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "futuristic-starship-ceremony",
+      "description": "Recognizes a ceremonial space-colony setting as futuristic rather than ancient or medieval",
+      "track": {
+        "track_id": 47,
+        "title": "Ceremony aboard the Far-Future Starship",
+        "display_title": "",
+        "artist": "Neon Colony Choir",
+        "album": "Space Colony Rites",
+        "origin": "",
+        "genre": "futuristic solemn electronic choral",
+        "length_s": 281.0,
+        "bpm": 72
+      },
+      "required_tags": ["futuristic", "ceremony", "solemn"],
+      "forbidden_tags": ["ancient", "medieval", "industrial", "modern"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "explicit-timeless-reverie",
+      "description": "Uses timeless only for an explicitly era-neutral ageless track, not merely for missing period evidence",
+      "track": {
+        "track_id": 48,
+        "title": "Era-Neutral Dreamscape",
+        "display_title": "",
+        "artist": "Ageless Ambient",
+        "album": "Timeless Meditation",
+        "origin": "",
+        "genre": "era-neutral calm dreamy ambient",
+        "length_s": 309.0,
+        "bpm": 58
+      },
+      "required_tags": ["timeless", "calm", "dreamy"],
+      "forbidden_tags": ["ancient", "medieval", "early modern", "industrial", "modern", "futuristic", "cross era"],
+      "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "explicit-cross-era-castle",
+      "description": "Uses cross era for an explicit techno-medieval blend instead of returning several competing period tags",
+      "track": {
+        "track_id": 49,
+        "title": "Cyberpunk Bard in the Neon Castle",
+        "display_title": "",
+        "artist": "The Anachronistic Ensemble",
+        "album": "Techno-Medieval Era Blend",
+        "origin": "",
+        "genre": "mixed-era electronic folk",
+        "length_s": 223.0,
+        "bpm": 128
+      },
+      "required_tags": ["cross era", "castle"],
+      "forbidden_tags": ["ancient", "medieval", "modern", "futuristic", "timeless"],
       "allowed_confidences": ["high", "medium"],
       "minimum_evidence_items": 1
     }

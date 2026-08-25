@@ -335,7 +335,7 @@ export function LibraryContextView() {
             relative path, while the inspector shows condensed whole-track dynamics,
             tempo, structure, and analysis confidence.
           </p>
-          <p>The local analyzer never proposes terrain, scene, or mood tags.</p>
+          <p>The local analyzer never proposes setting, period, scene, or mood tags.</p>
         </AssistantInfoPopover>
         <Link className="btn-secondary assistant-context-refresh" to="/assistant/moods/workflow">
           Build or refresh

@@ -248,7 +248,7 @@ Runtime data lives outside the image.
   Never send the absolute media root, paths outside the indexed library,
   audio, waveforms, spectrograms, full-resolution timelines, database mood tags, stored
   suggestions, playlists, review history, or credentials. Local context analysis must remain
-  factual and may never propose terrain, scene, mood, genre, or instrument tags.
+  factual and may never propose setting, period, scene, mood, genre, or instrument tags.
   Context cues are global operator-managed vocabulary guidance, not per-track local tag
   hypotheses; the model must confirm them against the complete untrusted metadata phrase.
   Keep each tag's ID, name, definition, aliases, and cues together in the provider input so the
@@ -257,7 +257,9 @@ Runtime data lives outside the image.
   or unsupported tag IDs. Each correction is a fresh strict classification; never edit, coerce,
   or locally repair the rejected output, and never retry provider, network, timeout, or truncation
   failures through this budget.
-  The model must choose zero through eight exact IDs from the full controlled vocabulary and
+  Period feel is separate from physical setting and describes the era evoked by the complete
+  evidence, not release date or recording technology. The model must choose zero through eight
+  exact IDs from the full controlled vocabulary and
   return confidence plus at most four bounded evidence strings. Do not ask it for signal axes and
   do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,
   missing track IDs, malformed confidence, extra fields, and truncated output; only incidental

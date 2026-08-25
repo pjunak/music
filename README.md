@@ -112,7 +112,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   locally first, then sends only unresolved source IDs/names and usage counts plus canonical ID
   definitions in batches of at most 50. The model returns exactly one canonical-ID-or-null decision
   per source. Local-only cleanup makes no provider call, and every stored
-  suggestion identifies whether it came from a local rule or the model. The proposal remains inert
+  suggestion identifies whether it came from a local rule or the model. The built-in groups separate
+  physical setting, period feel, scene, and emotional mood; period feel describes the era the track
+  evokes rather than its release date. The proposal remains inert
   until
   the user selects specific renames, and stale proposals are rejected. Quality, playlist, tagging,
   and cleanup jobs retain their attempted request count,
@@ -143,7 +145,7 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   separate AGPL and non-commercial/share-alike license obligations; see
   [`ASSISTANT.md`](ASSISTANT.md#optional-local-voice-analysis) and
   [`ADR-009`](docs/ADR-009-opt-in-local-voice-analysis.md).
-- **Database mood tags** — attach operator-owned terrain, scene, and mood context such as
+- **Database mood tags** — attach operator-owned setting, period, scene, and mood context such as
   `medieval`, `tavern`, `dancing`, `combat`, or any custom term without modifying the audio file or
   its embedded album, artist, year, genre, and similar metadata. Database mood tags and generated
   suggestions remain visibly and

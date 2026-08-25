@@ -82,8 +82,11 @@ indexed metadata / local audio / operator request
   the provider boundary. The model receives the full revisioned controlled vocabulary with stable
   IDs, names, groups, definitions, exact aliases, and bounded semantic context cues. The cues are
   global vocabulary guidance that must be confirmed against complete metadata phrases; no local
-  per-track candidate-tag hypothesis is sent and the model does not return signal axes. It may
-  return only exact IDs, confidence, and bounded
+  per-track candidate-tag hypothesis is sent and the model does not return signal axes. It must
+  scan every vocabulary group and return every positively supported primary or secondary tag up to
+  the fixed limit. Physical setting and period feel remain separate: locations such as temples do
+  not imply an era, release date is not period evidence, and unknown period evidence produces no
+  period tag. It may return only exact IDs, confidence, and bounded
   evidence; names are restored locally. Missing context falls back to conservative metadata/path
   interpretation only when the operator chooses “run anyway”; “skip incomplete” prevents those
   tracks from reaching the provider.
@@ -112,8 +115,8 @@ indexed metadata / local audio / operator request
   candidates, 20 tagging tracks per batch, and 500 catalog tags in cleanup batches of
   at most 50 unresolved names. Deterministic cleanup can reduce those payloads or avoid
   provider calls completely.
-- The tagging quality suite submits four synthetic tracks per request. This exercises
-  the live multi-track contract while evaluating and reporting every scenario
+- The tagging quality suite submits up to the live maximum of 20 synthetic tracks per request. This
+  exercises live-size structured output while evaluating and reporting every scenario
   independently.
 
 ## Trade-offs

@@ -465,7 +465,7 @@ def analyze_audio_file(
         f"zero-crossing rate: {measurements.zero_crossing_rate:.3f}",
         f"Transient onset rate: {measurements.onset_rate_hz:.2f} per second",
         tempo_evidence,
-        "Signal proxies do not identify instruments, genre, scene, or mood.",
+        "Signal proxies do not identify instruments, genre, setting, period, scene, or mood.",
     )
     return AudioSignalProfile(
         energy=round(_clamp(energy), 6),

@@ -86,7 +86,7 @@ const track: LibraryTagTrack = {
     confidence: "medium",
     evidence: [
       "Signal level: -18.0 dBFS RMS, -2.0 dBFS peak",
-      "Signal proxies do not identify instruments, genre, scene, or mood.",
+      "Signal proxies do not identify instruments, genre, setting, period, scene, or mood.",
     ],
     metrics: {
       schema: "local-audio/v1",

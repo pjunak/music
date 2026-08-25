@@ -19,13 +19,60 @@ TAG_VOCABULARY_KEY = "library"
 TAG_VOCABULARY_SCHEMA: Literal["assistant-tag-vocabulary/v1"] = (
     "assistant-tag-vocabulary/v1"
 )
-TAG_VOCABULARY_SEED_VERSION = 4
+TAG_VOCABULARY_SEED_VERSION = 5
 MAX_VOCABULARY_TAGS = 200
 
 _DEFAULT_CONTEXT_CUES: dict[str, tuple[str, ...]] = {
+    # Period feel: broad historical or imagined eras. These describe the era the
+    # track evokes, not its release date or recording technology.
+    "period.ancient": (
+        "bronze age",
+        "classical antiquity",
+        "ancient egypt",
+        "roman empire",
+        "primal rite",
+    ),
+    "setting.medieval": ("minstrel", "troubadour", "bardic", "feudal court", "knightly"),
+    "period.early-modern": (
+        "renaissance court",
+        "baroque chamber",
+        "age of sail",
+        "musketeer",
+    ),
+    "period.industrial": (
+        "victorian",
+        "steam age",
+        "industrial revolution",
+        "gaslamp",
+        "clockwork factory",
+    ),
+    "period.modern": (
+        "present day",
+        "contemporary city",
+        "electronic club",
+        "modern urban life",
+    ),
+    "period.futuristic": (
+        "far future",
+        "cyberpunk",
+        "starship",
+        "space colony",
+        "neon megacity",
+    ),
+    "period.timeless": (
+        "era neutral",
+        "period neutral",
+        "ageless sound",
+        "timeless atmosphere",
+    ),
+    "period.cross-era": (
+        "techno medieval",
+        "ancient future",
+        "anachronistic blend",
+        "mixed era",
+    ),
     # Terrain and settings: indirect but high-signal phrases that often appear in
     # soundtrack titles, albums, and library folders.
-    "setting.medieval": ("minstrel", "troubadour", "bardic", "feudal court", "knightly"),
     "setting.tavern": ("drinking song", "common room", "hearthside", "ale and song"),
     "setting.dungeon": ("underground delve", "dungeon crawl", "dungeon depths", "hostile delve"),
     "setting.castle": ("crown guard", "royal procession", "royal brass", "royal palace"),
@@ -377,15 +424,22 @@ def _entry(
     description: str,
     *aliases: str,
     context_cues: tuple[str, ...] = (),
+    tag_id: str | None = None,
 ) -> TagVocabularyEntry:
-    tag_id = f"{group}.{name.replace(' ', '-')}"
+    resolved_tag_id = tag_id or f"{group}.{name.replace(' ', '-')}"
     return TagVocabularyEntry(
-        id=tag_id,
+        id=resolved_tag_id,
         name=name,
         description=description,
         aliases=list(aliases),
-        context_cues=list(dict.fromkeys((*_DEFAULT_CONTEXT_CUES.get(tag_id, ()), *context_cues))),
+        context_cues=list(
+            dict.fromkeys(
+                (*_DEFAULT_CONTEXT_CUES.get(resolved_tag_id, ()), *context_cues)
+            )
+        ),
     )
+
+
 def default_tag_vocabulary() -> TagVocabularyDocument:
     return TagVocabularyDocument(
         groups=[
@@ -396,12 +450,6 @@ def default_tag_vocabulary() -> TagVocabularyDocument:
                     "The physical terrain, built location, plane, or culture the music evokes."
                 ),
                 tags=[
-                    _entry(
-                        "setting",
-                        "medieval",
-                        "Pre-modern European courtly, folk, or feudal atmosphere.",
-                        "middle ages",
-                    ),
                     _entry(
                         "setting",
                         "tavern",
@@ -787,6 +835,77 @@ def default_tag_vocabulary() -> TagVocabularyDocument:
                 ],
             ),
             TagVocabularyGroup(
+                key="period",
+                label="Period feel",
+                description=(
+                    "The historical or imagined era the music evokes, independent of "
+                    "its physical setting and recording or release date."
+                ),
+                tags=[
+                    _entry(
+                        "period",
+                        "ancient",
+                        "Prehistoric or ancient-civilization character, including antiquity.",
+                        "antiquity",
+                        "archaic",
+                    ),
+                    _entry(
+                        "period",
+                        "medieval",
+                        "Pre-modern European courtly, folk, or feudal atmosphere.",
+                        "middle ages",
+                        # Preserve the established public ID while correcting its group.
+                        tag_id="setting.medieval",
+                    ),
+                    _entry(
+                        "period",
+                        "early modern",
+                        "Renaissance, Baroque, age-of-sail, or early gunpowder-era character.",
+                        "renaissance",
+                        "baroque",
+                        "age of sail",
+                    ),
+                    _entry(
+                        "period",
+                        "industrial",
+                        "Industrial-revolution, Victorian, steam-age, or gaslamp character.",
+                        "victorian",
+                        "steam age",
+                        "gaslamp",
+                    ),
+                    _entry(
+                        "period",
+                        "modern",
+                        "Present-day or recent contemporary-world character.",
+                        "contemporary",
+                        "present day",
+                    ),
+                    _entry(
+                        "period",
+                        "futuristic",
+                        "Speculative future, science-fiction, cyberpunk, or space-age character.",
+                        "science fiction",
+                        "sci fi",
+                        "cyberpunk",
+                    ),
+                    _entry(
+                        "period",
+                        "timeless",
+                        "Intentionally era-neutral or ageless character with no dominant period.",
+                        "era neutral",
+                        "period neutral",
+                    ),
+                    _entry(
+                        "period",
+                        "cross era",
+                        "Intentional blend of clearly different eras or anachronistic styles.",
+                        "anachronistic",
+                        "mixed era",
+                        "era blend",
+                    ),
+                ],
+            ),
+            TagVocabularyGroup(
                 key="scene",
                 label="Scene",
                 description="What the players or characters are doing.",
@@ -1102,6 +1221,40 @@ def _merge_seed_vocabulary(
     return TagVocabularyDocument(groups=groups)
 
 
+def _migrate_period_group(document: TagVocabularyDocument) -> TagVocabularyDocument:
+    """Move the established medieval tag into the new period group without renaming it."""
+
+    groups = [group.model_copy(deep=True) for group in document.groups]
+    period_group = next((group for group in groups if group.key == "period"), None)
+    if period_group is None:
+        return document
+
+    medieval: TagVocabularyEntry | None = None
+    for group in groups:
+        for index, tag in enumerate(group.tags):
+            if tag.id != "setting.medieval":
+                continue
+            medieval = tag
+            if group.key != "period":
+                del group.tags[index]
+            break
+        if medieval is not None:
+            break
+
+    if medieval is not None and all(
+        tag.id != medieval.id for tag in period_group.tags
+    ):
+        period_group.tags.insert(1, medieval)
+
+    groups.remove(period_group)
+    setting_index = next(
+        (index for index, group in enumerate(groups) if group.key == "setting"),
+        -1,
+    )
+    groups.insert(setting_index + 1, period_group)
+    return TagVocabularyDocument(groups=groups)
+
+
 def load_tag_vocabulary(db: Session) -> TagVocabularySnapshot:
     row = db.get(AssistantTagVocabulary, TAG_VOCABULARY_KEY)
     if row is None:
@@ -1118,6 +1271,8 @@ def load_tag_vocabulary(db: Session) -> TagVocabularySnapshot:
     document = TagVocabularyDocument.model_validate_json(row.document_json)
     if row.seed_version < TAG_VOCABULARY_SEED_VERSION:
         merged = _merge_seed_vocabulary(document, default_tag_vocabulary())
+        if row.seed_version < 5:
+            merged = _migrate_period_group(merged)
         if merged != document:
             row.document_json = _document_json(merged)
             row.revision += 1

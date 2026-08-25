@@ -22,11 +22,19 @@ not desired sparsity. It still sends no per-track candidate-tag hypothesis. A di
 run-scoped budget allows at most two fresh correction requests for contract-invalid output;
 the server never edits or coerces a rejected answer.
 
+**Implementation update (2026-08-25):** Input contract v15 makes the boolean inclusion rule
+operational: every vocabulary group is scanned independently, secondary but positively supported
+tags are included, and mere compatibility is not enough. A separate `Period feel` group now
+distinguishes the era a track evokes from its physical setting and release date. The established
+`setting.medieval` ID remains stable but is presented in that new group. `timeless` means explicitly
+era-neutral and `cross era` means an explicit intentional blend; unknown period evidence yields no
+period tag.
+
 ## Context
 
 Manual D&D playlist tags are operator-owned, while local metadata analysis
 already stores generated suggestions separately and requires explicit review.
-An optional model can infer useful setting, scene, and mood labels from richer
+An optional model can infer useful setting, period, scene, and mood labels from richer
 metadata, but arbitrary tags would fragment the vocabulary and direct promotion
 would erase the distinction between model output and human intent.
 
@@ -47,7 +55,7 @@ observable after the browser closes without silently repeating uncertain calls.
   root, paths outside the indexed library, audio, waveforms, full-resolution timelines,
   spectrograms, database mood tags, stored generated tags, playlists, or review history.
   Bounded factual context may refine generic mood and activity judgments but is
-  never proof of an instrument, genre, setting, scene, or D&D context.
+  never proof of an instrument, genre, setting, period, scene, or D&D context.
 - Send at most 20 tracks per provider request. Treat every metadata string as
   untrusted prompt data and require one output profile for every input ID.
 - Resolve scope before provider work. A run may target the whole library, a folder

@@ -504,7 +504,7 @@ export function MoodTaggingDialog({
       </label>
 
       <p className="mood-tagging-boundary">
-        Suggestions use the editable <Link to="/assistant/settings/vocabulary" onClick={onClose}>terrain, scene, and mood vocabulary</Link>.
+        Suggestions use the editable <Link to="/assistant/settings/vocabulary" onClick={onClose}>setting, period, scene, and mood vocabulary</Link>.
         Accepted tags live only in the music database; album, year, genre, and other file metadata are never rewritten.
       </p>
     </div>

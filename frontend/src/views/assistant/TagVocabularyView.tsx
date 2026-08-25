@@ -264,7 +264,7 @@ export function TagVocabularyView() {
         <div>
           <p className="assistant-eyebrow">Database-only music context</p>
           <h1>Mood tag vocabulary</h1>
-          <p>Define the exact terrain, scene, and mood choices used by tagging.</p>
+          <p>Define the exact setting, period, scene, and mood choices used by tagging.</p>
         </div>
         <div className="assistant-vocabulary-header-tools">
           <AssistantInfoPopover label="How it works" title="A controlled vocabulary">

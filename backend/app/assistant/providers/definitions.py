@@ -85,7 +85,7 @@ MODEL_ROLES = (
         id="music_tagger",
         label="Mood tagging",
         description=(
-            "Suggest reviewable terrain, scene, and mood database tags from approved track evidence."
+            "Suggest reviewable setting, period, scene, and mood database tags from approved track evidence."
         ),
         required_capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
         configuration_available=True,
@@ -138,7 +138,7 @@ MODEL_ROLE_BY_ID = {role.id: role for role in MODEL_ROLES}
 # results even when a connection, model, and runtime limits are unchanged.
 MODEL_ROLE_RUNTIME_CONTRACTS: dict[str, str] = {
     "music_tagger": (
-        "assistant-music-tagger-input/v14+output/v3+local-context/v1"
+        "assistant-music-tagger-input/v15+output/v3+local-context/v1"
     ),
     "playlist_planner": "assistant-playlist-planner-input/v2+output/v1+closed-ids/v1",
     "tag_cleanup": (

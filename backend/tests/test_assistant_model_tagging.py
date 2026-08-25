@@ -138,7 +138,7 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
         "open wilderness": ["travel", "wilderness", "calm"],
         "quiet tavern lullaby": ["tavern", "rest", "calm"],
         "black sails": ["seafaring", "combat", "tense"],
-        "temple vigil": ["medieval", "temple", "mysterious"],
+        "temple vigil": ["ancient", "temple", "mysterious"],
         "lantern feast": ["village", "feast", "festive"],
         "sorrow among the ruins": ["ruins", "exploration", "melancholy"],
         "desert caravan": ["desert", "travel", "adventurous"],
@@ -183,6 +183,12 @@ def _tags_for_metadata(track: dict[str, Any]) -> list[str]:
         "sleeping keep": ["escape", "chase", "urgent"],
         "silent snow": ["combat", "tense"],
         "market dance": ["dancing", "festive", "playful"],
+        "present-day temple service": ["modern", "temple", "worship", "sacred"],
+        "renaissance court": ["early modern", "court", "dancing", "festive"],
+        "gaslamp factory": ["industrial", "workshop", "tense"],
+        "far-future starship": ["futuristic", "ceremony", "solemn"],
+        "era-neutral dreamscape": ["timeless", "calm", "dreamy"],
+        "cyberpunk bard": ["cross era", "castle"],
     }
     for marker, values in mapping.items():
         if marker in text:
@@ -855,6 +861,7 @@ def test_model_tagger_sends_full_vocabulary_guidance_for_high_recall() -> None:
     assert prompt.index('"tracks"') < prompt.index('"vocabulary_groups"')
     assert {group["label"] for group in payload["vocabulary_groups"]} == {
         "Terrain & setting",
+        "Period feel",
         "Scene",
         "Mood",
     }
@@ -888,7 +895,9 @@ def test_model_tagger_sends_full_vocabulary_guidance_for_high_recall() -> None:
     assert payload["tracks"][0]["context_evidence"] is None
     assert len(prompt) < 35_000
     assert "semantic context examples" in observed["system_prompt"]
-    assert "use this decision procedure" in observed["system_prompt"]
+    assert "use this coverage procedure" in observed["system_prompt"]
+    assert "Include secondary tags that genuinely fit" in observed["system_prompt"]
+    assert "A temple, court, market" in observed["system_prompt"]
     assert "example intentionally uses empty low-confidence profiles" in observed[
         "system_prompt"
     ]
@@ -1044,10 +1053,10 @@ def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
         {"succeeded"},
     )
     evaluation = failed_case_result["result"]["evaluation"]
-    assert failed_case_result["progress_current"] == 50
-    assert failed_case_result["progress_total"] == 50
+    assert failed_case_result["progress_current"] == 56
+    assert failed_case_result["progress_total"] == 56
     assert failed_case_result["progress_message"] == (
-        "Completed 50 of 50 scored attempts across 43 scored scenarios"
+        "Completed 56 of 56 scored attempts across 49 scored scenarios"
     )
     assert evaluation["passed"] is True
     assert [case["id"] for case in evaluation["cases"] if not case["passed"]] == [
@@ -1078,8 +1087,8 @@ def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
 
     assert calls == [[7]]
     assert finished["result"]["evaluation"]["passed"] is True
-    assert finished["result"]["evaluation"]["passed_cases"] == 43
-    assert finished["result"]["evaluation"]["total_cases"] == 43
+    assert finished["result"]["evaluation"]["passed_cases"] == 49
+    assert finished["result"]["evaluation"]["total_cases"] == 49
     assert finished["result"]["usage"]["attempted_requests"] == 1
     assert finished["result"]["execution_scope"] == "diagnostic_retest"
 
@@ -1145,8 +1154,8 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
     suite = load_tag_quality_suite(_SUITE_PATH)
 
     assert suite.schema_version == "assistant-music-tagger-evaluation/v6"
-    assert suite.id == "controlled-vocabulary-tagging-baseline-v14"
-    assert len(suite.cases) == 43
+    assert suite.id == "controlled-vocabulary-tagging-baseline-v15"
+    assert len(suite.cases) == 49
     assert any(case.track.context_evidence is None for case in suite.cases)
     temporal = {
         case.id: case
@@ -1164,6 +1173,30 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
     assert escape.trajectories["intensity"].shape == "stepped_build"
     assert len(escape.sections) == 3
     by_id = {case.id: case for case in suite.cases}
+    period_group = next(
+        group
+        for group in default_tag_vocabulary_snapshot().document.groups
+        if group.key == "period"
+    )
+    period_tags = {tag.name for tag in period_group.tags}
+    assert period_tags == {
+        "ancient",
+        "medieval",
+        "early modern",
+        "industrial",
+        "modern",
+        "futuristic",
+        "timeless",
+        "cross era",
+    }
+    assert by_id["ancient-temple-vigil"].required_tags[:2] == [
+        "ancient",
+        "temple",
+    ]
+    assert by_id["modern-temple-service"].required_tags[:2] == [
+        "modern",
+        "temple",
+    ]
     assert by_id["insufficient-evidence"].allowed_confidences == ["low"]
     assert by_id[
         "signal-evidence-does-not-invent-context"
@@ -1649,7 +1682,10 @@ def test_model_tagging_shares_only_relative_path_and_stays_review_only(
     )
     started = auth_client.post(
         "/api/assistant/library-tags/model-jobs",
-        json=_start_payload(),
+        json={
+            **_start_payload(),
+            "scope": {"type": "tracks", "track_ids": [seeded_track_id]},
+        },
     )
 
     assert started.status_code == 202, started.text

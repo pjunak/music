@@ -185,6 +185,21 @@ def test_catalog_has_dnd_starters_and_tracks_custom_usage(
         for tag in group["tags"]
     }
     assert {"medieval", "dancing", "tavern"} <= starters
+    period_tags = next(
+        group["tags"]
+        for group in response.json()["starter_groups"]
+        if group["key"] == "period"
+    )
+    assert period_tags == [
+        "ancient",
+        "medieval",
+        "early modern",
+        "industrial",
+        "modern",
+        "futuristic",
+        "timeless",
+        "cross era",
+    ]
 
     update = auth_client.patch(
         f"/api/assistant/library-tags/{seeded_track_id}",
@@ -268,6 +283,19 @@ def test_expanded_vocabulary_seed_merges_once_without_resetting_custom_tags(
         "schema_version": "assistant-tag-vocabulary/v1",
         "groups": [
             {
+                "key": "setting",
+                "label": "My settings",
+                "description": "Operator-curated settings.",
+                "tags": [
+                    {
+                        "id": "setting.medieval",
+                        "name": "medieval",
+                        "description": "My carefully tuned medieval definition.",
+                        "aliases": ["middle ages"],
+                    }
+                ],
+            },
+            {
                 "key": "mood",
                 "label": "My moods",
                 "description": "Operator-curated choices.",
@@ -310,7 +338,17 @@ def test_expanded_vocabulary_seed_merges_once_without_resetting_custom_tags(
         for group in migrated.json()["groups"]
         for tag in group["tags"]
     }
-    assert {"personal favorite", "desert", "combat", "calm"} <= names
+    assert {
+        "personal favorite",
+        "desert",
+        "combat",
+        "calm",
+        "ancient",
+        "modern",
+        "futuristic",
+        "timeless",
+        "cross era",
+    } <= names
     custom_group = next(
         group for group in migrated.json()["groups"] if group["key"] == "mood"
     )
@@ -319,6 +357,19 @@ def test_expanded_vocabulary_seed_merges_once_without_resetting_custom_tags(
     assert calm["description"] == "My carefully tuned calm definition."
     assert calm["aliases"] == ["serene"]
     assert {"quiet", "lullaby", "rest"} <= set(calm["context_cues"])
+    setting_group = next(
+        group for group in migrated.json()["groups"] if group["key"] == "setting"
+    )
+    period_group = next(
+        group for group in migrated.json()["groups"] if group["key"] == "period"
+    )
+    assert all(tag["id"] != "setting.medieval" for tag in setting_group["tags"])
+    medieval = next(
+        tag for tag in period_group["tags"] if tag["id"] == "setting.medieval"
+    )
+    assert medieval["name"] == "medieval"
+    assert medieval["description"] == "My carefully tuned medieval definition."
+    assert medieval["aliases"] == ["middle ages"]
 
 
 def test_manual_and_analysis_tags_remain_separate(

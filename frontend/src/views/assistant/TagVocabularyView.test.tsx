@@ -59,6 +59,20 @@ const vocabulary: TagVocabulary = {
       ],
     },
     {
+      key: "period",
+      label: "Period feel",
+      description: "The era the music evokes, not its release date.",
+      tags: [
+        {
+          id: "setting.medieval",
+          name: "medieval",
+          description: "Pre-modern European courtly or feudal character.",
+          aliases: ["middle ages"],
+          context_cues: ["minstrel", "feudal court"],
+        },
+      ],
+    },
+    {
       key: "scene",
       label: "Scene",
       description: "What is happening in the scene.",
@@ -144,7 +158,8 @@ describe("TagVocabularyView", () => {
     render(<TagVocabularyView />);
 
     expect(await screen.findByRole("heading", { name: "Setting" })).toBeVisible();
-    expect(screen.getAllByRole("table")).toHaveLength(3);
+    expect(screen.getByRole("heading", { name: "Period feel" })).toBeVisible();
+    expect(screen.getAllByRole("table")).toHaveLength(4);
     expect(screen.getByText("setting.tavern")).toBeVisible();
     expect(screen.getByText("wondrous")).toBeVisible();
 

@@ -36,7 +36,7 @@ tagging scope has current context.
   `track_contexts`, keyed by `(track_id, analyzer_id)`. Fingerprint path, size, and mtime. Commit or
   checkpoint failure after every track so interrupted work resumes without repeating completed
   decoding.
-- Keep analysis semantic-free. It must not output terrain, scene, mood, genre, or instrument tags.
+- Keep analysis semantic-free. It must not output setting, period, scene, mood, genre, or instrument tags.
   Voice status remains `not_classified` unless the explicit optional local classifier described by
   ADR-009 is installed; spectral measurements must not be relabelled as voice detection.
 - Give operators a Track Context tab mirroring library folders. The selected track view shows the

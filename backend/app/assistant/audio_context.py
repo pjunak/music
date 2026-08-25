@@ -1,6 +1,6 @@
 """Comprehensive, factual context distilled from a full audio recording.
 
-The output intentionally contains no mood, scene, terrain, genre, or
+The output intentionally contains no mood, scene, setting, period, genre, or
 instrument tags.  It preserves temporal behaviour in bounded trajectories and
 sections so a later, review-only classifier can make those semantic choices.
 """

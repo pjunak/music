@@ -7,7 +7,7 @@ from app.models.base import Base, UtcDateTime, utcnow
 
 
 class TrackUserTag(Base):
-    """Operator-owned terrain, scene, or mood tag attached to one track.
+    """Operator-owned setting, period, scene, or mood tag attached to one track.
 
     These rows are deliberately independent from file metadata and generated
     ``TrackAnalysis`` output. They never write ID3/Vorbis fields such as album,
