@@ -33,6 +33,7 @@ SUITE_PATH = (
     / "evaluation_suites"
     / "playlist-local-v1.json"
 )
+MODEL_SUITE_PATH = SUITE_PATH.with_name("playlist-model-v1.json")
 
 
 def _case_inputs(
@@ -71,9 +72,22 @@ class CapturingExecutor:
 class ReferenceExecutor:
     """Deterministic fixture model used to exercise the complete engine contract."""
 
+    def __init__(self, *, semantic_uplift: bool = True) -> None:
+        self.semantic_uplift = semantic_uplift
+        self.requests: list[StructuredModelRequest] = []
+
     def __call__(self, request: StructuredModelRequest) -> StructuredModelResult:
+        self.requests.append(request)
         payload = json.loads(request.user_prompt)
         candidates = payload["candidates"]
+        if (
+            self.semantic_uplift
+            and "burglary" in payload["request"]["prompt"].casefold()
+        ):
+            candidates = sorted(
+                candidates,
+                key=lambda item: "stealth" not in item["manual_tags"],
+            )
         limit = payload["request"]["candidate_limit"]
         ranked = candidates[:limit]
         selected: list[dict[str, object]] = []
@@ -348,3 +362,31 @@ def test_reference_model_planner_passes_provider_neutral_suite() -> None:
         "untrusted-candidate-text-limit",
     }
     assert all(case.metrics.deterministic is True for case in repeated_cases)
+
+
+def test_model_quality_suite_requires_uplift_and_exercises_100_candidates() -> None:
+    suite = load_evaluation_suite(MODEL_SUITE_PATH)
+
+    echo_result = evaluate_playlist_engine(
+        ModelPlaylistPlanner(ReferenceExecutor(semantic_uplift=False)),
+        suite,
+    )
+    assert echo_result.passed is False
+    assert next(
+        case for case in echo_result.cases if case.id == "semantic-burglary-uplift"
+    ).passed is False
+
+    executor = ReferenceExecutor()
+    result = evaluate_playlist_engine(ModelPlaylistPlanner(executor), suite)
+
+    assert result.passed is True
+    assert result.summary.passed_cases == 11
+    boundary = next(
+        case for case in result.cases if case.id == "production-candidate-boundary"
+    )
+    assert boundary.metrics.duration_error_ratio == 0.0
+    assert boundary.metrics.selected_artist_diversity == 1.0
+    assert 100 in [
+        len(json.loads(request.user_prompt)["candidates"])
+        for request in executor.requests
+    ]

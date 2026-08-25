@@ -448,7 +448,7 @@ def test_reference_cleanup_model_passes_fixed_quality_suite() -> None:
     )
 
     assert result.passed is True
-    assert result.passed_cases == result.total_cases == 12
+    assert result.passed_cases == result.total_cases == 13
 
 
 def test_tag_cleanup_quality_job_persists_certification_and_usage(
@@ -469,16 +469,16 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     finished = _wait_for_job(auth_client, started.json()["id"], {"succeeded"})
 
     assert finished["kind"] == TAG_CLEANUP_QUALITY_JOB_KIND
-    assert finished["progress_current"] == 12
-    assert finished["progress_total"] == 12
+    assert finished["progress_current"] == 13
+    assert finished["progress_total"] == 13
     assert finished["result"]["evaluation"]["passed"] is True
     assert finished["result"]["usage"] == {
         "schema_version": "assistant-provider-usage/v1",
-        "attempted_requests": 3,
-        "input_tokens": 180,
-        "output_tokens": 45,
-        "input_tokens_reported_requests": 3,
-        "output_tokens_reported_requests": 3,
+        "attempted_requests": 4,
+        "input_tokens": 240,
+        "output_tokens": 60,
+        "input_tokens_reported_requests": 4,
+        "output_tokens_reported_requests": 4,
         "provider_model_ids": ["cleanup-response-model"],
         "provider_model_ids_truncated": False,
     }
@@ -490,7 +490,7 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     assert evaluations.status_code == 200, evaluations.text
     assert evaluations.json()[0]["status"] == "passed"
     assert evaluations.json()[0]["suite_id"] == (
-        "controlled-vocabulary-cleanup-baseline-v3"
+        "controlled-vocabulary-cleanup-baseline-v4"
     )
 
 

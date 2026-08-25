@@ -37,9 +37,11 @@ must never authorize a changed model.
   role no longer matches before execution or before saving the result.
 - Clear current certifications when a connection is reverified or role runtime
   settings change. Historical jobs remain available for diagnosis.
-- Use the checked-in `playlist-local-v1.json` suite for
-  `playlist-quality-v1`. The suite is synthetic. The model still receives only
-  the locally filtered, path-free candidate contract and returns IDs only.
+- Use the checked-in `playlist-model-v1.json` suite for `playlist-quality-v1`.
+  It includes the local safety baseline plus semantic-uplift and 100-candidate
+  production-shape cases, with target-duration and selected-artist-diversity
+  scoring. The suite is synthetic. The model still receives only the locally
+  filtered, path-free candidate contract and returns IDs only.
 - Make model evaluation jobs non-restartable. A server restart marks an
   interrupted evaluation failed; the operator can deliberately retry it.
   Browser refresh and reopening remain supported because job progress is
@@ -55,6 +57,10 @@ must never authorize a changed model.
   explicit minimum recall pass rate. This catches unstable dangerous output without
   turning a larger nondeterministic semantic suite into an accidental all-or-nothing
   gate.
+- Exercise provider request scale in certification rather than only in live
+  work: 20 tracks per mood-tagging batch and 50 sources in a cleanup boundary
+  case. EQ includes goals outside deterministic keyword guidance so a baseline
+  echo cannot certify semantic refinement.
 - Permit a bounded mood-tagging failed-scenario recheck only against the exact
   current complete result. Run only its failed case IDs, merge replacements with
   the saved complete case set, and show the recomputed report for diagnosis.

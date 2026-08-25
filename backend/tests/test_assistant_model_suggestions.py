@@ -78,6 +78,11 @@ def _reference_playlist_model(
 ) -> StructuredModelResult:
     payload = json.loads(request.user_prompt)
     candidates = payload["candidates"]
+    if "burglary" in payload["request"]["prompt"].casefold():
+        candidates = sorted(
+            candidates,
+            key=lambda item: "stealth" not in item["manual_tags"],
+        )
     ranked = candidates[: payload["request"]["candidate_limit"]]
     selected: list[dict[str, Any]] = []
     selected_seconds = 0.0

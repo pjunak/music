@@ -157,7 +157,7 @@ const qualityEvaluation: ModelQualityEvaluation = {
     "No songs or live library data are sent."
   ),
   status: "never",
-  suite_id: "local-dnd-playlist-baseline-v4",
+  suite_id: "model-dnd-playlist-quality-v5",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
@@ -192,7 +192,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Mood tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "controlled-vocabulary-tagging-baseline-v13",
+  suite_id: "controlled-vocabulary-tagging-baseline-v14",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,

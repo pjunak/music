@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v6",
-  "id": "controlled-vocabulary-tagging-baseline-v13",
+  "id": "controlled-vocabulary-tagging-baseline-v14",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {

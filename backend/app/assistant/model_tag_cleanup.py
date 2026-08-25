@@ -131,6 +131,21 @@ class TagCleanupPair(_StrictModel):
     target: str = Field(min_length=1, max_length=64)
 
 
+class GeneratedCleanupTags(_StrictModel):
+    count: int = Field(ge=1, le=MODEL_TAG_CLEANUP_BATCH_SIZE)
+    prefix: str = Field(min_length=1, max_length=48)
+    track_count: int = Field(default=1, ge=0)
+
+    def materialize(self) -> list[dict[str, object]]:
+        return [
+            {
+                "tag": f"{self.prefix} {index + 1:02d}",
+                "track_count": self.track_count,
+            }
+            for index in range(self.count)
+        ]
+
+
 class TagCleanupQualityCase(_StrictModel):
     id: str = Field(min_length=1, max_length=128)
     description: str = Field(min_length=1, max_length=512)
@@ -151,6 +166,20 @@ class TagCleanupQualityCase(_StrictModel):
         ge=0,
         le=MAX_MODEL_CLEANUP_SUGGESTIONS,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def materialize_generated_tags(cls, value: object) -> object:
+        if not isinstance(value, dict) or "generated_used_tags" not in value:
+            return value
+        payload = dict(value)
+        generated = GeneratedCleanupTags.model_validate(
+            payload.pop("generated_used_tags")
+        )
+        used_tags = list(payload.get("used_tags", []))
+        used_tags.extend(generated.materialize())
+        payload["used_tags"] = used_tags
+        return payload
 
     @model_validator(mode="after")
     def valid_expectations(self) -> TagCleanupQualityCase:

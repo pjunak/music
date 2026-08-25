@@ -23,6 +23,7 @@ def test_bundled_model_quality_suites_exist_and_match_definitions() -> None:
     assert {path.name for path in paths} == {
         "eq-assistant-v1.json",
         "music-tagging-v1.json",
+        "playlist-model-v1.json",
         "playlist-local-v1.json",
         "tag-cleanup-v1.json",
     }

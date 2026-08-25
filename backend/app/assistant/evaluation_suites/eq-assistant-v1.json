@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-eq-quality/v1",
-  "id": "graphic-eq-safety-baseline-v2",
+  "id": "graphic-eq-safety-baseline-v3",
   "cases": [
     {
       "id": "warm-tavern",
@@ -45,6 +45,31 @@
       "expectations": [
         {"frequency_hz": 64, "minimum_gain_db": 0.5, "maximum_gain_db": 4.0},
         {"frequency_hz": 32, "minimum_gain_db": 0.0, "maximum_gain_db": 3.0}
+      ]
+    },
+    {
+      "id": "semantic-nasal-midrange",
+      "description": "A semantic midrange problem outside the deterministic rules still needs a conservative correction.",
+      "goal": "Tame the nasal, honky character without making voices dull.",
+      "expectations": [
+        {"frequency_hz": 1000, "minimum_gain_db": -1.5, "maximum_gain_db": -0.5}
+      ]
+    },
+    {
+      "id": "semantic-subsonic-rumble",
+      "description": "Subsonic rumble should be reduced without relying on a literal bass-rule keyword.",
+      "goal": "Remove the subsonic rumble from the recording while preserving the rest of the mix.",
+      "expectations": [
+        {"frequency_hz": 32, "minimum_gain_db": -1.5, "maximum_gain_db": -0.5}
+      ]
+    },
+    {
+      "id": "semantic-tape-hiss",
+      "description": "Tape hiss and excess air should receive a restrained high-frequency cut.",
+      "goal": "Soften constant tape hiss and excessive air without losing all detail.",
+      "expectations": [
+        {"frequency_hz": 8000, "minimum_gain_db": -1.5, "maximum_gain_db": -0.5},
+        {"frequency_hz": 16000, "minimum_gain_db": -1.5, "maximum_gain_db": -0.5}
       ]
     }
   ]

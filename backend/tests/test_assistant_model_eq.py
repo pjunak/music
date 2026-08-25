@@ -1,6 +1,7 @@
 import json
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,7 +11,9 @@ from sqlalchemy import delete
 from app.assistant.model_eq import (
     EQ_DRAFT_OUTPUT_CONTRACT,
     ModelEqError,
+    evaluate_eq_model,
     generate_eq_draft,
+    load_eq_quality_suite,
 )
 from app.assistant.model_eq_job import MODEL_EQ_DRAFT_JOB_KIND
 from app.assistant.model_evaluation import EQ_QUALITY_JOB_KIND
@@ -29,6 +32,13 @@ from app.models.background_job import BackgroundJob
 from .assistant_test_values import TEST_PROVIDER_API_KEY
 
 DISCLOSURE_VERSION = "assistant-eq-draft-disclosure/v2"
+_QUALITY_SUITE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "app"
+    / "assistant"
+    / "evaluation_suites"
+    / "eq-assistant-v1.json"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +98,13 @@ def _reference_eq_model(
         gains[0] = 1.0
         gains[1] = 2.0
         gains[2] = 1.0
+    elif "nasal" in goal or "honky" in goal:
+        gains[5] = -1.0
+    elif "subsonic" in goal or "rumble" in goal:
+        gains[0] = -1.0
+    elif "tape hiss" in goal or "excessive air" in goal:
+        gains[8] = -1.0
+        gains[9] = -1.0
     else:
         gains[0] = -1.0
         gains[6] = 2.0
@@ -235,6 +252,40 @@ def test_eq_contract_bounds_incidental_review_text() -> None:
     assert len(draft.rationale) == 1000
     assert len(draft.cautions) == 5
     assert all(len(item) == 256 for item in draft.cautions)
+
+
+def test_eq_quality_requires_semantic_uplift_beyond_local_guidance() -> None:
+    def echo_local_guidance(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": EQ_DRAFT_OUTPUT_CONTRACT,
+                "gains_db": [
+                    band["baseline_gain_db"]
+                    for band in payload["local_guidance"]["bands"]
+                ],
+                "rationale": "Echoed deterministic guidance.",
+                "cautions": [],
+            },
+        )
+
+    result = evaluate_eq_model(
+        echo_local_guidance,
+        load_eq_quality_suite(_QUALITY_SUITE_PATH),
+    )
+
+    assert result.passed is False
+    assert result.passed_cases == 5
+    assert result.total_cases == 8
+    assert {
+        case.id for case in result.cases if not case.passed
+    } == {
+        "semantic-nasal-midrange",
+        "semantic-subsonic-rumble",
+        "semantic-tape-hiss",
+    }
 
 
 def test_eq_endpoints_are_consent_bound_durable_and_review_only(

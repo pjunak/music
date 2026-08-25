@@ -73,7 +73,8 @@ TAG_CLEANUP_QUALITY_JOB_KIND = "assistant.model-evaluation.tag-cleanup-quality-v
 EQ_QUALITY_EVALUATION_ID: Literal["eq-quality-v1"] = "eq-quality-v1"
 EQ_QUALITY_JOB_KIND = "assistant.model-evaluation.eq-quality-v1"
 _EVALUATION_SUITE_DIR = Path(__file__).resolve().with_name("evaluation_suites")
-_PLAYLIST_SUITE_PATH = _EVALUATION_SUITE_DIR / "playlist-local-v1.json"
+_PLAYLIST_SUITE_PATH = _EVALUATION_SUITE_DIR / "playlist-model-v1.json"
+_PLAYLIST_BASE_SUITE_PATH = _EVALUATION_SUITE_DIR / "playlist-local-v1.json"
 _TAGGING_SUITE_PATH = _EVALUATION_SUITE_DIR / "music-tagging-v1.json"
 _TAG_CLEANUP_SUITE_PATH = _EVALUATION_SUITE_DIR / "tag-cleanup-v1.json"
 _EQ_SUITE_PATH = _EVALUATION_SUITE_DIR / "eq-assistant-v1.json"
@@ -98,7 +99,7 @@ PLAYLIST_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic D&D playlist scenarios through this model. "
         "No songs or live library data are sent."
     ),
-    suite_id="local-dnd-playlist-baseline-v4",
+    suite_id="model-dnd-playlist-quality-v5",
     suite_path=_PLAYLIST_SUITE_PATH,
     job_kind=PLAYLIST_QUALITY_JOB_KIND,
 )
@@ -111,7 +112,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v13",
+    suite_id="controlled-vocabulary-tagging-baseline-v14",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -124,7 +125,7 @@ TAG_CLEANUP_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic canonical-ID and no-match tag-cleanup cases through "
         "this model. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-cleanup-baseline-v3",
+    suite_id="controlled-vocabulary-cleanup-baseline-v4",
     suite_path=_TAG_CLEANUP_SUITE_PATH,
     job_kind=TAG_CLEANUP_QUALITY_JOB_KIND,
 )
@@ -136,7 +137,7 @@ EQ_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic sound goals through this model and checks bounded, "
         "conservative graphic-EQ behavior. No songs or live presets are sent."
     ),
-    suite_id="graphic-eq-safety-baseline-v2",
+    suite_id="graphic-eq-safety-baseline-v3",
     suite_path=_EQ_SUITE_PATH,
     job_kind=EQ_QUALITY_JOB_KIND,
 )
@@ -152,11 +153,12 @@ _EVALUATIONS_BY_ROLE: dict[str, tuple[ModelEvaluationDefinition, ...]] = {
 def bundled_evaluation_suite_paths() -> tuple[Path, ...]:
     """Return every read-only suite that must ship with the backend package."""
 
-    return tuple(
+    configured = tuple(
         definition.suite_path
         for definitions in _EVALUATIONS_BY_ROLE.values()
         for definition in definitions
     )
+    return (*configured, _PLAYLIST_BASE_SUITE_PATH)
 
 
 class _EvaluationJobParameters(BaseModel):

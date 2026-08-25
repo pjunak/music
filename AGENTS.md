@@ -284,13 +284,15 @@ Runtime data lives outside the image.
   Connection changes, credential deletion, and reverification must refuse to reset assigned roles
   while their model jobs are queued or running; the UI must warn that deliberate reverification
   clears their model tests and quality results.
-  The mood-tagging suite batches four synthetic tracks per provider request while preserving
+  The mood-tagging suite batches 20 synthetic tracks per provider request, matching live work,
+  while preserving
   per-scenario progress and diagnostics, then repeats every safety scenario once to catch unstable
   forbidden output. Provider/contract failures and forbidden false positives block certification;
   a scenario's safety label alone does not turn a required semantic-tag miss into a blocking error.
   All scenarios contribute to the suite's explicit minimum scored pass rate. A
   failed-scenario recheck may call the provider only for failures from the exact current complete
-  result, then must merge those results with that baseline before updating certification.
+  result and may merge those results only for diagnosis. Only another complete suite may update
+  certification.
 - Durable quality, playlist, tagging, and tag-cleanup model jobs record the shared bounded provider-usage
   summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
   Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep

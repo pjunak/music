@@ -1145,7 +1145,7 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
     suite = load_tag_quality_suite(_SUITE_PATH)
 
     assert suite.schema_version == "assistant-music-tagger-evaluation/v6"
-    assert suite.id == "controlled-vocabulary-tagging-baseline-v13"
+    assert suite.id == "controlled-vocabulary-tagging-baseline-v14"
     assert len(suite.cases) == 43
     assert any(case.track.context_evidence is None for case in suite.cases)
     temporal = {
@@ -1470,7 +1470,7 @@ def test_tag_quality_batches_tracks_but_reports_each_case() -> None:
 
     assert result.passed is True
     assert result.passed_cases == result.total_cases == 5
-    assert batches == [[1, 2, 3, 4], [5]]
+    assert batches == [[1, 2, 3, 4, 5]]
     assert progress == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
 
 
@@ -1498,7 +1498,7 @@ def test_tag_quality_shares_two_contract_recoveries_across_the_run() -> None:
                     "required_tags": [],
                     "forbidden_tags": [],
                 }
-                for track_id in range(1, 10)
+                for track_id in range(1, 42)
             ],
         }
     )
@@ -1530,11 +1530,11 @@ def test_tag_quality_shares_two_contract_recoveries_across_the_run() -> None:
     result = evaluate_music_tagger(execute, suite)
 
     assert attempts == {
-        (1, 2, 3, 4): 2,
-        (5, 6, 7, 8): 2,
-        (9,): 1,
+        tuple(range(1, 21)): 2,
+        tuple(range(21, 41)): 2,
+        (41,): 1,
     }
-    assert [case.passed for case in result.cases] == [True] * 8 + [False]
+    assert [case.passed for case in result.cases] == [True] * 40 + [False]
     assert result.cases[-1].blocking is True
     assert result.cases[-1].failures == [
         "Tagger error: model_execution_invalid_structured_output"

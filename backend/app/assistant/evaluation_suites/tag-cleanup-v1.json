@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-model-tag-cleanup-evaluation/v2",
-  "id": "controlled-vocabulary-cleanup-baseline-v3",
+  "id": "controlled-vocabulary-cleanup-baseline-v4",
   "cases": [
     {
       "id": "inn-to-tavern",
@@ -181,6 +181,19 @@
         {"source": "tender love", "target": "melancholy"}
       ],
       "maximum_suggestions": 3
+    },
+    {
+      "id": "production-batch-boundary",
+      "description": "A full 50-source batch must preserve explicit no-match decisions without truncation or invented mappings",
+      "used_tags": [],
+      "generated_used_tags": {
+        "count": 50,
+        "prefix": "uncategorized fixture",
+        "track_count": 1
+      },
+      "required_pairs": [],
+      "forbidden_pairs": [],
+      "maximum_suggestions": 0
     }
   ]
 }

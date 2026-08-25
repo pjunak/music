@@ -72,6 +72,33 @@ class EvaluationTrack(StrictEvaluationModel):
     signal: EvaluationSignalProfile | None = None
 
 
+class GeneratedEvaluationTracks(StrictEvaluationModel):
+    """Compact declaration for deterministic, low-signal scale fixtures."""
+
+    count: int = Field(ge=1, le=100)
+    id_start: int = Field(gt=0)
+    path_prefix: str = Field(min_length=1, max_length=200)
+    title_prefix: str = Field(min_length=1, max_length=200)
+    artist: str = Field(default="Synthetic Scale Fixture", max_length=500)
+    genre: str = Field(default="ambient", max_length=500)
+    length_s: float = Field(default=180.0, ge=0.0, le=86_400.0)
+    manual_tags: list[str] = Field(default_factory=list, max_length=100)
+
+    def materialize(self) -> list[dict[str, object]]:
+        return [
+            {
+                "id": self.id_start + offset,
+                "path": f"{self.path_prefix}/{offset + 1:03d}.flac",
+                "title": f"{self.title_prefix} {offset + 1:03d}",
+                "artist": self.artist,
+                "genre": self.genre,
+                "length_s": self.length_s,
+                "manual_tags": self.manual_tags,
+            }
+            for offset in range(self.count)
+        ]
+
+
 class EvaluationExpectations(StrictEvaluationModel):
     top_k: int = Field(default=5, ge=1, le=100)
     relevant_track_ids: list[int] = Field(min_length=1, max_length=1_000)
@@ -104,6 +131,8 @@ class EvaluationThresholds(StrictEvaluationModel):
     min_required_selected_recall: float = Field(default=0.0, ge=0.0, le=1.0)
     min_order_pair_accuracy: float = Field(default=0.0, ge=0.0, le=1.0)
     min_reason_coverage: float = Field(default=1.0, ge=0.0, le=1.0)
+    min_selected_artist_diversity: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_duration_error_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
     max_forbidden_candidates: int = Field(default=0, ge=0)
     require_deterministic: bool = False
 
@@ -115,6 +144,20 @@ class PlaylistEvaluationCase(StrictEvaluationModel):
     tracks: list[EvaluationTrack] = Field(min_length=1, max_length=1_000)
     expectations: EvaluationExpectations
     thresholds: EvaluationThresholds = Field(default_factory=EvaluationThresholds)
+
+    @model_validator(mode="before")
+    @classmethod
+    def materialize_generated_tracks(cls, value: object) -> object:
+        if not isinstance(value, dict) or "generated_tracks" not in value:
+            return value
+        payload = dict(value)
+        generated = GeneratedEvaluationTracks.model_validate(
+            payload.pop("generated_tracks")
+        )
+        tracks = list(payload.get("tracks", []))
+        tracks.extend(generated.materialize())
+        payload["tracks"] = tracks
+        return payload
 
     @model_validator(mode="after")
     def validate_references(self) -> PlaylistEvaluationCase:
@@ -176,6 +219,8 @@ class EvaluationMetrics(StrictEvaluationModel):
     required_selected_recall: float | None = Field(default=None, ge=0.0, le=1.0)
     order_pair_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
     reason_coverage: float = Field(ge=0.0, le=1.0)
+    selected_artist_diversity: float = Field(ge=0.0, le=1.0)
+    duration_error_ratio: float = Field(ge=0.0)
     forbidden_candidate_count: int = Field(ge=0)
     unknown_candidate_count: int = Field(ge=0)
     excluded_candidate_count: int = Field(ge=0)
@@ -214,6 +259,8 @@ class EvaluationSummary(StrictEvaluationModel):
     mean_required_selected_recall: float | None = Field(default=None, ge=0.0, le=1.0)
     mean_order_pair_accuracy: float | None = Field(default=None, ge=0.0, le=1.0)
     mean_reason_coverage: float = Field(ge=0.0, le=1.0)
+    mean_selected_artist_diversity: float = Field(ge=0.0, le=1.0)
+    mean_duration_error_ratio: float = Field(ge=0.0)
 
 
 class PlaylistEvaluationResult(StrictEvaluationModel):
@@ -226,7 +273,20 @@ class PlaylistEvaluationResult(StrictEvaluationModel):
 
 
 def load_evaluation_suite(path: Path) -> PlaylistEvaluationSuite:
-    return PlaylistEvaluationSuite.model_validate_json(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    included_name = payload.pop("include_cases_from", None)
+    if included_name is not None:
+        if not isinstance(included_name, str) or Path(included_name).name != included_name:
+            raise ValueError("included evaluation suite must be a sibling file name")
+        included_path = path.with_name(included_name)
+        if included_path == path:
+            raise ValueError("evaluation suite cannot include itself")
+        included = load_evaluation_suite(included_path)
+        payload["cases"] = [
+            *[case.model_dump(mode="json") for case in included.cases],
+            *payload.get("cases", []),
+        ]
+    return PlaylistEvaluationSuite.model_validate(payload)
 
 
 def _response_fingerprint(response: PlaylistSuggestionResponse) -> str:
@@ -314,6 +374,21 @@ def _assess_response(
         else 0.0
     )
 
+    selected_track_by_id = {track.id: track for track in tracks}
+    selected_duration_s = sum(
+        selected_track_by_id[track_id].length_s
+        for track_id in selected_ids
+        if track_id in selected_track_by_id
+    )
+    target_duration_s = case.request.target_minutes * 60.0
+    duration_error_ratio = abs(selected_duration_s - target_duration_s) / target_duration_s
+    artist_keys = {
+        (selected_track_by_id[track_id].artist.casefold().strip() or f"track:{track_id}")
+        for track_id in selected_ids
+        if track_id in selected_track_by_id
+    }
+    artist_diversity = len(artist_keys) / len(selected_ids) if selected_ids else 0.0
+
     known_ids = {track.id for track in tracks}
     track_by_id = {track.id: track for track in tracks}
     forbidden = set(case.expectations.forbidden_track_ids)
@@ -356,6 +431,8 @@ def _assess_response(
         and len(candidates) <= case.request.candidate_limit
         and 0 <= response.eligible_tracks <= len(tracks)
         and len(candidates) <= response.eligible_tracks
+        and response.plan.energy_curve == case.request.energy_curve
+        and abs(response.plan.selected_duration_s - selected_duration_s) < 0.001
         and unknown_count == 0
         and excluded_count == 0
         and source_mismatch_count == 0
@@ -375,6 +452,8 @@ def _assess_response(
             round(order_pair_accuracy, 4) if order_pair_accuracy is not None else None
         ),
         reason_coverage=round(reason_coverage, 4),
+        selected_artist_diversity=round(artist_diversity, 4),
+        duration_error_ratio=round(duration_error_ratio, 4),
         forbidden_candidate_count=forbidden_count,
         unknown_candidate_count=unknown_count,
         excluded_candidate_count=excluded_count,
@@ -402,6 +481,10 @@ def _assess_response(
         failures.append("order_pair_accuracy below threshold")
     if metrics.reason_coverage < thresholds.min_reason_coverage:
         failures.append("reason_coverage below threshold")
+    if metrics.selected_artist_diversity < thresholds.min_selected_artist_diversity:
+        failures.append("selected_artist_diversity below threshold")
+    if metrics.duration_error_ratio > thresholds.max_duration_error_ratio:
+        failures.append("duration_error_ratio above threshold")
     if metrics.forbidden_candidate_count > thresholds.max_forbidden_candidates:
         failures.append("forbidden candidate limit exceeded")
     if not metrics.contract_valid:
@@ -550,6 +633,8 @@ def _engine_error_result(
             required_selected_recall=None,
             order_pair_accuracy=None,
             reason_coverage=0.0,
+            selected_artist_diversity=0.0,
+            duration_error_ratio=1.0,
             forbidden_candidate_count=0,
             unknown_candidate_count=0,
             excluded_candidate_count=0,
@@ -613,6 +698,14 @@ def evaluate_playlist_engine(
             mean_order_pair_accuracy=order_accuracy,
             mean_reason_coverage=_mean(
                 case.metrics.reason_coverage for case in cases
+            )
+            or 0.0,
+            mean_selected_artist_diversity=_mean(
+                case.metrics.selected_artist_diversity for case in cases
+            )
+            or 0.0,
+            mean_duration_error_ratio=_mean(
+                case.metrics.duration_error_ratio for case in cases
             )
             or 0.0,
         ),
