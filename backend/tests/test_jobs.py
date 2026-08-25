@@ -12,8 +12,12 @@ SUCCESS_KIND = "tests.progress"
 CANCEL_KIND = "tests.cancel"
 RESTARTABLE_KIND = "tests.restartable"
 NON_RESTARTABLE_KIND = "tests.non-restartable"
+LOCAL_LANE_KIND = "tests.local-lane"
+PROVIDER_LANE_KIND = "tests.provider-lane"
 
 _cancel_started = threading.Event()
+_provider_started = threading.Event()
+_provider_release = threading.Event()
 
 
 def _progress_handler(
@@ -41,10 +45,27 @@ def _cancellable_handler(
     return {"processed": 1000}
 
 
+def _blocking_provider_handler(
+    context: JobExecutionContext, _parameters: dict[str, Any]
+) -> dict[str, Any]:
+    _provider_started.set()
+    if not _provider_release.wait(timeout=3):
+        raise TimeoutError("test did not release provider lane")
+    context.check_cancelled()
+    return {"released": True}
+
+
 register_job_handler(SUCCESS_KIND, _progress_handler, restartable=True)
 register_job_handler(CANCEL_KIND, _cancellable_handler, restartable=True)
 register_job_handler(RESTARTABLE_KIND, _progress_handler, restartable=True)
 register_job_handler(NON_RESTARTABLE_KIND, _progress_handler, restartable=False)
+register_job_handler(LOCAL_LANE_KIND, _progress_handler, restartable=True, lane="local")
+register_job_handler(
+    PROVIDER_LANE_KIND,
+    _blocking_provider_handler,
+    restartable=False,
+    lane="provider",
+)
 
 
 def _wait_for_status(
@@ -93,6 +114,46 @@ def test_runner_persists_progress_result_and_history(auth_client: TestClient) ->
     listed = auth_client.get("/api/jobs", params={"kind": SUCCESS_KIND})
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()] == [job_id]
+
+
+def test_provider_work_does_not_block_local_job_lane(auth_client: TestClient) -> None:
+    from app.core.db import SessionLocal
+    from app.jobs.runner import job_runner
+    from app.jobs.service import enqueue_job
+
+    _provider_started.clear()
+    _provider_release.clear()
+    provider_id: str | None = None
+    try:
+        with SessionLocal() as db:
+            provider = enqueue_job(db, PROVIDER_LANE_KIND, {})
+            provider_id = provider.id
+        job_runner.wake("provider")
+        assert _provider_started.wait(timeout=2)
+
+        with SessionLocal() as db:
+            local = enqueue_job(db, LOCAL_LANE_KIND, {"steps": 1})
+            local_id = local.id
+        job_runner.wake("local")
+
+        finished = _wait_for_status(
+            auth_client,
+            local_id,
+            {"succeeded"},
+            timeout=2,
+        )
+        assert finished["result"] == {"processed": 1}
+    finally:
+        _provider_release.set()
+        job_runner.wake("provider")
+
+    assert provider_id is not None
+    provider_finished = _wait_for_status(
+        auth_client,
+        provider_id,
+        {"succeeded"},
+    )
+    assert provider_finished["result"] == {"released": True}
 
 
 def test_running_job_can_be_cancelled_and_retried(auth_client: TestClient) -> None:

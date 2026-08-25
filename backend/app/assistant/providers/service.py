@@ -667,6 +667,26 @@ def _require_no_active_model_jobs_for_connection(
         )
 
 
+def _require_no_active_model_jobs_for_role(db: Session, role_id: str) -> None:
+    jobs = db.scalars(
+        select(BackgroundJob).where(
+            BackgroundJob.kind.like("assistant.model%"),
+            BackgroundJob.status.in_(ACTIVE_JOB_STATUSES),
+        )
+    ).all()
+    for job in jobs:
+        try:
+            parameters = json.loads(job.parameters_json)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(parameters, dict) and parameters.get("role_id") == role_id:
+            raise ProviderServiceError(
+                "role_model_job_active",
+                "Wait for or cancel active model work before changing or retesting this role.",
+                409,
+            )
+
+
 def prepare_verification(db: Session, connection_id: str) -> VerificationTarget:
     row = get_connection(db, connection_id)
     _require_no_active_model_jobs_for_connection(db, row.id)
@@ -918,6 +938,8 @@ def update_model_role(
     payload: ModelRoleUpdate,
 ) -> ModelRoleOut:
     definition = _configurable_role(role_id)
+    row = db.get(AssistantModelRole, role_id)
+    _require_no_active_model_jobs_for_role(db, role_id)
     connection = get_connection(db, payload.connection_id)
     adapter = PROVIDER_ADAPTER_BY_ID.get(connection.adapter_id)
     supported_capabilities = set(adapter.capability_ids) if adapter is not None else set()
@@ -947,7 +969,6 @@ def update_model_role(
         )
     if payload.enabled:
         _connection_credential(connection)
-    row = db.get(AssistantModelRole, role_id)
     runtime_changed = (
         row is None
         or row.connection_id != connection.id
@@ -997,6 +1018,7 @@ def delete_model_role(db: Session, role_id: str) -> None:
         raise ProviderServiceError("role_not_found", "Model role not found.", 404)
     row = db.get(AssistantModelRole, role_id)
     if row is not None:
+        _require_no_active_model_jobs_for_role(db, role_id)
         db.delete(row)
         db.commit()
 
@@ -1076,6 +1098,7 @@ def prepare_role_conformance(db: Session, role_id: str) -> ConformanceTarget:
             "Save a model configuration before testing it.",
             409,
         )
+    _require_no_active_model_jobs_for_role(db, role_id)
     connection = get_connection(db, row.connection_id)
     if connection.verification_status != "verified":
         raise ProviderServiceError(

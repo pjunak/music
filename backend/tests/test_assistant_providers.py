@@ -1074,6 +1074,56 @@ def test_connection_invalidation_refuses_active_assigned_model_job(
     assert stored["effective_enabled"] is True
 
 
+def test_role_changes_and_retest_refuse_active_model_job(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    role = _enabled_playlist_role(auth_client, monkeypatch)
+    with SessionLocal() as db:
+        db.add(
+            BackgroundJob(
+                id="active-quality-during-role-change",
+                kind=PLAYLIST_QUALITY_JOB_KIND,
+                status="running",
+                parameters_json=json.dumps(
+                    {
+                        "role_id": "playlist_planner",
+                        "evaluation_id": "playlist-quality-v1",
+                    }
+                ),
+            )
+        )
+        db.commit()
+
+    changed = auth_client.put(
+        "/api/assistant/providers/roles/playlist_planner",
+        json={
+            "connection_id": role["connection_id"],
+            "model_id": role["model_id"],
+            "enabled": False,
+        },
+    )
+    deleted = auth_client.delete(
+        "/api/assistant/providers/roles/playlist_planner"
+    )
+    retested = auth_client.post(
+        "/api/assistant/providers/roles/playlist_planner/test"
+    )
+
+    for response in (changed, deleted, retested):
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "role_model_job_active"
+        assert response.json()["detail"]["message"] == (
+            "Wait for or cancel active model work before changing or retesting this role."
+        )
+
+    stored = auth_client.get("/api/assistant/providers/roles").json()
+    playlist_role = next(
+        item for item in stored if item["role_id"] == "playlist_planner"
+    )
+    assert playlist_role["effective_enabled"] is True
+
+
 def test_reverification_finish_refuses_job_started_during_provider_request(
     auth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

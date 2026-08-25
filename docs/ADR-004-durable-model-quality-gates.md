@@ -50,6 +50,13 @@ must never authorize a changed model.
   interrupted evaluation failed; the operator can deliberately retry it.
   Browser refresh and reopening remain supported because job progress is
   server-owned and persistent.
+- Run local analysis and provider-backed work in separate serialized job lanes.
+  Local scans still cannot compete with one another for disk or SQLite writes,
+  while one bounded provider timeout cannot stall unrelated local analysis.
+- Reject connection or role mutation, deletion, verification, and conformance
+  retesting while a provider job assigned to that configuration is active.
+  The job therefore keeps the exact runtime it prepared until it reaches a
+  terminal state.
 - Treat a completed but failing quality report as a successful job with a
   failed certification. Job failure is reserved for infrastructure,
   configuration, cancellation, or execution-lifecycle failure.
@@ -108,5 +115,8 @@ room for multiple role-specific suites. Selected.
   be run again. This is deliberate and visible.
 - An interrupted server-side run may have incurred provider cost even though it
   cannot certify the model; retry remains an explicit operator action.
+- Provider work and local analysis can progress independently, but each lane
+  remains intentionally single-file to avoid accidental request bursts or
+  competing library scans.
 - A passed synthetic suite is necessary but not sufficient evidence for live
   library use. It does not prove subjective quality for every private library.

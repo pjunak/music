@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import CursorResult, select, update
 
 from app.core.db import SessionLocal
-from app.jobs.registry import JobExecutionContext, get_job_handler
+from app.jobs.registry import JobExecutionContext, JobLane, get_job_handler, job_lane_for_kind
 from app.models.background_job import BackgroundJob
 from app.models.base import utcnow
 
@@ -91,51 +91,65 @@ class JobContext(JobExecutionContext):
 
 
 class BackgroundJobRunner:
-    """One cooperative worker for heavy server-owned jobs.
+    """Separate cooperative workers for local and provider-owned jobs.
 
-    Handlers execute in a worker thread so filesystem and CPU work cannot
-    block FastAPI's event loop. A single worker is deliberate: whole-library
-    scans should not compete with each other for disk and SQLite writes.
+    Handlers execute in worker threads so filesystem, CPU, and network work
+    cannot block FastAPI's event loop. Local jobs remain serialized so
+    whole-library scans do not compete for disk and SQLite writes. Provider
+    jobs use a second serialized lane so a bounded remote timeout cannot stall
+    unrelated local analysis.
     """
 
     def __init__(self) -> None:
-        self._task: asyncio.Task[None] | None = None
+        self._tasks: dict[JobLane, asyncio.Task[None]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._wake_event: asyncio.Event | None = None
+        self._wake_events: dict[JobLane, asyncio.Event] = {}
         self._stopping = threading.Event()
 
     async def start(self) -> None:
-        if self._task is not None and not self._task.done():
+        if any(not task.done() for task in self._tasks.values()):
             return
         self._loop = asyncio.get_running_loop()
-        self._wake_event = asyncio.Event()
+        self._wake_events = {"local": asyncio.Event(), "provider": asyncio.Event()}
         self._stopping = threading.Event()
         await asyncio.to_thread(self.recover_interrupted_jobs)
-        self._task = self._loop.create_task(self._run(), name="background-jobs")
+        self._tasks = {
+            lane: self._loop.create_task(
+                self._run(lane),
+                name=f"background-jobs-{lane}",
+            )
+            for lane in ("local", "provider")
+        }
 
     async def stop(self) -> None:
-        task = self._task
-        if task is None:
+        tasks = list(self._tasks.values())
+        if not tasks:
             return
         self._stopping.set()
         self.wake()
         try:
-            await asyncio.wait_for(task, timeout=10)
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
         except TimeoutError:
             logger.error("background job runner did not stop cooperatively")
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         finally:
-            self._task = None
+            self._tasks = {}
             self._loop = None
-            self._wake_event = None
+            self._wake_events = {}
 
-    def wake(self) -> None:
+    def wake(self, lane: JobLane | None = None) -> None:
         loop = self._loop
-        event = self._wake_event
-        if loop is None or event is None or loop.is_closed():
+        if loop is None or loop.is_closed():
             return
-        loop.call_soon_threadsafe(event.set)
+        events = (
+            [self._wake_events[lane]]
+            if lane is not None and lane in self._wake_events
+            else list(self._wake_events.values())
+        )
+        for event in events:
+            loop.call_soon_threadsafe(event.set)
 
     def recover_interrupted_jobs(self) -> None:
         now = utcnow()
@@ -166,48 +180,53 @@ class BackgroundJobRunner:
                 job.updated_at = now
             db.commit()
 
-    async def _run(self) -> None:
-        assert self._wake_event is not None
+    async def _run(self, lane: JobLane) -> None:
+        wake_event = self._wake_events[lane]
         while not self._stopping.is_set():
-            self._wake_event.clear()
-            job_id = await asyncio.to_thread(self._claim_next)
+            wake_event.clear()
+            job_id = await asyncio.to_thread(self._claim_next, lane)
             if job_id is None:
                 with suppress(TimeoutError):
-                    await asyncio.wait_for(self._wake_event.wait(), timeout=5)
+                    await asyncio.wait_for(wake_event.wait(), timeout=5)
                 continue
             await asyncio.to_thread(self._execute, job_id)
 
-    def _claim_next(self) -> str | None:
+    def _claim_next(self, lane: JobLane) -> str | None:
         with SessionLocal() as db:
             while True:
-                job_id = db.scalar(
-                    select(BackgroundJob.id)
+                queued = db.execute(
+                    select(BackgroundJob.id, BackgroundJob.kind)
                     .where(BackgroundJob.status == "queued")
                     .order_by(BackgroundJob.created_at, BackgroundJob.id)
-                    .limit(1)
-                )
-                if job_id is None:
+                ).all()
+                candidates = [
+                    job_id
+                    for job_id, kind in queued
+                    if job_lane_for_kind(kind) == lane
+                ]
+                if not candidates:
                     return None
-                now = utcnow()
-                claimed = db.execute(
-                    update(BackgroundJob)
-                    .where(
-                        BackgroundJob.id == job_id,
-                        BackgroundJob.status == "queued",
+                for job_id in candidates:
+                    now = utcnow()
+                    claimed = db.execute(
+                        update(BackgroundJob)
+                        .where(
+                            BackgroundJob.id == job_id,
+                            BackgroundJob.status == "queued",
+                        )
+                        .values(
+                            status="running",
+                            started_at=now,
+                            finished_at=None,
+                            error=None,
+                            progress_phase="Starting",
+                            updated_at=now,
+                            attempts=BackgroundJob.attempts + 1,
+                        )
                     )
-                    .values(
-                        status="running",
-                        started_at=now,
-                        finished_at=None,
-                        error=None,
-                        progress_phase="Starting",
-                        updated_at=now,
-                        attempts=BackgroundJob.attempts + 1,
-                    )
-                )
-                db.commit()
-                if isinstance(claimed, CursorResult) and claimed.rowcount == 1:
-                    return job_id
+                    db.commit()
+                    if isinstance(claimed, CursorResult) and claimed.rowcount == 1:
+                        return job_id
 
     def _execute(self, job_id: str) -> None:
         with SessionLocal() as db:
