@@ -6,8 +6,6 @@ continue to share the pinned-DNS, no-redirect, bounded transport in
 model resource names and thinking parameters.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal
 

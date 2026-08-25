@@ -1,7 +1,5 @@
 """Offline provider-credential audit and master-key rotation commands."""
 
-from __future__ import annotations
-
 import argparse
 import os
 

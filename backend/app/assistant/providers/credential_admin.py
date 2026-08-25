@@ -1,7 +1,5 @@
 """Offline audit and atomic master-key rotation for provider credentials."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from sqlalchemy import delete, select

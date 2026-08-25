@@ -6,8 +6,6 @@ adds bounded classifier evidence without making network requests or turning
 the result into a semantic tag.
 """
 
-from __future__ import annotations
-
 import hashlib
 import math
 from collections.abc import Callable, Iterable, Sequence

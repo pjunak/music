@@ -1,7 +1,5 @@
 """Safe, bounded diagnostics for rejected provider output schemas."""
 
-from __future__ import annotations
-
 import re
 from typing import Any
 

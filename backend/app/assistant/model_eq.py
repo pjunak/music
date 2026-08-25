@@ -1,7 +1,5 @@
 """Strict provider contract for review-only graphic-EQ preset drafts."""
 
-from __future__ import annotations
-
 import re
 from collections.abc import Callable
 from dataclasses import dataclass

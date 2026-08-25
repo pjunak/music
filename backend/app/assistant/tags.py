@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass

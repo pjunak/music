@@ -9,8 +9,6 @@ library got reindexed) without SSH'ing into the host.
 
 Auth: behind `CurrentUser` since it leaks operational detail.
 """
-from __future__ import annotations
-
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel

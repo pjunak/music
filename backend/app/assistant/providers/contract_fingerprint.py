@@ -1,7 +1,5 @@
 """Content digests for executable Assistant model-role contracts."""
 
-from __future__ import annotations
-
 import hashlib
 from pathlib import Path
 

@@ -5,8 +5,6 @@ instrument tags.  It preserves temporal behaviour in bounded trajectories and
 sections so a later, review-only classifier can make those semantic choices.
 """
 
-from __future__ import annotations
-
 import json
 import math
 import re
@@ -17,17 +15,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
-from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from app.assistant.audio_signal import AudioSignalError, _open_mono_pcm
 from app.assistant.voice_analysis import analyze_voice
 
-# The repository retains Python 3.11 compatibility through NumPy 2.4 while
-# newer interpreters use 2.5. A narrow local MyPy compatibility surface keeps
-# the 3.11 syntax target from parsing 2.5's Python 3.12-only alias declarations;
-# runtime locking and numerical regression tests verify the real implementation.
+type _FloatArray = npt.NDArray[np.float64]
 
 CONTEXT_SAMPLE_RATE = 16_000
 CONTEXT_FRAME_SECONDS = 0.5
@@ -41,7 +36,7 @@ _FFT_SIZE = 2_048
 _MAX_SECTIONS = 10
 _MIN_SECTION_SECONDS = 10.0
 _LOUDNORM_JSON = re.compile(r"\{\s*\"input_i\".*?\}", re.DOTALL)
-_SPECTRUM_WINDOW = np.hanning(_FFT_SIZE)
+_SPECTRUM_WINDOW: _FloatArray = np.hanning(_FFT_SIZE)
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -96,7 +91,7 @@ class _Spectrum:
 
 
 def _spectrum(
-    samples: Sequence[float] | Any,
+    samples: Sequence[float] | _FloatArray,
     sample_rate: int,
 ) -> _Spectrum:
     values = np.asarray(samples, dtype=np.float64)
@@ -168,7 +163,7 @@ class _ContextAccumulator:
         self.total_squares = 0.0
         self.peak = 0.0
         self.framed_samples = 0
-        self.pending: Any = np.empty(0, dtype=np.float64)
+        self.pending: _FloatArray = np.empty(0, dtype=np.float64)
         self.short_samples = 0
         self.short_squares = 0.0
         self.short_levels: list[float] = []
@@ -192,7 +187,7 @@ class _ContextAccumulator:
                 self._finish_frame(frame)
         self.pending = combined[framed_count:].copy()
 
-    def _add_short_levels(self, values: Any) -> None:
+    def _add_short_levels(self, values: _FloatArray) -> None:
         position = 0
         if self.short_samples:
             take = min(self.short_size - self.short_samples, int(values.size))
@@ -217,7 +212,7 @@ class _ContextAccumulator:
             self.short_samples = int(remaining.size)
             self.short_squares = float(np.sum(np.square(remaining), dtype=np.float64))
 
-    def _finish_frame(self, samples: Any) -> None:
+    def _finish_frame(self, samples: _FloatArray) -> None:
         if samples.size == 0:
             return
         squares = float(np.sum(np.square(samples), dtype=np.float64))

@@ -5,8 +5,6 @@ features. Verification and model adapters share it so every outbound request
 gets the same redirect, destination, timeout, and size protections.
 """
 
-from __future__ import annotations
-
 import http.client
 import ipaddress
 import json

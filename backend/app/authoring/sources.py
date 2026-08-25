@@ -1,9 +1,6 @@
 """Adapters that normalize modes and JSON documents into one import bundle."""
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import TypeAlias
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,7 +31,7 @@ class PlaylistPayload:
     tracks: tuple[PlaylistTrackRef, ...]
 
 
-ResourcePayload: TypeAlias = (
+type ResourcePayload = (
     PlaylistPayload | SoundboardManifest | InterruptSpec | PresetManifest | CueSpec
 )
 

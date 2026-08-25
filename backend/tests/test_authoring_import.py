@@ -1,6 +1,4 @@
 """Cross-mode Authoring import preview, commit, conflicts, and rollback."""
-from __future__ import annotations
-
 import os
 from pathlib import Path
 

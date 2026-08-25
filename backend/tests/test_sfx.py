@@ -1,6 +1,4 @@
 """SFX HTTP surface — playback (reference-gated) + management (free)."""
-from __future__ import annotations
-
 import os
 from pathlib import Path
 

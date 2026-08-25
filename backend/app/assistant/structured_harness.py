@@ -6,8 +6,6 @@ wording, the advertised JSON Schema, examples, and local validation cannot
 quietly drift apart.
 """
 
-from __future__ import annotations
-
 import json
 import re
 from collections.abc import Callable

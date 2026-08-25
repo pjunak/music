@@ -1,7 +1,5 @@
 """Conservative, review-only cleanup suggestions for operator-owned tags."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 from collections.abc import Sequence

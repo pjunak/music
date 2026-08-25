@@ -1,7 +1,5 @@
 """Durable, synthetic quality gates for optional Assistant model roles."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast

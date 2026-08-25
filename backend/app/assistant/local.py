@@ -4,8 +4,6 @@ The planner keeps operator tags, metadata profiles, and measured signal
 profiles as separate evidence sources. It never writes playlists or tags;
 the caller still reviews a draft through Authoring import.
 """
-from __future__ import annotations
-
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence

@@ -1,7 +1,5 @@
 """Consent-bound, preview-only live-library model playlist suggestions."""
 
-from __future__ import annotations
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field

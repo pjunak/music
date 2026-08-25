@@ -1,7 +1,5 @@
 """Consent-bound durable job for review-only model tag cleanup."""
 
-from __future__ import annotations
-
 import hashlib
 import math
 from typing import Any, Literal

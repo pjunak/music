@@ -1,7 +1,5 @@
 """Durable, versioned factual context for indexed library recordings."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import time

@@ -1,7 +1,5 @@
 """Consent-bound durable job for creating a review-only EQ preset draft."""
 
-from __future__ import annotations
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field

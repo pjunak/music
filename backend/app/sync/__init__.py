@@ -5,8 +5,6 @@
 It guarantees the state machine, the persisted DB row, and connected clients
 all see the same state.
 """
-from __future__ import annotations
-
 from typing import Any
 
 import anyio

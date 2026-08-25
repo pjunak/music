@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from app.assistant.providers.definitions import PROVIDER_ADAPTER_BY_ID

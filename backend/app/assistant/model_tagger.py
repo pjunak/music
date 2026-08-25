@@ -1,7 +1,5 @@
 """Strict provider contract and synthetic evaluation for context-aware mood tagging."""
 
-from __future__ import annotations
-
 import re
 from collections.abc import Callable, Sequence
 from copy import deepcopy

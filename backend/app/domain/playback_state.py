@@ -5,8 +5,6 @@ survive restart. Wraps the row so callers don't have to think about
 JSON-column mutation tracking (assignment of a new dict is required for
 SQLAlchemy to detect a change).
 """
-from __future__ import annotations
-
 from typing import Any
 
 from sqlalchemy.orm import Session

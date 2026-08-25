@@ -5,8 +5,6 @@ It does not claim to recognize instruments, genres, scenes, or moods. Those
 semantic decisions remain a separate, reviewable layer.
 """
 
-from __future__ import annotations
-
 import math
 import shutil
 import subprocess

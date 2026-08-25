@@ -1,7 +1,5 @@
 """Process-local throttling for endpoints that verify account passwords."""
 
-from __future__ import annotations
-
 import time
 
 

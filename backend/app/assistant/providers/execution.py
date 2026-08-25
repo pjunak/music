@@ -5,8 +5,6 @@ payload against its own schema. This layer only normalizes provider transport,
 JSON-object extraction, bounded usage metadata, and safe error codes.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass
 from typing import Literal

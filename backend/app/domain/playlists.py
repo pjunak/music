@@ -16,8 +16,6 @@ constraint on (playlist_id, position) doesn't blow up mid-update —
 positions are first flipped negative (always unique within a playlist),
 then flipped back to positive after the slot is free.
 """
-from __future__ import annotations
-
 import logging
 
 from sqlalchemy import func, select, update

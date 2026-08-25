@@ -21,8 +21,6 @@ Modes are validated with Pydantic at load time. Bad files don't crash the
 running app; errors are captured per folder so one broken manifest
 doesn't take down the rest.
 """
-from __future__ import annotations
-
 import logging
 import time
 from dataclasses import dataclass, field

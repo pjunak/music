@@ -11,8 +11,6 @@ band via SFTP/rsync, and a full backup roundtrip through HTTP is the wrong
 mechanism for them. Backing those up is on the operator's filesystem-level
 tools.
 """
-from __future__ import annotations
-
 import io
 import sqlite3
 import tarfile

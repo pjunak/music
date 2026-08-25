@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 OPENAI_COMPATIBLE_ADAPTER = "openai-compatible/v1"

@@ -1,7 +1,5 @@
 """Persistent, operator-editable controlled vocabulary for Assistant tagging."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 from dataclasses import dataclass

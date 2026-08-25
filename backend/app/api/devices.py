@@ -8,8 +8,6 @@ standalone file (see `app.devices.store`) so it survives reinstalls.
 
 All endpoints require a signed-in operator.
 """
-from __future__ import annotations
-
 from fastapi import APIRouter, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field

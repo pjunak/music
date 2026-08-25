@@ -12,8 +12,6 @@ Console refresh and be visible/stoppable from any client — a per-tab timer
 can't do that. Timers do not survive a process restart (PlayerState's
 `looping_sfx` is wiped on boot to match).
 """
-from __future__ import annotations
-
 import asyncio
 import logging
 

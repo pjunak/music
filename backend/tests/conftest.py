@@ -9,8 +9,6 @@ Per-test: a `client` and an authenticated `auth_client`.
 We use real WAV bytes so mutagen actually parses something; tests can rely
 on length/title/etc behaviour rather than mocks.
 """
-from __future__ import annotations
-
 import base64
 import os
 import struct

@@ -1,6 +1,4 @@
 """Authenticated review-first endpoints for Authoring imports."""
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter

@@ -16,8 +16,6 @@ Shape on disk:
 An in-memory dict is the live source of truth (reads are instant, so the WS hot
 path doesn't touch disk); every mutation write-through-persists atomically.
 """
-from __future__ import annotations
-
 import json
 import logging
 import os

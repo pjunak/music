@@ -17,8 +17,6 @@ Files are built in pure Python — no binary fixtures, no encoder. Silence is
 enough for mutagen to parse tags; FLAC/OGG carry no audio frames at all
 (mutagen reads/writes their comment blocks without decoding a stream).
 """
-from __future__ import annotations
-
 import math
 import struct
 from pathlib import Path

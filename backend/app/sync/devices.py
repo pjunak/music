@@ -16,8 +16,6 @@ hit. It is display/auto-activate only — SFX fan-out and position gating follow
 live active-output membership (`PlayerState.active_output_device_ids`), not
 this cache.
 """
-from __future__ import annotations
-
 import secrets
 from dataclasses import dataclass
 

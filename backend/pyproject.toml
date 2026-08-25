@@ -2,7 +2,7 @@
 name = "music-backend"
 version = "0.1.0"
 description = "Self-hosted music player and DnD session orchestrator — backend"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi==0.141.1",
     # Was held below 1.0 while `httpx2` (the 1.x TestClient transport) looked
@@ -19,11 +19,8 @@ dependencies = [
     "cryptography==50.0.1",
     "pyyaml==6.0.3",
     "mutagen==1.48.1",
-    # Context analysis uses NumPy's native FFT/vector operations. Keep the
-    # Python 3.11 wheel on the last compatible line while newer interpreters
-    # share the current pin.
-    "numpy==2.4.6; python_version < '3.12'",
-    "numpy==2.5.2; python_version >= '3.12'",
+    # Context analysis uses NumPy's native FFT and vector operations.
+    "numpy==2.5.2",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +28,7 @@ voice = [
     # The purpose-trained model is optional because Essentia is AGPL and its
     # downloadable weights are CC BY-NC-SA. This release publishes a CPython
     # 3.14 wheel for the Linux x86-64 production image.
-    "essentia-tensorflow==2.1b6.dev1438; python_version == '3.14' and platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "essentia-tensorflow==2.1b6.dev1438; platform_system == 'Linux' and platform_machine == 'x86_64'",
 ]
 dev = [
     "pytest==9.1.1",
@@ -61,7 +58,7 @@ include = ["app*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
@@ -73,9 +70,8 @@ ignore = ["E501"]
 "app/library/cleanup.py" = ["RUF001"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 files = ["app", "tests"]
-mypy_path = "typings"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

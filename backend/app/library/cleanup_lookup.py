@@ -14,8 +14,6 @@ User-Agent. `_pace()` enforces the rate process-wide so concurrent calls
 can't gang up on the limit; the caller keeps batches small enough that a
 synchronous request handler stays comfortably under proxy timeouts.
 """
-from __future__ import annotations
-
 import json
 import logging
 import threading

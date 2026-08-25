@@ -1,19 +1,24 @@
 """Bounded process workers for CPU-heavy whole-track context analysis."""
 
-from __future__ import annotations
-
 import multiprocessing
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Protocol
 
 from app.assistant.audio_context import AudioContextDocument, analyze_audio_context
 from app.assistant.audio_signal import AudioSignalError
 
 _POLL_SECONDS = 0.25
-_worker_cancel_event: Any | None = None
+
+class _CancelEvent(Protocol):
+    def is_set(self) -> bool: ...
+
+    def set(self) -> None: ...
+
+
+_worker_cancel_event: _CancelEvent | None = None
 
 
 class _WorkerAnalysisCancelled(Exception):
@@ -34,7 +39,7 @@ class ContextAnalysisResult:
     fatal: bool = False
 
 
-def _initialize_worker(cancel_event: Any) -> None:
+def _initialize_worker(cancel_event: _CancelEvent) -> None:
     global _worker_cancel_event
     _worker_cancel_event = cancel_event
 
@@ -66,17 +71,13 @@ def _analyze_track(task: ContextAnalysisTask) -> ContextAnalysisResult:
     return ContextAnalysisResult(track_id=task.track_id, document=document)
 
 
-_TaskT = TypeVar("_TaskT")
-_ResultT = TypeVar("_ResultT")
-
-
-def _process_map_unordered(
-    worker: Callable[[_TaskT], _ResultT],
-    tasks: Sequence[_TaskT],
+def _process_map_unordered[TaskT, ResultT](
+    worker: Callable[[TaskT], ResultT],
+    tasks: Sequence[TaskT],
     *,
     max_workers: int,
     check_cancelled: Callable[[], None],
-) -> Iterator[_ResultT]:
+) -> Iterator[ResultT]:
     """Run a bounded spawn-based process map and propagate cancellation.
 
     Only one task per worker is submitted at a time. This bounds queued work,
@@ -98,7 +99,7 @@ def _process_map_unordered(
         initializer=_initialize_worker,
         initargs=(cancel_event,),
     )
-    pending: dict[Future[_ResultT], None] = {}
+    pending: dict[Future[ResultT], None] = {}
     task_iterator = iter(tasks)
 
     def fill_workers() -> None:

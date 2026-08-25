@@ -85,7 +85,7 @@ network. Essentia's TensorFlow runtime is AGPL-3.0-only and the MTG model weight
 CC BY-NC-SA 4.0; confirm those terms fit the deployment before proceeding. The application does not
 download or accept a different model silently.
 
-On a supported Linux x86-64 development environment with Python 3.11-3.13:
+On a supported Linux x86-64 development environment with Python 3.14:
 
 ```bash
 cd backend

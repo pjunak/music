@@ -343,7 +343,7 @@ the filesystem.
 
 ## Development
 
-Backend (Python 3.11+) and frontend (Node 26+) run as two processes in development.
+Backend (Python 3.14+) and frontend (Node 26+) run as two processes in development.
 
 ```bash
 # Backend — uv-managed (uv.lock is the pinned resolution)
@@ -417,7 +417,7 @@ clients/   The documented guest output protocol + a reference headless appliance
 ## Tech stack
 
 FastAPI · SQLAlchemy 2.0 · Pydantic · argon2 · mutagen — React · TypeScript 7 · Vite · Zustand · Oxlint ·
-Web Audio API. Packaged as a multi-stage Docker image (`node:26-alpine` build → `python:3.12-slim`
-runtime).
+Web Audio API. Packaged as a multi-stage Docker image (`node:26.7.0-alpine` build →
+`python:3.14.7-slim` runtime).
 
 [mutagen]: https://mutagen.readthedocs.io/

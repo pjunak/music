@@ -1,7 +1,5 @@
 """Authenticated configuration endpoints for optional Assistant providers."""
 
-from __future__ import annotations
-
 from functools import partial
 from time import monotonic
 from typing import NoReturn

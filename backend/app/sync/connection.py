@@ -1,6 +1,4 @@
 """Track open WebSocket connections so the state machine can broadcast."""
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import logging

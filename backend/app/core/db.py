@@ -42,7 +42,7 @@ def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     db = SessionLocal()
     try:
         yield db

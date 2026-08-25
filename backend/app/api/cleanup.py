@@ -9,8 +9,6 @@ Everything that lands is journaled to a `cleanup_batches` row that can be
 listed, downloaded as JSON, and reverted — including from an uploaded
 journal file after a DB wipe (items carry paths, not just track ids).
 """
-from __future__ import annotations
-
 import contextlib
 import json
 import logging

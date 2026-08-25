@@ -1,7 +1,5 @@
 """Consent-bound durable model metadata tagging for review-only suggestions."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import math

@@ -6,12 +6,10 @@ field in the public suggestion response is reconstructed from trusted local
 data. This engine is initially used only by the synthetic evaluation CLI.
 """
 
-from __future__ import annotations
-
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -122,7 +120,7 @@ class ModelPlaylistOutput(_StrictModel):
         return self
 
 
-StructuredPlaylistExecutor: TypeAlias = Callable[
+type StructuredPlaylistExecutor = Callable[
     [StructuredModelRequest],
     StructuredModelResult,
 ]

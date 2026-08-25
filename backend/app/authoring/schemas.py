@@ -4,8 +4,6 @@ The document format is deliberately versioned and JSON-shaped.  These models
 validate its structural contract; source adapters and the planner add semantic
 checks that are more useful as per-item review issues than as one opaque 422.
 """
-from __future__ import annotations
-
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

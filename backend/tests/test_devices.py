@@ -1,8 +1,6 @@
 """Device registry HTTP surface — the operator's manually-curated, file-backed
 device list and the "output by default" designation (auto-activate on connect;
 it does NOT gate ad-hoc activation, which any connected device can do)."""
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
