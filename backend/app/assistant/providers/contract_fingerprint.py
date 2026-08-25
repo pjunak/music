@@ -9,6 +9,7 @@ _ASSISTANT_DIR = Path(__file__).resolve().parent.parent
 _COMMON_FILES = (
     _ASSISTANT_DIR / "structured_harness.py",
     _ASSISTANT_DIR / "providers" / "execution.py",
+    _ASSISTANT_DIR / "providers" / "handlers.py",
 )
 _ROLE_FILES: dict[str, tuple[Path, ...]] = {
     "playlist_planner": (

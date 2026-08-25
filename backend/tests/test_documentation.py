@@ -29,7 +29,10 @@ from app.assistant.model_tagger import (
     MODEL_TAGGER_INPUT_CONTRACT,
     MODEL_TAGGER_OUTPUT_CONTRACT,
 )
-from app.assistant.providers.definitions import MODEL_ROLE_RUNTIME_CONTRACTS
+from app.assistant.providers.definitions import (
+    MODEL_ROLE_RUNTIME_CONTRACTS,
+    PROVIDER_ADAPTERS,
+)
 from app.assistant.providers.execution import CONFORMANCE_CONTRACT
 from app.assistant.schemas import (
     MODEL_EQ_DISCLOSURE_VERSION,
@@ -119,6 +122,7 @@ def test_assistant_contract_inventory_matches_runtime() -> None:
         TAGGING_QUALITY_EVALUATION_ID,
         TAG_CLEANUP_QUALITY_EVALUATION_ID,
         EQ_QUALITY_EVALUATION_ID,
+        *(adapter.id for adapter in PROVIDER_ADAPTERS),
         *MODEL_ROLE_RUNTIME_CONTRACTS.values(),
     }
     missing = sorted(value for value in contract_values if value not in inventory)

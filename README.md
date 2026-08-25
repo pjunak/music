@@ -281,7 +281,10 @@ keys still belong to the service configuration and cannot be removed by a runnin
 preserve saved credentials, use the offline rotation workflow below instead of resetting or editing
 the file.
 
-The first adapter verifies OpenAI-compatible providers by requesting their model list. Public
+Provider adapters verify compatible services by requesting their model list. The generic adapters
+cover OpenAI-shaped services; explicit transport-free handlers own documented provider differences
+without bypassing the shared HTTP safety boundary. The Google Gemini handler pins the Google AI
+Studio address, canonicalizes model resource IDs, and translates thinking controls. Public
 addresses require HTTPS. Private-network providers are opt-in per connection. Verification uses
 strict time and response-size limits and does not send songs, tags, prompts, or audio. The UI reports
 saved-key presence separately from verification. A saved provider key cannot be replaced in place:
@@ -322,7 +325,8 @@ role choices remain, but must be verified and checked again. Never keep the old 
 same long-lived environment file.
 
 Connection types and model tasks are linked through versioned capabilities rather than provider or
-model-name guesses. The initial OpenAI-compatible adapter verifies `structured-text/v1`. Future
+model-name guesses. OpenAI-compatible and Google Gemini adapters verify `structured-text/v1`; the
+explicit strict-schema variants additionally verify `strict-json-schema/v1`. Future
 audio-capable adapters must implement and verify their own bounded `audio-input/v1` transport before
 the specialized audio-analysis role can be configured.
 

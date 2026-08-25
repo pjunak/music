@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.assistant.providers.definitions import (
-    OPENAI_COMPATIBLE_ADAPTER,
-    OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
-    PROVIDER_ADAPTER_BY_ID,
+from app.assistant.providers.definitions import PROVIDER_ADAPTER_BY_ID
+from app.assistant.providers.handlers import (
+    ProviderAdapterHandler,
+    get_provider_adapter_handler,
 )
 from app.assistant.providers.transport import (
     ProviderTransportError,
@@ -36,7 +36,7 @@ class ProviderVerificationResult:
 
 
 def _verify_openai_compatible(
-    adapter_id: str,
+    handler: ProviderAdapterHandler,
     base_url: str,
     api_key: str,
     *,
@@ -45,7 +45,7 @@ def _verify_openai_compatible(
     try:
         response = request_json(
             "GET",
-            f"{base_url.rstrip('/')}/models",
+            handler.models_url(base_url),
             api_key,
             allow_private_network=allow_private_network,
             timeout_seconds=_VERIFICATION_TIMEOUT_SECONDS,
@@ -70,7 +70,12 @@ def _verify_openai_compatible(
     for item in payload["data"]:
         if not isinstance(item, dict):
             continue
-        model_id = item.get("id")
+        raw_model_id = item.get("id")
+        model_id = (
+            handler.normalize_model_id(raw_model_id)
+            if isinstance(raw_model_id, str)
+            else None
+        )
         if (
             isinstance(model_id, str)
             and 0 < len(model_id) <= 256
@@ -83,7 +88,7 @@ def _verify_openai_compatible(
         True,
         None,
         tuple(models),
-        PROVIDER_ADAPTER_BY_ID[adapter_id].capability_ids,
+        PROVIDER_ADAPTER_BY_ID[handler.adapter_id].capability_ids,
     )
 
 
@@ -94,14 +99,12 @@ def verify_provider_connection(
     *,
     allow_private_network: bool,
 ) -> ProviderVerificationResult:
-    if adapter_id in {
-        OPENAI_COMPATIBLE_ADAPTER,
-        OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
-    }:
-        return _verify_openai_compatible(
-            adapter_id,
-            base_url,
-            api_key,
-            allow_private_network=allow_private_network,
-        )
-    return ProviderVerificationResult(False, "unsupported_adapter")
+    handler = get_provider_adapter_handler(adapter_id)
+    if handler is None:
+        return ProviderVerificationResult(False, "unsupported_adapter")
+    return _verify_openai_compatible(
+        handler,
+        base_url,
+        api_key,
+        allow_private_network=allow_private_network,
+    )

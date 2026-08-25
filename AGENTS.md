@@ -185,7 +185,10 @@ Runtime data lives outside the image.
   enable a role until the operator explicitly verifies its connection and its exact runtime
   configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the
   event loop, bounded by request size, time, and response size, and protected against redirects and
-  unsafe destinations. OpenAI-compatible structured requests must carry the generated task JSON
+  unsafe destinations. Keep provider-specific model-ID normalization and inference parameters in
+  explicit versioned adapter handlers; handlers shape requests but must not bypass the shared
+  pinned-DNS transport or infer behavior from connection names, URLs, or model names.
+  OpenAI-compatible structured requests must carry the generated task JSON
   Schema. The standard adapter uses JSON-object response mode; the explicit strict adapter may use
   `json_schema` only when selected and proven by conformance. Each fixed feature prompt includes a
   locally validated example of its strict output shape. Include the versioned harness, conformance,

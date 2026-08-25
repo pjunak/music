@@ -37,6 +37,10 @@ from app.assistant.providers.execution import (
     ProviderConformanceResult,
     ProviderExecutionTarget,
 )
+from app.assistant.providers.handlers import (
+    ProviderHandlerConfigurationError,
+    validate_provider_handler_base_url,
+)
 from app.assistant.providers.schemas import (
     ModelRoleDefinitionOut,
     ModelRoleOut,
@@ -139,6 +143,13 @@ def _adapter_exists(adapter_id: str) -> None:
             "That provider adapter is not supported.",
             422,
         )
+
+
+def _validate_adapter_base_url(adapter_id: str, base_url: str) -> None:
+    try:
+        validate_provider_handler_base_url(adapter_id, base_url)
+    except ProviderHandlerConfigurationError as exc:
+        raise ProviderServiceError("invalid_provider_url", str(exc), 422) from None
 
 
 def _configurable_role(role_id: str) -> ModelRoleDefinition:
@@ -461,6 +472,7 @@ def create_connection(
         )
     except ProviderUrlError as exc:
         raise ProviderServiceError("invalid_provider_url", str(exc), 422) from None
+    _validate_adapter_base_url(payload.adapter_id, base_url)
     connection_id = secrets.token_hex(16)
     try:
         encrypted = _vault().encrypt(
@@ -522,6 +534,7 @@ def update_connection(
         )
     except ProviderUrlError as exc:
         raise ProviderServiceError("invalid_provider_url", str(exc), 422) from None
+    _validate_adapter_base_url(adapter_id, base_url)
 
     verification_inputs_changed = (
         adapter_id != row.adapter_id

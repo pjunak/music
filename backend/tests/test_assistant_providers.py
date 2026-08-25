@@ -456,6 +456,8 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
     assert [adapter["id"] for adapter in payload["adapters"]] == [
         "openai-compatible/v1",
         "openai-compatible-json-schema/v1",
+        "google-gemini-openai/v1",
+        "google-gemini-openai-json-schema/v1",
     ]
     assert payload["capabilities"] == [
         {
@@ -483,6 +485,11 @@ def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> N
     ]
     assert payload["adapters"][0]["capability_ids"] == ["structured-text/v1"]
     assert payload["adapters"][1]["capability_ids"] == [
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    ]
+    assert payload["adapters"][2]["capability_ids"] == ["structured-text/v1"]
+    assert payload["adapters"][3]["capability_ids"] == [
         "structured-text/v1",
         "strict-json-schema/v1",
     ]
@@ -972,6 +979,38 @@ def test_connection_rejects_unsafe_provider_urls(
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "invalid_provider_url"
+
+
+def test_gemini_connection_requires_the_documented_api_address(
+    auth_client: TestClient,
+) -> None:
+    rejected = auth_client.post(
+        "/api/assistant/providers/connections",
+        json=_connection_payload(
+            adapter_id="google-gemini-openai/v1",
+            base_url="https://models.example.test/v1",
+        ),
+    )
+
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "invalid_provider_url"
+    assert rejected.json()["detail"]["message"] == (
+        "This connection type requires "
+        "https://generativelanguage.googleapis.com/v1beta/openai."
+    )
+
+    accepted = auth_client.post(
+        "/api/assistant/providers/connections",
+        json=_connection_payload(
+            adapter_id="google-gemini-openai/v1",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        ),
+    )
+
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()["base_url"] == (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
 
 
 def test_connection_names_are_unique_without_case_sensitivity(

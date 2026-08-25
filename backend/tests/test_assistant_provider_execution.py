@@ -3,10 +3,15 @@ from __future__ import annotations
 import pytest
 
 from app.assistant.providers import execution
+from app.assistant.providers.definitions import PROVIDER_ADAPTER_BY_ID
 from app.assistant.providers.execution import (
     CONFORMANCE_CONTRACT,
     ProviderExecutionTarget,
     StructuredModelRequest,
+)
+from app.assistant.providers.handlers import (
+    GOOGLE_GEMINI_OPENAI_BASE_URL,
+    PROVIDER_ADAPTER_HANDLER_BY_ID,
 )
 from app.assistant.providers.transport import JsonHttpResponse, ProviderTransportError
 
@@ -16,17 +21,24 @@ from .assistant_test_values import TEST_SHORT_API_KEY
 def _target(
     adapter_id: str = "openai-compatible/v1",
     thinking_mode: execution.ThinkingMode = "provider_default",
+    *,
+    base_url: str = "https://models.example/v1",
+    model_id: str = "planner-large",
 ) -> ProviderExecutionTarget:
     return ProviderExecutionTarget(
         adapter_id=adapter_id,
-        base_url="https://models.example/v1",
+        base_url=base_url,
         api_key=TEST_SHORT_API_KEY,
         allow_private_network=False,
-        model_id="planner-large",
+        model_id=model_id,
         timeout_seconds=30,
         max_output_tokens=2000,
         thinking_mode=thinking_mode,
     )
+
+
+def test_every_advertised_adapter_has_an_execution_handler() -> None:
+    assert PROVIDER_ADAPTER_HANDLER_BY_ID.keys() == PROVIDER_ADAPTER_BY_ID.keys()
 
 
 def test_execution_normalizes_structured_response_and_usage(
@@ -101,8 +113,91 @@ def test_execution_sends_explicit_thinking_override(
     assert payload["thinking"] == {"type": thinking_mode}
 
 
+@pytest.mark.parametrize(
+    "thinking_mode,reasoning_effort",
+    [("enabled", "high"), ("disabled", "none")],
+)
+def test_gemini_handler_normalizes_model_and_maps_thinking_controls(
+    monkeypatch: pytest.MonkeyPatch,
+    thinking_mode: execution.ThinkingMode,
+    reasoning_effort: str,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(args=args, kwargs=kwargs)
+        return JsonHttpResponse(
+            200,
+            {"choices": [{"message": {"content": '{"answer":"ok"}'}}]},
+        )
+
+    monkeypatch.setattr(execution, "request_json", request)
+    result = execution.execute_structured_model_request(
+        _target(
+            "google-gemini-openai/v1",
+            thinking_mode,
+            base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
+            model_id="models/gemini-3.7-flash",
+        ),
+        StructuredModelRequest("system", "user", 512),
+    )
+
+    assert result.succeeded is True
+    args = observed["args"]
+    assert isinstance(args, tuple)
+    assert args[1] == f"{GOOGLE_GEMINI_OPENAI_BASE_URL}/chat/completions"
+    kwargs = observed["kwargs"]
+    assert isinstance(kwargs, dict)
+    payload = kwargs["payload"]
+    assert isinstance(payload, dict)
+    assert payload["model"] == "gemini-3.7-flash"
+    assert payload["reasoning_effort"] == reasoning_effort
+    assert "thinking" not in payload
+
+
+def test_gemini_handler_omits_provider_default_thinking_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(kwargs)
+        return JsonHttpResponse(
+            200,
+            {"choices": [{"message": {"content": '{"answer":"ok"}'}}]},
+        )
+
+    monkeypatch.setattr(execution, "request_json", request)
+    result = execution.execute_structured_model_request(
+        _target(
+            "google-gemini-openai/v1",
+            base_url=GOOGLE_GEMINI_OPENAI_BASE_URL,
+            model_id="models/gemini-3.7-flash",
+        ),
+        StructuredModelRequest("system", "user", 512),
+    )
+
+    assert result.succeeded is True
+    payload = observed["payload"]
+    assert isinstance(payload, dict)
+    assert "thinking" not in payload
+    assert "reasoning_effort" not in payload
+
+
+@pytest.mark.parametrize(
+    "adapter_id,base_url",
+    [
+        ("openai-compatible-json-schema/v1", "https://models.example/v1"),
+        (
+            "google-gemini-openai-json-schema/v1",
+            GOOGLE_GEMINI_OPENAI_BASE_URL,
+        ),
+    ],
+)
 def test_strict_adapter_sends_exact_task_json_schema(
     monkeypatch: pytest.MonkeyPatch,
+    adapter_id: str,
+    base_url: str,
 ) -> None:
     observed: dict[str, object] = {}
 
@@ -122,7 +217,7 @@ def test_strict_adapter_sends_exact_task_json_schema(
     monkeypatch.setattr(execution, "request_json", request)
 
     result = execution.execute_structured_model_request(
-        _target("openai-compatible-json-schema/v1"),
+        _target(adapter_id, base_url=base_url),
         StructuredModelRequest(
             "system",
             "user",
@@ -153,6 +248,25 @@ def test_strict_adapter_requires_a_schema() -> None:
 
     assert result.succeeded is False
     assert result.error_code == "output_schema_required"
+
+
+def test_execution_maps_provider_validation_failures_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        execution,
+        "request_json",
+        lambda *a, **k: JsonHttpResponse(400, {"error": {"message": "private"}}),
+    )
+
+    result = execution.execute_structured_model_request(
+        _target(),
+        StructuredModelRequest("system", "user", 512),
+    )
+
+    assert result.succeeded is False
+    assert result.error_code == "invalid_request"
+    assert "private" not in repr(result)
 
 
 @pytest.mark.parametrize(

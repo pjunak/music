@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 OPENAI_COMPATIBLE_ADAPTER = "openai-compatible/v1"
 OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER = "openai-compatible-json-schema/v1"
+GOOGLE_GEMINI_OPENAI_ADAPTER = "google-gemini-openai/v1"
+GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER = "google-gemini-openai-json-schema/v1"
 STRUCTURED_TEXT_CAPABILITY = "structured-text/v1"
 STRICT_JSON_SCHEMA_CAPABILITY = "strict-json-schema/v1"
 AUDIO_INPUT_CAPABILITY = "audio-input/v1"
@@ -74,6 +76,24 @@ PROVIDER_ADAPTERS = (
         description=(
             "For compatible services that support response_format type json_schema. "
             "Use the standard adapter when the provider supports only json_object."
+        ),
+        capability_ids=(STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY),
+    ),
+    ProviderAdapterDefinition(
+        id=GOOGLE_GEMINI_OPENAI_ADAPTER,
+        label="Google Gemini API",
+        description=(
+            "Gemini's OpenAI-compatible API with canonical model IDs and "
+            "provider-specific thinking controls."
+        ),
+        capability_ids=(STRUCTURED_TEXT_CAPABILITY,),
+    ),
+    ProviderAdapterDefinition(
+        id=GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
+        label="Google Gemini API with strict JSON Schema",
+        description=(
+            "Gemini's OpenAI-compatible API with canonical model IDs, "
+            "provider-specific thinking controls, and native JSON Schema output."
         ),
         capability_ids=(STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY),
     ),

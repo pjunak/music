@@ -76,7 +76,8 @@ operator request / indexed library / local audio
 |---|---|---|---|
 | Task prompt, example, schema, untrusted-data labels | [`structured_harness.py`](../backend/app/assistant/structured_harness.py) | [`test_assistant_structured_harness.py`](../backend/tests/test_assistant_structured_harness.py) | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
 | Adapter/capability/role inventory and runtime fingerprints | [`providers/definitions.py`](../backend/app/assistant/providers/definitions.py) | [`test_assistant_providers.py`](../backend/tests/test_assistant_providers.py) | [ADR-001](ADR-001-assistant-provider-connections.md), [ADR-002](ADR-002-assistant-model-execution.md) |
-| Request execution and response parsing | [`providers/execution.py`](../backend/app/assistant/providers/execution.py) | [`test_assistant_provider_execution.py`](../backend/tests/test_assistant_provider_execution.py) | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| Provider-specific model IDs and inference parameters | [`providers/handlers.py`](../backend/app/assistant/providers/handlers.py) | [`test_assistant_provider_execution.py`](../backend/tests/test_assistant_provider_execution.py), [`test_assistant_provider_verification.py`](../backend/tests/test_assistant_provider_verification.py) | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
+| Request execution and response parsing | [`providers/execution.py`](../backend/app/assistant/providers/execution.py) | [`test_assistant_provider_execution.py`](../backend/tests/test_assistant_provider_execution.py) | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
 | URL validation, SSRF boundary, redirect refusal, byte/time limits | [`providers/transport.py`](../backend/app/assistant/providers/transport.py) | [`test_assistant_provider_verification.py`](../backend/tests/test_assistant_provider_verification.py) | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Credential encryption, initialization, reset, and offline rotation | [`providers/credentials.py`](../backend/app/assistant/providers/credentials.py), [`providers/credential_admin.py`](../backend/app/assistant/providers/credential_admin.py) | [`test_assistant_credential_admin.py`](../backend/tests/test_assistant_credential_admin.py), [`test_assistant_providers.py`](../backend/tests/test_assistant_providers.py) | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Role preparation and stale-gate enforcement | [`providers/service.py`](../backend/app/assistant/providers/service.py), [`model_evaluation.py`](../backend/app/assistant/model_evaluation.py) | [`test_assistant_providers.py`](../backend/tests/test_assistant_providers.py) | [ADR-004](ADR-004-durable-model-quality-gates.md) |
@@ -96,6 +97,8 @@ Shared contracts:
 - provider conformance: `assistant-provider-conformance/v3`
 - standard adapter: `openai-compatible/v1`
 - strict-schema adapter: `openai-compatible-json-schema/v1`
+- Google Gemini adapter: `google-gemini-openai/v1`
+- Google Gemini strict-schema adapter: `google-gemini-openai-json-schema/v1`
 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
@@ -157,10 +160,13 @@ prior consent.
 4. Update the fixed task example, request-specific schema closure, synthetic suite, negative cases,
    and privacy assertions. Never use private library data as a checked-in fixture.
 5. Update the task disclosure when any sent/retained data category or retry/cost boundary changes.
-6. Update this inventory and amend the relevant ADR when the reasoning or trade-off changed.
-7. Run the narrow task tests, documentation tests, full backend gates, frontend gates, and a real
+6. Put provider-specific model-ID, endpoint, or inference-parameter differences in a versioned
+   handler. Keep network I/O in the shared transport, update the handler fingerprint coverage, and
+   never select behavior from a connection name, URL, or model-name guess.
+7. Update this inventory and amend the relevant ADR when the reasoning or trade-off changed.
+8. Run the narrow task tests, documentation tests, full backend gates, frontend gates, and a real
    provider conformance/quality run before enabling the changed configuration in production.
-8. Treat real-provider and real-audio checks as manual acceptance. Passing mocked automation does
+9. Treat real-provider and real-audio checks as manual acceptance. Passing mocked automation does
    not establish compatibility with a provider or accuracy on the operator's library.
 
 ## External foundations

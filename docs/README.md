@@ -30,6 +30,7 @@ decision when it was accepted unless an amendment says otherwise.
 - [ADR-008: Comprehensive local track context](ADR-008-comprehensive-local-track-context.md)
 - [ADR-009: Opt-in local voice analysis](ADR-009-opt-in-local-voice-analysis.md)
 - [ADR-010: Parallel library context analysis](ADR-010-parallel-library-context-analysis.md)
+- [ADR-011: In-process provider adapter handlers](ADR-011-in-process-provider-adapter-handlers.md)
 
 ## Maintenance rules
 

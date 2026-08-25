@@ -5,6 +5,7 @@ import json
 import pytest
 
 from app.assistant.providers import transport, verification
+from app.assistant.providers.handlers import GOOGLE_GEMINI_OPENAI_BASE_URL
 from app.assistant.providers.transport import JsonHttpResponse, ProviderTransportError
 
 
@@ -109,6 +110,67 @@ def test_strict_adapter_verification_advertises_schema_capability(
     )
 
 
+def test_gemini_verification_normalizes_resource_model_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def request(*args: object, **kwargs: object) -> JsonHttpResponse:
+        observed.update(args=args, kwargs=kwargs)
+        return JsonHttpResponse(
+            200,
+            {
+                "data": [
+                    {"id": "models/gemini-3.7-flash"},
+                    {"id": "gemini-3.7-flash"},
+                    {"id": "models/gemini-2.5-flash"},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(verification, "request_json", request)
+    result = verification.verify_provider_connection(
+        "google-gemini-openai/v1",
+        GOOGLE_GEMINI_OPENAI_BASE_URL,
+        "key",
+        allow_private_network=False,
+    )
+
+    assert result.verified is True
+    assert result.models == ("gemini-3.7-flash", "gemini-2.5-flash")
+    assert result.capability_ids == ("structured-text/v1",)
+    args = observed["args"]
+    assert isinstance(args, tuple)
+    assert args[1] == f"{GOOGLE_GEMINI_OPENAI_BASE_URL}/models"
+
+
+def test_gemini_strict_verification_advertises_schema_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        verification,
+        "request_json",
+        lambda *a, **k: JsonHttpResponse(
+            200,
+            {"data": [{"id": "models/gemini-3.7-flash"}]},
+        ),
+    )
+
+    result = verification.verify_provider_connection(
+        "google-gemini-openai-json-schema/v1",
+        GOOGLE_GEMINI_OPENAI_BASE_URL,
+        "key",
+        allow_private_network=False,
+    )
+
+    assert result.verified is True
+    assert result.models == ("gemini-3.7-flash",)
+    assert result.capability_ids == (
+        "structured-text/v1",
+        "strict-json-schema/v1",
+    )
+
+
 def test_verification_does_not_follow_redirects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -202,3 +264,14 @@ def test_transport_rejects_oversized_json_request(
         )
 
     assert error.value.code == "request_too_large"
+
+
+@pytest.mark.parametrize("status_code", [400, 422])
+def test_transport_maps_provider_validation_statuses(status_code: int) -> None:
+    assert (
+        transport.safe_http_error_code(
+            status_code,
+            not_found_code="endpoint_not_found",
+        )
+        == "invalid_request"
+    )

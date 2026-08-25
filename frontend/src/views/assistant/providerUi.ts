@@ -8,6 +8,7 @@ const VERIFICATION_FAILURES: Record<string, string> = {
   forbidden: "This API key cannot list the provider's models.",
   models_endpoint_not_found: "The provider does not expose a compatible model list.",
   rate_limited: "The provider asked us to slow down. Try verification again later.",
+  invalid_request: "The provider rejected these connection settings.",
   destination_blocked:
     "The address resolves to a private or otherwise unsafe destination.",
   redirect_blocked: "The provider redirected the verification request.",
@@ -26,6 +27,8 @@ const MODEL_TEST_FAILURES: Record<string, string> = {
   completion_endpoint_not_found:
     "The provider does not expose a compatible chat-completions endpoint.",
   rate_limited: "The provider asked us to slow down. Try the model test later.",
+  invalid_request:
+    "The provider rejected this model or one of its request settings.",
   destination_blocked:
     "The address resolves to a private or otherwise unsafe destination.",
   redirect_blocked: "The provider redirected the model request.",

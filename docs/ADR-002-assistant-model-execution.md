@@ -16,6 +16,11 @@ of the role runtime fingerprint, so this transport change makes previous model
 tests and quality reports stale. Schema failures expose only a bounded field path
 and validation type; provider-generated values remain private.
 
+**Implementation follow-up (2026-08-25):** Request-shape differences now live in versioned adapter
+handlers that cannot perform network I/O. The same bounded transport still executes every request;
+handler source participates in role fingerprints so a mapping change makes old conformance and
+quality evidence stale. See [ADR-011](ADR-011-in-process-provider-adapter-handlers.md).
+
 **Superseded in part by:** [ADR-007](ADR-007-algorithm-first-structured-model-harness.md),
 which generates the prompt and provider schema from the same strict output model,
 adds an explicit strict-JSON-Schema adapter, and fingerprints each role's feature

@@ -172,6 +172,15 @@ For each connection:
    `openai-compatible-json-schema/v1` for API-enforced strict output. Do not choose
    the strict adapter merely because the endpoint is otherwise OpenAI-compatible;
    the role conformance test is the authoritative check.
+
+   For a Google AI Studio Gemini key, choose `google-gemini-openai/v1` and use
+   `https://generativelanguage.googleapis.com/v1beta/openai`. The explicit Gemini
+   handler canonicalizes model resource names and maps task thinking controls to
+   Gemini's documented `reasoning_effort` field. The
+   `google-gemini-openai-json-schema/v1` variant is available when the exact selected
+   model passes strict-schema conformance. These profiles accept only Google's
+   documented public base URL; use the generic adapter for a deliberate proxy or
+   gateway.
 2. Enter a clear local name, the provider's documented API base URL, and its API key.
 3. Leave private-network access off for public providers. Enable it only for a service
    you intentionally run on a trusted private address.
@@ -195,14 +204,22 @@ a specialized model and separate key.
 
 1. Select a verified connection and one of its reported model IDs.
 2. Keep the role disabled while saving its initial configuration.
-3. Run the role's fixed conformance test. This makes one small provider request and
+3. Choose **Provider default** when first testing a new provider/model pair. Explicit
+   **On** and **Off** controls are translated by the selected handler and remain
+   model-dependent; the conformance test rejects an unsupported choice.
+4. Run the role's fixed conformance test. This makes one small provider request and
    checks strict structured output for that exact connection, model, timeout, and output
    limit.
-4. Enable the role only after conformance passes.
-5. Run the task-specific synthetic quality check and wait for its durable job to finish.
-6. Review the report. A pass certifies only that exact runtime fingerprint; changing or
+5. Enable the role only after conformance passes.
+6. Run the task-specific synthetic quality check and wait for its durable job to finish.
+7. Review the report. A pass certifies only that exact runtime fingerprint; changing or
    reverifying the connection, replacing/removing its key, or changing the model/runtime
    settings requires conformance and quality to run again.
+
+To convert an existing Gemini connection, expand **Connection settings**, select
+**Google Gemini API**, keep the documented address, and save. The encrypted API key is
+retained, but verification and assigned task checks are deliberately cleared. Verify
+again, select the newly canonicalized bare model ID, save the task, and rerun conformance.
 
 The four checks are intentionally independent. A model that is good at playlist ordering
 may be poor at conservative EQ or metadata tagging. Provider-side spending limits remain

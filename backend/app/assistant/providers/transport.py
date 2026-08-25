@@ -255,4 +255,6 @@ def safe_http_error_code(
         return not_found_code
     if status_code == 429:
         return "rate_limited"
+    if status_code in {400, 422}:
+        return "invalid_request"
     return "upstream_error"

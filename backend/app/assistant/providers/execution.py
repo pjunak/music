@@ -11,10 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from app.assistant.providers.definitions import (
-    OPENAI_COMPATIBLE_ADAPTER,
-    OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
-)
+from app.assistant.providers.handlers import get_provider_adapter_handler
 from app.assistant.providers.transport import (
     ProviderTransportError,
     request_json,
@@ -156,12 +153,15 @@ def _parse_openai_compatible_response(payload: object) -> StructuredModelResult:
     )
 
 
-def _execute_openai_compatible(
+def _execute_provider_handler(
     target: ProviderExecutionTarget,
     request: StructuredModelRequest,
 ) -> StructuredModelResult:
+    handler = get_provider_adapter_handler(target.adapter_id)
+    if handler is None:
+        return StructuredModelResult(False, "unsupported_adapter")
     response_format: dict[str, object] = {"type": "json_object"}
-    if target.adapter_id == OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER:
+    if handler.structured_output_mode == "json_schema":
         if request.output_schema_name is None or request.output_schema is None:
             return StructuredModelResult(False, "output_schema_required")
         response_format = {
@@ -173,7 +173,7 @@ def _execute_openai_compatible(
             },
         }
     payload: dict[str, object] = {
-        "model": target.model_id,
+        "model": handler.normalize_model_id(target.model_id),
         "messages": [
             {"role": "system", "content": request.system_prompt},
             {"role": "user", "content": request.user_prompt},
@@ -184,12 +184,11 @@ def _execute_openai_compatible(
         ),
         "response_format": response_format,
     }
-    if target.thinking_mode != "provider_default":
-        payload["thinking"] = {"type": target.thinking_mode}
+    handler.apply_thinking_mode(payload, target.thinking_mode)
     try:
         response = request_json(
             "POST",
-            f"{target.base_url.rstrip('/')}/chat/completions",
+            handler.completion_url(target.base_url),
             target.api_key,
             allow_private_network=target.allow_private_network,
             timeout_seconds=target.timeout_seconds,
@@ -217,12 +216,7 @@ def execute_structured_model_request(
 ) -> StructuredModelResult:
     """Execute one request; feature-specific schema checks happen above this layer."""
 
-    if target.adapter_id in {
-        OPENAI_COMPATIBLE_ADAPTER,
-        OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
-    }:
-        return _execute_openai_compatible(target, request)
-    return StructuredModelResult(False, "unsupported_adapter")
+    return _execute_provider_handler(target, request)
 
 
 def run_provider_conformance(

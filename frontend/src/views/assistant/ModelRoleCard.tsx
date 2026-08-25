@@ -135,6 +135,11 @@ export function ModelRoleCard({
   const connectionAdapter = adapters.find(
     (adapter) => adapter.id === connection?.adapter_id,
   );
+  const thinkingRecommendation = connection?.adapter_id.startsWith(
+    "google-gemini-openai",
+  )
+    ? "Provider default first"
+    : ROLE_THINKING_RECOMMENDATIONS[role.role_id];
   const adapterSupportsRole = includesEveryCapability(
     connectionAdapter?.capability_ids,
     role.required_capability_ids,
@@ -429,9 +434,9 @@ export function ModelRoleCard({
             <fieldset className="assistant-thinking-mode">
               <legend>
                 <span>Thinking</span>
-                {ROLE_THINKING_RECOMMENDATIONS[role.role_id] !== undefined ? (
+                {thinkingRecommendation !== undefined ? (
                   <span className="assistant-thinking-recommendation">
-                    {ROLE_THINKING_RECOMMENDATIONS[role.role_id]}
+                    {thinkingRecommendation}
                   </span>
                 ) : null}
               </legend>

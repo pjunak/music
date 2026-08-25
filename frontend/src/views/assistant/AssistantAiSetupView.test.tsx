@@ -1294,6 +1294,32 @@ describe("AssistantAiSetupView", () => {
     );
   });
 
+  it("recommends provider-default thinking for Gemini connections", async () => {
+    const geminiConnection: ProviderConnection = {
+      ...connection,
+      adapter_id: "google-gemini-openai/v1",
+      name: "Gemini",
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+    };
+    const configuredRole: ModelRole = {
+      ...role,
+      connection_id: geminiConnection.id,
+      connection_name: geminiConnection.name,
+      model_id: "gemini-2.5-flash",
+      verification_status: "verified",
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([
+      geminiConnection,
+    ]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([configuredRole]);
+    render(<AssistantAiSetupView />);
+
+    await userEvent.click(await screen.findByText("Request settings"));
+
+    expect(screen.getByText("Provider default first")).toBeVisible();
+    expect(screen.queryByText("Off recommended")).not.toBeInTheDocument();
+  });
+
   it("rechecks only failed mood scenarios from the test console", async () => {
     const completed = qualityJob({
       id: "tagging-complete-job",

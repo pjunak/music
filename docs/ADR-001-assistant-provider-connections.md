@@ -14,6 +14,12 @@ accepts the path or returns, replaces, or removes the key; environment configura
 takes precedence and rotation remains offline. The connection/role boundary below
 remains authoritative.
 
+**Implementation follow-up (2026-08-25):** Versioned in-process adapter handlers now own
+provider-specific model-resource normalization and inference parameters while retaining the shared
+hardened transport. Google Gemini is the first explicit provider profile; generic OpenAI-compatible
+connections remain available for other compatible services. See
+[ADR-011](ADR-011-in-process-provider-adapter-handlers.md).
+
 ## Context
 
 The Assistant needs optional access to user-chosen model providers without
