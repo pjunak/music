@@ -86,7 +86,7 @@ const detail: TrackContextDetail = {
     },
     voice: {
       status: "not_classified",
-      note: "No calibrated voice classifier is configured.",
+      note: "Local voice classification is not enabled.",
     },
   },
   timeline: [

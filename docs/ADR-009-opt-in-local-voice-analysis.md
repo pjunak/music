@@ -12,6 +12,12 @@ advanced the current role to `assistant-music-tagger-input/v14` and disclosure v
 classifier identity and local-only boundary in this ADR are unchanged; see the
 [living contract inventory](ASSISTANT_ARCHITECTURE.md#current-contract-inventory).
 
+**Deployment update (2026-08-25):** The project-published production image now explicitly builds
+the optional Essentia runtime. The model remains a separate operator-obtained, checksum-verified,
+read-only mount; generic Docker builds keep the runtime disabled by default. Stored
+`local-context/v1` rows retain the legacy `voice_probability` key for compatibility, but every
+consumer treats the value as a normalized classifier score, not a calibrated probability.
+
 ## Context
 
 `local-context/v1` deliberately reported voice as unknown because loudness, spectral shape, and

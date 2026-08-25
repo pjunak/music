@@ -20,7 +20,7 @@ def test_voice_analyzer_is_explicitly_unconfigured_by_default(
         "voice_probability": None,
         "vocal_coverage": None,
         "note": (
-            "No calibrated local voice classifier is installed. Spectral measurements "
+            "Local voice classification is not enabled. Spectral measurements "
             "are retained, but they are not presented as voice detection."
         ),
     }

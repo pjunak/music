@@ -78,7 +78,8 @@ the bounded evidence and candidates used by model workflows.
 
 ### Optional local voice analysis
 
-The base application intentionally reports voice as `not_classified`. The supported opt-in uses
+Until a model path is configured, the application reports voice as `not_classified`. The supported
+opt-in uses
 Essentia's purpose-trained `voice_instrumental-musicnn-msd-2.pb` model and never sends audio over the
 network. Essentia's TensorFlow runtime is AGPL-3.0-only and the MTG model weights are licensed
 CC BY-NC-SA 4.0; confirm those terms fit the deployment before proceeding. The application does not
@@ -97,8 +98,10 @@ echo "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a  ./models
 export ASSISTANT_VOICE_MODEL_PATH="$PWD/models/voice_instrumental-musicnn-msd-2.pb"
 ```
 
-The standard published image does not contain this optional runtime or model. For an explicit custom
-image, build and run it with a read-only model mount:
+The project-published production image includes the optional runtime, but never downloads or embeds
+the separately licensed model. Point it at a checksum-verified, read-only model mount. Other builds
+remain lightweight by default; to create an explicit voice-capable custom image, build and run it as
+follows:
 
 ```bash
 docker build --build-arg INSTALL_VOICE_ANALYZER=true -t music-voice .
@@ -114,7 +117,8 @@ After restarting, existing context built without that exact classifier is shown 
 normal comprehensive context job, then inspect several known vocal, instrumental, and intermittent-
 vocal tracks in **Assistant -> Track Context**. The UI reports the normalized two-class score and
 the fraction of windows where voice led instrumental. These are classifier measurements, not a
-guarantee: real inference has not been validated against this private library by automated tests.
+calibrated probability or guarantee; library-specific threshold calibration is not required for
+this bounded factual-evidence use.
 Disabling or changing the model also requires a normal context rebuild. If the optional stage fails,
 the rest of the track context remains available and the voice stage reports `unavailable`.
 

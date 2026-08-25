@@ -125,6 +125,8 @@ class ModelTagContextStructure(_StrictModel):
 
 class ModelTagContextVoice(_StrictModel):
     status: Literal["not_classified", "classified", "unavailable"]
+    # Legacy local-context/v1 key: this is a normalized classifier score, not
+    # a calibrated probability. Keep the name stable for stored context rows.
     voice_probability: float | None = Field(default=None, ge=0.0, le=1.0)
     vocal_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
     note: str = Field(default="", max_length=300)

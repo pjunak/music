@@ -270,7 +270,7 @@ def test_audio_context_describes_development_without_suggesting_tags(
         "voice_probability": None,
         "vocal_coverage": None,
         "note": (
-            "No calibrated local voice classifier is installed. Spectral measurements "
+            "Local voice classification is not enabled. Spectral measurements "
             "are retained, but they are not presented as voice detection."
         ),
     }

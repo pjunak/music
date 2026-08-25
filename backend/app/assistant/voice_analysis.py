@@ -36,7 +36,7 @@ def _not_classified() -> VoiceAnalysis:
             "voice_probability": None,
             "vocal_coverage": None,
             "note": (
-                "No calibrated local voice classifier is installed. Spectral measurements "
+                "Local voice classification is not enabled. Spectral measurements "
                 "are retained, but they are not presented as voice detection."
             ),
         },
@@ -142,22 +142,22 @@ def _summarize_predictions(predictions: object) -> tuple[float, float, int]:
         probabilities.append(voice_score / total)
     if not probabilities:
         raise ValueError("voice classifier returned no valid prediction windows")
-    voice_probability = sum(probabilities) / len(probabilities)
+    voice_score = sum(probabilities) / len(probabilities)
     vocal_coverage = sum(value >= 0.5 for value in probabilities) / len(probabilities)
-    return voice_probability, vocal_coverage, len(probabilities)
+    return voice_score, vocal_coverage, len(probabilities)
 
 
-def _classification_note(voice_probability: float, vocal_coverage: float) -> str:
-    if voice_probability >= 0.65 and vocal_coverage >= 0.6:
+def _classification_note(voice_score: float, vocal_coverage: float) -> str:
+    if voice_score >= 0.65 and vocal_coverage >= 0.6:
         label = "Voice is present across most analyzed windows."
-    elif voice_probability >= 0.55 and vocal_coverage >= 0.2:
+    elif voice_score >= 0.55 and vocal_coverage >= 0.2:
         label = "Voice is present in part of the recording."
-    elif voice_probability <= 0.35 and vocal_coverage <= 0.2:
+    elif voice_score <= 0.35 and vocal_coverage <= 0.2:
         label = "The recording is predominantly instrumental."
     else:
         label = "The classifier found mixed or uncertain voice evidence."
     return (
-        f"{label} Mean normalized voice score {voice_probability:.0%}; "
+        f"{label} Mean normalized voice score {voice_score:.0%}; "
         f"voice-leading window coverage {vocal_coverage:.0%}."
     )
 
@@ -221,7 +221,7 @@ def analyze_voice(
     cancellation_check()
     try:
         predictions = _run_essentia_model(path, model_path, model_hash)
-        voice_probability, vocal_coverage, window_count = _summarize_predictions(predictions)
+        voice_score, vocal_coverage, window_count = _summarize_predictions(predictions)
     except Exception as exc:  # Optional stage: retain the rest of the factual context.
         return _unavailable(
             "inference_failed",
@@ -232,9 +232,11 @@ def analyze_voice(
     return VoiceAnalysis(
         summary={
             "status": "classified",
-            "voice_probability": round(voice_probability, 5),
+            # Keep the stored/wire key for local-context/v1 compatibility. Its value is
+            # a normalized model score, not a calibrated real-world probability.
+            "voice_probability": round(voice_score, 5),
             "vocal_coverage": round(vocal_coverage, 5),
-            "note": _classification_note(voice_probability, vocal_coverage),
+            "note": _classification_note(voice_score, vocal_coverage),
         },
         stage={
             "status": "complete",

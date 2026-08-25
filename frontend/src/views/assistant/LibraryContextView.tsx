@@ -46,15 +46,15 @@ function seconds(value: unknown): string {
 
 function voiceLabel(
   status: string | null,
-  voiceProbability: number | null,
+  voiceScore: number | null,
   vocalCoverage: number | null,
 ): string {
-  if (status !== "classified" || voiceProbability === null || vocalCoverage === null) {
+  if (status !== "classified" || voiceScore === null || vocalCoverage === null) {
     return status?.replaceAll("_", " ") ?? "Unknown";
   }
-  if (voiceProbability >= 0.65 && vocalCoverage >= 0.6) return "Voice present";
-  if (voiceProbability >= 0.55 && vocalCoverage >= 0.2) return "Partial voice";
-  if (voiceProbability <= 0.35 && vocalCoverage <= 0.2) return "Predominantly instrumental";
+  if (voiceScore >= 0.65 && vocalCoverage >= 0.6) return "Voice present";
+  if (voiceScore >= 0.55 && vocalCoverage >= 0.2) return "Partial voice";
+  if (voiceScore <= 0.35 && vocalCoverage <= 0.2) return "Predominantly instrumental";
   return "Mixed / uncertain voice";
 }
 
@@ -128,7 +128,9 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
   const structure = objectValue(summary?.structure);
   const voice = objectValue(summary?.voice);
   const voiceStatus = stringValue(voice?.status);
-  const voiceProbability = numberValue(voice?.voice_probability);
+  // local-context/v1 retains the legacy key, but its value is a normalized
+  // classifier score rather than a calibrated probability.
+  const voiceScore = numberValue(voice?.voice_probability);
   const vocalCoverage = numberValue(voice?.vocal_coverage);
 
   if (summary === null) {
@@ -210,10 +212,10 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
         </div>
         <div>
           <span>Voice</span>
-          <strong>{voiceLabel(voiceStatus, voiceProbability, vocalCoverage)}</strong>
+          <strong>{voiceLabel(voiceStatus, voiceScore, vocalCoverage)}</strong>
           <small>
-            {voiceStatus === "classified" && voiceProbability !== null && vocalCoverage !== null
-              ? `${percent(voiceProbability)} voice score · ${percent(vocalCoverage)} vocal coverage. `
+            {voiceStatus === "classified" && voiceScore !== null && vocalCoverage !== null
+              ? `${percent(voiceScore)} voice score · ${percent(vocalCoverage)} vocal coverage. `
               : null}
             {stringValue(voice?.note) ?? "No voice classifier result"}
           </small>

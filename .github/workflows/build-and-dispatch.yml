@@ -92,6 +92,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            INSTALL_VOICE_ANALYZER=true
           tags: |
             ${{ steps.img.outputs.name }}:latest
             ${{ steps.img.outputs.name }}:sha-${{ github.sha }}

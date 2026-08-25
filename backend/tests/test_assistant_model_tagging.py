@@ -356,7 +356,7 @@ def _add_current_track_context(db: Session, track: Track) -> None:
             "status": "not_classified",
             "voice_probability": None,
             "vocal_coverage": None,
-            "note": "No calibrated voice classifier is configured.",
+            "note": "Local voice classification is not enabled.",
         },
         "evidence": ["Intensity rises gradually across the track."],
     }
