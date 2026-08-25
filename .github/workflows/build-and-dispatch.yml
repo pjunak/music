@@ -33,7 +33,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       # uv sync --locked installs the exact transitive graph from uv.lock
       # (and fails on pyproject/lock drift) — a plain `pip install -e .`

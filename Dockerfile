@@ -11,7 +11,7 @@
 # ============================================================================
 # Stage 1: frontend builder
 # ============================================================================
-FROM node:26-alpine AS frontend-builder
+FROM node:26.7.0-alpine AS frontend-builder
 
 WORKDIR /frontend
 
@@ -34,7 +34,7 @@ RUN npm run build
 # Has the C toolchain + libffi-dev needed to compile argon2-cffi (and any
 # future cffi-backed wheel that doesn't ship a manylinux build for slim).
 # Output is just the wheels; the runtime stage stays compiler-free.
-FROM python:3.12-slim AS backend-builder
+FROM python:3.14.7-slim AS backend-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -56,7 +56,10 @@ COPY backend/app ./app
 # runtime stage installs from this directory only — no network, no compiler.
 # --locked errors out if pyproject drifted from the lockfile instead of
 # silently building an unlocked graph.
-RUN pip install --no-cache-dir --upgrade pip wheel uv && \
+RUN pip install --no-cache-dir --upgrade \
+        pip==26.2.1 \
+        wheel==0.48.0 \
+        uv==0.12.6 && \
     if [ "$INSTALL_VOICE_ANALYZER" = "true" ]; then voice_extra="--extra voice"; else voice_extra=""; fi && \
     uv export --locked --no-dev $voice_extra --no-hashes --no-emit-project -o /tmp/requirements.txt && \
     pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt . && \
@@ -65,7 +68,7 @@ RUN pip install --no-cache-dir --upgrade pip wheel uv && \
 # ============================================================================
 # Stage 3: python runtime
 # ============================================================================
-FROM python:3.12-slim AS runtime
+FROM python:3.14.7-slim AS runtime
 
 ARG INSTALL_VOICE_ANALYZER=false
 
@@ -85,7 +88,7 @@ WORKDIR /app
 # needed. The wheelhouse contains every transitive dep + the music-backend
 # wheel itself.
 COPY --from=backend-builder /wheels /wheels
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip==26.2.1 && \
     if [ "$INSTALL_VOICE_ANALYZER" = "true" ]; then project="music-backend[voice]"; else project="music-backend"; fi && \
     pip install --no-cache-dir --no-index --find-links=/wheels "$project" && \
     rm -rf /wheels
