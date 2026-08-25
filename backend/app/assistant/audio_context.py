@@ -616,12 +616,17 @@ def _safe_int(value: object) -> int | None:
     return parsed if parsed >= 0 else None
 
 
-def _ebu_loudness(path: Path) -> dict[str, float] | None:
+def _ebu_loudness(
+    path: Path,
+    *,
+    check_cancelled: Callable[[], None] | None = None,
+) -> dict[str, float] | None:
     executable = shutil.which("ffmpeg")
     if executable is None:
         return None
+    cancellation_check = check_cancelled or (lambda: None)
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             [
                 executable,
                 "-hide_banner",
@@ -641,17 +646,36 @@ def _ebu_loudness(path: Path) -> dict[str, float] | None:
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            check=False,
-            timeout=1_800,
             text=True,
             encoding="utf-8",
             errors="replace",
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
         return None
-    if result.returncode != 0:
+    deadline = time.monotonic() + 1_800
+    try:
+        while True:
+            try:
+                _, stderr = process.communicate(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                cancellation_check()
+                if time.monotonic() >= deadline:
+                    process.kill()
+                    process.communicate()
+                    return None
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        raise
+    if process.returncode != 0:
         return None
-    matches = _LOUDNORM_JSON.findall(result.stderr)
+    matches = _LOUDNORM_JSON.findall(stderr)
     if not matches:
         return None
     try:
@@ -725,7 +749,7 @@ def analyze_audio_context(
         "points": tempo_points[:20],
     }
     voice_analysis = analyze_voice(path, check_cancelled=cancellation_check)
-    loudness = _ebu_loudness(path)
+    loudness = _ebu_loudness(path, check_cancelled=cancellation_check)
     cancellation_check()
     if loudness is not None:
         technical["loudness"] = {"status": "ebu_r128", **loudness}

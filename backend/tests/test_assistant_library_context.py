@@ -13,8 +13,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
 from app.assistant.audio_context import AudioContextDocument, analyze_audio_context
+from app.assistant.context_workers import ContextAnalysisResult
 from app.assistant.library_context import LOCAL_CONTEXT_ANALYZER_ID
 from app.assistant.voice_analysis import VoiceAnalysis
+from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.track_analysis_failure import TrackAnalysisFailure
 from app.models.track_context import TrackContext
@@ -195,6 +197,47 @@ def test_context_job_is_scoped_checkpointed_and_browsable(
     assert summary.status_code == 200, summary.text
     assert summary.json()["full_tracks"] == 1
     assert summary.json()["analyzer"] == LOCAL_CONTEXT_ANALYZER_ID
+
+
+def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    track_ids = [seeded_track_id, *extra_seeded_track_ids]
+    captured: dict[str, object] = {}
+
+    def analyze_in_processes(tasks, *, max_workers, check_cancelled):  # type: ignore[no-untyped-def]
+        captured["track_ids"] = [task.track_id for task in tasks]
+        captured["max_workers"] = max_workers
+        check_cancelled()
+        for task in reversed(tasks):
+            yield ContextAnalysisResult(track_id=task.track_id, document=_document())
+
+    monkeypatch.setattr(get_settings(), "assistant_library_context_workers", 3)
+    monkeypatch.setattr(
+        "app.assistant.library_context.analyze_tracks_in_processes",
+        analyze_in_processes,
+    )
+
+    started = auth_client.post(
+        "/api/assistant/library-context/jobs",
+        json={
+            "force": True,
+            "scope": {"type": "tracks", "track_ids": track_ids},
+        },
+    )
+    finished = _wait_for_job(auth_client, started.json()["id"])
+
+    assert finished["status"] == "succeeded", finished
+    assert finished["result"]["analysis_workers"] == 3
+    assert finished["result"]["updated"] == 4
+    assert captured == {"track_ids": track_ids, "max_workers": 3}
+
+    with SessionLocal() as db:
+        rows = db.query(TrackContext).filter(TrackContext.track_id.in_(track_ids)).all()
+    assert len(rows) == 4
 
 
 def test_context_job_checkpoints_failures_and_retries(

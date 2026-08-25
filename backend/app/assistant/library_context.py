@@ -16,8 +16,14 @@ from app.assistant.audio_context import (
     analyze_audio_context,
 )
 from app.assistant.audio_signal import AudioSignalError
+from app.assistant.context_workers import (
+    ContextAnalysisResult,
+    ContextAnalysisTask,
+    analyze_tracks_in_processes,
+)
 from app.assistant.tag_schemas import ModelTaggingScope
 from app.assistant.voice_analysis import voice_analyzer_signature
+from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.library import index as library_index
@@ -254,6 +260,29 @@ def _store_failure(
         db.commit()
 
 
+def _store_analysis_result(
+    track: Track,
+    signature: str,
+    context: JobExecutionContext,
+    result: ContextAnalysisResult,
+) -> bool:
+    if result.fatal:
+        raise RuntimeError(
+            f"context analysis worker failed for track {track.id}: "
+            f"{result.error or 'unknown error'}"
+        )
+    if result.document is not None:
+        _store_document(track, signature, context, result.document)
+        return True
+    _store_failure(
+        track,
+        signature,
+        context,
+        result.error or "AudioSignalError: context analysis returned no result",
+    )
+    return False
+
+
 def run_library_context_analysis(
     context: JobExecutionContext,
     parameters: dict[str, object],
@@ -319,32 +348,65 @@ def run_library_context_analysis(
         work.append(track)
     starting = max(context.progress_current, checkpointed)
     total = starting + len(work)
+    configured_workers = get_settings().assistant_library_context_workers
+    active_workers = min(configured_workers, len(work)) if work else 0
     context.update_progress(
         starting,
         total,
         phase="Building track context",
-        message=f"{len(work)} tracks need comprehensive analysis",
+        message=(
+            f"{len(work)} tracks need comprehensive analysis"
+            + (f" with {active_workers} workers" if active_workers else "")
+        ),
     )
-    for processed, track in enumerate(work, start=1):
-        context.check_cancelled()
-        signature = signatures[track.id]
-        try:
-            document = analyze_audio_context(
-                library_index.to_absolute(track.path),
-                check_cancelled=context.check_cancelled,
+    if active_workers == 1:
+        for processed, track in enumerate(work, start=1):
+            context.check_cancelled()
+            signature = signatures[track.id]
+            try:
+                document = analyze_audio_context(
+                    library_index.to_absolute(track.path),
+                    check_cancelled=context.check_cancelled,
+                )
+                _store_document(track, signature, context, document)
+                updated_track_ids.add(track.id)
+            except (AudioSignalError, OSError) as exc:
+                _store_failure(track, signature, context, f"{type(exc).__name__}: {exc}")
+                failed_track_ids.add(track.id)
+            current = starting + processed
+            context.update_progress(
+                current,
+                total,
+                phase="Building track context",
+                message=f"Processed {current} of {total} tracks",
             )
-            _store_document(track, signature, context, document)
-            updated_track_ids.add(track.id)
-        except (AudioSignalError, OSError) as exc:
-            _store_failure(track, signature, context, f"{type(exc).__name__}: {exc}")
-            failed_track_ids.add(track.id)
-        current = starting + processed
-        context.update_progress(
-            current,
-            total,
-            phase="Building track context",
-            message=f"Processed {current} of {total} tracks",
+    elif active_workers > 1:
+        tracks_by_id = {track.id: track for track in work}
+        tasks = [
+            ContextAnalysisTask(
+                track_id=track.id,
+                path=str(library_index.to_absolute(track.path)),
+            )
+            for track in work
+        ]
+        results = analyze_tracks_in_processes(
+            tasks,
+            max_workers=active_workers,
+            check_cancelled=context.check_cancelled,
         )
+        for processed, result in enumerate(results, start=1):
+            track = tracks_by_id[result.track_id]
+            if _store_analysis_result(track, signatures[track.id], context, result):
+                updated_track_ids.add(track.id)
+            else:
+                failed_track_ids.add(track.id)
+            current = starting + processed
+            context.update_progress(
+                current,
+                total,
+                phase="Building track context",
+                message=f"Processed {current} of {total} tracks with {active_workers} workers",
+            )
     with SessionLocal() as db:
         current_contexts = load_current_contexts(db, tracks)
         current_failures = {
@@ -370,6 +432,7 @@ def run_library_context_analysis(
         "analyzer": LOCAL_CONTEXT_ANALYZER_ID,
         "scope": scope.model_dump(mode="json"),
         "tracks": len(tracks),
+        "analysis_workers": active_workers,
         "updated": updated,
         "failed": failed,
         "unchanged": max(0, len(tracks) - updated - failed),

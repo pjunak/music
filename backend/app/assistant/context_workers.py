@@ -1,0 +1,145 @@
+"""Bounded process workers for CPU-heavy whole-track context analysis."""
+
+from __future__ import annotations
+
+import multiprocessing
+from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, TypeVar
+
+from app.assistant.audio_context import AudioContextDocument, analyze_audio_context
+from app.assistant.audio_signal import AudioSignalError
+
+_POLL_SECONDS = 0.25
+_worker_cancel_event: Any | None = None
+
+
+class _WorkerAnalysisCancelled(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class ContextAnalysisTask:
+    track_id: int
+    path: str
+
+
+@dataclass(frozen=True)
+class ContextAnalysisResult:
+    track_id: int
+    document: AudioContextDocument | None = None
+    error: str | None = None
+    fatal: bool = False
+
+
+def _initialize_worker(cancel_event: Any) -> None:
+    global _worker_cancel_event
+    _worker_cancel_event = cancel_event
+
+
+def _check_worker_cancelled() -> None:
+    if _worker_cancel_event is not None and _worker_cancel_event.is_set():
+        raise _WorkerAnalysisCancelled
+
+
+def _analyze_track(task: ContextAnalysisTask) -> ContextAnalysisResult:
+    try:
+        document = analyze_audio_context(
+            Path(task.path),
+            check_cancelled=_check_worker_cancelled,
+        )
+    except _WorkerAnalysisCancelled:
+        raise
+    except (AudioSignalError, OSError) as exc:
+        return ContextAnalysisResult(
+            track_id=task.track_id,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    except Exception as exc:
+        return ContextAnalysisResult(
+            track_id=task.track_id,
+            error=f"{type(exc).__name__}: {exc}".strip()[:2_000],
+            fatal=True,
+        )
+    return ContextAnalysisResult(track_id=task.track_id, document=document)
+
+
+_TaskT = TypeVar("_TaskT")
+_ResultT = TypeVar("_ResultT")
+
+
+def _process_map_unordered(
+    worker: Callable[[_TaskT], _ResultT],
+    tasks: Sequence[_TaskT],
+    *,
+    max_workers: int,
+    check_cancelled: Callable[[], None],
+) -> Iterator[_ResultT]:
+    """Run a bounded spawn-based process map and propagate cancellation.
+
+    Only one task per worker is submitted at a time. This bounds queued work,
+    makes cancellation responsive, and avoids forking the already-threaded
+    FastAPI process. Workers receive a shared event so the audio decoder can
+    stop cooperatively while the parent retains ownership of all persistence.
+    """
+
+    if max_workers < 1:
+        raise ValueError("max_workers must be at least one")
+    if not tasks:
+        return
+
+    process_context = multiprocessing.get_context("spawn")
+    cancel_event = process_context.Event()
+    executor = ProcessPoolExecutor(
+        max_workers=min(max_workers, len(tasks)),
+        mp_context=process_context,
+        initializer=_initialize_worker,
+        initargs=(cancel_event,),
+    )
+    pending: dict[Future[_ResultT], None] = {}
+    task_iterator = iter(tasks)
+
+    def fill_workers() -> None:
+        while len(pending) < max_workers:
+            try:
+                task = next(task_iterator)
+            except StopIteration:
+                return
+            pending[executor.submit(worker, task)] = None
+
+    try:
+        check_cancelled()
+        fill_workers()
+        while pending:
+            done, _ = wait(
+                pending,
+                timeout=_POLL_SECONDS,
+                return_when=FIRST_COMPLETED,
+            )
+            check_cancelled()
+            for future in done:
+                del pending[future]
+                yield future.result()
+            fill_workers()
+    finally:
+        if pending:
+            cancel_event.set()
+            for future in pending:
+                future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+def analyze_tracks_in_processes(
+    tasks: Sequence[ContextAnalysisTask],
+    *,
+    max_workers: int,
+    check_cancelled: Callable[[], None],
+) -> Iterator[ContextAnalysisResult]:
+    yield from _process_map_unordered(
+        _analyze_track,
+        tasks,
+        max_workers=max_workers,
+        check_cancelled=check_cancelled,
+    )

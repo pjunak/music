@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     # at runtime. The dependency and model carry licenses that require an
     # explicit operator choice, so the standard image leaves this unset.
     assistant_voice_model_path: Path | None = None
+
+    # Whole-track context analysis is CPU-heavy pure Python. Independent
+    # processes can use multiple cores while the parent remains the sole owner
+    # of SQLite writes. Generic installs stay conservative; production may opt
+    # into up to four workers after assigning matching CPU and memory capacity.
+    assistant_library_context_workers: int = Field(default=1, ge=1, le=4)
 
     # Upload guard rails (per request). Generous enough for hi-res FLAC albums;
     # they exist to stop an authenticated client from exhausting the volume
