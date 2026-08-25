@@ -21,7 +21,7 @@ from app.assistant.engine import (
     TrackLike,
     TrackSignalProfile,
 )
-from app.assistant.local import local_playlist_planner
+from app.assistant.local import expanded_retrieval_prompt, local_playlist_planner
 from app.assistant.providers.execution import (
     StructuredModelRequest,
     StructuredModelResult,
@@ -269,6 +269,32 @@ class ModelPlaylistPlanner:
             manual_tags=manual_tags,
             signal_profiles=signal_profiles,
         )
+        expanded_prompt = expanded_retrieval_prompt(request.prompt)
+        if expanded_prompt != request.prompt and len(baseline.candidates) < _MAX_MODEL_CANDIDATES:
+            expanded_request = prefilter_request.model_copy(
+                update={"prompt": expanded_prompt}
+            )
+            expanded = local_playlist_planner.suggest(
+                tracks,
+                expanded_request,
+                profiles=profiles,
+                manual_tags=manual_tags,
+                signal_profiles=signal_profiles,
+            )
+            known_ids = {candidate.track_id for candidate in baseline.candidates}
+            recall_candidates = [
+                candidate
+                for candidate in expanded.candidates
+                if candidate.track_id not in known_ids
+            ]
+            baseline = baseline.model_copy(
+                update={
+                    "candidates": [
+                        *baseline.candidates,
+                        *recall_candidates,
+                    ][:_MAX_MODEL_CANDIDATES]
+                }
+            )
         if not baseline.candidates:
             return baseline.model_copy(update={"engine": self.engine_id})
 

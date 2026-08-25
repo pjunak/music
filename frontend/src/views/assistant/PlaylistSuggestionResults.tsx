@@ -226,6 +226,11 @@ export function PlaylistSuggestionResults({
                     </span>
                     <span className="assistant-match">
                       <strong>{Math.round(candidate.match_score * 100)}%</strong>
+                      <small>
+                        {suggestion.engine === "model-playlist-planner/v2"
+                          ? "local evidence"
+                          : "local match"}
+                      </small>
                       <span className={`assistant-confidence is-${candidate.confidence}`}>
                         {candidate.confidence}
                       </span>

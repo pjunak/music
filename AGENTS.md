@@ -213,7 +213,11 @@ Runtime data lives outside the image.
   Keep `local-planner/v2` as the default, require the exact current `playlist-quality-v1` pass and
   disclosure version before enqueueing, and make model jobs non-restartable to avoid silently
   repeating provider cost. Locally enforce eligibility and exclusions, send a privacy-reduced pool
-  of at most 100 candidates, inject those exact IDs into the output schema, and accept only
+  of at most 100 candidates, and preserve the original local rank while unioning additional recall
+  candidates found through controlled-vocabulary aliases and context cues. Treat a non-empty
+  display title as canonical, and do not infer mood axes from artist names or filesystem paths.
+  Choose the review default with bounded duration-error improvement. Inject the exact candidate
+  IDs into the output schema, and accept only
   ranked/selected IDs. Never send library-relative paths
   or trust model-supplied source fields, tags, scores, reasons, or evidence; reconstruct the public
   response from the local candidate snapshot. Model results remain drafts and must use the existing

@@ -6,7 +6,12 @@ from typing import Literal
 from fastapi.testclient import TestClient
 
 from app.assistant.engine import TrackAnalysisProfile
-from app.assistant.local import interpret_prompt, suggest_local_playlist
+from app.assistant.local import (
+    analyze_track_metadata,
+    expanded_retrieval_prompt,
+    interpret_prompt,
+    suggest_local_playlist,
+)
 from app.assistant.schemas import PlaylistSuggestionRequest
 
 
@@ -49,6 +54,29 @@ def test_interpret_prompt_combines_known_moods_and_keeps_context_terms() -> None
     assert intent.brightness < 0.3
 
 
+def test_vocabulary_cues_expand_retrieval_without_rewriting_public_intent() -> None:
+    expanded = expanded_retrieval_prompt("clandestine burglary under moonlight")
+
+    assert expanded.startswith("clandestine burglary under moonlight")
+    assert "stealth" in expanded.split()
+
+
+def test_canonical_title_and_semantic_fields_bound_metadata_moods() -> None:
+    track = StubTrack(
+        1,
+        "Battle/Dark Combat.flac",
+        "Intense Battle",
+        display_title="Neutral Ledger",
+        artist="Dark Combat Ensemble",
+        genre="classical",
+    )
+
+    profile = analyze_track_metadata(track)
+
+    assert "combat" not in profile.moods
+    assert "dark" not in profile.moods
+
+
 def test_combat_and_calm_requests_rank_different_tracks() -> None:
     tracks = [
         StubTrack(1, "Ambient/Still Lake.flac", "Still Lake", genre="ambient", bpm=68),
@@ -88,6 +116,23 @@ def test_filters_exclusions_and_default_duration_selection() -> None:
     assert [candidate.track_id for candidate in result.candidates] == [2]
     assert result.candidates[0].default_selected is True
     assert result.eligible_tracks == 1
+
+
+def test_default_selection_chooses_a_closer_duration_without_losing_rank_order() -> None:
+    tracks = [
+        StubTrack(1, "one.flac", "One", length_s=400),
+        StubTrack(2, "two.flac", "Two", length_s=300),
+        StubTrack(3, "three.flac", "Three", length_s=120),
+    ]
+
+    result = suggest_local_playlist(
+        tracks,
+        request("neutral scene", target_minutes=5),
+    )
+
+    selected = [item.track_id for item in result.candidates if item.default_selected]
+    assert selected == [2]
+    assert result.plan.selected_duration_s == 300
 
 
 def test_current_analysis_profiles_feed_the_local_ranker() -> None:

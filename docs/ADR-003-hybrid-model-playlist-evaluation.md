@@ -25,6 +25,14 @@ paths, titles, tags, evidence, scores, or explanations that appear server-owned.
 - Run the local planner first with an expanded but bounded candidate limit. It
   remains authoritative for exclusions, BPM eligibility, current analysis,
   manual/generated tag separation, numeric evidence, and source metadata.
+- Treat a non-empty display title as the canonical title for local evidence and
+  derive mood axes only from title, album, and genre semantics—not artist names
+  or filesystem paths. Choose the default review set with bounded add/remove/swap
+  improvements that reduce target-duration error without changing rank order.
+- Preserve the original local candidate order as the baseline, then union
+  additional eligible recall candidates found by controlled-vocabulary aliases
+  and bounded semantic cues. This widens what the model can consider without
+  letting expanded terms silently masquerade as the original local ranking.
 - Send the deterministic local rank, default selection, playback sequence, effective
   BPM source, and duration plan so the model refines a complete local baseline rather
   than reconstructing one.

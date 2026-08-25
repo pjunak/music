@@ -185,6 +185,41 @@ def test_model_planner_sends_reduced_candidates_and_reconstructs_sources() -> No
     assert response.plan.selected_duration_s == 600.0
 
 
+def test_model_prefilter_unions_vocabulary_expanded_recall_candidates() -> None:
+    tracks = [
+        EvaluationTrack(
+            id=index,
+            path=f"fixture/{index}.flac",
+            title=f"Neutral fixture {index}",
+            length_s=300,
+        )
+        for index in range(1, 31)
+    ]
+    executor = CapturingExecutor(
+        {
+            "schema_version": MODEL_PLAYLIST_OUTPUT_CONTRACT,
+            "ranked_track_ids": [30],
+            "selected_track_ids": [30],
+        }
+    )
+
+    response = ModelPlaylistPlanner(executor).suggest(
+        tracks,
+        PlaylistSuggestionRequest(
+            prompt="clandestine burglary",
+            target_minutes=5,
+            candidate_limit=5,
+        ),
+        manual_tags={30: ("stealth",)},
+    )
+
+    supplied = json.loads(executor.requests[0].user_prompt)["candidates"]
+    assert [item["track_id"] for item in supplied[:15]] == list(range(1, 16))
+    assert supplied[-1]["track_id"] == 30
+    assert len(supplied) == 16
+    assert [item.track_id for item in response.candidates] == [30]
+
+
 @pytest.mark.parametrize(
     "payload,error_code",
     [

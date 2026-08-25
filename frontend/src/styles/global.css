@@ -5048,6 +5048,12 @@ kbd,
   gap: var(--space-1);
   font-variant-numeric: tabular-nums;
 }
+.assistant-match small {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .assistant-candidate-audition {
   display: flex;
   align-items: center;

@@ -128,6 +128,12 @@ configurable.
 | Mood-tag cleanup | unresolved source IDs/names and usage counts, canonical vocabulary IDs/names/groups/definitions | track metadata, paths, audio, playlists, generated tags, review history, credentials |
 | EQ | operator goal, fixed ten-band frequencies, deterministic baseline guidance, per-band limits | songs, audio, library metadata, paths, playlists, existing presets, credentials, final preset document |
 
+Playlist retrieval keeps the original local rank, then appends additional eligible candidates
+found through controlled-vocabulary aliases and semantic cues, up to the same 100-candidate
+disclosure limit. Canonical display titles override conflicting raw scanner titles; artist names
+and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
+shown after model ranking are explicitly labeled as local evidence, not model confidence.
+
 Quality suites exercise the same production request shape: 20-track tagging batches,
 50-source cleanup batches, and the 100-candidate playlist boundary. Playlist certification
 also scores target-duration error and selected-artist diversity, and requires one semantic

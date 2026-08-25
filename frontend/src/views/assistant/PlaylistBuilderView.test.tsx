@@ -457,6 +457,7 @@ describe("PlaylistBuilderView", () => {
     expect(
       await screen.findByText("Ranked with connected model", {}, { timeout: 2500 }),
     ).toBeInTheDocument();
+    expect(screen.getAllByText("local evidence")).toHaveLength(2);
     expect(screen.getByText("Rainy Alley")).toBeInTheDocument();
     expect(assistantApi.suggestPlaylist).not.toHaveBeenCalled();
 

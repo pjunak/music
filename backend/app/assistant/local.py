@@ -10,6 +10,7 @@ import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from typing import Literal
 
 from app.assistant.engine import TrackAnalysisProfile, TrackLike, TrackSignalProfile
@@ -21,8 +22,12 @@ from app.assistant.schemas import (
     PlaylistSuggestionRequest,
     PlaylistSuggestionResponse,
 )
+from app.assistant.tag_vocabulary import default_tag_vocabulary_snapshot
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
+_PLAYLIST_RETRIEVAL_ALIASES: dict[str, tuple[str, ...]] = {
+    "stealth": ("burglary", "clandestine", "heist"),
+}
 _STOP_WORDS = frozenset(
     {
         "a",
@@ -163,6 +168,44 @@ def _tokens(value: str) -> frozenset[str]:
     return frozenset(_WORD_RE.findall(ascii_value))
 
 
+@cache
+def _retrieval_vocabulary_phrases() -> tuple[
+    tuple[str, tuple[frozenset[str], ...]], ...
+]:
+    vocabulary_phrases = tuple(
+        (
+            entry.name,
+            tuple(
+                phrase_tokens
+                for phrase in (entry.name, *entry.aliases, *entry.context_cues)
+                if (phrase_tokens := _tokens(phrase))
+            ),
+        )
+        for entry in default_tag_vocabulary_snapshot().entries
+    )
+    playlist_aliases = tuple(
+        (
+            name,
+            tuple(_tokens(alias) for alias in aliases),
+        )
+        for name, aliases in _PLAYLIST_RETRIEVAL_ALIASES.items()
+    )
+    return (*vocabulary_phrases, *playlist_aliases)
+
+
+def expanded_retrieval_prompt(prompt: str) -> str:
+    """Add canonical vocabulary terms for matched aliases and context cues."""
+
+    prompt_tokens = _tokens(prompt)
+    expansions = [
+        name
+        for name, phrases in _retrieval_vocabulary_phrases()
+        if not _tokens(name) <= prompt_tokens
+        and any(phrase <= prompt_tokens for phrase in phrases)
+    ]
+    return f"{prompt} {' '.join(expansions)}" if expansions else prompt
+
+
 def _mean(values: list[float], default: float = 0.5) -> float:
     return sum(values) / len(values) if values else default
 
@@ -250,8 +293,9 @@ def _track_field_tokens(
     track: TrackLike,
     manual_tags: Sequence[str] = (),
 ) -> dict[str, frozenset[str]]:
+    canonical_title = track.display_title.strip() or track.title
     return {
-        "title": _tokens(f"{track.display_title} {track.title}"),
+        "title": _tokens(canonical_title),
         "genre": _tokens(track.genre),
         "origin": _tokens(track.origin),
         "album": _tokens(track.album),
@@ -266,8 +310,12 @@ def _track_field_tokens(
 def _track_axes(
     track: TrackLike, field_tokens: dict[str, frozenset[str]]
 ) -> tuple[float, float, float, tuple[str, ...]]:
-    all_tokens = frozenset().union(*field_tokens.values())
-    track_moods = [profile for profile in _MOODS if all_tokens & profile.aliases]
+    mood_tokens = frozenset().union(
+        field_tokens["title"],
+        field_tokens["genre"],
+        field_tokens["album"],
+    )
+    track_moods = [profile for profile in _MOODS if mood_tokens & profile.aliases]
 
     energy_values = [profile.energy for profile in track_moods]
     if track.bpm is not None:
@@ -544,14 +592,74 @@ def _default_pool(
     ranked: Sequence[_RankedTrack],
     target_seconds: float,
 ) -> tuple[list[_RankedTrack], float]:
-    selected: list[_RankedTrack] = []
+    if not ranked:
+        return [], 0.0
+
+    durations = [_planning_duration(item.track) for item in ranked]
+    selected_indices: set[int] = set()
     selected_seconds = 0.0
-    for item in ranked:
-        if selected_seconds >= target_seconds:
+    for index, duration in enumerate(durations):
+        if abs(selected_seconds + duration - target_seconds) < abs(
+            selected_seconds - target_seconds
+        ):
+            selected_indices.add(index)
+            selected_seconds += duration
+
+    if not selected_indices:
+        closest = min(
+            range(len(ranked)),
+            key=lambda index: (abs(durations[index] - target_seconds), index),
+        )
+        selected_indices.add(closest)
+        selected_seconds = durations[closest]
+
+    # Improve a rank-respecting greedy result with bounded add/remove/swap moves.
+    # Each move must strictly reduce duration error, so this always terminates.
+    while True:
+        current_error = abs(selected_seconds - target_seconds)
+        best_error = current_error
+        best_indices: set[int] | None = None
+        best_seconds = selected_seconds
+
+        for index, duration in enumerate(durations):
+            if index in selected_indices:
+                if len(selected_indices) > 1:
+                    candidate_seconds = selected_seconds - duration
+                    candidate_error = abs(candidate_seconds - target_seconds)
+                    if candidate_error < best_error:
+                        best_error = candidate_error
+                        best_indices = selected_indices - {index}
+                        best_seconds = candidate_seconds
+                continue
+            candidate_seconds = selected_seconds + duration
+            candidate_error = abs(candidate_seconds - target_seconds)
+            if candidate_error < best_error:
+                best_error = candidate_error
+                best_indices = selected_indices | {index}
+                best_seconds = candidate_seconds
+
+        for removed in selected_indices:
+            for added, duration in enumerate(durations):
+                if added in selected_indices:
+                    continue
+                candidate_seconds = (
+                    selected_seconds - durations[removed] + duration
+                )
+                candidate_error = abs(candidate_seconds - target_seconds)
+                if candidate_error < best_error:
+                    best_error = candidate_error
+                    best_indices = (selected_indices - {removed}) | {added}
+                    best_seconds = candidate_seconds
+
+        if best_indices is None:
             break
-        selected.append(item)
-        selected_seconds += _planning_duration(item.track)
-    return selected, selected_seconds
+        selected_indices = best_indices
+        selected_seconds = best_seconds
+
+    return (
+        [item for index, item in enumerate(ranked) if index in selected_indices],
+        selected_seconds,
+    )
 
 
 def _arc_targets(items: Sequence[_RankedTrack]) -> list[float]:
