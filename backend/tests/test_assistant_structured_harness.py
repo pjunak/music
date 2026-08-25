@@ -90,3 +90,29 @@ def test_harness_uses_task_specific_closed_schema_in_prompt_and_request() -> Non
     assert isinstance(accepted, dict)
     assert accepted["const"] is True
     assert '"const":true' in request.system_prompt
+
+
+def test_harness_rejects_example_invalidated_by_task_schema_transform() -> None:
+    def require_acceptance(schema: dict[str, object]) -> dict[str, object]:
+        properties = schema["properties"]
+        assert isinstance(properties, dict)
+        accepted = properties["accepted"]
+        assert isinstance(accepted, dict)
+        accepted["const"] = True
+        return schema
+
+    with pytest.raises(ValueError, match=r"\$\.accepted: value differs from const"):
+        build_structured_request(
+            StructuredTaskDefinition(
+                task_id="invalid-example-task",
+                role="A test role.",
+                objective="Return a validated decision.",
+                rules=("Use the closed schema.",),
+                untrusted_data=("value",),
+            ),
+            _Input(value="untrusted"),
+            _Output,
+            output_example={"schema_version": "test-output/v1", "accepted": False},
+            max_output_tokens=128,
+            schema_transform=require_acceptance,
+        )

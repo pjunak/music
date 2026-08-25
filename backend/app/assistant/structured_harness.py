@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from app.assistant.providers.execution import StructuredModelRequest
 
-STRUCTURED_HARNESS_CONTRACT = "assistant-structured-harness/v2"
+STRUCTURED_HARNESS_CONTRACT = "assistant-structured-harness/v3"
 # The provider schema name appends ``-response`` and must remain within the
 # 64-character limit used by strict OpenAI-compatible endpoints.
 _TASK_ID = re.compile(r"^[a-zA-Z0-9_-]{1,55}$")
@@ -89,6 +89,120 @@ def _system_prompt(
     )
 
 
+def _schema_error(path: str, message: str) -> ValueError:
+    return ValueError(
+        f"output example does not satisfy transformed schema at {path}: {message}"
+    )
+
+
+def _validate_schema_example(
+    value: object,
+    schema: dict[str, Any],
+    *,
+    root: dict[str, Any],
+    path: str = "$",
+) -> None:
+    reference = schema.get("$ref")
+    if reference is not None:
+        if not isinstance(reference, str) or not reference.startswith("#/$defs/"):
+            raise _schema_error(path, "unsupported schema reference")
+        name = reference.removeprefix("#/$defs/")
+        definitions = root.get("$defs")
+        target = definitions.get(name) if isinstance(definitions, dict) else None
+        if not isinstance(target, dict):
+            raise _schema_error(path, "schema reference cannot be resolved")
+        _validate_schema_example(value, target, root=root, path=path)
+
+    alternatives = schema.get("anyOf")
+    if isinstance(alternatives, list):
+        for alternative in alternatives:
+            if not isinstance(alternative, dict):
+                continue
+            try:
+                _validate_schema_example(value, alternative, root=root, path=path)
+                break
+            except ValueError:
+                continue
+        else:
+            raise _schema_error(path, "value does not match any allowed schema")
+
+    if "const" in schema and value != schema["const"]:
+        raise _schema_error(path, "value differs from const")
+    allowed = schema.get("enum")
+    if isinstance(allowed, list) and value not in allowed:
+        raise _schema_error(path, "value is outside enum")
+
+    expected_type = schema.get("type")
+    type_matches = {
+        "object": isinstance(value, dict),
+        "array": isinstance(value, list),
+        "string": isinstance(value, str),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "boolean": isinstance(value, bool),
+        "null": value is None,
+    }
+    if isinstance(expected_type, str) and not type_matches.get(expected_type, False):
+        raise _schema_error(path, f"expected {expected_type}")
+
+    if isinstance(value, dict):
+        required = schema.get("required", [])
+        if isinstance(required, list):
+            missing = [field for field in required if field not in value]
+            if missing:
+                raise _schema_error(path, f"missing required fields {missing}")
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            for field, item in value.items():
+                field_schema = properties.get(field)
+                if isinstance(field_schema, dict):
+                    _validate_schema_example(
+                        item,
+                        field_schema,
+                        root=root,
+                        path=f"{path}.{field}",
+                    )
+                elif schema.get("additionalProperties") is False:
+                    raise _schema_error(path, f"unexpected field {field}")
+    elif isinstance(value, list):
+        minimum = schema.get("minItems")
+        maximum = schema.get("maxItems")
+        if isinstance(minimum, int) and len(value) < minimum:
+            raise _schema_error(path, f"needs at least {minimum} items")
+        if isinstance(maximum, int) and len(value) > maximum:
+            raise _schema_error(path, f"allows at most {maximum} items")
+        if schema.get("uniqueItems") is True and len(
+            {_compact_json(item) for item in value}
+        ) != len(value):
+            raise _schema_error(path, "items must be unique")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                _validate_schema_example(
+                    item,
+                    item_schema,
+                    root=root,
+                    path=f"{path}[{index}]",
+                )
+    elif isinstance(value, str):
+        minimum = schema.get("minLength")
+        maximum = schema.get("maxLength")
+        pattern = schema.get("pattern")
+        if isinstance(minimum, int) and len(value) < minimum:
+            raise _schema_error(path, f"needs at least {minimum} characters")
+        if isinstance(maximum, int) and len(value) > maximum:
+            raise _schema_error(path, f"allows at most {maximum} characters")
+        if isinstance(pattern, str) and re.fullmatch(pattern, value) is None:
+            raise _schema_error(path, "does not match pattern")
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum = schema.get("minimum")
+        maximum = schema.get("maximum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            raise _schema_error(path, f"must be at least {minimum}")
+        if isinstance(maximum, (int, float)) and value > maximum:
+            raise _schema_error(path, f"must be at most {maximum}")
+
+
 def build_structured_request(
     definition: StructuredTaskDefinition,
     input_payload: BaseModel,
@@ -101,14 +215,16 @@ def build_structured_request(
     """Build one task request with a generated, locally validated output contract."""
 
     validated_example = output_model.model_validate(output_example)
+    example_payload = validated_example.model_dump(mode="json")
     output_schema = output_model.model_json_schema(mode="validation")
     if schema_transform is not None:
         output_schema = schema_transform(output_schema)
+    _validate_schema_example(example_payload, output_schema, root=output_schema)
     return StructuredModelRequest(
         system_prompt=_system_prompt(
             definition,
             output_schema=output_schema,
-            example=validated_example.model_dump(mode="json"),
+            example=example_payload,
         ),
         user_prompt=input_payload.model_dump_json(),
         max_output_tokens=max_output_tokens,

@@ -37,6 +37,10 @@ must never authorize a changed model.
   role no longer matches before execution or before saving the result.
 - Clear current certifications when a connection is reverified or role runtime
   settings change. Historical jobs remain available for diagnosis.
+- Include a content digest of the role's executable harness, prompt/schema code,
+  local preparation logic, and checked-in quality-suite bytes in the runtime
+  fingerprint. Human-readable version fragments remain useful documentation,
+  but a missed manual bump cannot leave an older certification current.
 - Use the checked-in `playlist-model-v1.json` suite for `playlist-quality-v1`.
   It includes the local safety baseline plus semantic-uplift and 100-candidate
   production-shape cases, with target-duration and selected-artist-diversity

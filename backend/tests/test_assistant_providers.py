@@ -29,6 +29,7 @@ from app.assistant.providers.execution import (
 from app.assistant.providers.schemas import ProviderConnectionUpdate
 from app.assistant.providers.service import (
     ProviderServiceError,
+    current_role_runtime_fingerprint,
     finish_role_conformance,
     finish_verification,
     prepare_role_conformance,
@@ -415,6 +416,26 @@ def test_failed_playlist_quality_is_a_completed_report_not_a_broken_job(
 
 def test_every_model_role_has_a_runtime_contract() -> None:
     assert set(MODEL_ROLE_RUNTIME_CONTRACTS) == set(MODEL_ROLE_BY_ID)
+
+
+def test_role_fingerprint_includes_executable_contract_digest(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enabled_playlist_role(auth_client, monkeypatch)
+    with SessionLocal() as db:
+        before = current_role_runtime_fingerprint(db, "playlist_planner")
+
+    monkeypatch.setattr(
+        "app.assistant.providers.service.role_executable_contract_digest",
+        lambda _role_id: "f" * 64,
+    )
+    with SessionLocal() as db:
+        after = current_role_runtime_fingerprint(db, "playlist_planner")
+
+    assert before is not None
+    assert after is not None
+    assert after != before
 
 
 def test_status_lists_supported_adapters_and_roles(auth_client: TestClient) -> None:

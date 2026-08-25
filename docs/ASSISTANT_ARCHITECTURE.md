@@ -36,8 +36,10 @@ remain authoritative for those claims.
   files, embedded metadata, or database mood tags directly.
 - Connection verification, role conformance, quality certification, and live-run consent are
   separate gates. Passing one does not imply another.
-- Runtime fingerprints include the shared harness and role contract. Relevant changes make saved
-  conformance and quality results stale instead of silently reusing them.
+- Runtime fingerprints include the shared harness and role contract plus a SHA-256 digest of each
+  role's executable prompt/schema modules and checked-in evaluation suites. Relevant source or
+  suite changes make saved conformance and quality results stale even when a developer forgets to
+  advance the human-readable contract fragment.
 - Provider jobs are non-restartable after uncertain external cost. Usage is checkpointed after
   every attempt, including attempts that later fail.
 
@@ -90,7 +92,7 @@ table, its evaluation suite, disclosure copy, and tests together.
 
 Shared contracts:
 
-- harness: `assistant-structured-harness/v2`
+- harness: `assistant-structured-harness/v3`
 - provider conformance: `assistant-provider-conformance/v3`
 - standard adapter: `openai-compatible/v1`
 - strict-schema adapter: `openai-compatible-json-schema/v1`

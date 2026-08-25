@@ -11,6 +11,9 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.assistant.providers.contract_fingerprint import (
+    role_executable_contract_digest,
+)
 from app.assistant.providers.credentials import (
     CredentialVault,
     CredentialVaultError,
@@ -755,6 +758,7 @@ def _role_runtime_fingerprint(
             _connection_fingerprint(connection),
             row.role_id,
             MODEL_ROLE_RUNTIME_CONTRACTS[row.role_id],
+            role_executable_contract_digest(row.role_id),
             row.model_id,
             str(row.timeout_seconds),
             str(row.max_output_tokens),
