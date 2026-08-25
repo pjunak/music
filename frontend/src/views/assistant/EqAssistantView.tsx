@@ -58,7 +58,7 @@ function unavailableMessage(reasonCode: string | null): string {
   }
 }
 
-interface EqAssistantViewProps {
+export interface EqAssistantViewProps {
   embedded?: boolean;
   onCreated?: (presetId: string) => void | Promise<void>;
 }

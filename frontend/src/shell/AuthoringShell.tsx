@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 
 import { ImportIcon } from "@/components/icons";
+import { lazyNamed } from "@/core/lazyNamed";
 import { usePlayerStore } from "@/core/playerStore";
 
-import { AuthoringImportModal } from "./AuthoringImportModal";
+import { RouteSpinner } from "./routeGuards";
 import { SectionNav } from "./SectionNav";
+
+const AuthoringImportModal = lazyNamed(
+  () => import("./AuthoringImportModal"),
+  (module) => module.AuthoringImportModal,
+);
 
 const AUTHORING_TABS = [
   { to: "playlists", label: "Playlists" },
@@ -48,13 +54,15 @@ export function AuthoringShell() {
           </button>
         }
       />
-      {activeModeId !== null ? (
-        <AuthoringImportModal
-          open={importOpen}
-          targetModeId={activeModeId}
-          onClose={() => setImportOpen(false)}
-          onImported={imported}
-        />
+      {importOpen && activeModeId !== null ? (
+        <Suspense fallback={<RouteSpinner />}>
+          <AuthoringImportModal
+            open
+            targetModeId={activeModeId}
+            onClose={() => setImportOpen(false)}
+            onImported={imported}
+          />
+        </Suspense>
       ) : null}
     </>
   );

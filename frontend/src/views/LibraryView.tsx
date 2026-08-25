@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, Dispatch, DragEvent, MouseEvent, SetStateAction } from "react";
 
 import { Breadcrumb } from "@/components/Breadcrumb";
 import type { BreadcrumbItem } from "@/components/Breadcrumb";
-import { CleanupDialog } from "@/components/CleanupDialog";
 import { confirmDialog } from "@/components/confirmDialog";
 import { uploadConflictDialog } from "@/components/conflictDialog";
 import { EmptyState } from "@/components/EmptyState";
@@ -12,7 +11,6 @@ import { FolderTree } from "@/components/FolderTree";
 import type { TreeFolder } from "@/components/FolderTree";
 import { IconButton } from "@/components/IconButton";
 import { LibrarySidebarRail } from "@/components/LibrarySidebarRail";
-import { MoodTaggingDialog } from "@/components/MoodTaggingDialog";
 import {
   EditIcon,
   FolderOpenIcon,
@@ -47,6 +45,17 @@ import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
 import { useDebouncedValue } from "@/core/useDebouncedValue";
 import { wsClient } from "@/core/ws";
+import { lazyNamed } from "@/core/lazyNamed";
+import { RouteSpinner } from "@/shell/routeGuards";
+
+const CleanupDialog = lazyNamed(
+  () => import("@/components/CleanupDialog"),
+  (module) => module.CleanupDialog,
+);
+const MoodTaggingDialog = lazyNamed(
+  () => import("@/components/MoodTaggingDialog"),
+  (module) => module.MoodTaggingDialog,
+);
 
 type Root = "music" | "sfx";
 
@@ -191,21 +200,25 @@ export function LibraryView() {
       </header>
 
       {cleanupOpen && root === "music" ? (
-        <CleanupDialog
-          path={path}
-          checkedIds={[...checked]}
-          onClose={() => setCleanupOpen(false)}
-          onApplied={() => setRefreshKey((k) => k + 1)}
-        />
+        <Suspense fallback={<RouteSpinner />}>
+          <CleanupDialog
+            path={path}
+            checkedIds={[...checked]}
+            onClose={() => setCleanupOpen(false)}
+            onApplied={() => setRefreshKey((k) => k + 1)}
+          />
+        </Suspense>
       ) : null}
 
       {moodTaggingOpen && root === "music" ? (
-        <MoodTaggingDialog
-          path={path}
-          checkedIds={[...checked]}
-          onClose={() => setMoodTaggingOpen(false)}
-          onChanged={() => setRefreshKey((key) => key + 1)}
-        />
+        <Suspense fallback={<RouteSpinner />}>
+          <MoodTaggingDialog
+            path={path}
+            checkedIds={[...checked]}
+            onClose={() => setMoodTaggingOpen(false)}
+            onChanged={() => setRefreshKey((key) => key + 1)}
+          />
+        </Suspense>
       ) : null}
 
       {root === "music" ? (

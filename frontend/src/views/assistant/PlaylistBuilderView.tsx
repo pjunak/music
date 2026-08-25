@@ -81,7 +81,7 @@ function modelUnavailableMessage(reasonCode: string | null): string {
   }
 }
 
-interface PlaylistBuilderViewProps {
+export interface PlaylistBuilderViewProps {
   embedded?: boolean;
   onCreated?: (playlistName: string) => void | Promise<void>;
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
@@ -16,38 +16,34 @@ import { useSfxHotkeys } from "@/core/useSfxHotkeys";
 import { useUiTransient } from "@/core/uiTransient";
 import { wsClient } from "@/core/ws";
 import { ControlsView } from "@/views/ControlsView";
-import { CuesView } from "@/views/CuesView";
-import { DiagnosticsView } from "@/views/DiagnosticsView";
-import { InterruptsView } from "@/views/InterruptsView";
-import { LibraryView } from "@/views/LibraryView";
 import { PlayerView } from "@/views/PlayerView";
-import { PlaylistsView } from "@/views/PlaylistsView";
-import { PresetsView } from "@/views/PresetsView";
-import { SettingsView } from "@/views/SettingsView";
-import { SoundboardsView } from "@/views/SoundboardsView";
-import { LibraryAnalysisView } from "@/views/assistant/LibraryAnalysisView";
-import { LibraryContextView } from "@/views/assistant/LibraryContextView";
-import { LibraryTagsView } from "@/views/assistant/LibraryTagsView";
-import { PlaylistBuilderView } from "@/views/assistant/PlaylistBuilderView";
-import { EqAssistantView } from "@/views/assistant/EqAssistantView";
-import { TagVocabularyView } from "@/views/assistant/TagVocabularyView";
 
 import {
+  AssistantAiSetupView,
   AssistantSettingsShell,
   AssistantShell,
+  AuthoringShell,
+  CuesView,
+  DiagnosticsView,
+  EqAssistantView,
+  InterruptsView,
+  LibraryAnalysisView,
+  LibraryContextView,
+  LibraryTagsView,
+  LibraryView,
   MoodLibraryShell,
-} from "./AssistantShell";
-import { AuthoringShell } from "./AuthoringShell";
+  PlaylistBuilderView,
+  PlaylistsView,
+  PresetsView,
+  SettingsView,
+  SoundboardsView,
+  TagVocabularyView,
+} from "./lazyRouteViews";
 import { Header } from "./Header";
 import { indexTarget } from "./indexTarget";
 import { LoginModal } from "./LoginModal";
 import { NowPlayingBar } from "./NowPlayingBar";
 import { LoginRedirect, Protected, RouteSpinner } from "./routeGuards";
-
-const AssistantAiSetupView = lazy(async () => {
-  const module = await import("@/views/assistant/AssistantAiSetupView");
-  return { default: module.AssistantAiSetupView };
-});
 
 // Old paths kept alive for bookmarks/external links — each redirects into the
 // new IA. The Modes sub-tab is gone (mode CRUD moved to the header popup), so
@@ -134,7 +130,8 @@ export default function AppShell() {
             while the Header / NowPlayingBar / AudioEngine stay mounted — so a
             buggy panel can't kill the whole session (or the music). */}
         <ErrorBoundary>
-        <Routes>
+        <Suspense fallback={<RouteSpinner />}>
+          <Routes>
           {/* `/` is the TV view for guests (the bookmark-on-a-room-display
               use case). For authed users it redirects to /console — the bare
               URL should land the operator on their workspace, not the
@@ -213,9 +210,7 @@ export default function AppShell() {
               <Route
                 path="models"
                 element={
-                  <Suspense fallback={<RouteSpinner />}>
-                    <AssistantAiSetupView />
-                  </Suspense>
+                  <AssistantAiSetupView />
                 }
               />
               <Route path="vocabulary" element={<TagVocabularyView />} />
@@ -253,7 +248,8 @@ export default function AppShell() {
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </Suspense>
         </ErrorBoundary>
       </main>
       <NowPlayingBar />
