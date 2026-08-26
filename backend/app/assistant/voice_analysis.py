@@ -8,6 +8,8 @@ the result into a semantic tag.
 
 import hashlib
 import math
+import subprocess
+import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -19,12 +21,23 @@ from app.core.config import get_settings
 VOICE_ANALYZER_ID = "essentia-musicnn-voice/v1"
 VOICE_MODEL_FILENAME = "voice_instrumental-musicnn-msd-2.pb"
 VOICE_MODEL_SHA256 = "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a"
+_RUNTIME_PROBE_TIMEOUT_SECONDS = 30.0
+_RUNTIME_PROBE_CODE = """\
+from essentia import standard
+
+names = ("MonoLoader", "TensorflowPredictMusiCNN")
+raise SystemExit(0 if all(callable(getattr(standard, name, None)) for name in names) else 1)
+"""
 
 
 @dataclass(frozen=True)
 class VoiceAnalysis:
     summary: dict[str, object]
     stage: dict[str, object]
+
+
+class _VoiceRuntimeUnavailable(Exception):
+    pass
 
 
 def _not_classified() -> VoiceAnalysis:
@@ -80,14 +93,28 @@ def _model_file_hash(path: Path) -> str:
 
 @lru_cache(maxsize=1)
 def _runtime_available() -> bool:
+    """Probe the native runtime without retaining TensorFlow in the web process.
+
+    Importing ``essentia.standard`` loads the bundled TensorFlow runtime and a
+    substantial native-memory footprint.  Status and source-signature checks
+    run in the parent FastAPI process, which never performs track inference;
+    keeping that import there duplicates the memory retained by every analysis
+    worker.  A short-lived interpreter gives the same import/capability check
+    while releasing its native memory when the probe exits.
+    """
+
     try:
-        from essentia import standard  # type: ignore[import-not-found]
-    except (ImportError, OSError):
+        result = subprocess.run(
+            [sys.executable, "-c", _RUNTIME_PROBE_CODE],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_RUNTIME_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return False
-    return all(
-        callable(getattr(standard, name, None))
-        for name in ("MonoLoader", "TensorflowPredictMusiCNN")
-    )
+    return result.returncode == 0
 
 
 def voice_analyzer_signature() -> str | None:
@@ -188,10 +215,13 @@ def _classification_note(voice_score: float, vocal_coverage: float) -> str:
 @lru_cache(maxsize=2)
 def _load_predictor(model_path: str, model_hash: str) -> tuple[Callable[..., Any], Any]:
     del model_hash
-    from essentia.standard import (  # type: ignore[import-not-found]
-        MonoLoader,
-        TensorflowPredictMusiCNN,
-    )
+    try:
+        from essentia.standard import (  # type: ignore[import-not-found]
+            MonoLoader,
+            TensorflowPredictMusiCNN,
+        )
+    except (ImportError, OSError) as exc:
+        raise _VoiceRuntimeUnavailable from exc
 
     predictor = TensorflowPredictMusiCNN(
         graphFilename=model_path,
@@ -237,17 +267,18 @@ def analyze_voice(
             "unsupported_model",
             "The configured voice model does not match the supported classifier checksum.",
         )
-    if not _runtime_available():
-        return _unavailable(
-            "runtime_missing",
-            "The supported voice model is configured, but the optional Essentia runtime is missing.",
-        )
-
     cancellation_check = check_cancelled or (lambda: None)
     cancellation_check()
     try:
         predictions = _run_essentia_model(path, model_path, model_hash)
         voice_score, vocal_coverage, window_count = _summarize_predictions(predictions)
+    except _VoiceRuntimeUnavailable as exc:
+        cause = exc.__cause__
+        return _unavailable(
+            "runtime_missing",
+            "The supported voice model is configured, but the optional Essentia runtime is missing.",
+            error_type=type(cause).__name__ if cause is not None else None,
+        )
     except Exception as exc:  # Optional stage: retain the rest of the factual context.
         return _unavailable(
             "inference_failed",

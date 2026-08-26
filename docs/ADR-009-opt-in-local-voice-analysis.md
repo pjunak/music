@@ -40,6 +40,11 @@ build the `voice` extra, obtain the model under its license, verify the pinned S
 read-only, and set `ASSISTANT_VOICE_MODEL_PATH`. The base application continues to report
 `not_classified`.
 
+Runtime readiness and source-signature checks execute the Essentia import in a short-lived Python
+process. The parent FastAPI process does not perform inference and must not retain its own
+TensorFlow copy merely to render deployment status. Analysis workers import and cache the predictor
+only when they process a configured track.
+
 The path-free classifier/model/runtime identity is part of each context source signature. Enabling,
 disabling, installing, removing, or changing the model makes affected rows stale and requires the
 normal context rebuild. A model or runtime failure produces an optional `unavailable` voice stage;

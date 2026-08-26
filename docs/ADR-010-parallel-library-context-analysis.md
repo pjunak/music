@@ -6,6 +6,14 @@
 
 **Deciders:** Project maintainer
 
+**Implementation update (2026-08-27):** The first live three-worker run with voice inference
+reached the 4 GB cgroup ceiling and a native worker terminated with a general-protection fault. The
+kernel did not invoke the OOM killer, but `memory.events` recorded repeated `max` events. Readiness
+and source-signature checks had retained an unnecessary Essentia/TensorFlow copy in the FastAPI
+parent before the three worker copies loaded. Runtime preflight now executes in a disposable
+interpreter so only analysis workers retain TensorFlow. The three-worker/4 GB target requires a
+live rerun and peak-memory verification after this correction.
+
 ## Context
 
 Whole-track context analysis performs sample-by-sample accumulation, repeated spectral transforms,
@@ -67,6 +75,8 @@ runtime and keeps extension failures contained to a worker result.
   deterministic and independently checkpointed.
 - Each process may load its own Essentia/TensorFlow runtime and model cache, increasing peak memory.
   Worker count and container memory therefore remain explicit deployment choices.
+- Runtime readiness is probed in a disposable interpreter. The parent FastAPI process does not
+  retain a redundant TensorFlow copy before the analysis workers start.
 - Cancellation during native voice inference can wait for that call to return; streaming decode and
   FFmpeg loudness work stop cooperatively. A future isolated inference service may tighten this
   boundary if real-library measurements show it is needed.
