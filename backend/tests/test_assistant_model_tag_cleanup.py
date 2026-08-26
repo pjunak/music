@@ -10,6 +10,7 @@ from sqlalchemy import delete
 
 from app.assistant.model_evaluation import TAG_CLEANUP_QUALITY_JOB_KIND
 from app.assistant.model_tag_cleanup import (
+    MODEL_TAG_CLEANUP_BATCH_SIZE,
     MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
     ModelTagCleanupError,
     evaluate_model_tag_cleanup,
@@ -440,6 +441,53 @@ def test_cleanup_model_receives_only_remaining_result_capacity() -> None:
     assert observed_slots == [99]
 
 
+def test_cleanup_batches_at_bounded_structured_output_size() -> None:
+    observed_batches: list[list[str]] = []
+
+    def execute(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        sources = payload["candidate_sources"]
+        source_ids = [source["source_id"] for source in sources]
+        observed_batches.append(source_ids)
+        assert len(source_ids) <= MODEL_TAG_CLEANUP_BATCH_SIZE
+        assert request.output_schema is not None
+        output_properties = request.output_schema["properties"]
+        assert isinstance(output_properties, dict)
+        decisions_schema = output_properties["decisions"]
+        assert isinstance(decisions_schema, dict)
+        assert decisions_schema["minItems"] == len(source_ids)
+        assert decisions_schema["maxItems"] == len(source_ids)
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
+                "decisions": [
+                    {
+                        "source_id": source_id,
+                        "target_tag_id": None,
+                        "confidence": "low",
+                        "reason": "No complete semantic match",
+                    }
+                    for source_id in source_ids
+                ],
+            },
+        )
+
+    suggestions = suggest_model_tag_cleanup(
+        [
+            TagUsage(tag=f"unresolved fixture {index:02d}", track_count=1)
+            for index in range(1, 42)
+        ],
+        execute,
+    )
+
+    assert suggestions == ()
+    assert [len(batch) for batch in observed_batches] == [20, 20, 1]
+    assert observed_batches[0][0] == "source-001"
+    assert observed_batches[-1] == ["source-041"]
+
+
 def test_reference_cleanup_model_passes_fixed_quality_suite() -> None:
     suite = load_tag_cleanup_quality_suite(_SUITE_PATH)
     result = evaluate_model_tag_cleanup(
@@ -490,7 +538,7 @@ def test_tag_cleanup_quality_job_persists_certification_and_usage(
     assert evaluations.status_code == 200, evaluations.text
     assert evaluations.json()[0]["status"] == "passed"
     assert evaluations.json()[0]["suite_id"] == (
-        "controlled-vocabulary-cleanup-baseline-v5"
+        "controlled-vocabulary-cleanup-baseline-v6"
     )
 
 

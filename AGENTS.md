@@ -278,7 +278,7 @@ Runtime data lives outside the image.
   `assistant.model-tag-cleanup`. Run declared-alias and deterministic spelling/plural cleanup first and make no
   provider call when it resolves every candidate. Require the exact current
   `tag-cleanup-quality-v1` pass and versioned disclosure consent, allow at most 500 catalog tags,
-  make the provider job non-restartable, batch at most 50 unresolved names per call, and send only
+  make the provider job non-restartable, batch at most 20 unresolved names per call, and send only
   source IDs/names and usage counts plus canonical vocabulary IDs, names, groups, and definitions.
   Require one ordered canonical-ID-or-null decision per source. Bound overlong reason text locally,
   but never repair source order, source or target IDs, confidence, missing decisions, or unexpected

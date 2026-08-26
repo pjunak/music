@@ -110,7 +110,7 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   path can write a playlist or
   manual tag directly. Tag cleanup resolves declared aliases and unambiguous spelling/plural cases
   locally first, then sends only unresolved source IDs/names and usage counts plus canonical ID
-  definitions in batches of at most 50. The model returns exactly one canonical-ID-or-null decision
+  definitions in batches of at most 20. The model returns exactly one canonical-ID-or-null decision
   per source. Local-only cleanup makes no provider call, and every stored
   suggestion identifies whether it came from a local rule or the model. The built-in groups separate
   physical setting, period feel, scene, and emotional mood; period feel describes the era the track

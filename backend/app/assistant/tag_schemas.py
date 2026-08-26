@@ -188,7 +188,7 @@ class ModelTagCleanupAvailability(StrictTagModel):
     catalog_signature: str = Field(pattern=r"^[a-f0-9]{64}$")
     vocabulary_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     manual_tags: int = Field(ge=0)
-    estimated_provider_requests: int = Field(ge=0, le=10)
+    estimated_provider_requests: int = Field(ge=0, le=25)
     disclosure: ModelTagCleanupDisclosure
 
 

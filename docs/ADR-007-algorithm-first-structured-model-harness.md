@@ -114,7 +114,7 @@ indexed metadata / local audio / operator request
   are not retried, and actual attempts remain usage-checkpointed.
 - Library scale is contained before the provider boundary: at most 100 playlist
   candidates, 20 tagging tracks per batch, and 500 catalog tags in cleanup batches of
-  at most 50 unresolved names. Deterministic cleanup can reduce those payloads or avoid
+  at most 20 unresolved names. Deterministic cleanup can reduce those payloads or avoid
   provider calls completely.
 - The tagging quality suite submits up to the live maximum of 20 synthetic tracks per request. This
   exercises live-size structured output while evaluating and reporting every scenario

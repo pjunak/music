@@ -123,7 +123,7 @@ TAG_CLEANUP_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic canonical-ID and no-match tag-cleanup cases through "
         "this model. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-cleanup-baseline-v5",
+    suite_id="controlled-vocabulary-cleanup-baseline-v6",
     suite_path=_TAG_CLEANUP_SUITE_PATH,
     job_kind=TAG_CLEANUP_QUALITY_JOB_KIND,
 )

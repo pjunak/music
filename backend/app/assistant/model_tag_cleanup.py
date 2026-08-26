@@ -44,7 +44,7 @@ MODEL_TAG_CLEANUP_ENGINE_ID: Literal["model-tag-cleanup/v3"] = (
 )
 MAX_MODEL_CLEANUP_TAGS = 500
 MAX_MODEL_CLEANUP_SUGGESTIONS = 100
-MODEL_TAG_CLEANUP_BATCH_SIZE = 50
+MODEL_TAG_CLEANUP_BATCH_SIZE = 20
 _MAX_MODEL_OUTPUT_TOKENS = 8_000
 _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9_]{1,64}$")
 _DEFAULT_TAG_SET = default_tag_vocabulary_snapshot().names
@@ -270,6 +270,7 @@ _TAG_CLEANUP_TASK = StructuredTaskDefinition(
         "Return every candidate source_id exactly once and no other source IDs. Preserve the input order.",
         "target_tag_id must be an exact ID from canonical_tags or null. Never return a tag name, source text, or invented ID as the target.",
         "The server already handled declared aliases and unambiguous spelling and plurals. Choose a target only for a clear semantic synonym that preserves useful distinctions.",
+        "The target definition must cover the complete source meaning, not merely one word. A multiword source may map when one definition covers all meaningful parts; otherwise use null instead of discarding a mood, period, setting, scene, or other modifier.",
         "Do not merge related but meaningfully distinct settings, scenes, or moods. Use null whenever track context would be needed to decide safely.",
         "Track counts indicate adoption only; popularity does not make two meanings equivalent. Definitions are authoritative when labels could overlap.",
         "Do not stop after the first match. Evaluate each source independently even when earlier sources map to the same target.",

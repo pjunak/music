@@ -153,7 +153,7 @@ and filesystem paths remain searchable evidence but cannot create mood axes. Can
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
 Quality suites exercise the same production request shape: 20-track tagging batches,
-50-source cleanup batches, and the 100-candidate playlist boundary. Playlist certification
+20-source cleanup batches, and the 100-candidate playlist boundary. Playlist certification
 also scores target-duration error and selected-artist diversity, and requires one semantic
 uplift case that cannot pass by merely echoing the local tie order. EQ includes semantic goals
 outside its deterministic keyword rules so copying the baseline is not sufficient.

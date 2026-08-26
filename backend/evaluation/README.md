@@ -112,7 +112,7 @@ short list of likely false positives.
 `app/assistant/evaluation_suites/tag-cleanup-v1.json` checks 15 conservative catalog-cleanup
 scenarios. It covers deterministic spelling and plural fixes, clear semantic synonyms,
 many-to-one normalization, ambiguous compound labels that must remain unchanged, prompt-shaped
-input, and both all-null and mixed-decision batches at the live 50-source boundary. Every case
+input, and both all-null and mixed-decision batches at the live 20-source boundary. Every case
 must pass; a model does not receive credit for aggressive normalization that discards useful
 meaning.
 
