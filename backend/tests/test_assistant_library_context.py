@@ -228,14 +228,30 @@ def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
     track_ids = [seeded_track_id, *extra_seeded_track_ids]
     captured: dict[str, object] = {}
 
-    def analyze_in_processes(tasks, *, max_workers, check_cancelled):  # type: ignore[no-untyped-def]
+    def analyze_in_processes(  # type: ignore[no-untyped-def]
+        tasks,
+        *,
+        max_workers,
+        max_tasks_per_worker,
+        check_cancelled,
+    ):
         captured["track_ids"] = [task.track_id for task in tasks]
         captured["max_workers"] = max_workers
+        captured["max_tasks_per_worker"] = max_tasks_per_worker
         check_cancelled()
         for task in reversed(tasks):
             yield ContextAnalysisResult(track_id=task.track_id, document=_document())
 
     monkeypatch.setattr(get_settings(), "assistant_library_context_workers", 3)
+    monkeypatch.setattr(
+        get_settings(),
+        "assistant_voice_model_path",
+        Path("configured-voice-model.pb"),
+    )
+    monkeypatch.setattr(
+        "app.assistant.library_context.voice_analyzer_signature",
+        lambda: "essentia-musicnn-voice/v1:model:runtime-present",
+    )
     monkeypatch.setattr(
         "app.assistant.library_context.analyze_tracks_in_processes",
         analyze_in_processes,
@@ -258,7 +274,11 @@ def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
     assert finished["result"]["performance"]["worker_seconds"] == 24.0
     assert finished["result"]["performance"]["dominant_stage"] == "spectrum"
     assert finished["result"]["performance"]["stage_seconds"]["spectrum"] == 8.0
-    assert captured == {"track_ids": track_ids, "max_workers": 3}
+    assert captured == {
+        "track_ids": track_ids,
+        "max_workers": 3,
+        "max_tasks_per_worker": 4,
+    }
 
     with SessionLocal() as db:
         rows = db.query(TrackContext).filter(TrackContext.track_id.in_(track_ids)).all()

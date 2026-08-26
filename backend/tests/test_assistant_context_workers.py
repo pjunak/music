@@ -20,6 +20,10 @@ def _timed_probe(value: int) -> tuple[int, float, float, int]:
     return os.getpid(), started, time.monotonic(), value
 
 
+def _pid_probe(value: int) -> tuple[int, int]:
+    return os.getpid(), value
+
+
 def _cancellable_probe(value: int) -> int:
     while True:
         _check_worker_cancelled()
@@ -81,6 +85,26 @@ def test_process_map_signals_workers_before_waiting_for_shutdown() -> None:
             )
         )
     assert time.monotonic() - started < 5
+
+
+def test_process_map_recycles_workers_after_bounded_tasks() -> None:
+    results = list(
+        _process_map_unordered(
+            _pid_probe,
+            list(range(10)),
+            max_workers=2,
+            max_tasks_per_worker=4,
+            check_cancelled=lambda: None,
+        )
+    )
+
+    tasks_by_pid: dict[int, int] = {}
+    for process_id, _value in results:
+        tasks_by_pid[process_id] = tasks_by_pid.get(process_id, 0) + 1
+
+    assert sorted(value for _process_id, value in results) == list(range(10))
+    assert len(tasks_by_pid) >= 3
+    assert max(tasks_by_pid.values()) <= 4
 
 
 def test_audio_context_documents_cross_the_process_boundary(tmp_path: Path) -> None:

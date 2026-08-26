@@ -76,6 +76,7 @@ def _process_map_unordered[TaskT, ResultT](
     tasks: Sequence[TaskT],
     *,
     max_workers: int,
+    max_tasks_per_worker: int | None = None,
     check_cancelled: Callable[[], None],
 ) -> Iterator[ResultT]:
     """Run a bounded spawn-based process map and propagate cancellation.
@@ -84,10 +85,14 @@ def _process_map_unordered[TaskT, ResultT](
     makes cancellation responsive, and avoids forking the already-threaded
     FastAPI process. Workers receive a shared event so the audio decoder can
     stop cooperatively while the parent retains ownership of all persistence.
+    Native analyzers may retain allocations between tracks, so callers can
+    recycle a worker after a bounded number of completed tasks.
     """
 
     if max_workers < 1:
         raise ValueError("max_workers must be at least one")
+    if max_tasks_per_worker is not None and max_tasks_per_worker < 1:
+        raise ValueError("max_tasks_per_worker must be at least one")
     if not tasks:
         return
 
@@ -98,6 +103,7 @@ def _process_map_unordered[TaskT, ResultT](
         mp_context=process_context,
         initializer=_initialize_worker,
         initargs=(cancel_event,),
+        max_tasks_per_child=max_tasks_per_worker,
     )
     pending: dict[Future[ResultT], None] = {}
     task_iterator = iter(tasks)
@@ -136,11 +142,13 @@ def analyze_tracks_in_processes(
     tasks: Sequence[ContextAnalysisTask],
     *,
     max_workers: int,
+    max_tasks_per_worker: int | None = None,
     check_cancelled: Callable[[], None],
 ) -> Iterator[ContextAnalysisResult]:
     yield from _process_map_unordered(
         _analyze_track,
         tasks,
         max_workers=max_workers,
+        max_tasks_per_worker=max_tasks_per_worker,
         check_cancelled=check_cancelled,
     )

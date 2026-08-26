@@ -36,6 +36,7 @@ from app.models.track_context import TrackContext
 LIBRARY_CONTEXT_JOB_KIND = "assistant.library-context-analysis"
 LOCAL_CONTEXT_ANALYZER_ID: Literal["local-context/v2"] = "local-context/v2"
 _FAILURE_SAMPLE_LIMIT = 20
+_VOICE_TRACKS_PER_WORKER = 4
 
 
 @dataclass(frozen=True)
@@ -394,8 +395,14 @@ def run_library_context_analysis(
         work.append(track)
     starting = max(context.progress_current, checkpointed)
     total = starting + len(work)
-    configured_workers = get_settings().assistant_library_context_workers
+    settings = get_settings()
+    configured_workers = settings.assistant_library_context_workers
     active_workers = min(configured_workers, len(work)) if work else 0
+    max_tasks_per_worker = (
+        _VOICE_TRACKS_PER_WORKER
+        if settings.assistant_voice_model_path is not None and len(work) > 1
+        else None
+    )
     context.update_progress(
         starting,
         total,
@@ -405,7 +412,7 @@ def run_library_context_analysis(
             + (f" with {active_workers} workers" if active_workers else "")
         ),
     )
-    if active_workers == 1:
+    if len(work) == 1:
         for processed, track in enumerate(work, start=1):
             context.check_cancelled()
             signature = signatures[track.id]
@@ -428,7 +435,7 @@ def run_library_context_analysis(
                 phase="Building track context",
                 message=f"Processed {current} of {total} tracks",
             )
-    elif active_workers > 1:
+    elif active_workers > 0:
         tracks_by_id = {track.id: track for track in work}
         tasks = [
             ContextAnalysisTask(
@@ -440,6 +447,7 @@ def run_library_context_analysis(
         results = analyze_tracks_in_processes(
             tasks,
             max_workers=active_workers,
+            max_tasks_per_worker=max_tasks_per_worker,
             check_cancelled=context.check_cancelled,
         )
         for processed, result in enumerate(results, start=1):

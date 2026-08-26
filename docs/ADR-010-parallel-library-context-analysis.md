@@ -11,7 +11,10 @@ reached the 4 GB cgroup ceiling and a native worker terminated with a general-pr
 kernel did not invoke the OOM killer, but `memory.events` recorded repeated `max` events. Readiness
 and source-signature checks had retained an unnecessary Essentia/TensorFlow copy in the FastAPI
 parent before the three worker copies loaded. Runtime preflight now executes in a disposable
-interpreter so only analysis workers retain TensorFlow. The three-worker/4 GB target requires a
+interpreter so only analysis workers retain TensorFlow. A second live run still reached the ceiling
+after 14 tracks, indicating retained native allocations inside the persistent workers. Voice-enabled
+analysis workers now recycle after at most four tracks so the operating system reclaims their full
+native heaps before the observed fifth-track failure. The three-worker/4 GB target requires another
 live rerun and peak-memory verification after this correction.
 
 ## Context
@@ -77,6 +80,8 @@ runtime and keeps extension failures contained to a worker result.
   Worker count and container memory therefore remain explicit deployment choices.
 - Runtime readiness is probed in a disposable interpreter. The parent FastAPI process does not
   retain a redundant TensorFlow copy before the analysis workers start.
+- Voice-enabled workers recycle after at most four tracks. This adds bounded process/model startup
+  overhead but prevents native TensorFlow allocations from accumulating across the whole library.
 - Cancellation during native voice inference can wait for that call to return; streaming decode and
   FFmpeg loudness work stop cooperatively. A future isolated inference service may tighten this
   boundary if real-library measurements show it is needed.
