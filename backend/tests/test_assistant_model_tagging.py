@@ -1055,10 +1055,10 @@ def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
         {"succeeded"},
     )
     evaluation = failed_case_result["result"]["evaluation"]
-    assert failed_case_result["progress_current"] == 56
-    assert failed_case_result["progress_total"] == 56
+    assert failed_case_result["progress_current"] == 58
+    assert failed_case_result["progress_total"] == 58
     assert failed_case_result["progress_message"] == (
-        "Completed 56 of 56 scored attempts across 49 scored scenarios"
+        "Completed 58 of 58 scored attempts across 50 scored scenarios"
     )
     assert evaluation["passed"] is True
     assert [case["id"] for case in evaluation["cases"] if not case["passed"]] == [
@@ -1089,8 +1089,8 @@ def test_failed_mood_scenarios_retest_only_failures_and_merge_result(
 
     assert calls == [[7]]
     assert finished["result"]["evaluation"]["passed"] is True
-    assert finished["result"]["evaluation"]["passed_cases"] == 49
-    assert finished["result"]["evaluation"]["total_cases"] == 49
+    assert finished["result"]["evaluation"]["passed_cases"] == 50
+    assert finished["result"]["evaluation"]["total_cases"] == 50
     assert finished["result"]["usage"]["attempted_requests"] == 1
     assert finished["result"]["execution_scope"] == "diagnostic_retest"
 
@@ -1155,9 +1155,9 @@ def test_model_tagger_rejects_non_library_relative_paths(library_path: str) -> N
 def test_quality_suite_covers_missing_and_time_aware_context() -> None:
     suite = load_tag_quality_suite(_SUITE_PATH)
 
-    assert suite.schema_version == "assistant-music-tagger-evaluation/v6"
-    assert suite.id == "controlled-vocabulary-tagging-baseline-v16"
-    assert len(suite.cases) == 49
+    assert suite.schema_version == "assistant-music-tagger-evaluation/v7"
+    assert suite.id == "controlled-vocabulary-tagging-baseline-v17"
+    assert len(suite.cases) == 50
     assert any(case.track.context_evidence is None for case in suite.cases)
     temporal = {
         case.id: case
@@ -1169,6 +1169,7 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
         "quiet-intro-urgent-escape",
         "slow-tempo-high-intensity-siege",
         "fast-tempo-light-market-dance",
+        "voice-score-does-not-invent-context",
     } <= set(temporal)
     escape = temporal["quiet-intro-urgent-escape"].track.context_evidence
     assert escape is not None
@@ -1206,15 +1207,28 @@ def test_quality_suite_covers_missing_and_time_aware_context() -> None:
         "temple",
     ]
     assert by_id["insufficient-evidence"].allowed_confidences == ["low"]
+    assert by_id["insufficient-evidence"].maximum_tags == 0
     assert by_id[
         "signal-evidence-does-not-invent-context"
     ].allowed_confidences == ["medium", "low"]
+    assert by_id[
+        "signal-evidence-does-not-invent-context"
+    ].forbidden_groups == ["setting", "period", "scene"]
+    voice = temporal["voice-score-does-not-invent-context"].track.context_evidence
+    assert voice is not None
+    assert voice.voice.status == "classified"
+    assert voice.voice.voice_probability == 0.91
+    assert by_id["voice-score-does-not-invent-context"].forbidden_groups == [
+        "setting",
+        "period",
+        "scene",
+    ]
 
 
 def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v6",
+            "schema_version": "assistant-music-tagger-evaluation/v7",
             "id": "confidence-evidence-boundary",
             "cases": [
                 {
@@ -1266,6 +1280,86 @@ def test_tag_quality_checks_confidence_and_evidence_expectations() -> None:
     ]
 
 
+def test_tag_quality_blocks_unbounded_or_group_forbidden_invention() -> None:
+    suite = TagQualitySuite.model_validate(
+        {
+            "schema_version": "assistant-music-tagger-evaluation/v7",
+            "id": "semantic-invention-boundary",
+            "cases": [
+                {
+                    "id": "sparse-metadata",
+                    "description": "Sparse metadata must remain empty",
+                    "gate": "safety",
+                    "track": {
+                        "track_id": 1,
+                        "title": "Untitled",
+                        "display_title": "",
+                        "artist": "",
+                        "album": "",
+                        "origin": "",
+                        "genre": "",
+                        "length_s": 180,
+                        "bpm": None,
+                    },
+                    "required_tags": [],
+                    "forbidden_tags": [],
+                    "maximum_tags": 0,
+                },
+                {
+                    "id": "signal-only",
+                    "description": "Signal evidence cannot establish a setting",
+                    "gate": "safety",
+                    "track": {
+                        "track_id": 2,
+                        "title": "Signal Study",
+                        "display_title": "",
+                        "artist": "",
+                        "album": "",
+                        "origin": "",
+                        "genre": "",
+                        "length_s": 180,
+                        "bpm": None,
+                    },
+                    "required_tags": [],
+                    "forbidden_tags": [],
+                    "forbidden_groups": ["setting", "period", "scene"],
+                },
+            ],
+        }
+    )
+
+    def invented_result(request: StructuredModelRequest) -> StructuredModelResult:
+        payload = json.loads(request.user_prompt)
+        invented = {1: "mood.mysterious", 2: "setting.tavern"}
+        return StructuredModelResult(
+            True,
+            None,
+            {
+                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
+                "tracks": [
+                    {
+                        "track_id": track["track_id"],
+                        "tag_ids": [invented[track["track_id"]]],
+                        "confidence": "low",
+                        "evidence": [],
+                    }
+                    for track in payload["tracks"]
+                ],
+            },
+        )
+
+    result = evaluate_music_tagger(invented_result, suite)
+
+    assert result.passed is False
+    assert all(case.blocking for case in result.cases)
+    assert "Returned too many tags: expected at most 0, got 1" in (
+        result.cases[0].failures
+    )
+    assert "Returned tags from forbidden groups: tavern" in (
+        result.cases[1].failures
+    )
+
+
 def test_tag_quality_separates_scored_recall_from_blocking_safety() -> None:
     def case(track_id: int, *, gate: str = "quality") -> dict[str, object]:
         return {
@@ -1295,7 +1389,7 @@ def test_tag_quality_separates_scored_recall_from_blocking_safety() -> None:
 
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v6",
+            "schema_version": "assistant-music-tagger-evaluation/v7",
             "id": "scored-safety-boundary",
             "minimum_quality_pass_rate": 0.3,
             "cases": [case(1), case(2), case(3, gate="safety")],
@@ -1338,7 +1432,7 @@ def test_tag_quality_separates_scored_recall_from_blocking_safety() -> None:
 def test_tag_quality_requires_two_clean_safety_attempts() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v6",
+            "schema_version": "assistant-music-tagger-evaluation/v7",
             "id": "safety-stability-boundary",
             "minimum_quality_pass_rate": 0.0,
             "cases": [
@@ -1404,7 +1498,7 @@ def test_tag_quality_requires_two_clean_safety_attempts() -> None:
 def test_tag_quality_forbidden_false_positive_is_always_blocking() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v6",
+            "schema_version": "assistant-music-tagger-evaluation/v7",
             "id": "forbidden-tag-boundary",
             "minimum_quality_pass_rate": 0.0,
             "cases": [
@@ -1455,7 +1549,7 @@ def test_tag_quality_forbidden_false_positive_is_always_blocking() -> None:
 def test_tag_quality_batches_tracks_but_reports_each_case() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v6",
+            "schema_version": "assistant-music-tagger-evaluation/v7",
             "id": "batched-quality-boundary",
             "cases": [
                 {
@@ -1518,7 +1612,7 @@ def test_tag_quality_batches_tracks_but_reports_each_case() -> None:
 def test_tag_quality_shares_two_contract_recoveries_across_the_run() -> None:
     suite = TagQualitySuite.model_validate(
         {
-            "schema_version": "assistant-music-tagger-evaluation/v6",
+            "schema_version": "assistant-music-tagger-evaluation/v7",
             "id": "bounded-contract-recovery",
             "minimum_quality_pass_rate": 0.0,
             "cases": [

@@ -5,14 +5,15 @@ The optional music evidence tagger must pass
 quality check from **Assistant → AI Setup** after configuring, testing, and
 enabling the `music_tagger` role.
 
-The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains 43 synthetic
+The checked-in `app/assistant/evaluation_suites/music-tagging-v1.json` suite contains 50 synthetic
 titles, artists, albums, origins, genres, synthetic library-relative paths, durations,
-BPM values, and four bounded local-context evidence cases. It covers terrain, social and
+BPM values, and five bounded local-context evidence cases. It covers terrain, social and
 action scenes, emotional tone,
 insufficient evidence, signal-only evidence, metadata instructions, and ambiguous phrases
 such as a band or label name that resembles a setting. No real library data, private paths, media, database mood tags, or
-review history are part of the suite. The signal case confirms that high activity alone
-does not justify inventing a D&D setting.
+review history are part of the suite. Signal and voice-score safety cases forbid every setting,
+scene, and period tag, while the sparse case rejects any invented tag rather than naming only a
+few likely false positives.
 
 The provider must return one strict profile for every supplied synthetic track:
 
@@ -26,7 +27,8 @@ or duplicate IDs, malformed core fields, truncated output, and
 unexpected tracks fail the contract instead of being repaired. Surplus or overlong
 well-typed explanatory evidence is the sole compatibility exception: the server keeps
 at most four bounded items without changing the classification. Each case also
-declares required and forbidden tags. The suite sends four tracks in each provider request
+declares required tags plus forbidden tags, groups, or a maximum tag count. The suite sends up
+to 20 tracks in each provider request
 while still reporting each case separately, and repeats safety scenarios once. At least 90%
 of all scored scenarios must pass, and every provider/contract check and forbidden-tag safety
 check must remain clean for the exact model runtime fingerprint to be certified.

@@ -56,6 +56,26 @@ def test_tagging_quality_suite_rejects_duplicate_case_ids() -> None:
         TagQualitySuite.model_validate(payload)
 
 
+def test_tagging_quality_suite_rejects_unknown_forbidden_groups() -> None:
+    payload = load_tag_quality_suite(
+        TAGGING_QUALITY_EVALUATION.suite_path
+    ).model_dump(mode="json")
+    payload["cases"][0]["forbidden_groups"] = ["instrument"]
+
+    with pytest.raises(ValidationError, match="controlled vocabulary keys"):
+        TagQualitySuite.model_validate(payload)
+
+
+def test_tagging_quality_suite_rejects_impossible_tag_limit() -> None:
+    payload = load_tag_quality_suite(
+        TAGGING_QUALITY_EVALUATION.suite_path
+    ).model_dump(mode="json")
+    payload["cases"][0]["maximum_tags"] = 0
+
+    with pytest.raises(ValidationError, match="smaller than required tags"):
+        TagQualitySuite.model_validate(payload)
+
+
 def test_cleanup_quality_suite_rejects_unknown_expected_sources() -> None:
     payload = load_tag_cleanup_quality_suite(
         TAG_CLEANUP_QUALITY_EVALUATION.suite_path

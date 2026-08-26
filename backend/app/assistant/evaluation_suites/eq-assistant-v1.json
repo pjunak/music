@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-eq-quality/v1",
-  "id": "graphic-eq-safety-baseline-v3",
+  "id": "graphic-eq-safety-baseline-v4",
   "cases": [
     {
       "id": "warm-tavern",
@@ -70,6 +70,33 @@
       "expectations": [
         {"frequency_hz": 8000, "minimum_gain_db": -1.5, "maximum_gain_db": -0.5},
         {"frequency_hz": 16000, "minimum_gain_db": -1.5, "maximum_gain_db": -0.5}
+      ]
+    },
+    {
+      "id": "neutral-restraint",
+      "description": "An already balanced source stays effectively neutral instead of receiving an invented smile or loudness curve.",
+      "goal": "The system already sounds balanced. Keep the EQ effectively neutral and only note that listening review is still needed.",
+      "expectations": [
+        {"frequency_hz": 32, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 64, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 125, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 250, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 500, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 1000, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 2000, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 4000, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 8000, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5},
+        {"frequency_hz": 16000, "minimum_gain_db": -0.5, "maximum_gain_db": 0.5}
+      ]
+    },
+    {
+      "id": "combined-warmth-and-harshness",
+      "description": "A combined request follows both supported directions without turning either into an extreme curve.",
+      "goal": "Add a little warm wooden body while reducing piercing harshness and preserving headroom.",
+      "expectations": [
+        {"frequency_hz": 250, "minimum_gain_db": 0.5, "maximum_gain_db": 3.0},
+        {"frequency_hz": 4000, "minimum_gain_db": -3.5, "maximum_gain_db": -0.5},
+        {"frequency_hz": 8000, "minimum_gain_db": -3.0, "maximum_gain_db": 0.0}
       ]
     }
   ]

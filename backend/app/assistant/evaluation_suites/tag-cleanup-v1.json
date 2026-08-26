@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-model-tag-cleanup-evaluation/v2",
-  "id": "controlled-vocabulary-cleanup-baseline-v4",
+  "id": "controlled-vocabulary-cleanup-baseline-v5",
   "cases": [
     {
       "id": "inn-to-tavern",
@@ -194,6 +194,46 @@
       "required_pairs": [],
       "forbidden_pairs": [],
       "maximum_suggestions": 0
+    },
+    {
+      "id": "compound-tags-preserve-meaning",
+      "description": "Compound and ambiguous labels stay unchanged when one canonical target would discard useful meaning",
+      "used_tags": [
+        {"tag": "dark forest", "track_count": 8},
+        {"tag": "ancient temple", "track_count": 6},
+        {"tag": "battle of the bards", "track_count": 4},
+        {"tag": "market research", "track_count": 3}
+      ],
+      "required_pairs": [],
+      "forbidden_pairs": [
+        {"source": "dark forest", "target": "forest"},
+        {"source": "dark forest", "target": "dark"},
+        {"source": "ancient temple", "target": "ancient"},
+        {"source": "ancient temple", "target": "temple"},
+        {"source": "battle of the bards", "target": "combat"},
+        {"source": "market research", "target": "market"},
+        {"source": "market research", "target": "shopping"}
+      ],
+      "maximum_suggestions": 0
+    },
+    {
+      "id": "production-mixed-batch-boundary",
+      "description": "A full 50-source batch must keep two clear semantic matches while returning explicit no-match decisions for every distractor",
+      "used_tags": [
+        {"tag": "clue hunting", "track_count": 6},
+        {"tag": "tender love", "track_count": 3}
+      ],
+      "generated_used_tags": {
+        "count": 48,
+        "prefix": "uncategorized mixed fixture",
+        "track_count": 1
+      },
+      "required_pairs": [
+        {"source": "clue hunting", "target": "investigation"},
+        {"source": "tender love", "target": "romantic"}
+      ],
+      "forbidden_pairs": [],
+      "maximum_suggestions": 2
     }
   ]
 }

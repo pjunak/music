@@ -110,7 +110,7 @@ TAGGING_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic metadata and signal-evidence cases against the "
         "server-owned tag vocabulary. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-tagging-baseline-v16",
+    suite_id="controlled-vocabulary-tagging-baseline-v17",
     suite_path=_TAGGING_SUITE_PATH,
     job_kind=TAGGING_QUALITY_JOB_KIND,
 )
@@ -123,7 +123,7 @@ TAG_CLEANUP_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic canonical-ID and no-match tag-cleanup cases through "
         "this model. No songs or live library data are sent."
     ),
-    suite_id="controlled-vocabulary-cleanup-baseline-v4",
+    suite_id="controlled-vocabulary-cleanup-baseline-v5",
     suite_path=_TAG_CLEANUP_SUITE_PATH,
     job_kind=TAG_CLEANUP_QUALITY_JOB_KIND,
 )
@@ -135,7 +135,7 @@ EQ_QUALITY_EVALUATION = ModelEvaluationDefinition(
         "Runs fixed synthetic sound goals through this model and checks bounded, "
         "conservative graphic-EQ behavior. No songs or live presets are sent."
     ),
-    suite_id="graphic-eq-safety-baseline-v3",
+    suite_id="graphic-eq-safety-baseline-v4",
     suite_path=_EQ_SUITE_PATH,
     job_kind=EQ_QUALITY_JOB_KIND,
 )

@@ -84,7 +84,15 @@ def _reference_eq_model(
     model_input = json.loads(request.user_prompt)
     goal = model_input["goal"].casefold()
     gains = [0.0] * 10
-    if "warm" in goal or "tavern" in goal:
+    if "already sounds balanced" in goal or "effectively neutral" in goal:
+        pass
+    elif ("warm" in goal or "tavern" in goal) and (
+        "harsh" in goal or "piercing" in goal
+    ):
+        gains[3] = 1.5
+        gains[7] = -2.0
+        gains[8] = -1.0
+    elif "warm" in goal or "tavern" in goal:
         gains[3] = 2.0
         gains[8] = -1.0
     elif "muddy" in goal or "boomy" in goal:
@@ -277,8 +285,8 @@ def test_eq_quality_requires_semantic_uplift_beyond_local_guidance() -> None:
     )
 
     assert result.passed is False
-    assert result.passed_cases == 5
-    assert result.total_cases == 8
+    assert result.passed_cases == 7
+    assert result.total_cases == 10
     assert {
         case.id for case in result.cases if not case.passed
     } == {

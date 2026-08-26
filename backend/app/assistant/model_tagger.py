@@ -35,8 +35,8 @@ MODEL_TAGGER_OUTPUT_CONTRACT: Literal["assistant-music-tagger-output/v3"] = (
     "assistant-music-tagger-output/v3"
 )
 MODEL_TAGGING_EVALUATION_CONTRACT: Literal[
-    "assistant-music-tagger-evaluation/v6"
-] = "assistant-music-tagger-evaluation/v6"
+    "assistant-music-tagger-evaluation/v7"
+] = "assistant-music-tagger-evaluation/v7"
 MODEL_TAG_ANALYZER_ID: Literal["model-context-tagger/v6"] = (
     "model-context-tagger/v6"
 )
@@ -54,6 +54,11 @@ MODEL_TAG_VOCABULARY: tuple[str, ...] = tuple(
     tag.name for tag in _DEFAULT_VOCABULARY.entries
 )
 _MODEL_TAG_SET = frozenset(MODEL_TAG_VOCABULARY)
+_MODEL_TAGS_BY_GROUP = {
+    group.key: frozenset(tag.name for tag in group.tags)
+    for group in _DEFAULT_VOCABULARY.document.groups
+}
+_MODEL_TAG_GROUP_SET = frozenset(_MODEL_TAGS_BY_GROUP)
 
 BoundedText = Annotated[str, Field(max_length=512)]
 BoundedEvidence = Annotated[
@@ -280,6 +285,12 @@ class TagQualityCase(_StrictModel):
     track: ModelTagTrackInput
     required_tags: list[str] = Field(max_length=MAX_MODEL_TAGS_PER_TRACK)
     forbidden_tags: list[str] = Field(max_length=MAX_MODEL_TAGS_PER_TRACK)
+    forbidden_groups: list[str] = Field(default_factory=list, max_length=4)
+    maximum_tags: int = Field(
+        default=MAX_MODEL_TAGS_PER_TRACK,
+        ge=0,
+        le=MAX_MODEL_TAGS_PER_TRACK,
+    )
     allowed_confidences: list[TagConfidence] = Field(
         default_factory=_all_tag_confidences,
         min_length=1,
@@ -299,13 +310,24 @@ class TagQualityCase(_StrictModel):
             raise ValueError("forbidden tags must be unique")
         if set(self.required_tags) & set(self.forbidden_tags):
             raise ValueError("required and forbidden tags must be disjoint")
+        if len(set(self.forbidden_groups)) != len(self.forbidden_groups):
+            raise ValueError("forbidden groups must be unique")
+        if not set(self.forbidden_groups) <= _MODEL_TAG_GROUP_SET:
+            raise ValueError("forbidden groups must use controlled vocabulary keys")
+        grouped_forbidden = set().union(
+            *(_MODEL_TAGS_BY_GROUP[key] for key in self.forbidden_groups)
+        )
+        if set(self.required_tags) & grouped_forbidden:
+            raise ValueError("required tags cannot belong to forbidden groups")
+        if len(self.required_tags) > self.maximum_tags:
+            raise ValueError("maximum tags cannot be smaller than required tags")
         if len(set(self.allowed_confidences)) != len(self.allowed_confidences):
             raise ValueError("allowed confidences must be unique")
         return self
 
 
 class TagQualitySuite(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-evaluation/v6"]
+    schema_version: Literal["assistant-music-tagger-evaluation/v7"]
     id: str = Field(min_length=1, max_length=128)
     minimum_quality_pass_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     cases: list[TagQualityCase] = Field(min_length=1, max_length=100)
@@ -683,6 +705,7 @@ def _evaluate_tag_quality_cases(
             failures: list[str] = []
             tags: list[str] = []
             returned_forbidden = False
+            exceeded_tag_limit = False
             if batch_failure is not None:
                 failures.append(batch_failure)
             else:
@@ -690,11 +713,32 @@ def _evaluate_tag_quality_cases(
                 tags = profile.tags
                 missing = sorted(set(case.required_tags) - set(tags))
                 forbidden = sorted(set(case.forbidden_tags) & set(tags))
+                grouped_forbidden = sorted(
+                    set(tags)
+                    & set().union(
+                        *(
+                            _MODEL_TAGS_BY_GROUP[key]
+                            for key in case.forbidden_groups
+                        )
+                    )
+                )
                 if missing:
                     failures.append(f"Missing required tags: {', '.join(missing)}")
                 if forbidden:
                     returned_forbidden = True
                     failures.append(f"Returned forbidden tags: {', '.join(forbidden)}")
+                if grouped_forbidden:
+                    returned_forbidden = True
+                    failures.append(
+                        "Returned tags from forbidden groups: "
+                        + ", ".join(grouped_forbidden)
+                    )
+                if len(tags) > case.maximum_tags:
+                    exceeded_tag_limit = True
+                    failures.append(
+                        "Returned too many tags: "
+                        f"expected at most {case.maximum_tags}, got {len(tags)}"
+                    )
                 if profile.confidence not in case.allowed_confidences:
                     failures.append(f"Returned disallowed confidence: {profile.confidence}")
                 if len(profile.evidence) < case.minimum_evidence_items:
@@ -709,7 +753,11 @@ def _evaluate_tag_quality_cases(
                     passed=not failures,
                     gate=case.gate,
                     blocking=bool(failures)
-                    and (batch_failure is not None or returned_forbidden),
+                    and (
+                        batch_failure is not None
+                        or returned_forbidden
+                        or (case.gate == "safety" and exceeded_tag_limit)
+                    ),
                     tags=tags,
                     failures=failures,
                 )

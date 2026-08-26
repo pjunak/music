@@ -1,6 +1,6 @@
 {
-  "schema_version": "assistant-music-tagger-evaluation/v6",
-  "id": "controlled-vocabulary-tagging-baseline-v16",
+  "schema_version": "assistant-music-tagger-evaluation/v7",
+  "id": "controlled-vocabulary-tagging-baseline-v17",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -96,6 +96,7 @@
       },
       "required_tags": [],
       "forbidden_tags": ["medieval", "tavern", "combat", "heroic", "eerie"],
+      "maximum_tags": 0,
       "allowed_confidences": ["low"],
       "minimum_evidence_items": 1
     },
@@ -173,6 +174,7 @@
       },
       "required_tags": [],
       "forbidden_tags": ["medieval", "tavern", "combat", "castle", "dungeon", "temple"],
+      "forbidden_groups": ["setting", "period", "scene"],
       "allowed_confidences": ["medium", "low"],
       "minimum_evidence_items": 1
     },
@@ -1017,6 +1019,45 @@
       "required_tags": ["cross era", "castle"],
       "forbidden_tags": ["ancient", "medieval", "early modern", "industrial", "modern", "futuristic", "timeless"],
       "allowed_confidences": ["high", "medium"],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "voice-score-does-not-invent-context",
+      "description": "A high local voice-classifier score does not establish a setting, scene, or period",
+      "gate": "safety",
+      "track": {
+        "track_id": 50,
+        "title": "Untitled Vocal Study",
+        "display_title": "",
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 204.0,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "full",
+          "confidence": "high",
+          "trajectories": {
+            "loudness": {"typical": 0.52, "low": 0.4, "high": 0.64, "range": 0.24, "variability": 0.12, "slope": 0.0, "start": 0.51, "end": 0.52, "peak_at_fraction": 0.48, "high_fraction": 0.2, "shape": "steady"},
+            "intensity": {"typical": 0.48, "low": 0.36, "high": 0.6, "range": 0.24, "variability": 0.11, "slope": 0.0, "start": 0.47, "end": 0.49, "peak_at_fraction": 0.55, "high_fraction": 0.15, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.44, "low": 0.31, "high": 0.56, "range": 0.25, "variability": 0.13, "slope": 0.0, "start": 0.43, "end": 0.44, "peak_at_fraction": 0.58, "high_fraction": 0.12, "shape": "steady"},
+            "brightness": {"typical": 0.5, "low": 0.38, "high": 0.63, "range": 0.25, "variability": 0.12, "slope": 0.0, "start": 0.49, "end": 0.5, "peak_at_fraction": 0.5, "high_fraction": 0.18, "shape": "steady"},
+            "density": {"typical": 0.46, "low": 0.34, "high": 0.58, "range": 0.24, "variability": 0.11, "slope": 0.0, "start": 0.45, "end": 0.47, "peak_at_fraction": 0.52, "high_fraction": 0.14, "shape": "steady"},
+            "spectral_flux": {"typical": 0.42, "low": 0.3, "high": 0.55, "range": 0.25, "variability": 0.13, "slope": 0.0, "start": 0.41, "end": 0.42, "peak_at_fraction": 0.46, "high_fraction": 0.1, "shape": "steady"}
+          },
+          "tempo": {"status": "unresolved", "typical_bpm": null, "low_bpm": null, "high_bpm": null, "variability": null, "points": []},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
+          "voice": {"status": "classified", "voice_probability": 0.91, "vocal_coverage": 0.84, "note": "Normalized pretrained classifier score; not a calibrated probability."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.48, "rhythmic_drive": 0.44, "brightness": 0.5, "density": 0.46, "tempo_bpm": null, "tempo_confidence": 0.0, "changes_from_previous": [], "repeats_section_ids": []}],
+          "evidence": ["The local classifier reported a high normalized voice score with broad coverage."]
+        }
+      },
+      "required_tags": [],
+      "forbidden_tags": [],
+      "forbidden_groups": ["setting", "period", "scene"],
+      "allowed_confidences": ["medium", "low"],
       "minimum_evidence_items": 1
     }
   ]

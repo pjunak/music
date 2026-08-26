@@ -192,7 +192,7 @@ const musicTaggingEvaluation: ModelQualityEvaluation = {
   label: "Mood tagging quality",
   description: "Runs fixed synthetic metadata cases through this model.",
   status: "never",
-  suite_id: "controlled-vocabulary-tagging-baseline-v16",
+  suite_id: "controlled-vocabulary-tagging-baseline-v17",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,
