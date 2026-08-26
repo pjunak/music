@@ -1,6 +1,7 @@
 """Bounded process workers for CPU-heavy whole-track context analysis."""
 
 import multiprocessing
+import time
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from typing import Protocol
 
 from app.assistant.audio_context import AudioContextDocument, analyze_audio_context
 from app.assistant.audio_signal import AudioSignalError
+from app.assistant.voice_analysis import VoiceAnalysis, analyze_voice
 
 _POLL_SECONDS = 0.25
 
@@ -29,12 +31,28 @@ class _WorkerAnalysisCancelled(Exception):
 class ContextAnalysisTask:
     track_id: int
     path: str
+    include_voice: bool = True
 
 
 @dataclass(frozen=True)
 class ContextAnalysisResult:
     track_id: int
     document: AudioContextDocument | None = None
+    error: str | None = None
+    fatal: bool = False
+
+
+@dataclass(frozen=True)
+class VoiceAnalysisTask:
+    track_id: int
+    path: str
+
+
+@dataclass(frozen=True)
+class VoiceAnalysisResult:
+    track_id: int
+    analysis: VoiceAnalysis | None = None
+    elapsed_seconds: float = 0.0
     error: str | None = None
     fatal: bool = False
 
@@ -54,6 +72,7 @@ def _analyze_track(task: ContextAnalysisTask) -> ContextAnalysisResult:
         document = analyze_audio_context(
             Path(task.path),
             check_cancelled=_check_worker_cancelled,
+            include_voice=task.include_voice,
         )
     except _WorkerAnalysisCancelled:
         raise
@@ -69,6 +88,29 @@ def _analyze_track(task: ContextAnalysisTask) -> ContextAnalysisResult:
             fatal=True,
         )
     return ContextAnalysisResult(track_id=task.track_id, document=document)
+
+
+def _analyze_voice_track(task: VoiceAnalysisTask) -> VoiceAnalysisResult:
+    started = time.perf_counter()
+    try:
+        analysis = analyze_voice(
+            Path(task.path),
+            check_cancelled=_check_worker_cancelled,
+        )
+    except _WorkerAnalysisCancelled:
+        raise
+    except Exception as exc:
+        return VoiceAnalysisResult(
+            track_id=task.track_id,
+            elapsed_seconds=time.perf_counter() - started,
+            error=f"{type(exc).__name__}: {exc}".strip()[:2_000],
+            fatal=True,
+        )
+    return VoiceAnalysisResult(
+        track_id=task.track_id,
+        analysis=analysis,
+        elapsed_seconds=time.perf_counter() - started,
+    )
 
 
 def _process_map_unordered[TaskT, ResultT](
@@ -147,6 +189,22 @@ def analyze_tracks_in_processes(
 ) -> Iterator[ContextAnalysisResult]:
     yield from _process_map_unordered(
         _analyze_track,
+        tasks,
+        max_workers=max_workers,
+        max_tasks_per_worker=max_tasks_per_worker,
+        check_cancelled=check_cancelled,
+    )
+
+
+def analyze_voice_tracks_in_processes(
+    tasks: Sequence[VoiceAnalysisTask],
+    *,
+    max_workers: int,
+    max_tasks_per_worker: int | None = None,
+    check_cancelled: Callable[[], None],
+) -> Iterator[VoiceAnalysisResult]:
+    yield from _process_map_unordered(
+        _analyze_voice_track,
         tasks,
         max_workers=max_workers,
         max_tasks_per_worker=max_tasks_per_worker,

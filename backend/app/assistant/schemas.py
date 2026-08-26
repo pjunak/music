@@ -215,9 +215,23 @@ class VoiceAnalyzerStatus(StrictAssistantModel):
     model_sha256: str
 
 
+class LibraryContextPassSummary(StrictAssistantModel):
+    completed_tracks: int = Field(ge=0)
+    failed_tracks: int = Field(ge=0)
+    skipped_tracks: int = Field(ge=0)
+    total_tracks: int = Field(ge=0)
+    enabled: bool = True
+
+
+class LibraryContextPasses(StrictAssistantModel):
+    audio_context: LibraryContextPassSummary
+    voice_detection: LibraryContextPassSummary
+
+
 class LibraryContextSummary(StrictAssistantModel):
     analyzer: Literal["local-context/v2"]
     voice_analyzer: VoiceAnalyzerStatus
+    passes: LibraryContextPasses
     library_tracks: int = Field(ge=0)
     analyzed_tracks: int = Field(ge=0)
     full_tracks: int = Field(ge=0)

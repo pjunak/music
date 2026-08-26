@@ -3,6 +3,7 @@ import struct
 import time
 import wave
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from app.assistant.audio_context import (
     _trajectory,
     analyze_audio_context,
 )
-from app.assistant.context_workers import ContextAnalysisResult
+from app.assistant.context_workers import ContextAnalysisResult, VoiceAnalysisResult
 from app.assistant.library_context import LOCAL_CONTEXT_ANALYZER_ID
 from app.assistant.voice_analysis import VoiceAnalysis
 from app.core.config import get_settings
@@ -147,6 +148,31 @@ def _document() -> AudioContextDocument:
     )
 
 
+def _pending_document() -> AudioContextDocument:
+    document = _document()
+    return replace(
+        document,
+        completeness="partial",
+        summary={
+            **document.summary,
+            "voice": {
+                "status": "not_classified",
+                "voice_probability": None,
+                "vocal_coverage": None,
+                "note": "Voice detection is waiting for the separate second analysis pass.",
+            },
+        },
+        stages={
+            **document.stages,
+            "voice": {
+                "status": "pending",
+                "required": False,
+                "analyzer_id": "essentia-musicnn-voice/v1",
+            },
+        },
+    )
+
+
 def test_library_context_endpoints_require_authentication(client: TestClient) -> None:
     assert client.get("/api/assistant/library-context/summary").status_code == 401
     assert client.get("/api/assistant/library-context/tracks/1").status_code == 401
@@ -166,7 +192,12 @@ def test_context_job_is_scoped_checkpointed_and_browsable(
 ) -> None:
     calls = 0
 
-    def analyze(_path: Path, *, check_cancelled=None) -> AudioContextDocument:  # type: ignore[no-untyped-def]
+    def analyze(  # type: ignore[no-untyped-def]
+        _path: Path,
+        *,
+        check_cancelled=None,
+        include_voice=True,
+    ) -> AudioContextDocument:
         nonlocal calls
         calls += 1
         if check_cancelled is not None:
@@ -217,6 +248,13 @@ def test_context_job_is_scoped_checkpointed_and_browsable(
     assert summary.status_code == 200, summary.text
     assert summary.json()["full_tracks"] == 1
     assert summary.json()["analyzer"] == LOCAL_CONTEXT_ANALYZER_ID
+    assert summary.json()["passes"]["audio_context"] == {
+        "completed_tracks": 1,
+        "failed_tracks": 0,
+        "skipped_tracks": 0,
+        "total_tracks": 1,
+        "enabled": True,
+    }
 
 
 def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
@@ -235,12 +273,43 @@ def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
         max_tasks_per_worker,
         check_cancelled,
     ):
-        captured["track_ids"] = [task.track_id for task in tasks]
-        captured["max_workers"] = max_workers
-        captured["max_tasks_per_worker"] = max_tasks_per_worker
+        captured["audio_track_ids"] = [task.track_id for task in tasks]
+        captured["audio_include_voice"] = [task.include_voice for task in tasks]
+        captured["audio_workers"] = max_workers
+        captured["audio_max_tasks_per_worker"] = max_tasks_per_worker
         check_cancelled()
         for task in reversed(tasks):
-            yield ContextAnalysisResult(track_id=task.track_id, document=_document())
+            yield ContextAnalysisResult(track_id=task.track_id, document=_pending_document())
+
+    def analyze_voice_in_processes(  # type: ignore[no-untyped-def]
+        tasks,
+        *,
+        max_workers,
+        max_tasks_per_worker,
+        check_cancelled,
+    ):
+        captured["voice_track_ids"] = [task.track_id for task in tasks]
+        captured["voice_workers"] = max_workers
+        captured["voice_max_tasks_per_worker"] = max_tasks_per_worker
+        check_cancelled()
+        for task in tasks:
+            yield VoiceAnalysisResult(
+                track_id=task.track_id,
+                analysis=VoiceAnalysis(
+                    summary={
+                        "status": "classified",
+                        "voice_probability": 0.75,
+                        "vocal_coverage": 0.5,
+                        "note": "Voice evidence measured.",
+                    },
+                    stage={
+                        "status": "complete",
+                        "required": False,
+                        "analyzer_id": "essentia-musicnn-voice/v1",
+                    },
+                ),
+                elapsed_seconds=2.0,
+            )
 
     monkeypatch.setattr(get_settings(), "assistant_library_context_workers", 3)
     monkeypatch.setattr(
@@ -253,8 +322,16 @@ def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
         lambda: "essentia-musicnn-voice/v1:model:runtime-present",
     )
     monkeypatch.setattr(
+        "app.assistant.library_context.voice_analyzer_status",
+        lambda: {"status": "ready"},
+    )
+    monkeypatch.setattr(
         "app.assistant.library_context.analyze_tracks_in_processes",
         analyze_in_processes,
+    )
+    monkeypatch.setattr(
+        "app.assistant.library_context.analyze_voice_tracks_in_processes",
+        analyze_voice_in_processes,
     )
 
     started = auth_client.post(
@@ -268,21 +345,139 @@ def test_context_job_uses_configured_process_workers_and_parent_checkpoints(
 
     assert finished["status"] == "succeeded", finished
     assert finished["result"]["analysis_workers"] == 3
+    assert finished["result"]["voice_workers"] == 3
     assert finished["result"]["updated"] == 4
     assert finished["result"]["performance"]["tracks_profiled"] == 4
     assert finished["result"]["performance"]["audio_seconds"] == 480.0
     assert finished["result"]["performance"]["worker_seconds"] == 24.0
     assert finished["result"]["performance"]["dominant_stage"] == "spectrum"
     assert finished["result"]["performance"]["stage_seconds"]["spectrum"] == 8.0
+    assert finished["result"]["passes"]["audio_context"]["status"] == "complete"
+    assert finished["result"]["passes"]["voice_detection"]["status"] == "complete"
+    assert finished["result"]["voice_performance"]["worker_seconds"] == 8.0
     assert captured == {
-        "track_ids": track_ids,
-        "max_workers": 3,
-        "max_tasks_per_worker": 4,
+        "audio_track_ids": track_ids,
+        "audio_include_voice": [False, False, False, False],
+        "audio_workers": 3,
+        "audio_max_tasks_per_worker": None,
+        "voice_track_ids": track_ids,
+        "voice_workers": 3,
+        "voice_max_tasks_per_worker": 4,
     }
 
     with SessionLocal() as db:
         rows = db.query(TrackContext).filter(TrackContext.track_id.in_(track_ids)).all()
     assert len(rows) == 4
+    assert all(row.completeness == "full" for row in rows)
+
+
+def test_context_job_retries_voice_pass_without_repeating_audio_context(
+    auth_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_track_id: int,
+    extra_seeded_track_ids: list[int],
+) -> None:
+    track_ids = [seeded_track_id, *extra_seeded_track_ids]
+    audio_calls = 0
+    voice_calls = 0
+
+    def analyze_in_processes(  # type: ignore[no-untyped-def]
+        tasks,
+        *,
+        max_workers,
+        max_tasks_per_worker,
+        check_cancelled,
+    ):
+        nonlocal audio_calls
+        del max_workers, max_tasks_per_worker
+        audio_calls += 1
+        check_cancelled()
+        for task in tasks:
+            yield ContextAnalysisResult(track_id=task.track_id, document=_pending_document())
+
+    def analyze_voice_in_processes(  # type: ignore[no-untyped-def]
+        tasks,
+        *,
+        max_workers,
+        max_tasks_per_worker,
+        check_cancelled,
+    ):
+        nonlocal voice_calls
+        del max_workers, max_tasks_per_worker
+        voice_calls += 1
+        check_cancelled()
+        for index, task in enumerate(tasks):
+            if voice_calls == 1 and index == 1:
+                raise RuntimeError("simulated native voice worker crash")
+            yield VoiceAnalysisResult(
+                track_id=task.track_id,
+                analysis=VoiceAnalysis(
+                    summary={
+                        "status": "classified",
+                        "voice_probability": 0.6,
+                        "vocal_coverage": 0.4,
+                        "note": "Voice evidence measured.",
+                    },
+                    stage={
+                        "status": "complete",
+                        "required": False,
+                        "analyzer_id": "essentia-musicnn-voice/v1",
+                    },
+                ),
+                elapsed_seconds=1.0,
+            )
+
+    monkeypatch.setattr(get_settings(), "assistant_library_context_workers", 3)
+    monkeypatch.setattr(
+        get_settings(),
+        "assistant_voice_model_path",
+        Path("configured-voice-model.pb"),
+    )
+    monkeypatch.setattr(
+        "app.assistant.library_context.voice_analyzer_signature",
+        lambda: "essentia-musicnn-voice/v1:model:runtime-present",
+    )
+    monkeypatch.setattr(
+        "app.assistant.library_context.voice_analyzer_status",
+        lambda: {"status": "ready"},
+    )
+    monkeypatch.setattr(
+        "app.assistant.library_context.analyze_tracks_in_processes",
+        analyze_in_processes,
+    )
+    monkeypatch.setattr(
+        "app.assistant.library_context.analyze_voice_tracks_in_processes",
+        analyze_voice_in_processes,
+    )
+
+    started = auth_client.post(
+        "/api/assistant/library-context/jobs",
+        json={
+            "force": True,
+            "scope": {"type": "tracks", "track_ids": track_ids},
+        },
+    )
+    failed = _wait_for_job(auth_client, started.json()["id"])
+
+    assert failed["status"] == "failed"
+    assert failed["result"]["passes"]["audio_context"]["completed_tracks"] == 4
+    assert failed["result"]["passes"]["voice_detection"]["completed_tracks"] == 1
+    with SessionLocal() as db:
+        rows = db.query(TrackContext).filter(TrackContext.track_id.in_(track_ids)).all()
+    assert sorted(row.completeness for row in rows) == ["full", "partial", "partial", "partial"]
+
+    retried = auth_client.post(f"/api/jobs/{failed['id']}/retry")
+    finished = _wait_for_job(auth_client, retried.json()["id"])
+
+    assert finished["status"] == "succeeded", finished
+    assert audio_calls == 1
+    assert voice_calls == 2
+    assert finished["result"]["passes"]["audio_context"]["completed_tracks"] == 4
+    assert finished["result"]["passes"]["voice_detection"]["completed_tracks"] == 4
+    with SessionLocal() as db:
+        rows = db.query(TrackContext).filter(TrackContext.track_id.in_(track_ids)).all()
+    assert len(rows) == 4
+    assert all(row.completeness == "full" for row in rows)
 
 
 def test_context_job_checkpoints_failures_and_retries(
@@ -506,6 +701,36 @@ def test_audio_context_includes_optional_voice_classifier_evidence(
         "required": False,
         "analyzer_id": "essentia-musicnn-voice/v1",
     }
+
+
+def test_audio_context_can_defer_voice_to_a_second_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "developing.wav"
+    _write_developing_tone(source)
+    monkeypatch.setattr("app.assistant.audio_context.shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        "app.assistant.audio_context.analyze_voice",
+        lambda *_args, **_kwargs: pytest.fail("voice analysis ran during the audio pass"),
+    )
+
+    document = analyze_audio_context(source, include_voice=False)
+
+    assert document.completeness == "partial"
+    voice = document.summary["voice"]
+    reliability = document.summary["measurement_reliability"]
+    assert isinstance(voice, dict)
+    assert isinstance(reliability, dict)
+    assert voice["status"] == "not_classified"
+    assert reliability["voice"] == "pending"
+    assert document.stages["voice"] == {
+        "status": "pending",
+        "required": False,
+        "analyzer_id": "essentia-musicnn-voice/v1",
+    }
+    assert document.performance is not None
+    assert "voice" not in document.performance.stage_seconds
 
 
 def test_context_source_signature_changes_with_voice_analyzer(

@@ -55,6 +55,24 @@ def _not_classified() -> VoiceAnalysis:
     )
 
 
+def deferred_voice_analysis() -> VoiceAnalysis:
+    """Describe a voice stage that will run after the signal-analysis pass."""
+
+    return VoiceAnalysis(
+        summary={
+            "status": "not_classified",
+            "voice_probability": None,
+            "vocal_coverage": None,
+            "note": "Voice detection is waiting for the separate second analysis pass.",
+        },
+        stage={
+            "status": "pending",
+            "required": False,
+            "analyzer_id": VOICE_ANALYZER_ID,
+        },
+    )
+
+
 def _unavailable(reason: str, note: str, *, error_type: str | None = None) -> VoiceAnalysis:
     stage: dict[str, object] = {
         "status": "unavailable",

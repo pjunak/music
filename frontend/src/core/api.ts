@@ -509,9 +509,21 @@ export interface LibraryContextSummary extends LibraryAnalysisSummary {
     model_filename: string;
     model_sha256: string;
   };
+  passes: {
+    audio_context: LibraryContextPassSummary;
+    voice_detection: LibraryContextPassSummary;
+  };
   full_tracks: number;
   partial_tracks: number;
   missing_tracks: number;
+}
+
+export interface LibraryContextPassSummary {
+  completed_tracks: number;
+  failed_tracks: number;
+  skipped_tracks: number;
+  total_tracks: number;
+  enabled: boolean;
 }
 
 export interface TrackContextDetail {

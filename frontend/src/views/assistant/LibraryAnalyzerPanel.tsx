@@ -113,7 +113,6 @@ interface LibraryAnalyzerPanelProps {
   summary: LibraryContextSummary | null;
   loading: boolean;
   actionBusy: boolean;
-  progressLabel: string;
   emptyTitle: string;
   emptyDescription: string;
   analyzeLabel: string;
@@ -122,6 +121,148 @@ interface LibraryAnalyzerPanelProps {
   onStart: (force: boolean) => void;
   onCancel: () => void;
   onRetry: () => void;
+}
+
+interface ContextPassProgress {
+  status: string;
+  completedTracks: number;
+  failedTracks: number;
+  skippedTracks: number;
+  totalTracks: number;
+  enabled: boolean;
+}
+
+type ContextPassId = "audio_context" | "voice_detection";
+
+function nonNegativeNumber(value: object, key: string): number | null {
+  const number = numberProperty(value, key);
+  return number !== null && number >= 0 ? number : null;
+}
+
+function jobPassProgress(
+  job: BackgroundJob | undefined,
+  id: ContextPassId,
+): ContextPassProgress | null {
+  const passes = job?.result?.passes;
+  if (typeof passes !== "object" || passes === null) return null;
+  const pass = Reflect.get(passes, id);
+  if (typeof pass !== "object" || pass === null) return null;
+  const completedTracks = nonNegativeNumber(pass, "completed_tracks");
+  const failedTracks = nonNegativeNumber(pass, "failed_tracks");
+  const skippedTracks = nonNegativeNumber(pass, "skipped_tracks");
+  const totalTracks = nonNegativeNumber(pass, "total_tracks");
+  const status = Reflect.get(pass, "status");
+  if (
+    completedTracks === null ||
+    failedTracks === null ||
+    skippedTracks === null ||
+    totalTracks === null ||
+    typeof status !== "string"
+  ) {
+    return null;
+  }
+  return {
+    status,
+    completedTracks,
+    failedTracks,
+    skippedTracks,
+    totalTracks,
+    enabled: status !== "not_available",
+  };
+}
+
+function summaryPassProgress(
+  summary: LibraryContextSummary,
+  id: ContextPassId,
+): ContextPassProgress {
+  const pass = summary.passes[id];
+  const handled = pass.completed_tracks + pass.failed_tracks + pass.skipped_tracks;
+  return {
+    status: !pass.enabled
+      ? "not_available"
+      : handled >= pass.total_tracks
+        ? pass.failed_tracks > 0 || pass.skipped_tracks > 0
+          ? "complete_with_failures"
+          : "complete"
+        : "waiting",
+    completedTracks: pass.completed_tracks,
+    failedTracks: pass.failed_tracks,
+    skippedTracks: pass.skipped_tracks,
+    totalTracks: pass.total_tracks,
+    enabled: pass.enabled,
+  };
+}
+
+function passStatusLabel(
+  pass: ContextPassProgress,
+  latest: BackgroundJob | undefined,
+  voiceUnavailable: boolean,
+): string {
+  if (!pass.enabled) return voiceUnavailable ? "Unavailable" : "Not enabled";
+  if (
+    (latest?.status === "failed" || latest?.status === "cancelled") &&
+    (pass.status === "running" || pass.status === "waiting")
+  ) {
+    return "Interrupted";
+  }
+  if (pass.status === "running") return "Running";
+  if (pass.status === "waiting") return "Waiting";
+  if (pass.status === "complete_with_failures") return "Complete with issues";
+  if (pass.status === "complete") return "Complete";
+  return pass.status.replaceAll("_", " ");
+}
+
+function ContextAnalysisPass({
+  number,
+  id,
+  title,
+  description,
+  progress,
+  latest,
+  voiceUnavailable = false,
+}: {
+  number: number;
+  id: ContextPassId;
+  title: string;
+  description: string;
+  progress: ContextPassProgress;
+  latest: BackgroundJob | undefined;
+  voiceUnavailable?: boolean;
+}) {
+  const handled = progress.completedTracks + progress.failedTracks + progress.skippedTracks;
+  const status = passStatusLabel(progress, latest, voiceUnavailable);
+  return (
+    <div className={`assistant-context-pass is-${id} is-${progress.status}`}>
+      <div className="assistant-context-pass-heading">
+        <div>
+          <span>Pass {number}</span>
+          <strong>{title}</strong>
+        </div>
+        <div>
+          <span className="assistant-context-pass-state">{status}</span>
+          {progress.enabled ? (
+            <span className="assistant-context-pass-count">
+              {handled} / {progress.totalTracks}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <progress
+        aria-label={`${title} pass progress`}
+        value={progress.enabled ? handled : 0}
+        max={Math.max(1, progress.totalTracks)}
+      />
+      <p>
+        {description}
+        {progress.failedTracks > 0
+          ? ` ${progress.failedTracks} ${progress.failedTracks === 1 ? "track has" : "tracks have"} an issue.`
+          : ""}
+        {progress.skippedTracks > 0 && progress.enabled
+          ? ` ${progress.skippedTracks} ${progress.skippedTracks === 1 ? "track was" : "tracks were"} skipped.`
+          : ""}
+      </p>
+    </div>
+  );
 }
 
 function analysisStateTitle(
@@ -157,7 +298,6 @@ export function LibraryAnalyzerPanel({
   summary,
   loading,
   actionBusy,
-  progressLabel,
   emptyTitle,
   emptyDescription,
   analyzeLabel,
@@ -181,6 +321,12 @@ export function LibraryAnalyzerPanel({
   const analysisWorkers =
     latest === undefined ? null : resultNumber(latest, "analysis_workers");
   const stateTitle = analysisStateTitle(latest, active, currentTracks);
+  const audioPass =
+    jobPassProgress(latest, "audio_context") ??
+    (summary === null ? null : summaryPassProgress(summary, "audio_context"));
+  const voicePass =
+    jobPassProgress(latest, "voice_detection") ??
+    (summary === null ? null : summaryPassProgress(summary, "voice_detection"));
 
   return (
     <section
@@ -225,24 +371,48 @@ export function LibraryAnalyzerPanel({
         </div>
       ) : (
         <div className="assistant-job-progress assistant-context-analysis-progress">
-          <div className="assistant-job-progress-label">
-            <strong>
-              {latest.progress_phase || analysisStatusLabel(latest.status)}
-            </strong>
-            {latest.progress_total !== null ? (
-              <span>
-                {latest.progress_current} / {latest.progress_total}
-              </span>
-            ) : null}
-          </div>
-          {latest.progress_total === null ? (
-            <progress aria-label={progressLabel} />
+          {audioPass !== null && voicePass !== null ? (
+            <div className="assistant-context-pass-list">
+              <ContextAnalysisPass
+                number={1}
+                id="audio_context"
+                title="Audio context"
+                description="Signal, structure, tempo and loudness are checkpointed for every track."
+                progress={audioPass}
+                latest={latest}
+              />
+              <ContextAnalysisPass
+                number={2}
+                id="voice_detection"
+                title="Voice detection"
+                description="Runs after the audio-context pass, using its own worker pool."
+                progress={voicePass}
+                latest={latest}
+                voiceUnavailable={summary?.voice_analyzer.status === "unavailable"}
+              />
+            </div>
           ) : (
-            <progress
-              aria-label={progressLabel}
-              value={latest.progress_current}
-              max={Math.max(1, latest.progress_total)}
-            />
+            <>
+              <div className="assistant-job-progress-label">
+                <strong>
+                  {latest.progress_phase || analysisStatusLabel(latest.status)}
+                </strong>
+                {latest.progress_total !== null ? (
+                  <span>
+                    {latest.progress_current} / {latest.progress_total}
+                  </span>
+                ) : null}
+              </div>
+              {latest.progress_total === null ? (
+                <progress aria-label="Library context analysis progress" />
+              ) : (
+                <progress
+                  aria-label="Library context analysis progress"
+                  value={latest.progress_current}
+                  max={Math.max(1, latest.progress_total)}
+                />
+              )}
+            </>
           )}
           {latest.progress_message ? <p>{latest.progress_message}</p> : null}
           {latest.error ? <p className="error">{latest.error}</p> : null}

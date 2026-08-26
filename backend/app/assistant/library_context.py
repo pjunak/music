@@ -20,14 +20,22 @@ from app.assistant.audio_signal import AudioSignalError
 from app.assistant.context_workers import (
     ContextAnalysisResult,
     ContextAnalysisTask,
+    VoiceAnalysisResult,
+    VoiceAnalysisTask,
     analyze_tracks_in_processes,
+    analyze_voice_tracks_in_processes,
 )
 from app.assistant.tag_schemas import ModelTaggingScope
-from app.assistant.voice_analysis import voice_analyzer_signature, voice_analyzer_status
+from app.assistant.voice_analysis import (
+    VoiceAnalysis,
+    voice_analyzer_signature,
+    voice_analyzer_status,
+)
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
 from app.library import index as library_index
+from app.models.background_job import BackgroundJob
 from app.models.base import utcnow
 from app.models.track import Track
 from app.models.track_analysis_failure import TrackAnalysisFailure
@@ -290,6 +298,63 @@ def _store_analysis_result(
     return False
 
 
+def _voice_stage_status(track_context: CurrentTrackContext) -> str | None:
+    voice_stage = track_context.stages.get("voice")
+    if not isinstance(voice_stage, dict):
+        return None
+    status = voice_stage.get("status")
+    return status if isinstance(status, str) else None
+
+
+def _store_voice_result(
+    track: Track,
+    signature: str,
+    context: JobExecutionContext,
+    result: VoiceAnalysisResult,
+) -> bool:
+    if result.fatal or result.analysis is None:
+        raise RuntimeError(
+            f"voice analysis worker failed for track {track.id}: "
+            f"{result.error or 'unknown error'}"
+        )
+    analysis: VoiceAnalysis = result.analysis
+    with SessionLocal() as db:
+        row = db.get(TrackContext, (track.id, LOCAL_CONTEXT_ANALYZER_ID))
+        parsed = (
+            _parse_context(row)
+            if row is not None and row.source_signature == signature
+            else None
+        )
+        if row is None or parsed is None:
+            raise RuntimeError(
+                f"voice analysis has no current audio-context checkpoint for track {track.id}"
+            )
+        summary = dict(parsed.summary)
+        summary["voice"] = analysis.summary
+        reliability_value = summary.get("measurement_reliability")
+        reliability = dict(reliability_value) if isinstance(reliability_value, dict) else {}
+        reliability["voice"] = (
+            "high" if analysis.summary.get("status") == "classified" else "unavailable"
+        )
+        summary["measurement_reliability"] = reliability
+        stages = dict(parsed.stages)
+        stages["voice"] = analysis.stage
+
+        row.job_id = context.job_id
+        row.completeness = "full"
+        row.summary_json = _json(summary)
+        row.stages_json = _json(stages)
+        row.updated_at = utcnow()
+        db.execute(
+            delete(TrackAnalysisFailure).where(
+                TrackAnalysisFailure.track_id == track.id,
+                TrackAnalysisFailure.analyzer_id == LOCAL_CONTEXT_ANALYZER_ID,
+            )
+        )
+        db.commit()
+    return analysis.summary.get("status") != "unavailable"
+
+
 def _performance_summary(
     samples: list[AudioContextPerformance],
     *,
@@ -328,6 +393,53 @@ def _performance_summary(
     }
 
 
+def _voice_performance_summary(
+    samples: list[float],
+    *,
+    wall_seconds: float,
+) -> dict[str, object]:
+    return {
+        "schema_version": "library-context-voice-performance/v1",
+        "tracks_profiled": len(samples),
+        "wall_seconds": round(wall_seconds, 3),
+        "worker_seconds": round(sum(samples), 3),
+    }
+
+
+def _pass_progress(
+    *,
+    status: str,
+    completed: int,
+    failed: int,
+    skipped: int,
+    total: int,
+) -> dict[str, object]:
+    return {
+        "status": status,
+        "completed_tracks": completed,
+        "failed_tracks": failed,
+        "skipped_tracks": skipped,
+        "total_tracks": total,
+    }
+
+
+def _checkpoint_passes(
+    context: JobExecutionContext,
+    *,
+    audio_context: dict[str, object],
+    voice_detection: dict[str, object],
+) -> None:
+    context.checkpoint_result(
+        {
+            "schema_version": "assistant-library-context-job-progress/v1",
+            "passes": {
+                "audio_context": audio_context,
+                "voice_detection": voice_detection,
+            },
+        }
+    )
+
+
 def run_library_context_analysis(
     context: JobExecutionContext,
     parameters: dict[str, object],
@@ -335,7 +447,13 @@ def run_library_context_analysis(
     job_started = time.perf_counter()
     force = parameters.get("force") is True
     scope = ModelTaggingScope.model_validate(parameters.get("scope", {"type": "all"}))
+    analyzer_status = voice_analyzer_status()
+    voice_enabled = analyzer_status.get("status") == "ready"
     with SessionLocal() as db:
+        job_row = db.get(BackgroundJob, context.job_id)
+        checkpoint_job_ids = {context.job_id}
+        if job_row is not None and job_row.retry_of_id is not None:
+            checkpoint_job_ids.add(job_row.retry_of_id)
         tracks = resolve_context_scope(db, scope)
         existing = {
             row.track_id: row
@@ -351,120 +469,323 @@ def run_library_context_analysis(
                 )
             ).all()
         }
+
     signatures = {track.id: context_source_signature(track) for track in tracks}
-    work: list[Track] = []
-    checkpointed = 0
+    current_contexts: dict[int, CurrentTrackContext] = {}
+    signal_work: list[Track] = []
+    audio_completed_ids: set[int] = set()
+    audio_failed_ids: set[int] = set()
     updated_track_ids: set[int] = set()
     failed_track_ids: set[int] = set()
     performance_samples: list[AudioContextPerformance] = []
+
     for track in tracks:
         signature = signatures[track.id]
         profile = existing.get(track.id)
-        failure = failures.get(track.id)
-        completed_by_job = (
-            profile is not None
-            and profile.job_id == context.job_id
-            and profile.source_signature == signature
-        ) or (
-            failure is not None
-            and failure.job_id == context.job_id
-            and failure.source_signature == signature
+        parsed = (
+            _parse_context(profile)
+            if profile is not None and profile.source_signature == signature
+            else None
         )
-        if completed_by_job:
-            checkpointed += 1
-            if (
-                profile is not None
-                and profile.job_id == context.job_id
-                and profile.source_signature == signature
-            ):
-                updated_track_ids.add(track.id)
-            else:
-                failed_track_ids.add(track.id)
-            continue
-        parsed = _parse_context(profile) if profile is not None else None
+        failure = failures.get(track.id)
         current_failure = failure is not None and failure.source_signature == signature
-        if (
-            not force
-            and profile is not None
-            and profile.source_signature == signature
+        if parsed is not None:
+            current_contexts[track.id] = parsed
+        completed_by_this_attempt = (
+            profile is not None
             and parsed is not None
-            and parsed.completeness == "full"
-            and not current_failure
-        ):
+            and profile.job_id in checkpoint_job_ids
+        )
+        failed_by_this_job = (
+            current_failure and failure is not None and failure.job_id == context.job_id
+        )
+
+        # A partial row is the durable hand-off between passes. Preserve it even
+        # for a retried forced rebuild so voice work can resume without decoding
+        # the track again.
+        signal_is_current = parsed is not None and (
+            parsed.completeness == "partial" or not force or completed_by_this_attempt
+        )
+        if signal_is_current:
+            audio_completed_ids.add(track.id)
+            if completed_by_this_attempt:
+                updated_track_ids.add(track.id)
             continue
-        work.append(track)
-    starting = max(context.progress_current, checkpointed)
-    total = starting + len(work)
+        if failed_by_this_job:
+            audio_failed_ids.add(track.id)
+            failed_track_ids.add(track.id)
+            continue
+        signal_work.append(track)
+
+    voice_completed_ids = {
+        track_id
+        for track_id in audio_completed_ids
+        if (parsed := current_contexts.get(track_id)) is not None
+        and _voice_stage_status(parsed) not in {None, "pending", "unavailable"}
+    }
+    voice_failed_ids = {
+        track_id
+        for track_id in audio_completed_ids
+        if (parsed := current_contexts.get(track_id)) is not None
+        and _voice_stage_status(parsed) == "unavailable"
+    }
+    audio_progress = _pass_progress(
+        status="running" if signal_work else "complete",
+        completed=len(audio_completed_ids),
+        failed=len(audio_failed_ids),
+        skipped=0,
+        total=len(tracks),
+    )
+    voice_progress = _pass_progress(
+        status="waiting" if voice_enabled else "not_available",
+        completed=len(voice_completed_ids) if voice_enabled else 0,
+        failed=len(voice_failed_ids) if voice_enabled else 0,
+        skipped=0 if voice_enabled else len(tracks),
+        total=len(tracks),
+    )
+    _checkpoint_passes(
+        context,
+        audio_context=audio_progress,
+        voice_detection=voice_progress,
+    )
+
     settings = get_settings()
     configured_workers = settings.assistant_library_context_workers
-    active_workers = min(configured_workers, len(work)) if work else 0
-    max_tasks_per_worker = (
-        _VOICE_TRACKS_PER_WORKER
-        if settings.assistant_voice_model_path is not None and len(work) > 1
-        else None
-    )
+    active_workers = min(configured_workers, len(signal_work)) if signal_work else 0
+    progress_current = context.progress_current
+    progress_total = progress_current + len(signal_work) * (2 if voice_enabled else 1)
     context.update_progress(
-        starting,
-        total,
-        phase="Building track context",
+        progress_current,
+        progress_total,
+        phase="Analyzing audio context",
         message=(
-            f"{len(work)} tracks need comprehensive analysis"
-            + (f" with {active_workers} workers" if active_workers else "")
+            f"Audio context: {len(audio_completed_ids) + len(audio_failed_ids)} of "
+            f"{len(tracks)} tracks processed"
         ),
     )
-    if len(work) == 1:
-        for processed, track in enumerate(work, start=1):
+
+    signal_pass_started = time.perf_counter()
+    if len(signal_work) == 1:
+        for track in signal_work:
             context.check_cancelled()
             signature = signatures[track.id]
             try:
                 document = analyze_audio_context(
                     library_index.to_absolute(track.path),
                     check_cancelled=context.check_cancelled,
+                    include_voice=not voice_enabled,
                 )
                 if document.performance is not None:
                     performance_samples.append(document.performance)
                 _store_document(track, signature, context, document)
+                audio_completed_ids.add(track.id)
                 updated_track_ids.add(track.id)
             except (AudioSignalError, OSError) as exc:
                 _store_failure(track, signature, context, f"{type(exc).__name__}: {exc}")
+                audio_failed_ids.add(track.id)
                 failed_track_ids.add(track.id)
-            current = starting + processed
+            progress_current += 1
+            audio_progress = _pass_progress(
+                status="running",
+                completed=len(audio_completed_ids),
+                failed=len(audio_failed_ids),
+                skipped=0,
+                total=len(tracks),
+            )
+            _checkpoint_passes(
+                context,
+                audio_context=audio_progress,
+                voice_detection=voice_progress,
+            )
             context.update_progress(
-                current,
-                total,
-                phase="Building track context",
-                message=f"Processed {current} of {total} tracks",
+                progress_current,
+                progress_total,
+                phase="Analyzing audio context",
+                message=(
+                    f"Audio context: {len(audio_completed_ids) + len(audio_failed_ids)} "
+                    f"of {len(tracks)} tracks processed"
+                ),
             )
     elif active_workers > 0:
-        tracks_by_id = {track.id: track for track in work}
+        tracks_by_id = {track.id: track for track in signal_work}
         tasks = [
             ContextAnalysisTask(
                 track_id=track.id,
                 path=str(library_index.to_absolute(track.path)),
+                include_voice=not voice_enabled,
             )
-            for track in work
+            for track in signal_work
         ]
-        results = analyze_tracks_in_processes(
+        signal_results = analyze_tracks_in_processes(
             tasks,
             max_workers=active_workers,
-            max_tasks_per_worker=max_tasks_per_worker,
+            max_tasks_per_worker=None,
             check_cancelled=context.check_cancelled,
         )
-        for processed, result in enumerate(results, start=1):
-            track = tracks_by_id[result.track_id]
-            if result.document is not None and result.document.performance is not None:
-                performance_samples.append(result.document.performance)
-            if _store_analysis_result(track, signatures[track.id], context, result):
+        for signal_result in signal_results:
+            track = tracks_by_id[signal_result.track_id]
+            if (
+                signal_result.document is not None
+                and signal_result.document.performance is not None
+            ):
+                performance_samples.append(signal_result.document.performance)
+            if _store_analysis_result(track, signatures[track.id], context, signal_result):
+                audio_completed_ids.add(track.id)
                 updated_track_ids.add(track.id)
             else:
+                audio_failed_ids.add(track.id)
                 failed_track_ids.add(track.id)
-            current = starting + processed
-            context.update_progress(
-                current,
-                total,
-                phase="Building track context",
-                message=f"Processed {current} of {total} tracks with {active_workers} workers",
+            progress_current += 1
+            audio_progress = _pass_progress(
+                status="running",
+                completed=len(audio_completed_ids),
+                failed=len(audio_failed_ids),
+                skipped=0,
+                total=len(tracks),
             )
+            _checkpoint_passes(
+                context,
+                audio_context=audio_progress,
+                voice_detection=voice_progress,
+            )
+            context.update_progress(
+                progress_current,
+                progress_total,
+                phase="Analyzing audio context",
+                message=(
+                    f"Audio context: {len(audio_completed_ids) + len(audio_failed_ids)} "
+                    f"of {len(tracks)} tracks processed with {active_workers} workers"
+                ),
+            )
+    signal_wall_seconds = time.perf_counter() - signal_pass_started
+    audio_progress = _pass_progress(
+        status="complete_with_failures" if audio_failed_ids else "complete",
+        completed=len(audio_completed_ids),
+        failed=len(audio_failed_ids),
+        skipped=0,
+        total=len(tracks),
+    )
+
+    voice_performance_samples: list[float] = []
+    voice_wall_seconds = 0.0
+    active_voice_workers = 0
+    if voice_enabled:
+        with SessionLocal() as db:
+            contexts_after_signal = load_current_contexts(db, tracks)
+        voice_work = [
+            track
+            for track in tracks
+            if (parsed := contexts_after_signal.get(track.id)) is not None
+            and _voice_stage_status(parsed) == "pending"
+        ]
+        voice_completed_ids = {
+            track.id
+            for track in tracks
+            if (parsed := contexts_after_signal.get(track.id)) is not None
+            and _voice_stage_status(parsed) not in {None, "pending", "unavailable"}
+        }
+        voice_failed_ids = {
+            track.id
+            for track in tracks
+            if (parsed := contexts_after_signal.get(track.id)) is not None
+            and _voice_stage_status(parsed) == "unavailable"
+        }
+        voice_skipped_ids = {track.id for track in tracks} - set(contexts_after_signal)
+        active_voice_workers = min(configured_workers, len(voice_work)) if voice_work else 0
+        progress_total = progress_current + len(voice_work)
+        voice_progress = _pass_progress(
+            status="running" if voice_work else "complete",
+            completed=len(voice_completed_ids),
+            failed=len(voice_failed_ids),
+            skipped=len(voice_skipped_ids),
+            total=len(tracks),
+        )
+        _checkpoint_passes(
+            context,
+            audio_context=audio_progress,
+            voice_detection=voice_progress,
+        )
+        context.update_progress(
+            progress_current,
+            progress_total,
+            phase="Detecting voice",
+            message=(
+                f"Voice detection: {len(voice_completed_ids) + len(voice_failed_ids)} "
+                f"of {len(tracks) - len(voice_skipped_ids)} eligible tracks processed"
+            ),
+        )
+        voice_pass_started = time.perf_counter()
+        if active_voice_workers > 0:
+            tracks_by_id = {track.id: track for track in voice_work}
+            voice_results = analyze_voice_tracks_in_processes(
+                [
+                    VoiceAnalysisTask(
+                        track_id=track.id,
+                        path=str(library_index.to_absolute(track.path)),
+                    )
+                    for track in voice_work
+                ],
+                max_workers=active_voice_workers,
+                max_tasks_per_worker=_VOICE_TRACKS_PER_WORKER,
+                check_cancelled=context.check_cancelled,
+            )
+            for voice_result in voice_results:
+                track = tracks_by_id[voice_result.track_id]
+                voice_performance_samples.append(voice_result.elapsed_seconds)
+                if _store_voice_result(track, signatures[track.id], context, voice_result):
+                    voice_completed_ids.add(track.id)
+                else:
+                    voice_failed_ids.add(track.id)
+                updated_track_ids.add(track.id)
+                progress_current += 1
+                voice_progress = _pass_progress(
+                    status="running",
+                    completed=len(voice_completed_ids),
+                    failed=len(voice_failed_ids),
+                    skipped=len(voice_skipped_ids),
+                    total=len(tracks),
+                )
+                _checkpoint_passes(
+                    context,
+                    audio_context=audio_progress,
+                    voice_detection=voice_progress,
+                )
+                context.update_progress(
+                    progress_current,
+                    progress_total,
+                    phase="Detecting voice",
+                    message=(
+                        f"Voice detection: {len(voice_completed_ids) + len(voice_failed_ids)} "
+                        f"of {len(tracks) - len(voice_skipped_ids)} eligible tracks processed "
+                        f"with {active_voice_workers} workers"
+                    ),
+                )
+        voice_wall_seconds = time.perf_counter() - voice_pass_started
+        voice_progress = _pass_progress(
+            status=(
+                "complete_with_failures"
+                if voice_failed_ids or voice_skipped_ids
+                else "complete"
+            ),
+            completed=len(voice_completed_ids),
+            failed=len(voice_failed_ids),
+            skipped=len(voice_skipped_ids),
+            total=len(tracks),
+        )
+    else:
+        voice_progress = _pass_progress(
+            status="not_available",
+            completed=0,
+            failed=0,
+            skipped=len(tracks),
+            total=len(tracks),
+        )
+
+    _checkpoint_passes(
+        context,
+        audio_context=audio_progress,
+        voice_detection=voice_progress,
+    )
     with SessionLocal() as db:
         current_contexts = load_current_contexts(db, tracks)
         current_failures = {
@@ -486,11 +807,16 @@ def run_library_context_analysis(
         if row.track_id in failed_track_ids
     ][:_FAILURE_SAMPLE_LIMIT]
     return {
-        "schema_version": "assistant-library-context-job-result/v2",
+        "schema_version": "assistant-library-context-job-result/v3",
         "analyzer": LOCAL_CONTEXT_ANALYZER_ID,
         "scope": scope.model_dump(mode="json"),
         "tracks": len(tracks),
         "analysis_workers": active_workers,
+        "voice_workers": active_voice_workers,
+        "passes": {
+            "audio_context": audio_progress,
+            "voice_detection": voice_progress,
+        },
         "updated": updated,
         "failed": failed,
         "unchanged": max(0, len(tracks) - updated - failed),
@@ -499,8 +825,13 @@ def run_library_context_analysis(
         "failure_samples": failure_samples,
         "performance": _performance_summary(
             performance_samples,
-            wall_seconds=time.perf_counter() - job_started,
+            wall_seconds=signal_wall_seconds,
         ),
+        "voice_performance": _voice_performance_summary(
+            voice_performance_samples,
+            wall_seconds=voice_wall_seconds,
+        ),
+        "wall_seconds": round(time.perf_counter() - job_started, 3),
     }
 
 
@@ -520,31 +851,57 @@ def context_summary(db: Session) -> dict[str, object]:
             )
         ).all()
     }
-    current: list[TrackContext] = []
+    current: list[tuple[TrackContext, CurrentTrackContext]] = []
     current_failures: list[TrackAnalysisFailure] = []
     stale = 0
     for track in tracks:
         signature = context_source_signature(track)
         row = rows.get(track.id)
-        if row is not None and row.source_signature == signature and _parse_context(row) is not None:
-            current.append(row)
+        parsed = _parse_context(row) if row is not None and row.source_signature == signature else None
+        if row is not None and parsed is not None:
+            current.append((row, parsed))
         elif row is not None:
             stale += 1
         failure = failures.get(track.id)
-        if failure is not None and failure.source_signature == signature:
+        if parsed is None and failure is not None and failure.source_signature == signature:
             current_failures.append(failure)
     confidence = {"high": 0, "medium": 0, "low": 0}
     completeness = {"full": 0, "partial": 0}
-    for row in current:
+    voice_complete = 0
+    voice_failed = 0
+    for row, parsed in current:
         if row.confidence in confidence:
             confidence[row.confidence] += 1
         if row.completeness in completeness:
             completeness[row.completeness] += 1
-    update_times = [row.updated_at for row in current]
+        voice_status = _voice_stage_status(parsed)
+        if voice_status == "unavailable":
+            voice_failed += 1
+        elif voice_status not in {None, "pending", "not_configured"}:
+            voice_complete += 1
+    update_times = [row.updated_at for row, _parsed in current]
     update_times.extend(row.updated_at for row in current_failures)
+    analyzer_status = voice_analyzer_status()
+    voice_enabled = analyzer_status.get("status") == "ready"
     return {
         "analyzer": LOCAL_CONTEXT_ANALYZER_ID,
-        "voice_analyzer": voice_analyzer_status(),
+        "voice_analyzer": analyzer_status,
+        "passes": {
+            "audio_context": {
+                "completed_tracks": len(current),
+                "failed_tracks": len(current_failures),
+                "skipped_tracks": 0,
+                "total_tracks": len(tracks),
+                "enabled": True,
+            },
+            "voice_detection": {
+                "completed_tracks": voice_complete if voice_enabled else 0,
+                "failed_tracks": voice_failed if voice_enabled else 0,
+                "skipped_tracks": 0 if voice_enabled else len(tracks),
+                "total_tracks": len(tracks),
+                "enabled": voice_enabled,
+            },
+        },
         "library_tracks": len(tracks),
         "analyzed_tracks": len(current),
         "full_tracks": completeness["full"],

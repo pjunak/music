@@ -21,7 +21,7 @@ import numpy as np
 import numpy.typing as npt
 
 from app.assistant.audio_signal import AudioSignalError, _open_mono_pcm
-from app.assistant.voice_analysis import analyze_voice
+from app.assistant.voice_analysis import analyze_voice, deferred_voice_analysis
 
 type _FloatArray = npt.NDArray[np.float64]
 
@@ -864,6 +864,7 @@ def analyze_audio_context(
     path: Path,
     *,
     check_cancelled: Callable[[], None] | None = None,
+    include_voice: bool = True,
 ) -> AudioContextDocument:
     """Decode a full recording and build bounded temporal context."""
 
@@ -922,9 +923,12 @@ def analyze_audio_context(
     }
 
     stage_seconds["feature_summary"] = time.perf_counter() - feature_started
-    voice_started = time.perf_counter()
-    voice_analysis = analyze_voice(path, check_cancelled=cancellation_check)
-    stage_seconds["voice"] = time.perf_counter() - voice_started
+    if include_voice:
+        voice_started = time.perf_counter()
+        voice_analysis = analyze_voice(path, check_cancelled=cancellation_check)
+        stage_seconds["voice"] = time.perf_counter() - voice_started
+    else:
+        voice_analysis = deferred_voice_analysis()
 
     loudness_started = time.perf_counter()
     loudness = _ebu_loudness(path, check_cancelled=cancellation_check)
@@ -971,7 +975,9 @@ def analyze_audio_context(
             "tempo": "medium" if tempo_bpms else "low",
             "structure": "medium" if duration_s >= 30.0 else "low",
             "voice": (
-                "high"
+                "pending"
+                if voice_analysis.stage.get("status") == "pending"
+                else "high"
                 if voice_analysis.summary.get("status") == "classified"
                 else "unavailable"
             ),
@@ -1001,7 +1007,7 @@ def analyze_audio_context(
     elapsed_seconds = time.perf_counter() - analysis_started
     return AudioContextDocument(
         confidence=confidence,
-        completeness="full",
+        completeness="full" if include_voice else "partial",
         summary=summary,
         timeline=downsampled,
         sections=sections,

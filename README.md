@@ -132,14 +132,18 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   contract, privacy, test, and change map, and
   [`docs/assistant-ux-philosophy.md`](docs/assistant-ux-philosophy.md) for the shared drafting,
   review, creation, and manual-tuning interaction contract.
-- **Durable library context analysis** — one restartable `local-context/v2` job decodes each new or
-  changed track into factual whole-track context: signal-level and intensity development, rhythmic
+- **Durable library context analysis** — one restartable `local-context/v2` job runs two sequential
+  library passes. The first decodes every new or changed track into factual whole-track context;
+  only after those rows are checkpointed does a separate worker pool perform optional voice
+  detection. The factual context includes signal-level and intensity development, rhythmic
   drive, perceptual brightness, spectral fullness, spectral change, local tempo behavior, major acoustic sections,
   repetition, technical details, explicit analysis-stage status, and bounded performance timings.
   Native NumPy frame/spectrum math uses gain-invariant Mel spectral profiles, logarithmic brightness,
   dB-based onset strength, octave-aware tempo confidence, and multiscale change detection. It stores condensed timelines
-  in a separate context table, checkpoints each completed/failed track, and never proposes semantic
-  tags. The Track Context tab mirrors the library folders, supports playback, and shows the full
+  in a separate context table, checkpoints each completed/failed track and each voice result, and
+  never proposes semantic tags. A failed voice pass leaves the first-pass rows usable and resumable
+  instead of repeating their audio analysis. The Track Context tab mirrors the library folders,
+  supports playback, and shows the full
   stored context for a selected song. The production image includes FFmpeg for the indexed MP3,
   FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV fallback.
   An opt-in, checksum-pinned Essentia MusiCNN stage can add a normalized voice score and vocal-window

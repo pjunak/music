@@ -114,13 +114,18 @@ docker run -d --name music \
 ```
 
 After restarting, existing context built without that exact classifier is shown as stale. Run the
-normal comprehensive context job, then inspect several known vocal, instrumental, and intermittent-
-vocal tracks in **Assistant -> Track Context**. The UI reports the normalized two-class score and
+normal comprehensive context job. It first checkpoints signal, structure, tempo, and loudness for
+every eligible track, then starts a separate voice-only worker pool. The Library Context page shows
+one progress bar for each pass. If native voice inference is interrupted, retrying the job resumes
+the remaining voice rows from the saved first-pass context instead of decoding the library again.
+Then inspect several known vocal, instrumental, and intermittent-vocal tracks in
+**Assistant -> Track Context**. The UI reports the normalized two-class score and
 the fraction of windows where voice led instrumental. These are classifier measurements, not a
 calibrated probability or guarantee; library-specific threshold calibration is not required for
 this bounded factual-evidence use.
-Disabling or changing the model also requires a normal context rebuild. If the optional stage fails,
-the rest of the track context remains available and the voice stage reports `unavailable`.
+Disabling or changing the model also requires a normal context rebuild. A per-track optional-stage
+failure keeps the rest of that track context and reports voice as `unavailable`; a worker-pool crash
+leaves unprocessed rows as partial checkpoints for the next retry.
 
 ## 3. Enable encrypted provider credentials
 

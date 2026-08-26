@@ -18,6 +18,12 @@ read-only mount; generic Docker builds keep the runtime disabled by default. Sto
 `local-context/v1` rows retain the legacy `voice_probability` key for compatibility, but every
 consumer treats the value as a normalized classifier score, not a calibrated probability.
 
+**Execution update (2026-08-27):** Voice inference remains part of the same durable context job and
+document contract, but no longer runs inside the workers that build signal context. The job first
+checkpoints every signal result as a partial row, closes that process pool, then starts a separate
+voice-only pool and promotes each completed row to full. This keeps native TensorFlow memory out of
+the signal-analysis workers and makes an interrupted voice pass resumable without another decode.
+
 ## Context
 
 `local-context/v1` deliberately reported voice as unknown because loudness, spectral shape, and
@@ -28,7 +34,7 @@ classifier must not discard otherwise useful context.
 
 ## Decision
 
-Add `essentia-musicnn-voice/v1` as an optional stage inside the existing context job. It accepts only
+Add `essentia-musicnn-voice/v1` as an optional second pass inside the existing context job. It accepts only
 the checksum-pinned Essentia `voice_instrumental-musicnn-msd-2.pb` model, whose declared output
 classes are `instrumental` and `voice`. The stage normalizes each two-class window, stores the mean
 voice score and the fraction of voice-leading windows, and presents a conservative track-level

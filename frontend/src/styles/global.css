@@ -5458,6 +5458,62 @@ kbd,
   border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
+.assistant-context-pass-list {
+  display: grid;
+  gap: var(--space-4);
+}
+.assistant-context-pass + .assistant-context-pass {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.assistant-context-pass-heading,
+.assistant-context-pass-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.assistant-context-pass-heading {
+  justify-content: space-between;
+}
+.assistant-context-pass-heading > div:last-child {
+  justify-content: flex-end;
+}
+.assistant-context-pass-heading > div:first-child > span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.assistant-context-pass-state {
+  color: var(--muted-strong);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+.assistant-context-pass-count {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.assistant-context-pass progress {
+  display: block;
+  margin-top: var(--space-2);
+}
+.assistant-context-pass.is-voice_detection progress {
+  accent-color: var(--accent);
+}
+.assistant-context-pass.is-running .assistant-context-pass-state {
+  color: var(--accent2);
+}
+.assistant-context-pass.is-complete .assistant-context-pass-state {
+  color: var(--accent2);
+}
+.assistant-context-pass.is-complete_with_failures .assistant-context-pass-state {
+  color: var(--warn);
+}
+.assistant-context-pass.is-not_available {
+  opacity: 0.72;
+}
 .assistant-context-analysis-empty {
   display: flex;
   align-items: baseline;
@@ -8382,6 +8438,14 @@ input.volume-slider::-moz-range-thumb {
   .assistant-context-analysis-empty {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .assistant-context-pass-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .assistant-context-pass-heading > div:last-child {
+    justify-content: flex-start;
   }
   .assistant-context-coverage-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));

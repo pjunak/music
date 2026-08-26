@@ -51,6 +51,22 @@ const summary: LibraryContextSummary = {
     model_filename: "voice_instrumental-musicnn-msd-2.pb",
     model_sha256: "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a",
   },
+  passes: {
+    audio_context: {
+      completed_tracks: 83,
+      failed_tracks: 2,
+      skipped_tracks: 0,
+      total_tracks: 120,
+      enabled: true,
+    },
+    voice_detection: {
+      completed_tracks: 0,
+      failed_tracks: 0,
+      skipped_tracks: 120,
+      total_tracks: 120,
+      enabled: false,
+    },
+  },
   library_tracks: 120,
   analyzed_tracks: 83,
   full_tracks: 80,
@@ -175,9 +191,14 @@ describe("LibraryAnalysisView", () => {
     renderView();
 
     expect(await screen.findByText("Processed 42 of 120 tracks")).toBeInTheDocument();
-    expect(
-      screen.getByRole("progressbar", { name: "Library context analysis progress" }),
-    ).toHaveValue(42);
+    expect(screen.getByRole("progressbar", { name: "Audio context pass progress" })).toHaveValue(
+      85,
+    );
+    expect(screen.getByRole("progressbar", { name: "Voice detection pass progress" })).toHaveValue(
+      0,
+    );
+    expect(screen.getByText("Pass 1")).toBeInTheDocument();
+    expect(screen.getByText("Pass 2")).toBeInTheDocument();
     expect(screen.getByText("Full")).toBeInTheDocument();
     expect(screen.getByText("Partial")).toBeInTheDocument();
     expect(
@@ -191,6 +212,73 @@ describe("LibraryAnalysisView", () => {
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(jobsApi.cancel).toHaveBeenCalledWith("context-job-1");
+  });
+
+  it("shows independently checkpointed progress for the two analysis passes", async () => {
+    vi.mocked(assistantApi.getLibraryContextSummary).mockResolvedValue({
+      ...summary,
+      voice_analyzer: { ...summary.voice_analyzer, status: "ready", reason: null },
+      passes: {
+        audio_context: {
+          completed_tracks: 120,
+          failed_tracks: 0,
+          skipped_tracks: 0,
+          total_tracks: 120,
+          enabled: true,
+        },
+        voice_detection: {
+          completed_tracks: 14,
+          failed_tracks: 0,
+          skipped_tracks: 0,
+          total_tracks: 120,
+          enabled: true,
+        },
+      },
+    });
+    vi.mocked(jobsApi.list).mockImplementation(async (params) =>
+      params?.kind === "assistant.library-context-analysis"
+        ? [
+            job({
+              status: "failed",
+              error: "BrokenProcessPool: a voice worker terminated abruptly",
+              progress_phase: "Detecting voice",
+              progress_message: "Voice detection: 14 of 120 eligible tracks processed",
+              result: {
+                schema_version: "assistant-library-context-job-progress/v1",
+                passes: {
+                  audio_context: {
+                    status: "complete",
+                    completed_tracks: 120,
+                    failed_tracks: 0,
+                    skipped_tracks: 0,
+                    total_tracks: 120,
+                  },
+                  voice_detection: {
+                    status: "running",
+                    completed_tracks: 14,
+                    failed_tracks: 0,
+                    skipped_tracks: 0,
+                    total_tracks: 120,
+                  },
+                },
+              },
+            }),
+          ]
+        : [],
+    );
+
+    renderView();
+
+    expect(await screen.findByText("Voice detection: 14 of 120 eligible tracks processed"))
+      .toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Audio context pass progress" })).toHaveValue(
+      120,
+    );
+    expect(screen.getByRole("progressbar", { name: "Voice detection pass progress" })).toHaveValue(
+      14,
+    );
+    expect(screen.getByText("Interrupted")).toBeInTheDocument();
+    expect(screen.getByText(/a voice worker terminated abruptly/)).toBeInTheDocument();
   });
 
   it("starts the one multistep analysis and explains checkpointing", async () => {

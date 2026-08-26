@@ -135,7 +135,6 @@ export function LibraryAnalysisView() {
         summary={summary}
         loading={loading}
         actionBusy={busy}
-        progressLabel="Library context analysis progress"
         emptyTitle="No track context has been built yet"
         emptyDescription="Build factual context for each track. Completed tracks are saved as the analysis runs."
         analyzeLabel="Build library context"
