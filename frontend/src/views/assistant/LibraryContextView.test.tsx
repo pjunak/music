@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,7 +62,7 @@ const detail: TrackContextDetail = {
   title: "Quiet Road",
   artist: "Tabletop Ensemble",
   status: "full",
-  analyzer_id: "local-context/v1",
+  analyzer_id: "local-context/v2",
   confidence: "high",
   updated_at: "2026-08-24T10:00:00Z",
   summary: {
@@ -136,11 +136,15 @@ describe("LibraryContextView", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Quiet Road" })).toBeInTheDocument();
-    expect(screen.getByText("Development across the track")).toBeInTheDocument();
+    expect(screen.queryByText("Development across the track")).not.toBeInTheDocument();
     expect(screen.getAllByText("gradual rise · 20%–80%")).toHaveLength(6);
     expect(screen.getByLabelText(/Intensity, rhythmic drive/)).toBeInTheDocument();
     const player = screen.getByLabelText("Play Quiet Road");
     expect(player).toHaveAttribute("src", "/api/library/tracks/9/stream");
+    expect(screen.getByText("0:00 / 3:00")).toBeInTheDocument();
+    Object.defineProperty(player, "currentTime", { configurable: true, value: 90 });
+    fireEvent.timeUpdate(player);
+    expect(screen.getByText("1:30 / 3:00")).toBeInTheDocument();
     expect(screen.queryByText("Campaign/Forest/Quiet Road.flac")).not.toBeInTheDocument();
     await waitFor(() => expect(assistantApi.getTrackContext).toHaveBeenCalledWith(9));
   });

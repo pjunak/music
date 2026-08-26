@@ -244,7 +244,7 @@ Runtime data lives outside the image.
   descriptive metadata, canonical library-relative paths treated as untrusted data, duration,
   BPM, numeric track IDs, the full revisioned operator vocabulary's IDs/names/groups/definitions/
   exact aliases and bounded semantic context cues, and an optional bounded projection of current
-  `local-context/v1` evidence:
+  `local-context/v2` evidence:
   loudness, intensity, rhythmic-drive, brightness, density and spectral-change trajectories;
   tempo development; major acoustic sections/transitions; repetition; confidence; and optional
   local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status).

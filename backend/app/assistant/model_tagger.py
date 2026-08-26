@@ -28,8 +28,8 @@ from app.assistant.tag_vocabulary import (
     default_tag_vocabulary_snapshot,
 )
 
-MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v16"] = (
-    "assistant-music-tagger-input/v16"
+MODEL_TAGGER_INPUT_CONTRACT: Literal["assistant-music-tagger-input/v17"] = (
+    "assistant-music-tagger-input/v17"
 )
 MODEL_TAGGER_OUTPUT_CONTRACT: Literal["assistant-music-tagger-output/v3"] = (
     "assistant-music-tagger-output/v3"
@@ -123,8 +123,8 @@ class ModelTagContextStructure(_StrictModel):
 
 class ModelTagContextVoice(_StrictModel):
     status: Literal["not_classified", "classified", "unavailable"]
-    # Legacy local-context/v1 key: this is a normalized classifier score, not
-    # a calibrated probability. Keep the name stable for stored context rows.
+    # Legacy wire key retained across local-context versions: this is a
+    # normalized classifier score, not a calibrated probability.
     voice_probability: float | None = Field(default=None, ge=0.0, le=1.0)
     vocal_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
     note: str = Field(default="", max_length=300)
@@ -151,7 +151,7 @@ class ModelTagContextSection(_StrictModel):
 
 
 class ModelTagContextEvidence(_StrictModel):
-    analyzer_id: Literal["local-context/v1"]
+    analyzer_id: Literal["local-context/v2"]
     completeness: Literal["full", "partial"]
     confidence: TagConfidence
     trajectories: dict[
@@ -214,7 +214,7 @@ class ModelTagVocabularyGroup(_StrictModel):
 
 
 class ModelTaggerInput(_StrictModel):
-    schema_version: Literal["assistant-music-tagger-input/v16"]
+    schema_version: Literal["assistant-music-tagger-input/v17"]
     tracks: list[ModelTagTrackInput] = Field(min_length=1, max_length=20)
     vocabulary_groups: list[ModelTagVocabularyGroup] = Field(
         min_length=1,

@@ -132,12 +132,12 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   contract, privacy, test, and change map, and
   [`docs/assistant-ux-philosophy.md`](docs/assistant-ux-philosophy.md) for the shared drafting,
   review, creation, and manual-tuning interaction contract.
-- **Durable library context analysis** — one restartable `local-context/v1` job decodes each new or
-  changed track into factual whole-track context: loudness and intensity development, rhythmic
-  drive, brightness, density, spectral change, local tempo behavior, major acoustic sections,
+- **Durable library context analysis** — one restartable `local-context/v2` job decodes each new or
+  changed track into factual whole-track context: signal-level and intensity development, rhythmic
+  drive, perceptual brightness, spectral fullness, spectral change, local tempo behavior, major acoustic sections,
   repetition, technical details, explicit analysis-stage status, and bounded performance timings.
-  Native NumPy frame/spectrum math preserves the v1 evidence contract while accelerating the
-  repeated numerical stages. It stores condensed timelines
+  Native NumPy frame/spectrum math uses gain-invariant Mel spectral profiles, logarithmic brightness,
+  dB-based onset strength, octave-aware tempo confidence, and multiscale change detection. It stores condensed timelines
   in a separate context table, checkpoints each completed/failed track, and never proposes semantic
   tags. The Track Context tab mirrors the library folders, supports playback, and shows the full
   stored context for a selected song. The production image includes FFmpeg for the indexed MP3,

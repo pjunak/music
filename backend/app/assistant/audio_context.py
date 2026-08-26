@@ -13,6 +13,7 @@ import subprocess
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
 
@@ -27,12 +28,10 @@ type _FloatArray = npt.NDArray[np.float64]
 CONTEXT_SAMPLE_RATE = 16_000
 CONTEXT_FRAME_SECONDS = 0.5
 CONTEXT_TIMELINE_SECONDS = 2.0
-CONTEXT_ANALYZER_ID = "local-context/v1"
-# Keep the public v1 evidence contract while making implementation changes
-# explicit in staleness fingerprints. local-context/v2 remains reserved for
-# recalibrated measurement semantics rather than a performance-only rewrite.
-CONTEXT_IMPLEMENTATION_ID = "local-context/v1+numpy-rfft/v1"
+CONTEXT_ANALYZER_ID = "local-context/v2"
+CONTEXT_IMPLEMENTATION_ID = "local-context/v2+perceptual-measurements/v1"
 _FFT_SIZE = 2_048
+_SPECTRAL_BANDS = 24
 _MAX_SECTIONS = 10
 _MIN_SECTION_SECONDS = 10.0
 _LOUDNORM_JSON = re.compile(r"\{\s*\"input_i\".*?\}", re.DOTALL)
@@ -88,6 +87,64 @@ class _Spectrum:
     mid_ratio: float
     high_ratio: float
     peak_concentration: float
+    spectral_entropy: float
+    band_coverage: float
+    profile: tuple[float, ...]
+
+
+def _mel_hz(value: float) -> float:
+    return 700.0 * (10.0 ** (value / 2_595.0) - 1.0)
+
+
+def _hz_mel(value: float) -> float:
+    return 2_595.0 * math.log10(1.0 + max(0.0, value) / 700.0)
+
+
+@lru_cache(maxsize=4)
+def _spectral_band_bins(
+    sample_rate: int,
+) -> tuple[npt.NDArray[np.intp], npt.NDArray[np.bool_]]:
+    frequencies = np.arange(_FFT_SIZE // 2, dtype=np.float64) * (sample_rate / _FFT_SIZE)
+    highest = min(sample_rate / 2.0, 8_000.0)
+    mel_edges = np.linspace(_hz_mel(40.0), _hz_mel(highest), _SPECTRAL_BANDS + 1)
+    hz_edges = np.asarray([_mel_hz(float(value)) for value in mel_edges], dtype=np.float64)
+    bins = np.searchsorted(hz_edges, frequencies, side="right") - 1
+    bins[frequencies == highest] = _SPECTRAL_BANDS - 1
+    valid = (bins >= 0) & (bins < _SPECTRAL_BANDS)
+    return bins, valid
+
+
+def _spectral_profile(
+    powers: _FloatArray,
+    total: float,
+    sample_rate: int,
+) -> tuple[tuple[float, ...], float, float]:
+    """Return a gain-invariant, perceptually spaced spectral shape."""
+
+    bins, valid = _spectral_band_bins(sample_rate)
+    band_energy = np.asarray(
+        np.bincount(
+            bins[valid],
+            weights=powers[valid],
+            minlength=_SPECTRAL_BANDS,
+        ),
+        dtype=np.float64,
+    )
+    covered_total = float(np.sum(band_energy, dtype=np.float64))
+    if covered_total <= max(1e-18, total * 1e-12):
+        return (0.0,) * _SPECTRAL_BANDS, 0.0, 0.0
+    ratios = band_energy / covered_total
+    positive = ratios[ratios > 1e-12]
+    entropy = (
+        -float(np.sum(positive * np.log(positive), dtype=np.float64)) / math.log(_SPECTRAL_BANDS)
+        if positive.size > 1
+        else 0.0
+    )
+    coverage = float(np.count_nonzero(ratios >= 0.01)) / _SPECTRAL_BANDS
+    compressed = np.log1p(ratios * 1_000.0)
+    compressed_total = float(np.sum(compressed, dtype=np.float64))
+    profile = compressed / compressed_total if compressed_total > 1e-12 else compressed
+    return tuple(float(value) for value in profile), _clamp(entropy), _clamp(coverage)
 
 
 def _spectrum(
@@ -107,16 +164,31 @@ def _spectrum(
     powers = np.maximum(1e-18, np.square(transformed.real) + np.square(transformed.imag))
     total = float(np.sum(powers, dtype=np.float64))
     if total <= 1e-12:
-        return _Spectrum(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        return _Spectrum(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            (0.0,) * _SPECTRAL_BANDS,
+        )
     bin_hz = sample_rate / _FFT_SIZE
     frequencies = np.arange(len(powers), dtype=np.float64) * bin_hz
-    centroid = float(np.sum(frequencies * powers, dtype=np.float64) / total)
+    magnitudes = np.sqrt(powers)
+    magnitude_total = float(np.sum(magnitudes, dtype=np.float64))
+    centroid = float(np.sum(frequencies * magnitudes, dtype=np.float64) / magnitude_total)
     variance = float(
-        np.sum(np.square(frequencies - centroid) * powers, dtype=np.float64) / total
+        np.sum(np.square(frequencies - centroid) * magnitudes, dtype=np.float64)
+        / magnitude_total
     )
-    threshold = total * 0.85
+    threshold = magnitude_total * 0.85
     rolloff_index = min(
-        int(np.searchsorted(np.cumsum(powers), threshold, side="left")),
+        int(np.searchsorted(np.cumsum(magnitudes), threshold, side="left")),
         len(frequencies) - 1,
     )
     rolloff = float(frequencies[rolloff_index])
@@ -129,6 +201,11 @@ def _spectrum(
 
     strongest_count = max(4, len(powers) // 100)
     strongest = float(np.sum(np.sort(powers)[-strongest_count:], dtype=np.float64) / total)
+    profile, spectral_entropy, band_coverage = _spectral_profile(
+        powers,
+        total,
+        sample_rate,
+    )
     return _Spectrum(
         centroid_hz=centroid,
         bandwidth_hz=math.sqrt(max(0.0, variance)),
@@ -138,6 +215,9 @@ def _spectrum(
         mid_ratio=band(250.0, 2_000.0),
         high_ratio=band(2_000.0, sample_rate / 2.0),
         peak_concentration=_clamp(strongest),
+        spectral_entropy=spectral_entropy,
+        band_coverage=band_coverage,
+        profile=profile,
     )
 
 
@@ -266,19 +346,27 @@ class _ContextAccumulator:
         )
 
 
+def _onset_strengths(levels: Sequence[float]) -> list[float]:
+    level_db = [_dbfs(value) for value in levels]
+    rises = [max(0.0, current - previous) for previous, current in pairwise(level_db)]
+    if not rises:
+        return []
+    floor = _median(rises)
+    mad = _median([abs(value - floor) for value in rises])
+    threshold = max(1.5, floor + 2.5 * mad)
+    return [max(0.0, value - threshold) for value in rises]
+
+
 def _estimate_tempo(levels: Sequence[float], windows_per_second: float) -> tuple[float | None, float]:
     if len(levels) < round(windows_per_second * 12.0):
         return None, 0.0
-    envelope = [max(0.0, current - previous) for previous, current in pairwise(levels)]
-    floor = _median(envelope)
-    envelope = [max(0.0, value - floor) for value in envelope]
+    envelope = _onset_strengths(levels)
     energy = sum(value * value for value in envelope)
     if energy <= 1e-10:
         return None, 0.0
     min_lag = max(1, round(windows_per_second * 60.0 / 200.0))
     max_lag = min(len(envelope) // 2, round(windows_per_second * 60.0 / 40.0))
-    best_lag: int | None = None
-    best = 0.0
+    candidates: list[tuple[float, float, int]] = []
     for lag in range(min_lag, max_lag + 1):
         left = envelope[lag:]
         right = envelope[:-lag]
@@ -286,13 +374,32 @@ def _estimate_tempo(levels: Sequence[float], windows_per_second: float) -> tuple
         denominator = math.sqrt(
             sum(value * value for value in left) * sum(value * value for value in right)
         )
-        if denominator > 1e-12 and numerator / denominator > best:
-            best = numerator / denominator
-            best_lag = lag
-    confidence = _clamp(best)
-    if best_lag is None or confidence < 0.2:
+        if denominator <= 1e-12:
+            continue
+        correlation = _clamp(numerator / denominator)
+        bpm = 60.0 * windows_per_second / lag
+        # Autocorrelation alone strongly favours slower integer multiples. A
+        # broad musical-tempo prior resolves obvious octave errors while still
+        # allowing genuinely slow or fast pulses when their alternate is weak.
+        prior = math.exp(-0.5 * (math.log2(bpm / 120.0) / 0.75) ** 2)
+        candidates.append((correlation * (0.25 + 0.75 * prior), correlation, lag))
+    if not candidates:
+        return None, 0.0
+    _, best_correlation, best_lag = max(candidates)
+    best_bpm = 60.0 * windows_per_second / best_lag
+    harmonic_rival = max(
+        (
+            correlation
+            for _, correlation, lag in candidates
+            if lag != best_lag
+            and min(abs(lag - 2 * best_lag), abs(2 * lag - best_lag)) <= 1
+        ),
+        default=0.0,
+    )
+    confidence = _clamp(best_correlation * (1.0 - 0.35 * harmonic_rival))
+    if best_correlation < 0.2:
         return None, confidence
-    return 60.0 * windows_per_second / best_lag, confidence
+    return best_bpm, confidence
 
 
 def _tempo_curve(short_levels: Sequence[float], duration_s: float) -> list[dict[str, float]]:
@@ -378,7 +485,9 @@ def _trajectory(values: Sequence[float]) -> dict[str, float | str]:
     else:
         shape = "mixed"
     peak_index = max(range(count), key=lambda index: values[index])
-    threshold = _quantile(values, 0.75)
+    # This is an absolute occupancy measure. A per-track percentile made the
+    # old value hover near 25% regardless of the trajectory's actual level.
+    threshold = 2.0 / 3.0
     return {
         "typical": _round(_median(values)),
         "low": _round(low),
@@ -395,31 +504,48 @@ def _trajectory(values: Sequence[float]) -> dict[str, float | str]:
 
 
 def _timeline_frames(frames: Sequence[_Frame], short_levels: Sequence[float]) -> list[dict[str, float]]:
-    positive_deltas = [max(0.0, current - previous) for previous, current in pairwise(short_levels)]
-    median = _median(positive_deltas)
-    mad = _median([abs(value - median) for value in positive_deltas])
-    onset_threshold = max(0.0015, median + 3.0 * mad)
-    onset_flags = [value > onset_threshold for value in positive_deltas]
+    onset_strengths = _onset_strengths(short_levels)
     short_per_frame = max(1, round(CONTEXT_FRAME_SECONDS / 0.05))
     rows: list[dict[str, float]] = []
-    previous_bands: tuple[float, float, float] | None = None
+    previous_profile: tuple[float, ...] | None = None
     for index, frame in enumerate(frames):
         start = index * short_per_frame
-        local_onsets = sum(onset_flags[start : start + short_per_frame])
+        local_strengths = onset_strengths[start : start + short_per_frame]
+        local_onsets = sum(value > 0.0 for value in local_strengths)
         onset_rate = local_onsets / max(frame.duration_s, 0.001)
-        bands = (frame.spectrum.bass_ratio, frame.spectrum.mid_ratio, frame.spectrum.high_ratio)
         flux = (
-            sum(abs(left - right) for left, right in zip(bands, previous_bands, strict=True))
-            if previous_bands is not None
+            0.5
+            * sum(
+                abs(left - right)
+                for left, right in zip(frame.spectrum.profile, previous_profile, strict=True)
+            )
+            if previous_profile is not None
             else 0.0
         )
-        previous_bands = bands
-        loudness = _normalize(frame.loudness_dbfs, -44.0, -8.0)
-        brightness = _clamp(frame.spectrum.centroid_hz / max(1.0, frame.spectrum.rolloff_hz, 6_000.0))
-        rhythmic = _clamp(0.65 * _normalize(onset_rate, 0.0, 5.0) + 0.35 * _normalize(flux, 0.0, 0.6))
-        occupied = sum(ratio >= 0.08 for ratio in bands) / 3.0
-        density = _clamp(0.45 * loudness + 0.30 * occupied + 0.25 * _normalize(frame.spectrum.bandwidth_hz, 300.0, 3_500.0))
-        intensity = _clamp(0.55 * loudness + 0.25 * rhythmic + 0.20 * _normalize(frame.difference_ratio, 0.02, 0.45))
+        previous_profile = frame.spectrum.profile
+        loudness = _normalize(frame.loudness_dbfs, -50.0, -10.0)
+        centroid_brightness = _normalize(
+            math.log2(max(frame.spectrum.centroid_hz, 250.0)),
+            math.log2(250.0),
+            math.log2(4_000.0),
+        )
+        rolloff_brightness = _normalize(
+            math.log2(max(frame.spectrum.rolloff_hz, 1_000.0)),
+            math.log2(1_000.0),
+            math.log2(7_000.0),
+        )
+        brightness = _clamp(0.78 * centroid_brightness + 0.22 * rolloff_brightness)
+        onset_strength = _mean([_clamp(value / 12.0) for value in local_strengths])
+        rhythmic = _clamp(
+            0.72 * _normalize(onset_rate, 0.0, 5.0) + 0.28 * onset_strength
+        )
+        density = _clamp(
+            0.45 * frame.spectrum.spectral_entropy
+            + 0.25 * frame.spectrum.band_coverage
+            + 0.20 * _normalize(frame.spectrum.bandwidth_hz, 300.0, 3_500.0)
+            + 0.10 * frame.spectrum.flatness
+        )
+        intensity = _clamp(0.50 * loudness + 0.30 * rhythmic + 0.20 * density)
         rows.append(
             {
                 "start_s": _round(frame.start_s, 3),
@@ -429,7 +555,7 @@ def _timeline_frames(frames: Sequence[_Frame], short_levels: Sequence[float]) ->
                 "rhythmic_drive": _round(rhythmic),
                 "brightness": _round(brightness),
                 "density": _round(density),
-                "spectral_flux": _round(_normalize(flux, 0.0, 0.6)),
+                "spectral_flux": _round(flux),
                 "bass_ratio": _round(frame.spectrum.bass_ratio),
                 "mid_ratio": _round(frame.spectrum.mid_ratio),
                 "high_ratio": _round(frame.spectrum.high_ratio),
@@ -459,21 +585,39 @@ def _downsample_timeline(rows: Sequence[dict[str, float]]) -> list[dict[str, flo
 def _change_boundaries(rows: Sequence[dict[str, float]]) -> list[int]:
     if len(rows) < 12:
         return [0, len(rows)]
-    window = 4
     scores: list[tuple[float, int]] = []
     keys = ("intensity", "rhythmic_drive", "brightness", "density", "spectral_flux")
-    for index in range(window, len(rows) - window):
-        before = rows[index - window : index]
-        after = rows[index : index + window]
-        score = _mean(
-            [
-                abs(_mean([row[key] for row in before]) - _mean([row[key] for row in after]))
-                for key in keys
-            ]
-        )
+    windows = [window for window in (4, 8, 16) if len(rows) >= window * 3]
+    if not windows:
+        windows = [4]
+    largest_window = max(windows)
+    for index in range(largest_window, len(rows) - largest_window):
+        scale_scores: list[float] = []
+        for window in windows:
+            before = rows[index - window : index]
+            after = rows[index : index + window]
+            scale_scores.append(
+                _mean(
+                    [
+                        abs(
+                            _mean([row[key] for row in before])
+                            - _mean([row[key] for row in after])
+                        )
+                        for key in keys
+                    ]
+                )
+            )
+        score = _mean(scale_scores)
         scores.append((score, index))
+    if not scores:
+        return [0, len(rows)]
     score_values = [score for score, _ in scores]
-    threshold = max(0.12, _quantile(score_values, 0.75) + _median([abs(score - _median(score_values)) for score in score_values]))
+    score_median = _median(score_values)
+    threshold = max(
+        0.08,
+        _quantile(score_values, 0.75)
+        + _median([abs(score - score_median) for score in score_values]),
+    )
     minimum = max(2, round(_MIN_SECTION_SECONDS / CONTEXT_FRAME_SECONDS))
     selected: list[int] = []
     for score, index in sorted(scores, reverse=True):
@@ -817,6 +961,21 @@ def analyze_audio_context(
             ),
         },
         "voice": voice_analysis.summary,
+        "measurement_reliability": {
+            "loudness": "medium",
+            "intensity": "medium",
+            "rhythmic_drive": "medium",
+            "brightness": "medium",
+            "density": "medium",
+            "spectral_flux": "medium",
+            "tempo": "medium" if tempo_bpms else "low",
+            "structure": "medium" if duration_s >= 30.0 else "low",
+            "voice": (
+                "high"
+                if voice_analysis.summary.get("status") == "classified"
+                else "unavailable"
+            ),
+        },
         "evidence": [
             _trajectory_evidence("Intensity", trajectories["intensity"]),
             _trajectory_evidence("Rhythmic drive", trajectories["rhythmic_drive"]),
@@ -830,7 +989,8 @@ def analyze_audio_context(
         "spectrum": {
             "status": "complete",
             "fft_size": _FFT_SIZE,
-            "implementation": "numpy-rfft/v1",
+            "bands": _SPECTRAL_BANDS,
+            "implementation": "numpy-rfft+mel-profile/v2",
         },
         "tempo": {"status": tempo_summary["status"]},
         "structure": {"status": "complete"},

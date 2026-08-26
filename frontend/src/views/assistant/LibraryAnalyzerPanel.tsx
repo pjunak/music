@@ -138,6 +138,19 @@ function analysisStateTitle(
   return "Build library context";
 }
 
+function voiceAnalyzerMessage(summary: LibraryContextSummary): string {
+  const { model_filename: filename, reason } = summary.voice_analyzer;
+  if (summary.voice_analyzer.status === "ready") return "Voice model ready";
+  if (summary.voice_analyzer.status === "not_configured") return "Voice model not enabled";
+  const reasons: Record<Exclude<typeof reason, null>, string> = {
+    model_missing: `${filename} is missing from the configured model mount.`,
+    model_unreadable: `${filename} cannot be read by the application.`,
+    unsupported_model: `${filename} does not match the supported checksum.`,
+    runtime_missing: "The optional Essentia voice runtime is missing from this image.",
+  };
+  return reason === null ? "Voice model unavailable" : reasons[reason];
+}
+
 export function LibraryAnalyzerPanel({
   id,
   history,
@@ -190,6 +203,18 @@ export function LibraryAnalyzerPanel({
           </span>
         ) : null}
       </div>
+
+      {summary !== null ? (
+        <div
+          className={`assistant-voice-readiness is-${summary.voice_analyzer.status}`}
+          role="status"
+        >
+          <strong>{voiceAnalyzerMessage(summary)}</strong>
+          {summary.voice_analyzer.status === "unavailable" ? (
+            <span>Fix the deployment model setup before rebuilding context.</span>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading && latest === undefined ? (
         <p className="muted">Loading analysis history…</p>

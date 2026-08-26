@@ -43,7 +43,14 @@ import { toast } from "@/core/toast";
 import { LibraryAnalysisView } from "./LibraryAnalysisView";
 
 const summary: LibraryContextSummary = {
-  analyzer: "local-context/v1",
+  analyzer: "local-context/v2",
+  voice_analyzer: {
+    analyzer_id: "essentia-musicnn-voice/v1",
+    status: "unavailable",
+    reason: "model_missing",
+    model_filename: "voice_instrumental-musicnn-msd-2.pb",
+    model_sha256: "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a",
+  },
   library_tracks: 120,
   analyzed_tracks: 83,
   full_tracks: 80,
@@ -173,6 +180,9 @@ describe("LibraryAnalysisView", () => {
     ).toHaveValue(42);
     expect(screen.getByText("Full")).toBeInTheDocument();
     expect(screen.getByText("Partial")).toBeInTheDocument();
+    expect(
+      screen.getByText(/voice_instrumental-musicnn-msd-2\.pb is missing/),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Analysis in progress" }),
     ).toBeInTheDocument();

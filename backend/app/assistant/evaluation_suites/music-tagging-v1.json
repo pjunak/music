@@ -153,7 +153,7 @@
         "length_s": 180.0,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v1",
+          "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
           "trajectories": {
@@ -804,7 +804,7 @@
         "length_s": 240.0,
         "bpm": 132,
         "context_evidence": {
-          "analyzer_id": "local-context/v1",
+          "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
           "trajectories": {
@@ -845,7 +845,7 @@
         "length_s": 286.0,
         "bpm": 58,
         "context_evidence": {
-          "analyzer_id": "local-context/v1",
+          "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
           "trajectories": {
@@ -882,7 +882,7 @@
         "length_s": 174.0,
         "bpm": 154,
         "context_evidence": {
-          "analyzer_id": "local-context/v1",
+          "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
           "trajectories": {

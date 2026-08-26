@@ -23,7 +23,7 @@ from app.assistant.context_workers import (
     analyze_tracks_in_processes,
 )
 from app.assistant.tag_schemas import ModelTaggingScope
-from app.assistant.voice_analysis import voice_analyzer_signature
+from app.assistant.voice_analysis import voice_analyzer_signature, voice_analyzer_status
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.jobs.registry import JobExecutionContext, register_job_handler
@@ -34,13 +34,13 @@ from app.models.track_analysis_failure import TrackAnalysisFailure
 from app.models.track_context import TrackContext
 
 LIBRARY_CONTEXT_JOB_KIND = "assistant.library-context-analysis"
-LOCAL_CONTEXT_ANALYZER_ID: Literal["local-context/v1"] = "local-context/v1"
+LOCAL_CONTEXT_ANALYZER_ID: Literal["local-context/v2"] = "local-context/v2"
 _FAILURE_SAMPLE_LIMIT = 20
 
 
 @dataclass(frozen=True)
 class CurrentTrackContext:
-    analyzer_id: Literal["local-context/v1"]
+    analyzer_id: Literal["local-context/v2"]
     source_signature: str
     completeness: Literal["full", "partial"]
     confidence: Literal["high", "medium", "low"]
@@ -536,6 +536,7 @@ def context_summary(db: Session) -> dict[str, object]:
     update_times.extend(row.updated_at for row in current_failures)
     return {
         "analyzer": LOCAL_CONTEXT_ANALYZER_ID,
+        "voice_analyzer": voice_analyzer_status(),
         "library_tracks": len(tracks),
         "analyzed_tracks": len(current),
         "full_tracks": completeness["full"],

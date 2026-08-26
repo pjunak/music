@@ -24,6 +24,28 @@ def test_voice_analyzer_is_explicitly_unconfigured_by_default(
     }
     assert result.stage == {"status": "not_configured", "required": False}
     assert voice_analysis.voice_analyzer_signature() is None
+    assert voice_analysis.voice_analyzer_status()["status"] == "not_configured"
+
+
+def test_voice_analyzer_status_reports_a_missing_deployment_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        get_settings(),
+        "assistant_voice_model_path",
+        tmp_path / voice_analysis.VOICE_MODEL_FILENAME,
+    )
+
+    status = voice_analysis.voice_analyzer_status()
+
+    assert status == {
+        "analyzer_id": voice_analysis.VOICE_ANALYZER_ID,
+        "status": "unavailable",
+        "reason": "model_missing",
+        "model_filename": voice_analysis.VOICE_MODEL_FILENAME,
+        "model_sha256": voice_analysis.VOICE_MODEL_SHA256,
+    }
 
 
 def test_voice_analyzer_aggregates_bounded_window_predictions(

@@ -202,8 +202,22 @@ class LibraryContextStartRequest(StrictAssistantModel):
     scope: ModelTaggingScope = Field(default_factory=ModelTaggingScope)
 
 
+class VoiceAnalyzerStatus(StrictAssistantModel):
+    analyzer_id: Literal["essentia-musicnn-voice/v1"]
+    status: Literal["not_configured", "ready", "unavailable"]
+    reason: Literal[
+        "model_missing",
+        "model_unreadable",
+        "unsupported_model",
+        "runtime_missing",
+    ] | None
+    model_filename: str
+    model_sha256: str
+
+
 class LibraryContextSummary(StrictAssistantModel):
-    analyzer: Literal["local-context/v1"]
+    analyzer: Literal["local-context/v2"]
+    voice_analyzer: VoiceAnalyzerStatus
     library_tracks: int = Field(ge=0)
     analyzed_tracks: int = Field(ge=0)
     full_tracks: int = Field(ge=0)
@@ -222,7 +236,7 @@ class TrackContextDetail(StrictAssistantModel):
     title: str
     artist: str
     status: Literal["full", "partial", "missing", "stale", "failed"]
-    analyzer_id: Literal["local-context/v1"]
+    analyzer_id: Literal["local-context/v2"]
     confidence: Literal["high", "medium", "low"] | None
     updated_at: datetime | None
     summary: dict[str, object] | None

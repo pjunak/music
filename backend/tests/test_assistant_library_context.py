@@ -13,7 +13,11 @@ from sqlalchemy import delete
 from app.assistant.audio_context import (
     AudioContextDocument,
     AudioContextPerformance,
+    _estimate_tempo,
+    _Frame,
     _spectrum,
+    _timeline_frames,
+    _trajectory,
     analyze_audio_context,
 )
 from app.assistant.context_workers import ContextAnalysisResult
@@ -343,7 +347,8 @@ def test_audio_context_describes_development_without_suggesting_tags(
     assert document.stages["spectrum"] == {
         "status": "complete",
         "fft_size": 2_048,
-        "implementation": "numpy-rfft/v1",
+        "bands": 24,
+        "implementation": "numpy-rfft+mel-profile/v2",
     }
     assert document.performance is not None
     assert document.performance.audio_seconds == pytest.approx(12.0)
@@ -359,7 +364,7 @@ def test_audio_context_describes_development_without_suggesting_tags(
     }
 
 
-def test_numpy_spectrum_preserves_the_previous_v1_measurement_baseline() -> None:
+def test_numpy_spectrum_has_a_deterministic_v2_measurement_baseline() -> None:
     samples = [
         0.55 * math.sin(2.0 * math.pi * 440.0 * index / 16_000)
         + 0.2 * math.sin(2.0 * math.pi * 1_700.0 * index / 16_000)
@@ -368,14 +373,80 @@ def test_numpy_spectrum_preserves_the_previous_v1_measurement_baseline() -> None
 
     spectrum = _spectrum(samples, 16_000)
 
-    assert spectrum.centroid_hz == pytest.approx(587.1532847193931, rel=1e-11)
-    assert spectrum.bandwidth_hz == pytest.approx(404.696694336264, rel=1e-11)
-    assert spectrum.rolloff_hz == 445.3125
-    assert spectrum.flatness == pytest.approx(7.769654402753437e-14, rel=1e-8)
+    assert spectrum.centroid_hz == pytest.approx(777.1830341514549, rel=1e-11)
+    assert spectrum.bandwidth_hz == pytest.approx(558.0481984202627, rel=1e-11)
+    assert spectrum.rolloff_hz == 1_695.3125
+    assert spectrum.flatness == pytest.approx(7.769654422762687e-14, rel=1e-8)
     assert spectrum.bass_ratio == pytest.approx(7.36736002722439e-10, rel=1e-8)
     assert spectrum.mid_ratio == pytest.approx(0.999999999247039, rel=1e-11)
     assert spectrum.high_ratio == pytest.approx(1.605474666777969e-11, rel=1e-8)
-    assert spectrum.peak_concentration == pytest.approx(0.9998252798468769, rel=1e-11)
+    assert spectrum.peak_concentration == pytest.approx(0.9998252798468766, rel=1e-11)
+    assert spectrum.spectral_entropy == pytest.approx(0.1135929609507341, rel=1e-11)
+    assert spectrum.band_coverage == pytest.approx(2 / 24)
+    assert len(spectrum.profile) == 24
+
+
+def _tone_frame(frequency_hz: float, *, start_s: float = 0.0) -> _Frame:
+    samples = [
+        0.5 * math.sin(2.0 * math.pi * frequency_hz * index / 16_000)
+        for index in range(8_000)
+    ]
+    return _Frame(
+        start_s=start_s,
+        duration_s=0.5,
+        loudness_dbfs=-10.0,
+        peak_dbfs=-6.0,
+        zero_crossing_rate=0.0,
+        difference_ratio=0.0,
+        spectrum=_spectrum(samples, 16_000),
+    )
+
+
+def test_v2_brightness_uses_a_perceptual_range_instead_of_a_hard_6khz_divisor() -> None:
+    frames = [_tone_frame(frequency, start_s=index * 0.5) for index, frequency in enumerate((500, 1_500, 4_000))]
+
+    rows = _timeline_frames(frames, [0.5] * 30)
+
+    assert rows[0]["brightness"] == pytest.approx(0.195, abs=0.01)
+    assert rows[1]["brightness"] == pytest.approx(0.55, abs=0.01)
+    assert rows[2]["brightness"] == pytest.approx(0.937, abs=0.01)
+
+
+def test_v2_spectral_change_detects_transitions_inside_the_old_mid_band() -> None:
+    rows = _timeline_frames(
+        [_tone_frame(500.0), _tone_frame(1_500.0, start_s=0.5)],
+        [0.5] * 20,
+    )
+
+    assert rows[1]["spectral_flux"] > 0.9
+
+
+def test_v2_tempo_resolves_accented_120_bpm_without_gain_dependence() -> None:
+    levels = [
+        (1.0 if (index // 10) % 2 == 0 else 0.35) if index % 10 == 0 else 0.05
+        for index in range(600)
+    ]
+
+    tempo, confidence = _estimate_tempo(levels, 20.0)
+    quieter_tempo, quieter_confidence = _estimate_tempo(
+        [value * 0.1 for value in levels],
+        20.0,
+    )
+
+    assert tempo == pytest.approx(120.0)
+    assert quieter_tempo == pytest.approx(tempo)
+    assert quieter_confidence == pytest.approx(confidence)
+    assert 0.4 < confidence < 0.8
+
+
+def test_v2_high_fraction_uses_an_absolute_level() -> None:
+    low = _trajectory([0.2] * 100)
+    high = _trajectory([0.8] * 100)
+    ramp = _trajectory([index / 99 for index in range(100)])
+
+    assert low["high_fraction"] == 0.0
+    assert high["high_fraction"] == 1.0
+    assert float(ramp["high_fraction"]) == pytest.approx(0.34)
 
 
 def test_audio_context_includes_optional_voice_classifier_evidence(
@@ -452,7 +523,7 @@ def test_context_source_signature_changes_with_implementation(
     monkeypatch.setattr(
         library_context,
         "CONTEXT_IMPLEMENTATION_ID",
-        "local-context/v1+different-implementation/v1",
+        "local-context/v2+different-implementation/v1",
     )
 
     assert library_context.context_source_signature(track) != current

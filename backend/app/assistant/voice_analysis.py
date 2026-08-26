@@ -48,6 +48,7 @@ def _unavailable(reason: str, note: str, *, error_type: str | None = None) -> Vo
         "required": False,
         "analyzer_id": VOICE_ANALYZER_ID,
         "reason": reason,
+        "model_filename": VOICE_MODEL_FILENAME,
     }
     if error_type is not None:
         stage["error_type"] = error_type
@@ -101,6 +102,30 @@ def voice_analyzer_signature() -> str | None:
         model_hash = "missing"
     runtime = "runtime-present" if _runtime_available() else "runtime-missing"
     return f"{VOICE_ANALYZER_ID}:{model_hash}:{runtime}"
+
+
+def voice_analyzer_status() -> dict[str, object]:
+    """Return a path-free deployment preflight for the analysis UI."""
+
+    model_path = get_settings().assistant_voice_model_path
+    base: dict[str, object] = {
+        "analyzer_id": VOICE_ANALYZER_ID,
+        "model_filename": VOICE_MODEL_FILENAME,
+        "model_sha256": VOICE_MODEL_SHA256,
+    }
+    if model_path is None:
+        return {**base, "status": "not_configured", "reason": None}
+    if not model_path.is_file():
+        return {**base, "status": "unavailable", "reason": "model_missing"}
+    try:
+        model_hash = _model_file_hash(model_path)
+    except OSError:
+        return {**base, "status": "unavailable", "reason": "model_unreadable"}
+    if model_hash != VOICE_MODEL_SHA256:
+        return {**base, "status": "unavailable", "reason": "unsupported_model"}
+    if not _runtime_available():
+        return {**base, "status": "unavailable", "reason": "runtime_missing"}
+    return {**base, "status": "ready", "reason": None}
 
 
 def _numeric_pair(value: object) -> tuple[float, float] | None:
@@ -194,7 +219,10 @@ def analyze_voice(
     if not model_path.is_file():
         return _unavailable(
             "model_missing",
-            "The configured local voice-classifier model is missing.",
+            (
+                f"{VOICE_MODEL_FILENAME} is missing from the configured model mount. "
+                "Install the checksum-pinned model, then rebuild this track."
+            ),
         )
     try:
         model_hash = _model_file_hash(model_path)
@@ -230,8 +258,8 @@ def analyze_voice(
     return VoiceAnalysis(
         summary={
             "status": "classified",
-            # Keep the stored/wire key for local-context/v1 compatibility. Its value is
-            # a normalized model score, not a calibrated real-world probability.
+            # Keep the stored/wire key across context versions. Its value is a
+            # normalized model score, not a calibrated real-world probability.
             "voice_probability": round(voice_score, 5),
             "vocal_coverage": round(vocal_coverage, 5),
             "note": _classification_note(voice_score, vocal_coverage),

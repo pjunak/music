@@ -7,14 +7,12 @@ import type { TrackContextDetail } from "@/core/api";
 import { assistantApi, libraryApi } from "@/core/api";
 import type { Track } from "@/core/types";
 
-import { AssistantInfoPopover } from "./AssistantInfoPopover";
-
 const TRAJECTORIES = [
   ["intensity", "Intensity"],
-  ["loudness", "Loudness"],
+  ["loudness", "Signal level"],
   ["rhythmic_drive", "Rhythmic drive"],
   ["brightness", "Brightness"],
-  ["density", "Density"],
+  ["density", "Spectral fullness"],
   ["spectral_flux", "Spectral change"],
 ] as const;
 
@@ -58,7 +56,13 @@ function voiceLabel(
   return "Mixed / uncertain voice";
 }
 
-function Timeline({ detail }: { detail: TrackContextDetail }) {
+function Timeline({
+  detail,
+  playbackTime,
+}: {
+  detail: TrackContextDetail;
+  playbackTime: number;
+}) {
   if (detail.timeline.length < 2) {
     return <p className="muted">No condensed timeline is available.</p>;
   }
@@ -75,6 +79,7 @@ function Timeline({ detail }: { detail: TrackContextDetail }) {
     ["rhythmic_drive", "#57d3c8"],
     ["loudness", "#8ca8ff"],
   ] as const;
+  const cursorX = Math.max(0, Math.min(width, (playbackTime / duration) * width));
   return (
     <div className="assistant-context-chart">
       <svg
@@ -111,27 +116,54 @@ function Timeline({ detail }: { detail: TrackContextDetail }) {
             />
           );
         })}
+        <line
+          className="assistant-context-playback-cursor"
+          x1={cursorX}
+          x2={cursorX}
+          y1="0"
+          y2={height}
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle
+          className="assistant-context-playback-marker"
+          cx={cursorX}
+          cy="8"
+          r="5"
+          vectorEffect="non-scaling-stroke"
+        />
       </svg>
-      <div className="assistant-context-chart-legend">
-        <span className="is-intensity">Intensity</span>
-        <span className="is-rhythm">Rhythmic drive</span>
-        <span className="is-loudness">Loudness</span>
+      <div className="assistant-context-chart-footer">
+        <div className="assistant-context-chart-legend">
+          <span className="is-intensity">Intensity</span>
+          <span className="is-rhythm">Rhythmic drive</span>
+          <span className="is-loudness">Signal level</span>
+        </div>
+        <span className="assistant-context-playback-time">
+          {seconds(playbackTime)} / {seconds(duration)}
+        </span>
       </div>
     </div>
   );
 }
 
 function ContextDetail({ detail }: { detail: TrackContextDetail }) {
+  const [playbackTime, setPlaybackTime] = useState(0);
   const summary = detail.summary;
   const trajectories = objectValue(summary?.trajectories);
   const tempo = objectValue(summary?.tempo);
   const structure = objectValue(summary?.structure);
   const voice = objectValue(summary?.voice);
+  const stages = objectValue(detail.stages);
+  const voiceStage = objectValue(stages?.voice);
   const voiceStatus = stringValue(voice?.status);
-  // local-context/v1 retains the legacy key, but its value is a normalized
-  // classifier score rather than a calibrated probability.
+  // The legacy wire key is retained, but its value is a normalized classifier
+  // score rather than a calibrated probability.
   const voiceScore = numberValue(voice?.voice_probability);
   const vocalCoverage = numberValue(voice?.vocal_coverage);
+
+  useEffect(() => {
+    setPlaybackTime(0);
+  }, [detail.track_id]);
 
   if (summary === null) {
     return (
@@ -153,27 +185,27 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
 
   return (
     <div className="assistant-context-detail">
-      <div className="assistant-context-detail-heading">
-        <div>
-          <span className={`assistant-job-status is-${detail.status === "full" ? "succeeded" : "queued"}`}>
-            {detail.status} · {detail.confidence ?? "unknown"} confidence
-          </span>
-          <h2>{detail.title}</h2>
-          <p>{detail.artist || "Unknown artist"}</p>
+      <section className="assistant-context-development">
+        <div className="assistant-context-detail-heading">
+          <div>
+            <span className={`assistant-job-status is-${detail.status === "full" ? "succeeded" : "queued"}`}>
+              {detail.status} · {detail.confidence ?? "unknown"} confidence
+            </span>
+            <h2>{detail.title}</h2>
+            <p>{detail.artist || "Unknown artist"}</p>
+          </div>
+          <audio
+            aria-label={`Play ${detail.title}`}
+            controls
+            preload="none"
+            src={libraryApi.streamUrl(detail.track_id)}
+            onTimeUpdate={(event) => setPlaybackTime(event.currentTarget.currentTime)}
+            onSeeked={(event) => setPlaybackTime(event.currentTarget.currentTime)}
+          >
+            <track kind="captions" />
+          </audio>
         </div>
-        <audio
-          aria-label={`Play ${detail.title}`}
-          controls
-          preload="none"
-          src={libraryApi.streamUrl(detail.track_id)}
-        >
-          <track kind="captions" />
-        </audio>
-      </div>
-
-      <section>
-        <h3>Development across the track</h3>
-        <Timeline detail={detail} />
+        <Timeline detail={detail} playbackTime={playbackTime} />
         <div className="assistant-context-trajectories">
           {TRAJECTORIES.map(([key, label]) => {
             const trajectory = objectValue(trajectories?.[key]);
@@ -212,12 +244,15 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
         </div>
         <div>
           <span>Voice</span>
-          <strong>{voiceLabel(voiceStatus, voiceScore, vocalCoverage)}</strong>
+          <strong>
+            {voiceStatus === "unavailable" && stringValue(voiceStage?.reason) === "model_missing"
+              ? "Model file missing"
+              : voiceLabel(voiceStatus, voiceScore, vocalCoverage)}
+          </strong>
           <small>
             {voiceStatus === "classified" && voiceScore !== null && vocalCoverage !== null
-              ? `${percent(voiceScore)} voice score · ${percent(vocalCoverage)} vocal coverage. `
-              : null}
-            {stringValue(voice?.note) ?? "No voice classifier result"}
+              ? `${percent(voiceScore)} voice score · ${percent(vocalCoverage)} vocal coverage`
+              : (stringValue(voice?.note) ?? "No voice classifier result")}
           </small>
         </div>
       </section>
@@ -233,7 +268,7 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
               </div>
               <p>
                 Intensity {percent(section.intensity)} · rhythm {percent(section.rhythmic_drive)} ·
-                brightness {percent(section.brightness)} · density {percent(section.density)}
+                brightness {percent(section.brightness)} · fullness {percent(section.density)}
               </p>
               {Array.isArray(section.changes_from_previous) && section.changes_from_previous.length > 0 ? (
                 <small>{section.changes_from_previous.join(" · ").replaceAll("_", " ")}</small>
@@ -324,24 +359,7 @@ export function LibraryContextView() {
 
   return (
     <div className="library-view assistant-context-view">
-      <header className="library-toolbar assistant-context-toolbar">
-        <div className="assistant-context-toolbar-title">
-          <h1>Track context</h1>
-          <span>Local evidence used by mood tagging</span>
-        </div>
-        <AssistantInfoPopover label="About this data" title="Factual, local evidence">
-          <p>
-            This view mirrors the Library. The selected folder already supplies the
-            relative path, while the inspector shows condensed whole-track dynamics,
-            tempo, structure, and analysis confidence.
-          </p>
-          <p>The local analyzer never proposes setting, period, scene, or mood tags.</p>
-        </AssistantInfoPopover>
-        <Link className="btn-secondary assistant-context-refresh" to="/assistant/moods/workflow">
-          Build or refresh
-        </Link>
-      </header>
-
+      <h1 className="sr-only">Track context</h1>
       <div className="music-workspace assistant-context-workspace">
         <LibrarySidebarRail>
           <FolderTree selectedPath={path} onSelect={setPath} loadAll={loadFolders} />

@@ -496,7 +496,19 @@ export interface LibraryAnalysisSummary {
 }
 
 export interface LibraryContextSummary extends LibraryAnalysisSummary {
-  analyzer: "local-context/v1";
+  analyzer: "local-context/v2";
+  voice_analyzer: {
+    analyzer_id: "essentia-musicnn-voice/v1";
+    status: "not_configured" | "ready" | "unavailable";
+    reason:
+      | "model_missing"
+      | "model_unreadable"
+      | "unsupported_model"
+      | "runtime_missing"
+      | null;
+    model_filename: string;
+    model_sha256: string;
+  };
   full_tracks: number;
   partial_tracks: number;
   missing_tracks: number;
@@ -507,7 +519,7 @@ export interface TrackContextDetail {
   title: string;
   artist: string;
   status: "full" | "partial" | "missing" | "stale" | "failed";
-  analyzer_id: "local-context/v1";
+  analyzer_id: "local-context/v2";
   confidence: "high" | "medium" | "low" | null;
   updated_at: string | null;
   summary: Record<string, unknown> | null;
