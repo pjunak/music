@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 use tokio::sync::watch;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentStatus {
     Starting,
@@ -12,7 +13,7 @@ pub enum ComponentStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadinessStatus {
     Starting,
@@ -21,10 +22,10 @@ pub enum ReadinessStatus {
     NotReady,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, ToSchema)]
 pub struct ReadinessSnapshot {
     pub status: ReadinessStatus,
-    pub components: BTreeMap<&'static str, ComponentStatus>,
+    pub components: BTreeMap<String, ComponentStatus>,
 }
 
 impl ReadinessSnapshot {
@@ -74,7 +75,7 @@ impl HealthRegistry {
         let components = state
             .components
             .iter()
-            .map(|(&name, record)| (name, record.status))
+            .map(|(&name, record)| (name.to_owned(), record.status))
             .collect();
         let mut has_critical = false;
         let mut critical_starting = false;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { usePlayerStore } from "@/core/playerStore";
-import type { LoopMode, ShuffleMode } from "@/core/types";
+import type { CrossfadeType, LoopMode, ShuffleMode } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
 // End-of-queue behaviour, mutually exclusive. "Continue" is follow/autoplay:
@@ -20,7 +20,7 @@ const SHUFFLE_MODES: { value: ShuffleMode; label: string }[] = [
   { value: "random", label: "Random" },
 ];
 
-const CROSSFADE_TYPES: { value: string; label: string }[] = [
+const CROSSFADE_TYPES: { value: CrossfadeType; label: string }[] = [
   { value: "linear", label: "Linear" },
   { value: "equal_power", label: "Equal power" },
   { value: "cut", label: "Cut" },
@@ -51,12 +51,17 @@ export function TransportSection() {
     wsClient.send({ type: "set_crossfade", crossfade_ms: ms });
   }
 
-  function setCrossfadeType(type: string) {
+  function setCrossfadeType(type: CrossfadeType) {
     wsClient.send({
       type: "set_crossfade",
       crossfade_ms: localCrossfade,
       crossfade_type: type,
     });
+  }
+
+  function setCrossfadeTypeFromSelect(value: string) {
+    const selected = CROSSFADE_TYPES.find((type) => type.value === value);
+    if (selected) setCrossfadeType(selected.value);
   }
 
   return (
@@ -119,7 +124,7 @@ export function TransportSection() {
         <span className="small num-readout">{(localCrossfade / 1000).toFixed(1)}s</span>
         <select
           value={crossfadeType}
-          onChange={(e) => setCrossfadeType(e.target.value)}
+          onChange={(e) => setCrossfadeTypeFromSelect(e.target.value)}
         >
           {CROSSFADE_TYPES.map((t) => (
             <option key={t.value} value={t.value}>

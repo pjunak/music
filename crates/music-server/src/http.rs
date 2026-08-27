@@ -17,6 +17,8 @@ use tower_http::cors::{AllowHeaders, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::Instrument;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
@@ -44,22 +46,22 @@ impl CorrelationId {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 struct LivenessResponse {
     status: &'static str,
 }
+
+#[derive(utoipa::OpenApi)]
+struct MusicApi;
 
 pub fn build_router(config: &AppConfig, health: HealthRegistry) -> Result<Router, RuntimeError> {
     let state = HttpState {
         health: health.clone(),
     };
-    let api = Router::new()
-        .route("/health", get(liveness))
-        .route("/readiness", get(readiness))
-        .route("/ws", get(websocket_shell))
-        .fallback(api_not_found)
-        .with_state(state);
-    let mut router = Router::new().nest("/api", api);
+    let api = documented_api_router().with_state(state);
+    let (mut router, _) = OpenApiRouter::with_openapi(<MusicApi as utoipa::OpenApi>::openapi())
+        .nest("/api", api)
+        .split_for_parts();
 
     let static_directory = config.static_dir.as_deref();
     let static_index = static_directory.map(|directory| directory.join("index.html"));
@@ -83,6 +85,20 @@ pub fn build_router(config: &AppConfig, health: HealthRegistry) -> Result<Router
         .layer(CatchPanicLayer::custom(panic_response))
         .layer(RequestBodyLimitLayer::new(config.request_body_limit_bytes));
     Ok(router.layer(middleware))
+}
+
+fn documented_api_router() -> OpenApiRouter<HttpState> {
+    OpenApiRouter::default()
+        .routes(routes!(liveness))
+        .routes(routes!(readiness))
+        .route("/ws", get(websocket_shell))
+        .fallback(api_not_found)
+}
+
+pub(crate) fn openapi_document() -> utoipa::openapi::OpenApi {
+    OpenApiRouter::<HttpState>::with_openapi(<MusicApi as utoipa::OpenApi>::openapi())
+        .nest("/api", documented_api_router())
+        .into_openapi()
 }
 
 fn cors_layer(config: &AppConfig) -> Result<CorsLayer, RuntimeError> {
@@ -112,10 +128,23 @@ fn cors_layer(config: &AppConfig) -> Result<CorsLayer, RuntimeError> {
         .allow_origin(origins))
 }
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses((status = 200, description = "Server process is alive", body = LivenessResponse))
+)]
 async fn liveness() -> Json<LivenessResponse> {
     Json(LivenessResponse { status: "ok" })
 }
 
+#[utoipa::path(
+    get,
+    path = "/readiness",
+    responses(
+        (status = 200, description = "All critical components can accept traffic", body = ReadinessSnapshot),
+        (status = 503, description = "A critical component is still starting or unavailable", body = ReadinessSnapshot)
+    )
+)]
 async fn readiness(State(state): State<HttpState>) -> (StatusCode, Json<ReadinessSnapshot>) {
     let snapshot = state.health.snapshot();
     let status = if snapshot.accepts_traffic() {

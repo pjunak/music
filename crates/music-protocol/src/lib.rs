@@ -12,6 +12,7 @@
 mod actions;
 mod messages;
 mod scalar;
+mod typescript;
 
 pub use actions::{ClientAction, CrossfadeType, LoopMode, ShuffleMode};
 pub use messages::{
@@ -20,5 +21,6 @@ pub use messages::{
 };
 pub use scalar::{
     BoundedText, CrossfadeMillis, FadeMillis, LoopIntervalSeconds, NonNegativeI64, ProtocolVersion,
-    ScalarError, UnitInterval,
+    RequiredNullableString, ScalarError, UnitInterval,
 };
+pub use typescript::typescript_bindings;

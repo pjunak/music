@@ -11,6 +11,7 @@
 //! state.
 
 mod config;
+mod contracts;
 mod error;
 mod health;
 mod http;
@@ -18,6 +19,9 @@ mod runtime;
 mod supervisor;
 
 pub use config::{AppConfig, ConfigError, LogLevel};
+pub use contracts::{
+    ContractArtifact, ContractError, check_contracts, export_contracts, render_contracts,
+};
 pub use error::{ApiError, PublicErrorBody, PublicErrorDetail, RuntimeError};
 pub use health::{ComponentStatus, HealthRegistry, ReadinessSnapshot, ReadinessStatus};
 pub use http::CorrelationId;

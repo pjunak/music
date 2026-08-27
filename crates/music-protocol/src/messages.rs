@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::actions::{CrossfadeType, LoopMode, ShuffleMode};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DeviceInfo {
     pub device_id: String,
     pub client_id: String,
@@ -11,15 +12,16 @@ pub struct DeviceInfo {
     pub is_output: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct PositionReport {
     pub device_id: String,
     pub position_ms: i64,
     pub reported_at: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, TS)]
 #[serde(default)]
+#[ts(rename = "CanonicalAmbientState")]
 pub struct AmbientState {
     pub current_track_id: Option<i64>,
     pub queue: Vec<i64>,
@@ -32,7 +34,8 @@ pub struct AmbientState {
     pub source_playlist_id: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(rename = "CanonicalInterruptState")]
 pub struct InterruptState {
     pub current_track_id: i64,
     #[serde(default)]
@@ -49,7 +52,7 @@ pub struct InterruptState {
     pub duck_to: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct LoopingSfx {
     pub id: String,
     pub name: String,
@@ -60,8 +63,9 @@ pub struct LoopingSfx {
     pub volume: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default)]
+#[ts(rename = "CanonicalPlayerState")]
 pub struct PlayerState {
     pub revision: i64,
     pub position_epoch: i64,
@@ -108,15 +112,16 @@ impl Default for PlayerState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     SessionExpired,
     SessionRevoked,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(rename = "CanonicalServerMessage")]
 pub enum ServerMessage {
     StateSnapshot {
         #[serde(default)]

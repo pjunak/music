@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 use crate::scalar::{
     BoundedText, CrossfadeMillis, FadeMillis, LoopIntervalSeconds, NonNegativeI64, ProtocolVersion,
-    UnitInterval,
+    RequiredNullableString, UnitInterval,
 };
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum LoopMode {
     #[default]
@@ -16,7 +17,7 @@ pub enum LoopMode {
     Track,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ShuffleMode {
     #[default]
@@ -24,7 +25,7 @@ pub enum ShuffleMode {
     Random,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum CrossfadeType {
     #[default]
@@ -33,33 +34,41 @@ pub enum CrossfadeType {
     Cut,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(rename = "CanonicalClientAction")]
 pub enum ClientAction {
     Register {
+        #[ts(type = "string")]
         name: BoundedText<1, 128>,
+        #[ts(type = "string")]
         client_id: BoundedText<1, 64>,
         #[serde(default)]
+        #[ts(type = "number")]
         protocol_version: ProtocolVersion,
     },
     SetVolume {
+        #[ts(type = "number")]
         volume: UnitInterval,
     },
     Pause,
     Resume,
     SetActiveMode {
-        #[serde(deserialize_with = "crate::scalar::required_nullable")]
-        mode_id: Option<String>,
+        #[ts(type = "string | null")]
+        mode_id: RequiredNullableString,
     },
     SetActiveOutputs {
         #[serde(default)]
         device_ids: Vec<String>,
     },
     SetDeviceVolume {
+        #[ts(type = "string")]
         device_id: BoundedText<1, 64>,
+        #[ts(type = "number")]
         volume: UnitInterval,
     },
     PositionReport {
+        #[ts(type = "number")]
         position_ms: NonNegativeI64,
     },
     AmbientPlayTrack {
@@ -70,6 +79,7 @@ pub enum ClientAction {
         track_ids: Vec<i64>,
     },
     AmbientJumpQueue {
+        #[ts(type = "number")]
         position: NonNegativeI64,
     },
     AmbientEnqueue {
@@ -82,6 +92,7 @@ pub enum ClientAction {
     },
     AmbientSkipPrev,
     AmbientSeek {
+        #[ts(type = "number")]
         position_ms: NonNegativeI64,
     },
     AmbientSetLoop {
@@ -95,34 +106,41 @@ pub enum ClientAction {
     AmbientPlayPlaylist {
         playlist_id: i64,
         #[serde(default)]
+        #[ts(type = "number")]
         start_index: NonNegativeI64,
     },
     AmbientPlayFolder {
         #[serde(default)]
+        #[ts(type = "string")]
         path: BoundedText<0, 1024>,
         #[serde(default)]
+        #[ts(type = "number")]
         start_index: NonNegativeI64,
     },
     SetActiveSoundboard {
-        #[serde(deserialize_with = "crate::scalar::required_nullable")]
-        soundboard_id: Option<String>,
+        #[ts(type = "string | null")]
+        soundboard_id: RequiredNullableString,
     },
     SetActivePresets {
         #[serde(default)]
         preset_ids: Vec<String>,
     },
     SetCrossfade {
+        #[ts(type = "number")]
         crossfade_ms: CrossfadeMillis,
         crossfade_type: Option<CrossfadeType>,
     },
     FireInterruptTrack {
+        #[ts(type = "number | null")]
         duck_to: Option<UnitInterval>,
         track_id: i64,
         #[serde(default = "default_true")]
         return_to_ambient: bool,
         #[serde(default)]
+        #[ts(type = "number")]
         fade_in_ms: FadeMillis,
         #[serde(default)]
+        #[ts(type = "number")]
         fade_out_ms: FadeMillis,
     },
     FireInterruptPlaylist {
@@ -130,37 +148,52 @@ pub enum ClientAction {
         #[serde(default = "default_true")]
         return_to_ambient: bool,
         #[serde(default)]
+        #[ts(type = "number")]
         fade_in_ms: FadeMillis,
         #[serde(default)]
+        #[ts(type = "number")]
         fade_out_ms: FadeMillis,
+        #[ts(type = "number | null")]
         duck_to: Option<UnitInterval>,
     },
     InterruptSkipNext {
         from_track_id: Option<i64>,
     },
     InterruptSeek {
+        #[ts(type = "number")]
         position_ms: NonNegativeI64,
     },
     CancelInterrupt,
     FireSfx {
+        #[ts(type = "string")]
         soundboard_id: BoundedText<1, 128>,
+        #[ts(type = "string")]
         item_path: BoundedText<1, 512>,
         #[serde(default)]
+        #[ts(type = "number")]
         volume: UnitInterval,
     },
     StartLoop {
+        #[ts(type = "string")]
         id: BoundedText<1, 64>,
+        #[ts(type = "string")]
         name: BoundedText<1, 128>,
+        #[ts(type = "string")]
         soundboard_id: BoundedText<1, 128>,
+        #[ts(type = "string")]
         item_path: BoundedText<1, 512>,
+        #[ts(type = "number")]
         interval_s: LoopIntervalSeconds,
         #[serde(default)]
+        #[ts(type = "number")]
         volume: UnitInterval,
     },
     StopLoop {
+        #[ts(type = "string")]
         id: BoundedText<1, 64>,
     },
     FireCue {
+        #[ts(type = "string")]
         cue_id: BoundedText<1, 128>,
     },
 }

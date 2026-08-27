@@ -48,6 +48,82 @@ impl<const MIN: usize, const MAX: usize> BoundedText<MIN, MAX> {
     }
 }
 
+/// A nullable string whose key must be present on the wire.
+///
+/// `Option<String>` alone treats an absent field like JSON `null`. This
+/// wrapper preserves the existing protocol distinction without relying on a
+/// custom field attribute that contract generators cannot understand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct RequiredNullableString(Option<String>);
+
+impl RequiredNullableString {
+    #[must_use]
+    pub const fn new(value: Option<String>) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub fn as_deref(&self) -> Option<&str> {
+        self.0.as_deref()
+    }
+
+    #[must_use]
+    pub fn into_inner(self) -> Option<String> {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RequiredNullableString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RequiredNullableStringVisitor;
+
+        impl de::Visitor<'_> for RequiredNullableStringVisitor {
+            type Value = RequiredNullableString;
+
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a string or null")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(RequiredNullableString(None))
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(RequiredNullableString(None))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(RequiredNullableString(Some(value.to_owned())))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(RequiredNullableString(Some(value)))
+            }
+        }
+
+        // `deserialize_any` is intentional: JSON null reaches `visit_unit`,
+        // while Serde's missing-field deserializer errors before invoking the
+        // visitor. Delegating to `Option` would collapse missing and null.
+        deserializer.deserialize_any(RequiredNullableStringVisitor)
+    }
+}
+
 impl<const MAX: usize> Default for BoundedText<0, MAX> {
     fn default() -> Self {
         Self(String::new())
@@ -208,12 +284,4 @@ impl<'de> Deserialize<'de> for LoopIntervalSeconds {
         let value = f64::deserialize(deserializer)?;
         Self::new(value).map_err(de::Error::custom)
     }
-}
-
-pub(crate) fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
 }

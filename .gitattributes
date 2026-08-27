@@ -1,3 +1,8 @@
 # SQLx hashes migration source bytes. Pin line endings so a database migrated
 # on Linux validates against the same checksum on Windows and vice versa.
 /crates/music-storage/migrations/** text eol=lf
+
+# Generated contracts are byte-compared in CI and must be identical on every
+# developer platform.
+/frontend/src/generated/** text eol=lf
+/contracts/generated/** text eol=lf

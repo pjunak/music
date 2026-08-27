@@ -38,6 +38,9 @@ tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.0", features = ["catch-panic", "cors", "fs", "limit"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+ts-rs = { version = "12.0.1", default-features = false, features = ["serde-compat"] }
+utoipa = { version = "5.5.0", default-features = false, features = ["macros"] }
+utoipa-axum = "0.2.0"
 uuid = { version = "1.26.0", features = ["v4"] }
 zeroize = "1.8"
 

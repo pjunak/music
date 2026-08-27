@@ -1,69 +1,19 @@
-// Protocol types mirroring backend/app/sync/protocol.py.
-// Source of truth for the contract: backend/app/sync/protocol.py.
-
-// "follow" continues into the rest of the library once the queue ends — the
-// "Continue / Autoplay (∞)" mode. Mutually exclusive with the repeat modes.
-export type LoopMode = "off" | "follow" | "queue" | "track";
-export type ShuffleMode = "off" | "random";
-
-export interface AmbientState {
-  current_track_id: number | null;
-  queue: number[];
-  history: number[];
-  /** Always materialized to "now" by the server (it owns the playback
-   *  clock), so this is current in every snapshot/broadcast — not just
-   *  after a position report. */
-  position_ms: number;
-  /** Server-internal clock anchor; clients must ignore it. */
-  position_anchored_at?: number | null;
-  loop: LoopMode;
-  shuffle: ShuffleMode;
-  /** The playlist the lane was started from (for the Console's "now driving"
-   *  highlight), or null once the queue diverges. */
-  source_playlist_id: number | null;
-}
-
-export interface InterruptState {
-  current_track_id: number;
-  queue: number[];
-  position_ms: number;
-  /** Server-internal clock anchor; clients must ignore it. */
-  position_anchored_at?: number | null;
-  return_to_ambient: boolean;
-  fade_in_ms: number;
-  fade_out_ms: number;
-  /** When non-null (0..1), ambient music keeps playing at this volume
-   *  multiplier during the interrupt instead of pausing. Drives the
-   *  cinematic "duck under voiceover" effect. */
-  duck_to: number | null;
-}
-
-export interface PositionReport {
-  device_id: string;
-  position_ms: number;
-  reported_at: number;
-}
-
-/** A repeating SFX driven by a server-side interval timer. Shown in the
- *  Console LOOPS panel; `id` is the stop handle. */
-export interface LoopingSfx {
-  id: string;
-  name: string;
-  soundboard_id: string;
-  item_path: string;
-  interval_s: number;
-  volume: number;
-}
-
-export interface DeviceInfo {
-  /** Same value as `client_id` (the stable identity) — kept so existing
-   *  code that keys on `device_id` keeps working. */
-  device_id: string;
-  client_id: string;
-  name: string;
-  /** Whether this device is a designated audio output (persistent registry). */
-  is_output: boolean;
-}
+// WebSocket protocol bindings are generated from the authoritative Rust DTOs.
+// Runtime validation remains in wsValidate.ts because TypeScript types vanish
+// at the browser boundary.
+export type {
+  AmbientState,
+  CrossfadeType,
+  DeviceInfo,
+  InterruptState,
+  LoopMode,
+  LoopingSfx,
+  PlayerState,
+  PositionReport,
+  ShuffleMode,
+  WsAction,
+  WsMessage,
+} from "@/generated/protocol";
 
 /** A remembered device from the operator's persistent registry
  *  (`GET /api/devices`). */
@@ -73,37 +23,6 @@ export interface KnownDevice {
   is_output: boolean;
   connected: boolean;
   added_at: string | null;
-}
-
-export interface PlayerState {
-  revision: number;
-  /** Bumped ONLY on deliberate position moves (play/seek/skip/loop restart/
-   *  interrupt transitions). The client seek contract: seek the active lane
-   *  iff this changed; never infer seeks by comparing positions. Optional
-   *  only for skew with a pre-epoch server (a cached bundle mid-deploy). */
-  position_epoch?: number;
-  is_playing: boolean;
-  /** Deprecated compatibility field. Current servers always emit 1.0. */
-  volume: number;
-  active_mode_id: string | null;
-  active_output_device_ids: string[];
-  /** Initial server-owned level for devices without a materialized entry. */
-  default_device_volume?: number;
-  /** Canonical absolute software volume per stable client_id. */
-  device_volumes: Record<string, number>;
-  active_soundboard_id: string | null;
-  active_preset_ids: string[];
-  /** Bumped when stored preset content changes so outputs invalidate their
-   *  manifest cache even when the active preset ids stay the same. */
-  preset_revision?: number;
-  crossfade_ms: number;
-  crossfade_type: string;
-  ambient: AmbientState;
-  interrupt: InterruptState | null;
-  /** Repeating SFX currently running (server-timer driven). */
-  looping_sfx: LoopingSfx[];
-  last_position_report: PositionReport | null;
-  connected_devices: DeviceInfo[];
 }
 
 // Library track shape returned by /api/library/*.
@@ -301,76 +220,3 @@ export interface TreeResponse {
 export interface FoldersResponse {
   folders: FolderEntry[];
 }
-
-// --- WebSocket actions (client → server) ---------------------------------
-
-export type WsAction =
-  | { type: "register"; name: string; client_id: string; protocol_version: 2 }
-  | { type: "set_volume"; volume: number }
-  | { type: "pause" }
-  | { type: "resume" }
-  | { type: "set_active_mode"; mode_id: string | null }
-  | { type: "set_active_outputs"; device_ids: string[] }
-  | { type: "set_device_volume"; device_id: string; volume: number }
-  | { type: "position_report"; position_ms: number }
-  | { type: "ambient_play_track"; track_id: number }
-  | { type: "ambient_set_queue"; track_ids: number[] }
-  | { type: "ambient_jump_queue"; position: number }
-  | { type: "ambient_enqueue"; track_id: number; position?: number }
-  | { type: "ambient_clear_queue" }
-  | { type: "ambient_skip_next"; from_track_id?: number | null }
-  | { type: "ambient_skip_prev" }
-  | { type: "ambient_seek"; position_ms: number }
-  | { type: "ambient_set_loop"; loop: LoopMode }
-  | { type: "ambient_set_shuffle"; shuffle: ShuffleMode }
-  | { type: "ambient_stop" }
-  | { type: "ambient_play_playlist"; playlist_id: number; start_index?: number }
-  | { type: "ambient_play_folder"; path: string; start_index?: number }
-  | { type: "set_active_soundboard"; soundboard_id: string | null }
-  | { type: "set_active_presets"; preset_ids: string[] }
-  | { type: "set_crossfade"; crossfade_ms: number; crossfade_type?: string }
-  | {
-      type: "fire_interrupt_track";
-      track_id: number;
-      return_to_ambient?: boolean;
-      fade_in_ms?: number;
-      fade_out_ms?: number;
-      duck_to?: number | null;
-    }
-  | {
-      type: "fire_interrupt_playlist";
-      playlist_id: number;
-      return_to_ambient?: boolean;
-      fade_in_ms?: number;
-      fade_out_ms?: number;
-      duck_to?: number | null;
-    }
-  | { type: "interrupt_skip_next"; from_track_id?: number | null }
-  | { type: "interrupt_seek"; position_ms: number }
-  | { type: "cancel_interrupt" }
-  | { type: "fire_sfx"; soundboard_id: string; item_path: string; volume?: number }
-  | {
-      type: "start_loop";
-      id: string;
-      name: string;
-      soundboard_id: string;
-      item_path: string;
-      interval_s: number;
-      volume?: number;
-    }
-  | { type: "stop_loop"; id: string }
-  | { type: "fire_cue"; cue_id: string };
-
-// --- WebSocket events (server → client) ----------------------------------
-
-export type WsMessage =
-  | { type: "state_snapshot"; your_device_id: string; state: PlayerState }
-  | { type: "state_changed"; state: PlayerState }
-  | { type: "sfx_fired"; soundboard_id: string; item_path: string; volume: number }
-  | {
-      type: "error";
-      detail: string;
-      /** Set when the client must react programmatically (re-login flow);
-       *  absent/null on ordinary rejected-action errors. */
-      code?: "session_expired" | "session_revoked" | null;
-    };
