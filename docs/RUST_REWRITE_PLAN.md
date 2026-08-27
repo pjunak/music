@@ -62,8 +62,9 @@ the Python reference runner, while Docker/Linux-specific checks run in CI or on 
 
 ### Required development tools
 
-- Stable Rust 1.89 or newer installed through rustup and pinned by `rust-toolchain.toml`, including
-  rustfmt and Clippy. The minimum supports standard-library cross-platform file locks.
+- Stable Rust 1.94 or newer installed through rustup and pinned by `rust-toolchain.toml`, including
+  rustfmt and Clippy. Standard-library cross-platform file locks stabilized in 1.89; SQLx 0.9 raises
+  the effective workspace minimum to 1.94.
 - `cargo-nextest` for the main test suite; `cargo test --doc` separately because nextest does not
   run doctests.
 - `cargo-deny` and `cargo-audit` for source/license/advisory policy.
@@ -85,7 +86,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo nextest run --workspace --all-features
 cargo test --workspace --all-features --doc
 cargo deny check
-cargo audit
+cargo audit --deny warnings
 cargo test -p music-protocol export_bindings
 npm.cmd run lint
 npm.cmd run typecheck
@@ -125,6 +126,13 @@ Evidence so far:
 - `music-protocol` parses and canonically re-serializes valid/defaulted Python examples for every
   action and server message type, and rejects the shared representative invalid corpus. Bounded
   wire scalars make the Python validation limits explicit before transport code consumes them.
+- `music-storage` opens bundled SQLite with WAL, foreign keys, a five-second busy timeout, and at
+  most four pooled connections; its standard-library lock refuses a second owner and releases on
+  drop. Playback persistence uses a separate `storage_revision` compare-and-swap, and a 16-writer
+  concurrency test proves one winner with stale writes rejected.
+- `deny.toml` rejects unknown registries and Git sources, wildcard requirements, OpenSSL/native-TLS
+  backends, and both deprecated YAML implementations. The initial 131-crate graph passes RustSec
+  with warnings denied; the two upstream duplicate families remain visible as review warnings.
 - The eight-crate workspace shell compiles with the accepted dependency direction and workspace
   safe-Rust/panic lints. It exists now to host Phase 1 contract and feasibility tests; no production
   endpoint is routed to Rust before its parity gate.

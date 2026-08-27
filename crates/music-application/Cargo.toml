@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-music-domain = { path = "../music-domain" }
+music-domain = { path = "../music-domain", version = "0.1.0" }
 
 [lints]
 workspace = true

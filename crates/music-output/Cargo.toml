@@ -7,7 +7,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-music-protocol = { path = "../music-protocol" }
+music-protocol = { path = "../music-protocol", version = "0.1.0" }
 
 [lints]
 workspace = true

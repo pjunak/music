@@ -7,8 +7,13 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-music-application = { path = "../music-application" }
-music-domain = { path = "../music-domain" }
+music-application = { path = "../music-application", version = "0.1.0" }
+music-domain = { path = "../music-domain", version = "0.1.0" }
+sqlx.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

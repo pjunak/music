@@ -43,12 +43,17 @@ cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo test --workspace --all-features --doc
+cargo deny check
+cargo audit --deny warnings
 ```
 
 The checked-in toolchain is authoritative. On Windows hosts without the Visual Studio C++ build
 tools, install rustup's official GNU host and add
 `+1.97.1-x86_64-pc-windows-gnu` immediately after `cargo` in the commands above. Linux CI and
 release builds use the normal host selected by `rust-toolchain.toml`.
+The Rust gates are verified with `cargo-nextest` 0.9.143, `cargo-deny` 0.20.2, and `cargo-audit`
+0.22.2; install those exact versions with `cargo install <tool> --version <version> --locked` when
+they are unavailable.
 
 Frontend, from `frontend/` (Node 26+):
 

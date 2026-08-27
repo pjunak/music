@@ -1,0 +1,42 @@
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "simplest-path"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = [
+    { crate = "native-tls", reason = "The server uses rustls rather than platform TLS backends." },
+    { crate = "openssl", reason = "The server uses rustls and must not acquire an OpenSSL runtime dependency." },
+    { crate = "openssl-sys", reason = "The server uses rustls and must not acquire an OpenSSL runtime dependency." },
+    { crate = "serde_yaml", reason = "The deprecated YAML implementation is excluded from the rewrite." },
+    { crate = "serde_yml", reason = "The unsound serde_yml fork is excluded from the rewrite." },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

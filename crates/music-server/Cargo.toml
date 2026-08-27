@@ -7,12 +7,12 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-music-analysis = { path = "../music-analysis" }
-music-application = { path = "../music-application" }
-music-domain = { path = "../music-domain" }
-music-media = { path = "../music-media" }
-music-protocol = { path = "../music-protocol" }
-music-storage = { path = "../music-storage" }
+music-analysis = { path = "../music-analysis", version = "0.1.0" }
+music-application = { path = "../music-application", version = "0.1.0" }
+music-domain = { path = "../music-domain", version = "0.1.0" }
+music-media = { path = "../music-media", version = "0.1.0" }
+music-protocol = { path = "../music-protocol", version = "0.1.0" }
+music-storage = { path = "../music-storage", version = "0.1.0" }
 
 [lints]
 workspace = true
