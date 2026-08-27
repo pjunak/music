@@ -7,8 +7,11 @@ same exact bytes without committing opaque binary files.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import math
 import struct
+import zlib
 from collections.abc import Callable
 
 
@@ -161,4 +164,101 @@ MINIMAL_AUDIO_BUILDERS: dict[str, Callable[[], bytes]] = {
     "ogg": _ogg,
 }
 
-__all__ = ["MINIMAL_AUDIO_BUILDERS"]
+# These four tiny silence containers cover formats whose framing is not
+# practical to reproduce correctly with Python's standard library. They were
+# generated with the checksum-pinned LGPL FFmpeg build recorded below. The
+# encoded payloads are source data for deterministic builders, not user media.
+FFMPEG_FIXTURE_PROVENANCE = {
+    "version": "n9.0.1-8-g16dfae5c88-20260826",
+    "archive": "ffmpeg-n9.0.1-8-g16dfae5c88-win64-lgpl-shared-9.0.zip",
+    "archive_sha256": "120b26a83d10de8927297169c7f2417a6b6a544c51d5284e7183d864d4118cd2",
+    "source": (
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/"
+        "autobuild-2026-08-26-13-06/"
+    ),
+}
+
+_AAC_BASE64 = (
+    "//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH"
+    "//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH"
+)
+
+_M4A_BASE64 = (
+    "AAAAHGZ0eXBNNEEgAAACAE00QSBpc29taXNvMgAAAtZtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAKxEAAArEQAB"
+    "AAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAACAAACJXRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAArEQAAAAAAAAAAAAAAAQEA"
+    "AAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAACRlZHRzAAAAHGVsc3QAAAAA"
+    "AAAAAQAAKxEAAAQAAAEAAAAAAZ1tZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAKxEAAAvEVXEAAAAAAAtaGRscgAA"
+    "AAAAAAAAc291bgAAAAAAAAAAAAAAAFNvdW5kSGFuZGxlcgAAAAFIbWluZgAAABBzbWhkAAAAAAAAAAAAAAAkZGlu"
+    "ZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAAEMc3RibAAAAGpzdHNkAAAAAAAAAAEAAABabXA0YQAAAAAA"
+    "AAABAAAAAAAAAAAAAQAQAAAAAKxEAAAAAAA2ZXNkcwAAAAADgICAJQABAASAgIAXQBUAAAAAAPoAAAAFfQWAgIAF"
+    "EghW5QAGgICAAQIAAAAgc3R0cwAAAAAAAAACAAAACwAABAAAAAABAAADEQAAABxzdHNjAAAAAAAAAAEAAAABAAAA"
+    "DAAAAAEAAAAUc3RzegAAAAAAAAAEAAAADAAAABRzdGNvAAAAAAAAAAEAAAMCAAAAGnNncGQBAAAAcm9sbAAAAAIA"
+    "AAAB//8AAAAcc2JncAAAAAByb2xsAAAAAQAAAAwAAAABAAAAPXVkdGEAAAA1bWV0YQAAAAAAAAAhaGRscgAAAAAA"
+    "AAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAIaWxzdAAAAAhmcmVlAAAAOG1kYXQBGCAHARggBwEYIAcBGCAHARggBwEY"
+    "IAcBGCAHARggBwEYIAcBGCAHARggBwEYIAc="
+)
+
+_OPUS_BASE64 = (
+    "T2dnUwACAAAAAAAAAAAAAAAAAAAAAAIotXIBE09wdXNIZWFkAQE4AYC7AAAAAABPZ2dTAAAAAAAAAAAAAAAAAAAB"
+    "AAAASZW+VAEuT3B1c1RhZ3MGAAAAZmZtcGVnAQAAABQAAABlbmNvZGVyPUxhdmMgbGlib3B1c09nZ1MABBgwAAAA"
+    "AAAAAAAAAAIAAAB0mmfVDQMDAwMDAwMDAwMDAwP4//74//74//74//74//74//74//74//74//74//74//74//74"
+    "//4="
+)
+
+_WMA_ZLIB_BASE64 = (
+    "eNozUNtU2pd2XnDZTYZVDEnncroYGcCABYgZmRbeWd3jvvK8YN8ThgM8CsGpGQzYgQ0flNFgd/XexrmMUEMYFAqZ"
+    "mUB0QrYWmC/DAxEHCTbwQDDDLwaGrcz74/VA9jyG2KMH1S946fLqXSDxZxBxNrDoRPY727cjiRZBVTvMy/zhG31e"
+    "cMVfhob4GBftgLOH9/cnnhfs3gT025ZHCjDXygAxB8h/YF4i0LUua4C65RkYihkFGLjAohA5xmIgBDIdgi62yRpe"
+    "EFy8hGHBSWaPbylQkxzRxBnBfhNnCGfIZMhjSGHIZyhnKGZQYPBlSAXyMhkSgWxHhlIwOx/IDmOwgIZHIqMZWkxs"
+    "4sEe1rCwZWRsAgZQbBQziPOCoQ0S6BzFjJBgLmZs+O/AwMDe4DcK6AYYmeBx4DUaBwMUB8zwOKgYjYMBigMWeBws"
+    "H42DAYoDVngcXB2NgwGKAzZ4HLDwjsbBgACGUTAKRgENAAA8pBFR"
+)
+
+
+def _encoded_fixture(value: str, expected_sha256: str) -> Callable[[], bytes]:
+    def build() -> bytes:
+        payload = base64.b64decode(value, validate=True)
+        actual_sha256 = hashlib.sha256(payload).hexdigest()
+        if actual_sha256 != expected_sha256:
+            raise ValueError("encoded FFmpeg reference fixture failed its checksum")
+        return payload
+
+    return build
+
+
+def _compressed_fixture(value: str, expected_sha256: str) -> Callable[[], bytes]:
+    def build() -> bytes:
+        payload = zlib.decompress(base64.b64decode(value, validate=True))
+        actual_sha256 = hashlib.sha256(payload).hexdigest()
+        if actual_sha256 != expected_sha256:
+            raise ValueError("compressed FFmpeg reference fixture failed its checksum")
+        return payload
+
+    return build
+
+
+FFMPEG_AUDIO_BUILDERS: dict[str, Callable[[], bytes]] = {
+    "aac": _encoded_fixture(
+        _AAC_BASE64, "1e17e860d5624eac32d16d87d63531191fc6770ec53a23bb2353c99d4495ef48"
+    ),
+    "m4a": _encoded_fixture(
+        _M4A_BASE64, "c1b3ad9540d461b3d0a95a13b5cb4bc1be9a98590a17985d17d7c564e0760983"
+    ),
+    "opus": _encoded_fixture(
+        _OPUS_BASE64, "5c8d228df5715f8d54564080d0bbcc7b59e584dc1040d4e9de8f2783282c265d"
+    ),
+    "wma": _compressed_fixture(
+        _WMA_ZLIB_BASE64,
+        "b15988ae1d011e5cabc8fac5a723f7bc37e680cfb17de7243f9b01e435381c4b",
+    ),
+}
+
+REFERENCE_AUDIO_BUILDERS = MINIMAL_AUDIO_BUILDERS | FFMPEG_AUDIO_BUILDERS
+
+__all__ = [
+    "FFMPEG_AUDIO_BUILDERS",
+    "FFMPEG_FIXTURE_PROVENANCE",
+    "MINIMAL_AUDIO_BUILDERS",
+    "REFERENCE_AUDIO_BUILDERS",
+]

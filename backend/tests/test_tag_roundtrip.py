@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from app.library import index as library_index
-from app.reference_media import MINIMAL_AUDIO_BUILDERS
+from app.reference_media import REFERENCE_AUDIO_BUILDERS
 
 # One representative value per writable tag — a mix of str and int so the
 # coerce path is exercised both ways.
@@ -42,12 +42,14 @@ SAMPLE: dict[str, object] = {
 # --- round-trip per format ------------------------------------------------
 
 
-@pytest.mark.parametrize("ext", sorted(MINIMAL_AUDIO_BUILDERS))
+@pytest.mark.parametrize(
+    "ext", sorted(set(REFERENCE_AUDIO_BUILDERS) - {"aac"})
+)
 def test_writable_tags_round_trip(tmp_path: Path, ext: str) -> None:
     """Every writable tag survives a write→read cycle, in every format —
     including `bpm` and `disc_no`, the two the four-site drift used to drop."""
     path = tmp_path / f"track.{ext}"
-    path.write_bytes(MINIMAL_AUDIO_BUILDERS[ext]())
+    path.write_bytes(REFERENCE_AUDIO_BUILDERS[ext]())
 
     library_index.write_tags(path, dict(SAMPLE))
     got = library_index._read_tags(path)
@@ -60,7 +62,7 @@ def test_clearing_a_writable_tag_round_trips(tmp_path: Path) -> None:
     """Writing an empty value clears the tag (the editor's "set to empty"
     path), and the read maps it back to the numeric/empty default."""
     path = tmp_path / "track.wav"
-    path.write_bytes(MINIMAL_AUDIO_BUILDERS["wav"]())
+    path.write_bytes(REFERENCE_AUDIO_BUILDERS["wav"]())
     library_index.write_tags(path, dict(SAMPLE))
 
     library_index.write_tags(path, {"genre": "", "bpm": None})
@@ -105,7 +107,7 @@ def test_numeric_tags_coerce_to_int_on_read(tmp_path: Path) -> None:
     assert int_keys == {"track_no", "disc_no", "year", "bpm"}
 
     path = tmp_path / "track.flac"
-    path.write_bytes(MINIMAL_AUDIO_BUILDERS["flac"]())
+    path.write_bytes(REFERENCE_AUDIO_BUILDERS["flac"]())
     library_index.write_tags(path, dict(SAMPLE))
     got = library_index._read_tags(path)
     for key in int_keys:
@@ -121,9 +123,23 @@ def test_album_falls_back_to_dotted_parent_folder(tmp_path: Path) -> None:
     folder = tmp_path / "Vol.2"
     folder.mkdir()
     path = folder / "song.flac"
-    path.write_bytes(MINIMAL_AUDIO_BUILDERS["flac"]())
+    path.write_bytes(REFERENCE_AUDIO_BUILDERS["flac"]())
 
     meta = library_index.metadata_for(path, root=tmp_path)
     assert meta["album"] == "Vol.2"
     assert meta["track_no"] is None
     assert meta["bpm"] is None
+
+
+def test_raw_aac_is_an_explicit_read_only_metadata_format(tmp_path: Path) -> None:
+    from mutagen.aac import AACError  # type: ignore[import-untyped]
+
+    path = tmp_path / "track.aac"
+    source = REFERENCE_AUDIO_BUILDERS["aac"]()
+    path.write_bytes(source)
+
+    with pytest.raises(AACError, match="doesn't support tags"):
+        library_index.write_tags(path, dict(SAMPLE))
+
+    assert path.read_bytes() == source
+    assert library_index._read_tags(path).get("length_s", 0) > 0

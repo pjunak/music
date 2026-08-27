@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from mutagen import File as MutagenFile  # type: ignore[import-untyped]
 from mutagen.flac import Picture  # type: ignore[import-untyped]
 from mutagen.id3 import APIC, TXXX  # type: ignore[import-untyped]
+from mutagen.mp4 import MP4Cover, MP4FreeForm  # type: ignore[import-untyped]
 from pydantic import Field, TypeAdapter
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
@@ -39,7 +40,10 @@ from app.reference_cases import (
     VALID_WEBSOCKET_ACTIONS,
     VALID_WEBSOCKET_MESSAGES,
 )
-from app.reference_media import MINIMAL_AUDIO_BUILDERS
+from app.reference_media import (
+    FFMPEG_FIXTURE_PROVENANCE,
+    REFERENCE_AUDIO_BUILDERS,
+)
 from app.sync.protocol import (
     ErrorMessage,
     SfxFired,
@@ -529,7 +533,7 @@ def _metadata_examples() -> dict[str, Any]:
         "AScY42YAAAAASUVORK5CYII="
     )
 
-    def add_preservation_fields(path: Path, extension: str) -> None:
+    def add_preservation_fields(path: Path, extension: str) -> bool:
         media = MutagenFile(str(path))
         if media is None or media.tags is None:
             raise ValueError(f"synthetic {extension} fixture has no writable tags")
@@ -544,35 +548,80 @@ def _metadata_examples() -> dict[str, Any]:
                     data=cover,
                 )
             )
+            artwork_expected = True
+        elif extension == "m4a":
+            media.tags[f"----:com.music-streaming:{sentinel_key}"] = [
+                MP4FreeForm(sentinel_value.encode("utf-8"))
+            ]
+            media.tags["covr"] = [
+                MP4Cover(cover, imageformat=MP4Cover.FORMAT_PNG)
+            ]
+            artwork_expected = True
         else:
             media.tags[sentinel_key] = [sentinel_value]
-            if extension == "flac":
+            artwork_expected = extension in {"flac", "opus"}
+            if artwork_expected:
                 picture = Picture()
                 picture.type = 3
                 picture.mime = "image/png"
                 picture.desc = "rewrite-fixture"
                 picture.data = cover
-                media.add_picture(picture)
+                if extension == "flac":
+                    media.add_picture(picture)
+                else:
+                    media.tags["metadata_block_picture"] = [
+                        base64.b64encode(picture.write()).decode("ascii")
+                    ]
         media.save()
+        return artwork_expected
 
     cases: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="music-reference-media-") as temp_dir:
         root = Path(temp_dir)
-        for extension, builder in sorted(MINIMAL_AUDIO_BUILDERS.items()):
+        for extension, builder in sorted(REFERENCE_AUDIO_BUILDERS.items()):
             path = root / f"track.{extension}"
             path.write_bytes(builder())
-            library_index.write_tags(path, sample)
-            add_preservation_fields(path, extension)
+            write_supported = extension != "aac"
+            legacy_write_error: str | None = None
+            artwork_expected = False
+            if write_supported:
+                library_index.write_tags(path, sample)
+                artwork_expected = add_preservation_fields(path, extension)
+            else:
+                source_before_attempt = path.read_bytes()
+                try:
+                    library_index.write_tags(path, sample)
+                except Exception as error:
+                    legacy_write_error = (
+                        f"{type(error).__module__}.{type(error).__qualname__}"
+                    )
+                else:
+                    raise ValueError("raw AAC unexpectedly accepted metadata writes")
+                if path.read_bytes() != source_before_attempt:
+                    raise ValueError("failed raw AAC metadata write changed the source")
             source = path.read_bytes()
-            canonical = library_index._read_tags(path)
-            for key, expected in sample.items():
-                if canonical.get(key) != expected:
-                    raise ValueError(f"{extension} fixture lost {key}")
+            raw_metadata = library_index._read_tags(path)
+            canonical = {
+                key: raw_metadata.get(key, None if isinstance(value, int) else "")
+                for key, value in sample.items()
+            }
+            if write_supported:
+                for key, expected in sample.items():
+                    if canonical[key] != expected:
+                        raise ValueError(f"{extension} fixture lost {key}")
             cases.append(
                 {
+                    "artwork_expected": artwork_expected,
                     "canonical": {key: canonical[key] for key in sample},
+                    "duration_millis": round(
+                        float(raw_metadata.get("length_s", 0.0)) * 1000
+                    ),
                     "extension": f".{extension}",
-                    "preservation_markers": [sentinel_key, sentinel_value],
+                    "legacy_write_error": legacy_write_error,
+                    "metadata_write_supported": write_supported,
+                    "preservation_markers": (
+                        [sentinel_key, sentinel_value] if write_supported else []
+                    ),
                     "source_base64": base64.b64encode(source).decode("ascii"),
                     "source_sha256": hashlib.sha256(source).hexdigest(),
                 }
@@ -583,10 +632,12 @@ def _metadata_examples() -> dict[str, Any]:
     return {
         "cases": cases,
         "covered_extensions": sorted(covered),
-        "pending_ffmpeg_extensions": sorted(set(runtime_extensions) - covered),
+        "ffmpeg_fixture_provenance": FFMPEG_FIXTURE_PROVENANCE,
+        "read_only_extensions": [".aac"],
         "runtime_extensions": runtime_extensions,
         "version": 1,
         "writable_fields": list(library_index.WRITABLE_TAGS),
+        "write_supported_extensions": sorted(covered - {".aac"}),
     }
 
 

@@ -385,10 +385,16 @@ behavior receive integration tests with generated media fixtures. Tower's file s
 implementation candidate, not assumed parity; its current range behavior is wrapped or replaced
 where the fixture corpus differs.
 
-Lofty is hidden behind `TagReader`/`TagWriter`. Before selection it must round-trip the project's
-declarative tag registry across generated MP3, FLAC, Ogg/Opus, M4A/AAC, WAV, and supported edge
-cases. Writes operate on a temporary copy and replace the original only after a successful reread.
-Unsupported or lossy formats return per-track partial failures rather than corrupting a batch.
+Lofty and the ASF subprocess boundary are hidden behind one metadata adapter. Concrete Lofty tag
+types are used for Vorbis, Opus, FLAC, and MP4 so unrelated fields, artwork, and MP4 integer atoms
+survive updates. WMA tags are read through bounded `ffprobe` JSON and changed by an FFmpeg
+stream-copy remux; compressed-audio SHA-256, codec identity, compatible ASF duration, and intended
+fields are verified before the staged result can be committed. Raw ADTS AAC uses Lofty for tag data
+and FFprobe for duration because the corpus disproved Lofty's duration estimate; it remains readable
+and streamable but metadata-read-only because neither the old Mutagen path nor the chosen safe path
+can write it reliably. All writes operate on a new staged file and replace the original only after
+a successful reread. Unsupported or lossy formats return per-track partial failures rather than
+corrupting a batch.
 
 ## Modes, playlists, authoring, and cleanup
 

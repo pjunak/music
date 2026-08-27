@@ -9,11 +9,17 @@ use std::time::Duration;
 use lofty::config::{GlobalOptions, ParseOptions, WriteOptions, apply_global_options};
 use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::flac::FlacFile;
+use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst, Mp4File};
 use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OpusFile, VorbisFile};
 use lofty::picture::PictureType;
 use lofty::probe::Probe;
-use lofty::tag::{ItemKey, Tag, TagType};
+use lofty::tag::{Accessor, ItemKey, Tag, TagType};
+
+mod asf;
+mod ffmpeg;
+
+pub use ffmpeg::FfmpegTools;
 
 const MAX_TAG_ITEM_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 512;
@@ -76,6 +82,33 @@ pub enum TagValue {
     Number(u32),
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum MetadataWriteCapability {
+    Native,
+    Ffmpeg,
+    ReadOnly,
+    Unsupported,
+}
+
+pub fn metadata_write_capability(path: &Path) -> MetadataWriteCapability {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if extension.eq_ignore_ascii_case("aac") {
+        MetadataWriteCapability::ReadOnly
+    } else if extension.eq_ignore_ascii_case("wma") {
+        MetadataWriteCapability::Ffmpeg
+    } else if ["aif", "aiff", "flac", "m4a", "mp3", "ogg", "opus", "wav"]
+        .iter()
+        .any(|supported| extension.eq_ignore_ascii_case(supported))
+    {
+        MetadataWriteCapability::Native
+    } else {
+        MetadataWriteCapability::Unsupported
+    }
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct TagPatch {
     changes: BTreeMap<TagField, Option<TagValue>>,
@@ -97,6 +130,9 @@ impl TagPatch {
         let value = value.into();
         if value.is_empty() {
             return self.insert_change(field, None);
+        }
+        if value.contains('\0') {
+            return Err(MetadataError::InvalidTextCharacter { field });
         }
         let maximum = if field == TagField::Genre {
             MAX_GENRE_LENGTH
@@ -150,6 +186,13 @@ pub struct StagedTagUpdate {
 }
 
 impl StagedTagUpdate {
+    fn new(path: PathBuf, metadata: AudioMetadata) -> Self {
+        Self {
+            path: Some(path),
+            metadata,
+        }
+    }
+
     pub fn path(&self) -> Result<&Path, MetadataError> {
         self.path.as_deref().ok_or(MetadataError::MissingStagedPath)
     }
@@ -160,6 +203,72 @@ impl StagedTagUpdate {
 
     pub fn persist(mut self) -> Result<PathBuf, MetadataError> {
         self.path.take().ok_or(MetadataError::MissingStagedPath)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MetadataAdapter {
+    ffmpeg: Option<FfmpegTools>,
+}
+
+impl MetadataAdapter {
+    pub const fn native_only() -> Self {
+        Self { ffmpeg: None }
+    }
+
+    pub const fn with_ffmpeg(tools: FfmpegTools) -> Self {
+        Self {
+            ffmpeg: Some(tools),
+        }
+    }
+
+    pub fn read(&self, path: &Path) -> Result<AudioMetadata, MetadataError> {
+        if has_extension(path, "wma") || has_extension(path, "aac") {
+            let tools = self
+                .ffmpeg
+                .as_ref()
+                .ok_or(MetadataError::ExternalToolRequired {
+                    extension: if has_extension(path, "wma") {
+                        ".wma"
+                    } else {
+                        ".aac"
+                    },
+                    tool: "ffprobe",
+                })?;
+            if has_extension(path, "wma") {
+                ffmpeg::read_wma_metadata(path, tools)
+            } else {
+                ffmpeg::read_aac_metadata(path, tools)
+            }
+        } else {
+            read_audio_metadata(path)
+        }
+    }
+
+    pub fn stage_update(
+        &self,
+        source: &Path,
+        staged: &Path,
+        patch: &TagPatch,
+    ) -> Result<StagedTagUpdate, MetadataError> {
+        if has_extension(source, "wma") {
+            let tools = self
+                .ffmpeg
+                .as_ref()
+                .ok_or(MetadataError::ExternalToolRequired {
+                    extension: ".wma",
+                    tool: "ffmpeg",
+                })?;
+            ffmpeg::stage_wma_tag_update(source, staged, patch, tools)
+        } else {
+            stage_tag_update(source, staged, patch)
+        }
+    }
+}
+
+impl Default for MetadataAdapter {
+    fn default() -> Self {
+        Self::native_only()
     }
 }
 
@@ -176,6 +285,10 @@ pub enum MetadataError {
     UnsupportedFormat {
         extension: String,
     },
+    ExternalToolRequired {
+        extension: &'static str,
+        tool: &'static str,
+    },
     EmptyPatch,
     DuplicateField {
         field: TagField,
@@ -186,6 +299,9 @@ pub enum MetadataError {
     TextTooLong {
         field: TagField,
         maximum: usize,
+    },
+    InvalidTextCharacter {
+        field: TagField,
     },
     NumberOutOfRange {
         field: TagField,
@@ -207,6 +323,20 @@ pub enum MetadataError {
     },
     FormatChanged,
     DurationChanged,
+    CodecChanged,
+    MissingAudioStream,
+    InvalidAsf(String),
+    ProcessTimedOut {
+        tool: &'static str,
+        timeout: Duration,
+    },
+    ProcessFailed {
+        tool: &'static str,
+        code: Option<i32>,
+    },
+    ProcessOutputTruncated {
+        tool: &'static str,
+    },
 }
 
 impl Display for MetadataError {
@@ -215,6 +345,9 @@ impl Display for MetadataError {
             Self::UnsupportedFormat { extension } => {
                 write!(formatter, "unsupported metadata format: {extension}")
             }
+            Self::ExternalToolRequired { extension, tool } => {
+                write!(formatter, "{extension} metadata requires {tool}")
+            }
             Self::EmptyPatch => formatter.write_str("metadata patch contains no changes"),
             Self::DuplicateField { field } => {
                 write!(formatter, "duplicate metadata field: {field}")
@@ -222,6 +355,9 @@ impl Display for MetadataError {
             Self::WrongValueType { field } => write!(formatter, "wrong value type for {field}"),
             Self::TextTooLong { field, maximum } => {
                 write!(formatter, "{field} exceeds {maximum} characters")
+            }
+            Self::InvalidTextCharacter { field } => {
+                write!(formatter, "{field} contains a null character")
             }
             Self::NumberOutOfRange { field, maximum } => {
                 write!(formatter, "{field} exceeds {maximum}")
@@ -247,6 +383,20 @@ impl Display for MetadataError {
             Self::DurationChanged => {
                 formatter.write_str("staged metadata changed the reported audio duration")
             }
+            Self::CodecChanged => {
+                formatter.write_str("staged metadata changed the encoded audio stream")
+            }
+            Self::MissingAudioStream => formatter.write_str("media has no audio stream"),
+            Self::InvalidAsf(message) => write!(formatter, "invalid ASF metadata: {message}"),
+            Self::ProcessTimedOut { tool, timeout } => {
+                write!(formatter, "{tool} exceeded its {timeout:?} deadline")
+            }
+            Self::ProcessFailed { tool, code } => {
+                write!(formatter, "{tool} failed with exit code {code:?}")
+            }
+            Self::ProcessOutputTruncated { tool } => {
+                write!(formatter, "{tool} exceeded its output limit")
+            }
         }
     }
 }
@@ -261,6 +411,15 @@ impl Error for MetadataError {
 }
 
 pub fn read_audio_metadata(path: &Path) -> Result<AudioMetadata, MetadataError> {
+    if has_extension(path, "aac") {
+        return Err(MetadataError::ExternalToolRequired {
+            extension: ".aac",
+            tool: "ffprobe",
+        });
+    }
+    if has_extension(path, "m4a") {
+        return read_mp4_metadata(path);
+    }
     let tagged_file = read_tagged_file(path)?;
     Ok(metadata_from_tagged_file(&tagged_file))
 }
@@ -270,6 +429,25 @@ pub fn stage_tag_update(
     staged: &Path,
     patch: &TagPatch,
 ) -> Result<StagedTagUpdate, MetadataError> {
+    validate_stage_request(source, staged, patch)?;
+    if has_extension(source, "aac") {
+        return Err(MetadataError::UnsupportedFormat {
+            extension: ".aac metadata is read-only".to_owned(),
+        });
+    }
+
+    let result = stage_tag_update_inner(source, staged, patch);
+    if result.is_err() {
+        let _ = fs::remove_file(staged);
+    }
+    result
+}
+
+fn validate_stage_request(
+    source: &Path,
+    staged: &Path,
+    patch: &TagPatch,
+) -> Result<(), MetadataError> {
     if patch.is_empty() {
         return Err(MetadataError::EmptyPatch);
     }
@@ -281,12 +459,7 @@ pub fn stage_tag_update(
             path: staged.to_path_buf(),
         });
     }
-
-    let result = stage_tag_update_inner(source, staged, patch);
-    if result.is_err() {
-        let _ = fs::remove_file(staged);
-    }
-    result
+    Ok(())
 }
 
 fn stage_tag_update_inner(
@@ -312,6 +485,10 @@ fn stage_tag_update_inner(
             drop(before);
             apply_opus_patch(staged, patch)?;
         }
+        lofty::file::FileType::Mp4 => {
+            drop(before);
+            apply_mp4_patch(staged, patch)?;
+        }
         _ => {
             let mut tagged_file = before;
             apply_generic_patch(&mut tagged_file, patch)?;
@@ -328,13 +505,15 @@ fn stage_tag_update_inner(
     if verified.properties().duration() != original_duration {
         return Err(MetadataError::DurationChanged);
     }
-    let metadata = metadata_from_tagged_file(&verified);
+    let metadata = if original_type == lofty::file::FileType::Mp4 {
+        drop(verified);
+        read_mp4_metadata(staged)?
+    } else {
+        metadata_from_tagged_file(&verified)
+    };
     verify_patch(&metadata, patch)?;
 
-    Ok(StagedTagUpdate {
-        path: Some(staged.to_path_buf()),
-        metadata,
-    })
+    Ok(StagedTagUpdate::new(staged.to_path_buf(), metadata))
 }
 
 fn copy_new_file(source: &Path, staged: &Path) -> Result<(), MetadataError> {
@@ -392,6 +571,12 @@ fn read_tagged_file(path: &Path) -> Result<TaggedFile, MetadataError> {
         })?
         .read()
         .map_err(|error| MetadataError::Parse(error.to_string()))
+}
+
+fn has_extension(path: &Path, expected: &str) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case(expected))
 }
 
 fn configure_lofty() {
@@ -468,13 +653,17 @@ fn read_artwork(tag: &Tag) -> Option<EmbeddedArtwork> {
         .iter()
         .find(|picture| picture.pic_type() == PictureType::CoverFront)
         .or_else(|| pictures.first())?;
-    Some(EmbeddedArtwork {
+    Some(embedded_artwork(picture))
+}
+
+fn embedded_artwork(picture: &lofty::picture::Picture) -> EmbeddedArtwork {
+    EmbeddedArtwork {
         bytes: picture.data().to_vec(),
         mime_type: picture
             .mime_type()
             .map_or("application/octet-stream", |mime| mime.as_str())
             .to_owned(),
-    })
+    }
 }
 
 fn apply_generic_patch(
@@ -536,6 +725,128 @@ fn apply_opus_patch(path: &Path, patch: &TagPatch) -> Result<(), MetadataError> 
     media
         .save_to_path(path, write_options())
         .map_err(|error| MetadataError::Write(error.to_string()))
+}
+
+fn read_mp4_metadata(path: &Path) -> Result<AudioMetadata, MetadataError> {
+    configure_lofty();
+    let mut reader = open_media_reader(path)?;
+    let media = Mp4File::read_from(&mut reader, parse_options())
+        .map_err(|error| MetadataError::Parse(error.to_string()))?;
+    Ok(metadata_from_mp4(&media))
+}
+
+fn metadata_from_mp4(media: &Mp4File) -> AudioMetadata {
+    let tag = media.ilst();
+    AudioMetadata {
+        title: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9nam")),
+        artist: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9ART")),
+        album_artist: mp4_text(tag, AtomIdent::Fourcc(*b"aART")),
+        album: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9alb")),
+        track_no: tag.and_then(Accessor::track),
+        disc_no: tag.and_then(Accessor::disk),
+        year: coerce_number(&mp4_text(tag, AtomIdent::Fourcc(*b"\xA9day"))),
+        genre: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9gen")),
+        bpm: mp4_number(tag, AtomIdent::Fourcc(*b"tmpo")),
+        duration: media.properties().duration(),
+        artwork: tag.and_then(|tag| {
+            tag.pictures()
+                .and_then(|mut pictures| pictures.next().map(embedded_artwork))
+        }),
+    }
+}
+
+fn mp4_text(tag: Option<&Ilst>, ident: AtomIdent<'_>) -> String {
+    tag.and_then(|tag| tag.get(&ident))
+        .and_then(|atom| {
+            atom.data().find_map(|data| match data {
+                AtomData::UTF8(text) | AtomData::UTF16(text) => Some(text.clone()),
+                _ => None,
+            })
+        })
+        .unwrap_or_default()
+}
+
+fn mp4_number(tag: Option<&Ilst>, ident: AtomIdent<'_>) -> Option<u32> {
+    tag.and_then(|tag| tag.get(&ident)).and_then(|atom| {
+        atom.data().find_map(|data| match data {
+            AtomData::SignedInteger(value) => u32::try_from(*value).ok(),
+            AtomData::UnsignedInteger(value) => Some(*value),
+            AtomData::UTF8(value) | AtomData::UTF16(value) => coerce_number(value),
+            _ => None,
+        })
+    })
+}
+
+fn apply_mp4_patch(path: &Path, patch: &TagPatch) -> Result<(), MetadataError> {
+    configure_lofty();
+    let mut reader = open_media_reader(path)?;
+    let mut media = Mp4File::read_from(&mut reader, parse_options())
+        .map_err(|error| MetadataError::Parse(error.to_string()))?;
+    if media.ilst().is_none() {
+        media.set_ilst(Ilst::new());
+    }
+    let tag = media
+        .ilst_mut()
+        .ok_or_else(|| MetadataError::Write("MP4 ilst was not created".to_owned()))?;
+    for (&field, value) in &patch.changes {
+        match field {
+            TagField::TrackNumber => apply_mp4_track(tag, value.as_ref()),
+            TagField::DiscNumber => apply_mp4_disc(tag, value.as_ref()),
+            TagField::Bpm => apply_mp4_bpm(tag, value.as_ref()),
+            _ => apply_mp4_text(tag, field, value.as_ref()),
+        }
+    }
+    media
+        .save_to_path(path, write_options())
+        .map_err(|error| MetadataError::Write(error.to_string()))
+}
+
+fn apply_mp4_track(tag: &mut Ilst, value: Option<&TagValue>) {
+    match value {
+        Some(TagValue::Number(value)) => tag.set_track(*value),
+        _ => tag.remove_track(),
+    }
+}
+
+fn apply_mp4_disc(tag: &mut Ilst, value: Option<&TagValue>) {
+    match value {
+        Some(TagValue::Number(value)) => tag.set_disk(*value),
+        _ => tag.remove_disk(),
+    }
+}
+
+fn apply_mp4_bpm(tag: &mut Ilst, value: Option<&TagValue>) {
+    let ident = AtomIdent::Fourcc(*b"tmpo");
+    let _ = tag.remove(&ident);
+    if let Some(TagValue::Number(value)) = value {
+        tag.replace_atom(Atom::new(
+            ident,
+            AtomData::SignedInteger(i32::try_from(*value).unwrap_or(i32::MAX)),
+        ));
+    }
+}
+
+fn apply_mp4_text(tag: &mut Ilst, field: TagField, value: Option<&TagValue>) {
+    let ident = match field {
+        TagField::Title => AtomIdent::Fourcc(*b"\xA9nam"),
+        TagField::Artist => AtomIdent::Fourcc(*b"\xA9ART"),
+        TagField::AlbumArtist => AtomIdent::Fourcc(*b"aART"),
+        TagField::Album => AtomIdent::Fourcc(*b"\xA9alb"),
+        TagField::Year => AtomIdent::Fourcc(*b"\xA9day"),
+        TagField::Genre => AtomIdent::Fourcc(*b"\xA9gen"),
+        TagField::TrackNumber | TagField::DiscNumber | TagField::Bpm => return,
+    };
+    let _ = tag.remove(&ident);
+    if let Some(value) = value {
+        tag.replace_atom(Atom::new(ident, AtomData::UTF8(tag_value_text(value))));
+    }
+}
+
+fn tag_value_text(value: &TagValue) -> String {
+    match value {
+        TagValue::Text(value) => value.clone(),
+        TagValue::Number(value) => value.to_string(),
+    }
 }
 
 fn open_media_reader(path: &Path) -> Result<BufReader<File>, MetadataError> {
@@ -670,14 +981,19 @@ const fn is_numeric_field(field: TagField) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::env;
     use std::error::Error;
     use std::fs;
+    use std::path::PathBuf;
 
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
     use serde::Deserialize;
 
-    use super::{TagField, TagPatch, read_audio_metadata, stage_tag_update};
+    use super::{
+        FfmpegTools, MetadataAdapter, MetadataWriteCapability, TagField, TagPatch,
+        metadata_write_capability, read_audio_metadata, stage_tag_update,
+    };
 
     const METADATA_EXAMPLES: &str =
         include_str!("../../../contracts/reference/v1/metadata.examples.json");
@@ -686,13 +1002,18 @@ mod tests {
     struct MetadataFixture {
         cases: Vec<MetadataCase>,
         covered_extensions: Vec<String>,
-        pending_ffmpeg_extensions: Vec<String>,
+        read_only_extensions: Vec<String>,
+        write_supported_extensions: Vec<String>,
     }
 
     #[derive(Deserialize)]
     struct MetadataCase {
+        artwork_expected: bool,
         canonical: CanonicalMetadata,
+        duration_millis: u128,
         extension: String,
+        legacy_write_error: Option<String>,
+        metadata_write_supported: bool,
         preservation_markers: Vec<String>,
         source_base64: String,
     }
@@ -703,11 +1024,11 @@ mod tests {
         artist: String,
         album_artist: String,
         album: String,
-        track_no: u32,
-        disc_no: u32,
-        year: u32,
+        track_no: Option<u32>,
+        disc_no: Option<u32>,
+        year: Option<u32>,
         genre: String,
-        bpm: u32,
+        bpm: Option<u32>,
     }
 
     #[test]
@@ -718,21 +1039,23 @@ mod tests {
                 .covered_extensions
                 .into_iter()
                 .collect::<BTreeSet<_>>(),
-            [".aiff", ".flac", ".mp3", ".ogg", ".wav"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect()
+            [
+                ".aac", ".aiff", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".wma",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
         );
         assert_eq!(
             fixture
-                .pending_ffmpeg_extensions
+                .read_only_extensions
                 .into_iter()
                 .collect::<BTreeSet<_>>(),
-            [".aac", ".m4a", ".opus", ".wma"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect()
+            [".aac"].into_iter().map(str::to_owned).collect()
         );
+        assert_eq!(fixture.write_supported_extensions.len(), 8);
+
+        let ffmpeg_adapter = MetadataAdapter::with_ffmpeg(test_ffmpeg_tools());
 
         for case in fixture.cases {
             let temp = tempfile::tempdir()?;
@@ -741,14 +1064,49 @@ mod tests {
             let source_bytes = STANDARD.decode(&case.source_base64)?;
             fs::write(&source, &source_bytes)?;
 
-            let read = read_audio_metadata(&source)?;
-            assert_canonical(&read, &case.canonical);
-            if case.extension != ".ogg" {
+            let expected_capability = match case.extension.as_str() {
+                ".aac" => MetadataWriteCapability::ReadOnly,
+                ".wma" => MetadataWriteCapability::Ffmpeg,
+                _ => MetadataWriteCapability::Native,
+            };
+            assert_eq!(metadata_write_capability(&source), expected_capability);
+
+            let read = if matches!(case.extension.as_str(), ".aac" | ".wma") {
+                ffmpeg_adapter.read(&source)?
+            } else {
+                read_audio_metadata(&source)?
+            };
+            assert_canonical(&read, &case.canonical, &case.extension);
+            assert!(
+                read.duration.as_millis().abs_diff(case.duration_millis) <= 2,
+                "{} duration: {:?} versus {} ms",
+                case.extension,
+                read.duration,
+                case.duration_millis
+            );
+            if case.artwork_expected {
                 assert!(read.artwork.is_some(), "{} artwork", case.extension);
+            } else {
+                assert!(read.artwork.is_none(), "{} artwork", case.extension);
+            }
+
+            if !case.metadata_write_supported {
+                assert_eq!(
+                    case.legacy_write_error.as_deref(),
+                    Some("mutagen.aac.AACError")
+                );
+                assert!(stage_tag_update(&source, &staged, &replacement_patch()?).is_err());
+                assert_eq!(fs::read(&source)?, source_bytes);
+                assert!(!staged.exists());
+                continue;
             }
 
             let patch = replacement_patch()?;
-            let staged_update = stage_tag_update(&source, &staged, &patch)?;
+            let staged_update = if case.extension == ".wma" {
+                ffmpeg_adapter.stage_update(&source, &staged, &patch)?
+            } else {
+                stage_tag_update(&source, &staged, &patch)?
+            };
             assert_eq!(
                 fs::read(&source)?,
                 source_bytes,
@@ -769,7 +1127,7 @@ mod tests {
             let staged_bytes = fs::read(staged_update.path()?)?;
             for marker in case.preservation_markers {
                 assert!(
-                    contains_ascii_case_insensitive(&staged_bytes, marker.as_bytes()),
+                    contains_marker(&staged_bytes, &marker),
                     "{} lost preservation marker {marker}",
                     case.extension
                 );
@@ -778,7 +1136,11 @@ mod tests {
             assert!(!staged.exists());
 
             let cleared = temp.path().join(format!("cleared{}", case.extension));
-            let clear_update = stage_tag_update(&source, &cleared, &clearing_patch()?)?;
+            let clear_update = if case.extension == ".wma" {
+                ffmpeg_adapter.stage_update(&source, &cleared, &clearing_patch()?)?
+            } else {
+                stage_tag_update(&source, &cleared, &clearing_patch()?)?
+            };
             assert_eq!(clear_update.metadata().title, "");
             assert_eq!(clear_update.metadata().artist, "");
             assert_eq!(clear_update.metadata().album_artist, "");
@@ -804,6 +1166,7 @@ mod tests {
         assert!(patch.insert_number(TagField::Artist, 12).is_err());
         assert!(patch.insert_number(TagField::Bpm, 10_000).is_err());
         assert!(patch.insert_text(TagField::Genre, "x".repeat(129)).is_err());
+        assert!(patch.insert_text(TagField::Artist, "bad\0value").is_err());
 
         let temp = tempfile::tempdir()?;
         let path = temp.path().join("track.wma");
@@ -851,16 +1214,30 @@ mod tests {
         Ok(patch)
     }
 
-    fn assert_canonical(actual: &super::AudioMetadata, expected: &CanonicalMetadata) {
-        assert_eq!(actual.title, expected.title);
-        assert_eq!(actual.artist, expected.artist);
-        assert_eq!(actual.album_artist, expected.album_artist);
-        assert_eq!(actual.album, expected.album);
-        assert_eq!(actual.track_no, Some(expected.track_no));
-        assert_eq!(actual.disc_no, Some(expected.disc_no));
-        assert_eq!(actual.year, Some(expected.year));
-        assert_eq!(actual.genre, expected.genre);
-        assert_eq!(actual.bpm, Some(expected.bpm));
+    fn assert_canonical(
+        actual: &super::AudioMetadata,
+        expected: &CanonicalMetadata,
+        extension: &str,
+    ) {
+        assert_eq!(actual.title, expected.title, "{extension} title");
+        assert_eq!(actual.artist, expected.artist, "{extension} artist");
+        assert_eq!(
+            actual.album_artist, expected.album_artist,
+            "{extension} album artist"
+        );
+        assert_eq!(actual.album, expected.album, "{extension} album");
+        assert_eq!(actual.track_no, expected.track_no, "{extension} track");
+        assert_eq!(actual.disc_no, expected.disc_no, "{extension} disc");
+        assert_eq!(actual.year, expected.year, "{extension} year");
+        assert_eq!(actual.genre, expected.genre, "{extension} genre");
+        assert_eq!(actual.bpm, expected.bpm, "{extension} bpm");
+    }
+
+    fn contains_marker(haystack: &[u8], marker: &str) -> bool {
+        let ascii = marker.as_bytes();
+        let utf16: Vec<u8> = marker.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        contains_ascii_case_insensitive(haystack, ascii)
+            || haystack.windows(utf16.len()).any(|window| window == utf16)
     }
 
     fn contains_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
@@ -868,5 +1245,13 @@ mod tests {
             && haystack
                 .windows(needle.len())
                 .any(|window| window.eq_ignore_ascii_case(needle))
+    }
+
+    fn test_ffmpeg_tools() -> FfmpegTools {
+        let ffmpeg =
+            env::var_os("MUSIC_TEST_FFMPEG").map_or_else(|| PathBuf::from("ffmpeg"), PathBuf::from);
+        let ffprobe = env::var_os("MUSIC_TEST_FFPROBE")
+            .map_or_else(|| PathBuf::from("ffprobe"), PathBuf::from);
+        FfmpegTools::new(ffmpeg, ffprobe)
     }
 }
