@@ -17,6 +17,7 @@ import sqlite3
 from pathlib import Path
 from typing import Annotated, Any
 
+import yaml
 from argon2.low_level import Type, hash_secret
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import Field, TypeAdapter
@@ -44,6 +45,7 @@ from app.sync.protocol import (
 BASELINE_COMMIT = "b93f91d"
 EXPORTER_VERSION = 2
 REFERENCE_DIR = Path(__file__).resolve().parents[2] / "contracts" / "reference" / "v1"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _HTTP_METHODS = frozenset({"delete", "get", "head", "options", "patch", "post", "put", "trace"})
 
@@ -410,6 +412,97 @@ def _authored_file_schemas() -> dict[str, Any]:
     }
 
 
+def _authored_file_examples() -> dict[str, Any]:
+    def build_case(path: Path, source: str) -> dict[str, Any]:
+        parsed = yaml.safe_load(source)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"authored YAML must contain a mapping: {path}")
+        data = dict(parsed)
+
+        if path.name == "manifest.yaml":
+            kind = "mode"
+            model = ModeManifest.model_validate(data)
+            canonical = model.model_dump(
+                mode="json",
+                exclude={"root_dir", "soundboards", "cues", "presets"},
+            )
+        elif path.parent.name == "soundboards":
+            kind = "soundboard"
+            data.setdefault("id", path.stem)
+            canonical = SoundboardManifest.model_validate(data).model_dump(mode="json")
+        elif path.parent.name == "cues":
+            kind = "cue"
+            data.setdefault("id", path.stem)
+            canonical = CueSpec.model_validate(data).model_dump(mode="json")
+        elif path.parent.name == "presets":
+            kind = "preset"
+            data.setdefault("id", path.stem)
+            preset = PresetManifest.model_validate(data)
+            for effect in preset.effects:
+                effect.validate_type()
+            canonical = preset.model_dump(mode="json")
+        else:
+            raise ValueError(f"unrecognized authored YAML location: {path}")
+
+        return {
+            "canonical": canonical,
+            "kind": kind,
+            "path": path.relative_to(PROJECT_ROOT).as_posix(),
+            "source": source,
+            "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        }
+
+    modes_root = PROJECT_ROOT / "modes"
+    cases = [
+        build_case(path, path.read_text(encoding="utf-8"))
+        for path in sorted(modes_root.rglob("*.yaml"))
+    ]
+    synthetic_root = PROJECT_ROOT / "contracts" / "reference" / "synthetic"
+    synthetic_files = [
+        (
+            synthetic_root / "soundboards" / "tavern.yaml",
+            "name: Tavern\n"
+            "categories:\n"
+            "  - id: doors\n"
+            "    name: Doors\n"
+            "    items:\n"
+            "      - file: dnd/door.ogg\n"
+            "        name: Door slam\n"
+            "        hotkey: d\n",
+        ),
+        (
+            synthetic_root / "cues" / "kraken.yaml",
+            "name: Release the Kraken\n"
+            "description: Full authored cue fixture\n"
+            "preset: cave\n"
+            "playlist: Combat\n"
+            "start_index: 1\n"
+            "start_ms: 500\n"
+            "sfx:\n"
+            "  - soundboard: tavern\n"
+            "    item: doors/0\n"
+            "    volume: 0.75\n"
+            "loops:\n"
+            "  - soundboard: weather\n"
+            "    item: rain/0\n"
+            "    interval_s: 12.5\n",
+        ),
+        (
+            synthetic_root / "presets" / "cave.yaml",
+            "name: Cave\n"
+            "description: Full authored preset fixture\n"
+            "crossfade_ms: 1500\n"
+            "effects:\n"
+            "  - type: reverb\n"
+            "    wet: 0.4\n"
+            "  - type: highpass\n"
+            "    frequency: 400\n",
+        ),
+    ]
+    cases.extend(build_case(path, source) for path, source in synthetic_files)
+    return {"cases": cases, "version": 1}
+
+
 def _websocket_action_examples() -> dict[str, Any]:
     valid: list[dict[str, Any]] = []
     action_types: set[str] = set()
@@ -475,7 +568,9 @@ def build_reference_bundle() -> dict[str, bytes]:
     actions = action_adapter.json_schema()
     messages = server_message_adapter.json_schema()
     compatibility = _compatibility_data()
+    authored_examples = _authored_file_examples()
     artifacts = {
+        "authored-files.examples.json": _json_bytes(authored_examples),
         "authored-files.schema.json": _json_bytes(_authored_file_schemas()),
         "compatibility-data.json": _json_bytes(compatibility),
         "openapi.json": _json_bytes(openapi),
@@ -504,6 +599,7 @@ def build_reference_bundle() -> dict[str, bytes]:
         "counts": {
             "http_operations": operations,
             "http_paths": len(openapi.get("paths", {})),
+            "authored_file_examples": len(authored_examples["cases"]),
             "legacy_device_cases": len(compatibility["legacy_device_cases"]),
             "openapi_schemas": len(openapi.get("components", {}).get("schemas", {})),
             "sqlite_fixture_rows": (

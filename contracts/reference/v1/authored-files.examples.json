@@ -1,0 +1,146 @@
+{
+  "cases": [
+    {
+      "canonical": {
+        "default_crossfade_ms": 0,
+        "default_soundboard": null,
+        "id": "default",
+        "integrations": {
+          "lights": null
+        },
+        "interrupts": [],
+        "name": "Default",
+        "panels": [
+          "now-playing",
+          "queue",
+          "library-browser"
+        ],
+        "playlist_categories": [],
+        "theme": null
+      },
+      "kind": "mode",
+      "path": "modes/default/manifest.yaml",
+      "source": "id: default\nname: Default\npanels:\n  - now-playing\n  - queue\n  - library-browser\n",
+      "source_sha256": "9040b8c57fbfcac61a26340aeaf7177e6c26ba83a5ce88372e613ae440bb25c1"
+    },
+    {
+      "canonical": {
+        "default_crossfade_ms": 2000,
+        "default_soundboard": "default",
+        "id": "dnd",
+        "integrations": {
+          "lights": null
+        },
+        "interrupts": [],
+        "name": "Dungeons & Dragons",
+        "panels": [
+          "now-playing",
+          "mode-player",
+          "soundboard",
+          "interrupts",
+          "queue"
+        ],
+        "playlist_categories": [
+          "combat",
+          "exploration",
+          "wonder",
+          "danger",
+          "downtime"
+        ],
+        "theme": "theme.css"
+      },
+      "kind": "mode",
+      "path": "modes/dnd/manifest.yaml",
+      "source": "id: dnd\nname: Dungeons & Dragons\ntheme: theme.css\npanels:\n  - now-playing\n  - mode-player        # quick-select ambient playlists by category\n  - soundboard\n  - interrupts\n  - queue\nplaylist_categories:\n  - combat\n  - exploration\n  - wonder\n  - danger\n  - downtime\ndefault_crossfade_ms: 2000\ndefault_soundboard: default\ninterrupts: []         # predefined interrupt templates; ad-hoc interrupts go through the WS interrupt lane\nintegrations:\n  lights: null         # stub; will point at an MQTT topic once lights are wired\n",
+      "source_sha256": "1df77b1b63adbb554c9f761b137e12ad4d2a57494a5e3a677bbf6e19be32478e"
+    },
+    {
+      "canonical": {
+        "categories": [],
+        "id": "default",
+        "name": "Default"
+      },
+      "kind": "soundboard",
+      "path": "modes/dnd/soundboards/default.yaml",
+      "source": "id: default\nname: Default\n# Drop .ogg/.mp3/.wav files into modes/dnd/soundboards/files/ and reference them here.\ncategories: []\n",
+      "source_sha256": "4d2fdaf7dabfa8bd16a0a029e796f486f0fde9d2221e293e852370e0b2729217"
+    },
+    {
+      "canonical": {
+        "categories": [
+          {
+            "id": "doors",
+            "items": [
+              {
+                "file": "dnd/door.ogg",
+                "hotkey": "d",
+                "icon": null,
+                "name": "Door slam"
+              }
+            ],
+            "name": "Doors"
+          }
+        ],
+        "id": "tavern",
+        "name": "Tavern"
+      },
+      "kind": "soundboard",
+      "path": "contracts/reference/synthetic/soundboards/tavern.yaml",
+      "source": "name: Tavern\ncategories:\n  - id: doors\n    name: Doors\n    items:\n      - file: dnd/door.ogg\n        name: Door slam\n        hotkey: d\n",
+      "source_sha256": "5d75c2f411f898b97ed56812629dbd3b8ccfdcb9fbf04204cb2d1a2a6f68ffc4"
+    },
+    {
+      "canonical": {
+        "description": "Full authored cue fixture",
+        "id": "kraken",
+        "loops": [
+          {
+            "interval_s": 12.5,
+            "item": "rain/0",
+            "soundboard": "weather",
+            "volume": 1.0
+          }
+        ],
+        "name": "Release the Kraken",
+        "playlist": "Combat",
+        "preset": "cave",
+        "sfx": [
+          {
+            "item": "doors/0",
+            "soundboard": "tavern",
+            "volume": 0.75
+          }
+        ],
+        "start_index": 1,
+        "start_ms": 500
+      },
+      "kind": "cue",
+      "path": "contracts/reference/synthetic/cues/kraken.yaml",
+      "source": "name: Release the Kraken\ndescription: Full authored cue fixture\npreset: cave\nplaylist: Combat\nstart_index: 1\nstart_ms: 500\nsfx:\n  - soundboard: tavern\n    item: doors/0\n    volume: 0.75\nloops:\n  - soundboard: weather\n    item: rain/0\n    interval_s: 12.5\n",
+      "source_sha256": "40920e185dc217e59240634af565e638d670e6a4daf81d7e26614c700b7e6996"
+    },
+    {
+      "canonical": {
+        "crossfade_ms": 1500,
+        "description": "Full authored preset fixture",
+        "effects": [
+          {
+            "type": "reverb",
+            "wet": 0.4
+          },
+          {
+            "frequency": 400,
+            "type": "highpass"
+          }
+        ],
+        "id": "cave",
+        "name": "Cave"
+      },
+      "kind": "preset",
+      "path": "contracts/reference/synthetic/presets/cave.yaml",
+      "source": "name: Cave\ndescription: Full authored preset fixture\ncrossfade_ms: 1500\neffects:\n  - type: reverb\n    wet: 0.4\n  - type: highpass\n    frequency: 400\n",
+      "source_sha256": "baf2c8a825a168a3173cf78bf78270d0172135a858e738f6a15d83e546dbddda"
+    }
+  ],
+  "version": 1
+}

@@ -8,3 +8,11 @@
 //!
 //! Filesystem effects stay behind explicit plans and recovery journals; pure
 //! cleanup or authoring analysis must not acquire write-capable dependencies.
+
+mod yaml;
+
+pub use yaml::{
+    CueDocument, ModeDocument, PresetDocument, SoundboardDocument, YamlDocumentError,
+    parse_cue_document, parse_mode_document, parse_preset_document, parse_soundboard_document,
+    serialize_document,
+};

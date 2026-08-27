@@ -1,5 +1,9 @@
 {
   "artifacts": {
+    "authored-files.examples.json": {
+      "bytes": 5007,
+      "sha256": "50c04241d205eae67f3a26f6916bb10fa4cb36a3f2c10514d6993113ae86b19c"
+    },
     "authored-files.schema.json": {
       "bytes": 17819,
       "sha256": "bb0296fe1022167c02eb47fde809d0c01d82f8ea108a92ce1fb14975a21313b4"
@@ -39,6 +43,7 @@
   },
   "baseline_commit": "b93f91d",
   "counts": {
+    "authored_file_examples": 6,
     "http_operations": 144,
     "http_paths": 118,
     "legacy_device_cases": 4,

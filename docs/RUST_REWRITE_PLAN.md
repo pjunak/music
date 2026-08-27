@@ -138,8 +138,13 @@ Evidence so far:
   Rust verifies Python Argon2id PHC hashes; new hashes explicitly retain Python's
   `m=65536,t=3,p=4` parameters. Decrypted secrets redact `Debug` output and zeroize their owned
   storage on drop.
+- [`serde-saphyr` 1.1](https://github.com/bourumir-wyngs/serde-saphyr) is selected as the
+  pure-safe-Rust YAML adapter. Includes and property interpolation are not compiled in; a one-MiB
+  outer limit plus parser event/node/depth/alias/scalar budgets reject oversized, duplicate-key,
+  multi-document, deep-flow, and alias-bomb inputs. Three current files and synthetic full cue,
+  soundboard, and preset documents match Python's canonical values and round-trip semantically.
 - `deny.toml` rejects unknown registries and Git sources, wildcard requirements, OpenSSL/native-TLS
-  backends, and both deprecated YAML implementations. The current 155-crate graph passes RustSec
+  backends, and both deprecated YAML implementations. The current 164-crate graph passes RustSec
   with warnings denied; six upstream duplicate families remain visible as review warnings (four at
   the SQLx/RustCrypto generation boundary, plus `hashbrown` and `syn`).
 - The eight-crate workspace shell compiles with the accepted dependency direction and workspace
