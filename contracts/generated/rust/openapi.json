@@ -1,6 +1,36 @@
 {
   "components": {
     "schemas": {
+      "ActiveSessionResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "is_current": {
+            "type": "boolean"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "token_prefix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_prefix",
+          "created_at",
+          "expires_at",
+          "last_seen",
+          "is_current"
+        ],
+        "type": "object"
+      },
       "AmbientState": {
         "properties": {
           "current_track_id": {
@@ -106,6 +136,68 @@
         ],
         "type": "object"
       },
+      "DeviceOut": {
+        "properties": {
+          "added_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "is_output": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "name",
+          "is_output",
+          "connected"
+        ],
+        "type": "object"
+      },
+      "DevicePut": {
+        "properties": {
+          "is_output": {
+            "default": false,
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "description": "FastAPI-compatible validation envelope retained as a stable HTTP contract.",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "InterruptState": {
         "properties": {
           "current_track_id": {
@@ -154,14 +246,28 @@
         ],
         "type": "object"
       },
-      "LivenessResponse": {
+      "LivenessContract": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "LoginRequest": {
         "properties": {
-          "status": {
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 64,
+            "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "status"
+          "username",
+          "password"
         ],
         "type": "object"
       },
@@ -366,32 +472,6 @@
         ],
         "type": "object"
       },
-      "PublicErrorBody": {
-        "properties": {
-          "detail": {
-            "$ref": "#/components/schemas/PublicErrorDetail"
-          }
-        },
-        "required": [
-          "detail"
-        ],
-        "type": "object"
-      },
-      "PublicErrorDetail": {
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message"
-        ],
-        "type": "object"
-      },
       "ReadinessSnapshot": {
         "properties": {
           "components": {
@@ -428,6 +508,54 @@
           "random"
         ],
         "type": "string"
+      },
+      "UserInfoResponse": {
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username"
+        ],
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "type": "object"
+          },
+          "input": {},
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "msg": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "type": "object"
       }
     }
   },
@@ -445,6 +573,242 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/sessions": {
+      "get": {
+        "operationId": "list_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ActiveSessionResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/sessions/{token_prefix}": {
+      "delete": {
+        "operationId": "revoke_session",
+        "parameters": [
+          {
+            "description": "Unique session token prefix",
+            "in": "path",
+            "name": "token_prefix",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/devices": {
+      "get": {
+        "operationId": "list_devices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceOut"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/api/devices/{client_id}": {
+      "delete": {
+        "operationId": "forget_device",
+        "parameters": [
+          {
+            "description": "Stable client identity",
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "devices"
+        ]
+      },
+      "put": {
+        "operationId": "save_device",
+        "parameters": [
+          {
+            "description": "Stable client identity",
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DevicePut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "devices"
+        ]
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "liveness",
@@ -453,11 +817,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LivenessResponse"
+                  "$ref": "#/components/schemas/LivenessContract"
                 }
               }
             },
-            "description": "Server process is alive"
+            "description": "Successful Response"
           }
         }
       }
@@ -494,16 +858,19 @@
         "operationId": "sync_state",
         "parameters": [
           {
-            "description": "Stable client identity for guest-safe self projection",
             "in": "query",
             "name": "client_id",
             "required": false,
             "schema": {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           }
@@ -523,11 +890,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublicErrorBody"
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             },
-            "description": "Invalid client identity"
+            "description": "Validation Error"
           }
         }
       }

@@ -1,28 +1,35 @@
 use std::any::Any;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::extract::{Query, Request, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{HeaderName, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use music_application::playback::PlaybackActorHandle;
 use music_protocol::PlayerState;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::{AllowHeaders, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::Instrument;
+use utoipa::openapi::RefOr;
+use utoipa::openapi::schema::{AnyOfBuilder, ObjectBuilder, Schema, Type};
+use utoipa::{IntoParams, PartialSchema, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
+use crate::auth::RuntimeAuth;
 use crate::config::AppConfig;
-use crate::error::{ApiError, RuntimeError};
+use crate::devices::RuntimeDevices;
+use crate::error::{ApiError, HttpValidationErrorBody, RuntimeError};
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::playback_projection::{canonical_state, guest_state};
 
@@ -36,6 +43,8 @@ const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-poli
 pub(crate) struct HttpState {
     pub(crate) health: HealthRegistry,
     pub(crate) playback: Option<PlaybackActorHandle>,
+    pub(crate) auth: Option<Arc<RuntimeAuth>>,
+    pub(crate) devices: Option<Arc<RuntimeDevices>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -48,20 +57,30 @@ impl CorrelationId {
     }
 }
 
-#[derive(Debug, Serialize, utoipa::ToSchema)]
-struct LivenessResponse {
-    status: &'static str,
-}
-
 #[derive(utoipa::OpenApi)]
 struct MusicApi;
+
+struct LivenessContract;
+
+impl PartialSchema for LivenessContract {
+    fn schema() -> RefOr<Schema> {
+        ObjectBuilder::new()
+            .additional_properties(Some(ObjectBuilder::new().schema_type(Type::String)))
+            .build()
+            .into()
+    }
+}
+
+impl ToSchema for LivenessContract {}
 
 pub fn build_router(
     config: &AppConfig,
     health: HealthRegistry,
     playback: PlaybackActorHandle,
+    auth: Arc<RuntimeAuth>,
+    devices: Arc<RuntimeDevices>,
 ) -> Result<Router, RuntimeError> {
-    build_router_inner(config, health, Some(playback))
+    build_router_inner(config, health, Some(playback), Some(auth), Some(devices))
 }
 
 #[cfg(test)]
@@ -69,17 +88,21 @@ fn build_router_without_playback(
     config: &AppConfig,
     health: HealthRegistry,
 ) -> Result<Router, RuntimeError> {
-    build_router_inner(config, health, None)
+    build_router_inner(config, health, None, None, None)
 }
 
 fn build_router_inner(
     config: &AppConfig,
     health: HealthRegistry,
     playback: Option<PlaybackActorHandle>,
+    auth: Option<Arc<RuntimeAuth>>,
+    devices: Option<Arc<RuntimeDevices>>,
 ) -> Result<Router, RuntimeError> {
     let state = HttpState {
         health: health.clone(),
         playback,
+        auth,
+        devices,
     };
     let api = documented_api_router().with_state(state);
     let (mut router, _) = OpenApiRouter::with_openapi(<MusicApi as utoipa::OpenApi>::openapi())
@@ -112,6 +135,8 @@ fn build_router_inner(
 
 fn documented_api_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
+        .merge(crate::auth::auth_router())
+        .merge(crate::devices::device_router())
         .routes(routes!(liveness))
         .routes(routes!(readiness))
         .routes(routes!(sync_state))
@@ -155,10 +180,10 @@ fn cors_layer(config: &AppConfig) -> Result<CorsLayer, RuntimeError> {
 #[utoipa::path(
     get,
     path = "/health",
-    responses((status = 200, description = "Server process is alive", body = LivenessResponse))
+    responses((status = 200, description = "Successful Response", body = LivenessContract))
 )]
-async fn liveness() -> Json<LivenessResponse> {
-    Json(LivenessResponse { status: "ok" })
+async fn liveness() -> Json<BTreeMap<&'static str, &'static str>> {
+    Json(BTreeMap::from([("status", "ok")]))
 }
 
 #[utoipa::path(
@@ -179,22 +204,41 @@ async fn readiness(State(state): State<HttpState>) -> (StatusCode, Json<Readines
     (status, Json(snapshot))
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct SyncStateQuery {
+    #[param(schema_with = sync_client_id_schema)]
     client_id: Option<String>,
+}
+
+fn sync_client_id_schema() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(
+                ObjectBuilder::new()
+                    .schema_type(Type::String)
+                    .min_length(Some(1))
+                    .max_length(Some(64))
+                    .build(),
+            )
+            .item(ObjectBuilder::new().schema_type(Type::Null).build())
+            .build(),
+    )
+    .into()
 }
 
 #[utoipa::path(
     get,
     path = "/sync/state",
-    params(("client_id" = Option<String>, Query, nullable, min_length = 1, max_length = 64, description = "Stable client identity for guest-safe self projection")),
+    params(SyncStateQuery),
     responses(
         (status = 200, description = "Current canonical playback state", body = PlayerState),
-        (status = 422, description = "Invalid client identity", body = crate::error::PublicErrorBody)
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
     )
 )]
 async fn sync_state(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     Query(query): Query<SyncStateQuery>,
 ) -> Result<Json<PlayerState>, ApiError> {
     if query
@@ -204,16 +248,27 @@ async fn sync_state(
     {
         return Err(ApiError::validation());
     }
-    let playback = state.playback.ok_or_else(ApiError::service_unavailable)?;
+    let playback = state
+        .playback
+        .as_ref()
+        .ok_or_else(ApiError::service_unavailable)?;
     let publication = playback
         .snapshot()
         .await
         .map_err(|_| ApiError::service_unavailable())?;
     let canonical = canonical_state(&publication).map_err(|_| ApiError::internal())?;
-    // Authentication lands in Phase 4. Until then this read endpoint is
-    // deliberately always guest-projected, so device capability IDs cannot
-    // leak through an unfinished auth boundary.
-    Ok(Json(guest_state(canonical, query.client_id.as_deref())))
+    let authenticated = crate::auth::optional_session(
+        &state,
+        &headers,
+        music_application::auth::SessionTouch::UpdateLastSeen,
+    )
+    .await?
+    .is_some();
+    Ok(Json(if authenticated {
+        canonical
+    } else {
+        guest_state(canonical, query.client_id.as_deref())
+    }))
 }
 
 async fn api_not_found() -> ApiError {

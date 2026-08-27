@@ -150,6 +150,16 @@ impl AppConfig {
                 "a non-empty HTTP cookie token",
             ));
         }
+        let session_cookie_domain = optional_text(values, "SESSION_COOKIE_DOMAIN");
+        if session_cookie_domain
+            .as_deref()
+            .is_some_and(|domain| !is_cookie_domain(domain))
+        {
+            return Err(ConfigError::invalid(
+                "SESSION_COOKIE_DOMAIN",
+                "a valid DNS cookie domain",
+            ));
+        }
 
         Ok(Self {
             database_url,
@@ -166,7 +176,7 @@ impl AppConfig {
                 DEFAULT_ALLOWED_ORIGINS,
             ))?,
             session_cookie_secure: parse_bool(values, "SESSION_COOKIE_SECURE", true)?,
-            session_cookie_domain: optional_text(values, "SESSION_COOKIE_DOMAIN"),
+            session_cookie_domain,
             session_cookie_name,
             session_ttl_days,
             assistant_credential_key: optional_text(values, "ASSISTANT_CREDENTIAL_KEY")
@@ -464,6 +474,23 @@ fn is_cookie_name(value: &str) -> bool {
         })
 }
 
+fn is_cookie_domain(value: &str) -> bool {
+    value.len() <= 253
+        && value
+            .strip_prefix('.')
+            .unwrap_or(value)
+            .split('.')
+            .all(|label| {
+                !label.is_empty()
+                    && label.len() <= 63
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+                    && label
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            })
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -569,6 +596,7 @@ mod tests {
             ("ASSISTANT_LIBRARY_CONTEXT_WORKERS", "5"),
             ("MAX_UPLOAD_FILES", "0"),
             ("SESSION_COOKIE_NAME", "bad name"),
+            ("SESSION_COOKIE_DOMAIN", "example.test; Secure"),
             ("MUSIC_DIR", ""),
         ] {
             let values = BTreeMap::from([(name.to_owned(), value.to_owned())]);

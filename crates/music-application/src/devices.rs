@@ -103,7 +103,7 @@ where
 }
 
 fn validate_client_id(client_id: &str) -> Result<(), DeviceServiceError> {
-    if !(1..=256).contains(&client_id.chars().count()) || client_id.chars().any(char::is_control) {
+    if !(1..=64).contains(&client_id.chars().count()) || client_id.chars().any(char::is_control) {
         Err(DeviceServiceError::InvalidClientId)
     } else {
         Ok(())
@@ -243,6 +243,24 @@ mod tests {
                 .is_default_output("living-room")
                 .await
                 .unwrap_or(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn client_ids_share_the_wire_contract_limit() {
+        let service =
+            RememberedDeviceService::new(std::sync::Arc::new(MemoryRepository::default()));
+        assert!(
+            service
+                .save(&"a".repeat(64), "Boundary", false)
+                .await
+                .is_ok()
+        );
+        assert!(
+            service
+                .save(&"a".repeat(65), "Too long", false)
+                .await
+                .is_err()
         );
     }
 }

@@ -2,15 +2,13 @@
   "schema_version": "openapi-compatibility/v1",
   "verdict": "incomplete",
   "reference_operation_count": 144,
-  "candidate_operation_count": 3,
-  "matched_operation_count": 2,
-  "fully_compatible_operation_count": 0,
+  "candidate_operation_count": 11,
+  "matched_operation_count": 10,
+  "fully_compatible_operation_count": 9,
   "missing_operations": [
     "DELETE /api/assistant/providers/connections/{connection_id}",
     "DELETE /api/assistant/providers/connections/{connection_id}/credential",
     "DELETE /api/assistant/providers/roles/{role_id}",
-    "DELETE /api/auth/sessions/{token_prefix}",
-    "DELETE /api/devices/{client_id}",
     "DELETE /api/library/folders",
     "DELETE /api/library/tracks/{track_id}",
     "DELETE /api/modes/{mode_id}",
@@ -42,10 +40,7 @@
     "GET /api/assistant/providers/roles",
     "GET /api/assistant/providers/roles/{role_id}/evaluations",
     "GET /api/assistant/providers/status",
-    "GET /api/auth/me",
-    "GET /api/auth/sessions",
     "GET /api/authoring/import/document/schema",
-    "GET /api/devices",
     "GET /api/diagnostics",
     "GET /api/jobs",
     "GET /api/jobs/{job_id}",
@@ -101,8 +96,6 @@
     "POST /api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs",
     "POST /api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs",
     "POST /api/assistant/providers/roles/{role_id}/test",
-    "POST /api/auth/login",
-    "POST /api/auth/logout",
     "POST /api/authoring/import/commit",
     "POST /api/authoring/import/document/commit",
     "POST /api/authoring/import/document/preview",
@@ -143,7 +136,6 @@
     "PUT /api/assistant/library-tags/{track_id}/analysis-tags/review",
     "PUT /api/assistant/providers/connections/{connection_id}",
     "PUT /api/assistant/providers/roles/{role_id}",
-    "PUT /api/devices/{client_id}",
     "PUT /api/modes/active",
     "PUT /api/modes/{mode_id}/cues/{cue_id}",
     "PUT /api/modes/{mode_id}/presets/{preset_id}",
@@ -152,12 +144,9 @@
   "candidate_only_operations": [
     "GET /api/readiness"
   ],
-  "parameter_mismatches": [
-    "GET /api/sync/state"
-  ],
+  "parameter_mismatches": [],
   "request_body_mismatches": [],
   "response_mismatches": [
-    "GET /api/health",
     "GET /api/sync/state"
   ],
   "security_mismatches": []

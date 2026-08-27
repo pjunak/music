@@ -96,7 +96,10 @@ impl ConnectionId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientRegistration {
     pub client_id: String,
+    /// Name announced by the live client. An operator-owned remembered name
+    /// may override only the public projection and can later be removed.
     pub name: String,
+    pub remembered_name: Option<String>,
     pub is_default_output: bool,
 }
 
@@ -306,6 +309,21 @@ impl PlaybackActorHandle {
         .await
     }
 
+    pub async fn refresh_client_metadata(
+        &self,
+        client_id: String,
+        remembered_name: Option<String>,
+        is_default_output: bool,
+    ) -> Result<PlaybackCommandResult, PlaybackActorError> {
+        self.request(|reply| ActorMessage::RefreshClientMetadata {
+            client_id,
+            remembered_name,
+            is_default_output,
+            reply,
+        })
+        .await
+    }
+
     pub async fn disconnect(
         &self,
         connection_id: ConnectionId,
@@ -382,6 +400,12 @@ enum ActorMessage {
     RegisterConnection {
         connection_id: ConnectionId,
         registration: ClientRegistration,
+        reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
+    },
+    RefreshClientMetadata {
+        client_id: String,
+        remembered_name: Option<String>,
+        is_default_output: bool,
         reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
     },
     Disconnect {
@@ -533,6 +557,16 @@ where
                 if fatal && let Some(error) = fatal_error {
                     return Err(error);
                 }
+            }
+            ActorMessage::RefreshClientMetadata {
+                client_id,
+                remembered_name,
+                is_default_output,
+                reply,
+            } => {
+                let result =
+                    self.refresh_client_metadata(&client_id, remembered_name, is_default_output);
+                let _ = reply.send(result);
             }
             ActorMessage::Disconnect {
                 connection_id,
@@ -731,6 +765,41 @@ where
         .await
     }
 
+    fn refresh_client_metadata(
+        &mut self,
+        client_id: &str,
+        remembered_name: Option<String>,
+        is_default_output: bool,
+    ) -> Result<PlaybackCommandResult, PlaybackActorError> {
+        if !(1..=MAX_CLIENT_ID_LENGTH).contains(&client_id.chars().count()) {
+            return Err(PlaybackActorError::InvalidRegistration(
+                "client_id must contain 1 to 64 characters",
+            ));
+        }
+        if remembered_name
+            .as_ref()
+            .is_some_and(|name| !(1..=MAX_CLIENT_NAME_LENGTH).contains(&name.chars().count()))
+        {
+            return Err(PlaybackActorError::InvalidRegistration(
+                "remembered name must contain 1 to 128 characters",
+            ));
+        }
+        let before = connected_clients(&self.connections);
+        for record in self.connections.values_mut() {
+            if let Some(registration) = record.registration.as_mut()
+                && registration.client_id == client_id
+            {
+                registration.remembered_name.clone_from(&remembered_name);
+                registration.is_default_output = is_default_output;
+            }
+        }
+        let changed = before != connected_clients(&self.connections);
+        if changed {
+            self.publish(self.clock.sample()?);
+        }
+        Ok(self.result(changed))
+    }
+
     async fn replace_catalog(
         &mut self,
         catalog: CatalogSnapshot,
@@ -921,6 +990,15 @@ fn validate_registration(registration: &ClientRegistration) -> Result<(), Playba
             "name must contain 1 to 128 characters",
         ));
     }
+    if registration
+        .remembered_name
+        .as_ref()
+        .is_some_and(|name| !(1..=MAX_CLIENT_NAME_LENGTH).contains(&name.chars().count()))
+    {
+        return Err(PlaybackActorError::InvalidRegistration(
+            "remembered name must contain 1 to 128 characters",
+        ));
+    }
     Ok(())
 }
 
@@ -1030,7 +1108,10 @@ fn connected_clients(
                 registration.client_id.clone(),
                 ConnectedClient {
                     client_id: registration.client_id.clone(),
-                    name: registration.name.clone(),
+                    name: registration
+                        .remembered_name
+                        .clone()
+                        .unwrap_or_else(|| registration.name.clone()),
                     is_default_output: registration.is_default_output,
                 },
             );
@@ -1427,6 +1508,7 @@ mod tests {
         ClientRegistration {
             client_id: client_id.to_owned(),
             name: format!("{client_id} player"),
+            remembered_name: None,
             is_default_output: default_output,
         }
     }
@@ -1588,6 +1670,53 @@ mod tests {
                 .active_output_device_ids
                 .is_empty()
         );
+        spawned.handle.shutdown();
+        spawned.task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn remembered_metadata_changes_projection_without_changing_live_activation()
+    -> Result<(), Box<dyn Error>> {
+        let store = Arc::new(FakeStore::default());
+        let spawned = start_playback_actor(
+            store,
+            TestClock::default(),
+            FirstRandom,
+            test_config(),
+            CatalogSnapshot::default(),
+        )
+        .await?;
+        let connection = spawned.handle.open_connection().await?;
+        spawned
+            .handle
+            .register_connection(connection, registration("screen", false))
+            .await?;
+
+        assert!(
+            spawned
+                .handle
+                .refresh_client_metadata(
+                    "screen".to_owned(),
+                    Some("Living Room TV".to_owned()),
+                    true,
+                )
+                .await?
+                .changed
+        );
+        let remembered = spawned.handle.snapshot().await?;
+        assert_eq!(remembered.connected_clients[0].name, "Living Room TV");
+        assert!(remembered.connected_clients[0].is_default_output);
+        assert!(remembered.state.active_output_device_ids.is_empty());
+
+        spawned
+            .handle
+            .refresh_client_metadata("screen".to_owned(), None, false)
+            .await?;
+        let forgotten = spawned.handle.snapshot().await?;
+        assert_eq!(forgotten.connected_clients[0].name, "screen player");
+        assert!(!forgotten.connected_clients[0].is_default_output);
+        assert!(forgotten.state.active_output_device_ids.is_empty());
         spawned.handle.shutdown();
         spawned.task.await??;
         Ok(())

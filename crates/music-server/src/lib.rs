@@ -10,8 +10,10 @@
 //! and authorize; they never become alternate owners of mutable application
 //! state.
 
+mod auth;
 mod config;
 mod contracts;
+mod devices;
 mod error;
 mod health;
 mod http;
@@ -24,7 +26,10 @@ pub use config::{AppConfig, ConfigError, LogLevel};
 pub use contracts::{
     ContractArtifact, ContractError, check_contracts, export_contracts, render_contracts,
 };
-pub use error::{ApiError, PublicErrorBody, PublicErrorDetail, RuntimeError};
+pub use error::{
+    ApiError, HttpValidationErrorBody, PlainErrorBody, PublicErrorBody, PublicErrorDetail,
+    RuntimeError, ValidationErrorDetail,
+};
 pub use health::{ComponentStatus, HealthRegistry, ReadinessSnapshot, ReadinessStatus};
 pub use http::CorrelationId;
 pub use runtime::{AppRuntime, initialize_tracing};

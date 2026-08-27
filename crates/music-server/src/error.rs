@@ -7,13 +7,19 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use serde_json::Value;
 use utoipa::ToSchema;
+use utoipa::openapi::RefOr;
+use utoipa::openapi::schema::{
+    AnyOfBuilder, Array, ArrayBuilder, Object, ObjectBuilder, Schema, SchemaType, Type,
+};
 
 use crate::config::ConfigError;
 
 #[derive(Debug)]
 pub enum RuntimeError {
     Config(ConfigError),
+    Authentication(music_application::auth::AuthServiceError),
     Storage(music_storage::StorageError),
     Playback(music_application::playback::PlaybackActorError),
     Io {
@@ -42,6 +48,7 @@ impl Display for RuntimeError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Config(error) => Display::fmt(error, formatter),
+            Self::Authentication(error) => Display::fmt(error, formatter),
             Self::Storage(error) => Display::fmt(error, formatter),
             Self::Playback(error) => Display::fmt(error, formatter),
             Self::Io { operation, .. } => write!(formatter, "failed to {operation}"),
@@ -68,6 +75,7 @@ impl Error for RuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Config(source) => Some(source),
+            Self::Authentication(source) => Some(source),
             Self::Storage(source) => Some(source),
             Self::Playback(source) => Some(source),
             Self::Io { source, .. } => Some(source),
@@ -83,6 +91,12 @@ impl Error for RuntimeError {
 impl From<ConfigError> for RuntimeError {
     fn from(error: ConfigError) -> Self {
         Self::Config(error)
+    }
+}
+
+impl From<music_application::auth::AuthServiceError> for RuntimeError {
+    fn from(error: music_application::auth::AuthServiceError) -> Self {
+        Self::Authentication(error)
     }
 }
 
@@ -109,10 +123,88 @@ pub struct PublicErrorBody {
     pub detail: PublicErrorDetail,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, ToSchema)]
+pub struct PlainErrorBody {
+    pub detail: &'static str,
+}
+
+/// FastAPI-compatible validation envelope retained as a stable HTTP contract.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, ToSchema)]
+#[schema(as = HTTPValidationError)]
+pub struct HttpValidationErrorBody {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detail: Vec<ValidationErrorDetail>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, ToSchema)]
+#[schema(as = ValidationError)]
+pub struct ValidationErrorDetail {
+    #[schema(schema_with = validation_location_schema)]
+    pub loc: Vec<Value>,
+    pub msg: &'static str,
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(schema_with = any_value_schema)]
+    pub input: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(schema_with = generic_object_schema)]
+    pub ctx: Option<Value>,
+}
+
+fn validation_location_schema() -> Array {
+    ArrayBuilder::new()
+        .items(
+            AnyOfBuilder::new()
+                .item(openapi_string())
+                .item(openapi_integer()),
+        )
+        .build()
+}
+
+fn any_value_schema() -> Object {
+    ObjectBuilder::new()
+        .schema_type(SchemaType::AnyValue)
+        .build()
+}
+
+fn generic_object_schema() -> Object {
+    ObjectBuilder::new().schema_type(Type::Object).build()
+}
+
+pub(crate) fn openapi_integer() -> RefOr<Schema> {
+    openapi_primitive(Type::Integer)
+}
+
+pub(crate) fn openapi_nullable_string() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(openapi_string())
+            .item(openapi_primitive(Type::Null))
+            .build(),
+    )
+    .into()
+}
+
+fn openapi_string() -> RefOr<Schema> {
+    openapi_primitive(Type::String)
+}
+
+fn openapi_primitive(kind: Type) -> RefOr<Schema> {
+    Schema::Object(ObjectBuilder::new().schema_type(kind).build()).into()
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum ApiErrorPayload {
+    Coded(PublicErrorDetail),
+    Plain(&'static str),
+    Validation,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ApiError {
     status: StatusCode,
-    detail: PublicErrorDetail,
+    payload: ApiErrorPayload,
 }
 
 impl ApiError {
@@ -120,10 +212,10 @@ impl ApiError {
     pub const fn not_found() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
-            detail: PublicErrorDetail {
+            payload: ApiErrorPayload::Coded(PublicErrorDetail {
                 code: "not_found",
                 message: "The requested resource was not found.",
-            },
+            }),
         }
     }
 
@@ -131,10 +223,10 @@ impl ApiError {
     pub const fn service_unavailable() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
-            detail: PublicErrorDetail {
+            payload: ApiErrorPayload::Coded(PublicErrorDetail {
                 code: "service_unavailable",
                 message: "The service is not ready for this request.",
-            },
+            }),
         }
     }
 
@@ -142,10 +234,7 @@ impl ApiError {
     pub const fn validation() -> Self {
         Self {
             status: StatusCode::UNPROCESSABLE_ENTITY,
-            detail: PublicErrorDetail {
-                code: "validation_error",
-                message: "The request parameters are invalid.",
-            },
+            payload: ApiErrorPayload::Validation,
         }
     }
 
@@ -153,22 +242,68 @@ impl ApiError {
     pub const fn internal() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            detail: PublicErrorDetail {
+            payload: ApiErrorPayload::Coded(PublicErrorDetail {
                 code: "internal_error",
                 message: "The request could not be completed.",
-            },
+            }),
+        }
+    }
+
+    #[must_use]
+    pub const fn unauthorized(detail: &'static str) -> Self {
+        Self::plain(StatusCode::UNAUTHORIZED, detail)
+    }
+
+    #[must_use]
+    pub const fn too_many_requests(detail: &'static str) -> Self {
+        Self::plain(StatusCode::TOO_MANY_REQUESTS, detail)
+    }
+
+    #[must_use]
+    pub const fn bad_request(detail: &'static str) -> Self {
+        Self::plain(StatusCode::BAD_REQUEST, detail)
+    }
+
+    #[must_use]
+    pub const fn plain_not_found(detail: &'static str) -> Self {
+        Self::plain(StatusCode::NOT_FOUND, detail)
+    }
+
+    #[must_use]
+    pub const fn conflict(detail: &'static str) -> Self {
+        Self::plain(StatusCode::CONFLICT, detail)
+    }
+
+    const fn plain(status: StatusCode, detail: &'static str) -> Self {
+        Self {
+            status,
+            payload: ApiErrorPayload::Plain(detail),
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(PublicErrorBody {
-                detail: self.detail,
-            }),
-        )
-            .into_response()
+        match self.payload {
+            ApiErrorPayload::Coded(detail) => {
+                (self.status, Json(PublicErrorBody { detail })).into_response()
+            }
+            ApiErrorPayload::Plain(detail) => {
+                (self.status, Json(PlainErrorBody { detail })).into_response()
+            }
+            ApiErrorPayload::Validation => (
+                self.status,
+                Json(HttpValidationErrorBody {
+                    detail: vec![ValidationErrorDetail {
+                        loc: vec![Value::String("body".to_owned())],
+                        msg: "The request parameters are invalid.",
+                        kind: "value_error",
+                        input: None,
+                        ctx: None,
+                    }],
+                }),
+            )
+                .into_response(),
+        }
     }
 }

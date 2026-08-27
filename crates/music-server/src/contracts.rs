@@ -451,6 +451,13 @@ mod tests {
         assert!(paths.contains_key("/api/health"));
         assert!(paths.contains_key("/api/readiness"));
         assert!(paths.contains_key("/api/sync/state"));
+        assert!(paths.contains_key("/api/auth/login"));
+        assert!(paths.contains_key("/api/auth/logout"));
+        assert!(paths.contains_key("/api/auth/me"));
+        assert!(paths.contains_key("/api/auth/sessions"));
+        assert!(paths.contains_key("/api/auth/sessions/{token_prefix}"));
+        assert!(paths.contains_key("/api/devices"));
+        assert!(paths.contains_key("/api/devices/{client_id}"));
         assert!(!paths.contains_key("/health"));
         assert!(!paths.contains_key("/api/ws"));
         Ok(())

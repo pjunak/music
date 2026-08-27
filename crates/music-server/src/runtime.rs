@@ -1,6 +1,7 @@
 use std::fs;
 use std::future::Future;
 use std::io;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,12 +11,17 @@ use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
     SystemPlaybackClock, SystemQueueRandom, start_playback_actor,
 };
-use music_storage::{SqliteStorage, SqliteStorageOptions};
+use music_storage::{
+    LegacyDeviceImportOutcome, LegacyDeviceImportStatus, SqliteStorage, SqliteStorageOptions,
+    StorageError,
+};
 use tokio::net::TcpListener;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing_subscriber::EnvFilter;
 
+use crate::auth::RuntimeAuth;
 use crate::config::AppConfig;
+use crate::devices::RuntimeDevices;
 use crate::error::RuntimeError;
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::http::build_router;
@@ -34,6 +40,8 @@ pub struct AppRuntime {
     supervisor: TaskSupervisor,
     storage: Arc<SqliteStorage>,
     playback: PlaybackActorHandle,
+    auth: Arc<RuntimeAuth>,
+    devices: Arc<RuntimeDevices>,
 }
 
 impl AppRuntime {
@@ -46,6 +54,8 @@ impl AppRuntime {
         health.set_component("database", true, ComponentStatus::Starting);
         health.set_component("database_schema", true, ComponentStatus::Starting);
         health.set_component("playback", true, ComponentStatus::Starting);
+        health.set_component("authentication", true, ComponentStatus::Starting);
+        health.set_component("remembered_devices", false, ComponentStatus::Starting);
         health.set_component("runtime", true, ComponentStatus::Starting);
 
         initialize_directories(&config, &health)?;
@@ -85,6 +95,11 @@ impl AppRuntime {
             );
         }
 
+        initialize_legacy_devices(&storage, &config.devices_file, &health).await?;
+        let auth = Arc::new(RuntimeAuth::new(Arc::clone(&storage), &config)?);
+        let devices = Arc::new(RuntimeDevices::new(Arc::clone(&storage)));
+        health.set_component("authentication", true, ComponentStatus::Ready);
+
         let supervisor = TaskSupervisor::new(health.clone());
         let playback = match start_playback_actor(
             Arc::clone(&storage),
@@ -118,6 +133,8 @@ impl AppRuntime {
             supervisor,
             storage,
             playback,
+            auth,
+            devices,
         })
     }
 
@@ -132,7 +149,13 @@ impl AppRuntime {
     }
 
     pub fn router(&self) -> Result<Router, RuntimeError> {
-        build_router(&self.config, self.health.clone(), self.playback.clone())
+        build_router(
+            &self.config,
+            self.health.clone(),
+            self.playback.clone(),
+            Arc::clone(&self.auth),
+            Arc::clone(&self.devices),
+        )
     }
 
     pub async fn run<F>(self, listener: TcpListener, shutdown_signal: F) -> Result<(), RuntimeError>
@@ -153,9 +176,12 @@ impl AppRuntime {
         let cancellation = self.supervisor.cancellation_token();
         let graceful_cancellation = cancellation.clone();
         let server = async move {
-            axum::serve(listener, router)
-                .with_graceful_shutdown(graceful_cancellation.cancelled_owned())
-                .await
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(graceful_cancellation.cancelled_owned())
+            .await
         };
         tokio::pin!(server);
         tokio::pin!(shutdown_signal);
@@ -188,6 +214,38 @@ impl AppRuntime {
         self.storage.close().await;
         supervisor_result
     }
+}
+
+async fn initialize_legacy_devices(
+    storage: &SqliteStorage,
+    path: &Path,
+    health: &HealthRegistry,
+) -> Result<(), RuntimeError> {
+    let outcome = match storage.import_legacy_devices_once(path).await {
+        Ok(outcome) => outcome,
+        Err(error @ StorageError::Io { .. }) => {
+            health.set_component("remembered_devices", false, ComponentStatus::Degraded);
+            tracing::warn!(error = %error, "legacy device registry could not be inspected");
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let status = match &outcome {
+        LegacyDeviceImportOutcome::Applied(record)
+        | LegacyDeviceImportOutcome::AlreadyRecorded(record) => Some(record.status),
+        LegacyDeviceImportOutcome::TargetNotEmpty => None,
+    };
+    if matches!(
+        status,
+        Some(LegacyDeviceImportStatus::Corrupt | LegacyDeviceImportStatus::Unsupported)
+    ) {
+        health.set_component("remembered_devices", false, ComponentStatus::Degraded);
+        tracing::warn!(?outcome, "legacy device registry was not importable");
+    } else {
+        health.set_component("remembered_devices", false, ComponentStatus::Ready);
+        tracing::info!(?outcome, "remembered-device storage initialized");
+    }
+    Ok(())
 }
 
 fn supervise_playback(

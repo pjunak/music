@@ -1,20 +1,29 @@
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use music_application::auth::{SecretSessionToken, SessionLookup, SessionTouch, UnixSeconds};
 use music_application::playback::{
     ClientRegistration, ConnectionId, PlaybackActorHandle, PlaybackPublication,
     ResolvedPlaybackCommand,
 };
-use music_domain::{DomainEvent, PlaybackCommand};
-use music_protocol::{ClientAction, ServerMessage};
+use music_domain::{
+    CrossfadeType as DomainCrossfadeType, DomainEvent, LoopMode as DomainLoopMode, PlaybackCommand,
+    ShuffleMode as DomainShuffleMode, UnitInterval as DomainUnitInterval,
+};
+use music_protocol::{ClientAction, ErrorCode, ServerMessage};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
+use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
+use crate::auth::{CurrentSession, RuntimeAuth, optional_session};
+use crate::devices::RuntimeDevices;
 use crate::http::HttpState;
 use crate::playback_projection::{canonical_state, guest_state, legacy_state};
 
@@ -24,30 +33,88 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITER_COMMAND_CAPACITY: usize = 16;
+#[cfg(not(test))]
+const SESSION_RECHECK_INTERVAL: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const SESSION_RECHECK_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct SessionProjection {
     client_id: Option<String>,
     protocol_version: i64,
+    authenticated: bool,
 }
 
 #[derive(Debug)]
 enum WriterCommand {
-    Error(&'static str),
+    Error {
+        detail: &'static str,
+        code: Option<ErrorCode>,
+    },
     Pong(axum::body::Bytes),
+}
+
+#[derive(Debug)]
+struct SessionAuthorization {
+    token: Option<SecretSessionToken>,
+    expires_at: Option<UnixSeconds>,
+    last_database_check: Instant,
+}
+
+struct ReaderContext {
+    playback: PlaybackActorHandle,
+    connection_id: ConnectionId,
+    auth: Option<Arc<RuntimeAuth>>,
+    devices: Option<Arc<RuntimeDevices>>,
+    authorization: SessionAuthorization,
+    projection: watch::Sender<SessionProjection>,
+    writer: mpsc::Sender<WriterCommand>,
+    cancellation: CancellationToken,
+}
+
+impl SessionAuthorization {
+    fn from_session(session: Option<CurrentSession>) -> Self {
+        let (token, expires_at) = session.map_or((None, None), |session| {
+            (Some(session.token), Some(session.expires_at))
+        });
+        Self {
+            token,
+            expires_at,
+            last_database_check: Instant::now(),
+        }
+    }
+
+    fn authenticated(&self) -> bool {
+        self.token.is_some()
+    }
+
+    fn downgrade(&mut self) {
+        self.token = None;
+        self.expires_at = None;
+    }
 }
 
 pub async fn websocket_upgrade(
     State(state): State<HttpState>,
+    headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    let Some(playback) = state.playback else {
+    let Some(playback) = state.playback.clone() else {
         return upgrade.on_upgrade(unavailable_session).into_response();
     };
+    let initial_session =
+        match optional_session(&state, &headers, SessionTouch::PreserveLastSeen).await {
+            Ok(session) => session,
+            Err(error) => return error.into_response(),
+        };
+    let auth = state.auth.clone();
+    let devices = state.devices.clone();
     upgrade
         .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
-        .on_upgrade(move |socket| websocket_session(socket, playback))
+        .on_upgrade(move |socket| {
+            websocket_session(socket, playback, auth, devices, initial_session)
+        })
         .into_response()
 }
 
@@ -64,7 +131,13 @@ async fn unavailable_session(mut socket: WebSocket) {
     let _ = tokio::time::timeout(CLOSE_TIMEOUT, socket.close()).await;
 }
 
-async fn websocket_session(socket: WebSocket, playback: PlaybackActorHandle) {
+async fn websocket_session(
+    socket: WebSocket,
+    playback: PlaybackActorHandle,
+    auth: Option<Arc<RuntimeAuth>>,
+    devices: Option<Arc<RuntimeDevices>>,
+    initial_session: Option<CurrentSession>,
+) {
     let connection_id = match playback.open_connection().await {
         Ok(connection_id) => connection_id,
         Err(_) => {
@@ -82,7 +155,11 @@ async fn websocket_session(socket: WebSocket, playback: PlaybackActorHandle) {
     };
     let publications = playback.subscribe_state();
     let events = playback.subscribe_events();
-    let (projection_tx, projection_rx) = watch::channel(SessionProjection::default());
+    let authorization = SessionAuthorization::from_session(initial_session);
+    let (projection_tx, projection_rx) = watch::channel(SessionProjection {
+        authenticated: authorization.authenticated(),
+        ..SessionProjection::default()
+    });
     let (writer_tx, writer_rx) = mpsc::channel(WRITER_COMMAND_CAPACITY);
     let cancellation = CancellationToken::new();
     let writer_cancellation = cancellation.clone();
@@ -104,11 +181,16 @@ async fn websocket_session(socket: WebSocket, playback: PlaybackActorHandle) {
 
     reader_loop(
         stream,
-        &playback,
-        connection_id,
-        projection_tx,
-        writer_tx,
-        cancellation.clone(),
+        ReaderContext {
+            playback: playback.clone(),
+            connection_id,
+            auth,
+            devices,
+            authorization,
+            projection: projection_tx,
+            writer: writer_tx,
+            cancellation: cancellation.clone(),
+        },
     )
     .await;
     cancellation.cancel();
@@ -126,17 +208,16 @@ async fn websocket_session(socket: WebSocket, playback: PlaybackActorHandle) {
     }
 }
 
-async fn reader_loop(
-    mut stream: SplitStream<WebSocket>,
-    playback: &PlaybackActorHandle,
-    connection_id: ConnectionId,
-    projection: watch::Sender<SessionProjection>,
-    writer: mpsc::Sender<WriterCommand>,
-    cancellation: CancellationToken,
-) {
+async fn reader_loop(mut stream: SplitStream<WebSocket>, mut context: ReaderContext) {
+    let mut session_recheck = tokio::time::interval(SESSION_RECHECK_INTERVAL);
+    session_recheck.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         let message = tokio::select! {
-            () = cancellation.cancelled() => break,
+            () = context.cancellation.cancelled() => break,
+            _ = session_recheck.tick(), if context.authorization.authenticated() => {
+                refresh_session_projection(&mut context).await;
+                continue;
+            }
             message = stream.next() => message,
         };
         let Some(message) = message else {
@@ -149,46 +230,41 @@ async fn reader_loop(
         match message {
             Message::Text(text) => {
                 if let Ok(action) = serde_json::from_str::<ClientAction>(&text) {
-                    handle_guest_action(
-                        action,
-                        playback,
-                        connection_id,
-                        &projection,
-                        &writer,
-                        &cancellation,
-                    )
-                    .await;
+                    handle_action(action, &mut context).await;
                 } else {
                     queue_writer(
-                        &writer,
-                        WriterCommand::Error("invalid action"),
-                        &cancellation,
+                        &context.writer,
+                        WriterCommand::Error {
+                            detail: "invalid action",
+                            code: None,
+                        },
+                        &context.cancellation,
                     )
                     .await;
                 }
             }
             Message::Binary(bytes) => {
                 if let Ok(action) = serde_json::from_slice::<ClientAction>(&bytes) {
-                    handle_guest_action(
-                        action,
-                        playback,
-                        connection_id,
-                        &projection,
-                        &writer,
-                        &cancellation,
-                    )
-                    .await;
+                    handle_action(action, &mut context).await;
                 } else {
                     queue_writer(
-                        &writer,
-                        WriterCommand::Error("invalid action"),
-                        &cancellation,
+                        &context.writer,
+                        WriterCommand::Error {
+                            detail: "invalid action",
+                            code: None,
+                        },
+                        &context.cancellation,
                     )
                     .await;
                 }
             }
             Message::Ping(bytes) => {
-                queue_writer(&writer, WriterCommand::Pong(bytes), &cancellation).await;
+                queue_writer(
+                    &context.writer,
+                    WriterCommand::Pong(bytes),
+                    &context.cancellation,
+                )
+                .await;
             }
             Message::Pong(_) => {}
             Message::Close(_) => break,
@@ -196,31 +272,49 @@ async fn reader_loop(
     }
 }
 
-async fn handle_guest_action(
-    action: ClientAction,
-    playback: &PlaybackActorHandle,
-    connection_id: ConnectionId,
-    projection: &watch::Sender<SessionProjection>,
-    writer: &mpsc::Sender<WriterCommand>,
-    cancellation: &CancellationToken,
-) {
+async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
+    refresh_session_projection(context).await;
+    let ReaderContext {
+        playback,
+        connection_id,
+        devices,
+        authorization,
+        projection,
+        writer,
+        cancellation,
+        ..
+    } = context;
+    let connection_id = *connection_id;
     match action {
         ClientAction::Register {
             name,
             client_id,
             protocol_version,
         } => {
+            let client_id = client_id.into_inner();
+            let name = name.into_inner();
+            let remembered = if let Some(devices) = devices.as_deref() {
+                match devices.find(&client_id).await {
+                    Ok(device) => device,
+                    Err(error) => {
+                        tracing::error!(error = %error, "remembered-device lookup failed during registration");
+                        queue_error(writer, "device registration failed", None, cancellation).await;
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
             let session = SessionProjection {
-                client_id: Some(client_id.as_str().to_owned()),
+                client_id: Some(client_id.clone()),
                 protocol_version: protocol_version.get(),
+                authenticated: authorization.authenticated(),
             };
             let registration = ClientRegistration {
-                client_id: client_id.into_inner(),
-                name: name.into_inner(),
-                // Remembered/default-output ownership is implemented in the
-                // authenticated device phase. Guest registration itself must
-                // never silently designate a new output.
-                is_default_output: false,
+                client_id,
+                name,
+                remembered_name: remembered.as_ref().map(|device| device.name.clone()),
+                is_default_output: remembered.is_some_and(|device| device.is_output),
             };
             if playback
                 .register_connection(connection_id, registration)
@@ -229,20 +323,16 @@ async fn handle_guest_action(
             {
                 projection.send_replace(session);
             } else {
-                queue_writer(
-                    writer,
-                    WriterCommand::Error("device registration failed"),
-                    cancellation,
-                )
-                .await;
+                queue_error(writer, "device registration failed", None, cancellation).await;
             }
         }
         ClientAction::PositionReport { position_ms } => {
             let client_id = projection.borrow().client_id.clone();
             let Some(client_id) = client_id else {
-                queue_writer(
+                queue_error(
                     writer,
-                    WriterCommand::Error("register before reporting position"),
+                    "register before reporting position",
+                    None,
                     cancellation,
                 )
                 .await;
@@ -257,23 +347,241 @@ async fn handle_guest_action(
                 ))
                 .await;
             if result.is_err() {
-                queue_writer(
+                queue_error(
                     writer,
-                    WriterCommand::Error("only active outputs may report position"),
+                    "only active outputs may report position",
+                    None,
                     cancellation,
                 )
                 .await;
             }
         }
-        _ => {
-            queue_writer(
+        action if !authorization.authenticated() => {
+            queue_error(
                 writer,
-                WriterCommand::Error("guest sessions cannot mutate state — please sign in"),
+                "guest sessions cannot mutate state — please sign in",
+                None,
                 cancellation,
             )
             .await;
+            drop(action);
+        }
+        action => match direct_command(action) {
+            Ok(Some(command)) => {
+                if let Err(error) = playback
+                    .execute(ResolvedPlaybackCommand::direct(command))
+                    .await
+                {
+                    tracing::warn!(error = %error, "authenticated playback action was rejected");
+                    queue_error(writer, "playback action failed", None, cancellation).await;
+                }
+            }
+            Ok(None) => {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+            }
+            Err(detail) => queue_error(writer, detail, None, cancellation).await,
+        },
+    }
+}
+
+async fn refresh_session_projection(context: &mut ReaderContext) {
+    let ReaderContext {
+        auth,
+        authorization,
+        projection,
+        writer,
+        cancellation,
+        ..
+    } = context;
+    if let Some((detail, code)) = refresh_authorization(auth.as_deref(), authorization).await {
+        let mut session = projection.borrow().clone();
+        session.authenticated = false;
+        projection.send_replace(session);
+        queue_writer(
+            writer,
+            WriterCommand::Error {
+                detail,
+                code: Some(code),
+            },
+            cancellation,
+        )
+        .await;
+    }
+}
+
+async fn refresh_authorization(
+    auth: Option<&RuntimeAuth>,
+    authorization: &mut SessionAuthorization,
+) -> Option<(&'static str, ErrorCode)> {
+    let token = authorization.token.as_ref()?;
+    let now = match current_unix_seconds() {
+        Some(now) => now,
+        None => {
+            authorization.downgrade();
+            return Some((
+                "session could not be verified — please sign in again",
+                ErrorCode::SessionRevoked,
+            ));
+        }
+    };
+    if authorization
+        .expires_at
+        .is_some_and(|expires_at| now >= expires_at)
+    {
+        authorization.downgrade();
+        return Some((
+            "session expired — please sign in again",
+            ErrorCode::SessionExpired,
+        ));
+    }
+    if authorization.last_database_check.elapsed() < SESSION_RECHECK_INTERVAL {
+        return None;
+    }
+    authorization.last_database_check = Instant::now();
+    let Some(auth) = auth else {
+        authorization.downgrade();
+        return Some((
+            "session revoked — please sign in again",
+            ErrorCode::SessionRevoked,
+        ));
+    };
+    let token = token.clone();
+    match auth
+        .authenticate(token.expose_secret(), SessionTouch::PreserveLastSeen)
+        .await
+    {
+        Ok(SessionLookup::Authenticated { expires_at, .. }) => {
+            authorization.expires_at = Some(expires_at);
+            None
+        }
+        Ok(SessionLookup::Expired) => {
+            authorization.downgrade();
+            Some((
+                "session expired — please sign in again",
+                ErrorCode::SessionExpired,
+            ))
+        }
+        Ok(SessionLookup::Missing) => {
+            authorization.downgrade();
+            Some((
+                "session revoked — please sign in again",
+                ErrorCode::SessionRevoked,
+            ))
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "WebSocket session recheck failed closed");
+            authorization.downgrade();
+            Some((
+                "session could not be verified — please sign in again",
+                ErrorCode::SessionRevoked,
+            ))
         }
     }
+}
+
+fn current_unix_seconds() -> Option<UnixSeconds> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_secs()).ok())
+        .map(UnixSeconds::new)
+}
+
+fn direct_command(action: ClientAction) -> Result<Option<PlaybackCommand>, &'static str> {
+    let command = match action {
+        ClientAction::SetVolume { volume } => {
+            PlaybackCommand::SetGroupVolume(domain_volume(volume.get())?)
+        }
+        ClientAction::Pause => PlaybackCommand::SetPlaying(false),
+        ClientAction::Resume => PlaybackCommand::SetPlaying(true),
+        ClientAction::SetActiveOutputs { device_ids } => {
+            PlaybackCommand::SetActiveOutputs(device_ids)
+        }
+        ClientAction::SetDeviceVolume { device_id, volume } => PlaybackCommand::SetDeviceVolume {
+            device_id: device_id.into_inner(),
+            volume: domain_volume(volume.get())?,
+        },
+        ClientAction::AmbientJumpQueue { position } => PlaybackCommand::AmbientJumpQueue(
+            usize::try_from(position.get()).map_err(|_| "queue position is too large")?,
+        ),
+        ClientAction::AmbientClearQueue => PlaybackCommand::AmbientClearQueue,
+        ClientAction::AmbientSkipNext { from_track_id } => PlaybackCommand::AmbientSkipNext {
+            follow_next_id: None,
+            expected_track_id: from_track_id
+                .map(music_domain::TrackId::new)
+                .transpose()
+                .map_err(|_| "track ID must be positive")?,
+        },
+        ClientAction::AmbientSkipPrev => PlaybackCommand::AmbientSkipPrevious,
+        ClientAction::AmbientSeek { position_ms } => PlaybackCommand::AmbientSeek(
+            u64::try_from(position_ms.get()).map_err(|_| "position is too large")?,
+        ),
+        ClientAction::AmbientSetLoop { loop_mode } => {
+            PlaybackCommand::AmbientSetLoop(match loop_mode {
+                music_protocol::LoopMode::Off => DomainLoopMode::Off,
+                music_protocol::LoopMode::Follow => DomainLoopMode::Follow,
+                music_protocol::LoopMode::Queue => DomainLoopMode::Queue,
+                music_protocol::LoopMode::Track => DomainLoopMode::Track,
+            })
+        }
+        ClientAction::AmbientSetShuffle { shuffle } => {
+            PlaybackCommand::AmbientSetShuffle(match shuffle {
+                music_protocol::ShuffleMode::Off => DomainShuffleMode::Off,
+                music_protocol::ShuffleMode::Random => DomainShuffleMode::Random,
+            })
+        }
+        ClientAction::AmbientStop => PlaybackCommand::AmbientStop,
+        ClientAction::SetCrossfade {
+            crossfade_ms,
+            crossfade_type,
+        } => PlaybackCommand::SetCrossfade {
+            crossfade_ms: u32::try_from(crossfade_ms.get())
+                .map_err(|_| "crossfade duration is too large")?,
+            crossfade_type: crossfade_type.map(|kind| match kind {
+                music_protocol::CrossfadeType::Linear => DomainCrossfadeType::Linear,
+                music_protocol::CrossfadeType::EqualPower => DomainCrossfadeType::EqualPower,
+                music_protocol::CrossfadeType::Cut => DomainCrossfadeType::Cut,
+            }),
+        },
+        ClientAction::InterruptSkipNext { from_track_id } => PlaybackCommand::InterruptSkipNext {
+            expected_track_id: from_track_id
+                .map(music_domain::TrackId::new)
+                .transpose()
+                .map_err(|_| "track ID must be positive")?,
+        },
+        ClientAction::InterruptSeek { position_ms } => PlaybackCommand::InterruptSeek(
+            u64::try_from(position_ms.get()).map_err(|_| "position is too large")?,
+        ),
+        ClientAction::CancelInterrupt => PlaybackCommand::CancelInterrupt,
+        ClientAction::StopLoop { id } => PlaybackCommand::StopLoop(id.into_inner()),
+        ClientAction::SetActiveMode { .. }
+        | ClientAction::AmbientPlayTrack { .. }
+        | ClientAction::AmbientSetQueue { .. }
+        | ClientAction::AmbientEnqueue { .. }
+        | ClientAction::AmbientPlayPlaylist { .. }
+        | ClientAction::AmbientPlayFolder { .. }
+        | ClientAction::SetActiveSoundboard { .. }
+        | ClientAction::SetActivePresets { .. }
+        | ClientAction::FireInterruptTrack { .. }
+        | ClientAction::FireInterruptPlaylist { .. }
+        | ClientAction::FireSfx { .. }
+        | ClientAction::StartLoop { .. }
+        | ClientAction::FireCue { .. } => return Ok(None),
+        ClientAction::Register { .. } | ClientAction::PositionReport { .. } => {
+            return Err("action was routed incorrectly");
+        }
+    };
+    Ok(Some(command))
+}
+
+fn domain_volume(value: f64) -> Result<DomainUnitInterval, &'static str> {
+    DomainUnitInterval::new(value).map_err(|_| "volume is outside the supported range")
 }
 
 async fn writer_loop(
@@ -294,10 +602,10 @@ async fn writer_loop(
             command = commands.recv() => {
                 let Some(command) = command else { break; };
                 match command {
-                    WriterCommand::Error(detail) => {
+                    WriterCommand::Error { detail, code } => {
                         send_server_message(
                             &mut sink,
-                            &ServerMessage::Error { detail: detail.to_owned(), code: None },
+                            &ServerMessage::Error { detail: detail.to_owned(), code },
                             true,
                         ).await?;
                     }
@@ -363,7 +671,11 @@ async fn send_projected_state(
     } else {
         legacy_state(canonical)
     };
-    let projected = guest_state(projected, session.client_id.as_deref());
+    let projected = if session.authenticated {
+        projected
+    } else {
+        guest_state(projected, session.client_id.as_deref())
+    };
     let message = if snapshot {
         ServerMessage::StateSnapshot {
             your_device_id: String::new(),
@@ -416,6 +728,15 @@ async fn queue_writer(
     }
 }
 
+async fn queue_error(
+    writer: &mpsc::Sender<WriterCommand>,
+    detail: &'static str,
+    code: Option<ErrorCode>,
+    cancellation: &CancellationToken,
+) {
+    queue_writer(writer, WriterCommand::Error { detail, code }, cancellation).await;
+}
+
 async fn finish_writer(writer: &mut JoinHandle<Result<(), ()>>) {
     if tokio::time::timeout(CLOSE_TIMEOUT, &mut *writer)
         .await
@@ -434,13 +755,20 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
+    use axum::body::Body;
+    use axum::http::header::COOKIE;
+    use axum::http::{HeaderValue, Request, StatusCode};
     use futures_util::{SinkExt, StreamExt};
-    use music_protocol::ServerMessage;
+    use music_application::auth::{AuthRepository, UnixSeconds};
+    use music_protocol::{ErrorCode, ServerMessage};
+    use music_storage::{SqliteStorage, SqliteStorageOptions, hash_password};
     use tempfile::tempdir;
     use tokio::net::TcpStream;
     use tokio::sync::oneshot;
     use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+    use tower::ServiceExt;
 
     use crate::{AppConfig, AppRuntime, RuntimeError};
 
@@ -466,8 +794,32 @@ mod tests {
                 "STATIC_DIR".to_owned(),
                 root.join("missing-static").display().to_string(),
             ),
+            (
+                "DEVICES_FILE".to_owned(),
+                root.join("devices.json").display().to_string(),
+            ),
+            ("SESSION_COOKIE_SECURE".to_owned(), "false".to_owned()),
         ]))
         .map_err(Into::into)
+    }
+
+    async fn seed_session(root: &Path, token: &str) -> Result<(), Box<dyn Error>> {
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(root.join("app.db"))).await?;
+        let password_hash = hash_password("test-password")?;
+        let user_id = storage
+            .create_user("operator", &password_hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        AuthRepository::create_session(
+            &storage,
+            user_id,
+            token,
+            UnixSeconds::new(1_800_000_000),
+            UnixSeconds::new(4_000_000_000),
+        )
+        .await
+        .map_err(|error| -> Box<dyn Error> { error })?;
+        storage.close().await;
+        Ok(())
     }
 
     async fn next_protocol_message(
@@ -572,6 +924,127 @@ mod tests {
             next_protocol_message(&mut socket).await?,
             ServerMessage::Error { detail, .. } if detail.contains("active outputs")
         ));
+
+        socket.close(None).await?;
+        let _ = shutdown_tx.send(());
+        server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn authenticated_socket_controls_playback_uses_remembered_defaults_and_downgrades()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let token = "authenticated-test-session-token";
+        seed_session(directory.path(), token).await?;
+        std::fs::write(
+            directory.path().join("devices.json"),
+            r#"{"living-room":{"name":"Living Room TV","is_output":true}}"#,
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let control_router = runtime.router()?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(runtime.run(listener, async move {
+            let _ = shutdown_rx.await;
+            Ok(())
+        }));
+        let mut request = format!("ws://{address}/api/ws").into_client_request()?;
+        request.headers_mut().insert(
+            COOKIE,
+            HeaderValue::from_str(&format!("music_session={token}"))?,
+        );
+        let (mut socket, _) = connect_async(request).await?;
+        assert!(matches!(
+            next_protocol_message(&mut socket).await?,
+            ServerMessage::StateSnapshot { state, .. } if state.connected_devices.is_empty()
+        ));
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"register",
+                    "name":"TV Browser",
+                    "client_id":"living-room",
+                    "protocol_version":2
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let registered = next_protocol_message(&mut socket).await?;
+        assert!(matches!(
+            registered,
+            ServerMessage::StateChanged { state }
+                if state.active_output_device_ids == ["living-room"]
+                    && state.connected_devices.len() == 1
+                    && state.connected_devices[0].name == "Living Room TV"
+                    && state.connected_devices[0].is_output
+        ));
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"resume"}).to_string().into(),
+            ))
+            .await?;
+        let mut saw_playing = false;
+        for _ in 0..4 {
+            if matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::StateChanged { state } if state.is_playing
+            ) {
+                saw_playing = true;
+                break;
+            }
+        }
+        assert!(saw_playing);
+
+        let logout = control_router
+            .oneshot(
+                Request::post("/api/auth/logout")
+                    .header(COOKIE, format!("music_session={token}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(logout.status(), StatusCode::NO_CONTENT);
+        let mut saw_revocation = false;
+        let mut saw_guest_projection = false;
+        for _ in 0..4 {
+            match next_protocol_message(&mut socket).await? {
+                ServerMessage::Error {
+                    code: Some(ErrorCode::SessionRevoked),
+                    ..
+                } => saw_revocation = true,
+                ServerMessage::StateChanged { state } if state.connected_devices.is_empty() => {
+                    saw_guest_projection = true;
+                }
+                _ => {}
+            }
+            if saw_revocation && saw_guest_projection {
+                break;
+            }
+        }
+        assert!(saw_revocation);
+        assert!(saw_guest_projection);
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"pause"}).to_string().into(),
+            ))
+            .await?;
+        let mut saw_guest_rejection = false;
+        for _ in 0..3 {
+            if matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::Error { code: None, detail }
+                    if detail.contains("guest sessions")
+            ) {
+                saw_guest_rejection = true;
+                break;
+            }
+        }
+        assert!(saw_guest_rejection);
 
         socket.close(None).await?;
         let _ = shutdown_tx.send(());

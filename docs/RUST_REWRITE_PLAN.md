@@ -246,15 +246,18 @@ change.
 The Phase-3 playback owner now starts under runtime supervision, so the `playback` readiness
 component becomes `ready` only after the persisted aggregate is loaded, restart-normalized, and
 owned by the bounded actor. `/api/health` remains the exact `{"status":"ok"}` liveness contract.
-`GET /api/sync/state` and `/api/ws` now project that same owner; until Rust session authentication
-lands in Phase 4, every transport is deliberately guest-scoped, registration and active-output
-telemetry remain available, and control mutations are denied instead of being exposed anonymously.
+`GET /api/sync/state` and `/api/ws` project that same owner. Valid sessions receive the canonical
+projection and can dispatch the implemented catalog-independent mutations; guests receive the
+bounded self projection and cannot mutate control state. Long-lived WebSockets recheck session
+state and downgrade in place after logout, revocation, or expiry.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus the three currently registered Rust routes, rather than presenting partial work
-as parity. The browser now imports generated Rust WebSocket DTOs; a generated compatibility layer
-models accepted omitted defaults and the deliberate cached-client window, while `wsValidate.ts`
-continues to validate untrusted frames at runtime.
+operations versus 11 currently registered Rust operations, rather than presenting partial work as
+parity. Ten operations overlap the reference and nine are fully schema-compatible; the remaining
+implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work. The
+browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
+omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
+validate untrusted frames at runtime.
 
 Gate: all standard Rust/frontend/security gates pass; forbidden global state/unsafe/panic fixtures
 are enforced; a copied existing database passes read-only doctor; a second writer is refused; and
@@ -268,9 +271,9 @@ Implement the highest-value invariant early:
 - [x] persisted state normalization, revision compare-and-swap, catalog generations, and boot
   pruning;
 - [x] state actor, bounded commands, watch snapshots, transient event channel, and supervision;
-- [ ] per-connection projection/send ownership, registration, guest projections, protocol v1/v2,
-  auth downgrade, send deadlines, transient lag policy, and sibling-client disconnect behavior;
-  everything except session-backed authentication/downgrade is implemented;
+- [x] per-connection projection/send ownership, registration, guest projections, protocol v1/v2,
+  session-backed auth downgrade, send deadlines, transient lag policy, and sibling-client
+  disconnect behavior;
 - server advancer and loop timers as supervised actor effects;
 - [x] `GET /api/sync/state` and a real guest-safe `/api/ws` transport;
 - extend the generated TypeScript bindings for any new playback DTOs without changing frontend
@@ -282,14 +285,28 @@ reconciliation and bounded slow-client behavior.
 
 ## Phase 4 — authentication, devices, diagnostics, and administration
 
-- Users, Argon2 verification, dummy verification, login throttles, opaque sessions, cookies,
-  revocation, expiry, and active-session APIs.
-- SQLite remembered-device table, one-time legacy JSON import, explicit CLI export/import, and live
-  connected/default-output projections.
+**Status:** In progress — runtime authentication and remembered-device ownership are implemented;
+diagnostics, administration, and explicit device transfer commands remain.
+
+- [x] Users, Python-compatible Argon2 verification, dummy verification, bounded login hashing,
+  direct-peer/global throttles, opaque sessions, configured cookies, revocation, expiry, and
+  active-session APIs.
+- [x] SQLite remembered-device table, audited one-time bounded legacy JSON import that preserves
+  its source, and live connected/default-output projections without coupling saved designation to
+  current activation.
+- [ ] Explicit remembered-device CLI export/import.
 - Diagnostics, maintenance-gated streaming backup/restore verification, storage initialization,
   create-user, set-password, and database doctor.
 - Compatibility liveness, component readiness/degradation, security headers, and safe
   `detail`/error-code/correlation-ID mappings.
+
+The HTTP and WebSocket paths share one opaque-session service and the configured cookie name.
+Authenticated WebSockets periodically revalidate against SQLite and become guests without a
+reconnect when their session disappears. Password verification is capped at two concurrent Argon2
+calls; login attempts have both a direct-peer bucket and a global process bucket, and forwarded
+address headers are deliberately ignored until a trusted-proxy policy exists. The frozen OpenAPI
+comparison reports all eight auth/device operations as fully compatible, while runtime-only failure
+statuses remain safe and tested.
 
 Gate: cross-language password/session fixtures, auth route differential tests, credential-free
 backup checks, symlink/permission tests, and long-lived WebSocket downgrade tests pass.
