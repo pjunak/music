@@ -26,6 +26,7 @@ pub enum RootedPathError {
     RootIsNotDirectory(PathBuf),
     EscapesRoot(PathBuf),
     ParentIsNotDirectory(PathBuf),
+    TargetIsNotFile(PathBuf),
     SymbolicLinkTarget(PathBuf),
 }
 
@@ -54,6 +55,13 @@ impl Display for RootedPathError {
                 "media creation parent is not a directory: {}",
                 path.display()
             ),
+            Self::TargetIsNotFile(path) => {
+                write!(
+                    formatter,
+                    "media mutation target is not a file: {}",
+                    path.display()
+                )
+            }
             Self::SymbolicLinkTarget(path) => write!(
                 formatter,
                 "media creation target must not be a symbolic link: {}",
@@ -70,6 +78,7 @@ impl Error for RootedPathError {
             Self::RootIsNotDirectory(_)
             | Self::EscapesRoot(_)
             | Self::ParentIsNotDirectory(_)
+            | Self::TargetIsNotFile(_)
             | Self::SymbolicLinkTarget(_) => None,
         }
     }
@@ -134,6 +143,40 @@ impl<Kind> MediaRoot<Kind> {
                 return Err(RootedPathError::ParentIsNotDirectory(candidate));
             }
             let resolved = canonicalize("canonicalize media directory", &candidate)?;
+            current = self.ensure_beneath_root(resolved)?;
+        }
+        Ok(current)
+    }
+
+    /// Resolve an existing regular file without following symbolic links in
+    /// any path component. This is the write-capable counterpart to
+    /// `resolve_existing`, which intentionally permits safe in-root links for
+    /// media reads.
+    pub fn resolve_existing_file_for_mutation(
+        &self,
+        relative: &RootedMediaPath<Kind>,
+    ) -> Result<PathBuf, RootedPathError> {
+        let mut current = self.canonical.clone();
+        let mut components = relative.as_str().split('/').peekable();
+        while let Some(component) = components.next() {
+            let candidate = current.join(component);
+            let metadata =
+                std::fs::symlink_metadata(&candidate).map_err(|source| RootedPathError::Io {
+                    operation: "inspect media mutation source",
+                    path: candidate.clone(),
+                    source,
+                })?;
+            if metadata.file_type().is_symlink() {
+                return Err(RootedPathError::SymbolicLinkTarget(candidate));
+            }
+            if components.peek().is_some() {
+                if !metadata.is_dir() {
+                    return Err(RootedPathError::ParentIsNotDirectory(candidate));
+                }
+            } else if !metadata.is_file() {
+                return Err(RootedPathError::TargetIsNotFile(candidate));
+            }
+            let resolved = canonicalize("canonicalize media mutation source", &candidate)?;
             current = self.ensure_beneath_root(resolved)?;
         }
         Ok(current)
@@ -276,6 +319,10 @@ mod tests {
             std::fs::canonicalize(music.join("Albums").join("track.flac"))?
         );
         assert_eq!(
+            root.resolve_existing_file_for_mutation(&LibraryPath::parse("Albums/track.flac")?)?,
+            std::fs::canonicalize(music.join("Albums").join("track.flac"))?
+        );
+        assert_eq!(
             root.resolve_existing_directory(&LibraryPath::parse("Albums")?)?,
             std::fs::canonicalize(music.join("Albums"))?
         );
@@ -348,6 +395,10 @@ mod tests {
         ));
         assert!(matches!(
             root.resolve_existing_directory(&LibraryPath::parse("escape")?),
+            Err(RootedPathError::SymbolicLinkTarget(_))
+        ));
+        assert!(matches!(
+            root.resolve_existing_file_for_mutation(&LibraryPath::parse("escape/secret.flac")?),
             Err(RootedPathError::SymbolicLinkTarget(_))
         ));
         Ok(())

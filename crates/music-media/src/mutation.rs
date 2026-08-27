@@ -7,17 +7,20 @@ use music_application::library::{
     LibraryMutationFailure, LibraryMutationFailureKind, LibraryMutationFuture,
 };
 
-use crate::{LibraryRoot, RootedPathError};
+use crate::{
+    FilesystemDiscoveryError, LibraryRoot, MetadataAdapter, RootedPathError, inspect_library_track,
+};
 
 #[derive(Debug, Clone)]
 pub struct FilesystemLibraryMutations {
     root: LibraryRoot,
+    metadata: MetadataAdapter,
 }
 
 impl FilesystemLibraryMutations {
     #[must_use]
-    pub const fn new(root: LibraryRoot) -> Self {
-        Self { root }
+    pub const fn new(root: LibraryRoot, metadata: MetadataAdapter) -> Self {
+        Self { root, metadata }
     }
 
     fn apply_blocking(
@@ -144,6 +147,92 @@ impl FilesystemLibraryMutations {
                 })?;
                 Ok(LibraryFileMutationOutcome::Deleted)
             }
+            LibraryFileMutation::MoveTrack {
+                track_id,
+                source,
+                destination,
+            } => {
+                if source == destination {
+                    let track = inspect_library_track(&self.root, &self.metadata, &destination)
+                        .map_err(FilesystemMutationError::Discovery)?;
+                    return Ok(LibraryFileMutationOutcome::TrackMoved { track_id, track });
+                }
+                let source_folded = source.as_str().to_lowercase();
+                let destination_folded = destination.as_str().to_lowercase();
+                let case_only = source_folded == destination_folded
+                    && source
+                        .parent()
+                        .map(|path| path.into_string().to_lowercase())
+                        == destination
+                            .parent()
+                            .map(|path| path.into_string().to_lowercase());
+                let source_absolute = match self.root.resolve_existing_file_for_mutation(&source) {
+                    Ok(path) => path,
+                    Err(error) if replay && rooted_path_is_missing(&error) => {
+                        self.root
+                            .resolve_existing_file_for_mutation(&destination)
+                            .map_err(FilesystemMutationError::RootedPath)?;
+                        let track = inspect_library_track(&self.root, &self.metadata, &destination)
+                            .map_err(FilesystemMutationError::Discovery)?;
+                        return Ok(LibraryFileMutationOutcome::TrackMoved { track_id, track });
+                    }
+                    Err(error) => return Err(FilesystemMutationError::RootedPath(error)),
+                };
+                if replay
+                    && case_only
+                    && source_absolute.file_name().and_then(|name| name.to_str())
+                        == Some(destination.file_name())
+                {
+                    let track = inspect_library_track(&self.root, &self.metadata, &destination)
+                        .map_err(FilesystemMutationError::Discovery)?;
+                    return Ok(LibraryFileMutationOutcome::TrackMoved { track_id, track });
+                }
+                if let Some(parent) = destination.parent() {
+                    self.root
+                        .ensure_directory(&parent)
+                        .map_err(FilesystemMutationError::RootedPath)?;
+                }
+                let destination_absolute = self
+                    .root
+                    .resolve_for_creation(&destination)
+                    .map_err(FilesystemMutationError::RootedPath)?;
+                match std::fs::symlink_metadata(&destination_absolute) {
+                    Ok(_) if !case_only => {
+                        return Err(FilesystemMutationError::DestinationExists);
+                    }
+                    Ok(_) => {}
+                    Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(source) => {
+                        return Err(FilesystemMutationError::Io {
+                            operation: "inspect track move destination",
+                            source,
+                        });
+                    }
+                }
+                std::fs::rename(&source_absolute, &destination_absolute).map_err(|source| {
+                    FilesystemMutationError::Io {
+                        operation: "move library track",
+                        source,
+                    }
+                })?;
+                let track = inspect_library_track(&self.root, &self.metadata, &destination)
+                    .map_err(FilesystemMutationError::Discovery)?;
+                Ok(LibraryFileMutationOutcome::TrackMoved { track_id, track })
+            }
+            LibraryFileMutation::DeleteTrack { track_id, path } => {
+                let absolute = match self.root.resolve_existing_file_for_mutation(&path) {
+                    Ok(path) => path,
+                    Err(error) if rooted_path_is_missing(&error) => {
+                        return Ok(LibraryFileMutationOutcome::TrackDeleted { track_id });
+                    }
+                    Err(error) => return Err(FilesystemMutationError::RootedPath(error)),
+                };
+                std::fs::remove_file(&absolute).map_err(|source| FilesystemMutationError::Io {
+                    operation: "delete library track",
+                    source,
+                })?;
+                Ok(LibraryFileMutationOutcome::TrackDeleted { track_id })
+            }
         }
     }
 }
@@ -169,6 +258,7 @@ impl LibraryMutationEffects for FilesystemLibraryMutations {
 #[derive(Debug)]
 enum FilesystemMutationError {
     RootedPath(RootedPathError),
+    Discovery(FilesystemDiscoveryError),
     Io {
         operation: &'static str,
         source: std::io::Error,
@@ -183,6 +273,7 @@ impl Display for FilesystemMutationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::RootedPath(source) => Display::fmt(source, formatter),
+            Self::Discovery(source) => Display::fmt(source, formatter),
             Self::Io { operation, .. } => write!(formatter, "failed to {operation}"),
             Self::NotADirectory => formatter.write_str("library folder path is not a directory"),
             Self::DestinationExists => formatter.write_str("folder destination already exists"),
@@ -196,6 +287,7 @@ impl Error for FilesystemMutationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::RootedPath(source) => Some(source),
+            Self::Discovery(source) => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::NotADirectory
             | Self::DestinationExists
@@ -259,7 +351,13 @@ fn map_failure(error: FilesystemMutationError) -> LibraryMutationFailure {
         FilesystemMutationError::DirectoryNotEmpty => {
             (LibraryMutationFailureKind::NotEmpty, "folder_not_empty")
         }
-        FilesystemMutationError::Io { .. } => (LibraryMutationFailureKind::Io, "folder_io_failed"),
+        FilesystemMutationError::Io { .. } => {
+            (LibraryMutationFailureKind::Io, "library_file_io_failed")
+        }
+        FilesystemMutationError::Discovery(_) => (
+            LibraryMutationFailureKind::Io,
+            "track_metadata_refresh_failed",
+        ),
     };
     LibraryMutationFailure::new(kind, code, Box::new(error))
 }
@@ -272,7 +370,7 @@ mod tests {
         LibraryFileMutation, LibraryFileMutationOutcome, LibraryMutationEffects,
         LibraryMutationFailureKind,
     };
-    use music_domain::LibraryPath;
+    use music_domain::{LibraryPath, TrackId};
     use tempfile::tempdir;
 
     use super::FilesystemLibraryMutations;
@@ -284,7 +382,10 @@ mod tests {
         let directory = tempdir()?;
         let root = directory.path().join("music");
         std::fs::create_dir(&root)?;
-        let effects = FilesystemLibraryMutations::new(LibraryRoot::open(&root)?);
+        let effects = FilesystemLibraryMutations::new(
+            LibraryRoot::open(&root)?,
+            crate::MetadataAdapter::native_only(),
+        );
         let created = effects
             .apply(
                 LibraryFileMutation::CreateFolder {
@@ -382,6 +483,73 @@ mod tests {
                 true,
             )
             .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn track_effects_move_delete_and_replay_without_following_untrusted_paths()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let root = directory.path().join("music");
+        std::fs::create_dir_all(root.join("Source"))?;
+        std::fs::write(root.join("Source/track.mp3"), b"fixture")?;
+        let effects = FilesystemLibraryMutations::new(
+            LibraryRoot::open(&root)?,
+            crate::MetadataAdapter::native_only(),
+        );
+        let track_id = TrackId::new(7)?;
+        let mutation = LibraryFileMutation::MoveTrack {
+            track_id,
+            source: LibraryPath::parse("Source/track.mp3")?,
+            destination: LibraryPath::parse("Archive/renamed.mp3")?,
+        };
+        assert!(matches!(
+            effects.apply(mutation.clone(), false).await?,
+            LibraryFileMutationOutcome::TrackMoved { track, .. }
+                if track.path.as_str() == "Archive/renamed.mp3"
+        ));
+        assert_eq!(std::fs::read(root.join("Archive/renamed.mp3"))?, b"fixture");
+        assert!(matches!(
+            effects.apply(mutation, true).await?,
+            LibraryFileMutationOutcome::TrackMoved { .. }
+        ));
+
+        effects
+            .apply(
+                LibraryFileMutation::DeleteTrack {
+                    track_id,
+                    path: LibraryPath::parse("Archive/renamed.mp3")?,
+                },
+                false,
+            )
+            .await?;
+        assert!(!root.join("Archive/renamed.mp3").exists());
+        assert!(matches!(
+            effects
+                .apply(
+                    LibraryFileMutation::DeleteTrack {
+                        track_id,
+                        path: LibraryPath::parse("Archive/renamed.mp3")?,
+                    },
+                    true,
+                )
+                .await?,
+            LibraryFileMutationOutcome::TrackDeleted { .. }
+        ));
+
+        let missing = effects
+            .apply(
+                LibraryFileMutation::MoveTrack {
+                    track_id,
+                    source: LibraryPath::parse("missing.mp3")?,
+                    destination: LibraryPath::parse("elsewhere.mp3")?,
+                },
+                false,
+            )
+            .await
+            .err()
+            .ok_or("missing track move unexpectedly succeeded")?;
+        assert_eq!(missing.kind(), LibraryMutationFailureKind::NotFound);
         Ok(())
     }
 }

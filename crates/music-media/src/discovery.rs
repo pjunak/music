@@ -172,67 +172,72 @@ impl FilesystemLibraryDiscovery {
         &self,
         candidate: &Path,
     ) -> Result<DiscoveredTrack, FilesystemDiscoveryError> {
-        let relative = candidate
-            .strip_prefix(self.root.canonical_path())
-            .map_err(|_| FilesystemDiscoveryError::EscapedRoot(candidate.to_path_buf()))?;
         let path = library_path(&self.root, candidate)?;
-        let absolute = self
-            .root
-            .resolve_existing(&path)
-            .map_err(FilesystemDiscoveryError::RootedPath)?;
-        let facts =
-            std::fs::metadata(&absolute).map_err(|source| FilesystemDiscoveryError::Io {
-                operation: "inspect discovered audio file",
-                path: absolute.clone(),
-                source,
-            })?;
-        if !facts.is_file() {
-            return Err(FilesystemDiscoveryError::ChangedDuringScan(absolute));
-        }
-        if facts.len() > i64::MAX as u64 {
-            return Err(FilesystemDiscoveryError::FileTooLarge(absolute));
-        }
-        let metadata = self
-            .metadata
-            .read(&absolute)
-            .unwrap_or_else(|_| fallback_metadata(&path));
-        let album_artist = if metadata.album_artist.is_empty() {
-            metadata.artist.clone()
-        } else {
-            metadata.album_artist
-        };
-        Ok(DiscoveredTrack {
-            path,
-            metadata: TrackMetadata {
-                title: if metadata.title.is_empty() {
-                    fallback_title(candidate)
-                } else {
-                    metadata.title
-                },
-                artist: metadata.artist,
-                album_artist,
-                album: if metadata.album.is_empty() {
-                    fallback_album(relative)
-                } else {
-                    metadata.album
-                },
-                track_no: metadata.track_no,
-                disc_no: metadata.disc_no,
-                year: metadata.year,
-                genre: metadata.genre,
-                bpm: metadata.bpm,
-            },
-            duration: metadata.duration,
-            size_bytes: facts.len(),
-            mtime_unix_seconds: unix_seconds(facts.modified().map_err(|source| {
-                FilesystemDiscoveryError::Io {
-                    operation: "read audio modification time",
-                    path: absolute,
-                    source,
-                }
-            })?)?,
-        })
+        inspect_library_track(&self.root, &self.metadata, &path)
     }
+}
+
+pub fn inspect_library_track(
+    root: &LibraryRoot,
+    metadata_adapter: &MetadataAdapter,
+    path: &LibraryPath,
+) -> Result<DiscoveredTrack, FilesystemDiscoveryError> {
+    let absolute = root
+        .resolve_existing_file_for_mutation(path)
+        .map_err(FilesystemDiscoveryError::RootedPath)?;
+    let relative = absolute
+        .strip_prefix(root.canonical_path())
+        .map_err(|_| FilesystemDiscoveryError::EscapedRoot(absolute.clone()))?;
+    let facts = std::fs::metadata(&absolute).map_err(|source| FilesystemDiscoveryError::Io {
+        operation: "inspect discovered audio file",
+        path: absolute.clone(),
+        source,
+    })?;
+    if !facts.is_file() {
+        return Err(FilesystemDiscoveryError::ChangedDuringScan(absolute));
+    }
+    if facts.len() > i64::MAX as u64 {
+        return Err(FilesystemDiscoveryError::FileTooLarge(absolute));
+    }
+    let metadata = metadata_adapter
+        .read(&absolute)
+        .unwrap_or_else(|_| fallback_metadata(path));
+    let album_artist = if metadata.album_artist.is_empty() {
+        metadata.artist.clone()
+    } else {
+        metadata.album_artist
+    };
+    Ok(DiscoveredTrack {
+        path: path.clone(),
+        metadata: TrackMetadata {
+            title: if metadata.title.is_empty() {
+                fallback_title(&absolute)
+            } else {
+                metadata.title
+            },
+            artist: metadata.artist,
+            album_artist,
+            album: if metadata.album.is_empty() {
+                fallback_album(relative)
+            } else {
+                metadata.album
+            },
+            track_no: metadata.track_no,
+            disc_no: metadata.disc_no,
+            year: metadata.year,
+            genre: metadata.genre,
+            bpm: metadata.bpm,
+        },
+        duration: metadata.duration,
+        size_bytes: facts.len(),
+        mtime_unix_seconds: unix_seconds(facts.modified().map_err(|source| {
+            FilesystemDiscoveryError::Io {
+                operation: "read audio modification time",
+                path: absolute,
+                source,
+            }
+        })?)?,
+    })
 }
 
 impl LibraryDiscovery for FilesystemLibraryDiscovery {

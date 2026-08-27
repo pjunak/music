@@ -4,8 +4,8 @@ use std::time::Duration;
 use music_application::library::{
     DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFuture,
     LibraryIndexMutationCommit, LibraryMutationRepository, LibraryRepository, LibrarySearch,
-    LibrarySearchResult, LibrarySortKey, LibraryStatus, ReconciliationCommit, ReconciliationStatus,
-    ReconciliationSummary, SortOrder,
+    LibrarySearchResult, LibrarySortKey, LibraryStatus, LibraryTrackMutationCommit,
+    ReconciliationCommit, ReconciliationStatus, ReconciliationSummary, SortOrder,
 };
 use music_application::recovery::RecoveryJournalId;
 use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
@@ -286,9 +286,141 @@ impl LibraryMutationRepository for SqliteStorage {
                 .map_err(box_storage)
         })
     }
+
+    fn commit_track_move<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        track_id: TrackId,
+        source: &'a LibraryPath,
+        discovered: &'a DiscoveredTrack,
+    ) -> LibraryFuture<'a, LibraryTrackMutationCommit> {
+        Box::pin(async move {
+            self.commit_library_track_move(journal_id, track_id, source, discovered)
+                .await
+                .map_err(box_storage)
+        })
+    }
+
+    fn commit_track_delete<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        track_id: TrackId,
+        path: &'a LibraryPath,
+    ) -> LibraryFuture<'a, LibraryIndexMutationCommit> {
+        Box::pin(async move {
+            self.commit_library_track_delete(journal_id, track_id, path)
+                .await
+                .map_err(box_storage)
+        })
+    }
 }
 
 impl SqliteStorage {
+    async fn commit_library_track_move(
+        &self,
+        journal_id: &RecoveryJournalId,
+        track_id: TrackId,
+        source: &LibraryPath,
+        discovered: &DiscoveredTrack,
+    ) -> Result<LibraryTrackMutationCommit, StorageError> {
+        if discovered.size_bytes > i64::MAX as u64 {
+            return Err(StorageError::InvalidLibraryRecord(
+                "track size exceeds SQLite integer range",
+            ));
+        }
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        validate_library_mutation_journal(
+            &mut transaction,
+            journal_id,
+            &LibraryFileMutation::MoveTrack {
+                track_id,
+                source: source.clone(),
+                destination: discovered.path.clone(),
+            },
+        )
+        .await?;
+        let updated = sqlx::query(
+            "UPDATE tracks SET path = ?, title = ?, artist = ?, album_artist = ?, album = ?, \
+             track_no = ?, disc_no = ?, year = ?, genre = ?, length_s = ?, bpm = ?, \
+             size_bytes = ?, mtime = ? WHERE id = ? AND path = ?",
+        )
+        .bind(discovered.path.as_str())
+        .bind(&discovered.metadata.title)
+        .bind(&discovered.metadata.artist)
+        .bind(&discovered.metadata.album_artist)
+        .bind(&discovered.metadata.album)
+        .bind(discovered.metadata.track_no.map(i64::from))
+        .bind(discovered.metadata.disc_no.map(i64::from))
+        .bind(discovered.metadata.year.map(i64::from))
+        .bind(&discovered.metadata.genre)
+        .bind(discovered.duration.as_secs_f64())
+        .bind(discovered.metadata.bpm.map(i64::from))
+        .bind(discovered.size_bytes as i64)
+        .bind(discovered.mtime_unix_seconds)
+        .bind(track_id.get())
+        .bind(source.as_str())
+        .execute(&mut *transaction)
+        .await?;
+        if updated.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryRecord(
+                "track move source changed",
+            ));
+        }
+        let track_ids =
+            finish_library_index_mutation(&mut transaction, journal_id, "move_track", 1).await?;
+        let mut query =
+            QueryBuilder::<Sqlite>::new(format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE id = "));
+        query.push_bind(track_id.get());
+        let row = query.build().fetch_one(&mut *transaction).await?;
+        let track = indexed_track_from_row(&row)?;
+        transaction.commit().await?;
+        Ok(LibraryTrackMutationCommit {
+            status: self.read_library_status().await?,
+            track_ids,
+            track,
+        })
+    }
+
+    async fn commit_library_track_delete(
+        &self,
+        journal_id: &RecoveryJournalId,
+        track_id: TrackId,
+        path: &LibraryPath,
+    ) -> Result<LibraryIndexMutationCommit, StorageError> {
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        validate_library_mutation_journal(
+            &mut transaction,
+            journal_id,
+            &LibraryFileMutation::DeleteTrack {
+                track_id,
+                path: path.clone(),
+            },
+        )
+        .await?;
+        let deleted = sqlx::query("DELETE FROM tracks WHERE id = ? AND path = ?")
+            .bind(track_id.get())
+            .bind(path.as_str())
+            .execute(&mut *transaction)
+            .await?;
+        let affected_tracks = deleted.rows_affected();
+        let track_ids = finish_library_index_mutation(
+            &mut transaction,
+            journal_id,
+            "delete_track",
+            affected_tracks,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(LibraryIndexMutationCommit {
+            status: self.read_library_status().await?,
+            track_ids,
+            affected_tracks,
+        })
+    }
+
     async fn commit_library_folder_rename(
         &self,
         journal_id: &RecoveryJournalId,
@@ -1282,6 +1414,61 @@ mod tests {
             )
             .await?
             .is_empty()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn journaled_track_move_and_delete_preserve_then_remove_the_same_identity()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(
+            directory.path().join("track-mutations.db"),
+        ))
+        .await?;
+        let raw_id = insert_track(&storage, "Source/song.mp3", "Song", "Artist").await?;
+        let track_id = TrackId::new(raw_id)?;
+        let move_mutation = LibraryFileMutation::MoveTrack {
+            track_id,
+            source: LibraryPath::parse("Source/song.mp3")?,
+            destination: LibraryPath::parse("Archive/renamed.mp3")?,
+        };
+        let move_journal = applying_journal(&storage, &move_mutation).await?;
+        let moved_discovery =
+            discovered("Archive/renamed.mp3", "Renamed song", "Artist", 321, 654)?;
+        let moved = LibraryMutationRepository::commit_track_move(
+            &storage,
+            &move_journal,
+            track_id,
+            &LibraryPath::parse("Source/song.mp3")?,
+            &moved_discovery,
+        )
+        .await?;
+        assert_eq!(moved.track.id, track_id);
+        assert_eq!(moved.track.path.as_str(), "Archive/renamed.mp3");
+        assert_eq!(moved.track.metadata.title, "Renamed song");
+        assert_eq!(moved.status.generation, LibraryGeneration::new(1));
+        assert!(moved.track_ids.contains(&track_id));
+
+        let delete_mutation = LibraryFileMutation::DeleteTrack {
+            track_id,
+            path: LibraryPath::parse("Archive/renamed.mp3")?,
+        };
+        let delete_journal = applying_journal(&storage, &delete_mutation).await?;
+        let deleted = LibraryMutationRepository::commit_track_delete(
+            &storage,
+            &delete_journal,
+            track_id,
+            &LibraryPath::parse("Archive/renamed.mp3")?,
+        )
+        .await?;
+        assert_eq!(deleted.affected_tracks, 1);
+        assert_eq!(deleted.status.generation, LibraryGeneration::new(2));
+        assert!(!deleted.track_ids.contains(&track_id));
+        assert!(
+            LibraryRepository::track(&storage, track_id)
+                .await?
+                .is_none()
         );
         Ok(())
     }

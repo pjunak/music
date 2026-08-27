@@ -142,7 +142,10 @@ impl AppRuntime {
         let mutation_repository: Arc<dyn LibraryMutationRepository> = storage.clone();
         let read_repository: Arc<dyn LibraryRepository> = storage.clone();
         let catalog_sink: Arc<dyn LibraryCatalogSink> = Arc::new(playback.clone());
-        let effects = Arc::new(FilesystemLibraryMutations::new(library_root.clone()));
+        let effects = Arc::new(FilesystemLibraryMutations::new(
+            library_root.clone(),
+            library_metadata.clone(),
+        ));
         let spawned_library =
             start_library_coordinator(mutation_repository, discovery, catalog_sink, effects)
                 .await?;
@@ -1119,6 +1122,49 @@ mod tests {
                 .is_file()
         );
 
+        let bulk_moved = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/tracks/bulk-move")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        "{{\"track_ids\":[{},{},999999],\"destination\":\"Bulk\"}}",
+                        first_id.get(),
+                        second_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(bulk_moved.status(), StatusCode::OK);
+        let bulk_moved_json: Value =
+            serde_json::from_slice(&to_bytes(bulk_moved.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(bulk_moved_json["moved"].as_array().map(Vec::len), Some(2));
+        assert_eq!(bulk_moved_json["skipped"].as_array().map(Vec::len), Some(1));
+        assert!(
+            directory
+                .path()
+                .join("music/Bulk/02 - Second.flac")
+                .is_file()
+        );
+
+        let moved_track = router
+            .clone()
+            .oneshot(
+                Request::post(format!("/api/library/tracks/{}/move", first_id.get()))
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"destination":"Moved","new_filename":"Final.mp3"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(moved_track.status(), StatusCode::OK);
+        let moved_track_json: Value =
+            serde_json::from_slice(&to_bytes(moved_track.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(moved_track_json["id"], first_id.get());
+        assert_eq!(moved_track_json["path"], "Moved/Final.mp3");
+        assert!(directory.path().join("music/Moved/Final.mp3").is_file());
+
         let generation_before_rescan = runtime.library_status().generation.get();
         let rescan = router
             .clone()
@@ -1131,24 +1177,64 @@ mod tests {
         assert_eq!(rescan.status(), StatusCode::OK);
         let rescan_json: Value =
             serde_json::from_slice(&to_bytes(rescan.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(rescan_json["updated"], 0);
         assert_eq!(rescan_json["unchanged"], 2);
         assert_eq!(
             runtime.library_status().generation.get(),
             generation_before_rescan + 1
         );
 
-        fs::remove_file(
-            directory
-                .path()
-                .join("music/Renamed/Album/02 - Second.flac"),
-        )?;
+        fs::remove_file(directory.path().join("music/Bulk/02 - Second.flac"))?;
         let missing_stream = router
+            .clone()
             .oneshot(
                 Request::get(format!("/api/library/tracks/{}/stream", second_id.get()))
                     .body(Body::empty())?,
             )
             .await?;
         assert_eq!(missing_stream.status(), StatusCode::GONE);
+
+        let bulk_deleted = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/tracks/bulk-delete")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        "{{\"track_ids\":[{},999999]}}",
+                        second_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(bulk_deleted.status(), StatusCode::OK);
+        let bulk_deleted_json: Value =
+            serde_json::from_slice(&to_bytes(bulk_deleted.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            bulk_deleted_json["deleted_ids"],
+            serde_json::json!([second_id.get()])
+        );
+        assert_eq!(
+            bulk_deleted_json["skipped"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert!(runtime.library_service.track(second_id).await?.is_none());
+        let deleted_track = router
+            .clone()
+            .oneshot(
+                Request::delete(format!("/api/library/tracks/{}", first_id.get()))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(deleted_track.status(), StatusCode::NO_CONTENT);
+        let deleted_again = router
+            .oneshot(
+                Request::delete(format!("/api/library/tracks/{}", first_id.get()))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(deleted_again.status(), StatusCode::NOT_FOUND);
 
         runtime.shutdown().await?;
         Ok(())

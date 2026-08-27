@@ -23,14 +23,14 @@ use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 use utoipa::openapi::RefOr;
-use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
+use utoipa::openapi::schema::{ArrayBuilder, ObjectBuilder, Schema, Type};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_integer,
-    openapi_number,
+    openapi_nullable_string, openapi_number,
 };
 use crate::http::HttpState;
 
@@ -51,7 +51,11 @@ pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(delete_folder))
         .routes(routes!(rename_folder))
         .routes(routes!(tracks_batch))
+        .routes(routes!(bulk_move_tracks))
+        .routes(routes!(bulk_delete_tracks))
         .routes(routes!(track))
+        .routes(routes!(move_track))
+        .routes(routes!(delete_track))
         .routes(routes!(stream))
         .routes(routes!(cover))
         .routes(routes!(rescan))
@@ -169,6 +173,53 @@ struct FolderRenameRequest {
 struct FolderDeleteResponse {
     #[schema(schema_with = openapi_integer)]
     removed_tracks: u64,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = TrackMoveRequest)]
+struct TrackMoveRequest {
+    destination: String,
+    #[serde(default)]
+    #[schema(schema_with = openapi_nullable_string)]
+    new_filename: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = BulkMoveRequest)]
+struct BulkMoveRequest {
+    #[schema(schema_with = bounded_track_id_array_schema)]
+    track_ids: Vec<i64>,
+    destination: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = BulkDeleteRequest)]
+struct BulkDeleteRequest {
+    #[schema(schema_with = bounded_track_id_array_schema)]
+    track_ids: Vec<i64>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BulkActionSkip)]
+struct BulkActionSkipResponse {
+    #[schema(schema_with = openapi_integer)]
+    track_id: i64,
+    reason: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BulkMoveResult)]
+struct BulkMoveResponse {
+    moved: Vec<TrackResponse>,
+    skipped: Vec<BulkActionSkipResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BulkDeleteResult)]
+struct BulkDeleteResponse {
+    #[schema(value_type = Vec<i128>)]
+    deleted_ids: Vec<i64>,
+    skipped: Vec<BulkActionSkipResponse>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
@@ -310,6 +361,17 @@ struct FolderDeleteQuery {
     #[serde(default)]
     #[param(default = false)]
     recursive: bool,
+}
+
+fn bounded_track_id_array_schema() -> RefOr<Schema> {
+    Schema::Array(
+        ArrayBuilder::new()
+            .items(openapi_integer())
+            .min_items(Some(1))
+            .max_items(Some(1000))
+            .build(),
+    )
+    .into()
 }
 
 #[utoipa::path(
@@ -576,6 +638,136 @@ async fn tracks_batch(
 }
 
 #[utoipa::path(
+    post,
+    path = "/library/tracks/bulk-move",
+    request_body = BulkMoveRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = BulkMoveResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn bulk_move_tracks(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<BulkMoveRequest>, JsonRejection>,
+) -> Result<Json<BulkMoveResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=1000).contains(&payload.track_ids.len()) {
+        return Err(ApiError::validation());
+    }
+    if !payload.destination.is_empty() {
+        LibraryPath::parse(payload.destination.clone())
+            .map_err(|_| ApiError::bad_request("invalid destination folder"))?;
+    }
+    let library = library(&state)?;
+    let mut requests = Vec::with_capacity(payload.track_ids.len());
+    let mut skipped = Vec::new();
+    for raw_track_id in payload.track_ids {
+        let Ok(track_id) = TrackId::new(raw_track_id) else {
+            skipped.push(BulkActionSkipResponse {
+                track_id: raw_track_id,
+                reason: "not found".to_owned(),
+            });
+            continue;
+        };
+        let Some(track) = library.service.track(track_id).await.map_err(|error| {
+            tracing::error!(error = %error, "bulk move track lookup failed");
+            ApiError::internal()
+        })?
+        else {
+            skipped.push(BulkActionSkipResponse {
+                track_id: raw_track_id,
+                reason: "not found".to_owned(),
+            });
+            continue;
+        };
+        match track_destination(&track, &payload.destination, None) {
+            Ok(destination) => requests.push((track_id, destination)),
+            Err(_) => skipped.push(BulkActionSkipResponse {
+                track_id: raw_track_id,
+                reason: "invalid destination path".to_owned(),
+            }),
+        }
+    }
+    let results = library
+        .coordinator
+        .move_tracks(requests)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "bulk track move coordinator failed");
+            ApiError::internal()
+        })?;
+    let mut moved = Vec::new();
+    for (track_id, result) in results {
+        match result {
+            Ok(track) => moved.push(track.try_into()?),
+            Err(error) => skipped.push(BulkActionSkipResponse {
+                track_id: track_id.get(),
+                reason: bulk_mutation_reason(&error),
+            }),
+        }
+    }
+    Ok(Json(BulkMoveResponse { moved, skipped }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/tracks/bulk-delete",
+    request_body = BulkDeleteRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = BulkDeleteResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn bulk_delete_tracks(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<BulkDeleteRequest>, JsonRejection>,
+) -> Result<Json<BulkDeleteResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=1000).contains(&payload.track_ids.len()) {
+        return Err(ApiError::validation());
+    }
+    let mut track_ids = Vec::with_capacity(payload.track_ids.len());
+    let mut skipped = Vec::new();
+    for raw_track_id in payload.track_ids {
+        match TrackId::new(raw_track_id) {
+            Ok(track_id) => track_ids.push(track_id),
+            Err(_) => skipped.push(BulkActionSkipResponse {
+                track_id: raw_track_id,
+                reason: "not found".to_owned(),
+            }),
+        }
+    }
+    let results = library(&state)?
+        .coordinator
+        .delete_tracks(track_ids)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "bulk track deletion coordinator failed");
+            ApiError::internal()
+        })?;
+    let mut deleted_ids = Vec::new();
+    for (track_id, result) in results {
+        match result {
+            Ok(()) => deleted_ids.push(track_id.get()),
+            Err(error) => skipped.push(BulkActionSkipResponse {
+                track_id: track_id.get(),
+                reason: bulk_mutation_reason(&error),
+            }),
+        }
+    }
+    Ok(Json(BulkDeleteResponse {
+        deleted_ids,
+        skipped,
+    }))
+}
+
+#[utoipa::path(
     get,
     path = "/library/tracks/{track_id}",
     params(("track_id" = i128, Path, description = "Track identifier")),
@@ -594,6 +786,67 @@ async fn track(
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
     let track = indexed_track(&state, raw_track_id).await?;
     Ok(Json(track.try_into()?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/tracks/{track_id}/move",
+    params(("track_id" = i128, Path, description = "Track identifier")),
+    request_body = TrackMoveRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = TrackResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn move_track(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    track_id: Result<Path<i64>, PathRejection>,
+    payload: Result<Json<TrackMoveRequest>, JsonRejection>,
+) -> Result<Json<TrackResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let current = indexed_track(&state, raw_track_id).await?;
+    let destination = track_destination(
+        &current,
+        &payload.destination,
+        payload.new_filename.as_deref(),
+    )?;
+    let moved = library(&state)?
+        .coordinator
+        .move_track(current.id, destination)
+        .await
+        .map_err(map_track_move_error)?;
+    Ok(Json(moved.try_into()?))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/library/tracks/{track_id}",
+    params(("track_id" = i128, Path, description = "Track identifier")),
+    responses(
+        (status = 204, description = "Successful Response"),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn delete_track(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    track_id: Result<Path<i64>, PathRejection>,
+) -> Result<StatusCode, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
+    let track_id =
+        TrackId::new(raw_track_id).map_err(|_| ApiError::plain_not_found("track not found"))?;
+    library(&state)?
+        .coordinator
+        .delete_track(track_id)
+        .await
+        .map_err(map_track_delete_error)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -739,6 +992,84 @@ fn folder_response(folder: FolderMutationResult) -> FolderResponse {
         track_count: 0,
         has_children: folder.has_children,
     }
+}
+
+fn track_destination(
+    track: &IndexedTrack,
+    directory: &str,
+    new_filename: Option<&str>,
+) -> Result<LibraryPath, ApiError> {
+    let file_name = new_filename.unwrap_or_else(|| track.path.file_name());
+    let leaf = LibraryPath::parse(file_name.to_owned())
+        .map_err(|_| ApiError::bad_request("invalid track filename"))?;
+    if leaf.parent().is_some() {
+        return Err(ApiError::bad_request("invalid track filename"));
+    }
+    if directory.is_empty() {
+        return Ok(leaf);
+    }
+    let directory = LibraryPath::parse(directory.to_owned())
+        .map_err(|_| ApiError::bad_request("invalid destination folder"))?;
+    directory
+        .join(file_name)
+        .map_err(|_| ApiError::bad_request("invalid destination path"))
+}
+
+fn map_track_move_error(error: LibraryCoordinatorError) -> ApiError {
+    match error {
+        LibraryCoordinatorError::TrackNotFound { .. } => {
+            ApiError::plain_not_found("track not found")
+        }
+        LibraryCoordinatorError::Mutation(failure) => match failure.kind() {
+            LibraryMutationFailureKind::NotFound => ApiError::gone("source file missing"),
+            LibraryMutationFailureKind::Conflict => {
+                ApiError::conflict("a file already exists at the destination")
+            }
+            LibraryMutationFailureKind::Invalid | LibraryMutationFailureKind::NotEmpty => {
+                ApiError::bad_request("invalid track destination")
+            }
+            LibraryMutationFailureKind::Io => {
+                tracing::error!(error = %failure, "library track move failed");
+                ApiError::internal()
+            }
+        },
+        other => {
+            tracing::error!(error = %other, "library track move coordinator failed");
+            ApiError::internal()
+        }
+    }
+}
+
+fn map_track_delete_error(error: LibraryCoordinatorError) -> ApiError {
+    match error {
+        LibraryCoordinatorError::TrackNotFound { .. } => {
+            ApiError::plain_not_found("track not found")
+        }
+        LibraryCoordinatorError::Mutation(failure) => {
+            tracing::error!(error = %failure, "library track deletion failed");
+            ApiError::internal()
+        }
+        other => {
+            tracing::error!(error = %other, "library track deletion coordinator failed");
+            ApiError::internal()
+        }
+    }
+}
+
+fn bulk_mutation_reason(error: &LibraryCoordinatorError) -> String {
+    match error {
+        LibraryCoordinatorError::TrackNotFound { .. } => "not found",
+        LibraryCoordinatorError::Mutation(failure) => match failure.kind() {
+            LibraryMutationFailureKind::NotFound => "source file missing",
+            LibraryMutationFailureKind::Conflict => "destination already exists",
+            LibraryMutationFailureKind::Invalid => "invalid media path",
+            LibraryMutationFailureKind::NotEmpty => "target is not empty",
+            LibraryMutationFailureKind::Io => "filesystem operation failed",
+        },
+        LibraryCoordinatorError::RecoveryConflict => "batch stopped for recovery",
+        _ => "mutation failed",
+    }
+    .to_owned()
 }
 
 fn map_folder_mutation_error(error: LibraryCoordinatorError) -> ApiError {

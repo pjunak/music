@@ -20,7 +20,7 @@ pub use delivery::{
     CoverArt, MediaDeliveryError, read_library_cover_art, resolve_library_media_file,
 };
 pub use discovery::{
-    FilesystemDiscoveryError, FilesystemLibraryDiscovery, LibraryDirectory,
+    FilesystemDiscoveryError, FilesystemLibraryDiscovery, LibraryDirectory, inspect_library_track,
     list_library_directories,
 };
 pub use metadata::{

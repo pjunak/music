@@ -97,6 +97,99 @@
         },
         "type": "object"
       },
+      "BulkActionSkip": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "BulkDeleteRequest": {
+        "properties": {
+          "track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "track_ids"
+        ],
+        "type": "object"
+      },
+      "BulkDeleteResult": {
+        "properties": {
+          "deleted_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/BulkActionSkip"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "deleted_ids",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "BulkMoveRequest": {
+        "properties": {
+          "destination": {
+            "type": "string"
+          },
+          "track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "track_ids",
+          "destination"
+        ],
+        "type": "object"
+      },
+      "BulkMoveResult": {
+        "properties": {
+          "moved": {
+            "items": {
+              "$ref": "#/components/schemas/TrackOut"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/BulkActionSkip"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "moved",
+          "skipped"
+        ],
+        "type": "object"
+      },
       "ComponentStatus": {
         "enum": [
           "starting",
@@ -663,6 +756,27 @@
           "random"
         ],
         "type": "string"
+      },
+      "TrackMoveRequest": {
+        "properties": {
+          "destination": {
+            "type": "string"
+          },
+          "new_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "destination"
+        ],
+        "type": "object"
       },
       "TrackOut": {
         "properties": {
@@ -1404,7 +1518,119 @@
         ]
       }
     },
+    "/api/library/tracks/bulk-delete": {
+      "post": {
+        "operationId": "bulk_delete_tracks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkDeleteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/tracks/bulk-move": {
+      "post": {
+        "operationId": "bulk_move_tracks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkMoveResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
     "/api/library/tracks/{track_id}": {
+      "delete": {
+        "operationId": "delete_track",
+        "parameters": [
+          {
+            "description": "Track identifier",
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      },
       "get": {
         "operationId": "track",
         "parameters": [
@@ -1464,6 +1690,57 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/tracks/{track_id}/move": {
+      "post": {
+        "operationId": "move_track",
+        "parameters": [
+          {
+            "description": "Track identifier",
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackOut"
+                }
               }
             },
             "description": "Successful Response"

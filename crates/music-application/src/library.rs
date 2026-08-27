@@ -24,6 +24,7 @@ pub use mutation::{
     FolderDeletionResult, FolderMutationResult, LibraryFileMutation, LibraryFileMutationOutcome,
     LibraryIndexMutationCommit, LibraryMutationEffects, LibraryMutationFailure,
     LibraryMutationFailureKind, LibraryMutationFuture, LibraryMutationValidationError,
+    LibraryTrackMutationCommit,
 };
 
 const LIBRARY_COMMAND_CAPACITY: usize = 4;
@@ -198,6 +199,21 @@ pub trait LibraryMutationRepository: LibraryRepository + RecoveryJournalReposito
         journal_id: &'a crate::recovery::RecoveryJournalId,
         path: &'a LibraryPath,
     ) -> LibraryFuture<'a, LibraryIndexMutationCommit>;
+
+    fn commit_track_move<'a>(
+        &'a self,
+        journal_id: &'a crate::recovery::RecoveryJournalId,
+        track_id: TrackId,
+        source: &'a LibraryPath,
+        discovered: &'a DiscoveredTrack,
+    ) -> LibraryFuture<'a, LibraryTrackMutationCommit>;
+
+    fn commit_track_delete<'a>(
+        &'a self,
+        journal_id: &'a crate::recovery::RecoveryJournalId,
+        track_id: TrackId,
+        path: &'a LibraryPath,
+    ) -> LibraryFuture<'a, LibraryIndexMutationCommit>;
 }
 
 #[derive(Debug)]
@@ -271,6 +287,9 @@ pub enum LibraryCoordinatorError {
     InvalidMutation(LibraryMutationValidationError),
     RecoveryConflict,
     InvalidMutationOutcome,
+    TrackNotFound {
+        track_id: TrackId,
+    },
     CommandQueueFull,
     Unavailable,
 }
@@ -296,6 +315,9 @@ impl Display for LibraryCoordinatorError {
             Self::InvalidMutationOutcome => {
                 formatter.write_str("library mutation returned an unexpected outcome")
             }
+            Self::TrackNotFound { track_id } => {
+                write!(formatter, "library track {} was not found", track_id.get())
+            }
             Self::CommandQueueFull => formatter.write_str("library command queue is full"),
             Self::Unavailable => formatter.write_str("library coordinator is unavailable"),
         }
@@ -312,11 +334,15 @@ impl Error for LibraryCoordinatorError {
             Self::GenerationConflict { .. }
             | Self::RecoveryConflict
             | Self::InvalidMutationOutcome
+            | Self::TrackNotFound { .. }
             | Self::CommandQueueFull
             | Self::Unavailable => None,
         }
     }
 }
+
+pub type TrackMoveBatchResults = Vec<(TrackId, Result<IndexedTrack, LibraryCoordinatorError>)>;
+pub type TrackDeleteBatchResults = Vec<(TrackId, Result<(), LibraryCoordinatorError>)>;
 
 #[derive(Debug, Clone)]
 pub struct LibraryCoordinatorHandle {
@@ -367,9 +393,7 @@ impl LibraryCoordinatorHandle {
             LibraryFileMutationOutcome::Folder { path, has_children } => {
                 Ok(FolderMutationResult { path, has_children })
             }
-            LibraryFileMutationOutcome::Deleted => {
-                Err(LibraryCoordinatorError::InvalidMutationOutcome)
-            }
+            _ => Err(LibraryCoordinatorError::InvalidMutationOutcome),
         }
     }
 
@@ -388,9 +412,7 @@ impl LibraryCoordinatorHandle {
             LibraryFileMutationOutcome::Folder { path, has_children } => {
                 Ok(FolderMutationResult { path, has_children })
             }
-            LibraryFileMutationOutcome::Deleted => {
-                Err(LibraryCoordinatorError::InvalidMutationOutcome)
-            }
+            _ => Err(LibraryCoordinatorError::InvalidMutationOutcome),
         }
     }
 
@@ -406,10 +428,66 @@ impl LibraryCoordinatorHandle {
             LibraryFileMutationOutcome::Deleted => Ok(FolderDeletionResult {
                 removed_tracks: applied.affected_tracks,
             }),
-            LibraryFileMutationOutcome::Folder { .. } => {
-                Err(LibraryCoordinatorError::InvalidMutationOutcome)
-            }
+            _ => Err(LibraryCoordinatorError::InvalidMutationOutcome),
         }
+    }
+
+    pub async fn move_track(
+        &self,
+        track_id: TrackId,
+        destination: LibraryPath,
+    ) -> Result<IndexedTrack, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::MoveTrack {
+                track_id,
+                destination,
+                reply,
+            })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
+    pub async fn delete_track(&self, track_id: TrackId) -> Result<(), LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::DeleteTrack { track_id, reply })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
+    pub async fn move_tracks(
+        &self,
+        requests: Vec<(TrackId, LibraryPath)>,
+    ) -> Result<TrackMoveBatchResults, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::MoveTracks { requests, reply })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
+    pub async fn delete_tracks(
+        &self,
+        track_ids: Vec<TrackId>,
+    ) -> Result<TrackDeleteBatchResults, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::DeleteTracks { track_ids, reply })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
     }
 
     async fn mutate(
@@ -496,12 +574,35 @@ enum LibraryCommand {
         mutation: LibraryFileMutation,
         reply: oneshot::Sender<Result<AppliedLibraryMutation, LibraryCoordinatorError>>,
     },
+    MoveTrack {
+        track_id: TrackId,
+        destination: LibraryPath,
+        reply: oneshot::Sender<Result<IndexedTrack, LibraryCoordinatorError>>,
+    },
+    DeleteTrack {
+        track_id: TrackId,
+        reply: oneshot::Sender<Result<(), LibraryCoordinatorError>>,
+    },
+    MoveTracks {
+        requests: Vec<(TrackId, LibraryPath)>,
+        reply: oneshot::Sender<Result<TrackMoveBatchResults, LibraryCoordinatorError>>,
+    },
+    DeleteTracks {
+        track_ids: Vec<TrackId>,
+        reply: oneshot::Sender<Result<TrackDeleteBatchResults, LibraryCoordinatorError>>,
+    },
 }
 
 #[derive(Debug)]
 struct AppliedLibraryMutation {
     outcome: LibraryFileMutationOutcome,
     affected_tracks: u64,
+}
+
+#[derive(Debug)]
+struct CatalogMutationPublication {
+    status: LibraryStatus,
+    track_ids: BTreeSet<TrackId>,
 }
 
 #[derive(Debug)]
@@ -535,12 +636,32 @@ impl LibraryCoordinator {
                         }
                         LibraryCommand::Mutate { mutation, reply } => {
                             let reconcile_metadata = mutation.needs_metadata_reconciliation();
-                            let result = self.apply_mutation(mutation).await;
+                            let result = self.apply_mutation(mutation, true).await;
                             let applied = result.is_ok();
                             let _ = reply.send(result);
                             if applied && reconcile_metadata {
                                 let _ = self.reconcile_once(cancellation.clone()).await;
                             }
+                        }
+                        LibraryCommand::MoveTrack {
+                            track_id,
+                            destination,
+                            reply,
+                        } => {
+                            let result = self.move_track_once(track_id, destination, true).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::DeleteTrack { track_id, reply } => {
+                            let result = self.delete_track_once(track_id, true).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::MoveTracks { requests, reply } => {
+                            let result = self.move_tracks_once(requests).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::DeleteTracks { track_ids, reply } => {
+                            let result = self.delete_tracks_once(track_ids).await;
+                            let _ = reply.send(result);
                         }
                     }
                 }
@@ -551,6 +672,7 @@ impl LibraryCoordinator {
     async fn apply_mutation(
         &self,
         mutation: LibraryFileMutation,
+        publish_catalog: bool,
     ) -> Result<AppliedLibraryMutation, LibraryCoordinatorError> {
         let operation = mutation
             .operation()
@@ -606,12 +728,151 @@ impl LibraryCoordinator {
         if let Some(commit) = catalog_commit {
             let generation = commit.status.generation;
             self.status.send_replace(commit.status);
-            self.catalog
-                .publish(generation, commit.track_ids)
-                .await
-                .map_err(|source| dependency("publish the mutated track catalog", source))?;
+            if publish_catalog {
+                self.catalog
+                    .publish(generation, commit.track_ids)
+                    .await
+                    .map_err(|source| dependency("publish the mutated track catalog", source))?;
+            }
         }
         Ok(applied)
+    }
+
+    async fn move_track_once(
+        &self,
+        track_id: TrackId,
+        destination: LibraryPath,
+        publish_catalog: bool,
+    ) -> Result<IndexedTrack, LibraryCoordinatorError> {
+        let track = self
+            .repository
+            .track(track_id)
+            .await
+            .map_err(|source| dependency("load a track for moving", source))?
+            .ok_or(LibraryCoordinatorError::TrackNotFound { track_id })?;
+        if track.path == destination {
+            return Ok(track);
+        }
+        let mutation = LibraryFileMutation::MoveTrack {
+            track_id,
+            source: track.path,
+            destination,
+        };
+        let applied = self.apply_mutation(mutation, publish_catalog).await?;
+        if !matches!(
+            applied.outcome,
+            LibraryFileMutationOutcome::TrackMoved {
+                track_id: moved_id,
+                ..
+            } if moved_id == track_id
+        ) {
+            return Err(LibraryCoordinatorError::InvalidMutationOutcome);
+        }
+        self.repository
+            .track(track_id)
+            .await
+            .map_err(|source| dependency("reload a moved track", source))?
+            .ok_or(LibraryCoordinatorError::TrackNotFound { track_id })
+    }
+
+    async fn delete_track_once(
+        &self,
+        track_id: TrackId,
+        publish_catalog: bool,
+    ) -> Result<(), LibraryCoordinatorError> {
+        let track = self
+            .repository
+            .track(track_id)
+            .await
+            .map_err(|source| dependency("load a track for deletion", source))?
+            .ok_or(LibraryCoordinatorError::TrackNotFound { track_id })?;
+        let mutation = LibraryFileMutation::DeleteTrack {
+            track_id,
+            path: track.path,
+        };
+        let applied = self.apply_mutation(mutation, publish_catalog).await?;
+        if matches!(
+            applied.outcome,
+            LibraryFileMutationOutcome::TrackDeleted {
+                track_id: deleted_id
+            } if deleted_id == track_id
+        ) {
+            Ok(())
+        } else {
+            Err(LibraryCoordinatorError::InvalidMutationOutcome)
+        }
+    }
+
+    async fn move_tracks_once(
+        &self,
+        requests: Vec<(TrackId, LibraryPath)>,
+    ) -> Result<TrackMoveBatchResults, LibraryCoordinatorError> {
+        let mut results = Vec::with_capacity(requests.len());
+        let mut succeeded = false;
+        let mut requests = requests.into_iter();
+        while let Some((track_id, destination)) = requests.next() {
+            let result = self.move_track_once(track_id, destination, false).await;
+            succeeded |= result.is_ok();
+            let stop = result.as_ref().is_err_and(mutation_error_requires_recovery);
+            results.push((track_id, result));
+            if stop {
+                results.extend(requests.map(|(track_id, _)| {
+                    (track_id, Err(LibraryCoordinatorError::RecoveryConflict))
+                }));
+                break;
+            }
+        }
+        if succeeded {
+            self.publish_current_catalog().await?;
+        }
+        Ok(results)
+    }
+
+    async fn delete_tracks_once(
+        &self,
+        track_ids: Vec<TrackId>,
+    ) -> Result<TrackDeleteBatchResults, LibraryCoordinatorError> {
+        let mut results = Vec::with_capacity(track_ids.len());
+        let mut succeeded = false;
+        let mut track_ids = track_ids.into_iter();
+        while let Some(track_id) = track_ids.next() {
+            let result = self.delete_track_once(track_id, false).await;
+            succeeded |= result.is_ok();
+            let stop = result.as_ref().is_err_and(mutation_error_requires_recovery);
+            results.push((track_id, result));
+            if stop {
+                results
+                    .extend(track_ids.map(|track_id| {
+                        (track_id, Err(LibraryCoordinatorError::RecoveryConflict))
+                    }));
+                break;
+            }
+        }
+        if succeeded {
+            self.publish_current_catalog().await?;
+        }
+        Ok(results)
+    }
+
+    async fn publish_current_catalog(&self) -> Result<(), LibraryCoordinatorError> {
+        let status = self
+            .repository
+            .status()
+            .await
+            .map_err(|source| dependency("load the mutated library status", source))?;
+        let track_ids = self
+            .repository
+            .catalog_track_ids()
+            .await
+            .map_err(|source| dependency("load the mutated track catalog", source))?
+            .into_iter()
+            .collect();
+        let generation = status.generation;
+        self.status.send_replace(status);
+        self.catalog
+            .publish(generation, track_ids)
+            .await
+            .map_err(|source| dependency("publish the mutated track catalog", source))
     }
 
     async fn reconcile_once(
@@ -681,6 +942,18 @@ impl LibraryCoordinator {
     }
 }
 
+fn mutation_error_requires_recovery(error: &LibraryCoordinatorError) -> bool {
+    match error {
+        LibraryCoordinatorError::Dependency { .. }
+        | LibraryCoordinatorError::RecoveryConflict
+        | LibraryCoordinatorError::InvalidMutationOutcome => true,
+        LibraryCoordinatorError::Mutation(failure) => {
+            failure.kind() == LibraryMutationFailureKind::Io
+        }
+        _ => false,
+    }
+}
+
 async fn recover_library_mutations(
     repository: &dyn LibraryMutationRepository,
     effects: &dyn LibraryMutationEffects,
@@ -724,7 +997,7 @@ async fn commit_applied_library_mutation(
     journal: &RecoveryJournalEntry,
     mutation: &LibraryFileMutation,
     outcome: LibraryFileMutationOutcome,
-) -> Result<(AppliedLibraryMutation, Option<LibraryIndexMutationCommit>), LibraryCoordinatorError> {
+) -> Result<(AppliedLibraryMutation, Option<CatalogMutationPublication>), LibraryCoordinatorError> {
     match (mutation, outcome) {
         (
             LibraryFileMutation::CreateFolder { path: expected },
@@ -766,7 +1039,10 @@ async fn commit_applied_library_mutation(
                     outcome: LibraryFileMutationOutcome::Folder { path, has_children },
                     affected_tracks,
                 },
-                Some(commit),
+                Some(CatalogMutationPublication {
+                    status: commit.status,
+                    track_ids: commit.track_ids,
+                }),
             ))
         }
         (LibraryFileMutation::DeleteFolder { path, .. }, LibraryFileMutationOutcome::Deleted) => {
@@ -780,7 +1056,63 @@ async fn commit_applied_library_mutation(
                     outcome: LibraryFileMutationOutcome::Deleted,
                     affected_tracks,
                 },
-                Some(commit),
+                Some(CatalogMutationPublication {
+                    status: commit.status,
+                    track_ids: commit.track_ids,
+                }),
+            ))
+        }
+        (
+            LibraryFileMutation::MoveTrack {
+                track_id,
+                source,
+                destination,
+            },
+            LibraryFileMutationOutcome::TrackMoved {
+                track_id: moved_id,
+                track,
+            },
+        ) if track_id == &moved_id && destination == &track.path => {
+            let commit = repository
+                .commit_track_move(&journal.id, *track_id, source, &track)
+                .await
+                .map_err(|source| dependency("commit a track move", source))?;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::TrackMoved {
+                        track_id: moved_id,
+                        track,
+                    },
+                    affected_tracks: 1,
+                },
+                Some(CatalogMutationPublication {
+                    status: commit.status,
+                    track_ids: commit.track_ids,
+                }),
+            ))
+        }
+        (
+            LibraryFileMutation::DeleteTrack { track_id, path },
+            LibraryFileMutationOutcome::TrackDeleted {
+                track_id: deleted_id,
+            },
+        ) if track_id == &deleted_id => {
+            let commit = repository
+                .commit_track_delete(&journal.id, *track_id, path)
+                .await
+                .map_err(|source| dependency("commit a track deletion", source))?;
+            let affected_tracks = commit.affected_tracks;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::TrackDeleted {
+                        track_id: deleted_id,
+                    },
+                    affected_tracks,
+                },
+                Some(CatalogMutationPublication {
+                    status: commit.status,
+                    track_ids: commit.track_ids,
+                }),
             ))
         }
         _ => Err(LibraryCoordinatorError::InvalidMutationOutcome),

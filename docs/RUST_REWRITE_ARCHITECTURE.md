@@ -394,8 +394,10 @@ Unicode, separators, symlinks, and rename races.
 and journaled durably before its rooted filesystem effect, then its index change and terminal
 journal state are committed together in a short database transaction. Startup replays unfinished
 domain operations before publishing the catalog. Folder renames rewrite indexed paths without
-reissuing track IDs; metadata reconciliation follows the commit. The shared journal infrastructure
-does not pretend SQLite and a media volume are one atomic filesystem.
+reissuing track IDs; metadata reconciliation follows the commit. Track moves refresh file-backed
+and filename/folder-derived metadata, then commit the new path and metadata without changing the
+track ID. Bulk track mutations keep per-item journals and publish one final catalog snapshot. The
+shared journal infrastructure does not pretend SQLite and a media volume are one atomic filesystem.
 
 Full scans discover and read metadata outside the mutation coordinator. Their result carries the
 library generation; final diff application is short and is rejected/reconciled when a committed

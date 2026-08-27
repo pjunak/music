@@ -468,7 +468,16 @@ mod tests {
         assert!(folders.contains_key("delete"));
         assert!(paths.contains_key("/api/library/folders/rename"));
         assert!(paths.contains_key("/api/library/tracks"));
-        assert!(paths.contains_key("/api/library/tracks/{track_id}"));
+        assert!(paths.contains_key("/api/library/tracks/bulk-move"));
+        assert!(paths.contains_key("/api/library/tracks/bulk-delete"));
+        let track = paths["/api/library/tracks/{track_id}"]
+            .as_object()
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "track path is not an object")
+            })?;
+        assert!(track.contains_key("get"));
+        assert!(track.contains_key("delete"));
+        assert!(paths.contains_key("/api/library/tracks/{track_id}/move"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}/stream"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}/cover"));
         assert!(paths.contains_key("/api/library/rescan"));
