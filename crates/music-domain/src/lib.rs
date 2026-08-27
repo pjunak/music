@@ -9,7 +9,13 @@
 //! This crate must remain independent of async runtimes, databases, HTTP,
 //! filesystems, processes, and public wire compatibility types.
 
+mod media_path;
 mod playback;
+
+pub use media_path::{
+    LibraryMedia, LibraryPath, MAX_MEDIA_PATH_BYTES, MediaPathError, RootedMediaPath, SfxMedia,
+    SfxPath,
+};
 
 pub use playback::{
     AmbientState, ClockSample, CrossfadeType, DomainEvent, InterruptState, LoopMode, LoopingSfx,

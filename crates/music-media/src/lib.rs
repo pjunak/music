@@ -10,12 +10,15 @@
 //! cleanup or authoring analysis must not acquire write-capable dependencies.
 
 mod metadata;
+mod path;
 mod yaml;
 
 pub use metadata::{
     AudioMetadata, FfmpegTools, MetadataAdapter, MetadataWriteCapability, StagedTagUpdate,
     TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata, stage_tag_update,
 };
+
+pub use path::{LibraryRoot, MediaRoot, RootedPathError, SfxRoot};
 
 pub use yaml::{
     CueDocument, ModeDocument, PresetDocument, SoundboardDocument, YamlDocumentError,

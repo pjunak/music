@@ -317,7 +317,10 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
 
 ## Phase 5 — library, metadata, streaming, uploads, and cleanup
 
-- Rooted path types and the single-owner `LibraryCoordinator`.
+- [x] Typed `LibraryPath`/`SfxPath` values with canonical POSIX-relative encoding and matching
+  rooted filesystem capabilities that reject absolute, traversal, platform-prefix, control-byte,
+  and symlink-escape inputs.
+- Single-owner `LibraryCoordinator` for all app-managed file/index mutations.
 - Durable-index startup, generation-checked full/incremental reconciliation, visible scan status,
   tree/folder/search APIs, metadata fallback, and source signatures.
 - Full/range media and cover streaming with disconnect-safe file handles.
