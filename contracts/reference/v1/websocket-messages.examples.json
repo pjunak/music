@@ -1,0 +1,289 @@
+{
+  "invalid": [
+    {
+      "id": "message-missing-type",
+      "input": {}
+    },
+    {
+      "id": "message-unknown-type",
+      "input": {
+        "type": "unknown"
+      }
+    },
+    {
+      "id": "snapshot-missing-state",
+      "input": {
+        "type": "state_snapshot"
+      }
+    },
+    {
+      "id": "changed-missing-state",
+      "input": {
+        "type": "state_changed"
+      }
+    },
+    {
+      "id": "sfx-missing-item-path",
+      "input": {
+        "soundboard_id": "valid",
+        "type": "sfx_fired"
+      }
+    },
+    {
+      "id": "error-missing-detail",
+      "input": {
+        "type": "error"
+      }
+    },
+    {
+      "id": "error-invalid-code",
+      "input": {
+        "code": "other",
+        "detail": "invalid",
+        "type": "error"
+      }
+    },
+    {
+      "id": "state-invalid-crossfade",
+      "input": {
+        "state": {
+          "crossfade_type": "logarithmic"
+        },
+        "type": "state_changed"
+      }
+    }
+  ],
+  "message_types": [
+    "error",
+    "sfx_fired",
+    "state_changed",
+    "state_snapshot"
+  ],
+  "valid": [
+    {
+      "canonical": {
+        "state": {
+          "active_mode_id": null,
+          "active_output_device_ids": [],
+          "active_preset_ids": [],
+          "active_soundboard_id": null,
+          "ambient": {
+            "current_track_id": null,
+            "history": [],
+            "loop": "off",
+            "position_anchored_at": null,
+            "position_ms": 0,
+            "queue": [],
+            "shuffle": "off",
+            "source_playlist_id": null
+          },
+          "connected_devices": [],
+          "crossfade_ms": 0,
+          "crossfade_type": "linear",
+          "default_device_volume": 1.0,
+          "device_volumes": {},
+          "interrupt": null,
+          "is_playing": false,
+          "last_position_report": null,
+          "looping_sfx": [],
+          "position_epoch": 0,
+          "preset_revision": 0,
+          "revision": 0,
+          "volume": 1.0
+        },
+        "type": "state_snapshot",
+        "your_device_id": ""
+      },
+      "id": "state-snapshot-defaults",
+      "input": {
+        "state": {},
+        "type": "state_snapshot"
+      }
+    },
+    {
+      "canonical": {
+        "state": {
+          "active_mode_id": "dnd",
+          "active_output_device_ids": [
+            "ref-output"
+          ],
+          "active_preset_ids": [
+            "cave"
+          ],
+          "active_soundboard_id": "tavern",
+          "ambient": {
+            "current_track_id": 41,
+            "history": [
+              40
+            ],
+            "loop": "queue",
+            "position_anchored_at": 1000.5,
+            "position_ms": 1234,
+            "queue": [
+              42
+            ],
+            "shuffle": "random",
+            "source_playlist_id": 7
+          },
+          "connected_devices": [
+            {
+              "client_id": "ref-output",
+              "device_id": "ref-output",
+              "is_output": false,
+              "name": "Reference output"
+            }
+          ],
+          "crossfade_ms": 1500,
+          "crossfade_type": "equal_power",
+          "default_device_volume": 1.0,
+          "device_volumes": {
+            "ref-output": 0.75
+          },
+          "interrupt": {
+            "current_track_id": 99,
+            "duck_to": 0.25,
+            "fade_in_ms": 250,
+            "fade_out_ms": 500,
+            "position_anchored_at": 1001.0,
+            "position_ms": 500,
+            "queue": [
+              100
+            ],
+            "return_to_ambient": false
+          },
+          "is_playing": true,
+          "last_position_report": {
+            "device_id": "ref-output",
+            "position_ms": 500,
+            "reported_at": 1001.25
+          },
+          "looping_sfx": [
+            {
+              "id": "rain-loop",
+              "interval_s": 12.5,
+              "item_path": "rain/0",
+              "name": "Rain",
+              "soundboard_id": "weather",
+              "volume": 1.0
+            }
+          ],
+          "position_epoch": 4,
+          "preset_revision": 3,
+          "revision": 17,
+          "volume": 1.0
+        },
+        "type": "state_changed"
+      },
+      "id": "state-changed-populated",
+      "input": {
+        "state": {
+          "active_mode_id": "dnd",
+          "active_output_device_ids": [
+            "ref-output"
+          ],
+          "active_preset_ids": [
+            "cave"
+          ],
+          "active_soundboard_id": "tavern",
+          "ambient": {
+            "current_track_id": 41,
+            "history": [
+              40
+            ],
+            "loop": "queue",
+            "position_anchored_at": 1000.5,
+            "position_ms": 1234,
+            "queue": [
+              42
+            ],
+            "shuffle": "random",
+            "source_playlist_id": 7
+          },
+          "connected_devices": [
+            {
+              "client_id": "ref-output",
+              "device_id": "ref-output",
+              "name": "Reference output"
+            }
+          ],
+          "crossfade_ms": 1500,
+          "crossfade_type": "equal_power",
+          "device_volumes": {
+            "ref-output": 0.75
+          },
+          "interrupt": {
+            "current_track_id": 99,
+            "duck_to": 0.25,
+            "fade_in_ms": 250,
+            "fade_out_ms": 500,
+            "position_anchored_at": 1001.0,
+            "position_ms": 500,
+            "queue": [
+              100
+            ],
+            "return_to_ambient": false
+          },
+          "is_playing": true,
+          "last_position_report": {
+            "device_id": "ref-output",
+            "position_ms": 500,
+            "reported_at": 1001.25
+          },
+          "looping_sfx": [
+            {
+              "id": "rain-loop",
+              "interval_s": 12.5,
+              "item_path": "rain/0",
+              "name": "Rain",
+              "soundboard_id": "weather"
+            }
+          ],
+          "position_epoch": 4,
+          "preset_revision": 3,
+          "revision": 17
+        },
+        "type": "state_changed"
+      }
+    },
+    {
+      "canonical": {
+        "item_path": "doors/0",
+        "soundboard_id": "tavern",
+        "type": "sfx_fired",
+        "volume": 1.0
+      },
+      "id": "sfx-fired-default-volume",
+      "input": {
+        "item_path": "doors/0",
+        "soundboard_id": "tavern",
+        "type": "sfx_fired"
+      }
+    },
+    {
+      "canonical": {
+        "code": null,
+        "detail": "request rejected",
+        "type": "error"
+      },
+      "id": "error-default-code",
+      "input": {
+        "detail": "request rejected",
+        "type": "error"
+      }
+    },
+    {
+      "canonical": {
+        "code": "session_expired",
+        "detail": "session expired",
+        "type": "error"
+      },
+      "id": "error-session-expired",
+      "input": {
+        "code": "session_expired",
+        "detail": "session expired",
+        "type": "error"
+      }
+    }
+  ],
+  "version": 1
+}

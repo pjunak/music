@@ -42,7 +42,7 @@ resource acceptance checks pass.
 
 | Source reference | Change or difference | Rust disposition | Evidence | Status |
 |---|---|---|---|---|
-| `b93f91d` | Rewrite baseline | Capture executable contracts in Phase 1 | Pending | Open |
+| `b93f91d` | Rewrite baseline | Capture executable contracts in Phase 1 | `contracts/reference/v1` plus `music-protocol` corpus tests | In progress |
 | `b93f91d` | `devices.json` is a mutable runtime store | Import to SQLite; add explicit CLI export/import; preserve source file for rollback | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#4-make-operational-data-ownership-consistent) | Accepted 2026-08-27 |
 | `b93f91d` | Full library scan blocks startup | Serve the durable index, expose reconciliation state, and scan as a durable job | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#6-remove-full-scanning-from-the-critical-boot-path) | Accepted 2026-08-27 |
 | `b93f91d` | Unexpected HTTP/WS errors expose exception text | Return safe code/message/correlation ID; keep internal detail in logs | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#10-separate-public-compatibility-from-internal-correctness) | Accepted 2026-08-27 |
@@ -122,6 +122,9 @@ Evidence so far:
 - `contracts/reference/v1` deterministically captures 144 HTTP operations, 205 OpenAPI schemas,
   all 33 client WebSocket actions, all four server message forms, the 18-table SQLite DDL, and the
   authored mode/preset schemas. `backend/tests/test_reference_contracts.py` fails on drift.
+- `music-protocol` parses and canonically re-serializes valid/defaulted Python examples for every
+  action and server message type, and rejects the shared representative invalid corpus. Bounded
+  wire scalars make the Python validation limits explicit before transport code consumes them.
 - The eight-crate workspace shell compiles with the accepted dependency direction and workspace
   safe-Rust/panic lints. It exists now to host Phase 1 contract and feasibility tests; no production
   endpoint is routed to Rust before its parity gate.

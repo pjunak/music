@@ -1,0 +1,603 @@
+{
+  "action_types": [
+    "ambient_clear_queue",
+    "ambient_enqueue",
+    "ambient_jump_queue",
+    "ambient_play_folder",
+    "ambient_play_playlist",
+    "ambient_play_track",
+    "ambient_seek",
+    "ambient_set_loop",
+    "ambient_set_queue",
+    "ambient_set_shuffle",
+    "ambient_skip_next",
+    "ambient_skip_prev",
+    "ambient_stop",
+    "cancel_interrupt",
+    "fire_cue",
+    "fire_interrupt_playlist",
+    "fire_interrupt_track",
+    "fire_sfx",
+    "interrupt_seek",
+    "interrupt_skip_next",
+    "pause",
+    "position_report",
+    "register",
+    "resume",
+    "set_active_mode",
+    "set_active_outputs",
+    "set_active_presets",
+    "set_active_soundboard",
+    "set_crossfade",
+    "set_device_volume",
+    "set_volume",
+    "start_loop",
+    "stop_loop"
+  ],
+  "invalid": [
+    {
+      "id": "missing-type",
+      "input": {}
+    },
+    {
+      "id": "unknown-type",
+      "input": {
+        "type": "not_an_action"
+      }
+    },
+    {
+      "id": "missing-required-nullable-mode",
+      "input": {
+        "type": "set_active_mode"
+      }
+    },
+    {
+      "id": "missing-required-nullable-soundboard",
+      "input": {
+        "type": "set_active_soundboard"
+      }
+    },
+    {
+      "id": "register-empty-name",
+      "input": {
+        "client_id": "valid",
+        "name": "",
+        "type": "register"
+      }
+    },
+    {
+      "id": "register-zero-protocol",
+      "input": {
+        "client_id": "valid",
+        "name": "Valid",
+        "protocol_version": 0,
+        "type": "register"
+      }
+    },
+    {
+      "id": "volume-below-zero",
+      "input": {
+        "type": "set_volume",
+        "volume": -0.01
+      }
+    },
+    {
+      "id": "device-volume-above-one",
+      "input": {
+        "device_id": "valid",
+        "type": "set_device_volume",
+        "volume": 1.01
+      }
+    },
+    {
+      "id": "negative-position-report",
+      "input": {
+        "position_ms": -1,
+        "type": "position_report"
+      }
+    },
+    {
+      "id": "negative-queue-position",
+      "input": {
+        "position": -1,
+        "type": "ambient_jump_queue"
+      }
+    },
+    {
+      "id": "invalid-loop-mode",
+      "input": {
+        "loop": "weighted",
+        "type": "ambient_set_loop"
+      }
+    },
+    {
+      "id": "invalid-shuffle-mode",
+      "input": {
+        "shuffle": "weighted",
+        "type": "ambient_set_shuffle"
+      }
+    },
+    {
+      "id": "crossfade-too-long",
+      "input": {
+        "crossfade_ms": 30001,
+        "type": "set_crossfade"
+      }
+    },
+    {
+      "id": "invalid-crossfade-type",
+      "input": {
+        "crossfade_ms": 0,
+        "crossfade_type": "logarithmic",
+        "type": "set_crossfade"
+      }
+    },
+    {
+      "id": "interrupt-duck-above-one",
+      "input": {
+        "duck_to": 1.01,
+        "track_id": 1,
+        "type": "fire_interrupt_track"
+      }
+    },
+    {
+      "id": "interrupt-fade-too-long",
+      "input": {
+        "fade_in_ms": 10001,
+        "playlist_id": 1,
+        "type": "fire_interrupt_playlist"
+      }
+    },
+    {
+      "id": "sfx-empty-path",
+      "input": {
+        "item_path": "",
+        "soundboard_id": "valid",
+        "type": "fire_sfx"
+      }
+    },
+    {
+      "id": "loop-interval-too-short",
+      "input": {
+        "id": "valid",
+        "interval_s": 0.5,
+        "item_path": "valid",
+        "name": "Valid",
+        "soundboard_id": "valid",
+        "type": "start_loop"
+      }
+    },
+    {
+      "id": "stop-loop-empty-id",
+      "input": {
+        "id": "",
+        "type": "stop_loop"
+      }
+    },
+    {
+      "id": "fire-cue-empty-id",
+      "input": {
+        "cue_id": "",
+        "type": "fire_cue"
+      }
+    }
+  ],
+  "valid": [
+    {
+      "canonical": {
+        "client_id": "ref-output",
+        "name": "Reference output",
+        "protocol_version": 1,
+        "type": "register"
+      },
+      "id": "register-default-protocol",
+      "input": {
+        "client_id": "ref-output",
+        "name": "Reference output",
+        "type": "register"
+      }
+    },
+    {
+      "canonical": {
+        "client_id": "ref-controller",
+        "name": "Reference controller",
+        "protocol_version": 2,
+        "type": "register"
+      },
+      "id": "register-v2",
+      "input": {
+        "client_id": "ref-controller",
+        "name": "Reference controller",
+        "protocol_version": 2,
+        "type": "register"
+      }
+    },
+    {
+      "canonical": {
+        "type": "set_volume",
+        "volume": 0.0
+      },
+      "id": "set-volume-zero",
+      "input": {
+        "type": "set_volume",
+        "volume": 0.0
+      }
+    },
+    {
+      "canonical": {
+        "type": "pause"
+      },
+      "id": "pause",
+      "input": {
+        "type": "pause"
+      }
+    },
+    {
+      "canonical": {
+        "type": "resume"
+      },
+      "id": "resume",
+      "input": {
+        "type": "resume"
+      }
+    },
+    {
+      "canonical": {
+        "mode_id": null,
+        "type": "set_active_mode"
+      },
+      "id": "set-active-mode-null",
+      "input": {
+        "mode_id": null,
+        "type": "set_active_mode"
+      }
+    },
+    {
+      "canonical": {
+        "device_ids": [
+          "ref-output",
+          "ref-tv"
+        ],
+        "type": "set_active_outputs"
+      },
+      "id": "set-active-outputs",
+      "input": {
+        "device_ids": [
+          "ref-output",
+          "ref-tv"
+        ],
+        "type": "set_active_outputs"
+      }
+    },
+    {
+      "canonical": {
+        "device_id": "ref-output",
+        "type": "set_device_volume",
+        "volume": 1.0
+      },
+      "id": "set-device-volume-max",
+      "input": {
+        "device_id": "ref-output",
+        "type": "set_device_volume",
+        "volume": 1.0
+      }
+    },
+    {
+      "canonical": {
+        "position_ms": 12345,
+        "type": "position_report"
+      },
+      "id": "position-report",
+      "input": {
+        "position_ms": 12345,
+        "type": "position_report"
+      }
+    },
+    {
+      "canonical": {
+        "track_id": 41,
+        "type": "ambient_play_track"
+      },
+      "id": "ambient-play-track",
+      "input": {
+        "track_id": 41,
+        "type": "ambient_play_track"
+      }
+    },
+    {
+      "canonical": {
+        "track_ids": [
+          41,
+          42
+        ],
+        "type": "ambient_set_queue"
+      },
+      "id": "ambient-set-queue",
+      "input": {
+        "track_ids": [
+          41,
+          42
+        ],
+        "type": "ambient_set_queue"
+      }
+    },
+    {
+      "canonical": {
+        "position": 1,
+        "type": "ambient_jump_queue"
+      },
+      "id": "ambient-jump-queue",
+      "input": {
+        "position": 1,
+        "type": "ambient_jump_queue"
+      }
+    },
+    {
+      "canonical": {
+        "position": null,
+        "track_id": 43,
+        "type": "ambient_enqueue"
+      },
+      "id": "ambient-enqueue-default-position",
+      "input": {
+        "track_id": 43,
+        "type": "ambient_enqueue"
+      }
+    },
+    {
+      "canonical": {
+        "type": "ambient_clear_queue"
+      },
+      "id": "ambient-clear-queue",
+      "input": {
+        "type": "ambient_clear_queue"
+      }
+    },
+    {
+      "canonical": {
+        "from_track_id": 41,
+        "type": "ambient_skip_next"
+      },
+      "id": "ambient-skip-next-observed",
+      "input": {
+        "from_track_id": 41,
+        "type": "ambient_skip_next"
+      }
+    },
+    {
+      "canonical": {
+        "type": "ambient_skip_prev"
+      },
+      "id": "ambient-skip-prev",
+      "input": {
+        "type": "ambient_skip_prev"
+      }
+    },
+    {
+      "canonical": {
+        "position_ms": 0,
+        "type": "ambient_seek"
+      },
+      "id": "ambient-seek-zero",
+      "input": {
+        "position_ms": 0,
+        "type": "ambient_seek"
+      }
+    },
+    {
+      "canonical": {
+        "loop": "follow",
+        "type": "ambient_set_loop"
+      },
+      "id": "ambient-set-loop",
+      "input": {
+        "loop": "follow",
+        "type": "ambient_set_loop"
+      }
+    },
+    {
+      "canonical": {
+        "shuffle": "random",
+        "type": "ambient_set_shuffle"
+      },
+      "id": "ambient-set-shuffle",
+      "input": {
+        "shuffle": "random",
+        "type": "ambient_set_shuffle"
+      }
+    },
+    {
+      "canonical": {
+        "type": "ambient_stop"
+      },
+      "id": "ambient-stop",
+      "input": {
+        "type": "ambient_stop"
+      }
+    },
+    {
+      "canonical": {
+        "playlist_id": 7,
+        "start_index": 0,
+        "type": "ambient_play_playlist"
+      },
+      "id": "ambient-play-playlist-default-index",
+      "input": {
+        "playlist_id": 7,
+        "type": "ambient_play_playlist"
+      }
+    },
+    {
+      "canonical": {
+        "path": "",
+        "start_index": 0,
+        "type": "ambient_play_folder"
+      },
+      "id": "ambient-play-folder-root",
+      "input": {
+        "type": "ambient_play_folder"
+      }
+    },
+    {
+      "canonical": {
+        "soundboard_id": null,
+        "type": "set_active_soundboard"
+      },
+      "id": "set-active-soundboard-null",
+      "input": {
+        "soundboard_id": null,
+        "type": "set_active_soundboard"
+      }
+    },
+    {
+      "canonical": {
+        "preset_ids": [
+          "cave",
+          "radio"
+        ],
+        "type": "set_active_presets"
+      },
+      "id": "set-active-presets",
+      "input": {
+        "preset_ids": [
+          "cave",
+          "radio"
+        ],
+        "type": "set_active_presets"
+      }
+    },
+    {
+      "canonical": {
+        "crossfade_ms": 1500,
+        "crossfade_type": null,
+        "type": "set_crossfade"
+      },
+      "id": "set-crossfade-default-type",
+      "input": {
+        "crossfade_ms": 1500,
+        "type": "set_crossfade"
+      }
+    },
+    {
+      "canonical": {
+        "duck_to": null,
+        "fade_in_ms": 0,
+        "fade_out_ms": 0,
+        "return_to_ambient": true,
+        "track_id": 99,
+        "type": "fire_interrupt_track"
+      },
+      "id": "fire-interrupt-track-defaults",
+      "input": {
+        "track_id": 99,
+        "type": "fire_interrupt_track"
+      }
+    },
+    {
+      "canonical": {
+        "duck_to": 0.25,
+        "fade_in_ms": 250,
+        "fade_out_ms": 500,
+        "playlist_id": 9,
+        "return_to_ambient": false,
+        "type": "fire_interrupt_playlist"
+      },
+      "id": "fire-interrupt-playlist-full",
+      "input": {
+        "duck_to": 0.25,
+        "fade_in_ms": 250,
+        "fade_out_ms": 500,
+        "playlist_id": 9,
+        "return_to_ambient": false,
+        "type": "fire_interrupt_playlist"
+      }
+    },
+    {
+      "canonical": {
+        "from_track_id": null,
+        "type": "interrupt_skip_next"
+      },
+      "id": "interrupt-skip-next-default",
+      "input": {
+        "type": "interrupt_skip_next"
+      }
+    },
+    {
+      "canonical": {
+        "position_ms": 321,
+        "type": "interrupt_seek"
+      },
+      "id": "interrupt-seek",
+      "input": {
+        "position_ms": 321,
+        "type": "interrupt_seek"
+      }
+    },
+    {
+      "canonical": {
+        "type": "cancel_interrupt"
+      },
+      "id": "cancel-interrupt",
+      "input": {
+        "type": "cancel_interrupt"
+      }
+    },
+    {
+      "canonical": {
+        "item_path": "doors/0",
+        "soundboard_id": "tavern",
+        "type": "fire_sfx",
+        "volume": 1.0
+      },
+      "id": "fire-sfx-default-volume",
+      "input": {
+        "item_path": "doors/0",
+        "soundboard_id": "tavern",
+        "type": "fire_sfx"
+      }
+    },
+    {
+      "canonical": {
+        "id": "rain-loop",
+        "interval_s": 12.5,
+        "item_path": "rain/0",
+        "name": "Rain",
+        "soundboard_id": "weather",
+        "type": "start_loop",
+        "volume": 1.0
+      },
+      "id": "start-loop",
+      "input": {
+        "id": "rain-loop",
+        "interval_s": 12.5,
+        "item_path": "rain/0",
+        "name": "Rain",
+        "soundboard_id": "weather",
+        "type": "start_loop"
+      }
+    },
+    {
+      "canonical": {
+        "id": "rain-loop",
+        "type": "stop_loop"
+      },
+      "id": "stop-loop",
+      "input": {
+        "id": "rain-loop",
+        "type": "stop_loop"
+      }
+    },
+    {
+      "canonical": {
+        "cue_id": "kraken",
+        "type": "fire_cue"
+      },
+      "id": "fire-cue",
+      "input": {
+        "cue_id": "kraken",
+        "type": "fire_cue"
+      }
+    }
+  ],
+  "version": 1
+}

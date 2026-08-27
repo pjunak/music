@@ -12,9 +12,17 @@
       "bytes": 7798,
       "sha256": "7320e8468eba8ccc8ea7c51be5322437217fdcdeae87dddaa8d63d1ba806ad61"
     },
+    "websocket-actions.examples.json": {
+      "bytes": 12366,
+      "sha256": "29ac032bb28fec8e6b01af8d7ac1d75c0bd81ea131a7b742e02891b776c28b4c"
+    },
     "websocket-actions.schema.json": {
       "bytes": 22560,
       "sha256": "ddd2b7471308e844d04a34185f1acd7b2f9473a60aea9935db3f945cc238fb5d"
+    },
+    "websocket-messages.examples.json": {
+      "bytes": 7001,
+      "sha256": "1e8fd54b6b1ae58e947184f88963836cefc1a767782cecb8c63f1a6bb4a86000"
     },
     "websocket-messages.schema.json": {
       "bytes": 13330,
@@ -27,7 +35,11 @@
     "http_paths": 118,
     "openapi_schemas": 205,
     "sqlite_tables": 18,
+    "websocket_action_examples": 34,
+    "websocket_action_rejections": 20,
     "websocket_actions": 33,
+    "websocket_message_examples": 5,
+    "websocket_message_rejections": 8,
     "websocket_messages": 4
   },
   "exporter_version": 1

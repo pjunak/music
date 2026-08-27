@@ -23,6 +23,12 @@ from app.main import app
 from app.models import Base
 from app.modes.loader import CueSpec, ModeManifest, SoundboardManifest
 from app.presets.loader import PresetManifest
+from app.reference_cases import (
+    INVALID_WEBSOCKET_ACTIONS,
+    INVALID_WEBSOCKET_MESSAGES,
+    VALID_WEBSOCKET_ACTIONS,
+    VALID_WEBSOCKET_MESSAGES,
+)
 from app.sync.protocol import (
     ErrorMessage,
     SfxFired,
@@ -68,6 +74,65 @@ def _authored_file_schemas() -> dict[str, Any]:
     }
 
 
+def _websocket_action_examples() -> dict[str, Any]:
+    valid: list[dict[str, Any]] = []
+    action_types: set[str] = set()
+    for case in VALID_WEBSOCKET_ACTIONS:
+        action = action_adapter.validate_python(case["input"])
+        canonical = action.model_dump(mode="json")
+        action_types.add(canonical["type"])
+        valid.append({"canonical": canonical, **case})
+
+    schema = action_adapter.json_schema()
+    schema_types = {
+        reference.rsplit("/", maxsplit=1)[-1]
+        for reference in schema["discriminator"]["mapping"].values()
+    }
+    model_types = {type(action_adapter.validate_python(case["input"])).__name__ for case in valid}
+    if model_types != schema_types:
+        missing = sorted(schema_types - model_types)
+        extra = sorted(model_types - schema_types)
+        raise ValueError(f"WebSocket action corpus mismatch: missing={missing}, extra={extra}")
+
+    for case in INVALID_WEBSOCKET_ACTIONS:
+        try:
+            action_adapter.validate_python(case["input"])
+        except ValueError:
+            continue
+        raise ValueError(f"invalid WebSocket action was accepted: {case['id']}")
+
+    return {
+        "action_types": sorted(action_types),
+        "invalid": INVALID_WEBSOCKET_ACTIONS,
+        "valid": valid,
+        "version": 1,
+    }
+
+
+def _websocket_message_examples() -> dict[str, Any]:
+    valid: list[dict[str, Any]] = []
+    message_types: set[str] = set()
+    for case in VALID_WEBSOCKET_MESSAGES:
+        message = server_message_adapter.validate_python(case["input"])
+        canonical = message.model_dump(mode="json")
+        message_types.add(canonical["type"])
+        valid.append({"canonical": canonical, **case})
+
+    for case in INVALID_WEBSOCKET_MESSAGES:
+        try:
+            server_message_adapter.validate_python(case["input"])
+        except ValueError:
+            continue
+        raise ValueError(f"invalid WebSocket message was accepted: {case['id']}")
+
+    return {
+        "invalid": INVALID_WEBSOCKET_MESSAGES,
+        "message_types": sorted(message_types),
+        "valid": valid,
+        "version": 1,
+    }
+
+
 def build_reference_bundle() -> dict[str, bytes]:
     """Return every generated artifact, including its integrity manifest."""
     openapi = app.openapi()
@@ -77,7 +142,9 @@ def build_reference_bundle() -> dict[str, bytes]:
         "authored-files.schema.json": _json_bytes(_authored_file_schemas()),
         "openapi.json": _json_bytes(openapi),
         "sqlite-schema.sql": _sqlite_ddl(),
+        "websocket-actions.examples.json": _json_bytes(_websocket_action_examples()),
         "websocket-actions.schema.json": _json_bytes(actions),
+        "websocket-messages.examples.json": _json_bytes(_websocket_message_examples()),
         "websocket-messages.schema.json": _json_bytes(messages),
     }
 
@@ -101,7 +168,11 @@ def build_reference_bundle() -> dict[str, bytes]:
             "openapi_schemas": len(openapi.get("components", {}).get("schemas", {})),
             "sqlite_tables": len(Base.metadata.sorted_tables),
             "websocket_actions": len(actions.get("oneOf", [])),
+            "websocket_action_examples": len(VALID_WEBSOCKET_ACTIONS),
+            "websocket_action_rejections": len(INVALID_WEBSOCKET_ACTIONS),
             "websocket_messages": len(messages.get("oneOf", [])),
+            "websocket_message_examples": len(VALID_WEBSOCKET_MESSAGES),
+            "websocket_message_rejections": len(INVALID_WEBSOCKET_MESSAGES),
         },
         "exporter_version": EXPORTER_VERSION,
     }

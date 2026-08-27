@@ -8,6 +8,7 @@ registry, absolute storage paths, or media.
 
 - every declared HTTP operation and OpenAPI component schema;
 - every client-to-server WebSocket action and server-to-client message;
+- canonical valid/defaulted examples and representative rejection cases for those WebSocket DTOs;
 - the complete SQLAlchemy SQLite DDL, including foreign keys, unique constraints, and indexes; and
 - the current mode, soundboard, cue, and preset schemas.
 
