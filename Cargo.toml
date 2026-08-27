@@ -1,0 +1,38 @@
+[workspace]
+members = [
+    "crates/music-analysis",
+    "crates/music-application",
+    "crates/music-domain",
+    "crates/music-media",
+    "crates/music-output",
+    "crates/music-protocol",
+    "crates/music-server",
+    "crates/music-storage",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+authors = ["Music contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "unwind"
+strip = "symbols"

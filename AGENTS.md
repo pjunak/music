@@ -35,6 +35,21 @@ An existing Windows virtual environment may be used instead:
 .\.venv\Scripts\pytest.exe
 ```
 
+Rust, from the repository root:
+
+```powershell
+cargo fmt --all --check
+cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo test --workspace --all-features --doc
+```
+
+The checked-in toolchain is authoritative. On Windows hosts without the Visual Studio C++ build
+tools, install rustup's official GNU host and add
+`+1.97.1-x86_64-pc-windows-gnu` immediately after `cargo` in the commands above. Linux CI and
+release builds use the normal host selected by `rust-toolchain.toml`.
+
 Frontend, from `frontend/` (Node 26+):
 
 ```powershell

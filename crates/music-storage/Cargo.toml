@@ -1,0 +1,14 @@
+[package]
+name = "music-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+music-application = { path = "../music-application" }
+music-domain = { path = "../music-domain" }
+
+[lints]
+workspace = true

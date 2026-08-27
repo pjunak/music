@@ -1,0 +1,13 @@
+[package]
+name = "music-application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+music-domain = { path = "../music-domain" }
+
+[lints]
+workspace = true

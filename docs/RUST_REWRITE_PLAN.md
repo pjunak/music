@@ -53,9 +53,12 @@ an open row in its subsystem.
 
 ## Tooling plan
 
-The current Windows workstation has Node 26 but does not currently expose `rustc`, Cargo, FFmpeg,
-uv, or Docker on `PATH`. Implementation therefore begins with a documented Rust toolchain bootstrap;
-Docker/Linux-specific checks run in CI or on a Docker-capable host until local availability changes.
+The current Windows workstation has Node 26 and rustup-managed Rust 1.97.1. Endpoint protection
+repeatedly removed Rust 1.98's bundled `ld.lld.exe`, and the Visual Studio Build Tools elevation path
+did not complete, so local verification uses rustup's official `x86_64-pc-windows-gnu` host
+explicitly. The pinned repository toolchain remains host-neutral for Linux CI and release builds.
+FFmpeg, uv, and Docker are not exposed on `PATH`; the existing backend virtual environment remains
+the Python reference runner, while Docker/Linux-specific checks run in CI or on a capable host.
 
 ### Required development tools
 
@@ -111,6 +114,17 @@ Deliverables:
 Gate: no application implementation begins until the unchecked owner decision is resolved.
 
 ## Phase 1 — executable reference and feasibility gates
+
+**Status:** In progress
+
+Evidence so far:
+
+- `contracts/reference/v1` deterministically captures 144 HTTP operations, 205 OpenAPI schemas,
+  all 33 client WebSocket actions, all four server message forms, the 18-table SQLite DDL, and the
+  authored mode/preset schemas. `backend/tests/test_reference_contracts.py` fails on drift.
+- The eight-crate workspace shell compiles with the accepted dependency direction and workspace
+  safe-Rust/panic lints. It exists now to host Phase 1 contract and feasibility tests; no production
+  endpoint is routed to Rust before its parity gate.
 
 Capture the old system before replacing it:
 
