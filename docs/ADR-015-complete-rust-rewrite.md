@@ -6,6 +6,10 @@
 
 **Decider:** Project owner
 
+**Proposed refinement:** [ADR-016](ADR-016-rust-native-runtime-boundaries.md) re-examines the
+application layer, device persistence, startup scan, and voice isolation choices before
+implementation. Until accepted, this ADR remains the owning decision.
+
 ## Context
 
 Music is a personal, single-operator service. Availability during development is not critical, and

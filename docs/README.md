@@ -14,6 +14,8 @@ not a second description of the implementation.
 - Active work deliberately left for later: [backlog](../TODO.md)
 - Assistant/Authoring interaction rules: [Assistant UX philosophy](assistant-ux-philosophy.md)
 - Rust rewrite target architecture: [Rust rewrite architecture](RUST_REWRITE_ARCHITECTURE.md)
+- Python-era architecture reassessment:
+  [Rust architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md)
 - Rust rewrite phases, gates, and cutover: [Rust rewrite execution plan](RUST_REWRITE_PLAN.md)
 
 ## Architecture decisions
@@ -37,6 +39,7 @@ decision when it was accepted unless an amendment says otherwise.
 - [ADR-013: Python 3.14 runtime and concurrency](ADR-013-python-314-runtime-and-concurrency.md)
 - [ADR-014: Perceptual local-context measurements](ADR-014-perceptual-context-measurements.md)
 - [ADR-015: Complete Rust modular-monolith rewrite](ADR-015-complete-rust-rewrite.md)
+- [ADR-016: Rust-native runtime and ownership boundaries](ADR-016-rust-native-runtime-boundaries.md)
 
 ## Maintenance rules
 

@@ -2,12 +2,16 @@
 
 **Status:** Proposed for implementation review
 
-**Owning decision:** [ADR-015](ADR-015-complete-rust-rewrite.md)
+**Owning decisions:** [ADR-015](ADR-015-complete-rust-rewrite.md),
+[ADR-016](ADR-016-rust-native-runtime-boundaries.md) (proposed refinement)
 **Target branch:** `rewrite/rust`
 
 This is the target architecture, not a map of Python files to Rust files. Existing behavior is an
 important compatibility oracle, but the new module boundaries follow data ownership, side effects,
 and failure domains.
+
+The [architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md) records which current boundaries
+are enduring product intent and which are Python-era implementation compromises.
 
 ## Requirements and constraints
 
@@ -51,38 +55,36 @@ and Baton must continue working without coordinated deployment.
                                       |
                               +-------v-------+
                               |  music-server |
-                              | Axum + Tower  |
-                              +---+---+---+---+
-                                  |   |   |
-                 typed commands --+   |   +-- application services
-                                      |          | library / modes / authoring
-                              +-------v-------+  | jobs / Assistant / providers
-                              | playback actor|  |
-                              | sole state    |  |
-                              | owner         |  |
-                              +---+-------+---+  |
-                                  |       |      |
-                         watch snapshots  |      |
-                         transient events |      |
-                                  |       |      |
-                           WebSocket tasks |      |
-                                          |      |
-                               +----------v------v--+
-                               | music-storage      |
-                               | SQLx + SQLite WAL  |
-                               +----------+---------+
-                                          |
-                   +----------------------+----------------------+
-                   |                                             |
-          +--------v---------+                          +--------v---------+
-          | signal pool      |                          | voice worker     |
-          | bounded Rust DSP |                          | one model/process|
-          | + FFmpeg process |                          | supervised IPC   |
-          +------------------+                          +------------------+
+                              | Axum / wire adapter |
+                              +----------+----------+
+                                         |
+                              +----------v----------+
+                              | music-application   |
+                              | commands / queries  |
+                              +----+--------+-------+
+                                   |        |
+                         +---------v--+  +--v-------------------+
+                         | playback  |  | library / mode / job |
+                         | actor     |  | coordinators          |
+                         +----+---+--+  +--+----------+---------+
+                              |   |        |          |
+                    watch state   |        |          |
+                    transient     |        |          |
+                              |   |        |          |
+                      per-socket  |   +----v----+ +---v----------+
+                      projection  |   | storage | | media /      |
+                                  |   | write   | | analysis     |
+                                  |   | gate    | | adapters     |
+                                  |   +----+----+ +------+-------+
+                                  |        |             |
+                                  +--------v-------------v--+
+                                           SQLite / files /
+                                      FFmpeg / optional model
 ```
 
 This is a modular monolith. The diagram shows ownership and worker boundaries, not independently
-deployed services.
+deployed services. `AppRuntime` creates these owners once, injects their handles, tracks their
+tasks, and coordinates shutdown. No mutable module-global service state is permitted.
 
 ## Workspace and dependency boundaries
 
@@ -90,10 +92,12 @@ deployed services.
 Cargo.toml
 crates/
   music-domain/       Pure domain models, typed IDs, reducers, rules, analysis documents
-  music-protocol/     Public HTTP/WS DTOs, tagged messages, schemas, TS export
+  music-application/  Commands, queries, use cases, actors, coordinator ports
+  music-protocol/     Wire-only HTTP/WS DTOs, tagged messages, schemas, TS export
   music-storage/      SQLx migrations, rows, repositories, transactions
+  music-media/        Safe paths, metadata, streaming, staged mutation, FFmpeg adapters
   music-analysis/     Streaming signal pipeline, DSP, voice backend interface
-  music-server/       Axum composition, application services, actors, jobs, provider transport
+  music-server/       Axum/provider adapters, composition, server and CLI binaries
   music-output/       Rust headless appliance using the shared protocol and mpv JSON IPC
 frontend/             Existing React application
 clients/              Protocol documentation and appliance packaging
@@ -103,26 +107,31 @@ modes/                Existing seed documents
 Dependency direction is one-way:
 
 ```text
-music-domain <- music-protocol
-music-domain <- music-storage
-music-domain <- music-analysis
-all four     <- music-server
-music-protocol <- music-output
+music-application -> music-domain
+music-storage     -> music-application + music-domain
+music-media       -> music-application + music-domain
+music-analysis    -> music-application + music-domain
+music-server      -> all internal crates
+music-output      -> music-protocol
 ```
 
 `music-domain` contains no database, HTTP framework, filesystem, process, or async-runtime types.
-Application services depend on repository and adapter traits defined at the boundary they consume;
-adapters implement them in `music-storage`, `music-analysis`, or `music-server`.
+`music-protocol` is also independent of the domain: explicit edge translations stop legacy and
+compatibility fields from becoming internal invariants. `music-application` defines coarse traits
+only at real external boundaries. Adapters implement them in `music-storage`, `music-media`,
+`music-analysis`, or `music-server`; there is no repository trait per table and no generic DI
+framework.
 
-Six crates are enough to enforce the important boundaries without creating a crate per feature.
-Feature modules remain ordinary Rust modules inside `music-server` until a demonstrated dependency
-or compilation boundary justifies extraction.
+Eight crates enforce the important boundaries without creating a crate per feature. Feature modules
+remain ordinary Rust modules inside `music-application`; concrete transport and composition stay in
+`music-server` until a demonstrated dependency or deployment boundary justifies extraction.
 
 ## Selected foundation
 
 | Concern | Decision | Reason |
 |---|---|---|
 | HTTP and WebSocket | Axum on Tokio | Small, explicit handler model and Tower middleware; no second runtime abstraction. |
+| Runtime supervision | Tokio Util `CancellationToken` and `TaskTracker` | One cancellation tree and observable shutdown instead of detached tasks. |
 | Persistence | SQLx with bundled SQLite | Explicit SQL, async integration, migrations, and compile-time checked static queries. |
 | Serialization | Serde and `serde_json` | Canonical Rust ecosystem and exact tagged-enum control. |
 | REST documentation | `utoipa`/`utoipa-axum` | OpenAPI is generated from registered handlers and DTOs. |
@@ -132,12 +141,14 @@ or compilation boundary justifies extraction.
 | Audio metadata | Lofty, subject to corpus parity | Reads and writes the formats currently handled by Mutagen; isolated behind a tag adapter. |
 | Decoding/probing | FFmpeg and ffprobe subprocesses | Preserves the existing broad format support, including formats pure-Rust decoders do not cover. |
 | DSP | RustFFT plus reusable buffers | Native SIMD-capable FFT without materializing Python lists or NumPy arrays. |
+| CPU execution | Dedicated fixed Rayon pool, subject to profiling | The application's CPU budget is explicit and separate from Tokio's general blocking pool. |
 | Loudness | `ebur128` from the decoded stream | Standards-tested implementation; removes a second whole-file FFmpeg measurement pass after parity. |
-| Voice inference | `tract` candidate behind `VoiceBackend` | Supports the current legacy TF1 frozen graph, but exact preprocessing and outputs require a gate. |
+| Voice inference | `tract` candidate behind `VoiceBackend` | Try one model-owning Rust thread; select a Rust subprocess only if the feasibility gate proves isolation necessary. |
 | YAML | Typed adapter; candidate selected by corpus/security gate | Avoid deprecated `serde_yaml`/`serde_yml`; keep parser exposure small and input bounded. |
 | Headless playback | mpv subprocess JSON IPC | Keeps proven playback while avoiding an unsafe libmpv FFI layer in project code. |
 | Logging | `tracing` and `tracing-subscriber` | Structured request, action, worker, and job context without secret-bearing string assembly. |
 | CLI | Clap | One typed command tree for administration, diagnostics, migrations, and evaluation. |
+| Single-instance ownership | Standard-library file lock beside `app.db` | Prevents two servers or an offline writer from creating competing canonical owners. |
 
 Versions are pinned in `Cargo.lock` only after the feasibility gates. Axum is built directly on
 Tokio/Hyper and Tower ([Axum documentation](https://docs.rs/axum/latest/axum/)); SQLx provides a
@@ -145,7 +156,11 @@ first-class SQLite driver and migrations ([SQLx SQLite documentation](https://do
 Lofty supports reading and writing the current common tag formats
 ([Lofty documentation](https://docs.rs/lofty/latest/lofty/)); and tract currently documents legacy
 TensorFlow frozen-graph loading ([tract documentation](https://github.com/sonos/tract/blob/main/README.md)).
-These are feasibility inputs, not substitutes for tests with this project's files and model.
+Tokio documents `CancellationToken` plus `TaskTracker` for graceful task shutdown
+([TaskTracker documentation](https://docs.rs/tokio-util/latest/tokio_util/task/task_tracker/struct.TaskTracker.html)),
+and the standard library has supported cross-platform file locks since Rust 1.89
+([`File::try_lock`](https://doc.rust-lang.org/stable/std/fs/struct.File.html#method.try_lock)). These
+are feasibility inputs, not substitutes for tests with this project's files and model.
 
 ## Canonical playback model
 
@@ -168,20 +183,36 @@ be unrepresentable where that does not distort the wire contract.
 
 ### State actor
 
-One supervised Tokio task owns mutable `PlayerState`, live connection membership, and timer
-registrations. A bounded command mailbox provides backpressure. Every mutating HTTP or WebSocket
-path performs any required read-side resolution, sends a typed command, and waits for a typed
-result.
+One supervised Tokio task owns mutable `PlayerState`, live connection membership, catalog
+generations, and timer registrations. A bounded command mailbox provides backpressure. Every
+mutating HTTP or WebSocket path performs any required read-side resolution, sends a closed typed
+command, and waits for a typed result. HTTP/WS handlers cannot supply arbitrary callbacks or obtain
+a mutable state reference.
 
-For an accepted mutation, the actor:
+Commands that refer to tracks, playlists, modes, soundboards, or presets carry the catalog
+generation used during resolution. A committed library or mode mutation sends the actor a typed
+catalog-change command. The actor rejects stale resolved commands and prunes invalidated references
+before publishing the next revision.
+
+For an accepted durable mutation, the actor:
 
 1. reduces the command against the current state;
-2. persists the new materialized state;
+2. persists the new materialized state with a revision compare-and-swap;
 3. publishes the newest immutable snapshot through a Tokio `watch` channel; and
 4. emits transient events or timer changes after persistence.
 
 If persistence fails, the actor keeps the prior state and returns an error. If the actor dies, the
 server terminates instead of serving a second, unsupervised truth.
+
+Presence-only changes are explicitly ephemeral: they publish a new in-process revision but are not
+serialized into the durable playback DTO. Disconnect cleanup that changes the durable active-output
+set still follows the normal persisted path. Position reports update live state immediately and use
+the documented throttled flush policy, with a final best-effort flush during graceful shutdown.
+
+The actor distinguishes `publication_revision` from the internal `storage_revision` used for SQL
+compare-and-swap. Wire `PlayerState.revision` maps to publication ordering and may reset from the
+last durable baseline after restart; storage concurrency never depends on an ephemeral connection
+change having been written.
 
 State watchers retain only the newest full snapshot. Skipping intermediate snapshots is safe
 because clients reconcile rather than replay deltas. SFX and loop ticks use a separate bounded
@@ -197,8 +228,14 @@ and never advances through downtime.
 ### WebSocket sessions
 
 Each connection has its own send task, timeout, guest/auth state, protocol version, and stable
-client identity after registration. Slow or failed sends disconnect that socket without blocking
-the actor. Guest and legacy projections are produced per connection from the same snapshot.
+client identity after registration. It subscribes to internal latest-state and transient-event
+channels, builds its own guest/legacy wire projection, and never gives the actor a WebSocket
+handle. Slow or failed sends disconnect only that socket without blocking publication or another
+output.
+
+Latest state may coalesce because clients reconcile complete snapshots. Transient SFX/cue events
+have bounded fan-out and are never replayed late; a receiver that falls behind records diagnostics
+and drops/disconnects according to the fixture-defined policy.
 
 Registration and disconnect are actor commands. Multiple sockets may share one stable client ID;
 disconnecting one socket removes live output membership only after the last sibling connection has
@@ -210,13 +247,18 @@ expiry or revocation.
 - Preserve route paths, methods, status codes, cookie behavior, range streaming, and JSON field
   names unless a deliberate compatibility change is approved.
 - `music-protocol` owns the WebSocket tagged unions and public state DTO. The server and Rust output
-  client compile against the same crate.
+  client compile against the same crate. Wire DTOs are translated explicitly and do not double as
+  internal domain objects.
 - Rust types derive Serde and TypeScript bindings. Generated TypeScript is committed; CI regenerates
-  it and fails on drift.
+  it and fails on drift. Warnings for unsupported Serde attributes fail the export gate rather than
+  being hidden.
 - Axum routes are registered with their OpenAPI definitions. A checked-in semantic OpenAPI baseline
   detects missing operations, parameters, response statuses, and incompatible schema changes.
 - Request rejection uses a single `ApiError` envelope compatible with the frontend's `detail`
   handling. Validation errors remain 422; auth remains 401/403 as currently contracted.
+- Unexpected failures retain a safe `detail`, stable code, and correlation ID. Internal exception
+  chains, SQL, provider bodies, secrets, and absolute paths are log-only; raw exception responses
+  are an intentional compatibility improvement requiring owner acceptance.
 - WebSocket protocol v1 legacy volume projection and v2 absolute per-device volume remain until a
   separately coordinated protocol decision changes them.
 - Runtime validation remains in the old-TV compatibility client. Generated static types do not
@@ -227,12 +269,27 @@ expiry or revocation.
 ### SQLite
 
 SQLite stays in WAL mode with foreign keys enabled and a bounded busy timeout. Use a small SQLx
-pool for concurrent reads; writes remain short. Cross-resource library mutations use a dedicated
-`LibraryMutationGate` so a disk operation and its index transaction cannot race a full scan.
+pool for concurrent reads. `music-storage` owns one asynchronous write-admission gate because WAL
+still has one writer; every write transaction remains short and the gate is never held across
+filesystem, network, provider, or model work. Cross-resource mutations go through typed library or
+mode coordinators rather than unrelated locks.
+
+Before opening the database for server writes, the process takes an exclusive standard-library
+file lock beside `app.db` and holds the file handle for its lifetime. Offline mutating CLI commands
+take the same lock. Lock contention is a clear startup/CLI error, not a second best-effort owner.
 
 SQL is explicit. Repositories return domain objects rather than exposing SQLx rows outside
 `music-storage`. Static queries use SQLx checked macros with committed offline metadata; dynamic
 search/filter queries use a bounded query builder with values always bound.
+
+The playback snapshot remains one cohesive versioned JSON aggregate, but its `storage_revision` is
+also an explicit column used for compare-and-swap persistence. A mismatched revision indicates an
+unexpected second/offline writer and moves the server out of readiness instead of overwriting it.
+
+Backups acquire a maintenance admission gate, create a SQLite-consistent snapshot in a temporary
+workspace, verify it, add modes and a bounded manifest, and stream the archive from disk. They do
+not buffer the database/archive in process memory and never include the credential master key;
+the manifest records only its one-way fingerprint for pairing checks.
 
 ### Migration bootstrap
 
@@ -241,8 +298,11 @@ The existing database has no general migration ledger. The first Rust migration 
 1. opens the database read-write only after an automatic backup succeeds;
 2. inspects tables, columns, indexes, foreign keys, and SQLite version;
 3. refuses unknown or incompatible shapes with a precise `music-cli db doctor` report;
-4. creates the SQLx migration ledger and any missing structures with idempotent statements; and
-5. records the compatibility baseline only after validation succeeds.
+4. creates the SQLx migration ledger and any missing structures, including remembered-device and
+   recovery-journal tables, with idempotent statements;
+5. imports legacy `devices.json` only when the target table is empty and records its fingerprint;
+   and
+6. records the compatibility baseline only after validation succeeds.
 
 Initial migrations are additive. Tables/columns used by Python are not dropped or renamed during
 the rollback window. A pre-cutover database copy is mandatory even though migrations are designed
@@ -257,8 +317,9 @@ to be backward-compatible.
 - Existing JSON state and job documents are read through tolerant persisted DTOs, normalized, and
   written through strict current DTOs.
 - Unknown historical job kinds remain listable rather than making job history unreadable.
-- `devices.json` remains an atomic, separately backed-up operator file because its survival across
-  a database reset is intentional.
+- Remembered devices become SQLite-owned operational records. Legacy `devices.json` is a one-time
+  migration input and rollback artifact; `music-cli devices export/import` provides explicit
+  recovery without retaining a second mutable runtime store.
 - Mode YAML remains operator-authored. Reads are typed and bounded; writes use stage, fsync, atomic
   rename, and a recoverable journal for multi-file authoring commits.
 
@@ -272,6 +333,30 @@ available. The operator must verify and certify the Rust execution path explicit
 Rust signal analysis uses a new analyzer identity when output differs beyond the defined parity
 tolerance. Existing analysis rows remain untouched but stale; the durable job builds new rows.
 
+## Startup and component health
+
+Startup is a supervised sequence, not one best-effort callback:
+
+1. validate immutable configuration and acquire the instance lock;
+2. inspect, back up when required, and migrate SQLite;
+3. load the valid mode catalog and normalize the persisted playback snapshot;
+4. start the playback, library, mode, job, and analysis owners;
+5. bind HTTP/WebSocket and expose readiness; and
+6. enqueue full library reconciliation and degradable capability probes.
+
+The server validates files referenced by live playback synchronously but does not walk the complete
+media tree before serving. It starts from the durable index and reports library status as
+`reconciling`, `current`, or `failed`. A failed scan preserves the last index and remains visible and
+retryable.
+
+`/api/health` keeps its compatibility liveness response. A component readiness surface distinguishes
+critical failure from degradation. Database/migration, instance-lock, or playback-owner failure
+makes the service not ready and initiates controlled shutdown. Missing FFmpeg, unavailable optional
+voice inference, malformed individual modes, or a failed reconciliation is degraded-but-usable so
+the operator can enter the UI and repair it. Public health responses expose only coarse status;
+component errors, versions, and timings remain behind authenticated diagnostics and never include
+paths or secrets.
+
 ## Filesystem and media architecture
 
 All stored library and SFX paths use a validated POSIX-relative `LibraryPath`/`SfxPath` newtype.
@@ -280,13 +365,25 @@ rejected before filesystem access. Existing targets and creation parents are can
 verified beneath their configured roots. Property and fuzz tests cover Windows and POSIX forms,
 Unicode, separators, symlinks, and rename races.
 
+`LibraryCoordinator` is the only owner of app-managed file/index mutations. A mutation is planned,
+staged on the target filesystem, journaled durably, committed in a short database transaction, and
+completed or recovered according to its domain-specific rules. The shared journal infrastructure
+does not pretend SQLite and a media volume are one atomic filesystem.
+
+Full scans discover and read metadata outside the mutation coordinator. Their result carries the
+library generation; final diff application is short and is rejected/reconciled when a committed
+mutation changed that generation. External filesystem edits remain eventually reconciled and media
+serving always verifies the current file.
+
 Uploads stream to a uniquely named temporary file in the destination directory, enforce file-count
 and byte limits while streaming, flush and sync, then atomically rename according to the operator's
 `rename`/`overwrite`/`skip` decision. No request body or whole media file is buffered in memory.
 
 Media streaming implements single-range and normal full responses with the same headers the current
 clients require. Range, conditional request, missing-file, traversal, content-type, and disconnect
-behavior receive integration tests with generated media fixtures.
+behavior receive integration tests with generated media fixtures. Tower's file service is an
+implementation candidate, not assumed parity; its current range behavior is wrapped or replaced
+where the fixture corpus differs.
 
 Lofty is hidden behind `TagReader`/`TagWriter`. Before selection it must round-trip the project's
 declarative tag registry across generated MP3, FLAC, Ogg/Opus, M4A/AAC, WAV, and supported edge
@@ -295,10 +392,12 @@ Unsupported or lossy formats return per-track partial failures rather than corru
 
 ## Modes, playlists, authoring, and cleanup
 
-- Modes are loaded into an immutable `ModeCatalog` snapshot and swapped atomically after a complete
-  successful parse. A bad reload leaves the last good snapshot active.
-- Preset and mode writes serialize through one mode-mutation gate. Active preset content changes
-  notify the playback actor to increment `preset_revision`.
+- `ModeCoordinator` loads modes into an immutable versioned `ModeCatalog` snapshot and publishes it
+  only after a complete successful parse. A bad reload leaves the last good snapshot active and
+  exposes bounded per-document diagnostics.
+- Preset and mode writes are staged and serialized through that coordinator. Committed changes send
+  a typed catalog-change command to playback; active preset content increments `preset_revision`,
+  and removed resources are pruned in the same actor revision.
 - Playlist ordering and automatic-playlist materialization live in pure domain services and commit
   in one SQLite transaction.
 - Authoring remains source -> pure preview -> explicit selection -> atomic commit. The commit stages
@@ -310,6 +409,9 @@ Unsupported or lossy formats return per-track partial failures rather than corru
 
 `JobKind` is a closed enum for current jobs, while historical unknown strings remain representable.
 Each current handler has typed parameters and results serialized into the compatible JSON columns.
+New rows also persist lane, parameter-schema version, restart policy, checkpoint version, and the
+current per-claim `execution_id`; recovery does not infer historical policy solely from whichever
+handler registry happens to be compiled today.
 
 A `JobCoordinator` supervises two bounded lanes:
 
@@ -317,10 +419,15 @@ A `JobCoordinator` supervises two bounded lanes:
 - **provider lane:** one provider-cost-bearing job at a time.
 
 The coordinator claims rows transactionally, owns cancellation tokens, and checkpoints progress and
-safe partial results. Restartable handlers must be idempotent or checkpointed. Non-restartable
-provider work is marked interrupted after an uncertain shutdown and is never repeated silently.
-Changing or deleting provider configuration remains blocked while a dependent provider job is
-active.
+safe partial results. Checkpoint/final writes compare the current `execution_id`, so a late cancelled
+attempt cannot overwrite a retry. Restartable handlers must be idempotent or checkpointed.
+Non-restartable provider work is marked interrupted after an uncertain shutdown and is never
+repeated silently. Changing or deleting provider configuration remains blocked while a dependent
+provider job is active.
+
+Handlers are async coordinators, not arbitrary blocking callbacks. CPU work enters the fixed
+analysis pool, filesystem work enters bounded media workers, and provider calls use bounded async
+I/O. The two actual lanes remain intentionally simpler than a generic scheduler or broker.
 
 ## Local audio/context analysis
 
@@ -344,10 +451,11 @@ The target is one decode pass for signal context and loudness. The first parity 
 temporarily retain a separate FFmpeg loudness probe until `ebur128` agrees on the representative
 corpus; that adapter is removed before the Python runtime is removed.
 
-Independent tracks run on a dedicated bounded CPU pool. FFmpeg is constrained to one thread per
-track. Results return to the coordinator, which alone writes SQLite checkpoints. Concurrency is
-configuration-bounded and benchmarked under the three-CPU cgroup rather than inferred from host CPU
-count. Cancellation is cooperative in Rust loops and actively terminates the owned FFmpeg child.
+Independent tracks run on a dedicated fixed CPU pool rather than Tokio's general blocking pool.
+FFmpeg is constrained to one thread per track. Results return to the coordinator, which alone writes
+SQLite checkpoints. Concurrency is configuration-bounded and benchmarked under the three-CPU cgroup
+rather than inferred from host CPU count. Cancellation is cooperative in Rust loops and actively
+terminates the owned FFmpeg child.
 
 The Rust analyzer is calibrated against the synthetic probes that defined `local-context/v2` and a
 private representative corpus. Numeric tolerances are field-specific; no semantic tags are added.
@@ -367,17 +475,24 @@ their existing CC BY-NC-SA terms and are never downloaded during build or startu
 Essentia runtime does not change the model's license or permit copying implementation code from an
 incompatible source.
 
-The model is owned by exactly one supervised `music-analysis-worker` process. The parent sends
-versioned, length-prefixed requests and receives bounded results; worker logs go only to stderr.
-The worker processes tracks sequentially, can batch model windows internally, exposes model/runtime
-identity without paths, and exits after a configured work or memory threshold. Cancellation or a
-deadline kills and replaces the worker, so native/model code cannot wedge server shutdown.
+The first candidate gives the model to exactly one dedicated, supervised Rust inference thread.
+That thread creates and owns non-`Send` model state, processes bounded requests sequentially, can
+batch windows internally, and exposes model/runtime identity without paths. Cancellation is checked
+between windows and results return through a bounded channel. A panic is observed by the supervisor
+and makes the optional backend unavailable until it can be cleanly recreated.
+
+This thread boundary is conditional on evidence. If the selected backend contains unsafe native
+code, leaks, wedges, cannot bound an inference call, or cannot meet shutdown deadlines, the same
+`VoiceBackend` runs in a supervised Rust subprocess using versioned length-prefixed IPC. Process
+isolation is therefore a tested fallback, not a Python-era default.
 
 Before the main port depends on it, a feasibility gate must reproduce Essentia's preprocessing,
 window ordering, output tensor, normalized score, and coverage on the exact checksum-pinned model.
-If tract cannot run the graph accurately, evaluate a maintained Rust binding to a native inference
-runtime behind the same process boundary. There is no Python fallback. Cutover either passes the
-voice gate or receives an explicit owner decision to ship the optional stage as unavailable.
+It must also decide whether runtime loads TF1 directly or prepares a checksum/version-bound NNEF
+artifact, because tract's public API treats TensorFlow as a legacy format. If tract cannot run the
+graph accurately, evaluate a maintained Rust/native runtime behind the same interface and isolation
+gate. There is no Python fallback. Cutover either passes the voice gate or receives an explicit
+owner decision to ship the optional stage as unavailable.
 
 ## Assistant and provider boundary
 
@@ -416,6 +531,8 @@ non-restartability retain their present meaning.
   in one small crate with a documented safety contract and dedicated tests.
 - Application crates deny Clippy's `unwrap_used`, `expect_used`, and panic lints outside tests and
   explicitly documented process-fatal startup invariants.
+- Release builds retain panic unwinding so task/thread supervisors can observe failure. Critical
+  owner panics initiate controlled shutdown; they are never treated as normal request errors.
 - Secrets use `secrecy`/zeroization-aware wrappers and never implement ordinary display or debug.
 - Session tokens use OS randomness and database lookup; cookies keep current secure attributes.
 - Password verification uses Argon2 and a dummy hash path for unknown users.
@@ -441,9 +558,11 @@ Every long operation declares:
 - its safe checkpoint; and
 - what happens when its external side effect succeeds but persistence fails.
 
-Shutdown stops admission, closes WebSocket sessions, requests job cancellation/checkpointing,
-terminates analysis children, persists final actor state, and closes SQLite. A deadline then exits
-non-zero so the container supervisor can restart cleanly; it does not wait forever for native work.
+`AppRuntime` owns one root cancellation token and tracks every long-lived task. Shutdown stops
+admission, closes WebSocket sessions, requests job cancellation/checkpointing, terminates any
+analysis children, persists final actor state, releases the database/instance lock, and closes
+SQLite. A deadline then exits non-zero so the container supervisor can restart cleanly; it does not
+wait forever for native work.
 
 ## Observability and performance
 
@@ -477,16 +596,20 @@ The production image remains a multi-stage build:
    CA certificates, FFmpeg/ffprobe, and no compiler or Python runtime.
 
 The server runs as the current non-root UID, serves the SPA and API from one origin, uses the same
-mounts and environment names where possible, and exposes the same health endpoint. `music-cli`
-provides the container healthcheck so the runtime does not need curl or Python.
+mounts and environment names where possible, and preserves the compatibility health endpoint while
+adding component readiness. `DEVICES_FILE` becomes a migration/import setting rather than a mutable
+runtime mount after cutover. `music-cli` provides the container healthcheck so the runtime does not
+need curl or Python.
 
 ## Decisions to revisit only with evidence
 
 - Replace FFmpeg decoding with Symphonia only after every supported format, metadata behavior, and
   performance characteristic passes the corpus gate.
-- Run voice inference in-process only after repeat-run memory and cancellation measurements prove
-  the process boundary unnecessary.
+- Promote voice inference to a Rust subprocess when repeat-run memory, panic, native-code,
+  cancellation, or deadline measurements show the in-process thread is not safely bounded.
 - Add more analysis workers only after cgroup CPU/RSS measurements show headroom.
+- Add a filesystem watcher only as a reconciliation accelerator after bind-mount behavior is
+  measured; it never replaces explicit scans or current-file checks.
 - Split a crate or service only when a real dependency, fault-isolation, or deployment boundary
   appears.
 - Change SQLite or the wire protocol only through a separate ADR and coordinated compatibility
