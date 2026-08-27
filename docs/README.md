@@ -13,6 +13,8 @@ not a second description of the implementation.
 - Versioned Authoring import document: [authoring import v1](../clients/authoring-import-v1.md)
 - Active work deliberately left for later: [backlog](../TODO.md)
 - Assistant/Authoring interaction rules: [Assistant UX philosophy](assistant-ux-philosophy.md)
+- Rust rewrite target architecture: [Rust rewrite architecture](RUST_REWRITE_ARCHITECTURE.md)
+- Rust rewrite phases, gates, and cutover: [Rust rewrite execution plan](RUST_REWRITE_PLAN.md)
 
 ## Architecture decisions
 
@@ -34,6 +36,7 @@ decision when it was accepted unless an amendment says otherwise.
 - [ADR-012: Native context analysis and workload profiling](ADR-012-native-context-analysis-and-profiling.md)
 - [ADR-013: Python 3.14 runtime and concurrency](ADR-013-python-314-runtime-and-concurrency.md)
 - [ADR-014: Perceptual local-context measurements](ADR-014-perceptual-context-measurements.md)
+- [ADR-015: Complete Rust modular-monolith rewrite](ADR-015-complete-rust-rewrite.md)
 
 ## Maintenance rules
 
