@@ -198,8 +198,6 @@
             "type": "string"
           },
           "track_count": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           }
         },
@@ -544,23 +542,15 @@
       "RescanResult": {
         "properties": {
           "added": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           },
           "removed": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           },
           "unchanged": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           },
           "updated": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           }
         },
@@ -582,13 +572,9 @@
       "SearchResponse": {
         "properties": {
           "limit": {
-            "format": "int32",
-            "minimum": 0,
             "type": "integer"
           },
           "offset": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           },
           "order": {
@@ -598,8 +584,6 @@
             "$ref": "#/components/schemas/SearchSort"
           },
           "total": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           },
           "tracks": {
@@ -643,6 +627,7 @@
       "TrackOut": {
         "properties": {
           "added_at": {
+            "format": "date-time",
             "type": "string"
           },
           "album": {
@@ -655,19 +640,23 @@
             "type": "string"
           },
           "bpm": {
-            "format": "int32",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "disc_no": {
-            "format": "int32",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "display_title": {
@@ -677,11 +666,9 @@
             "type": "string"
           },
           "id": {
-            "format": "int64",
             "type": "integer"
           },
           "length_s": {
-            "format": "double",
             "type": "number"
           },
           "origin": {
@@ -691,27 +678,29 @@
             "type": "string"
           },
           "size_bytes": {
-            "format": "int64",
-            "minimum": 0,
             "type": "integer"
           },
           "title": {
             "type": "string"
           },
           "track_no": {
-            "format": "int32",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "year": {
-            "format": "int32",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -722,8 +711,12 @@
           "artist",
           "album_artist",
           "album",
+          "track_no",
+          "disc_no",
+          "year",
           "genre",
           "length_s",
+          "bpm",
           "size_bytes",
           "added_at",
           "display_title",
@@ -1115,6 +1108,7 @@
             "name": "q",
             "required": false,
             "schema": {
+              "default": "",
               "type": "string"
             }
           },
@@ -1123,7 +1117,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "format": "int32",
+              "default": 100,
               "maximum": 500,
               "minimum": 1,
               "type": "integer"
@@ -1134,7 +1128,7 @@
             "name": "offset",
             "required": false,
             "schema": {
-              "format": "int64",
+              "default": 0,
               "minimum": 0,
               "type": "integer"
             }
@@ -1144,7 +1138,19 @@
             "name": "sort",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/SearchSort"
+              "default": "artist",
+              "enum": [
+                "title",
+                "artist",
+                "album",
+                "album_artist",
+                "year",
+                "length_s",
+                "track_no",
+                "added_at",
+                "path"
+              ],
+              "type": "string"
             }
           },
           {
@@ -1152,7 +1158,12 @@
             "name": "order",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/SearchOrder"
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
             }
           }
         ],
@@ -1236,7 +1247,6 @@
             "name": "track_id",
             "required": true,
             "schema": {
-              "format": "int64",
               "type": "integer"
             }
           }
@@ -1268,6 +1278,84 @@
         ]
       }
     },
+    "/api/library/tracks/{track_id}/cover": {
+      "get": {
+        "operationId": "cover",
+        "parameters": [
+          {
+            "description": "Track identifier",
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/tracks/{track_id}/stream": {
+      "get": {
+        "operationId": "stream",
+        "parameters": [
+          {
+            "description": "Track identifier",
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
     "/api/library/tree": {
       "get": {
         "operationId": "tree",
@@ -1277,6 +1365,7 @@
             "name": "path",
             "required": false,
             "schema": {
+              "default": "",
               "type": "string"
             }
           }

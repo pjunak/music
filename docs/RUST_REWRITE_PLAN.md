@@ -326,7 +326,8 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
 - [x] Durable-index startup, generation-checked full reconciliation, visible scan status,
   tree/folder/search/batch/rescan HTTP APIs, metadata fallback, and source signatures.
 - Incremental reconciliation after committed app-managed mutations and optional watcher hints.
-- Full/range media and cover streaming with disconnect-safe file handles.
+- [x] Chunked full/single-range media streaming with ETag/conditional handling, bounded cover
+  extraction and folder fallback, inert MIME allow-listing, and disconnect-safe file bodies.
 - Streaming uploads and explicit conflict handling.
 - Shared staged-file/recovery infrastructure; metadata edits, moves, bulk operations, folders, SFX
   files, and per-item partial failures.

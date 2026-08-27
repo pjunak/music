@@ -11,7 +11,8 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{
-    AnyOfBuilder, Array, ArrayBuilder, Object, ObjectBuilder, Schema, SchemaType, Type,
+    AnyOfBuilder, Array, ArrayBuilder, KnownFormat, Object, ObjectBuilder, Schema, SchemaFormat,
+    SchemaType, Type,
 };
 
 use crate::config::ConfigError;
@@ -194,6 +195,30 @@ pub(crate) fn openapi_integer() -> RefOr<Schema> {
     openapi_primitive(Type::Integer)
 }
 
+pub(crate) fn openapi_number() -> RefOr<Schema> {
+    openapi_primitive(Type::Number)
+}
+
+pub(crate) fn openapi_nullable_integer() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(openapi_integer())
+            .item(openapi_primitive(Type::Null))
+            .build(),
+    )
+    .into()
+}
+
+pub(crate) fn openapi_datetime() -> RefOr<Schema> {
+    Schema::Object(
+        ObjectBuilder::new()
+            .schema_type(Type::String)
+            .format(Some(SchemaFormat::KnownFormat(KnownFormat::DateTime)))
+            .build(),
+    )
+    .into()
+}
+
 pub(crate) fn openapi_nullable_string() -> RefOr<Schema> {
     Schema::AnyOf(
         AnyOfBuilder::new()
@@ -285,6 +310,11 @@ impl ApiError {
     #[must_use]
     pub const fn plain_not_found(detail: &'static str) -> Self {
         Self::plain(StatusCode::NOT_FOUND, detail)
+    }
+
+    #[must_use]
+    pub const fn gone(detail: &'static str) -> Self {
+        Self::plain(StatusCode::GONE, detail)
     }
 
     #[must_use]

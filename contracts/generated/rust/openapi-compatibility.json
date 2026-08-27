@@ -2,9 +2,9 @@
   "schema_version": "openapi-compatibility/v1",
   "verdict": "incomplete",
   "reference_operation_count": 144,
-  "candidate_operation_count": 17,
-  "matched_operation_count": 16,
-  "fully_compatible_operation_count": 9,
+  "candidate_operation_count": 19,
+  "matched_operation_count": 18,
+  "fully_compatible_operation_count": 17,
   "missing_operations": [
     "DELETE /api/assistant/providers/connections/{connection_id}",
     "DELETE /api/assistant/providers/connections/{connection_id}/credential",
@@ -46,8 +46,6 @@
     "GET /api/jobs/{job_id}",
     "GET /api/library/cleanup/batches",
     "GET /api/library/cleanup/batches/{batch_id}",
-    "GET /api/library/tracks/{track_id}/cover",
-    "GET /api/library/tracks/{track_id}/stream",
     "GET /api/modes",
     "GET /api/modes/active",
     "GET /api/modes/{mode_id}",
@@ -138,20 +136,10 @@
   "candidate_only_operations": [
     "GET /api/readiness"
   ],
-  "parameter_mismatches": [
-    "GET /api/library/search",
-    "GET /api/library/tracks/{track_id}",
-    "GET /api/library/tree"
-  ],
+  "parameter_mismatches": [],
   "request_body_mismatches": [],
   "response_mismatches": [
-    "GET /api/library/folders",
-    "GET /api/library/search",
-    "GET /api/library/tracks",
-    "GET /api/library/tracks/{track_id}",
-    "GET /api/library/tree",
-    "GET /api/sync/state",
-    "POST /api/library/rescan"
+    "GET /api/sync/state"
   ],
   "security_mismatches": []
 }

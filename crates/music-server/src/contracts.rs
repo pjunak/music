@@ -463,6 +463,8 @@ mod tests {
         assert!(paths.contains_key("/api/library/folders"));
         assert!(paths.contains_key("/api/library/tracks"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}"));
+        assert!(paths.contains_key("/api/library/tracks/{track_id}/stream"));
+        assert!(paths.contains_key("/api/library/tracks/{track_id}/cover"));
         assert!(paths.contains_key("/api/library/rescan"));
         assert!(!paths.contains_key("/health"));
         assert!(!paths.contains_key("/api/ws"));

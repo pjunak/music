@@ -1,21 +1,36 @@
 use std::sync::Arc;
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::rejection::{PathRejection, QueryRejection};
-use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
+use axum::extract::{Path, Query, Request, State};
+use axum::http::header::{
+    CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS,
+};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::library::{
     LibraryCoordinatorHandle, LibrarySearch, LibraryService, LibrarySortKey, SortOrder,
 };
 use music_domain::{IndexedTrack, LibraryPath, TrackId};
-use music_media::{LibraryRoot, list_library_directories};
+use music_media::{
+    LibraryRoot, MediaDeliveryError, MetadataAdapter, list_library_directories,
+    read_library_cover_art, resolve_library_media_file,
+};
 use serde::{Deserialize, Serialize};
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
+use utoipa::openapi::RefOr;
+use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::error::{ApiError, HttpValidationErrorBody};
+use crate::error::{
+    ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_integer,
+    openapi_number,
+};
 use crate::http::HttpState;
 
 #[derive(Debug, Clone)]
@@ -23,6 +38,7 @@ pub(crate) struct RuntimeLibrary {
     pub(crate) service: Arc<LibraryService>,
     pub(crate) coordinator: LibraryCoordinatorHandle,
     pub(crate) root: LibraryRoot,
+    pub(crate) metadata: MetadataAdapter,
 }
 
 pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
@@ -32,25 +48,35 @@ pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(folders))
         .routes(routes!(tracks_batch))
         .routes(routes!(track))
+        .routes(routes!(stream))
+        .routes(routes!(cover))
         .routes(routes!(rescan))
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[schema(as = TrackOut)]
 struct TrackResponse {
+    #[schema(schema_with = openapi_integer)]
     id: i64,
     path: String,
     title: String,
     artist: String,
     album_artist: String,
     album: String,
+    #[schema(required = true, schema_with = openapi_nullable_integer)]
     track_no: Option<u32>,
+    #[schema(required = true, schema_with = openapi_nullable_integer)]
     disc_no: Option<u32>,
+    #[schema(required = true, schema_with = openapi_nullable_integer)]
     year: Option<u32>,
     genre: String,
+    #[schema(schema_with = openapi_number)]
     length_s: f64,
+    #[schema(required = true, schema_with = openapi_nullable_integer)]
     bpm: Option<u32>,
+    #[schema(schema_with = openapi_integer)]
     size_bytes: u64,
+    #[schema(schema_with = openapi_datetime)]
     added_at: String,
     display_title: String,
     origin: String,
@@ -85,8 +111,11 @@ impl TryFrom<IndexedTrack> for TrackResponse {
 #[schema(as = SearchResponse)]
 struct SearchResponse {
     tracks: Vec<TrackResponse>,
+    #[schema(schema_with = openapi_integer)]
     total: u64,
+    #[schema(schema_with = openapi_integer)]
     limit: u16,
+    #[schema(schema_with = openapi_integer)]
     offset: u64,
     sort: SearchSort,
     order: SearchOrder,
@@ -104,6 +133,7 @@ struct TreeResponse {
 struct FolderResponse {
     name: String,
     path: String,
+    #[schema(schema_with = openapi_integer)]
     track_count: u64,
     has_children: bool,
 }
@@ -117,9 +147,13 @@ struct FoldersResponse {
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[schema(as = RescanResult)]
 struct RescanResponse {
+    #[schema(schema_with = openapi_integer)]
     added: u64,
+    #[schema(schema_with = openapi_integer)]
     updated: u64,
+    #[schema(schema_with = openapi_integer)]
     removed: u64,
+    #[schema(schema_with = openapi_integer)]
     unchanged: u64,
 }
 
@@ -175,16 +209,52 @@ impl From<SearchOrder> for SortOrder {
 #[into_params(parameter_in = Query)]
 struct SearchQuery {
     #[serde(default)]
+    #[param(default = "")]
     q: String,
     #[serde(default = "default_search_limit")]
-    #[param(minimum = 1, maximum = 500)]
+    #[param(value_type = i128, default = 100, minimum = 1, maximum = 500)]
     limit: u16,
     #[serde(default)]
+    #[param(value_type = i128, default = 0, minimum = 0)]
     offset: u64,
     #[serde(default)]
+    #[param(schema_with = search_sort_parameter_schema)]
     sort: SearchSort,
     #[serde(default)]
+    #[param(schema_with = search_order_parameter_schema)]
     order: SearchOrder,
+}
+
+fn search_sort_parameter_schema() -> RefOr<Schema> {
+    Schema::Object(
+        ObjectBuilder::new()
+            .schema_type(Type::String)
+            .enum_values(Some([
+                "title",
+                "artist",
+                "album",
+                "album_artist",
+                "year",
+                "length_s",
+                "track_no",
+                "added_at",
+                "path",
+            ]))
+            .default(Some(serde_json::Value::String("artist".to_owned())))
+            .build(),
+    )
+    .into()
+}
+
+fn search_order_parameter_schema() -> RefOr<Schema> {
+    Schema::Object(
+        ObjectBuilder::new()
+            .schema_type(Type::String)
+            .enum_values(Some(["asc", "desc"]))
+            .default(Some(serde_json::Value::String("asc".to_owned())))
+            .build(),
+    )
+    .into()
 }
 
 const fn default_search_limit() -> u16 {
@@ -194,6 +264,7 @@ const fn default_search_limit() -> u16 {
 #[derive(Debug, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct TreeQuery {
+    #[param(default = "")]
     path: Option<String>,
 }
 
@@ -378,7 +449,7 @@ async fn tracks_batch(
 #[utoipa::path(
     get,
     path = "/library/tracks/{track_id}",
-    params(("track_id" = i64, Path, description = "Track identifier")),
+    params(("track_id" = i128, Path, description = "Track identifier")),
     responses(
         (status = 200, description = "Successful Response", body = TrackResponse),
         (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
@@ -392,20 +463,117 @@ async fn track(
 ) -> Result<Json<TrackResponse>, ApiError> {
     let _ = crate::auth::optional_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
-    let track_id = match TrackId::new(raw_track_id) {
-        Ok(track_id) => track_id,
-        Err(_) => return Err(ApiError::plain_not_found("track not found")),
-    };
-    let track = library(&state)?
-        .service
-        .track(track_id)
+    let track = indexed_track(&state, raw_track_id).await?;
+    Ok(Json(track.try_into()?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/library/tracks/{track_id}/stream",
+    params(("track_id" = i128, Path, description = "Track identifier")),
+    responses(
+        (status = 200, description = "Successful Response", body = serde_json::Value),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn stream(
+    State(state): State<HttpState>,
+    track_id: Result<Path<i64>, PathRejection>,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let _ = crate::auth::optional_session(&state, request.headers(), SessionTouch::UpdateLastSeen)
+        .await?;
+    let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
+    let track = indexed_track(&state, raw_track_id).await?;
+    let library = library(&state)?;
+    let root = library.root.clone();
+    let path = track.path;
+    let absolute = tokio::task::spawn_blocking(move || resolve_library_media_file(&root, &path))
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "library track query failed");
+            tracing::error!(error = %error, "media path worker failed");
             ApiError::internal()
         })?
-        .ok_or_else(|| ApiError::plain_not_found("track not found"))?;
-    Ok(Json(track.try_into()?))
+        .map_err(|error| map_stream_delivery_error(raw_track_id, &error))?;
+
+    let response = ServeFile::new(absolute)
+        .oneshot(request)
+        .await
+        .map_err(|never| match never {})?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(ApiError::gone("track file missing"));
+    }
+    if response.status() == StatusCode::INTERNAL_SERVER_ERROR {
+        tracing::error!(
+            track_id = raw_track_id,
+            "media stream failed after path validation"
+        );
+        return Err(ApiError::internal());
+    }
+    let mut response = response.map(Body::new);
+    response
+        .headers_mut()
+        .insert(CONTENT_DISPOSITION, HeaderValue::from_static("inline"));
+    Ok(response)
+}
+
+#[utoipa::path(
+    get,
+    path = "/library/tracks/{track_id}/cover",
+    params(("track_id" = i128, Path, description = "Track identifier")),
+    responses(
+        (status = 200, description = "Successful Response", body = serde_json::Value),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn cover(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    track_id: Result<Path<i64>, PathRejection>,
+) -> Result<Response, ApiError> {
+    let _ = crate::auth::optional_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
+    let track = indexed_track(&state, raw_track_id).await?;
+    let library = library(&state)?;
+    let root = library.root.clone();
+    let metadata = library.metadata.clone();
+    let path = track.path;
+    let artwork =
+        tokio::task::spawn_blocking(move || read_library_cover_art(&root, &path, &metadata))
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "cover art worker failed");
+                ApiError::internal()
+            })?
+            .map_err(|error| {
+                if error.is_unavailable() {
+                    ApiError::plain_not_found("no cover art")
+                } else {
+                    tracing::error!(
+                        track_id = raw_track_id,
+                        error_code = error.code(),
+                        "cover art extraction failed"
+                    );
+                    ApiError::internal()
+                }
+            })?
+            .ok_or_else(|| ApiError::plain_not_found("no cover art"))?;
+
+    let mut response = artwork.bytes.into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static(safe_cover_mime(&artwork.mime_type)),
+    );
+    response
+        .headers_mut()
+        .insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    response.headers_mut().insert(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    Ok(response)
 }
 
 #[utoipa::path(
@@ -440,4 +608,54 @@ fn library(state: &HttpState) -> Result<&RuntimeLibrary, ApiError> {
         .library
         .as_deref()
         .ok_or_else(ApiError::service_unavailable)
+}
+
+async fn indexed_track(state: &HttpState, raw_track_id: i64) -> Result<IndexedTrack, ApiError> {
+    let track_id =
+        TrackId::new(raw_track_id).map_err(|_| ApiError::plain_not_found("track not found"))?;
+    library(state)?
+        .service
+        .track(track_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "library track query failed");
+            ApiError::internal()
+        })?
+        .ok_or_else(|| ApiError::plain_not_found("track not found"))
+}
+
+fn map_stream_delivery_error(track_id: i64, error: &MediaDeliveryError) -> ApiError {
+    if error.is_unavailable() {
+        ApiError::gone("track file missing")
+    } else {
+        tracing::error!(
+            track_id,
+            error_code = error.code(),
+            "media stream path validation failed"
+        );
+        ApiError::internal()
+    }
+}
+
+fn safe_cover_mime(candidate: &str) -> &'static str {
+    match candidate {
+        "image/jpeg" => "image/jpeg",
+        "image/png" => "image/png",
+        "image/gif" => "image/gif",
+        "image/webp" => "image/webp",
+        "image/avif" => "image/avif",
+        _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_cover_mime;
+
+    #[test]
+    fn hostile_cover_mime_is_never_rendered_as_active_content() {
+        assert_eq!(safe_cover_mime("image/png"), "image/png");
+        assert_eq!(safe_cover_mime("text/html"), "application/octet-stream");
+        assert_eq!(safe_cover_mime("image/svg+xml"), "application/octet-stream");
+    }
 }

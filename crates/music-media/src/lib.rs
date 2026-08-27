@@ -9,11 +9,15 @@
 //! Filesystem effects stay behind explicit plans and recovery journals; pure
 //! cleanup or authoring analysis must not acquire write-capable dependencies.
 
+mod delivery;
 mod discovery;
 mod metadata;
 mod path;
 mod yaml;
 
+pub use delivery::{
+    CoverArt, MediaDeliveryError, read_library_cover_art, resolve_library_media_file,
+};
 pub use discovery::{
     FilesystemDiscoveryError, FilesystemLibraryDiscovery, LibraryDirectory,
     list_library_directories,

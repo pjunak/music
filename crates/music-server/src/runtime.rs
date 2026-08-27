@@ -51,6 +51,7 @@ pub struct AppRuntime {
     library: LibraryCoordinatorHandle,
     library_service: Arc<LibraryService>,
     library_root: LibraryRoot,
+    library_metadata: MetadataAdapter,
 }
 
 impl AppRuntime {
@@ -130,9 +131,10 @@ impl AppRuntime {
         };
         health.set_component("playback", true, ComponentStatus::Ready);
         let library_root = LibraryRoot::open(&config.music_dir)?;
+        let library_metadata = MetadataAdapter::with_ffmpeg(FfmpegTools::new("ffmpeg", "ffprobe"));
         let discovery = Arc::new(FilesystemLibraryDiscovery::new(
             library_root.clone(),
-            MetadataAdapter::with_ffmpeg(FfmpegTools::new("ffmpeg", "ffprobe")),
+            library_metadata.clone(),
         ));
         let mutation_repository: Arc<dyn LibraryMutationRepository> = storage.clone();
         let read_repository: Arc<dyn LibraryRepository> = storage.clone();
@@ -164,6 +166,7 @@ impl AppRuntime {
             library,
             library_service,
             library_root,
+            library_metadata,
         })
     }
 
@@ -193,6 +196,7 @@ impl AppRuntime {
                 service: Arc::clone(&self.library_service),
                 coordinator: self.library.clone(),
                 root: self.library_root.clone(),
+                metadata: self.library_metadata.clone(),
             }),
         )
     }
@@ -525,7 +529,10 @@ mod tests {
     use std::time::Duration;
 
     use axum::body::{Body, to_bytes};
-    use axum::http::header::SET_COOKIE;
+    use axum::http::header::{
+        ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_RANGE, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
+        ETAG, IF_NONE_MATCH, RANGE, SET_COOKIE, X_CONTENT_TYPE_OPTIONS,
+    };
     use axum::http::{Request, StatusCode};
     use music_application::auth::UnixSeconds;
     use music_application::library::ReconciliationStatus;
@@ -695,6 +702,17 @@ mod tests {
         .await?;
         let ids = runtime.library_service.catalog_track_ids().await?;
         assert_eq!(ids.len(), 2);
+        let indexed_tracks = runtime.library_service.tracks_by_ids(&ids).await?;
+        let first_id = indexed_tracks
+            .iter()
+            .find(|track| track.path.as_str() == "Album/01 - First.mp3")
+            .ok_or("first indexed track was missing")?
+            .id;
+        let second_id = indexed_tracks
+            .iter()
+            .find(|track| track.path.as_str() == "Album/02 - Second.flac")
+            .ok_or("second indexed track was missing")?
+            .id;
 
         let hash = music_storage::hash_password("correct horse battery staple")?;
         runtime
@@ -806,10 +824,119 @@ mod tests {
                 .any(|folder| folder["path"] == "Campaign/Scenes/Empty")
         );
 
+        let stream = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/stream", first_id.get()))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(stream.status(), StatusCode::OK);
+        assert_eq!(
+            stream.headers().get(CONTENT_TYPE),
+            Some(&"audio/mpeg".parse()?)
+        );
+        assert_eq!(stream.headers().get(ACCEPT_RANGES), Some(&"bytes".parse()?));
+        assert_eq!(
+            stream.headers().get(CONTENT_DISPOSITION),
+            Some(&"inline".parse()?)
+        );
+        let etag = stream
+            .headers()
+            .get(ETAG)
+            .ok_or("stream response omitted its entity tag")?
+            .clone();
+        assert_eq!(
+            to_bytes(stream.into_body(), 1024 * 1024).await?,
+            &b"metadata fallback fixture"[..]
+        );
+
+        let conditional = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/stream", first_id.get()))
+                    .header(IF_NONE_MATCH, etag)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(conditional.status(), StatusCode::NOT_MODIFIED);
+        assert!(to_bytes(conditional.into_body(), 1024).await?.is_empty());
+
+        let range = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/stream", first_id.get()))
+                    .header(RANGE, "bytes=0-7")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(range.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            range.headers().get(CONTENT_RANGE),
+            Some(&"bytes 0-7/25".parse()?)
+        );
+        assert_eq!(to_bytes(range.into_body(), 1024).await?, &b"metadata"[..]);
+
+        let unsatisfiable = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/stream", first_id.get()))
+                    .header(RANGE, "bytes=9999-")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(unsatisfiable.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+
+        let multiple_ranges = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/stream", first_id.get()))
+                    .header(RANGE, "bytes=0-1,3-4")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(multiple_ranges.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+
+        let no_cover = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/cover", first_id.get()))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(no_cover.status(), StatusCode::NOT_FOUND);
+
+        fs::write(
+            directory.path().join("music/Album/cover.png"),
+            b"safe cover",
+        )?;
+        let cover = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/cover", first_id.get()))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(cover.status(), StatusCode::OK);
+        assert_eq!(
+            cover.headers().get(CONTENT_TYPE),
+            Some(&"image/png".parse()?)
+        );
+        assert_eq!(
+            cover.headers().get(X_CONTENT_TYPE_OPTIONS),
+            Some(&"nosniff".parse()?)
+        );
+        assert_eq!(
+            cover.headers().get(CONTENT_SECURITY_POLICY),
+            Some(&"default-src 'none'; sandbox".parse()?)
+        );
+        assert_eq!(to_bytes(cover.into_body(), 1024).await?, &b"safe cover"[..]);
+
         let rescan = router
+            .clone()
             .oneshot(
                 Request::post("/api/library/rescan")
-                    .header("cookie", cookie)
+                    .header("cookie", &cookie)
                     .body(Body::empty())?,
             )
             .await?;
@@ -818,6 +945,15 @@ mod tests {
             serde_json::from_slice(&to_bytes(rescan.into_body(), 1024 * 1024).await?)?;
         assert_eq!(rescan_json["unchanged"], 2);
         assert_eq!(runtime.library_status().generation.get(), 2);
+
+        fs::remove_file(directory.path().join("music/Album/02 - Second.flac"))?;
+        let missing_stream = router
+            .oneshot(
+                Request::get(format!("/api/library/tracks/{}/stream", second_id.get()))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(missing_stream.status(), StatusCode::GONE);
 
         runtime.shutdown().await?;
         Ok(())
