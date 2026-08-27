@@ -354,7 +354,7 @@ mod tests {
         )
         .fetch_one(&storage.pool)
         .await?;
-        assert_eq!(table_count, 21);
+        assert_eq!(table_count, 22);
 
         let foreign_key_failures = sqlx::query("PRAGMA foreign_key_check")
             .fetch_all(&storage.pool)

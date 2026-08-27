@@ -9,8 +9,11 @@
 //! This crate must remain independent of async runtimes, databases, HTTP,
 //! filesystems, processes, and public wire compatibility types.
 
+mod library;
 mod media_path;
 mod playback;
+
+pub use library::{IndexedTrack, LibraryGeneration, LibraryRecordError, TrackMetadata};
 
 pub use media_path::{
     LibraryMedia, LibraryPath, MAX_MEDIA_PATH_BYTES, MediaPathError, RootedMediaPath, SfxMedia,

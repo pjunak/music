@@ -14,11 +14,13 @@ use crate::schema::{CURRENT_SCHEMA_VERSION, SchemaCompatibility, SchemaReport, i
 use crate::{SqliteStorageOptions, StorageError};
 
 const BASELINE_MIGRATION_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
+const LIBRARY_STATE_MIGRATION_SQL: &str = include_str!("../migrations/0002_library_state.sql");
 
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
 const BACKUP_NAME_ATTEMPTS: u16 = 100;
 const BASELINE_MIGRATION_VERSION: i64 = 1;
+const LIBRARY_STATE_MIGRATION_VERSION: i64 = 2;
 
 const ADDITIVE_MIGRATIONS: &[(&str, &str, &str)] = &[
     (
@@ -180,13 +182,22 @@ pub(crate) async fn bootstrap(
 }
 
 fn migrator() -> Migrator {
-    Migrator::with_migrations(vec![Migration::new(
-        BASELINE_MIGRATION_VERSION,
-        "rust baseline".into(),
-        MigrationType::Simple,
-        BASELINE_MIGRATION_SQL.into_sql_str(),
-        false,
-    )])
+    Migrator::with_migrations(vec![
+        Migration::new(
+            BASELINE_MIGRATION_VERSION,
+            "rust baseline".into(),
+            MigrationType::Simple,
+            BASELINE_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            LIBRARY_STATE_MIGRATION_VERSION,
+            "library reconciliation state".into(),
+            MigrationType::Simple,
+            LIBRARY_STATE_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+    ])
 }
 
 async fn normalize_legacy_schema(pool: &SqlitePool) -> Result<(), StorageError> {
@@ -425,12 +436,18 @@ fn file_name_text(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{BASELINE_MIGRATION_SQL, BASELINE_MIGRATION_VERSION, migrator};
+    use super::{
+        BASELINE_MIGRATION_SQL, BASELINE_MIGRATION_VERSION, LIBRARY_STATE_MIGRATION_SQL,
+        LIBRARY_STATE_MIGRATION_VERSION, migrator,
+    };
 
     #[test]
     fn embedded_migration_is_cross_platform_stable() {
         assert_eq!(BASELINE_MIGRATION_VERSION, 1);
         assert!(!BASELINE_MIGRATION_SQL.contains('\r'));
         assert!(migrator().version_exists(BASELINE_MIGRATION_VERSION));
+        assert_eq!(LIBRARY_STATE_MIGRATION_VERSION, 2);
+        assert!(!LIBRARY_STATE_MIGRATION_SQL.contains('\r'));
+        assert!(migrator().version_exists(LIBRARY_STATE_MIGRATION_VERSION));
     }
 }

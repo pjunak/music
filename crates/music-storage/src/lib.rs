@@ -14,6 +14,7 @@ mod crypto;
 mod devices;
 mod error;
 mod instance_lock;
+mod library;
 mod migration;
 mod playback;
 mod schema;

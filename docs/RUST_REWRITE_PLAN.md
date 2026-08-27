@@ -321,8 +321,10 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
   rooted filesystem capabilities that reject absolute, traversal, platform-prefix, control-byte,
   and symlink-escape inputs.
 - Single-owner `LibraryCoordinator` for all app-managed file/index mutations.
+- [x] Typed catalog records and query ports, SQLite-backed literal search/stable sorting/batch and
+  directory lookup, plus durable generation/reconciliation state in schema v2.
 - Durable-index startup, generation-checked full/incremental reconciliation, visible scan status,
-  tree/folder/search APIs, metadata fallback, and source signatures.
+  tree/folder/search HTTP APIs, metadata fallback, and source signatures.
 - Full/range media and cover streaming with disconnect-safe file handles.
 - Streaming uploads and explicit conflict handling.
 - Shared staged-file/recovery infrastructure; metadata edits, moves, bulk operations, folders, SFX

@@ -9,9 +9,10 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
-const CURRENT_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
+const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
+const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 
@@ -411,7 +412,10 @@ async fn expected_shape() -> Result<DatabaseShape, StorageError> {
         .max_connections(1)
         .connect_with(options)
         .await?;
-    sqlx::raw_sql(CURRENT_SCHEMA_SQL).execute(&pool).await?;
+    sqlx::raw_sql(BASELINE_SCHEMA_SQL).execute(&pool).await?;
+    sqlx::raw_sql(LIBRARY_STATE_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
     let shape = read_shape(&pool).await;
     pool.close().await;
     shape
@@ -596,6 +600,12 @@ fn required_check_fragments(table: &str) -> &'static [&'static str] {
             "check(statein('planned','applying','committed','rolling_back',",
             "'rolled_back','failed'))"
         )],
+        "library_state" => &[
+            "check(id=1)",
+            "check(generation>=0)",
+            "check(statusin('pending','reconciling','current','failed'))",
+            "check(discovered_tracks>=0)",
+        ],
         _ => &[],
     }
 }

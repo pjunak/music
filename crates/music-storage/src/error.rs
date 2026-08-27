@@ -33,6 +33,9 @@ pub enum StorageError {
     InvalidTimestamp,
     InvalidLegacyDeviceImport,
     InvalidDeviceTransfer(&'static str),
+    InvalidLibraryPath(music_domain::MediaPathError),
+    InvalidLibraryRecord(&'static str),
+    InvalidLibraryState(&'static str),
 }
 
 impl Display for StorageError {
@@ -98,6 +101,13 @@ impl Display for StorageError {
             Self::InvalidDeviceTransfer(detail) => {
                 write!(formatter, "remembered-device transfer is invalid: {detail}")
             }
+            Self::InvalidLibraryPath(_) => formatter.write_str("stored library path is invalid"),
+            Self::InvalidLibraryRecord(detail) => {
+                write!(formatter, "stored library record is invalid: {detail}")
+            }
+            Self::InvalidLibraryState(detail) => {
+                write!(formatter, "stored library state is invalid: {detail}")
+            }
         }
     }
 }
@@ -111,6 +121,7 @@ impl Error for StorageError {
             Self::BackgroundTask(source) => Some(source),
             Self::ManifestSerialization(source) => Some(source),
             Self::DeviceTransferSerialization(source) => Some(source),
+            Self::InvalidLibraryPath(source) => Some(source),
             Self::InvalidDatabasePath(_)
             | Self::InvalidOption(_)
             | Self::IncompatibleSchema(_)
@@ -120,7 +131,9 @@ impl Error for StorageError {
             | Self::StorageRevisionOverflow
             | Self::InvalidTimestamp
             | Self::InvalidLegacyDeviceImport
-            | Self::InvalidDeviceTransfer(_) => None,
+            | Self::InvalidDeviceTransfer(_)
+            | Self::InvalidLibraryRecord(_)
+            | Self::InvalidLibraryState(_) => None,
         }
     }
 }
