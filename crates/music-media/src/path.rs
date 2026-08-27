@@ -111,6 +111,34 @@ impl<Kind> MediaRoot<Kind> {
         self.ensure_beneath_root(resolved)
     }
 
+    /// Resolve an existing directory for a mutating operation. Unlike media
+    /// reads, mutations reject symbolic links at every component so deleting
+    /// or renaming a folder cannot act on a link target instead of the link.
+    pub fn resolve_existing_directory(
+        &self,
+        relative: &RootedMediaPath<Kind>,
+    ) -> Result<PathBuf, RootedPathError> {
+        let mut current = self.canonical.clone();
+        for component in relative.as_str().split('/') {
+            let candidate = current.join(component);
+            let metadata =
+                std::fs::symlink_metadata(&candidate).map_err(|source| RootedPathError::Io {
+                    operation: "inspect media directory",
+                    path: candidate.clone(),
+                    source,
+                })?;
+            if metadata.file_type().is_symlink() {
+                return Err(RootedPathError::SymbolicLinkTarget(candidate));
+            }
+            if !metadata.is_dir() {
+                return Err(RootedPathError::ParentIsNotDirectory(candidate));
+            }
+            let resolved = canonicalize("canonicalize media directory", &candidate)?;
+            current = self.ensure_beneath_root(resolved)?;
+        }
+        Ok(current)
+    }
+
     /// Resolve a target whose parent already exists. Returning a path built
     /// from the canonical parent avoids retaining a user-controlled parent
     /// symlink in the write path. Existing symlink targets are refused.
@@ -149,6 +177,60 @@ impl<Kind> MediaRoot<Kind> {
                 source,
             }),
         }
+    }
+
+    /// Create a complete validated directory path beneath this capability.
+    /// Existing directories are accepted; symlinks and non-directory
+    /// components are rejected at every level.
+    pub fn ensure_directory(
+        &self,
+        relative: &RootedMediaPath<Kind>,
+    ) -> Result<PathBuf, RootedPathError> {
+        let mut current = self.canonical.clone();
+        for component in relative.as_str().split('/') {
+            let candidate = current.join(component);
+            match std::fs::symlink_metadata(&candidate) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err(RootedPathError::SymbolicLinkTarget(candidate));
+                }
+                Ok(metadata) if !metadata.is_dir() => {
+                    return Err(RootedPathError::ParentIsNotDirectory(candidate));
+                }
+                Ok(_) => {}
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                    match std::fs::create_dir(&candidate) {
+                        Ok(()) => {}
+                        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {}
+                        Err(source) => {
+                            return Err(RootedPathError::Io {
+                                operation: "create media directory",
+                                path: candidate,
+                                source,
+                            });
+                        }
+                    }
+                }
+                Err(source) => {
+                    return Err(RootedPathError::Io {
+                        operation: "inspect media directory",
+                        path: candidate,
+                        source,
+                    });
+                }
+            }
+            let resolved = canonicalize("canonicalize media directory", &candidate)?;
+            let metadata =
+                std::fs::symlink_metadata(&candidate).map_err(|source| RootedPathError::Io {
+                    operation: "verify media directory",
+                    path: candidate.clone(),
+                    source,
+                })?;
+            if metadata.file_type().is_symlink() {
+                return Err(RootedPathError::SymbolicLinkTarget(candidate));
+            }
+            current = self.ensure_beneath_root(resolved)?;
+        }
+        Ok(current)
     }
 
     fn ensure_beneath_root(&self, candidate: PathBuf) -> Result<PathBuf, RootedPathError> {
@@ -194,12 +276,20 @@ mod tests {
             std::fs::canonicalize(music.join("Albums").join("track.flac"))?
         );
         assert_eq!(
+            root.resolve_existing_directory(&LibraryPath::parse("Albums")?)?,
+            std::fs::canonicalize(music.join("Albums"))?
+        );
+        assert_eq!(
             root.resolve_for_creation(&LibraryPath::parse("Albums/new.flac")?)?,
             std::fs::canonicalize(music.join("Albums"))?.join("new.flac")
         );
         assert!(
             root.resolve_for_creation(&LibraryPath::parse("Missing/new.flac")?)
                 .is_err()
+        );
+        assert_eq!(
+            root.ensure_directory(&LibraryPath::parse("New/Nested/Folder")?)?,
+            std::fs::canonicalize(music.join("New/Nested/Folder"))?
         );
 
         let sfx = directory.path().join("sfx");
@@ -255,6 +345,10 @@ mod tests {
         assert!(matches!(
             root.resolve_for_creation(&LibraryPath::parse("escape/new.flac")?),
             Err(RootedPathError::EscapesRoot(_))
+        ));
+        assert!(matches!(
+            root.resolve_existing_directory(&LibraryPath::parse("escape")?),
+            Err(RootedPathError::SymbolicLinkTarget(_))
         ));
         Ok(())
     }

@@ -186,6 +186,29 @@
         ],
         "type": "object"
       },
+      "FolderCreateRequest": {
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "FolderDeleteResult": {
+        "properties": {
+          "removed_tracks": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "removed_tracks"
+        ],
+        "type": "object"
+      },
       "FolderOut": {
         "properties": {
           "has_children": {
@@ -206,6 +229,23 @@
           "path",
           "track_count",
           "has_children"
+        ],
+        "type": "object"
+      },
+      "FolderRenameRequest": {
+        "properties": {
+          "dst": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "src": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "src",
+          "dst"
         ],
         "type": "object"
       },
@@ -1060,6 +1100,55 @@
       }
     },
     "/api/library/folders": {
+      "delete": {
+        "operationId": "delete_folder",
+        "parameters": [
+          {
+            "description": "Folder path relative to the configured music directory.",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Delete contents too; otherwise non-empty folders are refused.",
+            "in": "query",
+            "name": "recursive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderDeleteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      },
       "get": {
         "operationId": "folders",
         "responses": {
@@ -1072,6 +1161,84 @@
               }
             },
             "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      },
+      "post": {
+        "operationId": "create_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/folders/rename": {
+      "post": {
+        "operationId": "rename_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderRenameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "tags": [

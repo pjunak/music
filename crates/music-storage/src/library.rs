@@ -2,11 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use music_application::library::{
-    DiscoveredTrack, LibraryDependencyError, LibraryFuture, LibraryMutationRepository,
-    LibraryRepository, LibrarySearch, LibrarySearchResult, LibrarySortKey, LibraryStatus,
-    ReconciliationCommit, ReconciliationStatus, ReconciliationSummary, SortOrder,
+    DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFuture,
+    LibraryIndexMutationCommit, LibraryMutationRepository, LibraryRepository, LibrarySearch,
+    LibrarySearchResult, LibrarySortKey, LibraryStatus, ReconciliationCommit, ReconciliationStatus,
+    ReconciliationSummary, SortOrder,
 };
+use music_application::recovery::RecoveryJournalId;
 use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
+use serde_json::{Value, json};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Row, Sqlite};
 
@@ -258,9 +261,144 @@ impl LibraryMutationRepository for SqliteStorage {
                 .map_err(box_storage)
         })
     }
+
+    fn commit_folder_rename<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        source: &'a LibraryPath,
+        destination: &'a LibraryPath,
+    ) -> LibraryFuture<'a, LibraryIndexMutationCommit> {
+        Box::pin(async move {
+            self.commit_library_folder_rename(journal_id, source, destination)
+                .await
+                .map_err(box_storage)
+        })
+    }
+
+    fn commit_folder_delete<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        path: &'a LibraryPath,
+    ) -> LibraryFuture<'a, LibraryIndexMutationCommit> {
+        Box::pin(async move {
+            self.commit_library_folder_delete(journal_id, path)
+                .await
+                .map_err(box_storage)
+        })
+    }
 }
 
 impl SqliteStorage {
+    async fn commit_library_folder_rename(
+        &self,
+        journal_id: &RecoveryJournalId,
+        source: &LibraryPath,
+        destination: &LibraryPath,
+    ) -> Result<LibraryIndexMutationCommit, StorageError> {
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        validate_library_mutation_journal(
+            &mut transaction,
+            journal_id,
+            &LibraryFileMutation::RenameFolder {
+                source: source.clone(),
+                destination: destination.clone(),
+            },
+        )
+        .await?;
+
+        let source_prefix = format!("{}/", source.as_str());
+        let pattern = format!("{}%", escape_like(&source_prefix));
+        let limit = i64::try_from(MAX_RECONCILIATION_TRACKS + 1)
+            .map_err(|_| StorageError::InvalidLibraryState("folder mutation limit is invalid"))?;
+        let rows = sqlx::query(
+            "SELECT path FROM tracks WHERE path LIKE ? ESCAPE '\\' ORDER BY id LIMIT ?",
+        )
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(&mut *transaction)
+        .await?;
+        if rows.len() > MAX_RECONCILIATION_TRACKS {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryState(
+                "folder mutation contains too many tracks",
+            ));
+        }
+
+        for row in &rows {
+            let path: String = row.try_get("path")?;
+            let suffix =
+                path.strip_prefix(&source_prefix)
+                    .ok_or(StorageError::InvalidLibraryRecord(
+                        "folder mutation path has an invalid prefix",
+                    ))?;
+            let _validated_destination = destination
+                .join(suffix)
+                .map_err(StorageError::InvalidLibraryPath)?;
+        }
+
+        let affected_tracks = u64::try_from(rows.len())
+            .map_err(|_| StorageError::InvalidLibraryState("folder mutation count is too large"))?;
+        let updated = sqlx::query(
+            "UPDATE tracks SET path = ? || substr(path, length(?) + 1) \
+             WHERE path LIKE ? ESCAPE '\\'",
+        )
+        .bind(destination.as_str())
+        .bind(source.as_str())
+        .bind(pattern)
+        .execute(&mut *transaction)
+        .await?;
+        if updated.rows_affected() != affected_tracks {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryRecord(
+                "folder mutation track set changed",
+            ));
+        }
+        let track_ids = finish_library_index_mutation(
+            &mut transaction,
+            journal_id,
+            "rename_folder",
+            affected_tracks,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(LibraryIndexMutationCommit {
+            status: self.read_library_status().await?,
+            track_ids,
+            affected_tracks,
+        })
+    }
+
+    async fn commit_library_folder_delete(
+        &self,
+        journal_id: &RecoveryJournalId,
+        path: &LibraryPath,
+    ) -> Result<LibraryIndexMutationCommit, StorageError> {
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        validate_library_delete_journal(&mut transaction, journal_id, path).await?;
+
+        let prefix = escape_like(&format!("{}/", path.as_str()));
+        let result = sqlx::query("DELETE FROM tracks WHERE path LIKE ? ESCAPE '\\'")
+            .bind(format!("{prefix}%"))
+            .execute(&mut *transaction)
+            .await?;
+        let affected_tracks = result.rows_affected();
+        let track_ids = finish_library_index_mutation(
+            &mut transaction,
+            journal_id,
+            "delete_folder",
+            affected_tracks,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(LibraryIndexMutationCommit {
+            status: self.read_library_status().await?,
+            track_ids,
+            affected_tracks,
+        })
+    }
+
     async fn begin_library_reconciliation(&self) -> Result<LibraryStatus, StorageError> {
         let _admission = self.write_gate.lock().await;
         let mut transaction = self.pool.begin().await?;
@@ -516,6 +654,127 @@ impl SqliteStorage {
     }
 }
 
+async fn validate_library_mutation_journal(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    journal_id: &RecoveryJournalId,
+    mutation: &LibraryFileMutation,
+) -> Result<(), StorageError> {
+    let operation = mutation
+        .operation()
+        .map_err(|_| StorageError::InvalidRecoveryJournalRecord)?;
+    let plan = read_applying_library_journal(transaction, journal_id, operation.as_str()).await?;
+    if plan != mutation.plan() {
+        return Err(StorageError::InvalidRecoveryJournalRecord);
+    }
+    Ok(())
+}
+
+async fn validate_library_delete_journal(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    journal_id: &RecoveryJournalId,
+    path: &LibraryPath,
+) -> Result<(), StorageError> {
+    let plan = read_applying_library_journal(transaction, journal_id, "delete_folder").await?;
+    let object = plan
+        .as_object()
+        .ok_or(StorageError::InvalidRecoveryJournalRecord)?;
+    if object.len() != 2
+        || object.get("path").and_then(Value::as_str) != Some(path.as_str())
+        || object.get("recursive").and_then(Value::as_bool).is_none()
+    {
+        return Err(StorageError::InvalidRecoveryJournalRecord);
+    }
+    Ok(())
+}
+
+async fn read_applying_library_journal(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    journal_id: &RecoveryJournalId,
+    operation: &str,
+) -> Result<Value, StorageError> {
+    let row = sqlx::query(
+        "SELECT domain, operation, state, plan_json FROM recovery_journal WHERE id = ?",
+    )
+    .bind(journal_id.as_str())
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(StorageError::InvalidRecoveryJournalRecord)?;
+    if row.try_get::<String, _>("domain")? != "library"
+        || row.try_get::<String, _>("operation")? != operation
+        || row.try_get::<String, _>("state")? != "applying"
+    {
+        return Err(StorageError::InvalidRecoveryJournalRecord);
+    }
+    serde_json::from_str(&row.try_get::<String, _>("plan_json")?)
+        .map_err(StorageError::RecoveryJournalSerialization)
+}
+
+async fn finish_library_index_mutation(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    journal_id: &RecoveryJournalId,
+    operation: &'static str,
+    affected_tracks: u64,
+) -> Result<BTreeSet<TrackId>, StorageError> {
+    if affected_tracks > 0 {
+        let current_generation = LibraryGeneration::try_from(
+            sqlx::query_scalar::<_, i64>("SELECT generation FROM library_state WHERE id = 1")
+                .fetch_one(&mut **transaction)
+                .await?,
+        )
+        .map_err(|_| StorageError::InvalidLibraryState("generation is invalid"))?;
+        let next_generation = current_generation
+            .next()
+            .map_err(|_| StorageError::InvalidLibraryState("generation overflowed"))?;
+        let track_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tracks")
+            .fetch_one(&mut **transaction)
+            .await?;
+        let result = sqlx::query(
+            "UPDATE library_state SET generation = ?, status = 'current', \
+             scan_started_at = NULL, last_error_code = NULL, discovered_tracks = ?, \
+             updated_at = CURRENT_TIMESTAMP WHERE id = 1 AND generation = ?",
+        )
+        .bind(i64::try_from(next_generation.get()).map_err(|_| {
+            StorageError::InvalidLibraryState("generation exceeds SQLite integer range")
+        })?)
+        .bind(track_count)
+        .bind(i64::try_from(current_generation.get()).map_err(|_| {
+            StorageError::InvalidLibraryState("generation exceeds SQLite integer range")
+        })?)
+        .execute(&mut **transaction)
+        .await?;
+        if result.rows_affected() != 1 {
+            return Err(StorageError::InvalidLibraryState(
+                "library state changed during folder mutation",
+            ));
+        }
+    }
+
+    let progress_json = serde_json::to_string(&json!({"affected_tracks": affected_tracks}))
+        .map_err(StorageError::RecoveryJournalSerialization)?;
+    let journal = sqlx::query(
+        "UPDATE recovery_journal SET state = 'committed', progress_json = ?, \
+         updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP \
+         WHERE id = ? AND domain = 'library' AND operation = ? AND state = 'applying'",
+    )
+    .bind(progress_json)
+    .bind(journal_id.as_str())
+    .bind(operation)
+    .execute(&mut **transaction)
+    .await?;
+    if journal.rows_affected() != 1 {
+        return Err(StorageError::InvalidRecoveryJournalRecord);
+    }
+
+    sqlx::query_scalar::<_, i64>("SELECT id FROM tracks ORDER BY id")
+        .fetch_all(&mut **transaction)
+        .await?
+        .into_iter()
+        .map(|id| {
+            TrackId::new(id).map_err(|_| StorageError::InvalidLibraryRecord("track id is invalid"))
+        })
+        .collect()
+}
+
 async fn count_reconciliation_rows(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     statement: &'static str,
@@ -655,9 +914,13 @@ mod tests {
     use std::time::Duration;
 
     use music_application::library::{
-        DiscoveredTrack, LibraryMutationRepository, LibraryRepository, LibrarySearch,
-        LibrarySortKey, ReconciliationCommit, ReconciliationStatus, ReconciliationSummary,
-        SortOrder,
+        DiscoveredTrack, LibraryFileMutation, LibraryMutationRepository, LibraryRepository,
+        LibrarySearch, LibrarySortKey, ReconciliationCommit, ReconciliationStatus,
+        ReconciliationSummary, SortOrder,
+    };
+    use music_application::recovery::{
+        RecoveryDomain, RecoveryJournalDraft, RecoveryJournalId, RecoveryJournalRepository,
+        RecoveryState, RecoveryTransition,
     };
     use music_domain::{LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
     use tempfile::tempdir;
@@ -709,6 +972,29 @@ mod tests {
             size_bytes,
             mtime_unix_seconds,
         })
+    }
+
+    async fn applying_journal(
+        storage: &SqliteStorage,
+        mutation: &LibraryFileMutation,
+    ) -> Result<RecoveryJournalId, Box<dyn Error + Send + Sync>> {
+        let draft = RecoveryJournalDraft::new(
+            RecoveryDomain::Library,
+            mutation.operation()?,
+            mutation.plan(),
+        )?;
+        let id = draft.id.clone();
+        RecoveryJournalRepository::create_recovery_journal(storage, draft).await?;
+        let transition = RecoveryJournalRepository::transition_recovery_journal(
+            storage,
+            &id,
+            RecoveryState::Planned,
+            RecoveryState::Applying,
+            serde_json::json!({}),
+        )
+        .await?;
+        assert!(matches!(transition, RecoveryTransition::Applied(_)));
+        Ok(id)
     }
 
     #[tokio::test]
@@ -881,6 +1167,121 @@ mod tests {
         assert_eq!(
             LibraryRepository::catalog_track_ids(&storage).await?.len(),
             3
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn journaled_folder_mutations_preserve_ids_and_update_the_index_atomically()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(
+            directory.path().join("folders.db"),
+        ))
+        .await?;
+        let first_id = insert_track(&storage, "Öld_%/one.mp3", "One", "Artist").await?;
+        let nested_id = insert_track(&storage, "Öld_%/Disc/two.mp3", "Two", "Artist").await?;
+        let unrelated_id =
+            insert_track(&storage, "Old_AX/untouched.mp3", "Other", "Artist").await?;
+
+        let rename = LibraryFileMutation::RenameFolder {
+            source: LibraryPath::parse("Öld_%")?,
+            destination: LibraryPath::parse("Néw_%")?,
+        };
+        let rename_journal = applying_journal(&storage, &rename).await?;
+        let renamed = LibraryMutationRepository::commit_folder_rename(
+            &storage,
+            &rename_journal,
+            &LibraryPath::parse("Öld_%")?,
+            &LibraryPath::parse("Néw_%")?,
+        )
+        .await?;
+        assert_eq!(renamed.affected_tracks, 2);
+        assert_eq!(renamed.status.generation, LibraryGeneration::new(1));
+        assert_eq!(renamed.status.discovered_tracks, 3);
+        assert_eq!(
+            LibraryRepository::track(&storage, TrackId::new(first_id)?)
+                .await?
+                .ok_or("renamed track disappeared")?
+                .path
+                .as_str(),
+            "Néw_%/one.mp3"
+        );
+        assert_eq!(
+            LibraryRepository::track(&storage, TrackId::new(nested_id)?)
+                .await?
+                .ok_or("nested track disappeared")?
+                .path
+                .as_str(),
+            "Néw_%/Disc/two.mp3"
+        );
+        assert_eq!(
+            LibraryRepository::track(&storage, TrackId::new(unrelated_id)?)
+                .await?
+                .ok_or("unrelated track disappeared")?
+                .path
+                .as_str(),
+            "Old_AX/untouched.mp3"
+        );
+
+        let mismatched_delete = LibraryFileMutation::DeleteFolder {
+            path: LibraryPath::parse("Old_AX")?,
+            recursive: true,
+        };
+        let mismatched_journal = applying_journal(&storage, &mismatched_delete).await?;
+        assert!(
+            LibraryMutationRepository::commit_folder_delete(
+                &storage,
+                &mismatched_journal,
+                &LibraryPath::parse("Néw_%")?,
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            LibraryRepository::track(&storage, TrackId::new(first_id)?)
+                .await?
+                .is_some()
+        );
+        assert!(matches!(
+            RecoveryJournalRepository::transition_recovery_journal(
+                &storage,
+                &mismatched_journal,
+                RecoveryState::Applying,
+                RecoveryState::Failed,
+                serde_json::json!({"error_code": "fixture_mismatch"}),
+            )
+            .await?,
+            RecoveryTransition::Applied(_)
+        ));
+
+        let delete = LibraryFileMutation::DeleteFolder {
+            path: LibraryPath::parse("Néw_%")?,
+            recursive: true,
+        };
+        let delete_journal = applying_journal(&storage, &delete).await?;
+        let deleted = LibraryMutationRepository::commit_folder_delete(
+            &storage,
+            &delete_journal,
+            &LibraryPath::parse("Néw_%")?,
+        )
+        .await?;
+        assert_eq!(deleted.affected_tracks, 2);
+        assert_eq!(deleted.status.generation, LibraryGeneration::new(2));
+        assert_eq!(deleted.status.discovered_tracks, 1);
+        assert!(
+            LibraryRepository::track(&storage, TrackId::new(first_id)?)
+                .await?
+                .is_none()
+        );
+        assert!(deleted.track_ids.contains(&TrackId::new(unrelated_id)?));
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                &storage,
+                RecoveryDomain::Library,
+            )
+            .await?
+            .is_empty()
         );
         Ok(())
     }

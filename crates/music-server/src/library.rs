@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Body;
-use axum::extract::rejection::{PathRejection, QueryRejection};
+use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::header::{
     CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS,
@@ -11,7 +11,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::library::{
-    LibraryCoordinatorHandle, LibrarySearch, LibraryService, LibrarySortKey, SortOrder,
+    FolderMutationResult, LibraryCoordinatorError, LibraryCoordinatorHandle,
+    LibraryMutationFailureKind, LibrarySearch, LibraryService, LibrarySortKey, SortOrder,
 };
 use music_domain::{IndexedTrack, LibraryPath, TrackId};
 use music_media::{
@@ -46,6 +47,9 @@ pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(search))
         .routes(routes!(tree))
         .routes(routes!(folders))
+        .routes(routes!(create_folder))
+        .routes(routes!(delete_folder))
+        .routes(routes!(rename_folder))
         .routes(routes!(tracks_batch))
         .routes(routes!(track))
         .routes(routes!(stream))
@@ -142,6 +146,29 @@ struct FolderResponse {
 #[schema(as = FoldersResponse)]
 struct FoldersResponse {
     folders: Vec<FolderResponse>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = FolderCreateRequest)]
+struct FolderCreateRequest {
+    #[schema(min_length = 1)]
+    path: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = FolderRenameRequest)]
+struct FolderRenameRequest {
+    #[schema(min_length = 1)]
+    src: String,
+    #[schema(min_length = 1)]
+    dst: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[schema(as = FolderDeleteResult)]
+struct FolderDeleteResponse {
+    #[schema(schema_with = openapi_integer)]
+    removed_tracks: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
@@ -274,6 +301,17 @@ struct BatchQuery {
     ids: String,
 }
 
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct FolderDeleteQuery {
+    /// Folder path relative to the configured music directory.
+    path: String,
+    /// Delete contents too; otherwise non-empty folders are refused.
+    #[serde(default)]
+    #[param(default = false)]
+    recursive: bool,
+}
+
 #[utoipa::path(
     get,
     path = "/library/search",
@@ -396,6 +434,97 @@ async fn folders(
             })
             .collect(),
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/folders",
+    request_body = FolderCreateRequest,
+    responses(
+        (status = 201, description = "Successful Response", body = FolderResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn create_folder(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<FolderCreateRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<FolderResponse>), ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if payload.path.is_empty() {
+        return Err(ApiError::validation());
+    }
+    let path = LibraryPath::parse(payload.path)
+        .map_err(|_| ApiError::bad_request("invalid folder path"))?;
+    let folder = library(&state)?
+        .coordinator
+        .create_folder(path)
+        .await
+        .map_err(map_folder_mutation_error)?;
+    Ok((StatusCode::CREATED, Json(folder_response(folder))))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/library/folders",
+    params(FolderDeleteQuery),
+    responses(
+        (status = 200, description = "Successful Response", body = FolderDeleteResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn delete_folder(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    query: Result<Query<FolderDeleteQuery>, QueryRejection>,
+) -> Result<Json<FolderDeleteResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Query(query) = query.map_err(|_| ApiError::validation())?;
+    let path =
+        LibraryPath::parse(query.path).map_err(|_| ApiError::bad_request("invalid folder path"))?;
+    let result = library(&state)?
+        .coordinator
+        .delete_folder(path, query.recursive)
+        .await
+        .map_err(map_folder_mutation_error)?;
+    Ok(Json(FolderDeleteResponse {
+        removed_tracks: result.removed_tracks,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/folders/rename",
+    request_body = FolderRenameRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = FolderResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn rename_folder(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<FolderRenameRequest>, JsonRejection>,
+) -> Result<Json<FolderResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if payload.src.is_empty() || payload.dst.is_empty() {
+        return Err(ApiError::validation());
+    }
+    let source = LibraryPath::parse(payload.src)
+        .map_err(|_| ApiError::bad_request("invalid source folder path"))?;
+    let destination = LibraryPath::parse(payload.dst)
+        .map_err(|_| ApiError::bad_request("invalid destination folder path"))?;
+    let folder = library(&state)?
+        .coordinator
+        .rename_folder(source, destination)
+        .await
+        .map_err(map_folder_mutation_error)?;
+    Ok(Json(folder_response(folder)))
 }
 
 #[utoipa::path(
@@ -601,6 +730,38 @@ async fn rescan(
         removed: summary.removed,
         unchanged: summary.unchanged,
     }))
+}
+
+fn folder_response(folder: FolderMutationResult) -> FolderResponse {
+    FolderResponse {
+        name: folder.path.file_name().to_owned(),
+        path: folder.path.into_string(),
+        track_count: 0,
+        has_children: folder.has_children,
+    }
+}
+
+fn map_folder_mutation_error(error: LibraryCoordinatorError) -> ApiError {
+    match error {
+        LibraryCoordinatorError::Mutation(failure) => match failure.kind() {
+            LibraryMutationFailureKind::NotFound => ApiError::plain_not_found("folder not found"),
+            LibraryMutationFailureKind::Conflict => {
+                ApiError::conflict("destination folder already exists")
+            }
+            LibraryMutationFailureKind::NotEmpty => {
+                ApiError::bad_request("folder is not empty (pass recursive=true to force)")
+            }
+            LibraryMutationFailureKind::Invalid => ApiError::bad_request("invalid folder path"),
+            LibraryMutationFailureKind::Io => {
+                tracing::error!(error = %failure, "library folder mutation failed");
+                ApiError::internal()
+            }
+        },
+        other => {
+            tracing::error!(error = %other, "library folder coordinator failed");
+            ApiError::internal()
+        }
+    }
 }
 
 fn library(state: &HttpState) -> Result<&RuntimeLibrary, ApiError> {

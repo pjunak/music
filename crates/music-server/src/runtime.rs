@@ -15,7 +15,10 @@ use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
     SystemPlaybackClock, SystemQueueRandom, start_playback_actor,
 };
-use music_media::{FfmpegTools, FilesystemLibraryDiscovery, LibraryRoot, MetadataAdapter};
+use music_media::{
+    FfmpegTools, FilesystemLibraryDiscovery, FilesystemLibraryMutations, LibraryRoot,
+    MetadataAdapter,
+};
 use music_storage::{
     LegacyDeviceImportOutcome, LegacyDeviceImportStatus, SqliteStorage, SqliteStorageOptions,
     StorageError,
@@ -139,8 +142,10 @@ impl AppRuntime {
         let mutation_repository: Arc<dyn LibraryMutationRepository> = storage.clone();
         let read_repository: Arc<dyn LibraryRepository> = storage.clone();
         let catalog_sink: Arc<dyn LibraryCatalogSink> = Arc::new(playback.clone());
+        let effects = Arc::new(FilesystemLibraryMutations::new(library_root.clone()));
         let spawned_library =
-            start_library_coordinator(mutation_repository, discovery, catalog_sink).await?;
+            start_library_coordinator(mutation_repository, discovery, catalog_sink, effects)
+                .await?;
         let library = supervise_library(&supervisor, spawned_library, health.clone())?;
         let library_service = Arc::new(LibraryService::new(read_repository));
         health.set_component("library_coordinator", true, ComponentStatus::Ready);
@@ -535,7 +540,11 @@ mod tests {
     };
     use axum::http::{Request, StatusCode};
     use music_application::auth::UnixSeconds;
-    use music_application::library::ReconciliationStatus;
+    use music_application::library::{LibraryFileMutation, ReconciliationStatus};
+    use music_application::recovery::{
+        RecoveryDomain, RecoveryJournalDraft, RecoveryJournalRepository, RecoveryState,
+        RecoveryTransition,
+    };
     use music_storage::StorageError;
     use serde_json::Value;
     use tempfile::tempdir;
@@ -671,6 +680,77 @@ mod tests {
 
         let reopened = AppRuntime::start(runtime_config(directory.path())?).await?;
         reopened.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_replays_an_applied_folder_move_before_publishing_the_catalog()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Old"))?;
+        fs::write(
+            directory.path().join("music/Old/track.mp3"),
+            b"metadata fallback fixture",
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if runtime.library_status().status == ReconciliationStatus::Current {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let track_id = *runtime
+            .library_service
+            .catalog_track_ids()
+            .await?
+            .first()
+            .ok_or("startup scan did not index the recovery fixture")?;
+        let mutation = LibraryFileMutation::RenameFolder {
+            source: music_domain::LibraryPath::parse("Old")?,
+            destination: music_domain::LibraryPath::parse("Recovered")?,
+        };
+        let draft = RecoveryJournalDraft::new(
+            RecoveryDomain::Library,
+            mutation.operation()?,
+            mutation.plan(),
+        )?;
+        let journal_id = draft.id.clone();
+        RecoveryJournalRepository::create_recovery_journal(runtime.storage.as_ref(), draft).await?;
+        let applying = RecoveryJournalRepository::transition_recovery_journal(
+            runtime.storage.as_ref(),
+            &journal_id,
+            RecoveryState::Planned,
+            RecoveryState::Applying,
+            serde_json::json!({}),
+        )
+        .await?;
+        assert!(matches!(applying, RecoveryTransition::Applied(_)));
+        fs::rename(
+            directory.path().join("music/Old"),
+            directory.path().join("music/Recovered"),
+        )?;
+        runtime.shutdown().await?;
+        drop(runtime);
+
+        let recovered = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let track = recovered
+            .library_service
+            .track(track_id)
+            .await?
+            .ok_or("recovery changed or removed the track identity")?;
+        assert_eq!(track.path.as_str(), "Recovered/track.mp3");
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                recovered.storage.as_ref(),
+                RecoveryDomain::Library,
+            )
+            .await?
+            .is_empty()
+        );
+        recovered.shutdown().await?;
         Ok(())
     }
 
@@ -932,6 +1012,114 @@ mod tests {
         );
         assert_eq!(to_bytes(cover.into_body(), 1024).await?, &b"safe cover"[..]);
 
+        let unauthorized_create = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/folders")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Scratch/Nested"}"#))?,
+            )
+            .await?;
+        assert_eq!(unauthorized_create.status(), StatusCode::UNAUTHORIZED);
+
+        let created = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/folders")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"Scratch/Nested"}"#))?,
+            )
+            .await?;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let created_json: Value =
+            serde_json::from_slice(&to_bytes(created.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(created_json["path"], "Scratch/Nested");
+        assert_eq!(created_json["track_count"], 0);
+        assert!(directory.path().join("music/Scratch/Nested").is_dir());
+
+        let renamed_empty = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/folders/rename")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"src":"Scratch","dst":"Archive/Scratch"}"#))?,
+            )
+            .await?;
+        assert_eq!(renamed_empty.status(), StatusCode::OK);
+        let renamed_empty_json: Value =
+            serde_json::from_slice(&to_bytes(renamed_empty.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(renamed_empty_json["path"], "Archive/Scratch");
+        assert_eq!(renamed_empty_json["has_children"], true);
+        assert!(
+            directory
+                .path()
+                .join("music/Archive/Scratch/Nested")
+                .is_dir()
+        );
+
+        let non_recursive = router
+            .clone()
+            .oneshot(
+                Request::delete("/api/library/folders?path=Archive/Scratch")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(non_recursive.status(), StatusCode::BAD_REQUEST);
+        let deleted_empty = router
+            .clone()
+            .oneshot(
+                Request::delete("/api/library/folders?path=Archive/Scratch&recursive=true")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(deleted_empty.status(), StatusCode::OK);
+        let deleted_empty_json: Value =
+            serde_json::from_slice(&to_bytes(deleted_empty.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(deleted_empty_json["removed_tracks"], 0);
+
+        let generation_before_rename = runtime.library_status().generation.get();
+        let renamed_album = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/folders/rename")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"src":"Album","dst":"Renamed/Album"}"#))?,
+            )
+            .await?;
+        assert_eq!(renamed_album.status(), StatusCode::OK);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current
+                    && status.generation.get() >= generation_before_rename + 2
+                {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let renamed_track = runtime
+            .library_service
+            .track(first_id)
+            .await?
+            .ok_or("renamed track lost its catalog identity")?;
+        assert_eq!(renamed_track.id, first_id);
+        assert_eq!(renamed_track.path.as_str(), "Renamed/Album/01 - First.mp3");
+        assert!(
+            directory
+                .path()
+                .join("music/Renamed/Album/01 - First.mp3")
+                .is_file()
+        );
+
+        let generation_before_rescan = runtime.library_status().generation.get();
         let rescan = router
             .clone()
             .oneshot(
@@ -944,9 +1132,16 @@ mod tests {
         let rescan_json: Value =
             serde_json::from_slice(&to_bytes(rescan.into_body(), 1024 * 1024).await?)?;
         assert_eq!(rescan_json["unchanged"], 2);
-        assert_eq!(runtime.library_status().generation.get(), 2);
+        assert_eq!(
+            runtime.library_status().generation.get(),
+            generation_before_rescan + 1
+        );
 
-        fs::remove_file(directory.path().join("music/Album/02 - Second.flac"))?;
+        fs::remove_file(
+            directory
+                .path()
+                .join("music/Renamed/Album/02 - Second.flac"),
+        )?;
         let missing_stream = router
             .oneshot(
                 Request::get(format!("/api/library/tracks/{}/stream", second_id.get()))

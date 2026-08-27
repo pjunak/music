@@ -460,7 +460,13 @@ mod tests {
         assert!(paths.contains_key("/api/devices/{client_id}"));
         assert!(paths.contains_key("/api/library/search"));
         assert!(paths.contains_key("/api/library/tree"));
-        assert!(paths.contains_key("/api/library/folders"));
+        let folders = paths["/api/library/folders"].as_object().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "folder path is not an object")
+        })?;
+        assert!(folders.contains_key("get"));
+        assert!(folders.contains_key("post"));
+        assert!(folders.contains_key("delete"));
+        assert!(paths.contains_key("/api/library/folders/rename"));
         assert!(paths.contains_key("/api/library/tracks"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}/stream"));

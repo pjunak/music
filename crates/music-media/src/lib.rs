@@ -12,6 +12,7 @@
 mod delivery;
 mod discovery;
 mod metadata;
+mod mutation;
 mod path;
 mod yaml;
 
@@ -26,6 +27,7 @@ pub use metadata::{
     AudioMetadata, FfmpegTools, MetadataAdapter, MetadataWriteCapability, StagedTagUpdate,
     TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata, stage_tag_update,
 };
+pub use mutation::FilesystemLibraryMutations;
 
 pub use path::{LibraryRoot, MediaRoot, RootedPathError, SfxRoot};
 

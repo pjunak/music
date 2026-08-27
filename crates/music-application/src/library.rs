@@ -7,12 +7,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
+use serde_json::json;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::playback::PlaybackActorHandle;
-use crate::recovery::RecoveryJournalRepository;
+use crate::recovery::{
+    RecoveryDomain, RecoveryJournalDraft, RecoveryJournalEntry, RecoveryJournalRepository,
+    RecoveryState, RecoveryTransition,
+};
+
+mod mutation;
+
+pub use mutation::{
+    FolderDeletionResult, FolderMutationResult, LibraryFileMutation, LibraryFileMutationOutcome,
+    LibraryIndexMutationCommit, LibraryMutationEffects, LibraryMutationFailure,
+    LibraryMutationFailureKind, LibraryMutationFuture, LibraryMutationValidationError,
+};
 
 const LIBRARY_COMMAND_CAPACITY: usize = 4;
 
@@ -173,6 +185,19 @@ pub trait LibraryMutationRepository: LibraryRepository + RecoveryJournalReposito
         expected_generation: LibraryGeneration,
         error_code: &'a str,
     ) -> LibraryFuture<'a, LibraryStatus>;
+
+    fn commit_folder_rename<'a>(
+        &'a self,
+        journal_id: &'a crate::recovery::RecoveryJournalId,
+        source: &'a LibraryPath,
+        destination: &'a LibraryPath,
+    ) -> LibraryFuture<'a, LibraryIndexMutationCommit>;
+
+    fn commit_folder_delete<'a>(
+        &'a self,
+        journal_id: &'a crate::recovery::RecoveryJournalId,
+        path: &'a LibraryPath,
+    ) -> LibraryFuture<'a, LibraryIndexMutationCommit>;
 }
 
 #[derive(Debug)]
@@ -242,6 +267,10 @@ pub enum LibraryCoordinatorError {
         expected: LibraryGeneration,
         current: LibraryGeneration,
     },
+    Mutation(LibraryMutationFailure),
+    InvalidMutation(LibraryMutationValidationError),
+    RecoveryConflict,
+    InvalidMutationOutcome,
     CommandQueueFull,
     Unavailable,
 }
@@ -259,6 +288,14 @@ impl Display for LibraryCoordinatorError {
                 expected.get(),
                 current.get()
             ),
+            Self::Mutation(failure) => Display::fmt(failure, formatter),
+            Self::InvalidMutation(failure) => Display::fmt(failure, formatter),
+            Self::RecoveryConflict => {
+                formatter.write_str("library recovery journal changed unexpectedly")
+            }
+            Self::InvalidMutationOutcome => {
+                formatter.write_str("library mutation returned an unexpected outcome")
+            }
             Self::CommandQueueFull => formatter.write_str("library command queue is full"),
             Self::Unavailable => formatter.write_str("library coordinator is unavailable"),
         }
@@ -270,7 +307,13 @@ impl Error for LibraryCoordinatorError {
         match self {
             Self::Dependency { source, .. } => Some(source.as_ref()),
             Self::Discovery(failure) => Some(failure),
-            Self::GenerationConflict { .. } | Self::CommandQueueFull | Self::Unavailable => None,
+            Self::Mutation(failure) => Some(failure),
+            Self::InvalidMutation(failure) => Some(failure),
+            Self::GenerationConflict { .. }
+            | Self::RecoveryConflict
+            | Self::InvalidMutationOutcome
+            | Self::CommandQueueFull
+            | Self::Unavailable => None,
         }
     }
 }
@@ -313,6 +356,76 @@ impl LibraryCoordinatorHandle {
             })
     }
 
+    pub async fn create_folder(
+        &self,
+        path: LibraryPath,
+    ) -> Result<FolderMutationResult, LibraryCoordinatorError> {
+        let applied = self
+            .mutate(LibraryFileMutation::CreateFolder { path })
+            .await?;
+        match applied.outcome {
+            LibraryFileMutationOutcome::Folder { path, has_children } => {
+                Ok(FolderMutationResult { path, has_children })
+            }
+            LibraryFileMutationOutcome::Deleted => {
+                Err(LibraryCoordinatorError::InvalidMutationOutcome)
+            }
+        }
+    }
+
+    pub async fn rename_folder(
+        &self,
+        source: LibraryPath,
+        destination: LibraryPath,
+    ) -> Result<FolderMutationResult, LibraryCoordinatorError> {
+        let applied = self
+            .mutate(LibraryFileMutation::RenameFolder {
+                source,
+                destination,
+            })
+            .await?;
+        match applied.outcome {
+            LibraryFileMutationOutcome::Folder { path, has_children } => {
+                Ok(FolderMutationResult { path, has_children })
+            }
+            LibraryFileMutationOutcome::Deleted => {
+                Err(LibraryCoordinatorError::InvalidMutationOutcome)
+            }
+        }
+    }
+
+    pub async fn delete_folder(
+        &self,
+        path: LibraryPath,
+        recursive: bool,
+    ) -> Result<FolderDeletionResult, LibraryCoordinatorError> {
+        let applied = self
+            .mutate(LibraryFileMutation::DeleteFolder { path, recursive })
+            .await?;
+        match applied.outcome {
+            LibraryFileMutationOutcome::Deleted => Ok(FolderDeletionResult {
+                removed_tracks: applied.affected_tracks,
+            }),
+            LibraryFileMutationOutcome::Folder { .. } => {
+                Err(LibraryCoordinatorError::InvalidMutationOutcome)
+            }
+        }
+    }
+
+    async fn mutate(
+        &self,
+        mutation: LibraryFileMutation,
+    ) -> Result<AppliedLibraryMutation, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::Mutate { mutation, reply })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
     pub fn shutdown(&self) {
         self.cancellation.cancel();
     }
@@ -328,7 +441,9 @@ pub async fn start_library_coordinator(
     repository: Arc<dyn LibraryMutationRepository>,
     discovery: Arc<dyn LibraryDiscovery>,
     catalog: Arc<dyn LibraryCatalogSink>,
+    effects: Arc<dyn LibraryMutationEffects>,
 ) -> Result<SpawnedLibraryCoordinator, LibraryCoordinatorError> {
+    recover_library_mutations(repository.as_ref(), effects.as_ref()).await?;
     let mut status = repository
         .status()
         .await
@@ -357,6 +472,7 @@ pub async fn start_library_coordinator(
         repository,
         discovery,
         catalog,
+        effects,
         status: status_sender,
     };
     let task_cancellation = cancellation.clone();
@@ -376,6 +492,16 @@ enum LibraryCommand {
     Reconcile {
         reply: Option<oneshot::Sender<Result<ReconciliationSummary, LibraryCoordinatorError>>>,
     },
+    Mutate {
+        mutation: LibraryFileMutation,
+        reply: oneshot::Sender<Result<AppliedLibraryMutation, LibraryCoordinatorError>>,
+    },
+}
+
+#[derive(Debug)]
+struct AppliedLibraryMutation {
+    outcome: LibraryFileMutationOutcome,
+    affected_tracks: u64,
 }
 
 #[derive(Debug)]
@@ -383,6 +509,7 @@ struct LibraryCoordinator {
     repository: Arc<dyn LibraryMutationRepository>,
     discovery: Arc<dyn LibraryDiscovery>,
     catalog: Arc<dyn LibraryCatalogSink>,
+    effects: Arc<dyn LibraryMutationEffects>,
     status: watch::Sender<LibraryStatus>,
 }
 
@@ -406,10 +533,85 @@ impl LibraryCoordinator {
                                 let _ = reply.send(result);
                             }
                         }
+                        LibraryCommand::Mutate { mutation, reply } => {
+                            let reconcile_metadata = mutation.needs_metadata_reconciliation();
+                            let result = self.apply_mutation(mutation).await;
+                            let applied = result.is_ok();
+                            let _ = reply.send(result);
+                            if applied && reconcile_metadata {
+                                let _ = self.reconcile_once(cancellation.clone()).await;
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    async fn apply_mutation(
+        &self,
+        mutation: LibraryFileMutation,
+    ) -> Result<AppliedLibraryMutation, LibraryCoordinatorError> {
+        let operation = mutation
+            .operation()
+            .map_err(LibraryCoordinatorError::InvalidMutation)?;
+        let draft = RecoveryJournalDraft::new(RecoveryDomain::Library, operation, mutation.plan())
+            .map_err(|source| {
+                dependency("validate a library mutation journal", Box::new(source))
+            })?;
+        let planned = self
+            .repository
+            .create_recovery_journal(draft)
+            .await
+            .map_err(|source| dependency("create a library mutation journal", source))?;
+        let applying = transition_applied(
+            self.repository
+                .transition_recovery_journal(
+                    &planned.id,
+                    RecoveryState::Planned,
+                    RecoveryState::Applying,
+                    json!({}),
+                )
+                .await
+                .map_err(|source| dependency("start a library mutation journal", source))?,
+        )?;
+        let outcome = match self.effects.apply(mutation.clone(), false).await {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                if failure.kind() != LibraryMutationFailureKind::Io {
+                    transition_applied(
+                        self.repository
+                            .transition_recovery_journal(
+                                &applying.id,
+                                RecoveryState::Applying,
+                                RecoveryState::Failed,
+                                json!({"error_code": failure.code()}),
+                            )
+                            .await
+                            .map_err(|source| {
+                                dependency("record a failed library mutation", source)
+                            })?,
+                    )?;
+                }
+                return Err(LibraryCoordinatorError::Mutation(failure));
+            }
+        };
+        let (applied, catalog_commit) = commit_applied_library_mutation(
+            self.repository.as_ref(),
+            &applying,
+            &mutation,
+            outcome,
+        )
+        .await?;
+        if let Some(commit) = catalog_commit {
+            let generation = commit.status.generation;
+            self.status.send_replace(commit.status);
+            self.catalog
+                .publish(generation, commit.track_ids)
+                .await
+                .map_err(|source| dependency("publish the mutated track catalog", source))?;
+        }
+        Ok(applied)
     }
 
     async fn reconcile_once(
@@ -476,6 +678,121 @@ impl LibraryCoordinator {
                 })
             }
         }
+    }
+}
+
+async fn recover_library_mutations(
+    repository: &dyn LibraryMutationRepository,
+    effects: &dyn LibraryMutationEffects,
+) -> Result<(), LibraryCoordinatorError> {
+    let entries = repository
+        .unfinished_recovery_journals(RecoveryDomain::Library)
+        .await
+        .map_err(|source| dependency("load unfinished library mutations", source))?;
+    for entry in entries {
+        let mutation = LibraryFileMutation::from_journal(&entry)
+            .map_err(LibraryCoordinatorError::InvalidMutation)?;
+        let applying = match entry.state {
+            RecoveryState::Planned => transition_applied(
+                repository
+                    .transition_recovery_journal(
+                        &entry.id,
+                        RecoveryState::Planned,
+                        RecoveryState::Applying,
+                        json!({"recovered": true}),
+                    )
+                    .await
+                    .map_err(|source| dependency("resume a planned library mutation", source))?,
+            )?,
+            RecoveryState::Applying => entry,
+            RecoveryState::Committed
+            | RecoveryState::RollingBack
+            | RecoveryState::RolledBack
+            | RecoveryState::Failed => return Err(LibraryCoordinatorError::RecoveryConflict),
+        };
+        let outcome = effects
+            .apply(mutation.clone(), true)
+            .await
+            .map_err(LibraryCoordinatorError::Mutation)?;
+        commit_applied_library_mutation(repository, &applying, &mutation, outcome).await?;
+    }
+    Ok(())
+}
+
+async fn commit_applied_library_mutation(
+    repository: &dyn LibraryMutationRepository,
+    journal: &RecoveryJournalEntry,
+    mutation: &LibraryFileMutation,
+    outcome: LibraryFileMutationOutcome,
+) -> Result<(AppliedLibraryMutation, Option<LibraryIndexMutationCommit>), LibraryCoordinatorError> {
+    match (mutation, outcome) {
+        (
+            LibraryFileMutation::CreateFolder { path: expected },
+            LibraryFileMutationOutcome::Folder { path, has_children },
+        ) if &path == expected => {
+            transition_applied(
+                repository
+                    .transition_recovery_journal(
+                        &journal.id,
+                        RecoveryState::Applying,
+                        RecoveryState::Committed,
+                        json!({"created": true}),
+                    )
+                    .await
+                    .map_err(|source| dependency("commit a folder creation journal", source))?,
+            )?;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::Folder { path, has_children },
+                    affected_tracks: 0,
+                },
+                None,
+            ))
+        }
+        (
+            LibraryFileMutation::RenameFolder {
+                source,
+                destination,
+            },
+            LibraryFileMutationOutcome::Folder { path, has_children },
+        ) if &path == destination => {
+            let commit = repository
+                .commit_folder_rename(&journal.id, source, destination)
+                .await
+                .map_err(|source| dependency("commit a folder rename", source))?;
+            let affected_tracks = commit.affected_tracks;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::Folder { path, has_children },
+                    affected_tracks,
+                },
+                Some(commit),
+            ))
+        }
+        (LibraryFileMutation::DeleteFolder { path, .. }, LibraryFileMutationOutcome::Deleted) => {
+            let commit = repository
+                .commit_folder_delete(&journal.id, path)
+                .await
+                .map_err(|source| dependency("commit a folder deletion", source))?;
+            let affected_tracks = commit.affected_tracks;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::Deleted,
+                    affected_tracks,
+                },
+                Some(commit),
+            ))
+        }
+        _ => Err(LibraryCoordinatorError::InvalidMutationOutcome),
+    }
+}
+
+fn transition_applied(
+    transition: RecoveryTransition,
+) -> Result<RecoveryJournalEntry, LibraryCoordinatorError> {
+    match transition {
+        RecoveryTransition::Applied(entry) => Ok(entry),
+        RecoveryTransition::Conflict(_) => Err(LibraryCoordinatorError::RecoveryConflict),
     }
 }
 
