@@ -8,3 +8,11 @@
 //!
 //! This crate must remain independent of async runtimes, databases, HTTP,
 //! filesystems, processes, and public wire compatibility types.
+
+mod playback;
+
+pub use playback::{
+    AmbientState, ClockSample, CrossfadeType, DomainEvent, InterruptState, LoopMode, LoopingSfx,
+    PersistenceIntent, PlaybackCommand, PlaybackError, PlaybackState, PositionReport, Reduction,
+    ReductionContext, ShuffleMode, TrackId, UnitInterval, materialize_positions, reduce,
+};
