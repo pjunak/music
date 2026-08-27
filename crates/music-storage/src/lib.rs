@@ -11,6 +11,7 @@
 
 mod auth;
 mod crypto;
+mod devices;
 mod error;
 mod instance_lock;
 mod migration;
@@ -22,6 +23,7 @@ pub use auth::Argon2PasswordVerifier;
 pub use crypto::{
     CredentialVault, CryptoError, EncryptedCredential, SecretString, hash_password, verify_password,
 };
+pub use devices::{LegacyDeviceImportOutcome, LegacyDeviceImportRecord, LegacyDeviceImportStatus};
 pub use error::StorageError;
 pub use instance_lock::InstanceLock;
 pub use migration::{MigrationBackup, MigrationOutcome};

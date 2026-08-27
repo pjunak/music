@@ -10,4 +10,5 @@
 //! media, analysis, or transport adapters.
 
 pub mod auth;
+pub mod devices;
 pub mod playback;
