@@ -6,9 +6,10 @@
 
 **Decider:** Project owner
 
-**Proposed refinement:** [ADR-016](ADR-016-rust-native-runtime-boundaries.md) re-examines the
-application layer, device persistence, startup scan, and voice isolation choices before
-implementation. Until accepted, this ADR remains the owning decision.
+**Accepted refinement:** [ADR-016](ADR-016-rust-native-runtime-boundaries.md) refines the
+application layer, device persistence, startup scan, and voice isolation choices for
+implementation. ADR-015 continues to own the complete-replacement decision; ADR-016 owns the
+runtime-boundary refinements.
 
 ## Context
 

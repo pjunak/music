@@ -1,9 +1,9 @@
 # Rust rewrite architecture
 
-**Status:** Proposed for implementation review
+**Status:** Accepted for implementation
 
 **Owning decisions:** [ADR-015](ADR-015-complete-rust-rewrite.md),
-[ADR-016](ADR-016-rust-native-runtime-boundaries.md) (proposed refinement)
+[ADR-016](ADR-016-rust-native-runtime-boundaries.md)
 **Target branch:** `rewrite/rust`
 
 This is the target architecture, not a map of Python files to Rust files. Existing behavior is an

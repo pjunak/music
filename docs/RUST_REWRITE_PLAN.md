@@ -1,6 +1,6 @@
 # Rust rewrite execution plan
 
-**Status:** Architecture complete; implementation awaits owner review
+**Status:** Implementation in progress
 
 **Branch:** `rewrite/rust`
 **Architecture:** [RUST_REWRITE_ARCHITECTURE.md](RUST_REWRITE_ARCHITECTURE.md)
@@ -43,10 +43,10 @@ resource acceptance checks pass.
 | Source reference | Change or difference | Rust disposition | Evidence | Status |
 |---|---|---|---|---|
 | `b93f91d` | Rewrite baseline | Capture executable contracts in Phase 1 | Pending | Open |
-| `b93f91d` | `devices.json` is a mutable runtime store | Import to SQLite; add explicit CLI export/import; preserve source file for rollback | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#4-make-operational-data-ownership-consistent) | Awaiting owner |
-| `b93f91d` | Full library scan blocks startup | Serve the durable index, expose reconciliation state, and scan as a durable job | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#6-remove-full-scanning-from-the-critical-boot-path) | Awaiting owner |
-| `b93f91d` | Unexpected HTTP/WS errors expose exception text | Return safe code/message/correlation ID; keep internal detail in logs | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#10-separate-public-compatibility-from-internal-correctness) | Awaiting owner |
-| `b93f91d` | Voice isolation uses recycled Python processes | Try one model-owning Rust thread; require a Rust subprocess when the gate shows it is needed | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#9-re-evaluate-the-voice-process-boundary) | Awaiting owner |
+| `b93f91d` | `devices.json` is a mutable runtime store | Import to SQLite; add explicit CLI export/import; preserve source file for rollback | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#4-make-operational-data-ownership-consistent) | Accepted 2026-08-27 |
+| `b93f91d` | Full library scan blocks startup | Serve the durable index, expose reconciliation state, and scan as a durable job | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#6-remove-full-scanning-from-the-critical-boot-path) | Accepted 2026-08-27 |
+| `b93f91d` | Unexpected HTTP/WS errors expose exception text | Return safe code/message/correlation ID; keep internal detail in logs | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#10-separate-public-compatibility-from-internal-correctness) | Accepted 2026-08-27 |
+| `b93f91d` | Voice isolation uses recycled Python processes | Try one model-owning Rust thread; require a Rust subprocess when the gate shows it is needed | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#9-re-evaluate-the-voice-process-boundary) | Accepted 2026-08-27 |
 
 Add one row immediately for every later `main` fix or accepted deviation. Do not close a phase with
 an open row in its subsystem.
@@ -97,7 +97,7 @@ not a public CI dependency.
 
 ## Phase 0 — architecture and baseline
 
-**Status:** In progress
+**Status:** Complete
 
 Deliverables:
 
@@ -105,8 +105,8 @@ Deliverables:
 - [x] Create `rewrite/rust` from a clean `main` at `b93f91d`.
 - [x] Record the modular-monolith architecture, ownership, concurrency, storage, and cutover model.
 - [x] Reassess Python-era boundaries against Rust runtime capabilities and record ADR-016.
-- [ ] Owner accepts or amends ADR-016, the explicit compatibility differences, and this plan.
-- [ ] Freeze ordinary feature development on `main` for the rewrite duration.
+- [x] Owner accepts ADR-016, the explicit compatibility differences, and this plan.
+- [x] Treat `main` as feature-frozen for ordinary development during the rewrite.
 
 Gate: no application implementation begins until the unchecked owner decision is resolved.
 

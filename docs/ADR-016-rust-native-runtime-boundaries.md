@@ -1,6 +1,6 @@
 # ADR-016: Refine the Rust runtime around explicit application and resource ownership
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Date:** 2026-08-27
 
@@ -122,7 +122,7 @@ the Rust subprocess remains the required fallback when bounded shutdown cannot b
 
 ## Action items
 
-1. [ ] Project owner accepts or amends this ADR and the five explicit differences in the
+1. [x] Project owner accepts this ADR and the five explicit differences in the
    [architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md).
 2. [ ] Phase 1 captures current startup, error, device-store, job, protocol, and model behavior as
    executable reference evidence.

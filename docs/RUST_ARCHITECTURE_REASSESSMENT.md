@@ -1,6 +1,6 @@
 # Rust rewrite architecture reassessment
 
-**Status:** Proposed for owner review
+**Status:** Accepted for implementation
 
 **Date:** 2026-08-27
 
@@ -12,8 +12,9 @@ purpose is to preserve product intent while removing boundaries that exist only 
 the GIL, synchronous SQLAlchemy, module-level singletons, native-extension behavior, or the former
 "wipe the database" migration policy.
 
-No application implementation has started. The recommendations below are architecture proposals
-until the project owner accepts ADR-016 and the explicit compatibility differences.
+The project owner accepted ADR-016 and the explicit compatibility differences on 2026-08-27. The
+recommendations below are now implementation constraints; Phase 1 must capture the displaced
+Python behavior as executable evidence before dependent Rust paths replace it.
 
 ## Evidence reviewed
 
