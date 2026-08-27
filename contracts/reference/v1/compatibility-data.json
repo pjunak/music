@@ -1,0 +1,57 @@
+{
+  "aes_256_gcm": {
+    "aad": "assistant-provider-credential/v1:0123456789abcdef0123456789abcdef",
+    "ciphertext_urlsafe_base64": "IWuub7CXpzbsMf6m2owBQO258xmRViwZWxWA8Wc-ZuRVwaS_Lxkp-H_1I7o=",
+    "connection_id": "0123456789abcdef0123456789abcdef",
+    "key_id": "630dcd2966c43366",
+    "key_urlsafe_base64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "nonce_urlsafe_base64": "AAECAwQFBgcICQoL",
+    "plaintext": "fixture-api-key-not-a-secret"
+  },
+  "argon2id": {
+    "invalid_password": "rewrite-fixture-password-wrong",
+    "password": "rewrite-fixture-password",
+    "phc": "$argon2id$v=19$m=65536,t=3,p=4$cmV3cml0ZS1maXh0dXJlLXNhbHQ$tgdYDN8ijOk+7HZgF2oUm50+O8nOMKGggRmynxNu4ko"
+  },
+  "legacy_device_cases": [
+    {
+      "expected": [],
+      "id": "missing-file",
+      "source": null
+    },
+    {
+      "expected": [],
+      "id": "corrupt-json",
+      "source": "{not-json"
+    },
+    {
+      "expected": [],
+      "id": "non-object-root",
+      "source": "[]\n"
+    },
+    {
+      "expected": [
+        {
+          "added_at": "2026-08-27T10:00:00+00:00",
+          "client_id": "living-room",
+          "is_output": true,
+          "name": "Living Room"
+        },
+        {
+          "added_at": "2026-08-27T10:05:00+00:00",
+          "client_id": "tablet",
+          "is_output": false,
+          "name": "Tabletop Controller"
+        }
+      ],
+      "id": "representative",
+      "source": "{\n  \"ignored-non-record\": [\n    \"not\",\n    \"an\",\n    \"object\"\n  ],\n  \"living-room\": {\n    \"added_at\": \"2026-08-27T10:00:00+00:00\",\n    \"is_output\": true,\n    \"name\": \"Living Room\"\n  },\n  \"tablet\": {\n    \"added_at\": \"2026-08-27T10:05:00+00:00\",\n    \"is_output\": false,\n    \"name\": \"Tabletop Controller\"\n  }\n}\n"
+    }
+  ],
+  "sqlite": {
+    "representative_rows_per_table": 1,
+    "table_count": 18,
+    "timestamp": "2026-08-27 12:34:56.000000"
+  },
+  "version": 1
+}

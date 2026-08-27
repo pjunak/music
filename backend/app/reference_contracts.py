@@ -10,11 +10,15 @@ device registries, and media are never opened.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import sqlite3
 from pathlib import Path
 from typing import Annotated, Any
 
+from argon2.low_level import Type, hash_secret
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import Field, TypeAdapter
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
@@ -38,7 +42,7 @@ from app.sync.protocol import (
 )
 
 BASELINE_COMMIT = "b93f91d"
-EXPORTER_VERSION = 1
+EXPORTER_VERSION = 2
 REFERENCE_DIR = Path(__file__).resolve().parents[2] / "contracts" / "reference" / "v1"
 
 _HTTP_METHODS = frozenset({"delete", "get", "head", "options", "patch", "post", "put", "trace"})
@@ -63,6 +67,338 @@ def _sqlite_ddl() -> bytes:
         for index in sorted(table.indexes, key=lambda item: item.name or ""):
             statements.append(str(CreateIndex(index).compile(dialect=dialect)).strip())
     return (";\n\n".join(statements) + ";\n").encode()
+
+
+def _compatibility_data() -> dict[str, Any]:
+    password = "rewrite-fixture-password"
+    password_hash = hash_secret(
+        password.encode(),
+        b"rewrite-fixture-salt",
+        time_cost=3,
+        memory_cost=65536,
+        parallelism=4,
+        hash_len=32,
+        type=Type.ID,
+        version=19,
+    ).decode("ascii")
+
+    connection_id = "0123456789abcdef0123456789abcdef"
+    credential_key = bytes(range(32))
+    credential_nonce = bytes(range(12))
+    credential_plaintext = "fixture-api-key-not-a-secret"
+    credential_aad = f"assistant-provider-credential/v1:{connection_id}"
+    credential_ciphertext = AESGCM(credential_key).encrypt(
+        credential_nonce,
+        credential_plaintext.encode(),
+        credential_aad.encode("ascii"),
+    )
+
+    legacy_devices = {
+        "living-room": {
+            "added_at": "2026-08-27T10:00:00+00:00",
+            "is_output": True,
+            "name": "Living Room",
+        },
+        "tablet": {
+            "added_at": "2026-08-27T10:05:00+00:00",
+            "is_output": False,
+            "name": "Tabletop Controller",
+        },
+        "ignored-non-record": ["not", "an", "object"],
+    }
+    return {
+        "aes_256_gcm": {
+            "aad": credential_aad,
+            "ciphertext_urlsafe_base64": base64.urlsafe_b64encode(
+                credential_ciphertext
+            ).decode("ascii"),
+            "connection_id": connection_id,
+            "key_id": hashlib.sha256(credential_key).hexdigest()[:16],
+            "key_urlsafe_base64": base64.urlsafe_b64encode(credential_key).decode(
+                "ascii"
+            ),
+            "nonce_urlsafe_base64": base64.urlsafe_b64encode(
+                credential_nonce
+            ).decode("ascii"),
+            "plaintext": credential_plaintext,
+        },
+        "argon2id": {
+            "invalid_password": "rewrite-fixture-password-wrong",
+            "password": password,
+            "phc": password_hash,
+        },
+        "legacy_device_cases": [
+            {"expected": [], "id": "missing-file", "source": None},
+            {"expected": [], "id": "corrupt-json", "source": "{not-json"},
+            {"expected": [], "id": "non-object-root", "source": "[]\n"},
+            {
+                "expected": [
+                    {
+                        "added_at": "2026-08-27T10:00:00+00:00",
+                        "client_id": "living-room",
+                        "is_output": True,
+                        "name": "Living Room",
+                    },
+                    {
+                        "added_at": "2026-08-27T10:05:00+00:00",
+                        "client_id": "tablet",
+                        "is_output": False,
+                        "name": "Tabletop Controller",
+                    },
+                ],
+                "id": "representative",
+                "source": json.dumps(
+                    legacy_devices, indent=2, sort_keys=True, ensure_ascii=False
+                )
+                + "\n",
+            },
+        ],
+        "sqlite": {
+            "representative_rows_per_table": 1,
+            "table_count": len(Base.metadata.sorted_tables),
+            "timestamp": "2026-08-27 12:34:56.000000",
+        },
+        "version": 1,
+    }
+
+
+def _sqlite_fixture_sql(compatibility: dict[str, Any]) -> bytes:
+    timestamp = compatibility["sqlite"]["timestamp"]
+    credential = compatibility["aes_256_gcm"]
+    password = compatibility["argon2id"]
+
+    def compact(value: Any) -> str:
+        return json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+
+    database = sqlite3.connect(":memory:")
+    try:
+        database.execute("PRAGMA foreign_keys=ON")
+        database.executescript(_sqlite_ddl().decode("utf-8"))
+        database.execute(
+            "INSERT INTO assistant_provider_connections VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                credential["connection_id"],
+                "Fixture provider",
+                "openai-responses",
+                "https://example.invalid/v1",
+                credential["ciphertext_urlsafe_base64"],
+                credential["nonce_urlsafe_base64"],
+                "••••cret",
+                0,
+                "verified",
+                None,
+                compact(["fixture-model"]),
+                compact(["structured-output"]),
+                timestamp,
+                timestamp,
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO assistant_tag_vocabularies VALUES (?, ?, ?, ?, ?)",
+            ("default", 1, 1, compact({"groups": []}), timestamp),
+        )
+        database.execute(
+            "INSERT INTO background_jobs VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "fixture-job",
+                "library_context",
+                "succeeded",
+                compact({"track_ids": [1]}),
+                compact({"processed": 1}),
+                None,
+                1,
+                1,
+                "complete",
+                "Fixture complete",
+                1,
+                None,
+                timestamp,
+                timestamp,
+                timestamp,
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO cleanup_batches VALUES (?, ?, ?, ?, ?)",
+            (1, timestamp, "Fixture scope", compact([{"track_id": 1}]), None),
+        )
+        database.execute(
+            "INSERT INTO cleanup_name_lookups VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "fixture title", "Fixture Title", 90, 80, timestamp),
+        )
+        database.execute(
+            "INSERT INTO playback_state VALUES (?, ?, ?)",
+            (
+                1,
+                compact(
+                    {
+                        "active_output_device_ids": ["living-room"],
+                        "is_playing": False,
+                        "revision": 7,
+                    }
+                ),
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO playlists VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "Fixture playlist",
+                "dnd",
+                "ambient",
+                compact({}),
+                None,
+                None,
+                timestamp,
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO tracks VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "Fixture/track.wav",
+                "Fixture Track",
+                "Fixture Artist",
+                "Fixture Album Artist",
+                "Fixture Album",
+                1,
+                1,
+                2026,
+                "Soundtrack",
+                12.5,
+                120,
+                "Fixture Artist — Fixture Track",
+                "fixture",
+                24044,
+                1787826896,
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO users VALUES (?, ?, ?, ?)",
+            (1, "fixture-user", password["phc"], timestamp),
+        )
+        database.execute(
+            "INSERT INTO assistant_model_roles VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "playlist",
+                credential["connection_id"],
+                "fixture-model",
+                1,
+                30,
+                2048,
+                "provider_default",
+                "passed",
+                None,
+                "fixture-fingerprint",
+                timestamp,
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO auth_sessions VALUES (?, ?, ?, ?, ?)",
+            ("fixture-session-token", 1, timestamp, timestamp, timestamp),
+        )
+        database.execute(
+            "INSERT INTO playlist_items VALUES (?, ?, ?, ?)",
+            (1, 0, 1, timestamp),
+        )
+        database.execute(
+            "INSERT INTO track_analyses VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "fixture-signal-v1",
+                "fixture-source",
+                "fixture-job",
+                0.4,
+                0.3,
+                0.2,
+                compact(["mood.calm"]),
+                compact({"source": "fixture"}),
+                compact({"rms": 0.1}),
+                "medium",
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO track_analysis_failures VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "fixture-failed-v1",
+                "fixture-source",
+                "fixture-job",
+                "synthetic failure",
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO track_analysis_tag_reviews VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "fixture-signal-v1",
+                "mood.calm",
+                "fixture-source",
+                "accepted",
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO track_contexts VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "fixture-context-v1",
+                "fixture-source",
+                "fixture-job",
+                "complete",
+                "medium",
+                compact({"label": "Fixture"}),
+                compact([]),
+                compact([]),
+                compact({"duration_s": 12.5}),
+                compact({"signal": "complete"}),
+                timestamp,
+            ),
+        )
+        database.execute(
+            "INSERT INTO track_user_tags VALUES (?, ?, ?)",
+            (1, "mood.calm", timestamp),
+        )
+        database.execute(
+            "INSERT INTO assistant_model_evaluations VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "playlist",
+                "fixture-evaluation",
+                "fixture-fingerprint",
+                "passed",
+                "playlist-model-v1",
+                "fixture-engine",
+                1,
+                1,
+                "fixture-job",
+                timestamp,
+            ),
+        )
+        database.commit()
+        dump = "\n".join(database.iterdump())
+        return (
+            "PRAGMA foreign_keys=OFF;\n"
+            + dump
+            + "\nPRAGMA foreign_keys=ON;\n"
+        ).encode()
+    finally:
+        database.close()
 
 
 def _authored_file_schemas() -> dict[str, Any]:
@@ -138,9 +474,12 @@ def build_reference_bundle() -> dict[str, bytes]:
     openapi = app.openapi()
     actions = action_adapter.json_schema()
     messages = server_message_adapter.json_schema()
+    compatibility = _compatibility_data()
     artifacts = {
         "authored-files.schema.json": _json_bytes(_authored_file_schemas()),
+        "compatibility-data.json": _json_bytes(compatibility),
         "openapi.json": _json_bytes(openapi),
+        "sqlite-fixture.sql": _sqlite_fixture_sql(compatibility),
         "sqlite-schema.sql": _sqlite_ddl(),
         "websocket-actions.examples.json": _json_bytes(_websocket_action_examples()),
         "websocket-actions.schema.json": _json_bytes(actions),
@@ -165,7 +504,12 @@ def build_reference_bundle() -> dict[str, bytes]:
         "counts": {
             "http_operations": operations,
             "http_paths": len(openapi.get("paths", {})),
+            "legacy_device_cases": len(compatibility["legacy_device_cases"]),
             "openapi_schemas": len(openapi.get("components", {}).get("schemas", {})),
+            "sqlite_fixture_rows": (
+                compatibility["sqlite"]["table_count"]
+                * compatibility["sqlite"]["representative_rows_per_table"]
+            ),
             "sqlite_tables": len(Base.metadata.sorted_tables),
             "websocket_actions": len(actions.get("oneOf", [])),
             "websocket_action_examples": len(VALID_WEBSOCKET_ACTIONS),

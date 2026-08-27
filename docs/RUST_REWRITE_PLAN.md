@@ -130,9 +130,18 @@ Evidence so far:
   most four pooled connections; its standard-library lock refuses a second owner and releases on
   drop. Playback persistence uses a separate `storage_revision` compare-and-swap, and a 16-writer
   concurrency test proves one winner with stale writes rejected.
+- A deterministic, synthetic-only persistence fixture populates every one of the 18 Python tables,
+  preserves SQLite timestamp/JSON encodings, and covers missing, corrupt, and representative legacy
+  device JSON. Rust opens that full shape with no foreign-key failures.
+- RustCrypto `aes-gcm` reproduces the existing AES-256-GCM ciphertext byte-for-byte for fixed
+  key/nonce input, including AAD, padded URL-safe base64, key fingerprint, and credential hint.
+  Rust verifies Python Argon2id PHC hashes; new hashes explicitly retain Python's
+  `m=65536,t=3,p=4` parameters. Decrypted secrets redact `Debug` output and zeroize their owned
+  storage on drop.
 - `deny.toml` rejects unknown registries and Git sources, wildcard requirements, OpenSSL/native-TLS
-  backends, and both deprecated YAML implementations. The initial 131-crate graph passes RustSec
-  with warnings denied; the two upstream duplicate families remain visible as review warnings.
+  backends, and both deprecated YAML implementations. The current 155-crate graph passes RustSec
+  with warnings denied; six upstream duplicate families remain visible as review warnings (four at
+  the SQLx/RustCrypto generation boundary, plus `hashbrown` and `syn`).
 - The eight-crate workspace shell compiles with the accepted dependency direction and workspace
   safe-Rust/panic lints. It exists now to host Phase 1 contract and feasibility tests; no production
   endpoint is routed to Rust before its parity gate.

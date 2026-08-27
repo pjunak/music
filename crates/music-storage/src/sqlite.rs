@@ -207,6 +207,9 @@ mod tests {
     use super::{CompareAndSwap, SqliteStorage, SqliteStorageOptions};
     use crate::StorageError;
 
+    const PYTHON_SQLITE_FIXTURE: &str =
+        include_str!("../../../contracts/reference/v1/sqlite-fixture.sql");
+
     async fn open_test_storage() -> Result<(tempfile::TempDir, SqliteStorage), StorageError> {
         let directory = tempdir().map_err(|source| StorageError::Io {
             operation: "create test directory",
@@ -315,6 +318,39 @@ mod tests {
             }
         }
         assert_eq!(winners, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn opens_python_schema_with_representative_rows() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let storage =
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?;
+        sqlx::raw_sql(PYTHON_SQLITE_FIXTURE)
+            .execute(&storage.pool)
+            .await?;
+
+        let table_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .fetch_one(&storage.pool)
+        .await?;
+        assert_eq!(table_count, 18);
+
+        let foreign_key_failures = sqlx::query("PRAGMA foreign_key_check")
+            .fetch_all(&storage.pool)
+            .await?;
+        assert!(foreign_key_failures.is_empty());
+
+        let row = sqlx::query("SELECT username, created_at FROM users WHERE id = 1")
+            .fetch_one(&storage.pool)
+            .await?;
+        assert_eq!(row.try_get::<String, _>("username")?, "fixture-user");
+        assert_eq!(
+            row.try_get::<String, _>("created_at")?,
+            "2026-08-27 12:34:56.000000"
+        );
         Ok(())
     }
 }

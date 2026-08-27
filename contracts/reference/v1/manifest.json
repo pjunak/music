@@ -4,9 +4,17 @@
       "bytes": 17819,
       "sha256": "bb0296fe1022167c02eb47fde809d0c01d82f8ea108a92ce1fb14975a21313b4"
     },
+    "compatibility-data.json": {
+      "bytes": 1936,
+      "sha256": "419ad4d81e799ebf421bd867a9bd33c17260dca2c3d32503ddad0ed60f34ecb3"
+    },
     "openapi.json": {
       "bytes": 386531,
       "sha256": "c152645ebbd0c6eea3530fa21f9bfb2e79f757af8324b4e22b9121ff3d6c0471"
+    },
+    "sqlite-fixture.sql": {
+      "bytes": 11015,
+      "sha256": "d6d8358dd2da04a9e9ea85a393007a6b3a6aba3b9fc7e24235edbc44338f7d87"
     },
     "sqlite-schema.sql": {
       "bytes": 7798,
@@ -33,7 +41,9 @@
   "counts": {
     "http_operations": 144,
     "http_paths": 118,
+    "legacy_device_cases": 4,
     "openapi_schemas": 205,
+    "sqlite_fixture_rows": 18,
     "sqlite_tables": 18,
     "websocket_action_examples": 34,
     "websocket_action_rejections": 20,
@@ -42,5 +52,5 @@
     "websocket_message_rejections": 8,
     "websocket_messages": 4
   },
-  "exporter_version": 1
+  "exporter_version": 2
 }
