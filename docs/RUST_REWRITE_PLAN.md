@@ -209,8 +209,9 @@ not introduce a Python sidecar.
 ## Phase 2 — workspace, process shell, and CI
 
 **Status:** In progress — the workspace, immutable configuration, supervised process shell,
-compatibility health/readiness, SPA serving, and non-publishing rewrite CI are implemented. The
-OpenAPI/TypeScript export pipelines and Rust container remain open.
+compatibility health/readiness, SPA serving, generated contract pipelines, and rewrite-only
+container/CI path are implemented. The container smoke gate still needs to execute on CI because
+Docker is not installed in the current Windows development environment.
 
 Create the eight-crate workspace and establish rules before feature code:
 
@@ -226,7 +227,8 @@ Create the eight-crate workspace and establish rules before feature code:
   request/body limits, and security headers;
 - [x] SQLx read pool, serialized short-write admission, WAL pragmas, exclusive instance lock,
   compatibility validator, migration baseline, backup/doctor commands;
-- [ ] OpenAPI and TypeScript export pipelines.
+- [x] Route-integrated OpenAPI, semantic parity report, and generated TypeScript WebSocket
+  bindings, with `music-cli contracts export/check` drift enforcement.
 - [x] CI verification on pull requests and `rewrite/rust` without image publishing or deployment.
 - [x] Main-only build/publish/dispatch remains unchanged and still targets the Python image until
   cutover.
@@ -245,6 +247,12 @@ Readiness is deliberately `starting` while the Phase-3 playback owner is absent.
 WebSocket shell emits one protocol-shaped service-unavailable error and closes; it never fabricates
 a canonical state snapshot. `/api/health` remains the exact `{"status":"ok"}` liveness contract.
 
+The first semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
+operations versus the two currently registered Rust routes, rather than presenting partial work as
+parity. The browser now imports generated Rust WebSocket DTOs; a generated compatibility layer
+models accepted omitted defaults and the deliberate cached-client window, while `wsValidate.ts`
+continues to validate untrusted frames at runtime.
+
 Gate: all standard Rust/frontend/security gates pass; forbidden global state/unsafe/panic fixtures
 are enforced; a copied existing database passes read-only doctor; a second writer is refused; and
 the Rust container boots non-root with empty storage and serves the unchanged SPA.
@@ -260,7 +268,8 @@ Implement the highest-value invariant early:
   downgrade, send deadlines, transient lag policy, and sibling-client disconnect behavior;
 - server advancer and loop timers as supervised actor effects;
 - `GET /api/sync/state` and `/api/ws`;
-- generated TypeScript protocol bindings without changing frontend behavior.
+- extend the generated TypeScript bindings for any new playback DTOs without changing frontend
+  behavior.
 
 Gate: reducer property tests pass; every WebSocket fixture matches; frontend WebSocket validation,
 compat-mode tests, and Baton serialization fixtures pass; stress tests show ordered latest-state

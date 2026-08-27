@@ -32,6 +32,9 @@ AGENTS.md
 **/build
 **/.vite
 
+# Rust build output — BuildKit caches compilation inside the builder stage.
+target
+
 # Environment files — secrets never go in images
 .env
 .env.*
