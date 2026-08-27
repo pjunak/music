@@ -2,8 +2,8 @@
   "schema_version": "openapi-compatibility/v1",
   "verdict": "incomplete",
   "reference_operation_count": 144,
-  "candidate_operation_count": 11,
-  "matched_operation_count": 10,
+  "candidate_operation_count": 17,
+  "matched_operation_count": 16,
   "fully_compatible_operation_count": 9,
   "missing_operations": [
     "DELETE /api/assistant/providers/connections/{connection_id}",
@@ -46,13 +46,8 @@
     "GET /api/jobs/{job_id}",
     "GET /api/library/cleanup/batches",
     "GET /api/library/cleanup/batches/{batch_id}",
-    "GET /api/library/folders",
-    "GET /api/library/search",
-    "GET /api/library/tracks",
-    "GET /api/library/tracks/{track_id}",
     "GET /api/library/tracks/{track_id}/cover",
     "GET /api/library/tracks/{track_id}/stream",
-    "GET /api/library/tree",
     "GET /api/modes",
     "GET /api/modes/active",
     "GET /api/modes/{mode_id}",
@@ -109,7 +104,6 @@
     "POST /api/library/cleanup/verify",
     "POST /api/library/folders",
     "POST /api/library/folders/rename",
-    "POST /api/library/rescan",
     "POST /api/library/tracks/bulk-delete",
     "POST /api/library/tracks/bulk-move",
     "POST /api/library/tracks/{track_id}/move",
@@ -144,10 +138,20 @@
   "candidate_only_operations": [
     "GET /api/readiness"
   ],
-  "parameter_mismatches": [],
+  "parameter_mismatches": [
+    "GET /api/library/search",
+    "GET /api/library/tracks/{track_id}",
+    "GET /api/library/tree"
+  ],
   "request_body_mismatches": [],
   "response_mismatches": [
-    "GET /api/sync/state"
+    "GET /api/library/folders",
+    "GET /api/library/search",
+    "GET /api/library/tracks",
+    "GET /api/library/tracks/{track_id}",
+    "GET /api/library/tree",
+    "GET /api/sync/state",
+    "POST /api/library/rescan"
   ],
   "security_mismatches": []
 }

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use music_domain::{
-    ClockSample, DomainEvent, PersistenceIntent, PlaybackCommand, PlaybackError, PlaybackState,
-    ReductionContext, ShuffleMode, TrackId, materialize_positions, reduce,
+    ClockSample, DomainEvent, LibraryGeneration, PersistenceIntent, PlaybackCommand, PlaybackError,
+    PlaybackState, ReductionContext, ShuffleMode, TrackId, materialize_positions, reduce,
 };
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -348,6 +348,19 @@ impl PlaybackActorHandle {
         .await
     }
 
+    pub async fn replace_library_catalog(
+        &self,
+        generation: LibraryGeneration,
+        track_ids: BTreeSet<TrackId>,
+    ) -> Result<PlaybackCommandResult, PlaybackActorError> {
+        self.request(|reply| ActorMessage::ReplaceLibraryCatalog {
+            generation,
+            track_ids,
+            reply,
+        })
+        .await
+    }
+
     #[must_use]
     pub fn subscribe_state(&self) -> watch::Receiver<PlaybackPublication> {
         self.publications.clone()
@@ -415,6 +428,11 @@ enum ActorMessage {
     ReplaceCatalog {
         catalog: CatalogSnapshot,
         active_preset_content_changed: bool,
+        reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
+    },
+    ReplaceLibraryCatalog {
+        generation: LibraryGeneration,
+        track_ids: BTreeSet<TrackId>,
         reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
     },
 }
@@ -588,6 +606,22 @@ where
                 let result = self
                     .replace_catalog(catalog, active_preset_content_changed)
                     .await;
+                let fatal = result.as_ref().err().is_some_and(is_fatal);
+                let fatal_error = result.as_ref().err().cloned();
+                let _ = reply.send(result);
+                if fatal && let Some(error) = fatal_error {
+                    return Err(error);
+                }
+            }
+            ActorMessage::ReplaceLibraryCatalog {
+                generation,
+                track_ids,
+                reply,
+            } => {
+                let mut catalog = self.catalog.clone();
+                catalog.generation.library = generation.get();
+                catalog.track_ids = Some(track_ids);
+                let result = self.replace_catalog(catalog, false).await;
                 let fatal = result.as_ref().err().is_some_and(is_fatal);
                 let fatal_error = result.as_ref().err().cloned();
                 let _ = reply.send(result);

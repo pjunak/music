@@ -458,6 +458,12 @@ mod tests {
         assert!(paths.contains_key("/api/auth/sessions/{token_prefix}"));
         assert!(paths.contains_key("/api/devices"));
         assert!(paths.contains_key("/api/devices/{client_id}"));
+        assert!(paths.contains_key("/api/library/search"));
+        assert!(paths.contains_key("/api/library/tree"));
+        assert!(paths.contains_key("/api/library/folders"));
+        assert!(paths.contains_key("/api/library/tracks"));
+        assert!(paths.contains_key("/api/library/tracks/{track_id}"));
+        assert!(paths.contains_key("/api/library/rescan"));
         assert!(!paths.contains_key("/health"));
         assert!(!paths.contains_key("/api/ws"));
         Ok(())

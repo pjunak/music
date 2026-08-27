@@ -9,10 +9,15 @@
 //! Filesystem effects stay behind explicit plans and recovery journals; pure
 //! cleanup or authoring analysis must not acquire write-capable dependencies.
 
+mod discovery;
 mod metadata;
 mod path;
 mod yaml;
 
+pub use discovery::{
+    FilesystemDiscoveryError, FilesystemLibraryDiscovery, LibraryDirectory,
+    list_library_directories,
+};
 pub use metadata::{
     AudioMetadata, FfmpegTools, MetadataAdapter, MetadataWriteCapability, StagedTagUpdate,
     TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata, stage_tag_update,

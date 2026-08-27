@@ -22,6 +22,8 @@ pub enum RuntimeError {
     Authentication(music_application::auth::AuthServiceError),
     Storage(music_storage::StorageError),
     Playback(music_application::playback::PlaybackActorError),
+    Library(music_application::library::LibraryCoordinatorError),
+    MediaRoot(music_media::RootedPathError),
     Io {
         operation: &'static str,
         source: io::Error,
@@ -51,6 +53,8 @@ impl Display for RuntimeError {
             Self::Authentication(error) => Display::fmt(error, formatter),
             Self::Storage(error) => Display::fmt(error, formatter),
             Self::Playback(error) => Display::fmt(error, formatter),
+            Self::Library(error) => Display::fmt(error, formatter),
+            Self::MediaRoot(error) => Display::fmt(error, formatter),
             Self::Io { operation, .. } => write!(formatter, "failed to {operation}"),
             Self::TracingInitialization => {
                 formatter.write_str("failed to initialize structured tracing")
@@ -78,6 +82,8 @@ impl Error for RuntimeError {
             Self::Authentication(source) => Some(source),
             Self::Storage(source) => Some(source),
             Self::Playback(source) => Some(source),
+            Self::Library(source) => Some(source),
+            Self::MediaRoot(source) => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::TracingInitialization
             | Self::TaskAdmissionClosed
@@ -109,6 +115,18 @@ impl From<music_storage::StorageError> for RuntimeError {
 impl From<music_application::playback::PlaybackActorError> for RuntimeError {
     fn from(error: music_application::playback::PlaybackActorError) -> Self {
         Self::Playback(error)
+    }
+}
+
+impl From<music_application::library::LibraryCoordinatorError> for RuntimeError {
+    fn from(error: music_application::library::LibraryCoordinatorError) -> Self {
+        Self::Library(error)
+    }
+}
+
+impl From<music_media::RootedPathError> for RuntimeError {
+    fn from(error: music_media::RootedPathError) -> Self {
+        Self::MediaRoot(error)
     }
 }
 

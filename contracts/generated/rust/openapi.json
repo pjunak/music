@@ -186,6 +186,45 @@
         ],
         "type": "object"
       },
+      "FolderOut": {
+        "properties": {
+          "has_children": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "track_count": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "track_count",
+          "has_children"
+        ],
+        "type": "object"
+      },
+      "FoldersResponse": {
+        "properties": {
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/FolderOut"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "folders"
+        ],
+        "type": "object"
+      },
       "HTTPValidationError": {
         "description": "FastAPI-compatible validation envelope retained as a stable HTTP contract.",
         "properties": {
@@ -502,12 +541,213 @@
         ],
         "type": "string"
       },
+      "RescanResult": {
+        "properties": {
+          "added": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "removed": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unchanged": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "updated",
+          "removed",
+          "unchanged"
+        ],
+        "type": "object"
+      },
+      "SearchOrder": {
+        "enum": [
+          "asc",
+          "desc"
+        ],
+        "type": "string"
+      },
+      "SearchResponse": {
+        "properties": {
+          "limit": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "order": {
+            "$ref": "#/components/schemas/SearchOrder"
+          },
+          "sort": {
+            "$ref": "#/components/schemas/SearchSort"
+          },
+          "total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/TrackOut"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tracks",
+          "total",
+          "limit",
+          "offset",
+          "sort",
+          "order"
+        ],
+        "type": "object"
+      },
+      "SearchSort": {
+        "enum": [
+          "title",
+          "artist",
+          "album",
+          "album_artist",
+          "year",
+          "length_s",
+          "track_no",
+          "added_at",
+          "path"
+        ],
+        "type": "string"
+      },
       "ShuffleMode": {
         "enum": [
           "off",
           "random"
         ],
         "type": "string"
+      },
+      "TrackOut": {
+        "properties": {
+          "added_at": {
+            "type": "string"
+          },
+          "album": {
+            "type": "string"
+          },
+          "album_artist": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "bpm": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "disc_no": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "display_title": {
+            "type": "string"
+          },
+          "genre": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "length_s": {
+            "format": "double",
+            "type": "number"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_no": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "year": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "title",
+          "artist",
+          "album_artist",
+          "album",
+          "genre",
+          "length_s",
+          "size_bytes",
+          "added_at",
+          "display_title",
+          "origin"
+        ],
+        "type": "object"
+      },
+      "TreeResponse": {
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/TrackOut"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "tracks"
+        ],
+        "type": "object"
       },
       "UserInfoResponse": {
         "properties": {
@@ -824,6 +1064,248 @@
             "description": "Successful Response"
           }
         }
+      }
+    },
+    "/api/library/folders": {
+      "get": {
+        "operationId": "folders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FoldersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/rescan": {
+      "post": {
+        "operationId": "rescan",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RescanResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/search": {
+      "get": {
+        "operationId": "search",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SearchSort"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SearchOrder"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/tracks": {
+      "get": {
+        "operationId": "tracks_batch",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrackOut"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/tracks/{track_id}": {
+      "get": {
+        "operationId": "track",
+        "parameters": [
+          {
+            "description": "Track identifier",
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/tree": {
+      "get": {
+        "operationId": "tree",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
       }
     },
     "/api/readiness": {

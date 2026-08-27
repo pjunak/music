@@ -31,6 +31,7 @@ use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
 use crate::error::{ApiError, HttpValidationErrorBody, RuntimeError};
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
+use crate::library::RuntimeLibrary;
 use crate::playback_projection::{canonical_state, guest_state};
 
 const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
@@ -45,6 +46,7 @@ pub(crate) struct HttpState {
     pub(crate) playback: Option<PlaybackActorHandle>,
     pub(crate) auth: Option<Arc<RuntimeAuth>>,
     pub(crate) devices: Option<Arc<RuntimeDevices>>,
+    pub(crate) library: Option<Arc<RuntimeLibrary>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -79,8 +81,16 @@ pub fn build_router(
     playback: PlaybackActorHandle,
     auth: Arc<RuntimeAuth>,
     devices: Arc<RuntimeDevices>,
+    library: Arc<RuntimeLibrary>,
 ) -> Result<Router, RuntimeError> {
-    build_router_inner(config, health, Some(playback), Some(auth), Some(devices))
+    build_router_inner(
+        config,
+        health,
+        Some(playback),
+        Some(auth),
+        Some(devices),
+        Some(library),
+    )
 }
 
 #[cfg(test)]
@@ -88,7 +98,7 @@ fn build_router_without_playback(
     config: &AppConfig,
     health: HealthRegistry,
 ) -> Result<Router, RuntimeError> {
-    build_router_inner(config, health, None, None, None)
+    build_router_inner(config, health, None, None, None, None)
 }
 
 fn build_router_inner(
@@ -97,12 +107,14 @@ fn build_router_inner(
     playback: Option<PlaybackActorHandle>,
     auth: Option<Arc<RuntimeAuth>>,
     devices: Option<Arc<RuntimeDevices>>,
+    library: Option<Arc<RuntimeLibrary>>,
 ) -> Result<Router, RuntimeError> {
     let state = HttpState {
         health: health.clone(),
         playback,
         auth,
         devices,
+        library,
     };
     let api = documented_api_router().with_state(state);
     let (mut router, _) = OpenApiRouter::with_openapi(<MusicApi as utoipa::OpenApi>::openapi())
@@ -137,6 +149,7 @@ fn documented_api_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .merge(crate::auth::auth_router())
         .merge(crate::devices::device_router())
+        .merge(crate::library::library_router())
         .routes(routes!(liveness))
         .routes(routes!(readiness))
         .routes(routes!(sync_state))

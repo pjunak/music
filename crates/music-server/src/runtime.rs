@@ -7,10 +7,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use music_application::library::{
+    LibraryCatalogSink, LibraryCoordinatorHandle, LibraryMutationRepository, LibraryRepository,
+    LibraryService, ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
+};
 use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
     SystemPlaybackClock, SystemQueueRandom, start_playback_actor,
 };
+use music_media::{FfmpegTools, FilesystemLibraryDiscovery, LibraryRoot, MetadataAdapter};
 use music_storage::{
     LegacyDeviceImportOutcome, LegacyDeviceImportStatus, SqliteStorage, SqliteStorageOptions,
     StorageError,
@@ -25,6 +30,7 @@ use crate::devices::RuntimeDevices;
 use crate::error::RuntimeError;
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::http::build_router;
+use crate::library::RuntimeLibrary;
 use crate::supervisor::{CriticalTaskError, TaskSupervisor};
 
 const DATABASE_HEALTH_INTERVAL: Duration = Duration::from_secs(30);
@@ -42,6 +48,9 @@ pub struct AppRuntime {
     playback: PlaybackActorHandle,
     auth: Arc<RuntimeAuth>,
     devices: Arc<RuntimeDevices>,
+    library: LibraryCoordinatorHandle,
+    library_service: Arc<LibraryService>,
+    library_root: LibraryRoot,
 }
 
 impl AppRuntime {
@@ -56,6 +65,8 @@ impl AppRuntime {
         health.set_component("playback", true, ComponentStatus::Starting);
         health.set_component("authentication", true, ComponentStatus::Starting);
         health.set_component("remembered_devices", false, ComponentStatus::Starting);
+        health.set_component("library_coordinator", true, ComponentStatus::Starting);
+        health.set_component("library", false, ComponentStatus::Starting);
         health.set_component("runtime", true, ComponentStatus::Starting);
 
         initialize_directories(&config, &health)?;
@@ -118,6 +129,21 @@ impl AppRuntime {
             }
         };
         health.set_component("playback", true, ComponentStatus::Ready);
+        let library_root = LibraryRoot::open(&config.music_dir)?;
+        let discovery = Arc::new(FilesystemLibraryDiscovery::new(
+            library_root.clone(),
+            MetadataAdapter::with_ffmpeg(FfmpegTools::new("ffmpeg", "ffprobe")),
+        ));
+        let mutation_repository: Arc<dyn LibraryMutationRepository> = storage.clone();
+        let read_repository: Arc<dyn LibraryRepository> = storage.clone();
+        let catalog_sink: Arc<dyn LibraryCatalogSink> = Arc::new(playback.clone());
+        let spawned_library =
+            start_library_coordinator(mutation_repository, discovery, catalog_sink).await?;
+        let library = supervise_library(&supervisor, spawned_library, health.clone())?;
+        let library_service = Arc::new(LibraryService::new(read_repository));
+        health.set_component("library_coordinator", true, ComponentStatus::Ready);
+        apply_library_health(&health, library.status().status);
+        library.request_reconciliation()?;
         start_database_monitor(&supervisor, Arc::clone(&storage))?;
         health.set_component("runtime", true, ComponentStatus::Ready);
 
@@ -135,6 +161,9 @@ impl AppRuntime {
             playback,
             auth,
             devices,
+            library,
+            library_service,
+            library_root,
         })
     }
 
@@ -148,6 +177,11 @@ impl AppRuntime {
         self.health.snapshot()
     }
 
+    #[must_use]
+    pub fn library_status(&self) -> music_application::library::LibraryStatus {
+        self.library.status()
+    }
+
     pub fn router(&self) -> Result<Router, RuntimeError> {
         build_router(
             &self.config,
@@ -155,6 +189,11 @@ impl AppRuntime {
             self.playback.clone(),
             Arc::clone(&self.auth),
             Arc::clone(&self.devices),
+            Arc::new(RuntimeLibrary {
+                service: Arc::clone(&self.library_service),
+                coordinator: self.library.clone(),
+                root: self.library_root.clone(),
+            }),
         )
     }
 
@@ -279,6 +318,61 @@ fn map_playback_exit(
         Ok(Err(_)) => Err(CriticalTaskError::new("playback_owner_failed")),
         Err(_) => Err(CriticalTaskError::new("playback_owner_panicked")),
     }
+}
+
+fn supervise_library(
+    supervisor: &TaskSupervisor,
+    spawned: SpawnedLibraryCoordinator,
+    health: HealthRegistry,
+) -> Result<LibraryCoordinatorHandle, RuntimeError> {
+    let handle = spawned.handle;
+    let shutdown_handle = handle.clone();
+    let mut status = handle.subscribe_status();
+    let cancellation = supervisor.cancellation_token();
+    let mut task = spawned.task;
+    supervisor.spawn_critical("library-owner", "library_coordinator", async move {
+        loop {
+            tokio::select! {
+                result = &mut task => return map_library_exit(result),
+                () = cancellation.cancelled() => {
+                    shutdown_handle.shutdown();
+                    return map_library_exit(task.await);
+                }
+                changed = status.changed() => {
+                    if changed.is_err() {
+                        return Err(CriticalTaskError::new("library_status_channel_closed"));
+                    }
+                    apply_library_health(&health, status.borrow().status);
+                }
+            }
+        }
+    })?;
+    Ok(handle)
+}
+
+fn map_library_exit(
+    result: Result<
+        Result<(), music_application::library::LibraryCoordinatorError>,
+        tokio::task::JoinError,
+    >,
+) -> Result<(), CriticalTaskError> {
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(CriticalTaskError::new("library_owner_failed")),
+        Err(_) => Err(CriticalTaskError::new("library_owner_panicked")),
+    }
+}
+
+fn apply_library_health(health: &HealthRegistry, status: ReconciliationStatus) {
+    health.set_component(
+        "library",
+        false,
+        if status == ReconciliationStatus::Failed {
+            ComponentStatus::Degraded
+        } else {
+            ComponentStatus::Ready
+        },
+    );
 }
 
 pub fn initialize_tracing(config: &AppConfig) -> Result<(), RuntimeError> {
@@ -428,9 +522,13 @@ mod tests {
     use std::error::Error;
     use std::fs;
     use std::path::Path;
+    use std::time::Duration;
 
     use axum::body::{Body, to_bytes};
+    use axum::http::header::SET_COOKIE;
     use axum::http::{Request, StatusCode};
+    use music_application::auth::UnixSeconds;
+    use music_application::library::ReconciliationStatus;
     use music_storage::StorageError;
     use serde_json::Value;
     use tempfile::tempdir;
@@ -566,6 +664,162 @@ mod tests {
 
         let reopened = AppRuntime::start(runtime_config(directory.path())?).await?;
         reopened.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_reconciles_the_durable_catalog_and_serves_compatible_read_routes()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Album"))?;
+        fs::write(
+            directory.path().join("music/Album/01 - First.mp3"),
+            b"metadata fallback fixture",
+        )?;
+        fs::write(
+            directory.path().join("music/Album/02 - Second.flac"),
+            b"metadata fallback fixture",
+        )?;
+        fs::create_dir_all(directory.path().join("music/Campaign/Scenes/Empty"))?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let ids = runtime.library_service.catalog_track_ids().await?;
+        assert_eq!(ids.len(), 2);
+
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+        let unauthorized = router
+            .clone()
+            .oneshot(Request::get("/api/library/search").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?
+            .to_owned();
+
+        let search = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/search?q=First")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(search.status(), StatusCode::OK);
+        let search_json: Value =
+            serde_json::from_slice(&to_bytes(search.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(search_json["total"], 1);
+        assert_eq!(search_json["tracks"][0]["title"], "01 - First");
+        assert_eq!(search_json["tracks"][0]["path"], "Album/01 - First.mp3");
+
+        let batch = router
+            .clone()
+            .oneshot(
+                Request::get(format!(
+                    "/api/library/tracks?ids={},{},999999",
+                    ids[1].get(),
+                    ids[1].get()
+                ))
+                .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(batch.status(), StatusCode::OK);
+        let batch_json: Value =
+            serde_json::from_slice(&to_bytes(batch.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(batch_json.as_array().map(Vec::len), Some(1));
+        assert_eq!(batch_json[0]["id"], ids[1].get());
+
+        let tree = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/tree?path=Album")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(tree.status(), StatusCode::OK);
+        let tree_json: Value =
+            serde_json::from_slice(&to_bytes(tree.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(tree_json["tracks"].as_array().map(Vec::len), Some(2));
+
+        let folders = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/folders")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(folders.status(), StatusCode::OK);
+        let folders_json: Value =
+            serde_json::from_slice(&to_bytes(folders.into_body(), 1024 * 1024).await?)?;
+        let folder_entries = folders_json["folders"]
+            .as_array()
+            .ok_or("folders response was not an array")?;
+        let album = folder_entries
+            .iter()
+            .find(|folder| folder["path"] == "Album")
+            .ok_or("album folder was missing")?;
+        assert_eq!(album["track_count"], 2);
+        assert_eq!(album["has_children"], false);
+        let campaign = folder_entries
+            .iter()
+            .find(|folder| folder["path"] == "Campaign")
+            .ok_or("campaign folder was missing")?;
+        assert_eq!(campaign["track_count"], 0);
+        assert_eq!(campaign["has_children"], true);
+        assert!(
+            folder_entries
+                .iter()
+                .any(|folder| folder["path"] == "Campaign/Scenes/Empty")
+        );
+
+        let rescan = router
+            .oneshot(
+                Request::post("/api/library/rescan")
+                    .header("cookie", cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(rescan.status(), StatusCode::OK);
+        let rescan_json: Value =
+            serde_json::from_slice(&to_bytes(rescan.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(rescan_json["unchanged"], 2);
+        assert_eq!(runtime.library_status().generation.get(), 2);
+
+        runtime.shutdown().await?;
         Ok(())
     }
 }

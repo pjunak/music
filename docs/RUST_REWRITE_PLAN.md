@@ -323,8 +323,9 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
 - Single-owner `LibraryCoordinator` for all app-managed file/index mutations.
 - [x] Typed catalog records and query ports, SQLite-backed literal search/stable sorting/batch and
   directory lookup, plus durable generation/reconciliation state in schema v2.
-- Durable-index startup, generation-checked full/incremental reconciliation, visible scan status,
-  tree/folder/search HTTP APIs, metadata fallback, and source signatures.
+- [x] Durable-index startup, generation-checked full reconciliation, visible scan status,
+  tree/folder/search/batch/rescan HTTP APIs, metadata fallback, and source signatures.
+- Incremental reconciliation after committed app-managed mutations and optional watcher hints.
 - Full/range media and cover streaming with disconnect-safe file handles.
 - Streaming uploads and explicit conflict handling.
 - Shared staged-file/recovery infrastructure; metadata edits, moves, bulk operations, folders, SFX

@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use music_application::library::{
-    LibraryDependencyError, LibraryFuture, LibraryRepository, LibrarySearch, LibrarySearchResult,
-    LibrarySortKey, LibraryStatus, ReconciliationStatus, SortOrder,
+    DiscoveredTrack, LibraryDependencyError, LibraryFuture, LibraryMutationRepository,
+    LibraryRepository, LibrarySearch, LibrarySearchResult, LibrarySortKey, LibraryStatus,
+    ReconciliationCommit, ReconciliationStatus, ReconciliationSummary, SortOrder,
 };
 use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
 use sqlx::sqlite::SqliteRow;
@@ -14,6 +15,33 @@ use crate::{SqliteStorage, StorageError};
 const TRACK_COLUMNS: &str = "id, path, title, artist, album_artist, album, track_no, disc_no, \
     year, genre, length_s, bpm, display_title, origin, size_bytes, mtime, \
     CAST(strftime('%s', added_at) AS INTEGER) AS added_at_unix_seconds";
+const MAX_RECONCILIATION_TRACKS: usize = 1_000_000;
+const RECONCILIATION_BATCH_SIZE: usize = 500;
+const UPDATED_COUNT_SQL: &str = "SELECT COUNT(*) FROM temp.library_scan_stage AS staged \
+    JOIN tracks ON tracks.path = staged.path WHERE \
+    tracks.title IS NOT staged.title OR tracks.artist IS NOT staged.artist OR \
+    tracks.album_artist IS NOT staged.album_artist OR tracks.album IS NOT staged.album OR \
+    tracks.track_no IS NOT staged.track_no OR tracks.disc_no IS NOT staged.disc_no OR \
+    tracks.year IS NOT staged.year OR tracks.genre IS NOT staged.genre OR \
+    tracks.length_s IS NOT staged.length_s OR tracks.bpm IS NOT staged.bpm OR \
+    tracks.size_bytes IS NOT staged.size_bytes OR tracks.mtime IS NOT staged.mtime";
+const TRACK_UPSERT_SQL: &str = "INSERT INTO tracks (\
+        path, title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, bpm, \
+        display_title, origin, size_bytes, mtime, added_at\
+    ) SELECT path, title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, \
+             bpm, '', '', size_bytes, mtime, CURRENT_TIMESTAMP \
+      FROM temp.library_scan_stage WHERE true \
+      ON CONFLICT(path) DO UPDATE SET \
+        title = excluded.title, artist = excluded.artist, album_artist = excluded.album_artist, \
+        album = excluded.album, track_no = excluded.track_no, disc_no = excluded.disc_no, \
+        year = excluded.year, genre = excluded.genre, length_s = excluded.length_s, \
+        bpm = excluded.bpm, size_bytes = excluded.size_bytes, mtime = excluded.mtime \
+      WHERE tracks.title IS NOT excluded.title OR tracks.artist IS NOT excluded.artist OR \
+        tracks.album_artist IS NOT excluded.album_artist OR tracks.album IS NOT excluded.album OR \
+        tracks.track_no IS NOT excluded.track_no OR tracks.disc_no IS NOT excluded.disc_no OR \
+        tracks.year IS NOT excluded.year OR tracks.genre IS NOT excluded.genre OR \
+        tracks.length_s IS NOT excluded.length_s OR tracks.bpm IS NOT excluded.bpm OR \
+        tracks.size_bytes IS NOT excluded.size_bytes OR tracks.mtime IS NOT excluded.mtime";
 
 impl LibraryRepository for SqliteStorage {
     fn status(&self) -> LibraryFuture<'_, LibraryStatus> {
@@ -169,9 +197,289 @@ impl LibraryRepository for SqliteStorage {
                 .map_err(box_storage)
         })
     }
+
+    fn folder_track_counts(&self) -> LibraryFuture<'_, BTreeMap<LibraryPath, u64>> {
+        Box::pin(async move {
+            let paths = sqlx::query_scalar::<_, String>("SELECT path FROM tracks ORDER BY path")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(StorageError::from)
+                .map_err(box_storage)?;
+            let mut counts = BTreeMap::new();
+            for stored in paths {
+                let mut parent = LibraryPath::parse(stored)
+                    .map_err(StorageError::InvalidLibraryPath)
+                    .map_err(box_storage)?
+                    .parent();
+                while let Some(directory) = parent {
+                    let count = counts.entry(directory.clone()).or_insert(0_u64);
+                    *count = count.checked_add(1).ok_or_else(|| {
+                        box_storage(StorageError::InvalidLibraryState(
+                            "folder track count overflowed",
+                        ))
+                    })?;
+                    parent = directory.parent();
+                }
+            }
+            Ok(counts)
+        })
+    }
+}
+
+impl LibraryMutationRepository for SqliteStorage {
+    fn begin_reconciliation(&self) -> LibraryFuture<'_, LibraryStatus> {
+        Box::pin(async move {
+            self.begin_library_reconciliation()
+                .await
+                .map_err(box_storage)
+        })
+    }
+
+    fn commit_reconciliation(
+        &self,
+        expected_generation: LibraryGeneration,
+        discovered: Vec<DiscoveredTrack>,
+    ) -> LibraryFuture<'_, ReconciliationCommit> {
+        Box::pin(async move {
+            self.commit_library_reconciliation(expected_generation, &discovered)
+                .await
+                .map_err(box_storage)
+        })
+    }
+
+    fn fail_reconciliation<'a>(
+        &'a self,
+        expected_generation: LibraryGeneration,
+        error_code: &'a str,
+    ) -> LibraryFuture<'a, LibraryStatus> {
+        Box::pin(async move {
+            self.fail_library_reconciliation(expected_generation, error_code)
+                .await
+                .map_err(box_storage)
+        })
+    }
 }
 
 impl SqliteStorage {
+    async fn begin_library_reconciliation(&self) -> Result<LibraryStatus, StorageError> {
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        let result = sqlx::query(
+            "UPDATE library_state SET status = 'reconciling', \
+             scan_started_at = CURRENT_TIMESTAMP, last_error_code = NULL, \
+             updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryState(
+                "singleton reconciliation row is missing",
+            ));
+        }
+        transaction.commit().await?;
+        self.read_library_status().await
+    }
+
+    async fn commit_library_reconciliation(
+        &self,
+        expected_generation: LibraryGeneration,
+        discovered: &[DiscoveredTrack],
+    ) -> Result<ReconciliationCommit, StorageError> {
+        if discovered.len() > MAX_RECONCILIATION_TRACKS {
+            return Err(StorageError::InvalidLibraryState(
+                "reconciliation contains too many tracks",
+            ));
+        }
+        let mut paths = BTreeSet::new();
+        if discovered
+            .iter()
+            .any(|track| !paths.insert(track.path.as_str()))
+        {
+            return Err(StorageError::InvalidLibraryState(
+                "reconciliation contains duplicate paths",
+            ));
+        }
+        if discovered
+            .iter()
+            .any(|track| track.size_bytes > i64::MAX as u64)
+        {
+            return Err(StorageError::InvalidLibraryState(
+                "track size exceeds SQLite integer range",
+            ));
+        }
+        let discovered_count = i64::try_from(discovered.len()).map_err(|_| {
+            StorageError::InvalidLibraryState("discovered track count is too large")
+        })?;
+
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        let state = sqlx::query("SELECT generation, status FROM library_state WHERE id = 1")
+            .fetch_one(&mut *transaction)
+            .await?;
+        let current_generation =
+            LibraryGeneration::try_from(state.try_get::<i64, _>("generation")?)
+                .map_err(|_| StorageError::InvalidLibraryState("generation is invalid"))?;
+        if current_generation != expected_generation {
+            transaction.rollback().await?;
+            return Ok(ReconciliationCommit::Conflict { current_generation });
+        }
+        if state.try_get::<String, _>("status")? != "reconciling" {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryState(
+                "reconciliation was not started",
+            ));
+        }
+
+        sqlx::raw_sql(
+            "CREATE TEMP TABLE IF NOT EXISTS library_scan_stage (\
+                path TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL, \
+                album_artist TEXT NOT NULL, album TEXT NOT NULL, track_no INTEGER, disc_no INTEGER, \
+                year INTEGER, genre TEXT NOT NULL, length_s REAL NOT NULL, bpm INTEGER, \
+                size_bytes INTEGER NOT NULL, mtime INTEGER NOT NULL\
+             ); \
+             DELETE FROM temp.library_scan_stage;",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        for chunk in discovered.chunks(RECONCILIATION_BATCH_SIZE) {
+            let mut insert = QueryBuilder::<Sqlite>::new(
+                "INSERT INTO temp.library_scan_stage (path, title, artist, album_artist, album, \
+                 track_no, disc_no, year, genre, length_s, bpm, size_bytes, mtime) ",
+            );
+            insert.push_values(chunk, |mut row, track| {
+                row.push_bind(track.path.as_str().to_owned())
+                    .push_bind(track.metadata.title.clone())
+                    .push_bind(track.metadata.artist.clone())
+                    .push_bind(track.metadata.album_artist.clone())
+                    .push_bind(track.metadata.album.clone())
+                    .push_bind(track.metadata.track_no.map(i64::from))
+                    .push_bind(track.metadata.disc_no.map(i64::from))
+                    .push_bind(track.metadata.year.map(i64::from))
+                    .push_bind(track.metadata.genre.clone())
+                    .push_bind(track.duration.as_secs_f64())
+                    .push_bind(track.metadata.bpm.map(i64::from))
+                    .push_bind(track.size_bytes as i64)
+                    .push_bind(track.mtime_unix_seconds);
+            });
+            insert.build().execute(&mut *transaction).await?;
+        }
+
+        let added = count_reconciliation_rows(
+            &mut transaction,
+            "SELECT COUNT(*) FROM temp.library_scan_stage AS staged \
+             LEFT JOIN tracks ON tracks.path = staged.path WHERE tracks.id IS NULL",
+        )
+        .await?;
+        let updated = count_reconciliation_rows(&mut transaction, UPDATED_COUNT_SQL).await?;
+        let matching = count_reconciliation_rows(
+            &mut transaction,
+            "SELECT COUNT(*) FROM temp.library_scan_stage AS staged \
+             JOIN tracks ON tracks.path = staged.path",
+        )
+        .await?;
+        let removed = count_reconciliation_rows(
+            &mut transaction,
+            "SELECT COUNT(*) FROM tracks WHERE NOT EXISTS (\
+                 SELECT 1 FROM temp.library_scan_stage AS staged WHERE staged.path = tracks.path\
+             )",
+        )
+        .await?;
+        let unchanged = matching
+            .checked_sub(updated)
+            .ok_or(StorageError::InvalidLibraryState(
+                "reconciliation counts are inconsistent",
+            ))?;
+
+        sqlx::raw_sql(TRACK_UPSERT_SQL)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query(
+            "DELETE FROM tracks WHERE NOT EXISTS (\
+                 SELECT 1 FROM temp.library_scan_stage AS staged WHERE staged.path = tracks.path\
+             )",
+        )
+        .execute(&mut *transaction)
+        .await?;
+
+        let next_generation = expected_generation
+            .next()
+            .map_err(|_| StorageError::InvalidLibraryState("generation overflowed"))?;
+        let result = sqlx::query(
+            "UPDATE library_state SET generation = ?, status = 'current', scan_started_at = NULL, \
+             last_scan_at = CURRENT_TIMESTAMP, last_error_code = NULL, discovered_tracks = ?, \
+             updated_at = CURRENT_TIMESTAMP \
+             WHERE id = 1 AND generation = ? AND status = 'reconciling'",
+        )
+        .bind(i64::try_from(next_generation.get()).map_err(|_| {
+            StorageError::InvalidLibraryState("generation exceeds SQLite integer range")
+        })?)
+        .bind(discovered_count)
+        .bind(i64::try_from(expected_generation.get()).map_err(|_| {
+            StorageError::InvalidLibraryState("generation exceeds SQLite integer range")
+        })?)
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryState(
+                "reconciliation state changed during commit",
+            ));
+        }
+        let ids = sqlx::query_scalar::<_, i64>("SELECT id FROM tracks ORDER BY id")
+            .fetch_all(&mut *transaction)
+            .await?;
+        let track_ids = ids
+            .into_iter()
+            .map(|id| {
+                TrackId::new(id)
+                    .map_err(|_| StorageError::InvalidLibraryRecord("track id is invalid"))
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        transaction.commit().await?;
+        let status = self.read_library_status().await?;
+        Ok(ReconciliationCommit::Applied {
+            status,
+            summary: ReconciliationSummary {
+                added,
+                updated,
+                removed,
+                unchanged,
+            },
+            track_ids,
+        })
+    }
+
+    async fn fail_library_reconciliation(
+        &self,
+        expected_generation: LibraryGeneration,
+        error_code: &str,
+    ) -> Result<LibraryStatus, StorageError> {
+        if !(1..=64).contains(&error_code.len())
+            || !error_code
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        {
+            return Err(StorageError::InvalidLibraryState(
+                "reconciliation error code is invalid",
+            ));
+        }
+        let expected_generation = i64::try_from(expected_generation.get()).map_err(|_| {
+            StorageError::InvalidLibraryState("generation exceeds SQLite integer range")
+        })?;
+        let _admission = self.write_gate.lock().await;
+        sqlx::query(
+            "UPDATE library_state SET status = 'failed', last_error_code = ?, \
+             updated_at = CURRENT_TIMESTAMP \
+             WHERE id = 1 AND generation = ? AND status = 'reconciling'",
+        )
+        .bind(error_code)
+        .bind(expected_generation)
+        .execute(&self.pool)
+        .await?;
+        self.read_library_status().await
+    }
+
     async fn read_library_status(&self) -> Result<LibraryStatus, StorageError> {
         let row = sqlx::query(
             "SELECT generation, status, \
@@ -206,6 +514,17 @@ impl SqliteStorage {
             })?,
         })
     }
+}
+
+async fn count_reconciliation_rows(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    statement: &'static str,
+) -> Result<u64, StorageError> {
+    let count: i64 = sqlx::query_scalar(statement)
+        .fetch_one(&mut **transaction)
+        .await?;
+    u64::try_from(count)
+        .map_err(|_| StorageError::InvalidLibraryState("reconciliation count is negative"))
 }
 
 fn indexed_track_from_row(row: &SqliteRow) -> Result<IndexedTrack, StorageError> {
@@ -333,11 +652,14 @@ fn box_storage(source: StorageError) -> LibraryDependencyError {
 mod tests {
     use std::error::Error;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use music_application::library::{
-        LibraryRepository, LibrarySearch, LibrarySortKey, ReconciliationStatus, SortOrder,
+        DiscoveredTrack, LibraryMutationRepository, LibraryRepository, LibrarySearch,
+        LibrarySortKey, ReconciliationCommit, ReconciliationStatus, ReconciliationSummary,
+        SortOrder,
     };
-    use music_domain::{LibraryPath, TrackId};
+    use music_domain::{LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
     use tempfile::tempdir;
 
     use crate::{SqliteStorage, SqliteStorageOptions};
@@ -361,6 +683,32 @@ mod tests {
         .execute(&storage.pool)
         .await?;
         Ok(result.last_insert_rowid())
+    }
+
+    fn discovered(
+        path: &str,
+        title: &str,
+        artist: &str,
+        size_bytes: u64,
+        mtime_unix_seconds: i64,
+    ) -> Result<DiscoveredTrack, music_domain::MediaPathError> {
+        Ok(DiscoveredTrack {
+            path: LibraryPath::parse(path)?,
+            metadata: TrackMetadata {
+                title: title.to_owned(),
+                artist: artist.to_owned(),
+                album_artist: artist.to_owned(),
+                album: String::new(),
+                track_no: None,
+                disc_no: None,
+                year: None,
+                genre: String::new(),
+                bpm: None,
+            },
+            duration: Duration::from_secs_f64(12.5),
+            size_bytes,
+            mtime_unix_seconds,
+        })
     }
 
     #[tokio::test]
@@ -440,6 +788,99 @@ mod tests {
             LibraryRepository::track(&storage, TrackId::new(track_id)?)
                 .await
                 .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reconciliation_is_generation_checked_and_preserves_human_owned_fields()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(
+            directory.path().join("reconcile.db"),
+        ))
+        .await?;
+        let unchanged_id = insert_track(&storage, "unchanged.mp3", "Same", "Artist").await?;
+        let updated_id = insert_track(&storage, "updated.mp3", "Old", "Artist").await?;
+        let removed_id = insert_track(&storage, "removed.mp3", "Removed", "Artist").await?;
+        sqlx::query(
+            "UPDATE tracks SET display_title = 'Human title', origin = 'Human origin' WHERE id = ?",
+        )
+        .bind(updated_id)
+        .execute(&storage.pool)
+        .await?;
+
+        let started = LibraryMutationRepository::begin_reconciliation(&storage).await?;
+        assert_eq!(started.generation, LibraryGeneration::new(0));
+        assert_eq!(started.status, ReconciliationStatus::Reconciling);
+        let commit = LibraryMutationRepository::commit_reconciliation(
+            &storage,
+            started.generation,
+            vec![
+                discovered("unchanged.mp3", "Same", "Artist", 123, 456)?,
+                discovered("updated.mp3", "New", "Artist", 124, 457)?,
+                discovered("new.mp3", "New track", "Artist", 10, 20)?,
+            ],
+        )
+        .await?;
+        let ReconciliationCommit::Applied {
+            status,
+            summary,
+            track_ids,
+        } = commit
+        else {
+            return Err("unexpected reconciliation conflict".into());
+        };
+        assert_eq!(status.generation, LibraryGeneration::new(1));
+        assert_eq!(status.status, ReconciliationStatus::Current);
+        assert_eq!(status.discovered_tracks, 3);
+        assert_eq!(
+            summary,
+            ReconciliationSummary {
+                added: 1,
+                updated: 1,
+                removed: 1,
+                unchanged: 1,
+            }
+        );
+        assert!(track_ids.contains(&TrackId::new(unchanged_id)?));
+        assert!(track_ids.contains(&TrackId::new(updated_id)?));
+        assert!(!track_ids.contains(&TrackId::new(removed_id)?));
+        let updated = LibraryRepository::track(&storage, TrackId::new(updated_id)?)
+            .await?
+            .ok_or("updated track disappeared")?;
+        assert_eq!(updated.metadata.title, "New");
+        assert_eq!(updated.display_title, "Human title");
+        assert_eq!(updated.origin, "Human origin");
+
+        let second = LibraryMutationRepository::begin_reconciliation(&storage).await?;
+        assert_eq!(second.generation, LibraryGeneration::new(1));
+        assert_eq!(
+            LibraryMutationRepository::commit_reconciliation(
+                &storage,
+                LibraryGeneration::new(0),
+                Vec::new(),
+            )
+            .await?,
+            ReconciliationCommit::Conflict {
+                current_generation: LibraryGeneration::new(1)
+            }
+        );
+        let failed = LibraryMutationRepository::fail_reconciliation(
+            &storage,
+            second.generation,
+            "fixture_scan_failed",
+        )
+        .await?;
+        assert_eq!(failed.status, ReconciliationStatus::Failed);
+        assert_eq!(failed.generation, LibraryGeneration::new(1));
+        assert_eq!(
+            failed.last_error_code.as_deref(),
+            Some("fixture_scan_failed")
+        );
+        assert_eq!(
+            LibraryRepository::catalog_track_ids(&storage).await?.len(),
+            3
         );
         Ok(())
     }

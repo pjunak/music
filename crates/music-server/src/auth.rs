@@ -436,7 +436,7 @@ pub(crate) fn session_cookie(headers: &HeaderMap, cookie_name: &str) -> Option<S
     })
 }
 
-fn format_rfc3339(timestamp: UnixSeconds) -> Result<String, ApiError> {
+pub(crate) fn format_rfc3339(timestamp: UnixSeconds) -> Result<String, ApiError> {
     let seconds = timestamp.get();
     let days = seconds.div_euclid(86_400);
     let seconds_in_day = seconds.rem_euclid(86_400);
