@@ -15,8 +15,10 @@ mod contracts;
 mod error;
 mod health;
 mod http;
+mod playback_projection;
 mod runtime;
 mod supervisor;
+mod websocket;
 
 pub use config::{AppConfig, ConfigError, LogLevel};
 pub use contracts::{

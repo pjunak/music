@@ -6,6 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use music_application::playback::{
+    CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
+    SystemPlaybackClock, SystemQueueRandom, start_playback_actor,
+};
 use music_storage::{SqliteStorage, SqliteStorageOptions};
 use tokio::net::TcpListener;
 use tokio::time::{Instant, MissedTickBehavior};
@@ -29,6 +33,7 @@ pub struct AppRuntime {
     health: HealthRegistry,
     supervisor: TaskSupervisor,
     storage: Arc<SqliteStorage>,
+    playback: PlaybackActorHandle,
 }
 
 impl AppRuntime {
@@ -81,6 +86,23 @@ impl AppRuntime {
         }
 
         let supervisor = TaskSupervisor::new(health.clone());
+        let playback = match start_playback_actor(
+            Arc::clone(&storage),
+            SystemPlaybackClock::try_new()?,
+            SystemQueueRandom,
+            PlaybackActorConfig::default(),
+            CatalogSnapshot::default(),
+        )
+        .await
+        {
+            Ok(spawned) => supervise_playback(&supervisor, spawned)?,
+            Err(error) => {
+                health.set_component("playback", true, ComponentStatus::Failed);
+                storage.close().await;
+                return Err(error.into());
+            }
+        };
+        health.set_component("playback", true, ComponentStatus::Ready);
         start_database_monitor(&supervisor, Arc::clone(&storage))?;
         health.set_component("runtime", true, ComponentStatus::Ready);
 
@@ -95,6 +117,7 @@ impl AppRuntime {
             health,
             supervisor,
             storage,
+            playback,
         })
     }
 
@@ -109,7 +132,7 @@ impl AppRuntime {
     }
 
     pub fn router(&self) -> Result<Router, RuntimeError> {
-        build_router(&self.config, self.health.clone())
+        build_router(&self.config, self.health.clone(), self.playback.clone())
     }
 
     pub async fn run<F>(self, listener: TcpListener, shutdown_signal: F) -> Result<(), RuntimeError>
@@ -164,6 +187,39 @@ impl AppRuntime {
         let supervisor_result = self.supervisor.shutdown(SHUTDOWN_TIMEOUT).await;
         self.storage.close().await;
         supervisor_result
+    }
+}
+
+fn supervise_playback(
+    supervisor: &TaskSupervisor,
+    spawned: SpawnedPlaybackActor,
+) -> Result<PlaybackActorHandle, RuntimeError> {
+    let handle = spawned.handle;
+    let shutdown_handle = handle.clone();
+    let cancellation = supervisor.cancellation_token();
+    let mut task = spawned.task;
+    supervisor.spawn_critical("playback-owner", "playback", async move {
+        tokio::select! {
+            result = &mut task => map_playback_exit(result),
+            () = cancellation.cancelled() => {
+                shutdown_handle.shutdown();
+                map_playback_exit(task.await)
+            }
+        }
+    })?;
+    Ok(handle)
+}
+
+fn map_playback_exit(
+    result: Result<
+        Result<(), music_application::playback::PlaybackActorError>,
+        tokio::task::JoinError,
+    >,
+) -> Result<(), CriticalTaskError> {
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(CriticalTaskError::new("playback_owner_failed")),
+        Err(_) => Err(CriticalTaskError::new("playback_owner_panicked")),
     }
 }
 
@@ -315,8 +371,12 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
     use music_storage::StorageError;
+    use serde_json::Value;
     use tempfile::tempdir;
+    use tower::ServiceExt;
 
     use super::AppRuntime;
     use crate::config::AppConfig;
@@ -350,18 +410,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn startup_owns_storage_and_keeps_playback_not_ready() -> Result<(), Box<dyn Error>> {
+    async fn startup_owns_storage_and_starts_the_playback_owner() -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
         let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
 
         assert!(directory.path().join("music").is_dir());
         assert!(directory.path().join("sfx").is_dir());
         assert!(directory.path().join("modes").is_dir());
-        assert_eq!(runtime.readiness().status, ReadinessStatus::Starting);
+        assert_eq!(runtime.readiness().status, ReadinessStatus::Ready);
         assert_eq!(
             runtime.readiness().components.get("playback"),
-            Some(&ComponentStatus::Starting)
+            Some(&ComponentStatus::Ready)
         );
+        let state_response = runtime
+            .router()?
+            .oneshot(Request::get("/api/sync/state?client_id=test-output").body(Body::empty())?)
+            .await?;
+        assert_eq!(state_response.status(), StatusCode::OK);
+        let state_body = to_bytes(state_response.into_body(), 1024 * 1024).await?;
+        let state_json: Value = serde_json::from_slice(&state_body)?;
+        assert_eq!(state_json["revision"], 0);
+        assert_eq!(
+            state_json["active_output_device_ids"],
+            serde_json::json!([])
+        );
+        assert_eq!(state_json["connected_devices"], serde_json::json!([]));
 
         let second = AppRuntime::start(runtime_config(directory.path())?).await;
         assert!(matches!(

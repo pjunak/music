@@ -25,6 +25,7 @@ axum = { version = "0.8.9", features = ["ws"] }
 base64 = "0.22.1"
 clap = { version = "4.6.6", features = ["derive"] }
 dotenvy = "0.15.7"
+futures-util = "0.3.34"
 lofty = "0.25.1"
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 rand = "0.9.5"
@@ -35,6 +36,7 @@ sha2 = "0.10.9"
 sqlx = { version = "0.9.0", default-features = false, features = ["migrate", "runtime-tokio", "sqlite"] }
 tempfile = "3.23"
 tokio = { version = "1.53", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = "0.29.0"
 tokio-util = { version = "0.7.19", features = ["rt"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.0", features = ["catch-panic", "cors", "fs", "limit"] }

@@ -450,6 +450,7 @@ mod tests {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "paths is not an object"))?;
         assert!(paths.contains_key("/api/health"));
         assert!(paths.contains_key("/api/readiness"));
+        assert!(paths.contains_key("/api/sync/state"));
         assert!(!paths.contains_key("/health"));
         assert!(!paths.contains_key("/api/ws"));
         Ok(())

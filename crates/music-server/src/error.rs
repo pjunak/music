@@ -7,6 +7,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::config::ConfigError;
 
@@ -14,6 +15,7 @@ use crate::config::ConfigError;
 pub enum RuntimeError {
     Config(ConfigError),
     Storage(music_storage::StorageError),
+    Playback(music_application::playback::PlaybackActorError),
     Io {
         operation: &'static str,
         source: io::Error,
@@ -41,6 +43,7 @@ impl Display for RuntimeError {
         match self {
             Self::Config(error) => Display::fmt(error, formatter),
             Self::Storage(error) => Display::fmt(error, formatter),
+            Self::Playback(error) => Display::fmt(error, formatter),
             Self::Io { operation, .. } => write!(formatter, "failed to {operation}"),
             Self::TracingInitialization => {
                 formatter.write_str("failed to initialize structured tracing")
@@ -66,6 +69,7 @@ impl Error for RuntimeError {
         match self {
             Self::Config(source) => Some(source),
             Self::Storage(source) => Some(source),
+            Self::Playback(source) => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::TracingInitialization
             | Self::TaskAdmissionClosed
@@ -88,13 +92,19 @@ impl From<music_storage::StorageError> for RuntimeError {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+impl From<music_application::playback::PlaybackActorError> for RuntimeError {
+    fn from(error: music_application::playback::PlaybackActorError) -> Self {
+        Self::Playback(error)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, ToSchema)]
 pub struct PublicErrorDetail {
     pub code: &'static str,
     pub message: &'static str,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, ToSchema)]
 pub struct PublicErrorBody {
     pub detail: PublicErrorDetail,
 }
@@ -124,6 +134,17 @@ impl ApiError {
             detail: PublicErrorDetail {
                 code: "service_unavailable",
                 message: "The service is not ready for this request.",
+            },
+        }
+    }
+
+    #[must_use]
+    pub const fn validation() -> Self {
+        Self {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            detail: PublicErrorDetail {
+                code: "validation_error",
+                message: "The request parameters are invalid.",
             },
         }
     }

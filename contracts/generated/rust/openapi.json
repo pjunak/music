@@ -1,6 +1,72 @@
 {
   "components": {
     "schemas": {
+      "AmbientState": {
+        "properties": {
+          "current_track_id": {
+            "default": null,
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "history": {
+            "default": [],
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "loop": {
+            "default": "off",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LoopMode"
+              }
+            ]
+          },
+          "position_anchored_at": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "position_ms": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "queue": {
+            "default": [],
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "shuffle": {
+            "default": "off",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ShuffleMode"
+              }
+            ]
+          },
+          "source_playlist_id": {
+            "default": null,
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ComponentStatus": {
         "enum": [
           "starting",
@@ -10,6 +76,84 @@
         ],
         "type": "string"
       },
+      "CrossfadeType": {
+        "enum": [
+          "linear",
+          "equal_power",
+          "cut"
+        ],
+        "type": "string"
+      },
+      "DeviceInfo": {
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "is_output": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_id",
+          "client_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "InterruptState": {
+        "properties": {
+          "current_track_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "duck_to": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "fade_in_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fade_out_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "position_anchored_at": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "position_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queue": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "return_to_ambient": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "current_track_id"
+        ],
+        "type": "object"
+      },
       "LivenessResponse": {
         "properties": {
           "status": {
@@ -18,6 +162,233 @@
         },
         "required": [
           "status"
+        ],
+        "type": "object"
+      },
+      "LoopMode": {
+        "enum": [
+          "off",
+          "follow",
+          "queue",
+          "track"
+        ],
+        "type": "string"
+      },
+      "LoopingSfx": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "interval_s": {
+            "format": "double",
+            "type": "number"
+          },
+          "item_path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "soundboard_id": {
+            "type": "string"
+          },
+          "volume": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "soundboard_id",
+          "item_path",
+          "interval_s"
+        ],
+        "type": "object"
+      },
+      "PlayerState": {
+        "properties": {
+          "active_mode_id": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "active_output_device_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "active_preset_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "active_soundboard_id": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ambient": {
+            "default": {
+              "current_track_id": null,
+              "history": [],
+              "loop": "off",
+              "position_anchored_at": null,
+              "position_ms": 0,
+              "queue": [],
+              "shuffle": "off",
+              "source_playlist_id": null
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AmbientState"
+              }
+            ]
+          },
+          "connected_devices": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DeviceInfo"
+            },
+            "type": "array"
+          },
+          "crossfade_ms": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "crossfade_type": {
+            "default": "linear",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CrossfadeType"
+              }
+            ]
+          },
+          "default_device_volume": {
+            "default": 1.0,
+            "format": "double",
+            "type": "number"
+          },
+          "device_volumes": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "default": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "interrupt": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InterruptState"
+              }
+            ]
+          },
+          "is_playing": {
+            "default": false,
+            "type": "boolean"
+          },
+          "last_position_report": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PositionReport"
+              }
+            ]
+          },
+          "looping_sfx": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LoopingSfx"
+            },
+            "type": "array"
+          },
+          "position_epoch": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "preset_revision": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "revision": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "volume": {
+            "default": 1.0,
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "PositionReport": {
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "position_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "reported_at": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "device_id",
+          "position_ms",
+          "reported_at"
+        ],
+        "type": "object"
+      },
+      "PublicErrorBody": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/PublicErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "type": "object"
+      },
+      "PublicErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
         ],
         "type": "object"
       },
@@ -48,6 +419,13 @@
           "ready",
           "degraded",
           "not_ready"
+        ],
+        "type": "string"
+      },
+      "ShuffleMode": {
+        "enum": [
+          "off",
+          "random"
         ],
         "type": "string"
       }
@@ -107,6 +485,49 @@
               }
             },
             "description": "A critical component is still starting or unavailable"
+          }
+        }
+      }
+    },
+    "/api/sync/state": {
+      "get": {
+        "operationId": "sync_state",
+        "parameters": [
+          {
+            "description": "Stable client identity for guest-safe self projection",
+            "in": "query",
+            "name": "client_id",
+            "required": false,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerState"
+                }
+              }
+            },
+            "description": "Current canonical playback state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicErrorBody"
+                }
+              }
+            },
+            "description": "Invalid client identity"
           }
         }
       }

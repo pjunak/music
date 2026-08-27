@@ -243,13 +243,16 @@ paired with a non-secret manifest before normalization or SQLx migration begins.
 recovery journal; representative Python rows remain intact and later boots make no backup or schema
 change.
 
-Readiness is deliberately `starting` while the Phase-3 playback owner is absent. The temporary
-WebSocket shell emits one protocol-shaped service-unavailable error and closes; it never fabricates
-a canonical state snapshot. `/api/health` remains the exact `{"status":"ok"}` liveness contract.
+The Phase-3 playback owner now starts under runtime supervision, so the `playback` readiness
+component becomes `ready` only after the persisted aggregate is loaded, restart-normalized, and
+owned by the bounded actor. `/api/health` remains the exact `{"status":"ok"}` liveness contract.
+`GET /api/sync/state` and `/api/ws` now project that same owner; until Rust session authentication
+lands in Phase 4, every transport is deliberately guest-scoped, registration and active-output
+telemetry remain available, and control mutations are denied instead of being exposed anonymously.
 
-The first semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus the two currently registered Rust routes, rather than presenting partial work as
-parity. The browser now imports generated Rust WebSocket DTOs; a generated compatibility layer
+The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
+operations versus the three currently registered Rust routes, rather than presenting partial work
+as parity. The browser now imports generated Rust WebSocket DTOs; a generated compatibility layer
 models accepted omitted defaults and the deliberate cached-client window, while `wsValidate.ts`
 continues to validate untrusted frames at runtime.
 
@@ -261,13 +264,15 @@ the Rust container boots non-root with empty storage and serves the unchanged SP
 
 Implement the highest-value invariant early:
 
-- pure playback reducer and deterministic clock/random inputs;
-- persisted state normalization, revision compare-and-swap, catalog generations, and boot pruning;
-- state actor, bounded commands, watch snapshots, transient event channel, and supervision;
-- per-connection projection/send ownership, registration, guest projections, protocol v1/v2, auth
-  downgrade, send deadlines, transient lag policy, and sibling-client disconnect behavior;
+- [x] pure playback reducer and deterministic clock/random inputs;
+- [x] persisted state normalization, revision compare-and-swap, catalog generations, and boot
+  pruning;
+- [x] state actor, bounded commands, watch snapshots, transient event channel, and supervision;
+- [ ] per-connection projection/send ownership, registration, guest projections, protocol v1/v2,
+  auth downgrade, send deadlines, transient lag policy, and sibling-client disconnect behavior;
+  everything except session-backed authentication/downgrade is implemented;
 - server advancer and loop timers as supervised actor effects;
-- `GET /api/sync/state` and `/api/ws`;
+- [x] `GET /api/sync/state` and a real guest-safe `/api/ws` transport;
 - extend the generated TypeScript bindings for any new playback DTOs without changing frontend
   behavior.
 

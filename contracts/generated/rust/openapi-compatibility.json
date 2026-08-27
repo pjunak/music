@@ -2,8 +2,8 @@
   "schema_version": "openapi-compatibility/v1",
   "verdict": "incomplete",
   "reference_operation_count": 144,
-  "candidate_operation_count": 2,
-  "matched_operation_count": 1,
+  "candidate_operation_count": 3,
+  "matched_operation_count": 2,
   "fully_compatible_operation_count": 0,
   "missing_operations": [
     "DELETE /api/assistant/providers/connections/{connection_id}",
@@ -71,7 +71,6 @@
     "GET /api/sfx/files",
     "GET /api/sfx/folders",
     "GET /api/sfx/tree",
-    "GET /api/sync/state",
     "PATCH /api/assistant/library-tags/{track_id}",
     "PATCH /api/library/tracks/bulk-metadata",
     "PATCH /api/library/tracks/{track_id}/metadata",
@@ -153,10 +152,13 @@
   "candidate_only_operations": [
     "GET /api/readiness"
   ],
-  "parameter_mismatches": [],
+  "parameter_mismatches": [
+    "GET /api/sync/state"
+  ],
   "request_body_mismatches": [],
   "response_mismatches": [
-    "GET /api/health"
+    "GET /api/health",
+    "GET /api/sync/state"
   ],
   "security_mismatches": []
 }

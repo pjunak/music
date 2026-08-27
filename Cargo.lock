@@ -1261,6 +1261,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ts-rs",
+ "utoipa",
 ]
 
 [[package]]
@@ -1270,6 +1271,7 @@ dependencies = [
  "axum",
  "clap",
  "dotenvy",
+ "futures-util",
  "music-analysis",
  "music-application",
  "music-domain",
@@ -1280,6 +1282,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tower",
  "tower-http",

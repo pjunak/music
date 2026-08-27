@@ -1,16 +1,16 @@
 use std::any::Any;
 use std::time::Instant;
 
-use axum::extract::ws::{Message, WebSocketUpgrade};
-use axum::extract::{Request, State};
+use axum::extract::{Query, Request, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use music_protocol::ServerMessage;
-use serde::Serialize;
+use music_application::playback::PlaybackActorHandle;
+use music_protocol::PlayerState;
+use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::{AllowHeaders, CorsLayer};
@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::config::AppConfig;
 use crate::error::{ApiError, RuntimeError};
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
+use crate::playback_projection::{canonical_state, guest_state};
 
 const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 const X_CONTENT_TYPE_OPTIONS: HeaderName = HeaderName::from_static("x-content-type-options");
@@ -32,8 +33,9 @@ const REFERRER_POLICY: HeaderName = HeaderName::from_static("referrer-policy");
 const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-policy");
 
 #[derive(Debug, Clone)]
-struct HttpState {
-    health: HealthRegistry,
+pub(crate) struct HttpState {
+    pub(crate) health: HealthRegistry,
+    pub(crate) playback: Option<PlaybackActorHandle>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -54,9 +56,30 @@ struct LivenessResponse {
 #[derive(utoipa::OpenApi)]
 struct MusicApi;
 
-pub fn build_router(config: &AppConfig, health: HealthRegistry) -> Result<Router, RuntimeError> {
+pub fn build_router(
+    config: &AppConfig,
+    health: HealthRegistry,
+    playback: PlaybackActorHandle,
+) -> Result<Router, RuntimeError> {
+    build_router_inner(config, health, Some(playback))
+}
+
+#[cfg(test)]
+fn build_router_without_playback(
+    config: &AppConfig,
+    health: HealthRegistry,
+) -> Result<Router, RuntimeError> {
+    build_router_inner(config, health, None)
+}
+
+fn build_router_inner(
+    config: &AppConfig,
+    health: HealthRegistry,
+    playback: Option<PlaybackActorHandle>,
+) -> Result<Router, RuntimeError> {
     let state = HttpState {
         health: health.clone(),
+        playback,
     };
     let api = documented_api_router().with_state(state);
     let (mut router, _) = OpenApiRouter::with_openapi(<MusicApi as utoipa::OpenApi>::openapi())
@@ -91,7 +114,8 @@ fn documented_api_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(liveness))
         .routes(routes!(readiness))
-        .route("/ws", get(websocket_shell))
+        .routes(routes!(sync_state))
+        .route("/ws", get(crate::websocket::websocket_upgrade))
         .fallback(api_not_found)
 }
 
@@ -155,32 +179,49 @@ async fn readiness(State(state): State<HttpState>) -> (StatusCode, Json<Readines
     (status, Json(snapshot))
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct SyncStateQuery {
+    client_id: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/sync/state",
+    params(("client_id" = Option<String>, Query, nullable, min_length = 1, max_length = 64, description = "Stable client identity for guest-safe self projection")),
+    responses(
+        (status = 200, description = "Current canonical playback state", body = PlayerState),
+        (status = 422, description = "Invalid client identity", body = crate::error::PublicErrorBody)
+    )
+)]
+async fn sync_state(
+    State(state): State<HttpState>,
+    Query(query): Query<SyncStateQuery>,
+) -> Result<Json<PlayerState>, ApiError> {
+    if query
+        .client_id
+        .as_ref()
+        .is_some_and(|client_id| !(1..=64).contains(&client_id.chars().count()))
+    {
+        return Err(ApiError::validation());
+    }
+    let playback = state.playback.ok_or_else(ApiError::service_unavailable)?;
+    let publication = playback
+        .snapshot()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+    let canonical = canonical_state(&publication).map_err(|_| ApiError::internal())?;
+    // Authentication lands in Phase 4. Until then this read endpoint is
+    // deliberately always guest-projected, so device capability IDs cannot
+    // leak through an unfinished auth boundary.
+    Ok(Json(guest_state(canonical, query.client_id.as_deref())))
+}
+
 async fn api_not_found() -> ApiError {
     ApiError::not_found()
 }
 
 async fn root_not_found() -> ApiError {
     ApiError::not_found()
-}
-
-async fn websocket_shell(upgrade: WebSocketUpgrade) -> Response {
-    upgrade
-        .on_upgrade(|mut socket| async move {
-            let message = ServerMessage::Error {
-                detail: "The Rust playback owner is not ready yet.".to_owned(),
-                code: None,
-            };
-            match serde_json::to_string(&message) {
-                Ok(payload) => {
-                    let _ = socket.send(Message::Text(payload.into())).await;
-                }
-                Err(_) => {
-                    tracing::error!("failed to serialize the WebSocket readiness response");
-                }
-            }
-            let _ = socket.send(Message::Close(None)).await;
-        })
-        .into_response()
 }
 
 fn panic_response(_: Box<dyn Any + Send + 'static>) -> Response {
@@ -281,7 +322,7 @@ mod tests {
     use tempfile::tempdir;
     use tower::ServiceExt;
 
-    use super::build_router;
+    use super::build_router_without_playback as build_router;
     use crate::config::AppConfig;
     use crate::health::{ComponentStatus, HealthRegistry};
 

@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use utoipa::ToSchema;
 
 use crate::actions::{CrossfadeType, LoopMode, ShuffleMode};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, ToSchema)]
 pub struct DeviceInfo {
     pub device_id: String,
     pub client_id: String,
@@ -12,14 +13,14 @@ pub struct DeviceInfo {
     pub is_output: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, ToSchema)]
 pub struct PositionReport {
     pub device_id: String,
     pub position_ms: i64,
     pub reported_at: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, TS, ToSchema)]
 #[serde(default)]
 #[ts(rename = "CanonicalAmbientState")]
 pub struct AmbientState {
@@ -34,7 +35,7 @@ pub struct AmbientState {
     pub source_playlist_id: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, ToSchema)]
 #[ts(rename = "CanonicalInterruptState")]
 pub struct InterruptState {
     pub current_track_id: i64,
@@ -52,7 +53,7 @@ pub struct InterruptState {
     pub duck_to: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, ToSchema)]
 pub struct LoopingSfx {
     pub id: String,
     pub name: String,
@@ -63,7 +64,7 @@ pub struct LoopingSfx {
     pub volume: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, ToSchema)]
 #[serde(default)]
 #[ts(rename = "CanonicalPlayerState")]
 pub struct PlayerState {
