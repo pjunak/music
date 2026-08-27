@@ -252,8 +252,8 @@ bounded self projection and cannot mutate control state. Long-lived WebSockets r
 state and downgrade in place after logout, revocation, or expiry.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 11 currently registered Rust operations, rather than presenting partial work as
-parity. Ten operations overlap the reference and nine are fully schema-compatible; the remaining
+operations versus 19 currently registered Rust operations, rather than presenting partial work as
+parity. Eighteen operations overlap the reference and 17 are fully schema-compatible; the remaining
 implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work. The
 browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
@@ -329,8 +329,10 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
 - [x] Chunked full/single-range media streaming with ETag/conditional handling, bounded cover
   extraction and folder fallback, inert MIME allow-listing, and disconnect-safe file bodies.
 - Streaming uploads and explicit conflict handling.
-- Shared staged-file/recovery infrastructure; metadata edits, moves, bulk operations, folders, SFX
-  files, and per-item partial failures.
+- [x] Shared bounded recovery-journal types and compare-and-swap persistence with explicit legal
+  transitions and cross-domain ownership.
+- Staged-file mutation execution; metadata edits, moves, bulk operations, folders, SFX files, and
+  per-item partial failures.
 - Pure cleanup analysis, verification, domain-specific journaled apply, history, and revert.
 
 Gate: generated-format metadata corpus, path property/fuzz tests, symlink/race tests, range tests,

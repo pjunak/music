@@ -17,6 +17,7 @@ mod instance_lock;
 mod library;
 mod migration;
 mod playback;
+mod recovery;
 mod schema;
 mod sqlite;
 

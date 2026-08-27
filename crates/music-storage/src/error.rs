@@ -28,6 +28,7 @@ pub enum StorageError {
     BackgroundTask(tokio::task::JoinError),
     ManifestSerialization(serde_json::Error),
     DeviceTransferSerialization(serde_json::Error),
+    RecoveryJournalSerialization(serde_json::Error),
     InvalidStorageRevision(i64),
     StorageRevisionOverflow,
     InvalidTimestamp,
@@ -36,6 +37,10 @@ pub enum StorageError {
     InvalidLibraryPath(music_domain::MediaPathError),
     InvalidLibraryRecord(&'static str),
     InvalidLibraryState(&'static str),
+    InvalidRecoveryJournal(music_application::recovery::RecoveryValidationError),
+    InvalidRecoveryJournalRecord,
+    InvalidRecoveryTransition,
+    RecoveryJournalCapacityExceeded,
 }
 
 impl Display for StorageError {
@@ -87,6 +92,9 @@ impl Display for StorageError {
             Self::DeviceTransferSerialization(_) => {
                 formatter.write_str("failed to encode the remembered-device transfer document")
             }
+            Self::RecoveryJournalSerialization(_) => {
+                formatter.write_str("failed to encode or decode a recovery journal")
+            }
             Self::InvalidStorageRevision(revision) => {
                 write!(
                     formatter,
@@ -108,6 +116,16 @@ impl Display for StorageError {
             Self::InvalidLibraryState(detail) => {
                 write!(formatter, "stored library state is invalid: {detail}")
             }
+            Self::InvalidRecoveryJournal(source) => Display::fmt(source, formatter),
+            Self::InvalidRecoveryJournalRecord => {
+                formatter.write_str("stored recovery journal is invalid")
+            }
+            Self::InvalidRecoveryTransition => {
+                formatter.write_str("recovery journal transition is invalid")
+            }
+            Self::RecoveryJournalCapacityExceeded => {
+                formatter.write_str("unfinished recovery journal capacity exceeded")
+            }
         }
     }
 }
@@ -121,7 +139,9 @@ impl Error for StorageError {
             Self::BackgroundTask(source) => Some(source),
             Self::ManifestSerialization(source) => Some(source),
             Self::DeviceTransferSerialization(source) => Some(source),
+            Self::RecoveryJournalSerialization(source) => Some(source),
             Self::InvalidLibraryPath(source) => Some(source),
+            Self::InvalidRecoveryJournal(source) => Some(source),
             Self::InvalidDatabasePath(_)
             | Self::InvalidOption(_)
             | Self::IncompatibleSchema(_)
@@ -133,7 +153,10 @@ impl Error for StorageError {
             | Self::InvalidLegacyDeviceImport
             | Self::InvalidDeviceTransfer(_)
             | Self::InvalidLibraryRecord(_)
-            | Self::InvalidLibraryState(_) => None,
+            | Self::InvalidLibraryState(_)
+            | Self::InvalidRecoveryJournalRecord
+            | Self::InvalidRecoveryTransition
+            | Self::RecoveryJournalCapacityExceeded => None,
         }
     }
 }

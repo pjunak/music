@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::playback::PlaybackActorHandle;
+use crate::recovery::RecoveryJournalRepository;
 
 const LIBRARY_COMMAND_CAPACITY: usize = 4;
 
@@ -158,7 +159,7 @@ pub trait LibraryRepository: std::fmt::Debug + Send + Sync {
     fn folder_track_counts(&self) -> LibraryFuture<'_, BTreeMap<LibraryPath, u64>>;
 }
 
-pub trait LibraryMutationRepository: LibraryRepository {
+pub trait LibraryMutationRepository: LibraryRepository + RecoveryJournalRepository {
     fn begin_reconciliation(&self) -> LibraryFuture<'_, LibraryStatus>;
 
     fn commit_reconciliation(
