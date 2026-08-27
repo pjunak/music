@@ -1,0 +1,808 @@
+{
+  "cue": {
+    "$defs": {
+      "CueLoop": {
+        "description": "A repeating SFX a cue starts (added to the live LOOPS panel).",
+        "properties": {
+          "interval_s": {
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Interval S",
+            "type": "number"
+          },
+          "item": {
+            "title": "Item",
+            "type": "string"
+          },
+          "soundboard": {
+            "title": "Soundboard",
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Volume",
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item",
+          "interval_s"
+        ],
+        "title": "CueLoop",
+        "type": "object"
+      },
+      "CueSfx": {
+        "description": "A one-shot SFX a cue fires when it runs.",
+        "properties": {
+          "item": {
+            "title": "Item",
+            "type": "string"
+          },
+          "soundboard": {
+            "title": "Soundboard",
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Volume",
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item"
+        ],
+        "title": "CueSfx",
+        "type": "object"
+      }
+    },
+    "description": "A saved one-click setup. Firing it applies a preset, starts a playlist\n(from a given song + timestamp), fires one-shot SFX, and starts loops.\nEverything references existing pieces by name; all parts are optional.",
+    "properties": {
+      "description": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Description"
+      },
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "loops": {
+        "items": {
+          "$ref": "#/$defs/CueLoop"
+        },
+        "title": "Loops",
+        "type": "array"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "playlist": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Playlist"
+      },
+      "preset": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Preset"
+      },
+      "sfx": {
+        "items": {
+          "$ref": "#/$defs/CueSfx"
+        },
+        "title": "Sfx",
+        "type": "array"
+      },
+      "start_index": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Start Index",
+        "type": "integer"
+      },
+      "start_ms": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Start Ms",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "id",
+      "name"
+    ],
+    "title": "CueSpec",
+    "type": "object"
+  },
+  "mode": {
+    "$defs": {
+      "CueLoop": {
+        "description": "A repeating SFX a cue starts (added to the live LOOPS panel).",
+        "properties": {
+          "interval_s": {
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Interval S",
+            "type": "number"
+          },
+          "item": {
+            "title": "Item",
+            "type": "string"
+          },
+          "soundboard": {
+            "title": "Soundboard",
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Volume",
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item",
+          "interval_s"
+        ],
+        "title": "CueLoop",
+        "type": "object"
+      },
+      "CueSfx": {
+        "description": "A one-shot SFX a cue fires when it runs.",
+        "properties": {
+          "item": {
+            "title": "Item",
+            "type": "string"
+          },
+          "soundboard": {
+            "title": "Soundboard",
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Volume",
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item"
+        ],
+        "title": "CueSfx",
+        "type": "object"
+      },
+      "CueSpec": {
+        "description": "A saved one-click setup. Firing it applies a preset, starts a playlist\n(from a given song + timestamp), fires one-shot SFX, and starts loops.\nEverything references existing pieces by name; all parts are optional.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "loops": {
+            "items": {
+              "$ref": "#/$defs/CueLoop"
+            },
+            "title": "Loops",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "playlist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Playlist"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset"
+          },
+          "sfx": {
+            "items": {
+              "$ref": "#/$defs/CueSfx"
+            },
+            "title": "Sfx",
+            "type": "array"
+          },
+          "start_index": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Start Index",
+            "type": "integer"
+          },
+          "start_ms": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CueSpec",
+        "type": "object"
+      },
+      "EffectSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "EffectSpec",
+        "type": "object"
+      },
+      "IntegrationsSpec": {
+        "properties": {
+          "lights": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Lights"
+          }
+        },
+        "title": "IntegrationsSpec",
+        "type": "object"
+      },
+      "InterruptSpec": {
+        "properties": {
+          "duck_to": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duck To"
+          },
+          "fade_in_ms": {
+            "default": 0,
+            "title": "Fade In Ms",
+            "type": "integer"
+          },
+          "fade_out_ms": {
+            "default": 0,
+            "title": "Fade Out Ms",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "playlist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Playlist"
+          },
+          "return_to_ambient": {
+            "default": true,
+            "title": "Return To Ambient",
+            "type": "boolean"
+          },
+          "soundboard_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Soundboard Item"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "InterruptSpec",
+        "type": "object"
+      },
+      "PresetManifest": {
+        "properties": {
+          "crossfade_ms": {
+            "anyOf": [
+              {
+                "maximum": 60000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Crossfade Ms"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "effects": {
+            "items": {
+              "$ref": "#/$defs/EffectSpec"
+            },
+            "title": "Effects",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "PresetManifest",
+        "type": "object"
+      },
+      "SoundboardCategory": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/$defs/SoundboardItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "SoundboardCategory",
+        "type": "object"
+      },
+      "SoundboardItem": {
+        "properties": {
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "hotkey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotkey"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "name"
+        ],
+        "title": "SoundboardItem",
+        "type": "object"
+      },
+      "SoundboardManifest": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/$defs/SoundboardCategory"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SoundboardManifest",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "cues": {
+        "additionalProperties": {
+          "$ref": "#/$defs/CueSpec"
+        },
+        "title": "Cues",
+        "type": "object"
+      },
+      "default_crossfade_ms": {
+        "default": 0,
+        "title": "Default Crossfade Ms",
+        "type": "integer"
+      },
+      "default_soundboard": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Default Soundboard"
+      },
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "integrations": {
+        "$ref": "#/$defs/IntegrationsSpec"
+      },
+      "interrupts": {
+        "items": {
+          "$ref": "#/$defs/InterruptSpec"
+        },
+        "title": "Interrupts",
+        "type": "array"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "panels": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Panels",
+        "type": "array"
+      },
+      "playlist_categories": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Playlist Categories",
+        "type": "array"
+      },
+      "presets": {
+        "additionalProperties": {
+          "$ref": "#/$defs/PresetManifest"
+        },
+        "title": "Presets",
+        "type": "object"
+      },
+      "root_dir": {
+        "anyOf": [
+          {
+            "format": "path",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Root Dir"
+      },
+      "soundboards": {
+        "additionalProperties": {
+          "$ref": "#/$defs/SoundboardManifest"
+        },
+        "title": "Soundboards",
+        "type": "object"
+      },
+      "theme": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Theme"
+      }
+    },
+    "required": [
+      "id",
+      "name"
+    ],
+    "title": "ModeManifest",
+    "type": "object"
+  },
+  "preset": {
+    "$defs": {
+      "EffectSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "EffectSpec",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "crossfade_ms": {
+        "anyOf": [
+          {
+            "maximum": 60000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Crossfade Ms"
+      },
+      "description": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Description"
+      },
+      "effects": {
+        "items": {
+          "$ref": "#/$defs/EffectSpec"
+        },
+        "title": "Effects",
+        "type": "array"
+      },
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "name"
+    ],
+    "title": "PresetManifest",
+    "type": "object"
+  },
+  "soundboard": {
+    "$defs": {
+      "SoundboardCategory": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/$defs/SoundboardItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "SoundboardCategory",
+        "type": "object"
+      },
+      "SoundboardItem": {
+        "properties": {
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "hotkey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotkey"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "name"
+        ],
+        "title": "SoundboardItem",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "categories": {
+        "items": {
+          "$ref": "#/$defs/SoundboardCategory"
+        },
+        "title": "Categories",
+        "type": "array"
+      },
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Name"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "title": "SoundboardManifest",
+    "type": "object"
+  }
+}

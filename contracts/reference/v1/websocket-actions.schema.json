@@ -1,0 +1,984 @@
+{
+  "$defs": {
+    "AmbientClearQueueAction": {
+      "properties": {
+        "type": {
+          "const": "ambient_clear_queue",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AmbientClearQueueAction",
+      "type": "object"
+    },
+    "AmbientEnqueueAction": {
+      "properties": {
+        "position": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position"
+        },
+        "track_id": {
+          "title": "Track Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ambient_enqueue",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track_id"
+      ],
+      "title": "AmbientEnqueueAction",
+      "type": "object"
+    },
+    "AmbientJumpQueueAction": {
+      "description": "Play an exact queue slot now and keep only the entries after it.",
+      "properties": {
+        "position": {
+          "minimum": 0,
+          "title": "Position",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ambient_jump_queue",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "position"
+      ],
+      "title": "AmbientJumpQueueAction",
+      "type": "object"
+    },
+    "AmbientPlayFolderAction": {
+      "properties": {
+        "path": {
+          "default": "",
+          "maxLength": 1024,
+          "title": "Path",
+          "type": "string"
+        },
+        "start_index": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Start Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ambient_play_folder",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AmbientPlayFolderAction",
+      "type": "object"
+    },
+    "AmbientPlayPlaylistAction": {
+      "properties": {
+        "playlist_id": {
+          "title": "Playlist Id",
+          "type": "integer"
+        },
+        "start_index": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Start Index",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ambient_play_playlist",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "playlist_id"
+      ],
+      "title": "AmbientPlayPlaylistAction",
+      "type": "object"
+    },
+    "AmbientPlayTrackAction": {
+      "properties": {
+        "track_id": {
+          "title": "Track Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ambient_play_track",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track_id"
+      ],
+      "title": "AmbientPlayTrackAction",
+      "type": "object"
+    },
+    "AmbientSeekAction": {
+      "properties": {
+        "position_ms": {
+          "minimum": 0,
+          "title": "Position Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "ambient_seek",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "position_ms"
+      ],
+      "title": "AmbientSeekAction",
+      "type": "object"
+    },
+    "AmbientSetLoopAction": {
+      "properties": {
+        "loop": {
+          "enum": [
+            "off",
+            "follow",
+            "queue",
+            "track"
+          ],
+          "title": "Loop",
+          "type": "string"
+        },
+        "type": {
+          "const": "ambient_set_loop",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "loop"
+      ],
+      "title": "AmbientSetLoopAction",
+      "type": "object"
+    },
+    "AmbientSetQueueAction": {
+      "properties": {
+        "track_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Track Ids",
+          "type": "array"
+        },
+        "type": {
+          "const": "ambient_set_queue",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AmbientSetQueueAction",
+      "type": "object"
+    },
+    "AmbientSetShuffleAction": {
+      "properties": {
+        "shuffle": {
+          "enum": [
+            "off",
+            "random"
+          ],
+          "title": "Shuffle",
+          "type": "string"
+        },
+        "type": {
+          "const": "ambient_set_shuffle",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "shuffle"
+      ],
+      "title": "AmbientSetShuffleAction",
+      "type": "object"
+    },
+    "AmbientSkipNextAction": {
+      "properties": {
+        "from_track_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Track Id"
+        },
+        "type": {
+          "const": "ambient_skip_next",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AmbientSkipNextAction",
+      "type": "object"
+    },
+    "AmbientSkipPrevAction": {
+      "properties": {
+        "type": {
+          "const": "ambient_skip_prev",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AmbientSkipPrevAction",
+      "type": "object"
+    },
+    "AmbientStopAction": {
+      "properties": {
+        "type": {
+          "const": "ambient_stop",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AmbientStopAction",
+      "type": "object"
+    },
+    "CancelInterruptAction": {
+      "properties": {
+        "type": {
+          "const": "cancel_interrupt",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CancelInterruptAction",
+      "type": "object"
+    },
+    "FireCueAction": {
+      "description": "Fire a saved cue from the active mode: apply its preset, start its\nplaylist (from a song + timestamp), fire one-shot SFX, and start loops.",
+      "properties": {
+        "cue_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Cue Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "fire_cue",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "cue_id"
+      ],
+      "title": "FireCueAction",
+      "type": "object"
+    },
+    "FireInterruptPlaylistAction": {
+      "properties": {
+        "duck_to": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duck To"
+        },
+        "fade_in_ms": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Fade In Ms",
+          "type": "integer"
+        },
+        "fade_out_ms": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Fade Out Ms",
+          "type": "integer"
+        },
+        "playlist_id": {
+          "title": "Playlist Id",
+          "type": "integer"
+        },
+        "return_to_ambient": {
+          "default": true,
+          "title": "Return To Ambient",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "fire_interrupt_playlist",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "playlist_id"
+      ],
+      "title": "FireInterruptPlaylistAction",
+      "type": "object"
+    },
+    "FireInterruptTrackAction": {
+      "properties": {
+        "duck_to": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duck To"
+        },
+        "fade_in_ms": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Fade In Ms",
+          "type": "integer"
+        },
+        "fade_out_ms": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Fade Out Ms",
+          "type": "integer"
+        },
+        "return_to_ambient": {
+          "default": true,
+          "title": "Return To Ambient",
+          "type": "boolean"
+        },
+        "track_id": {
+          "title": "Track Id",
+          "type": "integer"
+        },
+        "type": {
+          "const": "fire_interrupt_track",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track_id"
+      ],
+      "title": "FireInterruptTrackAction",
+      "type": "object"
+    },
+    "FireSfxAction": {
+      "properties": {
+        "item_path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Item Path",
+          "type": "string"
+        },
+        "soundboard_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Soundboard Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "fire_sfx",
+          "title": "Type",
+          "type": "string"
+        },
+        "volume": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Volume",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "soundboard_id",
+        "item_path"
+      ],
+      "title": "FireSfxAction",
+      "type": "object"
+    },
+    "InterruptSeekAction": {
+      "properties": {
+        "position_ms": {
+          "minimum": 0,
+          "title": "Position Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "interrupt_seek",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "position_ms"
+      ],
+      "title": "InterruptSeekAction",
+      "type": "object"
+    },
+    "InterruptSkipNextAction": {
+      "properties": {
+        "from_track_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Track Id"
+        },
+        "type": {
+          "const": "interrupt_skip_next",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "InterruptSkipNextAction",
+      "type": "object"
+    },
+    "PauseAction": {
+      "properties": {
+        "type": {
+          "const": "pause",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "PauseAction",
+      "type": "object"
+    },
+    "PositionReportAction": {
+      "properties": {
+        "position_ms": {
+          "minimum": 0,
+          "title": "Position Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "position_report",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "position_ms"
+      ],
+      "title": "PositionReportAction",
+      "type": "object"
+    },
+    "RegisterAction": {
+      "properties": {
+        "client_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Client Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "protocol_version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "type": {
+          "const": "register",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "client_id"
+      ],
+      "title": "RegisterAction",
+      "type": "object"
+    },
+    "ResumeAction": {
+      "properties": {
+        "type": {
+          "const": "resume",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ResumeAction",
+      "type": "object"
+    },
+    "SetActiveModeAction": {
+      "properties": {
+        "mode_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mode Id"
+        },
+        "type": {
+          "const": "set_active_mode",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "mode_id"
+      ],
+      "title": "SetActiveModeAction",
+      "type": "object"
+    },
+    "SetActiveOutputsAction": {
+      "properties": {
+        "device_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Device Ids",
+          "type": "array"
+        },
+        "type": {
+          "const": "set_active_outputs",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "SetActiveOutputsAction",
+      "type": "object"
+    },
+    "SetActivePresetsAction": {
+      "properties": {
+        "preset_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preset Ids",
+          "type": "array"
+        },
+        "type": {
+          "const": "set_active_presets",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "SetActivePresetsAction",
+      "type": "object"
+    },
+    "SetActiveSoundboardAction": {
+      "properties": {
+        "soundboard_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Soundboard Id"
+        },
+        "type": {
+          "const": "set_active_soundboard",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "soundboard_id"
+      ],
+      "title": "SetActiveSoundboardAction",
+      "type": "object"
+    },
+    "SetCrossfadeAction": {
+      "properties": {
+        "crossfade_ms": {
+          "maximum": 30000,
+          "minimum": 0,
+          "title": "Crossfade Ms",
+          "type": "integer"
+        },
+        "crossfade_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "linear",
+                "equal_power",
+                "cut"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Crossfade Type"
+        },
+        "type": {
+          "const": "set_crossfade",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "crossfade_ms"
+      ],
+      "title": "SetCrossfadeAction",
+      "type": "object"
+    },
+    "SetDeviceVolumeAction": {
+      "properties": {
+        "device_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Device Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_device_volume",
+          "title": "Type",
+          "type": "string"
+        },
+        "volume": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Volume",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "device_id",
+        "volume"
+      ],
+      "title": "SetDeviceVolumeAction",
+      "type": "object"
+    },
+    "SetVolumeAction": {
+      "properties": {
+        "type": {
+          "const": "set_volume",
+          "title": "Type",
+          "type": "string"
+        },
+        "volume": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Volume",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "volume"
+      ],
+      "title": "SetVolumeAction",
+      "type": "object"
+    },
+    "StartLoopAction": {
+      "description": "Start a repeating SFX. A server-side timer fires it every `interval_s`\nuntil `stop_loop`. `id` is a client-minted handle (so the same client can\nstop it). Lives in PlayerState so every LOOPS panel sees it.",
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "interval_s": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Interval S",
+          "type": "number"
+        },
+        "item_path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Item Path",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "soundboard_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Soundboard Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "start_loop",
+          "title": "Type",
+          "type": "string"
+        },
+        "volume": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Volume",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "name",
+        "soundboard_id",
+        "item_path",
+        "interval_s"
+      ],
+      "title": "StartLoopAction",
+      "type": "object"
+    },
+    "StopLoopAction": {
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "stop_loop",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "title": "StopLoopAction",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "ambient_clear_queue": "#/$defs/AmbientClearQueueAction",
+      "ambient_enqueue": "#/$defs/AmbientEnqueueAction",
+      "ambient_jump_queue": "#/$defs/AmbientJumpQueueAction",
+      "ambient_play_folder": "#/$defs/AmbientPlayFolderAction",
+      "ambient_play_playlist": "#/$defs/AmbientPlayPlaylistAction",
+      "ambient_play_track": "#/$defs/AmbientPlayTrackAction",
+      "ambient_seek": "#/$defs/AmbientSeekAction",
+      "ambient_set_loop": "#/$defs/AmbientSetLoopAction",
+      "ambient_set_queue": "#/$defs/AmbientSetQueueAction",
+      "ambient_set_shuffle": "#/$defs/AmbientSetShuffleAction",
+      "ambient_skip_next": "#/$defs/AmbientSkipNextAction",
+      "ambient_skip_prev": "#/$defs/AmbientSkipPrevAction",
+      "ambient_stop": "#/$defs/AmbientStopAction",
+      "cancel_interrupt": "#/$defs/CancelInterruptAction",
+      "fire_cue": "#/$defs/FireCueAction",
+      "fire_interrupt_playlist": "#/$defs/FireInterruptPlaylistAction",
+      "fire_interrupt_track": "#/$defs/FireInterruptTrackAction",
+      "fire_sfx": "#/$defs/FireSfxAction",
+      "interrupt_seek": "#/$defs/InterruptSeekAction",
+      "interrupt_skip_next": "#/$defs/InterruptSkipNextAction",
+      "pause": "#/$defs/PauseAction",
+      "position_report": "#/$defs/PositionReportAction",
+      "register": "#/$defs/RegisterAction",
+      "resume": "#/$defs/ResumeAction",
+      "set_active_mode": "#/$defs/SetActiveModeAction",
+      "set_active_outputs": "#/$defs/SetActiveOutputsAction",
+      "set_active_presets": "#/$defs/SetActivePresetsAction",
+      "set_active_soundboard": "#/$defs/SetActiveSoundboardAction",
+      "set_crossfade": "#/$defs/SetCrossfadeAction",
+      "set_device_volume": "#/$defs/SetDeviceVolumeAction",
+      "set_volume": "#/$defs/SetVolumeAction",
+      "start_loop": "#/$defs/StartLoopAction",
+      "stop_loop": "#/$defs/StopLoopAction"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RegisterAction"
+    },
+    {
+      "$ref": "#/$defs/SetVolumeAction"
+    },
+    {
+      "$ref": "#/$defs/PauseAction"
+    },
+    {
+      "$ref": "#/$defs/ResumeAction"
+    },
+    {
+      "$ref": "#/$defs/SetActiveModeAction"
+    },
+    {
+      "$ref": "#/$defs/SetActiveOutputsAction"
+    },
+    {
+      "$ref": "#/$defs/SetDeviceVolumeAction"
+    },
+    {
+      "$ref": "#/$defs/PositionReportAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientPlayTrackAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientSetQueueAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientJumpQueueAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientEnqueueAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientClearQueueAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientSkipNextAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientSkipPrevAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientSeekAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientSetLoopAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientSetShuffleAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientStopAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientPlayPlaylistAction"
+    },
+    {
+      "$ref": "#/$defs/AmbientPlayFolderAction"
+    },
+    {
+      "$ref": "#/$defs/SetActiveSoundboardAction"
+    },
+    {
+      "$ref": "#/$defs/SetActivePresetsAction"
+    },
+    {
+      "$ref": "#/$defs/SetCrossfadeAction"
+    },
+    {
+      "$ref": "#/$defs/FireInterruptTrackAction"
+    },
+    {
+      "$ref": "#/$defs/FireInterruptPlaylistAction"
+    },
+    {
+      "$ref": "#/$defs/InterruptSkipNextAction"
+    },
+    {
+      "$ref": "#/$defs/InterruptSeekAction"
+    },
+    {
+      "$ref": "#/$defs/CancelInterruptAction"
+    },
+    {
+      "$ref": "#/$defs/FireSfxAction"
+    },
+    {
+      "$ref": "#/$defs/StartLoopAction"
+    },
+    {
+      "$ref": "#/$defs/StopLoopAction"
+    },
+    {
+      "$ref": "#/$defs/FireCueAction"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "artifacts": {
+    "authored-files.schema.json": {
+      "bytes": 17819,
+      "sha256": "bb0296fe1022167c02eb47fde809d0c01d82f8ea108a92ce1fb14975a21313b4"
+    },
+    "openapi.json": {
+      "bytes": 386531,
+      "sha256": "c152645ebbd0c6eea3530fa21f9bfb2e79f757af8324b4e22b9121ff3d6c0471"
+    },
+    "sqlite-schema.sql": {
+      "bytes": 7798,
+      "sha256": "7320e8468eba8ccc8ea7c51be5322437217fdcdeae87dddaa8d63d1ba806ad61"
+    },
+    "websocket-actions.schema.json": {
+      "bytes": 22560,
+      "sha256": "ddd2b7471308e844d04a34185f1acd7b2f9473a60aea9935db3f945cc238fb5d"
+    },
+    "websocket-messages.schema.json": {
+      "bytes": 13330,
+      "sha256": "1660ba642b568aa6c81ad9b0e8be4df848854d86c6d3b390d55c4cff1fd7f031"
+    }
+  },
+  "baseline_commit": "b93f91d",
+  "counts": {
+    "http_operations": 144,
+    "http_paths": 118,
+    "openapi_schemas": 205,
+    "sqlite_tables": 18,
+    "websocket_actions": 33,
+    "websocket_messages": 4
+  },
+  "exporter_version": 1
+}

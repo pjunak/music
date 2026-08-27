@@ -1,0 +1,513 @@
+{
+  "$defs": {
+    "AmbientState": {
+      "description": "The \"main player\" lane. Holds the current track, what's coming up,\nand what's already played (for skip_prev). `position_ms` is the server's\nbest guess of where in the current track playback is — updated by user\nactions (play/seek/skip) and by position reports from the active output.\n\nWhile an interrupt is active, `position_ms` is *not* updated (position\nreports go to the interrupt lane), so it preserves the resume point\nautomatically.\n\n`shuffle` controls how `skip_next` picks the next track: \"off\" advances\nsequentially (queue head); \"random\" pulls a random queue entry.",
+      "properties": {
+        "current_track_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Track Id"
+        },
+        "history": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "loop": {
+          "default": "off",
+          "enum": [
+            "off",
+            "follow",
+            "queue",
+            "track"
+          ],
+          "title": "Loop",
+          "type": "string"
+        },
+        "position_anchored_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position Anchored At"
+        },
+        "position_ms": {
+          "default": 0,
+          "title": "Position Ms",
+          "type": "integer"
+        },
+        "queue": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Queue",
+          "type": "array"
+        },
+        "shuffle": {
+          "default": "off",
+          "enum": [
+            "off",
+            "random"
+          ],
+          "title": "Shuffle",
+          "type": "string"
+        },
+        "source_playlist_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Playlist Id"
+        }
+      },
+      "title": "AmbientState",
+      "type": "object"
+    },
+    "DeviceInfo": {
+      "description": "A currently-connected device. `device_id` carries the stable `client_id`\n(they're the same value now) so existing clients that key on `device_id`\nkeep working unchanged. `is_output` reflects the persistent registry\ndesignation.",
+      "properties": {
+        "client_id": {
+          "title": "Client Id",
+          "type": "string"
+        },
+        "device_id": {
+          "title": "Device Id",
+          "type": "string"
+        },
+        "is_output": {
+          "default": false,
+          "title": "Is Output",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "client_id",
+        "name"
+      ],
+      "title": "DeviceInfo",
+      "type": "object"
+    },
+    "ErrorMessage": {
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "enum": [
+                "session_expired",
+                "session_revoked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "type": {
+          "const": "error",
+          "default": "error",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail"
+      ],
+      "title": "ErrorMessage",
+      "type": "object"
+    },
+    "InterruptState": {
+      "description": "An interrupt is a short audio override. Its lifecycle ends either by\nqueue exhaustion (auto-completion via `interrupt_skip_next` past the end)\nor explicit cancel. On completion, behavior depends on\n`return_to_ambient`: true → ambient takes back over from its preserved\nposition; false → playback stops.\n\n`duck_to` controls how ambient behaves *during* the interrupt:\n- `None` (default): ambient pauses - full cut, position frozen.\n- `0.0`..`1.0`: ambient keeps playing at this multiplier relative to the\n  device's output level, creating a cinematic duck. Same fade\n  durations as the interrupt's fade_in/out drive the ramp.",
+      "properties": {
+        "current_track_id": {
+          "title": "Current Track Id",
+          "type": "integer"
+        },
+        "duck_to": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duck To"
+        },
+        "fade_in_ms": {
+          "default": 0,
+          "title": "Fade In Ms",
+          "type": "integer"
+        },
+        "fade_out_ms": {
+          "default": 0,
+          "title": "Fade Out Ms",
+          "type": "integer"
+        },
+        "position_anchored_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position Anchored At"
+        },
+        "position_ms": {
+          "default": 0,
+          "title": "Position Ms",
+          "type": "integer"
+        },
+        "queue": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Queue",
+          "type": "array"
+        },
+        "return_to_ambient": {
+          "default": true,
+          "title": "Return To Ambient",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "current_track_id"
+      ],
+      "title": "InterruptState",
+      "type": "object"
+    },
+    "LoopingSfx": {
+      "description": "A repeating SFX driven by a server-side interval timer. Held in\nPlayerState so every client's LOOPS panel shows the same live set; the\nactual timers live in `sync/loops.py`. `id` is the stop handle.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "interval_s": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Interval S",
+          "type": "number"
+        },
+        "item_path": {
+          "title": "Item Path",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "soundboard_id": {
+          "title": "Soundboard Id",
+          "type": "string"
+        },
+        "volume": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Volume",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "soundboard_id",
+        "item_path",
+        "interval_s"
+      ],
+      "title": "LoopingSfx",
+      "type": "object"
+    },
+    "PlayerState": {
+      "description": "Canonical playback state. The server is the sole writer.",
+      "properties": {
+        "active_mode_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Mode Id"
+        },
+        "active_output_device_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Active Output Device Ids",
+          "type": "array"
+        },
+        "active_preset_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Active Preset Ids",
+          "type": "array"
+        },
+        "active_soundboard_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Soundboard Id"
+        },
+        "ambient": {
+          "$ref": "#/$defs/AmbientState"
+        },
+        "connected_devices": {
+          "items": {
+            "$ref": "#/$defs/DeviceInfo"
+          },
+          "title": "Connected Devices",
+          "type": "array"
+        },
+        "crossfade_ms": {
+          "default": 0,
+          "title": "Crossfade Ms",
+          "type": "integer"
+        },
+        "crossfade_type": {
+          "default": "linear",
+          "enum": [
+            "linear",
+            "equal_power",
+            "cut"
+          ],
+          "title": "Crossfade Type",
+          "type": "string"
+        },
+        "default_device_volume": {
+          "default": 1.0,
+          "title": "Default Device Volume",
+          "type": "number"
+        },
+        "device_volumes": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Device Volumes",
+          "type": "object"
+        },
+        "interrupt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterruptState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "is_playing": {
+          "default": false,
+          "title": "Is Playing",
+          "type": "boolean"
+        },
+        "last_position_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositionReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "looping_sfx": {
+          "items": {
+            "$ref": "#/$defs/LoopingSfx"
+          },
+          "title": "Looping Sfx",
+          "type": "array"
+        },
+        "position_epoch": {
+          "default": 0,
+          "title": "Position Epoch",
+          "type": "integer"
+        },
+        "preset_revision": {
+          "default": 0,
+          "title": "Preset Revision",
+          "type": "integer"
+        },
+        "revision": {
+          "default": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "volume": {
+          "default": 1.0,
+          "title": "Volume",
+          "type": "number"
+        }
+      },
+      "title": "PlayerState",
+      "type": "object"
+    },
+    "PositionReport": {
+      "properties": {
+        "device_id": {
+          "title": "Device Id",
+          "type": "string"
+        },
+        "position_ms": {
+          "title": "Position Ms",
+          "type": "integer"
+        },
+        "reported_at": {
+          "title": "Reported At",
+          "type": "number"
+        }
+      },
+      "required": [
+        "device_id",
+        "position_ms",
+        "reported_at"
+      ],
+      "title": "PositionReport",
+      "type": "object"
+    },
+    "SfxFired": {
+      "description": "Fire-and-forget event for soundboard items. Not part of PlayerState —\nbroadcast to ALL sockets; each client's engine plays it locally only if that\nclient is an active output (or a force-local guest). The server no longer\ngates this by designation — output membership is dynamic, so the client is\nthe source of truth.",
+      "properties": {
+        "item_path": {
+          "title": "Item Path",
+          "type": "string"
+        },
+        "soundboard_id": {
+          "title": "Soundboard Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "sfx_fired",
+          "default": "sfx_fired",
+          "title": "Type",
+          "type": "string"
+        },
+        "volume": {
+          "default": 1.0,
+          "title": "Volume",
+          "type": "number"
+        }
+      },
+      "required": [
+        "soundboard_id",
+        "item_path"
+      ],
+      "title": "SfxFired",
+      "type": "object"
+    },
+    "StateChanged": {
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/PlayerState"
+        },
+        "type": {
+          "const": "state_changed",
+          "default": "state_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "StateChanged",
+      "type": "object"
+    },
+    "StateSnapshot": {
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/PlayerState"
+        },
+        "type": {
+          "const": "state_snapshot",
+          "default": "state_snapshot",
+          "title": "Type",
+          "type": "string"
+        },
+        "your_device_id": {
+          "default": "",
+          "title": "Your Device Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "StateSnapshot",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "error": "#/$defs/ErrorMessage",
+      "sfx_fired": "#/$defs/SfxFired",
+      "state_changed": "#/$defs/StateChanged",
+      "state_snapshot": "#/$defs/StateSnapshot"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/StateSnapshot"
+    },
+    {
+      "$ref": "#/$defs/StateChanged"
+    },
+    {
+      "$ref": "#/$defs/SfxFired"
+    },
+    {
+      "$ref": "#/$defs/ErrorMessage"
+    }
+  ]
+}
