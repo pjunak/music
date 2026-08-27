@@ -7,7 +7,9 @@ targets = [
 all-features = true
 
 [advisories]
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is an archived compile-time proc macro pulled only by lofty 0.25.1; remove this exception when Lofty replaces it." },
+]
 
 [licenses]
 allow = [

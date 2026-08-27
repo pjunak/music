@@ -12,6 +12,10 @@
       "bytes": 1936,
       "sha256": "419ad4d81e799ebf421bd867a9bd33c17260dca2c3d32503ddad0ed60f34ecb3"
     },
+    "metadata.examples.json": {
+      "bytes": 30984,
+      "sha256": "b23722e965a8b24283156efc72be7393e7f5ea96f8eb0aa7e6ab92343fce405a"
+    },
     "openapi.json": {
       "bytes": 386531,
       "sha256": "c152645ebbd0c6eea3530fa21f9bfb2e79f757af8324b4e22b9121ff3d6c0471"
@@ -47,6 +51,7 @@
     "http_operations": 144,
     "http_paths": 118,
     "legacy_device_cases": 4,
+    "metadata_examples": 5,
     "openapi_schemas": 205,
     "sqlite_fixture_rows": 18,
     "sqlite_tables": 18,

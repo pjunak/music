@@ -143,10 +143,20 @@ Evidence so far:
   outer limit plus parser event/node/depth/alias/scalar budgets reject oversized, duplicate-key,
   multi-document, deep-flow, and alias-bomb inputs. Three current files and synthetic full cue,
   soundboard, and preset documents match Python's canonical values and round-trip semantically.
+- [`lofty` 0.25.1](https://github.com/Serial-ATA/lofty-rs) is selected for native metadata formats.
+  Five synthetic Python/Mutagen files (AIFF, FLAC, MP3, Ogg Vorbis, and WAV) match all nine writable
+  fields. Rust writes only to create-new staged copies, verifies format, duration, intended fields,
+  artwork and unrelated markers, leaves the source byte-identical, and removes abandoned stages.
+  The corpus caught Lofty's lossy generic Vorbis conversion, so FLAC/Vorbis/Opus writes now use
+  concrete tag types. AAC, M4A, Opus, and WMA remain explicit FFmpeg-generated corpus gates; WMA
+  will use the FFmpeg/ffprobe adapter because Lofty does not support ASF.
 - `deny.toml` rejects unknown registries and Git sources, wildcard requirements, OpenSSL/native-TLS
-  backends, and both deprecated YAML implementations. The current 164-crate graph passes RustSec
-  with warnings denied; six upstream duplicate families remain visible as review warnings (four at
-  the SQLx/RustCrypto generation boundary, plus `hashbrown` and `syn`).
+  backends, and both deprecated YAML implementations. RustSec findings remain denied except for
+  `RUSTSEC-2024-0436`: Lofty alone pulls the archived `paste` 1.0.15 proc macro at compile time, and
+  that informational exception carries an explicit removal condition. The resulting 175-crate
+  graph has no reported vulnerability, unsoundness, or yanked-package finding. Six upstream
+  duplicate families remain visible as review warnings (four at the SQLx/RustCrypto generation
+  boundary, plus `hashbrown` and `syn`).
 - The eight-crate workspace shell compiles with the accepted dependency direction and workspace
   safe-Rust/panic lints. It exists now to host Phase 1 contract and feasibility tests; no production
   endpoint is routed to Rust before its parity gate.

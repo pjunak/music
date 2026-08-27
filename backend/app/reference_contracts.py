@@ -14,16 +14,21 @@ import base64
 import hashlib
 import json
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
 from argon2.low_level import Type, hash_secret
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from mutagen import File as MutagenFile  # type: ignore[import-untyped]
+from mutagen.flac import Picture  # type: ignore[import-untyped]
+from mutagen.id3 import APIC, TXXX  # type: ignore[import-untyped]
 from pydantic import Field, TypeAdapter
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
+from app.library import index as library_index
 from app.main import app
 from app.models import Base
 from app.modes.loader import CueSpec, ModeManifest, SoundboardManifest
@@ -34,6 +39,7 @@ from app.reference_cases import (
     VALID_WEBSOCKET_ACTIONS,
     VALID_WEBSOCKET_MESSAGES,
 )
+from app.reference_media import MINIMAL_AUDIO_BUILDERS
 from app.sync.protocol import (
     ErrorMessage,
     SfxFired,
@@ -503,6 +509,87 @@ def _authored_file_examples() -> dict[str, Any]:
     return {"cases": cases, "version": 1}
 
 
+def _metadata_examples() -> dict[str, Any]:
+    sample: dict[str, str | int] = {
+        "title": "Round Trip",
+        "artist": "The Artist",
+        "album_artist": "Album Artist",
+        "album": "An Album",
+        "track_no": 7,
+        "disc_no": 2,
+        "year": 1991,
+        "genre": "Ambient",
+        "bpm": 123,
+    }
+    sentinel_key = "MUSIC_REWRITE_SENTINEL"
+    sentinel_value = "keep-me"
+    # A valid one-pixel PNG keeps picture-preservation checks synthetic and tiny.
+    cover = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB"
+        "AScY42YAAAAASUVORK5CYII="
+    )
+
+    def add_preservation_fields(path: Path, extension: str) -> None:
+        media = MutagenFile(str(path))
+        if media is None or media.tags is None:
+            raise ValueError(f"synthetic {extension} fixture has no writable tags")
+        if extension in {"aiff", "mp3", "wav"}:
+            media.tags.add(TXXX(encoding=3, desc=sentinel_key, text=[sentinel_value]))
+            media.tags.add(
+                APIC(
+                    encoding=3,
+                    mime="image/png",
+                    type=3,
+                    desc="rewrite-fixture",
+                    data=cover,
+                )
+            )
+        else:
+            media.tags[sentinel_key] = [sentinel_value]
+            if extension == "flac":
+                picture = Picture()
+                picture.type = 3
+                picture.mime = "image/png"
+                picture.desc = "rewrite-fixture"
+                picture.data = cover
+                media.add_picture(picture)
+        media.save()
+
+    cases: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="music-reference-media-") as temp_dir:
+        root = Path(temp_dir)
+        for extension, builder in sorted(MINIMAL_AUDIO_BUILDERS.items()):
+            path = root / f"track.{extension}"
+            path.write_bytes(builder())
+            library_index.write_tags(path, sample)
+            add_preservation_fields(path, extension)
+            source = path.read_bytes()
+            canonical = library_index._read_tags(path)
+            for key, expected in sample.items():
+                if canonical.get(key) != expected:
+                    raise ValueError(f"{extension} fixture lost {key}")
+            cases.append(
+                {
+                    "canonical": {key: canonical[key] for key in sample},
+                    "extension": f".{extension}",
+                    "preservation_markers": [sentinel_key, sentinel_value],
+                    "source_base64": base64.b64encode(source).decode("ascii"),
+                    "source_sha256": hashlib.sha256(source).hexdigest(),
+                }
+            )
+
+    covered = {case["extension"] for case in cases}
+    runtime_extensions = sorted(library_index.AUDIO_EXTENSIONS)
+    return {
+        "cases": cases,
+        "covered_extensions": sorted(covered),
+        "pending_ffmpeg_extensions": sorted(set(runtime_extensions) - covered),
+        "runtime_extensions": runtime_extensions,
+        "version": 1,
+        "writable_fields": list(library_index.WRITABLE_TAGS),
+    }
+
+
 def _websocket_action_examples() -> dict[str, Any]:
     valid: list[dict[str, Any]] = []
     action_types: set[str] = set()
@@ -569,10 +656,12 @@ def build_reference_bundle() -> dict[str, bytes]:
     messages = server_message_adapter.json_schema()
     compatibility = _compatibility_data()
     authored_examples = _authored_file_examples()
+    metadata_examples = _metadata_examples()
     artifacts = {
         "authored-files.examples.json": _json_bytes(authored_examples),
         "authored-files.schema.json": _json_bytes(_authored_file_schemas()),
         "compatibility-data.json": _json_bytes(compatibility),
+        "metadata.examples.json": _json_bytes(metadata_examples),
         "openapi.json": _json_bytes(openapi),
         "sqlite-fixture.sql": _sqlite_fixture_sql(compatibility),
         "sqlite-schema.sql": _sqlite_ddl(),
@@ -601,6 +690,7 @@ def build_reference_bundle() -> dict[str, bytes]:
             "http_paths": len(openapi.get("paths", {})),
             "authored_file_examples": len(authored_examples["cases"]),
             "legacy_device_cases": len(compatibility["legacy_device_cases"]),
+            "metadata_examples": len(metadata_examples["cases"]),
             "openapi_schemas": len(openapi.get("components", {}).get("schemas", {})),
             "sqlite_fixture_rows": (
                 compatibility["sqlite"]["table_count"]

@@ -9,7 +9,13 @@
 //! Filesystem effects stay behind explicit plans and recovery journals; pure
 //! cleanup or authoring analysis must not acquire write-capable dependencies.
 
+mod metadata;
 mod yaml;
+
+pub use metadata::{
+    AudioMetadata, StagedTagUpdate, TagField, TagPatch, TagValue, read_audio_metadata,
+    stage_tag_update,
+};
 
 pub use yaml::{
     CueDocument, ModeDocument, PresetDocument, SoundboardDocument, YamlDocumentError,

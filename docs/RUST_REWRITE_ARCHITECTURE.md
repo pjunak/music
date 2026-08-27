@@ -138,7 +138,7 @@ remain ordinary Rust modules inside `music-application`; concrete transport and 
 | TypeScript contract export | `ts-rs` | HTTP/WS types are generated from the same Serde types and committed for frontend use. |
 | Task JSON Schema | Schemars plus local validation | Draft 2020-12 schemas originate from the same strict Rust result types. |
 | HTTP client | Reqwest with Rustls | Supports explicit redirect, proxy, retry, timeout, and DNS overrides needed by provider policy. |
-| Audio metadata | Lofty, subject to corpus parity | Reads and writes the formats currently handled by Mutagen; isolated behind a tag adapter. |
+| Audio metadata | Lofty for its native formats; FFmpeg/ffprobe adapter for ASF/WMA | Keeps the common path in-process and typed without pretending Lofty supports WMA; both remain isolated behind one tag adapter. |
 | Decoding/probing | FFmpeg and ffprobe subprocesses | Preserves the existing broad format support, including formats pure-Rust decoders do not cover. |
 | DSP | RustFFT plus reusable buffers | Native SIMD-capable FFT without materializing Python lists or NumPy arrays. |
 | CPU execution | Dedicated fixed Rayon pool, subject to profiling | The application's CPU budget is explicit and separate from Tokio's general blocking pool. |
@@ -153,7 +153,7 @@ remain ordinary Rust modules inside `music-application`; concrete transport and 
 Versions are pinned in `Cargo.lock` only after the feasibility gates. Axum is built directly on
 Tokio/Hyper and Tower ([Axum documentation](https://docs.rs/axum/latest/axum/)); SQLx provides a
 first-class SQLite driver and migrations ([SQLx SQLite documentation](https://docs.rs/sqlx/latest/sqlx/sqlite/));
-Lofty supports reading and writing the current common tag formats
+Lofty supports reading and writing the current common tag formats, but not ASF/WMA
 ([Lofty documentation](https://docs.rs/lofty/latest/lofty/)); and tract currently documents legacy
 TensorFlow frozen-graph loading ([tract documentation](https://github.com/sonos/tract/blob/main/README.md)).
 Tokio documents `CancellationToken` plus `TaskTracker` for graceful task shutdown
