@@ -29,6 +29,7 @@ pub enum StorageError {
     ManifestSerialization(serde_json::Error),
     InvalidStorageRevision(i64),
     StorageRevisionOverflow,
+    InvalidTimestamp,
 }
 
 impl Display for StorageError {
@@ -84,6 +85,7 @@ impl Display for StorageError {
                 )
             }
             Self::StorageRevisionOverflow => formatter.write_str("storage revision overflow"),
+            Self::InvalidTimestamp => formatter.write_str("stored timestamp is invalid"),
         }
     }
 }
@@ -102,7 +104,8 @@ impl Error for StorageError {
             | Self::BackupPathNotUnicode(_)
             | Self::BackupVerificationFailed { .. }
             | Self::InvalidStorageRevision(_)
-            | Self::StorageRevisionOverflow => None,
+            | Self::StorageRevisionOverflow
+            | Self::InvalidTimestamp => None,
         }
     }
 }

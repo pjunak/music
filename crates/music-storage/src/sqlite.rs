@@ -61,8 +61,8 @@ impl SqliteStorageOptions {
 
 #[derive(Debug)]
 pub struct SqliteStorage {
-    pool: SqlitePool,
-    write_gate: Arc<Mutex<()>>,
+    pub(crate) pool: SqlitePool,
+    pub(crate) write_gate: Arc<Mutex<()>>,
     instance_lock: InstanceLock,
     migration_outcome: MigrationOutcome,
 }

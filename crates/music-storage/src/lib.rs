@@ -9,6 +9,7 @@
 //! This crate owns the small read pool, serialized short-write admission, and
 //! exclusive process/offline-writer lock.
 
+mod auth;
 mod crypto;
 mod error;
 mod instance_lock;
@@ -17,6 +18,7 @@ mod playback;
 mod schema;
 mod sqlite;
 
+pub use auth::Argon2PasswordVerifier;
 pub use crypto::{
     CredentialVault, CryptoError, EncryptedCredential, SecretString, hash_password, verify_password,
 };
