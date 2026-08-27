@@ -178,7 +178,7 @@ impl SqliteStorage {
         }
     }
 
-    pub async fn close(self) {
+    pub async fn close(&self) {
         self.pool.close().await;
     }
 }

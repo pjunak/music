@@ -1,0 +1,96 @@
+name: Rust rewrite verification
+
+on:
+  push:
+    branches: ["rewrite/rust"]
+  pull_request:
+    branches: [main, "rewrite/rust"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-rewrite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MUSIC_TEST_FFMPEG: /usr/bin/ffmpeg
+      MUSIC_TEST_FFPROBE: /usr/bin/ffprobe
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+          rustup default 1.97.1
+
+      - name: Install media test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
+      - name: Format, lint, test, and document
+        run: |
+          cargo fmt --all --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
+          cargo test --workspace --all-features --doc
+
+      - name: Install pinned dependency auditors
+        run: |
+          cargo install cargo-deny --version 0.20.2 --locked
+          cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Audit dependencies
+        run: |
+          cargo deny check
+          cargo audit --deny warnings
+
+  python-reference:
+    name: Python compatibility oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Verify the frozen reference implementation
+        run: |
+          cd backend
+          pip install uv
+          uv sync --locked --extra dev
+          uv run python -m app.reference_contracts --check
+          uv run ruff check app tests
+          uv run mypy app tests
+          uv run pytest
+
+  frontend:
+    name: Frontend compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
+      - name: Lint, typecheck, test, and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build

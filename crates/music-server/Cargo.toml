@@ -7,12 +7,26 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+axum.workspace = true
+dotenvy.workspace = true
 music-analysis = { path = "../music-analysis", version = "0.1.0" }
 music-application = { path = "../music-application", version = "0.1.0" }
 music-domain = { path = "../music-domain", version = "0.1.0" }
 music-media = { path = "../music-media", version = "0.1.0" }
 music-protocol = { path = "../music-protocol", version = "0.1.0" }
 music-storage = { path = "../music-storage", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

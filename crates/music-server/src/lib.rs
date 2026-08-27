@@ -9,3 +9,17 @@
 //! The future `AppRuntime` is constructed once here. HTTP handlers translate
 //! and authorize; they never become alternate owners of mutable application
 //! state.
+
+mod config;
+mod error;
+mod health;
+mod http;
+mod runtime;
+mod supervisor;
+
+pub use config::{AppConfig, ConfigError, LogLevel};
+pub use error::{ApiError, PublicErrorBody, PublicErrorDetail, RuntimeError};
+pub use health::{ComponentStatus, HealthRegistry, ReadinessSnapshot, ReadinessStatus};
+pub use http::CorrelationId;
+pub use runtime::{AppRuntime, initialize_tracing};
+pub use supervisor::{CriticalFailure, CriticalTaskError, TaskSupervisor};

@@ -162,6 +162,13 @@ and the standard library has supported cross-platform file locks since Rust 1.89
 ([`File::try_lock`](https://doc.rust-lang.org/stable/std/fs/struct.File.html#method.try_lock)). These
 are feasibility inputs, not substitutes for tests with this project's files and model.
 
+The implemented process shell loads the current environment names and optional working-directory
+`.env` exactly once, with process values taking precedence. Required paths, SQLite-only storage,
+origins, cookies, limits, and worker counts fail validation before mutable owners start. Optional
+provider credentials use a zeroizing, redacted wrapper and are never included in error values.
+Axum currently targets 0.8.9, Tokio Util 0.7.19, Tower HTTP 0.7.0, and tracing-subscriber 0.3.23 in
+`Cargo.lock`; upgrades remain ordinary reviewed dependency changes rather than floating CI inputs.
+
 ## Canonical playback model
 
 ### Pure reducer
@@ -356,6 +363,12 @@ voice inference, malformed individual modes, or a failed reconciliation is degra
 the operator can enter the UI and repair it. Public health responses expose only coarse status;
 component errors, versions, and timings remain behind authenticated diagnostics and never include
 paths or secrets.
+
+During the rewrite, readiness remains `starting` until the real playback owner is running. The
+Phase-2 WebSocket transport shell returns a protocol-shaped availability error and closes instead
+of publishing a synthetic snapshot. Static files are optional and degradable: a valid built SPA
+uses no-cache entry/client routes and immutable content-hashed assets, while `/api/*` has its own
+JSON 404 boundary and can never fall through to `index.html`.
 
 ## Filesystem and media architecture
 
@@ -569,6 +582,13 @@ admission, closes WebSocket sessions, requests job cancellation/checkpointing, t
 analysis children, persists final actor state, releases the database/instance lock, and closes
 SQLite. A deadline then exits non-zero so the container supervisor can restart cleanly; it does not
 wait forever for native work.
+
+Task admission and tracker closure share one lock, so no owner can be detached across the shutdown
+boundary. Every critical future runs behind an observed Tokio join handle: a typed failure,
+premature return, or panic marks its component failed, records only a non-secret failure code,
+cancels the root token, and makes the process exit non-zero after bounded cleanup. HTTP panics are
+converted to a fixed safe response; request middleware replaces rather than trusts incoming
+correlation IDs and returns the generated ID in the response header.
 
 ## Observability and performance
 

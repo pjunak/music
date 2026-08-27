@@ -208,21 +208,32 @@ not introduce a Python sidecar.
 
 ## Phase 2 — workspace, process shell, and CI
 
+**Status:** In progress — the workspace, immutable configuration, supervised process shell,
+compatibility health/readiness, SPA serving, and non-publishing rewrite CI are implemented. The
+migration/doctor/export pipelines and Rust container remain open.
+
 Create the eight-crate workspace and establish rules before feature code:
 
-- pinned stable toolchain, Cargo lockfile, workspace lints, formatting, and release profiles;
-- pure domain, application/use-case, wire protocol, storage, media, analysis, server, and output
+- [x] Pinned stable toolchain, Cargo lockfile, workspace lints, formatting, and release profiles.
+- [x] Pure domain, application/use-case, wire protocol, storage, media, analysis, server, and output
   crate boundaries with a forbidden-dependency check;
-- immutable configuration loader with current environment names and startup validation;
-- explicit `AppRuntime`, typed error model, tracing, correlation IDs, root cancellation token,
+- [x] Immutable configuration loader with current environment names, `.env` precedence, secret
+  redaction, and startup validation.
+- [x] Explicit `AppRuntime`, typed error model, structured tracing, server-generated correlation
+  IDs, root cancellation token,
   tracked tasks, panic supervision, and secret wrappers;
-- Axum compatibility health plus component readiness, static SPA fallback/cache behavior,
+- [x] Axum compatibility health plus component readiness, static SPA fallback/cache behavior,
   request/body limits, and security headers;
-- SQLx read pool, serialized short-write admission, WAL pragmas, exclusive instance lock,
+- [ ] SQLx read pool, serialized short-write admission, WAL pragmas, exclusive instance lock,
   compatibility validator, migration baseline, backup/doctor commands;
-- OpenAPI and TypeScript export pipelines;
-- CI verification on pull requests and `rewrite/rust` without image publishing or deployment;
-- main-only build/publish/dispatch retained but still targeting the Python image until cutover.
+- [ ] OpenAPI and TypeScript export pipelines.
+- [x] CI verification on pull requests and `rewrite/rust` without image publishing or deployment.
+- [x] Main-only build/publish/dispatch remains unchanged and still targets the Python image until
+  cutover.
+
+Readiness is deliberately `starting` while the Phase-3 playback owner is absent. The temporary
+WebSocket shell emits one protocol-shaped service-unavailable error and closes; it never fabricates
+a canonical state snapshot. `/api/health` remains the exact `{"status":"ok"}` liveness contract.
 
 Gate: all standard Rust/frontend/security gates pass; forbidden global state/unsafe/panic fixtures
 are enforced; a copied existing database passes read-only doctor; a second writer is refused; and

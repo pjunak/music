@@ -55,6 +55,11 @@ pub struct SecretString(Zeroizing<String>);
 
 impl SecretString {
     #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(Zeroizing::new(value.into()))
+    }
+
+    #[must_use]
     pub fn expose_secret(&self) -> &str {
         self.0.as_str()
     }
