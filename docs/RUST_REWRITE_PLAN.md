@@ -285,8 +285,8 @@ reconciliation and bounded slow-client behavior.
 
 ## Phase 4 — authentication, devices, diagnostics, and administration
 
-**Status:** In progress — runtime authentication and remembered-device ownership are implemented;
-diagnostics, administration, and explicit device transfer commands remain.
+**Status:** In progress — runtime authentication, remembered-device ownership, and foundational
+offline administration are implemented; diagnostics and maintenance-gated backup/restore remain.
 
 - [x] Users, Python-compatible Argon2 verification, dummy verification, bounded login hashing,
   direct-peer/global throttles, opaque sessions, configured cookies, revocation, expiry, and
@@ -294,9 +294,13 @@ diagnostics, administration, and explicit device transfer commands remain.
 - [x] SQLite remembered-device table, audited one-time bounded legacy JSON import that preserves
   its source, and live connected/default-output projections without coupling saved designation to
   current activation.
-- [ ] Explicit remembered-device CLI export/import.
-- Diagnostics, maintenance-gated streaming backup/restore verification, storage initialization,
-  create-user, set-password, and database doctor.
+- [x] Versioned remembered-device CLI export/import with no-clobber export, bounded strict input,
+  transactional replacement, and an explicit `--replace` gate for populated targets.
+- [x] Offline `create-user`, `set-password`, database doctor/migrate, healthcheck, and contract
+  commands. Password input defaults to a hidden prompt; password replacement atomically revokes
+  active sessions unless the operator explicitly preserves them.
+- Diagnostics, maintenance-gated streaming backup/restore verification, and storage
+  initialization.
 - Compatibility liveness, component readiness/degradation, security headers, and safe
   `detail`/error-code/correlation-ID mappings.
 
@@ -399,6 +403,8 @@ the selected thread or process boundary's deadline.
 
 - Recreate every `music-cli` command with compatible safe defaults and add `db doctor`, migration,
   healthcheck, device import/export, and contract-export commands.
+  The new database, contract, healthcheck, user/password, and device-transfer commands are already
+  implemented; library, provider, job, and evaluation commands follow their owning coordinators.
 - Implement `music-output` using the shared protocol, WebSocket ping/reconnect, stable ID,
   position-epoch reconciliation, server/local volume, position reports, SFX, and local control API.
 - Supervise two local mpv processes through Unix-socket JSON IPC; use no libmpv FFI.

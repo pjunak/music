@@ -60,6 +60,43 @@ impl SqliteStorage {
             .await?;
         Ok(result.rows_affected() == 1)
     }
+
+    /// Replace one user's password and optionally revoke every active session
+    /// in the same transaction. Offline administration must never expose a
+    /// window where a new password is committed while leaked cookies survive.
+    pub async fn replace_user_password(
+        &self,
+        username: &str,
+        password_hash: &str,
+        revoke_sessions: bool,
+    ) -> Result<Option<u64>, StorageError> {
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        let user_id = sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE username = ?")
+            .bind(username)
+            .fetch_optional(&mut *transaction)
+            .await?;
+        let Some(user_id) = user_id else {
+            transaction.rollback().await?;
+            return Ok(None);
+        };
+        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+            .bind(password_hash)
+            .bind(user_id)
+            .execute(&mut *transaction)
+            .await?;
+        let revoked = if revoke_sessions {
+            sqlx::query("DELETE FROM auth_sessions WHERE user_id = ?")
+                .bind(user_id)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected()
+        } else {
+            0
+        };
+        transaction.commit().await?;
+        Ok(Some(revoked))
+    }
 }
 
 impl AuthRepository for SqliteStorage {
@@ -405,6 +442,84 @@ mod tests {
             )
             .await?,
             SessionLookup::Missing
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn offline_password_replacement_is_atomic_with_session_revocation()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (_directory, storage) = test_storage().await?;
+        let old_hash = hash_password("old operator password")?;
+        let new_hash = hash_password("new operator password")?;
+        let user_id = storage
+            .create_user("operator", &old_hash, UnixSeconds::new(1_799_000_000))
+            .await?;
+        for token in ["first-active-token", "second-active-token"] {
+            AuthRepository::create_session(
+                storage.as_ref(),
+                user_id,
+                token,
+                UnixSeconds::new(1_799_999_000),
+                UnixSeconds::new(1_800_001_000),
+            )
+            .await?;
+        }
+
+        assert_eq!(
+            storage
+                .replace_user_password("operator", &new_hash, true)
+                .await?,
+            Some(2)
+        );
+        let record = AuthRepository::find_user_by_username(storage.as_ref(), "operator")
+            .await?
+            .ok_or("operator disappeared after password replacement")?;
+        assert_eq!(record.password_hash.as_str(), new_hash);
+        for token in ["first-active-token", "second-active-token"] {
+            assert_eq!(
+                AuthRepository::lookup_session(
+                    storage.as_ref(),
+                    token,
+                    UnixSeconds::new(1_800_000_000),
+                    SessionTouch::PreserveLastSeen,
+                    Duration::from_secs(60),
+                )
+                .await?,
+                SessionLookup::Missing
+            );
+        }
+
+        AuthRepository::create_session(
+            storage.as_ref(),
+            user_id,
+            "preserved-token",
+            UnixSeconds::new(1_799_999_000),
+            UnixSeconds::new(1_800_001_000),
+        )
+        .await?;
+        assert_eq!(
+            storage
+                .replace_user_password("operator", &old_hash, false)
+                .await?,
+            Some(0)
+        );
+        assert!(matches!(
+            AuthRepository::lookup_session(
+                storage.as_ref(),
+                "preserved-token",
+                UnixSeconds::new(1_800_000_000),
+                SessionTouch::PreserveLastSeen,
+                Duration::from_secs(60),
+            )
+            .await?,
+            SessionLookup::Authenticated { .. }
+        ));
+        assert_eq!(
+            storage
+                .replace_user_password("missing", &new_hash, true)
+                .await?,
+            None
         );
         Ok(())
     }

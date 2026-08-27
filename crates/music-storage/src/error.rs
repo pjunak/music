@@ -27,10 +27,12 @@ pub enum StorageError {
     },
     BackgroundTask(tokio::task::JoinError),
     ManifestSerialization(serde_json::Error),
+    DeviceTransferSerialization(serde_json::Error),
     InvalidStorageRevision(i64),
     StorageRevisionOverflow,
     InvalidTimestamp,
     InvalidLegacyDeviceImport,
+    InvalidDeviceTransfer(&'static str),
 }
 
 impl Display for StorageError {
@@ -79,6 +81,9 @@ impl Display for StorageError {
             Self::ManifestSerialization(_) => {
                 formatter.write_str("failed to encode the migration backup manifest")
             }
+            Self::DeviceTransferSerialization(_) => {
+                formatter.write_str("failed to encode the remembered-device transfer document")
+            }
             Self::InvalidStorageRevision(revision) => {
                 write!(
                     formatter,
@@ -89,6 +94,9 @@ impl Display for StorageError {
             Self::InvalidTimestamp => formatter.write_str("stored timestamp is invalid"),
             Self::InvalidLegacyDeviceImport => {
                 formatter.write_str("legacy device import record is invalid")
+            }
+            Self::InvalidDeviceTransfer(detail) => {
+                write!(formatter, "remembered-device transfer is invalid: {detail}")
             }
         }
     }
@@ -102,6 +110,7 @@ impl Error for StorageError {
             Self::Migration(source) => Some(source),
             Self::BackgroundTask(source) => Some(source),
             Self::ManifestSerialization(source) => Some(source),
+            Self::DeviceTransferSerialization(source) => Some(source),
             Self::InvalidDatabasePath(_)
             | Self::InvalidOption(_)
             | Self::IncompatibleSchema(_)
@@ -110,7 +119,8 @@ impl Error for StorageError {
             | Self::InvalidStorageRevision(_)
             | Self::StorageRevisionOverflow
             | Self::InvalidTimestamp
-            | Self::InvalidLegacyDeviceImport => None,
+            | Self::InvalidLegacyDeviceImport
+            | Self::InvalidDeviceTransfer(_) => None,
         }
     }
 }
