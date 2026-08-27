@@ -8,8 +8,11 @@ authors.workspace = true
 
 [dependencies]
 music-domain = { path = "../music-domain", version = "0.1.0" }
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
 
 [lints]
 workspace = true
