@@ -8,6 +8,8 @@ authors.workspace = true
 
 [dependencies]
 music-domain = { path = "../music-domain", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

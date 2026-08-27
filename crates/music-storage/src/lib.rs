@@ -13,6 +13,7 @@ mod crypto;
 mod error;
 mod instance_lock;
 mod migration;
+mod playback;
 mod schema;
 mod sqlite;
 

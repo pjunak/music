@@ -1219,6 +1219,8 @@ name = "music-application"
 version = "0.1.0"
 dependencies = [
  "music-domain",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

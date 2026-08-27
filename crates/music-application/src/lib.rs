@@ -8,3 +8,5 @@
 //!
 //! This layer may depend on the pure domain but never on concrete storage,
 //! media, analysis, or transport adapters.
+
+pub mod playback;
