@@ -12,6 +12,8 @@
 mod crypto;
 mod error;
 mod instance_lock;
+mod migration;
+mod schema;
 mod sqlite;
 
 pub use crypto::{
@@ -19,4 +21,9 @@ pub use crypto::{
 };
 pub use error::StorageError;
 pub use instance_lock::InstanceLock;
+pub use migration::{MigrationBackup, MigrationOutcome};
+pub use schema::{
+    CURRENT_SCHEMA_VERSION, SchemaCompatibility, SchemaIssue, SchemaIssueLevel, SchemaReport,
+    inspect_database,
+};
 pub use sqlite::{CompareAndSwap, SqliteStorage, SqliteStorageOptions, StoredPlaybackSnapshot};

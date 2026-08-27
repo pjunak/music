@@ -210,7 +210,7 @@ not introduce a Python sidecar.
 
 **Status:** In progress — the workspace, immutable configuration, supervised process shell,
 compatibility health/readiness, SPA serving, and non-publishing rewrite CI are implemented. The
-migration/doctor/export pipelines and Rust container remain open.
+OpenAPI/TypeScript export pipelines and Rust container remain open.
 
 Create the eight-crate workspace and establish rules before feature code:
 
@@ -224,12 +224,22 @@ Create the eight-crate workspace and establish rules before feature code:
   tracked tasks, panic supervision, and secret wrappers;
 - [x] Axum compatibility health plus component readiness, static SPA fallback/cache behavior,
   request/body limits, and security headers;
-- [ ] SQLx read pool, serialized short-write admission, WAL pragmas, exclusive instance lock,
+- [x] SQLx read pool, serialized short-write admission, WAL pragmas, exclusive instance lock,
   compatibility validator, migration baseline, backup/doctor commands;
 - [ ] OpenAPI and TypeScript export pipelines.
 - [x] CI verification on pull requests and `rewrite/rust` without image publishing or deployment.
 - [x] Main-only build/publish/dispatch remains unchanged and still targets the Python image until
   cutover.
+
+Schema baseline v1 derives its expected tables, columns, unique constraints, check constraints,
+indexes, and foreign keys from the frozen Python contract. It accepts only documented additive
+legacy gaps, refuses unknown/incompatible structures before a writable connection, and exposes the
+same report through `music-cli db doctor`. A non-empty compatible legacy database is copied with
+SQLite `VACUUM INTO`, reopened read-only for integrity/shape verification, hashed, fsynced, and
+paired with a non-secret manifest before normalization or SQLx migration begins. Migration v1 adds
+`playback_state.storage_revision`, the SQLite-owned remembered-device/import tables, and the shared
+recovery journal; representative Python rows remain intact and later boots make no backup or schema
+change.
 
 Readiness is deliberately `starting` while the Phase-3 playback owner is absent. The temporary
 WebSocket shell emits one protocol-shaped service-unavailable error and closes; it never fabricates

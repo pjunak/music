@@ -3,6 +3,8 @@ use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::path::PathBuf;
 
+use crate::schema::SchemaReport;
+
 #[derive(Debug)]
 pub enum StorageError {
     InvalidDatabasePath(PathBuf),
@@ -17,6 +19,14 @@ pub enum StorageError {
         source: io::Error,
     },
     Database(sqlx::Error),
+    Migration(sqlx::migrate::MigrateError),
+    IncompatibleSchema(Box<SchemaReport>),
+    BackupPathNotUnicode(PathBuf),
+    BackupVerificationFailed {
+        path: PathBuf,
+    },
+    BackgroundTask(tokio::task::JoinError),
+    ManifestSerialization(serde_json::Error),
     InvalidStorageRevision(i64),
     StorageRevisionOverflow,
 }
@@ -39,6 +49,34 @@ impl Display for StorageError {
                 write!(formatter, "storage is already owned: {}", path.display())
             }
             Self::Database(_) => formatter.write_str("SQLite operation failed"),
+            Self::Migration(_) => formatter.write_str("SQLite migration failed"),
+            Self::IncompatibleSchema(report) => {
+                if let Some(issue) = report.errors().next() {
+                    write!(
+                        formatter,
+                        "database schema is incompatible: {}",
+                        issue.detail
+                    )
+                } else {
+                    formatter.write_str("database schema is incompatible")
+                }
+            }
+            Self::BackupPathNotUnicode(path) => write!(
+                formatter,
+                "migration backup path is not valid Unicode: {}",
+                path.display()
+            ),
+            Self::BackupVerificationFailed { path } => write!(
+                formatter,
+                "migration backup failed verification: {}",
+                path.display()
+            ),
+            Self::BackgroundTask(_) => {
+                formatter.write_str("blocking storage operation did not complete")
+            }
+            Self::ManifestSerialization(_) => {
+                formatter.write_str("failed to encode the migration backup manifest")
+            }
             Self::InvalidStorageRevision(revision) => {
                 write!(
                     formatter,
@@ -55,8 +93,14 @@ impl Error for StorageError {
         match self {
             Self::Io { source, .. } | Self::LockUnavailable { source, .. } => Some(source),
             Self::Database(source) => Some(source),
+            Self::Migration(source) => Some(source),
+            Self::BackgroundTask(source) => Some(source),
+            Self::ManifestSerialization(source) => Some(source),
             Self::InvalidDatabasePath(_)
             | Self::InvalidOption(_)
+            | Self::IncompatibleSchema(_)
+            | Self::BackupPathNotUnicode(_)
+            | Self::BackupVerificationFailed { .. }
             | Self::InvalidStorageRevision(_)
             | Self::StorageRevisionOverflow => None,
         }
@@ -66,5 +110,23 @@ impl Error for StorageError {
 impl From<sqlx::Error> for StorageError {
     fn from(error: sqlx::Error) -> Self {
         Self::Database(error)
+    }
+}
+
+impl From<sqlx::migrate::MigrateError> for StorageError {
+    fn from(error: sqlx::migrate::MigrateError) -> Self {
+        Self::Migration(error)
+    }
+}
+
+impl From<tokio::task::JoinError> for StorageError {
+    fn from(error: tokio::task::JoinError) -> Self {
+        Self::BackgroundTask(error)
+    }
+}
+
+impl From<serde_json::Error> for StorageError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::ManifestSerialization(error)
     }
 }

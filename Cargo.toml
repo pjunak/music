@@ -23,13 +23,14 @@ aes-gcm = { version = "0.11.1", features = ["zeroize"] }
 argon2 = { version = "0.6.0", features = ["zeroize"] }
 axum = { version = "0.8.9", features = ["ws"] }
 base64 = "0.22.1"
+clap = { version = "4.6.6", features = ["derive"] }
 dotenvy = "0.15.7"
 lofty = "0.25.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde-saphyr = { version = "1.1.0", default-features = false, features = ["deserialize", "serialize"] }
 sha2 = "0.10.9"
-sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["migrate", "runtime-tokio", "sqlite"] }
 tempfile = "3.23"
 tokio = { version = "1.53", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7.19", features = ["rt"] }

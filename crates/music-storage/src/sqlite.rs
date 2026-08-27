@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use tokio::sync::Mutex;
 
-use crate::{InstanceLock, StorageError};
+use crate::migration::{MigrationOutcome, bootstrap};
+use crate::{InstanceLock, SchemaReport, StorageError, inspect_database};
 
 const DEFAULT_MAX_CONNECTIONS: u32 = 3;
 const MAX_CONNECTIONS: u32 = 4;
@@ -49,6 +49,14 @@ impl SqliteStorageOptions {
     pub fn database_path(&self) -> &Path {
         &self.database_path
     }
+
+    pub(crate) const fn max_connections(&self) -> u32 {
+        self.max_connections
+    }
+
+    pub(crate) const fn busy_timeout(&self) -> Duration {
+        self.busy_timeout
+    }
 }
 
 #[derive(Debug)]
@@ -56,6 +64,7 @@ pub struct SqliteStorage {
     pool: SqlitePool,
     write_gate: Arc<Mutex<()>>,
     instance_lock: InstanceLock,
+    migration_outcome: MigrationOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,27 +83,27 @@ impl SqliteStorage {
     pub async fn open(options: SqliteStorageOptions) -> Result<Self, StorageError> {
         ensure_parent_exists(&options.database_path)?;
         let instance_lock = InstanceLock::acquire(&options.database_path)?;
-        let connect_options = SqliteConnectOptions::new()
-            .filename(&options.database_path)
-            .create_if_missing(true)
-            .foreign_keys(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
-            .busy_timeout(options.busy_timeout);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(options.max_connections)
-            .connect_with(connect_options)
-            .await?;
+        let (pool, migration_outcome) = bootstrap(&options).await?;
         Ok(Self {
             pool,
             write_gate: Arc::new(Mutex::new(())),
             instance_lock,
+            migration_outcome,
         })
+    }
+
+    pub async fn doctor(database_path: &Path) -> Result<SchemaReport, StorageError> {
+        inspect_database(database_path).await
     }
 
     #[must_use]
     pub fn lock_path(&self) -> &Path {
         self.instance_lock.path()
+    }
+
+    #[must_use]
+    pub const fn migration_outcome(&self) -> &MigrationOutcome {
+        &self.migration_outcome
     }
 
     pub async fn healthcheck(&self) -> Result<(), StorageError> {
@@ -200,8 +209,10 @@ fn ensure_parent_exists(database_path: &Path) -> Result<(), StorageError> {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::path::Path;
 
     use sqlx::Row;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use tempfile::tempdir;
 
     use super::{CompareAndSwap, SqliteStorage, SqliteStorageOptions};
@@ -218,17 +229,21 @@ mod tests {
         })?;
         let storage =
             SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?;
-        sqlx::query(
-            "CREATE TABLE playback_state (\
-                id INTEGER PRIMARY KEY, \
-                state_json TEXT NOT NULL, \
-                storage_revision INTEGER NOT NULL DEFAULT 0, \
-                updated_at DATETIME NOT NULL\
-            )",
-        )
-        .execute(&storage.pool)
-        .await?;
         Ok((directory, storage))
+    }
+
+    async fn create_python_fixture(path: &Path) -> Result<(), Box<dyn Error>> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        sqlx::raw_sql(PYTHON_SQLITE_FIXTURE).execute(&pool).await?;
+        pool.close().await;
+        Ok(())
     }
 
     #[tokio::test]
@@ -248,6 +263,10 @@ mod tests {
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
         assert!(storage.pool.options().get_max_connections() <= 4);
+        assert_eq!(
+            storage.migration_outcome.schema_after.compatibility,
+            crate::SchemaCompatibility::Current
+        );
         Ok(())
     }
 
@@ -322,21 +341,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opens_python_schema_with_representative_rows() -> Result<(), Box<dyn Error>> {
+    async fn migrates_python_schema_after_verified_backup() -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
-        let storage =
-            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?;
-        sqlx::raw_sql(PYTHON_SQLITE_FIXTURE)
-            .execute(&storage.pool)
-            .await?;
+        let database_path = directory.path().join("app.db");
+        create_python_fixture(&database_path).await?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(&database_path)).await?;
 
         let table_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master \
-             WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+             WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
+               AND name != '_sqlx_migrations'",
         )
         .fetch_one(&storage.pool)
         .await?;
-        assert_eq!(table_count, 18);
+        assert_eq!(table_count, 21);
 
         let foreign_key_failures = sqlx::query("PRAGMA foreign_key_check")
             .fetch_all(&storage.pool)
@@ -350,6 +368,85 @@ mod tests {
         assert_eq!(
             row.try_get::<String, _>("created_at")?,
             "2026-08-27 12:34:56.000000"
+        );
+        let storage_revision: i64 =
+            sqlx::query_scalar("SELECT storage_revision FROM playback_state WHERE id = 1")
+                .fetch_one(&storage.pool)
+                .await?;
+        assert_eq!(storage_revision, 0);
+
+        let outcome = storage.migration_outcome();
+        assert!(outcome.migration_applied);
+        assert_eq!(
+            outcome.schema_before.compatibility,
+            crate::SchemaCompatibility::CompatibleLegacy
+        );
+        assert_eq!(
+            outcome.schema_after.compatibility,
+            crate::SchemaCompatibility::Current
+        );
+        let backup = outcome.backup.as_ref().ok_or("expected migration backup")?;
+        assert!(backup.database_path.is_file());
+        assert!(backup.manifest_path.is_file());
+        assert_eq!(backup.sha256.len(), 64);
+        assert!(backup.bytes > 0);
+
+        let backup_report = SqliteStorage::doctor(&backup.database_path).await?;
+        assert_eq!(backup_report.table_count, 18);
+        assert_eq!(
+            backup_report.compatibility,
+            crate::SchemaCompatibility::CompatibleLegacy
+        );
+        let backup_options = SqliteConnectOptions::new()
+            .filename(&backup.database_path)
+            .read_only(true);
+        let backup_pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(backup_options)
+            .await?;
+        let migrated_column_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('playback_state') \
+             WHERE name = 'storage_revision'",
+        )
+        .fetch_one(&backup_pool)
+        .await?;
+        assert_eq!(migrated_column_count, 0);
+        backup_pool.close().await;
+
+        storage.close().await;
+        drop(storage);
+        let reopened = SqliteStorage::open(SqliteStorageOptions::new(&database_path)).await?;
+        assert!(!reopened.migration_outcome().migration_applied);
+        assert!(reopened.migration_outcome().backup.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn refuses_unknown_schema_without_creating_a_backup() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let database_path = directory.path().join("app.db");
+        let options = SqliteConnectOptions::new()
+            .filename(&database_path)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        sqlx::query("CREATE TABLE surprise (value TEXT)")
+            .execute(&pool)
+            .await?;
+        pool.close().await;
+
+        let result = SqliteStorage::open(SqliteStorageOptions::new(&database_path)).await;
+
+        assert!(matches!(result, Err(StorageError::IncompatibleSchema(_))));
+        let sibling_names = std::fs::read_dir(directory.path())?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(
+            !sibling_names
+                .iter()
+                .any(|name| { name.to_string_lossy().contains(".pre-rust-v") })
         );
         Ok(())
     }

@@ -315,6 +315,18 @@ Initial migrations are additive. Tables/columns used by Python are not dropped o
 the rollback window. A pre-cutover database copy is mandatory even though migrations are designed
 to be backward-compatible.
 
+Baseline v1 implements that bootstrap without first touching the source database: the doctor opens
+the existing file read-only, runs SQLite quick/foreign-key checks, and compares tables, columns,
+unique/check constraints, indexes, and foreign keys against the frozen Python schema plus explicit
+Rust additions. Only the documented Python additive columns and Rust v1 objects may be absent;
+unknown tables/columns or damaged constraints fail closed. For a compatible existing file,
+`VACUUM INTO` creates a consistent sibling snapshot that is reopened read-only, verified, fsynced,
+SHA-256 hashed, and paired with a non-secret JSON manifest before the first read-write pool opens.
+The migration then records SQLx schema version 1, adds the internal playback storage revision, and
+creates `remembered_devices`, `legacy_device_imports`, and `recovery_journal`. Missing databases are
+created directly because there is no prior state to back up. `music-cli db doctor` is read-only;
+`music-cli db migrate` takes the same lifetime lock as the server and follows this identical path.
+
 ### Compatibility-sensitive data
 
 - Existing Argon2 password hashes are verified directly by the Rust Argon2 implementation.

@@ -39,6 +39,7 @@ impl AppRuntime {
         health.set_component("filesystem", true, ComponentStatus::Starting);
         health.set_component("instance_lock", true, ComponentStatus::Starting);
         health.set_component("database", true, ComponentStatus::Starting);
+        health.set_component("database_schema", true, ComponentStatus::Starting);
         health.set_component("playback", true, ComponentStatus::Starting);
         health.set_component("runtime", true, ComponentStatus::Starting);
 
@@ -49,6 +50,7 @@ impl AppRuntime {
                 Err(error) => {
                     health.set_component("instance_lock", true, ComponentStatus::Failed);
                     health.set_component("database", true, ComponentStatus::Failed);
+                    health.set_component("database_schema", true, ComponentStatus::Failed);
                     return Err(error.into());
                 }
             };
@@ -58,6 +60,25 @@ impl AppRuntime {
         }
         health.set_component("instance_lock", true, ComponentStatus::Ready);
         health.set_component("database", true, ComponentStatus::Ready);
+        health.set_component("database_schema", true, ComponentStatus::Ready);
+
+        let migration = storage.migration_outcome();
+        if let Some(backup) = &migration.backup {
+            tracing::info!(
+                backup = %backup.database_path.display(),
+                manifest = %backup.manifest_path.display(),
+                bytes = backup.bytes,
+                sha256 = %backup.sha256,
+                "created and verified the pre-migration database backup"
+            );
+        }
+        if migration.migration_applied {
+            tracing::info!(
+                schema_before = %migration.schema_before.compatibility,
+                schema_version = migration.schema_after.current_schema_version,
+                "applied the Rust database baseline"
+            );
+        }
 
         let supervisor = TaskSupervisor::new(health.clone());
         start_database_monitor(&supervisor, Arc::clone(&storage))?;

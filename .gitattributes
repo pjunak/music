@@ -1,0 +1,3 @@
+# SQLx hashes migration source bytes. Pin line endings so a database migrated
+# on Linux validates against the same checksum on Windows and vice versa.
+/crates/music-storage/migrations/** text eol=lf
