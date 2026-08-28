@@ -37,10 +37,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # ============================================================================
 FROM debian:trixie-slim AS runtime
 
+# FFmpeg's libstdc++ dependency includes an unused GDB Python pretty-printer.
+# GDB is absent from the runtime image, so discard that debugger-only payload.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
-        && rm -rf /var/lib/apt/lists/* && \
+        && rm -rf /var/lib/apt/lists/* /usr/share/gdb && \
     groupadd --system music && \
     useradd --system --gid music --uid 1000 --home-dir /app --shell /usr/sbin/nologin music
 
