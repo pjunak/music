@@ -47,6 +47,7 @@ resource acceptance checks pass.
 | `b93f91d` | Full library scan blocks startup | Serve the durable index, expose reconciliation state, and scan as a durable job | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#6-remove-full-scanning-from-the-critical-boot-path) | Accepted 2026-08-27 |
 | `b93f91d` | Unexpected HTTP/WS errors expose exception text | Return safe code/message/correlation ID; keep internal detail in logs | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#10-separate-public-compatibility-from-internal-correctness) | Accepted 2026-08-27 |
 | `b93f91d` | Voice isolation uses recycled Python processes | Try one model-owning Rust thread; require a Rust subprocess when the gate shows it is needed | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#9-re-evaluate-the-voice-process-boundary) | Accepted 2026-08-27 |
+| `b93f91d` | Essentia injects random low-level noise into fully silent analysis frames | Use deterministic zero padding so the same audio and model always produce the same evidence | `music-analysis::voice` preprocessing tests and source-signature `preprocess/v1` | Accepted 2026-08-28 |
 
 Add one row immediately for every later `main` fix or accepted deviation. Do not close a phase with
 an open row in its subsystem.
@@ -189,6 +190,9 @@ Run feasibility spikes before depending on uncertain adapters:
    NNEF preparation, reproduce Essentia preprocessing/outputs, and soak one model-owning Rust thread
    under the 4 GB limit. Measure cancellation, panic recovery, and per-call bounds; select the Rust
    worker-process fallback if any hard-isolation condition fails.
+   Direct TF1 loading, the checksum-specific compatibility importer, deterministic preprocessing,
+   graph output, and end-to-end FFmpeg/worker inference now pass on Windows. Linux Essentia
+   differential results and the production-shaped RSS/cancellation/panic soak remain open.
 2. **Metadata:** prove Lofty read/write round trips across every supported format/tag registry field
    without damaging audio or unrelated tags.
 3. **YAML:** select a maintained parser/serializer by loading and rewriting every current mode and
@@ -482,8 +486,8 @@ remains an explicitly authorized acceptance check, not a parity dependency.
 ## Phase 10 — local context and voice analysis
 
 **Status:** In progress — the bounded FFmpeg/RustFFT context pass, EBU R128 integration, durable
-checkpoints, and UI/API contracts are implemented. The exact checksum-pinned local voice model,
-selected isolation boundary, and production-shaped resource soak remain.
+checkpoints, UI/API contracts, exact checksum-pinned local voice model, and retryable second pass are
+implemented. The Linux differential and production-shaped resource soak remain acceptance gates.
 
 - [x] Streaming FFmpeg PCM adapter, cancellation, deadlines, and bounded stderr.
 - [x] Reused signal buffers, RustFFT/Mel features, trajectories, tempo, structure, reliability, and
@@ -491,8 +495,9 @@ selected isolation boundary, and production-shaped resource soak remain.
 - [x] Single-pass EBU R128 integration after corpus parity.
 - [x] Bounded track pool, serialized SQLite checkpoints, partial/failure rows, profiling, and UI job
   progress compatibility.
-- [ ] Supervised single-model inference thread and retryable second phase; exercise the Rust subprocess
-  implementation when Phase 1 selected hard isolation.
+- [x] Supervised capacity-one, single-model inference thread and retryable second phase. Direct TF1
+  loading is selected provisionally; implement the Rust subprocess only if the remaining gate
+  selects hard isolation.
 
 Gate: controlled probes pass; representative numeric output is within field tolerances or carries a
 new documented analyzer identity; no semantic inference is added; production-shaped three-CPU/4 GB

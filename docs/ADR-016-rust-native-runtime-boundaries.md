@@ -6,6 +6,13 @@
 
 **Decider:** Project owner
 
+**Implementation update (2026-08-28):** The checksum-pinned MusiCNN TensorFlow graph runs directly
+through tract 0.23.5 after a checksum-specific, in-memory compatibility normalization for four fixed
+padding operators and `FusedBatchNormV3`. One dedicated Rust thread owns the compiled graph and a
+capacity-one request queue. This confirms the thread as the implementation candidate; the Linux
+Essentia differential and production-shaped RSS/cancellation soak still gate final acceptance over
+the subprocess fallback.
+
 ## Context
 
 ADR-015 selected a complete Rust modular-monolith rewrite. Its first blueprint correctly preserved
@@ -124,8 +131,10 @@ the Rust subprocess remains the required fallback when bounded shutdown cannot b
 
 1. [x] Project owner accepts this ADR and the five explicit differences in the
    [architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md).
-2. [ ] Phase 1 captures current startup, error, device-store, job, protocol, and model behavior as
+2. [x] Phase 1 captures current startup, error, device-store, job, protocol, and model behavior as
    executable reference evidence.
 3. [ ] Phase 1 proves SQLite import/lock/write-gate and in-process voice feasibility on copied data.
-4. [ ] Phase 2 creates the eight-crate skeleton and supervised runtime before feature porting.
-5. [ ] The compatibility ledger records every accepted difference and its frontend/operator effect.
+   Storage is proven; voice graph loading and end-to-end inference are proven, while differential
+   output and resource-soak evidence remain.
+4. [x] Phase 2 creates the eight-crate skeleton and supervised runtime before feature porting.
+5. [x] The compatibility ledger records every accepted difference and its frontend/operator effect.

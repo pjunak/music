@@ -9,11 +9,11 @@ use std::time::Duration;
 use axum::Router;
 use music_analysis::{
     AnalysisExecutor, AudioContextAnalyzer, AudioSignalAnalyzer, FfmpegContextAnalyzer,
-    FfmpegSignalAnalyzer,
+    FfmpegSignalAnalyzer, VoiceBackend,
 };
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
-    MetadataAnalysisJobHandler, ModelEvaluationRepository, ProviderRepository, VoiceAnalyzerStatus,
+    MetadataAnalysisJobHandler, ModelEvaluationRepository, ProviderRepository,
 };
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
@@ -117,6 +117,7 @@ impl AppRuntime {
         health.set_component("library_coordinator", true, ComponentStatus::Starting);
         health.set_component("library", false, ComponentStatus::Starting);
         health.set_component("background_jobs", true, ComponentStatus::Starting);
+        health.set_component("voice_analysis", false, ComponentStatus::Starting);
         health.set_component("mode_coordinator", true, ComponentStatus::Starting);
         health.set_component("modes", false, ComponentStatus::Starting);
         health.set_component("sfx", true, ComponentStatus::Starting);
@@ -175,7 +176,20 @@ impl AppRuntime {
             provider_runtime_contract_digest(),
         ));
         let local_analysis_repository: Arc<dyn LocalAnalysisRepository> = storage.clone();
-        let voice_analyzer = VoiceAnalyzerStatus::not_configured();
+        let ffmpeg = ffmpeg_executable();
+        let voice_backend =
+            VoiceBackend::initialize(config.assistant_voice_model_path.as_deref(), ffmpeg.clone());
+        let voice_analyzer = voice_backend.status;
+        let voice_worker = voice_backend.worker;
+        health.set_component(
+            "voice_analysis",
+            false,
+            if voice_analyzer.status == "unavailable" {
+                ComponentStatus::Degraded
+            } else {
+                ComponentStatus::Ready
+            },
+        );
         let local_analysis = Arc::new(LocalAnalysisService::with_voice_analyzer(
             Arc::clone(&local_analysis_repository),
             voice_analyzer.clone(),
@@ -241,7 +255,6 @@ impl AppRuntime {
         });
         health.set_component("sfx", true, ComponentStatus::Ready);
         let library_root = LibraryRoot::open(&config.music_dir)?;
-        let ffmpeg = ffmpeg_executable();
         let library_metadata =
             MetadataAdapter::with_ffmpeg(FfmpegTools::new(ffmpeg.clone(), ffprobe_executable()));
         let discovery = Arc::new(FilesystemLibraryDiscovery::new(
@@ -305,6 +318,7 @@ impl AppRuntime {
                 analysis_executor,
                 context_analyzer,
                 voice_analyzer,
+                voice_worker,
             )),
         ];
         job_handlers.extend(model_evaluation_job_handlers(

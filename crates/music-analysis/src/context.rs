@@ -48,6 +48,13 @@ pub struct AudioContextDocument {
     pub performance: AudioContextPerformance,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum VoiceContextPreparation {
+    NotConfigured,
+    Deferred,
+    Unavailable { reason: String },
+}
+
 #[derive(Debug)]
 pub enum AudioContextError {
     MissingFile,
@@ -89,7 +96,7 @@ pub trait AudioContextAnalyzer: std::fmt::Debug + Send + Sync {
         &self,
         path: &Path,
         cancelled: &AtomicBool,
-        defer_voice: bool,
+        voice: VoiceContextPreparation,
     ) -> Result<AudioContextDocument, AudioContextError>;
 }
 
@@ -122,7 +129,7 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
         &self,
         path: &Path,
         cancelled: &AtomicBool,
-        defer_voice: bool,
+        voice: VoiceContextPreparation,
     ) -> Result<AudioContextDocument, AudioContextError> {
         if !path.is_file() {
             return Err(AudioContextError::MissingFile);
@@ -169,8 +176,8 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
 
         let voice_started = Instant::now();
         let (voice_summary, voice_stage, voice_reliability, completeness) =
-            voice_placeholders(defer_voice);
-        if !defer_voice {
+            voice_placeholders(&voice);
+        if !matches!(voice, VoiceContextPreparation::Deferred) {
             stage_seconds.insert(
                 "voice".to_owned(),
                 json!(voice_started.elapsed().as_secs_f64()),
@@ -1603,9 +1610,11 @@ fn read_bounded(mut reader: impl Read) -> Vec<u8> {
     }
 }
 
-fn voice_placeholders(deferred: bool) -> (Value, Value, &'static str, &'static str) {
-    if deferred {
-        (
+fn voice_placeholders(
+    preparation: &VoiceContextPreparation,
+) -> (Value, Value, &'static str, &'static str) {
+    match preparation {
+        VoiceContextPreparation::Deferred => (
             json!({
                 "status": "not_classified",
                 "voice_probability": null,
@@ -1619,9 +1628,8 @@ fn voice_placeholders(deferred: bool) -> (Value, Value, &'static str, &'static s
             }),
             "pending",
             "partial",
-        )
-    } else {
-        (
+        ),
+        VoiceContextPreparation::NotConfigured => (
             json!({
                 "status": "not_classified",
                 "voice_probability": null,
@@ -1634,7 +1642,24 @@ fn voice_placeholders(deferred: bool) -> (Value, Value, &'static str, &'static s
             }),
             "unavailable",
             "full",
-        )
+        ),
+        VoiceContextPreparation::Unavailable { reason } => (
+            json!({
+                "status": "unavailable",
+                "voice_probability": null,
+                "vocal_coverage": null,
+                "note": "The configured local voice classifier is unavailable. The remaining track context is still available.",
+            }),
+            json!({
+                "status": "unavailable",
+                "required": false,
+                "analyzer_id": "essentia-musicnn-voice/v1",
+                "reason": reason,
+                "model_filename": "voice_instrumental-musicnn-msd-2.pb",
+            }),
+            "unavailable",
+            "full",
+        ),
     }
 }
 
@@ -1757,8 +1782,21 @@ mod tests {
 
     use super::{
         AudioContextAnalyzer, ContextAccumulator, FfmpegContextAnalyzer, TimelineMetric,
-        estimate_tempo, timeline_frames, trajectory,
+        VoiceContextPreparation, estimate_tempo, timeline_frames, trajectory, voice_placeholders,
     };
+
+    #[test]
+    fn configured_but_unavailable_voice_backend_is_not_reported_as_disabled() {
+        let (summary, stage, reliability, completeness) =
+            voice_placeholders(&VoiceContextPreparation::Unavailable {
+                reason: "unsupported_model".to_owned(),
+            });
+        assert_eq!(summary["status"], "unavailable");
+        assert_eq!(stage["status"], "unavailable");
+        assert_eq!(stage["reason"], "unsupported_model");
+        assert_eq!(reliability, "unavailable");
+        assert_eq!(completeness, "full");
+    }
 
     #[test]
     fn rustfft_matches_the_v2_two_tone_calibration() -> Result<(), Box<dyn std::error::Error>> {
@@ -1848,7 +1886,11 @@ mod tests {
         let ffmpeg = std::env::var_os("MUSIC_TEST_FFMPEG").unwrap_or_else(|| "ffmpeg".into());
         let ffprobe = std::env::var_os("MUSIC_TEST_FFPROBE").unwrap_or_else(|| "ffprobe".into());
         let analyzer = FfmpegContextAnalyzer::new(ffmpeg, ffprobe);
-        let document = analyzer.analyze(&path, &AtomicBool::new(false), false)?;
+        let document = analyzer.analyze(
+            &path,
+            &AtomicBool::new(false),
+            VoiceContextPreparation::NotConfigured,
+        )?;
         assert_eq!(document.summary["schema_version"], "local-context/v2");
         assert_eq!(document.summary["duration_s"], 12.0);
         assert_eq!(document.summary["confidence"], "medium");

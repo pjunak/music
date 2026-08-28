@@ -11,7 +11,9 @@ music-application = { path = "../music-application", version = "0.1.0" }
 music-domain = { path = "../music-domain", version = "0.1.0" }
 rustfft.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
+tract-tensorflow.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -174,10 +174,44 @@ impl VoiceAnalyzerStatus {
         Self {
             analyzer_id: VOICE_ANALYZER_ID.to_owned(),
             status: "not_configured".to_owned(),
-            reason: Some("model_missing".to_owned()),
+            reason: None,
             model_filename: VOICE_MODEL_FILENAME.to_owned(),
             model_sha256: VOICE_MODEL_SHA256.to_owned(),
             source_signature: None,
+        }
+    }
+
+    #[must_use]
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self {
+            analyzer_id: VOICE_ANALYZER_ID.to_owned(),
+            status: "unavailable".to_owned(),
+            reason: Some(reason.into()),
+            model_filename: VOICE_MODEL_FILENAME.to_owned(),
+            model_sha256: VOICE_MODEL_SHA256.to_owned(),
+            source_signature: None,
+        }
+    }
+
+    #[must_use]
+    pub fn unavailable_with_signature(
+        reason: impl Into<String>,
+        source_signature: impl Into<String>,
+    ) -> Self {
+        let mut status = Self::unavailable(reason);
+        status.source_signature = Some(source_signature.into());
+        status
+    }
+
+    #[must_use]
+    pub fn ready(source_signature: impl Into<String>) -> Self {
+        Self {
+            analyzer_id: VOICE_ANALYZER_ID.to_owned(),
+            status: "ready".to_owned(),
+            reason: None,
+            model_filename: VOICE_MODEL_FILENAME.to_owned(),
+            model_sha256: VOICE_MODEL_SHA256.to_owned(),
+            source_signature: Some(source_signature.into()),
         }
     }
 

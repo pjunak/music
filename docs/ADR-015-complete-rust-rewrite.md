@@ -102,8 +102,9 @@ replacement once a language is selected.
 
 Separate playback, library, analysis, and provider services would isolate failure domains, but
 would add network contracts, deployment units, distributed coordination, and operational work to a
-single-user application. The only process boundary retained is the one justified by expensive,
-optional model inference.
+single-user application. Optional model inference receives a dedicated ownership boundary; under
+ADR-016 that boundary starts as one supervised Rust thread and becomes a subprocess only when the
+resource and fault-isolation gate requires it.
 
 ## Consequences
 

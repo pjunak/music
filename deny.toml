@@ -22,6 +22,11 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.8
+exceptions = [
+    # tract uses this tiny, unmodified trait-object helper. MPL-2.0 is
+    # file-scoped; keep its source/license notice with distributed binaries.
+    { allow = ["MPL-2.0"], crate = "dyn-eq@0.1.3" },
+]
 
 [licenses.private]
 ignore = false

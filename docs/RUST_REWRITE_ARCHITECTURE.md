@@ -588,24 +588,38 @@ their existing CC BY-NC-SA terms and are never downloaded during build or startu
 Essentia runtime does not change the model's license or permit copying implementation code from an
 incompatible source.
 
-The first candidate gives the model to exactly one dedicated, supervised Rust inference thread.
-That thread creates and owns non-`Send` model state, processes bounded requests sequentially, can
-batch windows internally, and exposes model/runtime identity without paths. Cancellation is checked
-between windows and results return through a bounded channel. A panic is observed by the supervisor
-and makes the optional backend unavailable until it can be cleanly recreated.
+The implemented candidate gives the model to exactly one dedicated, supervised Rust inference
+thread. That thread creates and owns the model state, processes requests sequentially through a
+capacity-one channel, runs overlapping windows without duplicating the graph, and exposes a
+path-free model/runtime/preprocessor identity. FFmpeg decoding, 512-sample frames, 96-band features,
+and 187-frame patches are streamed through fixed-size buffers. Cancellation is checked while
+decoding and between patches. A panic closes the response channel, marks the worker dead, and makes
+subsequent optional work unavailable without taking down the server.
+
+The exact pinned graph is loaded directly as TF1 rather than converted to NNEF. Its checksum permits
+a deliberately narrow in-memory importer compatibility layer: all four graph `Pad` constants are
+validated as the expected fixed `(3, 3)` time-axis padding before replacement, and
+`FusedBatchNormV3` is normalized to tract's compatible frozen-graph operator. No rewritten model is
+persisted and no model is downloaded by the application.
+
+Preprocessing independently implements the published MusiCNN parameters: mono 16 kHz audio,
+centered 512-sample symmetric Hann frames with a 256-sample hop, a 257-bin magnitude spectrum,
+96 Slaney-warped linear triangles with unit-triangle normalization and power accumulation,
+`log10(energy * 10000 + 1)`, and 187-frame patches with a 93-frame hop. Silent padding is
+deterministic zero rather than Essentia's default random low-level dither; this is an explicit
+reproducibility hardening recorded in the compatibility ledger.
 
 This thread boundary is conditional on evidence. If the selected backend contains unsafe native
 code, leaks, wedges, cannot bound an inference call, or cannot meet shutdown deadlines, the same
 `VoiceBackend` runs in a supervised Rust subprocess using versioned length-prefixed IPC. Process
 isolation is therefore a tested fallback, not a Python-era default.
 
-Before the main port depends on it, a feasibility gate must reproduce Essentia's preprocessing,
-window ordering, output tensor, normalized score, and coverage on the exact checksum-pinned model.
-It must also decide whether runtime loads TF1 directly or prepares a checksum/version-bound NNEF
-artifact, because tract's public API treats TensorFlow as a legacy format. If tract cannot run the
-graph accurately, evaluate a maintained Rust/native runtime behind the same interface and isolation
-gate. There is no Python fallback. Cutover either passes the voice gate or receives an explicit
-owner decision to ship the optional stage as unavailable.
+The Windows implementation gate verifies the official model checksum, exact graph output shape and
+fixed zero-input output, end-to-end FFmpeg-to-worker inference, bounded score aggregation, frame and
+patch counts, and cancellation-aware streaming. Final acceptance still requires a Linux runner to
+compare representative preprocessing and outputs against Essentia and to record repeated-run RSS,
+shutdown, cancellation, and panic behavior under the three-CPU/4 GB envelope. If that evidence
+fails, the same interface moves to the documented Rust subprocess. There is no Python fallback.
 
 ## Assistant and provider boundary
 
@@ -655,6 +669,10 @@ non-restartability retain their present meaning.
 - Dependency sources, advisories, duplicates, licenses, and banned crates are checked in CI. The
   deprecated/unsound `serde_yml` line is explicitly banned; RustSec records its unsoundness
   ([RUSTSEC-2025-0068](https://rustsec.org/advisories/RUSTSEC-2025-0068)).
+- tract's unmodified `dyn-eq` 0.1.3 dependency is the sole MPL-2.0 exception. The exception is
+  crate-and-version scoped, its file-level obligations do not change the license of project files,
+  and binary distributions must retain the source/license notice recorded in
+  [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Error handling, cancellation, and shutdown
 

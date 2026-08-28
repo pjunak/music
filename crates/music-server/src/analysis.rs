@@ -7,14 +7,15 @@ use std::time::{Duration, Instant};
 use futures_util::{StreamExt, stream};
 use music_analysis::{
     AnalysisExecutor, AudioContextAnalyzer, AudioContextDocument, AudioContextError,
-    AudioContextPerformance, AudioSignalAnalyzer, AudioSignalError,
+    AudioContextPerformance, AudioSignalAnalyzer, AudioSignalError, VoiceAnalysisDocument,
+    VoiceAnalysisError, VoiceContextPreparation, VoiceWorker,
 };
 use music_application::assistant::{
     AUDIO_ANALYSIS_JOB_KIND, AnalysisFailureState, AnalysisFailureWrite, AnalysisState,
-    AnalysisWrite, ContextScope, ContextState, ContextWrite, LIBRARY_CONTEXT_JOB_KIND,
-    LOCAL_AUDIO_ANALYZER_ID, LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID,
-    LocalAnalysisRepository, VoiceAnalyzerStatus, audio_source_signature, context_source_signature,
-    parse_context_state,
+    AnalysisWrite, ContextScope, ContextState, ContextWrite, CurrentTrackContext,
+    LIBRARY_CONTEXT_JOB_KIND, LOCAL_AUDIO_ANALYZER_ID, LOCAL_CONTEXT_ANALYZER_ID,
+    LOCAL_CONTEXT_IMPLEMENTATION_ID, LocalAnalysisRepository, VoiceAnalyzerStatus,
+    audio_source_signature, context_source_signature, parse_context_state,
 };
 use music_application::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
@@ -277,6 +278,7 @@ pub(crate) struct ContextAnalysisJobHandler {
     executor: AnalysisExecutor,
     analyzer: Arc<dyn AudioContextAnalyzer>,
     voice_analyzer: VoiceAnalyzerStatus,
+    voice_worker: Option<VoiceWorker>,
 }
 
 impl ContextAnalysisJobHandler {
@@ -286,6 +288,7 @@ impl ContextAnalysisJobHandler {
         executor: AnalysisExecutor,
         analyzer: Arc<dyn AudioContextAnalyzer>,
         voice_analyzer: VoiceAnalyzerStatus,
+        voice_worker: Option<VoiceWorker>,
     ) -> Self {
         Self {
             repository,
@@ -293,6 +296,7 @@ impl ContextAnalysisJobHandler {
             executor,
             analyzer,
             voice_analyzer,
+            voice_worker,
         }
     }
 
@@ -304,10 +308,22 @@ impl ContextAnalysisJobHandler {
         let cancellation = Arc::new(AtomicBool::new(false));
         let guard = CancelAnalysisOnDrop(Arc::clone(&cancellation));
         let analyzer = Arc::clone(&self.analyzer);
-        let defer_voice = self.voice_analyzer.is_ready();
+        let voice = if self.voice_analyzer.is_ready() && self.voice_worker.is_some() {
+            VoiceContextPreparation::Deferred
+        } else if self.voice_analyzer.status == "unavailable" || self.voice_analyzer.is_ready() {
+            VoiceContextPreparation::Unavailable {
+                reason: self
+                    .voice_analyzer
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "runtime_missing".to_owned()),
+            }
+        } else {
+            VoiceContextPreparation::NotConfigured
+        };
         let task = self
             .executor
-            .execute(move || analyzer.analyze(&path, &cancellation, defer_voice));
+            .execute(move || analyzer.analyze(&path, &cancellation, voice));
         tokio::pin!(task);
         loop {
             tokio::select! {
@@ -315,6 +331,35 @@ impl ContextAnalysisJobHandler {
                     drop(guard);
                     return result
                         .map_err(|_| JobHandlerError::new("context analysis executor failed"));
+                }
+                () = tokio::time::sleep(CANCELLATION_POLL_INTERVAL) => {
+                    if let Err(error) = context.check_cancelled().await {
+                        guard.cancel();
+                        let _ = task.await;
+                        return Err(JobHandlerError::from_execution(error));
+                    }
+                }
+            }
+        }
+    }
+
+    async fn analyze_voice_track(
+        &self,
+        context: &JobExecutionContext,
+        path: std::path::PathBuf,
+    ) -> Result<Result<VoiceAnalysisDocument, VoiceAnalysisError>, JobHandlerError> {
+        let Some(worker) = self.voice_worker.as_ref().cloned() else {
+            return Ok(Err(VoiceAnalysisError::WorkerUnavailable));
+        };
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let guard = CancelAnalysisOnDrop(Arc::clone(&cancellation));
+        let task = worker.analyze(path, cancellation);
+        tokio::pin!(task);
+        loop {
+            tokio::select! {
+                result = &mut task => {
+                    drop(guard);
+                    return Ok(result);
                 }
                 () = tokio::time::sleep(CANCELLATION_POLL_INTERVAL) => {
                     if let Err(error) = context.check_cancelled().await {
@@ -376,7 +421,11 @@ impl JobHandler for ContextAnalysisJobHandler {
             let state_by_track = context_by_track(&states);
             let failure_by_track = failures_by_track(&failures);
             let voice_signature = self.voice_analyzer.source_signature.as_deref();
-            let mut work = Vec::new();
+            let voice_enabled = self.voice_analyzer.is_ready() && self.voice_worker.is_some();
+            let mut signal_work = Vec::new();
+            let mut audio_completed_ids = BTreeSet::new();
+            let mut audio_failed_ids = BTreeSet::new();
+            let mut initially_pending_voice = 0_usize;
             let mut checkpointed = 0_u64;
             for track in &tracks {
                 let signature = context_source_signature(
@@ -387,9 +436,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                 .map_err(|_| JobHandlerError::new("track context fingerprint failed"))?;
                 let state = state_by_track.get(&track.id).copied();
                 let failure = failure_by_track.get(&track.id).copied();
-                let current_context = state.is_some_and(|state| {
-                    state.source_signature == signature && parse_context_state(state).is_some()
-                });
+                let parsed = state
+                    .filter(|state| state.source_signature == signature)
+                    .and_then(parse_context_state);
                 let current_failure =
                     failure.is_some_and(|failure| failure.source_signature == signature);
                 let completed_by_job = state.is_some_and(|state| {
@@ -401,37 +450,78 @@ impl JobHandler for ContextAnalysisJobHandler {
                 });
                 if completed_by_job {
                     checkpointed = checkpointed.saturating_add(1);
+                }
+                // A partial row is the durable boundary between the signal and
+                // voice passes. Preserve it even for a forced retry so a
+                // cancelled voice pass never causes another signal decode.
+                let signal_is_current = parsed.as_ref().is_some_and(|parsed| {
+                    parsed.completeness == "partial" || !parameters.force || completed_by_job
+                });
+                if signal_is_current && !current_failure {
+                    audio_completed_ids.insert(track.id);
+                    if voice_enabled
+                        && parsed.as_ref().and_then(context_voice_stage_status) == Some("pending")
+                    {
+                        initially_pending_voice = initially_pending_voice.saturating_add(1);
+                    }
                     continue;
                 }
-                if !parameters.force && current_context && !current_failure {
+                if current_failure
+                    && failure.is_some_and(|failure| failure.job_id == context.job_id())
+                {
+                    audio_failed_ids.insert(track.id);
                     continue;
                 }
-                work.push((track.clone(), signature));
+                signal_work.push((track.clone(), signature));
             }
 
             let starting = context.progress_current().max(checkpointed);
-            let work_count = u64::try_from(work.len())
+            let signal_work_count = u64::try_from(signal_work.len())
                 .map_err(|_| JobHandlerError::new("context analysis is too large"))?;
-            let total = starting.saturating_add(work_count);
-            let active_workers = self.executor.worker_count().max(1).min(work.len());
+            let expected_voice_count = if voice_enabled {
+                u64::try_from(signal_work.len().saturating_add(initially_pending_voice))
+                    .map_err(|_| JobHandlerError::new("context analysis is too large"))?
+            } else {
+                0
+            };
+            let initial_total = starting
+                .saturating_add(signal_work_count)
+                .saturating_add(expected_voice_count);
+            let active_workers = self.executor.worker_count().min(signal_work.len());
             let stream_concurrency = active_workers.max(1);
+            let initial_audio = ContextPassProgress {
+                status: if signal_work.is_empty() {
+                    "complete"
+                } else {
+                    "running"
+                },
+                completed: audio_completed_ids.len(),
+                failed: audio_failed_ids.len(),
+                skipped: 0,
+                total: tracks.len(),
+            };
+            let initial_voice = if voice_enabled {
+                ContextPassProgress {
+                    status: "waiting",
+                    completed: 0,
+                    failed: 0,
+                    skipped: 0,
+                    total: tracks.len(),
+                }
+            } else {
+                ContextPassProgress::not_available(tracks.len())
+            };
             context
-                .checkpoint(context_checkpoint(
-                    "running",
-                    starting as usize,
-                    0,
-                    tracks.len(),
-                    &self.voice_analyzer,
-                ))
+                .checkpoint(context_checkpoint(initial_audio, initial_voice))
                 .await
                 .map_err(JobHandlerError::from_execution)?;
             context
                 .update_progress(
                     JobProgress::new(
                         starting,
-                        Some(total),
+                        Some(initial_total),
                         "Analyzing audio context",
-                        format!("{} tracks need context analysis", work.len()),
+                        format!("{} tracks need context analysis", signal_work.len()),
                     )
                     .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
                 )
@@ -439,16 +529,17 @@ impl JobHandler for ContextAnalysisJobHandler {
                 .map_err(JobHandlerError::from_execution)?;
 
             let signal_started = Instant::now();
-            let mut completed = usize::try_from(starting).unwrap_or(usize::MAX);
-            let mut failed = 0_usize;
+            let mut progress_current = starting;
             let mut performance = Vec::new();
-            let mut results = stream::iter(work.into_iter().map(|(track, signature)| async move {
-                let analysis = match self.root.resolve_existing(&track.path) {
-                    Ok(path) => self.analyze_track(context, path).await,
-                    Err(_) => Ok(Err(AudioContextError::MissingFile)),
-                };
-                (track, signature, analysis)
-            }))
+            let mut results = stream::iter(signal_work.into_iter().map(
+                |(track, signature)| async move {
+                    let analysis = match self.root.resolve_existing(&track.path) {
+                        Ok(path) => self.analyze_track(context, path).await,
+                        Err(_) => Ok(Err(AudioContextError::MissingFile)),
+                    };
+                    (track, signature, analysis)
+                },
+            ))
             .buffer_unordered(stream_concurrency);
             while let Some((track, signature, analysis)) = results.next().await {
                 match analysis? {
@@ -465,7 +556,8 @@ impl JobHandler for ContextAnalysisJobHandler {
                             technical: document.technical,
                             stages: document.stages,
                         };
-                        self.repository
+                        let stored = self
+                            .repository
                             .store_context(
                                 LOCAL_CONTEXT_ANALYZER_ID,
                                 LOCAL_CONTEXT_IMPLEMENTATION_ID,
@@ -475,6 +567,10 @@ impl JobHandler for ContextAnalysisJobHandler {
                             )
                             .await
                             .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                        if stored {
+                            audio_completed_ids.insert(track.id);
+                            audio_failed_ids.remove(&track.id);
+                        }
                     }
                     Err(AudioContextError::Cancelled) => {
                         context
@@ -503,30 +599,36 @@ impl JobHandler for ContextAnalysisJobHandler {
                             .await
                             .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
                         if stored {
-                            failed = failed.saturating_add(1);
+                            audio_failed_ids.insert(track.id);
+                            audio_completed_ids.remove(&track.id);
                         }
                     }
                 }
-                completed = completed.saturating_add(1);
-                let current = u64::try_from(completed)
-                    .map_err(|_| JobHandlerError::new("context analysis is too large"))?;
+                progress_current = progress_current.saturating_add(1);
+                let audio_progress = ContextPassProgress {
+                    status: "running",
+                    completed: audio_completed_ids.len(),
+                    failed: audio_failed_ids.len(),
+                    skipped: 0,
+                    total: tracks.len(),
+                };
                 context
-                    .checkpoint(context_checkpoint(
-                        "running",
-                        completed.saturating_sub(failed),
-                        failed,
-                        tracks.len(),
-                        &self.voice_analyzer,
-                    ))
+                    .checkpoint(context_checkpoint(audio_progress, initial_voice))
                     .await
                     .map_err(JobHandlerError::from_execution)?;
                 context
                     .update_progress(
                         JobProgress::new(
-                            current.min(total),
-                            Some(total),
+                            progress_current.min(initial_total),
+                            Some(initial_total),
                             "Analyzing audio context",
-                            format!("Processed {} of {} tracks", current.min(total), total),
+                            format!(
+                                "Audio context: {} of {} tracks processed",
+                                audio_completed_ids
+                                    .len()
+                                    .saturating_add(audio_failed_ids.len()),
+                                tracks.len()
+                            ),
                         )
                         .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
                     )
@@ -534,7 +636,232 @@ impl JobHandler for ContextAnalysisJobHandler {
                     .map_err(JobHandlerError::from_execution)?;
             }
             drop(results);
-            let wall_seconds = signal_started.elapsed().as_secs_f64();
+            let signal_wall_seconds = signal_started.elapsed().as_secs_f64();
+
+            let states_after_signal = self
+                .repository
+                .context_states(LOCAL_CONTEXT_ANALYZER_ID)
+                .await
+                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+            let failures_after_signal = self
+                .repository
+                .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
+                .await
+                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+            let states_after_signal_by_track = context_by_track(&states_after_signal);
+            let failures_after_signal_by_track = failures_by_track(&failures_after_signal);
+            audio_completed_ids.clear();
+            audio_failed_ids.clear();
+            let mut voice_work = Vec::new();
+            let mut voice_completed_ids = BTreeSet::new();
+            let mut voice_failed_ids = BTreeSet::new();
+            let mut voice_skipped_ids = BTreeSet::new();
+            for track in &tracks {
+                let signature = context_source_signature(
+                    track,
+                    LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                    voice_signature,
+                )
+                .map_err(|_| JobHandlerError::new("track context fingerprint failed"))?;
+                let current_state = states_after_signal_by_track
+                    .get(&track.id)
+                    .copied()
+                    .filter(|state| state.source_signature == signature);
+                let parsed = current_state.and_then(parse_context_state);
+                if let Some(parsed) = parsed {
+                    audio_completed_ids.insert(track.id);
+                    if voice_enabled {
+                        match context_voice_stage_status(&parsed) {
+                            Some("pending") => {
+                                if let Some(state) = current_state {
+                                    voice_work.push((track.clone(), state.clone()));
+                                }
+                            }
+                            Some("unavailable") => {
+                                voice_failed_ids.insert(track.id);
+                            }
+                            Some("not_configured") | None => {
+                                voice_skipped_ids.insert(track.id);
+                            }
+                            Some(_) => {
+                                voice_completed_ids.insert(track.id);
+                            }
+                        }
+                    }
+                } else if failures_after_signal_by_track
+                    .get(&track.id)
+                    .is_some_and(|failure| failure.source_signature == signature)
+                {
+                    audio_failed_ids.insert(track.id);
+                    if voice_enabled {
+                        voice_skipped_ids.insert(track.id);
+                    }
+                } else if voice_enabled {
+                    voice_skipped_ids.insert(track.id);
+                }
+            }
+            let audio_progress = ContextPassProgress {
+                status: if audio_failed_ids.is_empty() {
+                    "complete"
+                } else {
+                    "complete_with_failures"
+                },
+                completed: audio_completed_ids.len(),
+                failed: audio_failed_ids.len(),
+                skipped: 0,
+                total: tracks.len(),
+            };
+
+            let active_voice_workers = usize::from(voice_enabled && !voice_work.is_empty());
+            let voice_total = progress_current.saturating_add(
+                u64::try_from(voice_work.len())
+                    .map_err(|_| JobHandlerError::new("context analysis is too large"))?,
+            );
+            let mut voice_progress = if voice_enabled {
+                ContextPassProgress {
+                    status: if voice_work.is_empty() {
+                        "complete"
+                    } else {
+                        "running"
+                    },
+                    completed: voice_completed_ids.len(),
+                    failed: voice_failed_ids.len(),
+                    skipped: voice_skipped_ids.len(),
+                    total: tracks.len(),
+                }
+            } else {
+                ContextPassProgress::not_available(tracks.len())
+            };
+            context
+                .checkpoint(context_checkpoint(audio_progress, voice_progress))
+                .await
+                .map_err(JobHandlerError::from_execution)?;
+            context
+                .update_progress(
+                    JobProgress::new(
+                        progress_current,
+                        Some(voice_total),
+                        if voice_enabled {
+                            "Detecting voice"
+                        } else {
+                            "Analyzing audio context"
+                        },
+                        if voice_enabled {
+                            format!(
+                                "Voice detection: {} eligible tracks remain",
+                                voice_work.len()
+                            )
+                        } else {
+                            "Optional voice detection is not enabled".to_owned()
+                        },
+                    )
+                    .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
+                )
+                .await
+                .map_err(JobHandlerError::from_execution)?;
+
+            let voice_started = Instant::now();
+            let mut voice_performance = Vec::new();
+            for (track, state) in voice_work {
+                context
+                    .check_cancelled()
+                    .await
+                    .map_err(JobHandlerError::from_execution)?;
+                let attempt_started = Instant::now();
+                let analysis = match self.root.resolve_existing(&track.path) {
+                    Ok(path) => self.analyze_voice_track(context, path).await?,
+                    Err(_) => Err(VoiceAnalysisError::MissingFile),
+                };
+                let document = match analysis {
+                    Ok(document) => document,
+                    Err(VoiceAnalysisError::Cancelled) => {
+                        context
+                            .check_cancelled()
+                            .await
+                            .map_err(JobHandlerError::from_execution)?;
+                        return Err(JobHandlerError::new("voice analysis stopped unexpectedly"));
+                    }
+                    Err(error) => VoiceAnalysisDocument::unavailable(
+                        &error,
+                        attempt_started.elapsed().as_secs_f64(),
+                    ),
+                };
+                voice_performance.push(document.elapsed_seconds);
+                let classified =
+                    document.summary.get("status").and_then(Value::as_str) == Some("classified");
+                let write = context_with_voice(track.id, &state, document)?;
+                let stored = self
+                    .repository
+                    .store_context(
+                        LOCAL_CONTEXT_ANALYZER_ID,
+                        LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                        voice_signature,
+                        context.job_id(),
+                        &write,
+                    )
+                    .await
+                    .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                if stored {
+                    voice_skipped_ids.remove(&track.id);
+                    if classified {
+                        voice_completed_ids.insert(track.id);
+                        voice_failed_ids.remove(&track.id);
+                    } else {
+                        voice_failed_ids.insert(track.id);
+                        voice_completed_ids.remove(&track.id);
+                    }
+                } else {
+                    voice_skipped_ids.insert(track.id);
+                }
+                progress_current = progress_current.saturating_add(1);
+                voice_progress = ContextPassProgress {
+                    status: "running",
+                    completed: voice_completed_ids.len(),
+                    failed: voice_failed_ids.len(),
+                    skipped: voice_skipped_ids.len(),
+                    total: tracks.len(),
+                };
+                context
+                    .checkpoint(context_checkpoint(audio_progress, voice_progress))
+                    .await
+                    .map_err(JobHandlerError::from_execution)?;
+                context
+                    .update_progress(
+                        JobProgress::new(
+                            progress_current.min(voice_total),
+                            Some(voice_total),
+                            "Detecting voice",
+                            format!(
+                                "Voice detection: {} of {} eligible tracks processed",
+                                voice_completed_ids
+                                    .len()
+                                    .saturating_add(voice_failed_ids.len()),
+                                tracks.len().saturating_sub(voice_skipped_ids.len())
+                            ),
+                        )
+                        .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
+                    )
+                    .await
+                    .map_err(JobHandlerError::from_execution)?;
+            }
+            let voice_wall_seconds = voice_started.elapsed().as_secs_f64();
+            if voice_enabled {
+                voice_progress = ContextPassProgress {
+                    status: if voice_failed_ids.is_empty() && voice_skipped_ids.is_empty() {
+                        "complete"
+                    } else {
+                        "complete_with_failures"
+                    },
+                    completed: voice_completed_ids.len(),
+                    failed: voice_failed_ids.len(),
+                    skipped: voice_skipped_ids.len(),
+                    total: tracks.len(),
+                };
+            }
+            context
+                .checkpoint(context_checkpoint(audio_progress, voice_progress))
+                .await
+                .map_err(JobHandlerError::from_execution)?;
 
             let final_states = self
                 .repository
@@ -554,8 +881,13 @@ impl JobHandler for ContextAnalysisJobHandler {
                 &parameters.scope,
                 &self.voice_analyzer,
                 active_workers,
+                active_voice_workers,
                 &performance,
-                wall_seconds,
+                signal_wall_seconds,
+                &voice_performance,
+                voice_wall_seconds,
+                audio_progress,
+                voice_progress,
                 started.elapsed().as_secs_f64(),
             )
         })
@@ -713,33 +1045,96 @@ fn context_by_track(states: &[ContextState]) -> BTreeMap<music_domain::TrackId, 
     states.iter().map(|state| (state.track_id, state)).collect()
 }
 
-fn context_checkpoint(
-    status: &str,
+#[derive(Debug, Clone, Copy)]
+struct ContextPassProgress {
+    status: &'static str,
     completed: usize,
     failed: usize,
+    skipped: usize,
     total: usize,
-    voice_analyzer: &VoiceAnalyzerStatus,
+}
+
+impl ContextPassProgress {
+    const fn not_available(total: usize) -> Self {
+        Self {
+            status: "not_available",
+            completed: 0,
+            failed: 0,
+            skipped: total,
+            total,
+        }
+    }
+
+    fn as_value(self) -> Value {
+        json!({
+            "status": self.status,
+            "completed_tracks": self.completed,
+            "failed_tracks": self.failed,
+            "skipped_tracks": self.skipped,
+            "total_tracks": self.total,
+        })
+    }
+}
+
+fn context_checkpoint(
+    audio_context: ContextPassProgress,
+    voice_detection: ContextPassProgress,
 ) -> Map<String, Value> {
-    let voice_enabled = voice_analyzer.is_ready();
     object(json!({
         "schema_version": "assistant-library-context-job-progress/v1",
         "passes": {
-            "audio_context": {
-                "status": status,
-                "completed_tracks": completed,
-                "failed_tracks": failed,
-                "skipped_tracks": 0,
-                "total_tracks": total,
-            },
-            "voice_detection": {
-                "status": if voice_enabled { "waiting" } else { "not_available" },
-                "completed_tracks": 0,
-                "failed_tracks": 0,
-                "skipped_tracks": if voice_enabled { 0 } else { total },
-                "total_tracks": total,
-            },
+            "audio_context": audio_context.as_value(),
+            "voice_detection": voice_detection.as_value(),
         },
     }))
+}
+
+fn context_voice_stage_status(context: &CurrentTrackContext) -> Option<&str> {
+    context
+        .stages
+        .get("voice")
+        .and_then(Value::as_object)
+        .and_then(|stage| stage.get("status"))
+        .and_then(Value::as_str)
+}
+
+fn context_with_voice(
+    track_id: music_domain::TrackId,
+    state: &ContextState,
+    voice: VoiceAnalysisDocument,
+) -> Result<ContextWrite, JobHandlerError> {
+    let mut context = parse_context_state(state).ok_or_else(|| {
+        JobHandlerError::new("voice analysis has no current audio-context checkpoint")
+    })?;
+    let classified = voice.summary.get("status").and_then(Value::as_str) == Some("classified");
+    context
+        .summary
+        .insert("voice".to_owned(), Value::Object(voice.summary));
+    let reliability = context
+        .summary
+        .entry("measurement_reliability".to_owned())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let reliability = reliability
+        .as_object_mut()
+        .ok_or_else(|| JobHandlerError::new("stored context reliability is invalid"))?;
+    reliability.insert(
+        "voice".to_owned(),
+        Value::String(if classified { "medium" } else { "unavailable" }.to_owned()),
+    );
+    context
+        .stages
+        .insert("voice".to_owned(), Value::Object(voice.stage));
+    Ok(ContextWrite {
+        track_id,
+        source_signature: state.source_signature.clone(),
+        completeness: "full".to_owned(),
+        confidence: context.confidence,
+        summary: context.summary,
+        timeline: context.timeline,
+        sections: context.sections,
+        technical: context.technical,
+        stages: context.stages,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -751,8 +1146,13 @@ fn context_result(
     scope: &ContextScopeParameters,
     voice_analyzer: &VoiceAnalyzerStatus,
     worker_count: usize,
+    voice_worker_count: usize,
     performance: &[AudioContextPerformance],
     signal_wall_seconds: f64,
+    voice_performance: &[f64],
+    voice_wall_seconds: f64,
+    audio_progress: ContextPassProgress,
+    voice_progress: ContextPassProgress,
     total_wall_seconds: f64,
 ) -> Result<Value, JobHandlerError> {
     let state_by_track = context_by_track(states);
@@ -800,7 +1200,6 @@ fn context_result(
             })
         })
         .collect::<Vec<_>>();
-    let voice_enabled = voice_analyzer.is_ready();
     let scope = serde_json::to_value(scope)
         .map_err(|_| JobHandlerError::new("context analysis scope could not be encoded"))?;
     Ok(json!({
@@ -809,22 +1208,10 @@ fn context_result(
         "scope": scope,
         "tracks": tracks.len(),
         "analysis_workers": worker_count,
-        "voice_workers": 0,
+        "voice_workers": voice_worker_count,
         "passes": {
-            "audio_context": {
-                "status": if failed == 0 { "complete" } else { "complete_with_failures" },
-                "completed_tracks": current_contexts.len(),
-                "failed_tracks": current_failures.len(),
-                "skipped_tracks": 0,
-                "total_tracks": tracks.len(),
-            },
-            "voice_detection": {
-                "status": if voice_enabled { "waiting" } else { "not_available" },
-                "completed_tracks": 0,
-                "failed_tracks": 0,
-                "skipped_tracks": if voice_enabled { 0 } else { tracks.len() },
-                "total_tracks": tracks.len(),
-            },
+            "audio_context": audio_progress.as_value(),
+            "voice_detection": voice_progress.as_value(),
         },
         "updated": updated,
         "failed": failed,
@@ -835,9 +1222,9 @@ fn context_result(
         "performance": context_performance(performance, signal_wall_seconds),
         "voice_performance": {
             "schema_version": "library-context-voice-performance/v1",
-            "tracks_profiled": 0,
-            "wall_seconds": 0.0,
-            "worker_seconds": 0.0,
+            "tracks_profiled": voice_performance.len(),
+            "wall_seconds": round_seconds(voice_wall_seconds),
+            "worker_seconds": round_seconds(voice_performance.iter().sum()),
         },
         "wall_seconds": round_seconds(total_wall_seconds),
     }))
@@ -901,4 +1288,121 @@ fn object(value: Value) -> Map<String, Value> {
 
 fn round_seconds(value: f64) -> f64 {
     (value * 1_000.0).round() / 1_000.0
+}
+
+#[cfg(test)]
+mod tests {
+    use music_analysis::{VoiceAnalysisDocument, VoiceAnalysisError};
+    use music_application::assistant::ContextState;
+    use music_domain::TrackId;
+    use serde_json::{Value, json};
+
+    use super::{ContextPassProgress, context_checkpoint, context_with_voice};
+
+    fn partial_context() -> Result<ContextState, Box<dyn std::error::Error>> {
+        Ok(ContextState {
+            track_id: TrackId::new(7)?,
+            source_signature: "current-signature".to_owned(),
+            job_id: "signal-job".to_owned(),
+            completeness: "partial".to_owned(),
+            confidence: "high".to_owned(),
+            summary_json: json!({
+                "schema_version": "local-context/v2",
+                "voice": {"status": "not_classified"},
+                "measurement_reliability": {"voice": "pending"},
+            })
+            .to_string(),
+            timeline_json: json!([{"start_s": 0.0}]).to_string(),
+            sections_json: json!([{"id": "section-1"}]).to_string(),
+            technical_json: json!({"duration_s": 60.0}).to_string(),
+            stages_json: json!({"voice": {"status": "pending"}}).to_string(),
+            updated_at_unix_seconds: 1,
+        })
+    }
+
+    #[test]
+    fn voice_result_promotes_the_partial_checkpoint_without_rebuilding_signal_context()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let state = partial_context()?;
+        let voice = VoiceAnalysisDocument {
+            summary: json!({
+                "status": "classified",
+                "voice_probability": 0.8,
+                "vocal_coverage": 0.75,
+                "note": "bounded classifier evidence",
+            })
+            .as_object()
+            .cloned()
+            .ok_or("voice summary is not an object")?,
+            stage: json!({
+                "status": "complete",
+                "required": false,
+                "analyzer_id": "essentia-musicnn-voice/v1",
+            })
+            .as_object()
+            .cloned()
+            .ok_or("voice stage is not an object")?,
+            elapsed_seconds: 1.5,
+            prediction_windows: 4,
+        };
+        let write = context_with_voice(state.track_id, &state, voice)?;
+        assert_eq!(write.completeness, "full");
+        assert_eq!(write.source_signature, "current-signature");
+        assert_eq!(write.summary["voice"]["status"], "classified");
+        assert_eq!(write.summary["measurement_reliability"]["voice"], "medium");
+        assert_eq!(write.stages["voice"]["status"], "complete");
+        assert_eq!(
+            write.timeline,
+            vec![
+                json!({"start_s": 0.0})
+                    .as_object()
+                    .cloned()
+                    .ok_or("timeline item is not an object")?
+            ]
+        );
+        assert_eq!(write.technical["duration_s"], 60.0);
+        Ok(())
+    }
+
+    #[test]
+    fn optional_voice_failure_still_promotes_the_remaining_context_to_full()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let state = partial_context()?;
+        let voice = VoiceAnalysisDocument::unavailable(&VoiceAnalysisError::Inference, 0.25);
+        let write = context_with_voice(state.track_id, &state, voice)?;
+        assert_eq!(write.completeness, "full");
+        assert_eq!(write.summary["voice"]["status"], "unavailable");
+        assert_eq!(
+            write.summary["measurement_reliability"]["voice"],
+            "unavailable"
+        );
+        assert_eq!(write.stages["voice"]["reason"], "inference_failed");
+        Ok(())
+    }
+
+    #[test]
+    fn progress_checkpoint_keeps_both_passes_independently_auditable() {
+        let checkpoint = context_checkpoint(
+            ContextPassProgress {
+                status: "complete",
+                completed: 3,
+                failed: 1,
+                skipped: 0,
+                total: 4,
+            },
+            ContextPassProgress::not_available(4),
+        );
+        assert_eq!(
+            checkpoint["passes"]["audio_context"]["failed_tracks"],
+            Value::from(1)
+        );
+        assert_eq!(
+            checkpoint["passes"]["voice_detection"]["status"],
+            "not_available"
+        );
+        assert_eq!(
+            checkpoint["passes"]["voice_detection"]["skipped_tracks"],
+            Value::from(4)
+        );
+    }
 }
