@@ -12,7 +12,7 @@ use axum::http::header::{
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use music_application::auth::{SessionTouch, UnixSeconds};
-use music_application::cleanup::CleanupService;
+use music_application::cleanup::{CleanupService, CleanupVerificationService};
 use music_application::library::{
     FolderMutationResult, LibraryCoordinatorError, LibraryCoordinatorHandle,
     LibraryMutationFailureKind, LibrarySearch, LibraryService, LibrarySortKey,
@@ -45,6 +45,7 @@ use crate::http::HttpState;
 pub(crate) struct RuntimeLibrary {
     pub(crate) service: Arc<LibraryService>,
     pub(crate) cleanup: Arc<CleanupService>,
+    pub(crate) cleanup_verification: Arc<CleanupVerificationService>,
     pub(crate) coordinator: LibraryCoordinatorHandle,
     pub(crate) root: LibraryRoot,
     pub(crate) metadata: MetadataAdapter,

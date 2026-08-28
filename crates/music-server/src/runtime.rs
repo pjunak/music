@@ -7,7 +7,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use music_application::cleanup::{CleanupRepository, CleanupService};
+use music_application::cleanup::{
+    CleanupNameLookup, CleanupRepository, CleanupService, CleanupVerificationRepository,
+    CleanupVerificationService,
+};
 use music_application::library::{
     LibraryCatalogSink, LibraryCoordinatorHandle, LibraryMutationRepository, LibraryRepository,
     LibraryService, ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
@@ -29,6 +32,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tracing_subscriber::EnvFilter;
 
 use crate::auth::RuntimeAuth;
+use crate::cleanup::MusicBrainzNameLookup;
 use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
 use crate::error::RuntimeError;
@@ -55,6 +59,7 @@ pub struct AppRuntime {
     library: LibraryCoordinatorHandle,
     library_service: Arc<LibraryService>,
     cleanup_service: Arc<CleanupService>,
+    cleanup_verification_service: Arc<CleanupVerificationService>,
     library_root: LibraryRoot,
     library_metadata: MetadataAdapter,
 }
@@ -144,6 +149,15 @@ impl AppRuntime {
         let mutation_repository: Arc<dyn LibraryMutationRepository> = storage.clone();
         let read_repository: Arc<dyn LibraryRepository> = storage.clone();
         let cleanup_repository: Arc<dyn CleanupRepository> = storage.clone();
+        let cleanup_verification_repository: Arc<dyn CleanupVerificationRepository> =
+            storage.clone();
+        let cleanup_lookup: Arc<dyn CleanupNameLookup> =
+            Arc::new(MusicBrainzNameLookup::new().map_err(|source| {
+                RuntimeError::io(
+                    "initialize the MusicBrainz HTTP client",
+                    io::Error::other(source),
+                )
+            })?);
         let catalog_sink: Arc<dyn LibraryCatalogSink> = Arc::new(playback.clone());
         let effects = Arc::new(FilesystemLibraryMutations::new(
             library_root.clone(),
@@ -155,6 +169,10 @@ impl AppRuntime {
         let library = supervise_library(&supervisor, spawned_library, health.clone())?;
         let library_service = Arc::new(LibraryService::new(read_repository));
         let cleanup_service = Arc::new(CleanupService::new(cleanup_repository));
+        let cleanup_verification_service = Arc::new(CleanupVerificationService::new(
+            cleanup_verification_repository,
+            cleanup_lookup,
+        ));
         health.set_component("library_coordinator", true, ComponentStatus::Ready);
         apply_library_health(&health, library.status().status);
         library.request_reconciliation()?;
@@ -178,6 +196,7 @@ impl AppRuntime {
             library,
             library_service,
             cleanup_service,
+            cleanup_verification_service,
             library_root,
             library_metadata,
         })
@@ -208,6 +227,7 @@ impl AppRuntime {
             Arc::new(RuntimeLibrary {
                 service: Arc::clone(&self.library_service),
                 cleanup: Arc::clone(&self.cleanup_service),
+                cleanup_verification: Arc::clone(&self.cleanup_verification_service),
                 coordinator: self.library.clone(),
                 root: self.library_root.clone(),
                 metadata: self.library_metadata.clone(),
@@ -542,6 +562,7 @@ mod tests {
     use std::error::Error;
     use std::fs;
     use std::path::Path;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use axum::body::{Body, to_bytes};
@@ -553,6 +574,9 @@ mod tests {
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
     use music_application::auth::UnixSeconds;
+    use music_application::cleanup::{
+        CleanupFuture, CleanupNameLookup, CleanupNameScores, CleanupVerificationService,
+    };
     use music_application::library::{LibraryFileMutation, ReconciliationStatus};
     use music_application::recovery::{
         RecoveryDomain, RecoveryJournalDraft, RecoveryJournalRepository, RecoveryState,
@@ -561,12 +585,37 @@ mod tests {
     use music_storage::StorageError;
     use serde_json::Value;
     use tempfile::tempdir;
+    use tokio::sync::Mutex;
     use tower::ServiceExt;
 
     use super::AppRuntime;
     use crate::config::AppConfig;
     use crate::error::RuntimeError;
     use crate::health::{ComponentStatus, ReadinessStatus};
+
+    #[derive(Debug)]
+    struct FakeCleanupLookup {
+        scores: CleanupNameScores,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl FakeCleanupLookup {
+        fn new(scores: CleanupNameScores) -> Self {
+            Self {
+                scores,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl CleanupNameLookup for FakeCleanupLookup {
+        fn fetch_name_scores<'a>(&'a self, name: &'a str) -> CleanupFuture<'a, CleanupNameScores> {
+            Box::pin(async move {
+                self.calls.lock().await.push(name.to_owned());
+                Ok(self.scores)
+            })
+        }
+    }
 
     fn runtime_config(root: &Path) -> Result<AppConfig, RuntimeError> {
         AppConfig::from_values(&BTreeMap::from([
@@ -1238,7 +1287,7 @@ mod tests {
             b"metadata fallback fixture",
         )?;
         fs::create_dir_all(directory.path().join("music/Campaign/Scenes/Empty"))?;
-        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let mut runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 let status = runtime.library_status();
@@ -1269,6 +1318,11 @@ mod tests {
             .storage
             .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
             .await?;
+        let cleanup_lookup = Arc::new(FakeCleanupLookup::new(CleanupNameScores::new(100, 20)?));
+        runtime.cleanup_verification_service = Arc::new(CleanupVerificationService::new(
+            runtime.storage.clone(),
+            cleanup_lookup.clone(),
+        ));
         let router = runtime.router()?;
         let unauthorized = router
             .clone()
@@ -1284,6 +1338,15 @@ mod tests {
             )
             .await?;
         assert_eq!(unauthorized_cleanup.status(), StatusCode::UNAUTHORIZED);
+        let unauthorized_verify = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/verify")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"names":["private name"]}"#))?,
+            )
+            .await?;
+        assert_eq!(unauthorized_verify.status(), StatusCode::UNAUTHORIZED);
 
         let login = router
             .clone()
@@ -1342,6 +1405,54 @@ mod tests {
             )
             .await?;
         assert_eq!(empty_track_scope.status(), StatusCode::BAD_REQUEST);
+
+        let empty_verify = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/verify")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"names":[]}"#))?,
+            )
+            .await?;
+        assert_eq!(empty_verify.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let verify = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/verify")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"names":["Andrey Vinogradov"]}"#))?,
+            )
+            .await?;
+        assert_eq!(verify.status(), StatusCode::OK);
+        let verify_json: Value =
+            serde_json::from_slice(&to_bytes(verify.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            verify_json,
+            serde_json::json!({"verified": 1, "failed": []})
+        );
+
+        let cached_verify = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/verify")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"names":["Andrey Vinogradov"]}"#))?,
+            )
+            .await?;
+        let cached_json: Value =
+            serde_json::from_slice(&to_bytes(cached_verify.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            cached_json,
+            serde_json::json!({"verified": 0, "failed": []})
+        );
+        assert_eq!(
+            cleanup_lookup.calls.lock().await.as_slice(),
+            ["Andrey Vinogradov"]
+        );
 
         let search = router
             .clone()

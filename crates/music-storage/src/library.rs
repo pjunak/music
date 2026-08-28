@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use music_application::cleanup::{CleanupFuture, CleanupRepository};
+use music_application::cleanup::{
+    CleanupFuture, CleanupNameVerdict, CleanupRepository, CleanupVerificationRepository,
+};
 use music_application::library::{
     DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFuture,
     LibraryIndexMutationCommit, LibraryMutationRepository, LibraryRepository, LibrarySearch,
@@ -277,6 +279,45 @@ impl CleanupRepository for SqliteStorage {
                     Ok((key, (artist, album)))
                 })
                 .collect()
+        })
+    }
+}
+
+impl CleanupVerificationRepository for SqliteStorage {
+    fn cleanup_name_verdict_exists<'a>(&'a self, loose_key: &'a str) -> CleanupFuture<'a, bool> {
+        Box::pin(async move {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM cleanup_name_lookups WHERE loose_key = ?)",
+            )
+            .bind(loose_key)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(StorageError::from)
+            .map_err(box_storage)
+        })
+    }
+
+    fn store_cleanup_name_verdict<'a>(
+        &'a self,
+        verdict: &'a CleanupNameVerdict,
+    ) -> CleanupFuture<'a, bool> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let result = sqlx::query(
+                "INSERT INTO cleanup_name_lookups \
+                 (loose_key, name, artist_score, album_score, fetched_at) \
+                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
+                 ON CONFLICT(loose_key) DO NOTHING",
+            )
+            .bind(verdict.loose_key())
+            .bind(verdict.name())
+            .bind(i64::from(verdict.scores().artist()))
+            .bind(i64::from(verdict.scores().album()))
+            .execute(&self.pool)
+            .await
+            .map_err(StorageError::from)
+            .map_err(box_storage)?;
+            Ok(result.rows_affected() == 1)
         })
     }
 }
@@ -1373,7 +1414,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use music_application::cleanup::CleanupRepository;
+    use music_application::cleanup::{
+        CleanupNameScores, CleanupNameVerdict, CleanupRepository, CleanupVerificationRepository,
+    };
     use music_application::library::{
         DiscoveredTrack, LibraryFileMutation, LibraryMutationRepository, LibraryRepository,
         LibrarySearch, LibrarySortKey, ReconciliationCommit, ReconciliationStatus,
@@ -1494,6 +1537,27 @@ mod tests {
             verdicts.get(&cleanup_loose_key("Andrey Vinogradov")),
             Some(&(100, 25))
         );
+
+        let cached = CleanupNameVerdict::new(
+            cleanup_loose_key("Abbey Road"),
+            "Abbey Road",
+            CleanupNameScores::new(10, 100)?,
+        );
+        assert!(
+            CleanupVerificationRepository::store_cleanup_name_verdict(&storage, &cached).await?
+        );
+        assert!(
+            CleanupVerificationRepository::cleanup_name_verdict_exists(
+                &storage,
+                cached.loose_key()
+            )
+            .await?
+        );
+        assert!(
+            !CleanupVerificationRepository::store_cleanup_name_verdict(&storage, &cached).await?
+        );
+        let refreshed = CleanupRepository::cleanup_name_verdicts(&storage).await?;
+        assert_eq!(refreshed.get(cached.loose_key()), Some(&(10, 100)));
         Ok(())
     }
 

@@ -1,14 +1,27 @@
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::Json;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
 use axum::http::HeaderMap;
+use futures_util::TryStreamExt;
 use music_application::auth::SessionTouch;
-use music_application::cleanup::{CleanupAnalysis, CleanupError, CleanupScope};
+use music_application::cleanup::{
+    CleanupAnalysis, CleanupError, CleanupFuture, CleanupNameLookup, CleanupNameScoreError,
+    CleanupNameScores, CleanupScope, CleanupVerificationError, CleanupVerificationResult,
+    MAX_CLEANUP_VERIFY_NAMES,
+};
 use music_domain::{
     CleanupFolderSuggestion, CleanupRule, CleanupRuleSet, CleanupSuggestion, CleanupTrackPlan,
     CleanupValue, DEFAULT_CLEANUP_RULES, LibraryPath, TrackId,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::Mutex;
+use tokio::time::Instant;
 use utoipa::ToSchema;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{AnyOfBuilder, ArrayBuilder, ObjectBuilder, Schema, Type};
@@ -19,9 +32,16 @@ use crate::error::{ApiError, HttpValidationErrorBody, openapi_integer, openapi_n
 use crate::http::HttpState;
 
 const MAX_SCOPE_TRACKS: usize = 5_000;
+const MUSICBRAINZ_ROOT: &str = "https://musicbrainz.org/ws/2";
+const MUSICBRAINZ_USER_AGENT: &str = "music-dnd-orchestrator/0.1 (https://github.com/pjunak/music)";
+const MUSICBRAINZ_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const MUSICBRAINZ_MIN_INTERVAL: Duration = Duration::from_millis(1_100);
+const MUSICBRAINZ_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
-    OpenApiRouter::default().routes(routes!(analyze))
+    OpenApiRouter::default()
+        .routes(routes!(analyze))
+        .routes(routes!(verify_names))
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -92,6 +112,30 @@ struct AnalyzeRequest {
     /// Enabled rule ids; omit for the default set.
     #[schema(required = false, schema_with = nullable_cleanup_rules_schema)]
     rules: Option<Vec<CleanupRuleRequest>>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = VerifyRequest)]
+struct VerifyRequest {
+    #[schema(schema_with = cleanup_verify_names_schema)]
+    names: Vec<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = VerifyResult)]
+struct VerifyResponse {
+    #[schema(schema_with = openapi_integer)]
+    verified: usize,
+    failed: Vec<String>,
+}
+
+impl From<CleanupVerificationResult> for VerifyResponse {
+    fn from(result: CleanupVerificationResult) -> Self {
+        Self {
+            verified: result.verified,
+            failed: result.failed,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -256,6 +300,36 @@ async fn analyze(
     Ok(Json(analysis.into()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/library/cleanup/verify",
+    operation_id = "verify_names_api_library_cleanup_verify_post",
+    summary = "Verify Names",
+    request_body = VerifyRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = VerifyResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn verify_names(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<VerifyRequest>, JsonRejection>,
+) -> Result<Json<VerifyResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=MAX_CLEANUP_VERIFY_NAMES).contains(&payload.names.len()) {
+        return Err(ApiError::validation());
+    }
+    let result = crate::library::library(&state)?
+        .cleanup_verification
+        .verify(payload.names)
+        .await
+        .map_err(map_cleanup_verification_error)?;
+    Ok(Json(result.into()))
+}
+
 fn cleanup_scope(scope: CleanupScopeRequest) -> Result<CleanupScope, ApiError> {
     match scope.kind {
         CleanupScopeKind::All => Ok(CleanupScope::All),
@@ -306,6 +380,16 @@ fn map_cleanup_error(error: CleanupError) -> ApiError {
     }
 }
 
+fn map_cleanup_verification_error(error: CleanupVerificationError) -> ApiError {
+    match error {
+        CleanupVerificationError::InvalidBatchSize => ApiError::validation(),
+        CleanupVerificationError::Dependency { .. } => {
+            tracing::error!(error = %error, "library cleanup verification persistence failed");
+            ApiError::internal()
+        }
+    }
+}
+
 const fn default_recursive() -> bool {
     true
 }
@@ -335,6 +419,14 @@ fn cleanup_scope_track_ids_schema() -> RefOr<Schema> {
     ArrayBuilder::new()
         .items(openapi_integer())
         .max_items(Some(MAX_SCOPE_TRACKS))
+        .into()
+}
+
+fn cleanup_verify_names_schema() -> RefOr<Schema> {
+    ArrayBuilder::new()
+        .items(ObjectBuilder::new().schema_type(Type::String))
+        .min_items(Some(1))
+        .max_items(Some(MAX_CLEANUP_VERIFY_NAMES))
         .into()
 }
 
@@ -391,4 +483,309 @@ fn cleanup_value_schema() -> RefOr<Schema> {
             .build(),
     )
     .into()
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MusicBrainzNameLookup {
+    client: reqwest::Client,
+    base_url: Arc<str>,
+    last_request_at: Arc<Mutex<Option<Instant>>>,
+    minimum_interval: Duration,
+}
+
+impl MusicBrainzNameLookup {
+    pub(crate) fn new() -> Result<Self, reqwest::Error> {
+        Self::with_endpoint(MUSICBRAINZ_ROOT, MUSICBRAINZ_MIN_INTERVAL)
+    }
+
+    fn with_endpoint(
+        base_url: impl Into<Arc<str>>,
+        minimum_interval: Duration,
+    ) -> Result<Self, reqwest::Error> {
+        let client = reqwest::Client::builder()
+            .user_agent(MUSICBRAINZ_USER_AGENT)
+            .timeout(MUSICBRAINZ_REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        Ok(Self {
+            client,
+            base_url: base_url.into(),
+            last_request_at: Arc::new(Mutex::new(None)),
+            minimum_interval,
+        })
+    }
+
+    async fn scores(&self, name: &str) -> Result<CleanupNameScores, MusicBrainzLookupError> {
+        let quoted = lucene_quote(name);
+        let artist_query = format!("artist:{quoted}");
+        let album_query = format!("releasegroup:{quoted}");
+        let artist = self.top_score("artist", &artist_query, "artists").await?;
+        let album = self
+            .top_score("release-group", &album_query, "release-groups")
+            .await?;
+        CleanupNameScores::new(artist, album).map_err(MusicBrainzLookupError::InvalidScore)
+    }
+
+    async fn top_score(
+        &self,
+        resource: &str,
+        query: &str,
+        list_key: &'static str,
+    ) -> Result<i32, MusicBrainzLookupError> {
+        self.pace().await;
+        let endpoint = format!("{}/{resource}", self.base_url.trim_end_matches('/'));
+        let response = self
+            .client
+            .get(endpoint)
+            .query(&[("query", query), ("fmt", "json"), ("limit", "1")])
+            .send()
+            .await
+            .map_err(MusicBrainzLookupError::Http)?
+            .error_for_status()
+            .map_err(MusicBrainzLookupError::Http)?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MUSICBRAINZ_MAX_RESPONSE_BYTES as u64)
+        {
+            return Err(MusicBrainzLookupError::ResponseTooLarge);
+        }
+        let mut body = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream
+            .try_next()
+            .await
+            .map_err(MusicBrainzLookupError::Http)?
+        {
+            let new_length = body
+                .len()
+                .checked_add(chunk.len())
+                .ok_or(MusicBrainzLookupError::ResponseTooLarge)?;
+            if new_length > MUSICBRAINZ_MAX_RESPONSE_BYTES {
+                return Err(MusicBrainzLookupError::ResponseTooLarge);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        parse_top_score(&body, list_key)
+    }
+
+    async fn pace(&self) {
+        let mut last_request_at = self.last_request_at.lock().await;
+        if let Some(last_request_at) = *last_request_at {
+            let next_request_at = last_request_at + self.minimum_interval;
+            if next_request_at > Instant::now() {
+                tokio::time::sleep_until(next_request_at).await;
+            }
+        }
+        *last_request_at = Some(Instant::now());
+    }
+}
+
+impl CleanupNameLookup for MusicBrainzNameLookup {
+    fn fetch_name_scores<'a>(&'a self, name: &'a str) -> CleanupFuture<'a, CleanupNameScores> {
+        Box::pin(async move {
+            self.scores(name)
+                .await
+                .map_err(|source| Box::new(source) as Box<dyn Error + Send + Sync>)
+        })
+    }
+}
+
+fn lucene_quote(name: &str) -> String {
+    format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn parse_top_score(body: &[u8], list_key: &'static str) -> Result<i32, MusicBrainzLookupError> {
+    let payload: Value = serde_json::from_slice(body).map_err(MusicBrainzLookupError::Json)?;
+    let Some(entries) = payload.get(list_key) else {
+        return Ok(0);
+    };
+    let entries = entries
+        .as_array()
+        .ok_or(MusicBrainzLookupError::InvalidPayload(
+            "search result list is not an array",
+        ))?;
+    let Some(score) = entries.first().and_then(|entry| entry.get("score")) else {
+        return Ok(0);
+    };
+    let score = if let Some(score) = score.as_i64() {
+        i32::try_from(score)
+            .map_err(|_| MusicBrainzLookupError::InvalidPayload("search score is out of range"))?
+    } else if let Some(score) = score.as_str() {
+        score
+            .parse()
+            .map_err(|_| MusicBrainzLookupError::InvalidPayload("search score is invalid"))?
+    } else {
+        return Err(MusicBrainzLookupError::InvalidPayload(
+            "search score is invalid",
+        ));
+    };
+    if !(0..=100).contains(&score) {
+        return Err(MusicBrainzLookupError::InvalidPayload(
+            "search score is out of range",
+        ));
+    }
+    Ok(score)
+}
+
+#[derive(Debug)]
+enum MusicBrainzLookupError {
+    Http(reqwest::Error),
+    Json(serde_json::Error),
+    InvalidScore(CleanupNameScoreError),
+    InvalidPayload(&'static str),
+    ResponseTooLarge,
+}
+
+impl Display for MusicBrainzLookupError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http(_) => formatter.write_str("MusicBrainz request failed"),
+            Self::Json(_) => formatter.write_str("MusicBrainz returned invalid JSON"),
+            Self::InvalidScore(_) => {
+                formatter.write_str("MusicBrainz returned an invalid search result")
+            }
+            Self::InvalidPayload(detail) => {
+                write!(
+                    formatter,
+                    "MusicBrainz returned an invalid search result: {detail}"
+                )
+            }
+            Self::ResponseTooLarge => {
+                formatter.write_str("MusicBrainz response exceeded the limit")
+            }
+        }
+    }
+}
+
+impl Error for MusicBrainzLookupError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Http(source) => Some(source),
+            Self::Json(source) => Some(source),
+            Self::InvalidScore(source) => Some(source),
+            Self::InvalidPayload(_) | Self::ResponseTooLarge => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use axum::Json;
+    use axum::Router;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, Uri};
+    use axum::routing::get;
+    use serde_json::{Value, json};
+    use tokio::sync::Mutex;
+    use tokio::time::Instant;
+
+    use super::{MUSICBRAINZ_USER_AGENT, MusicBrainzNameLookup, lucene_quote, parse_top_score};
+
+    #[derive(Debug, Clone)]
+    struct ObservedRequest {
+        path: String,
+        query: String,
+        user_agent: String,
+        started_at: Instant,
+    }
+
+    async fn musicbrainz_fixture(
+        State(observed): State<Arc<Mutex<Vec<ObservedRequest>>>>,
+        headers: HeaderMap,
+        uri: Uri,
+    ) -> Json<Value> {
+        observed.lock().await.push(ObservedRequest {
+            path: uri.path().to_owned(),
+            query: uri.query().unwrap_or_default().to_owned(),
+            user_agent: headers
+                .get("user-agent")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_owned(),
+            started_at: Instant::now(),
+        });
+        if uri.path().ends_with("/artist") {
+            Json(json!({"artists": [{"score": 100}]}))
+        } else {
+            Json(json!({"release-groups": [{"score": "25"}]}))
+        }
+    }
+
+    #[test]
+    fn parser_accepts_musicbrainz_score_shapes_and_rejects_malformed_lists()
+    -> Result<(), Box<dyn Error>> {
+        assert_eq!(
+            parse_top_score(br#"{"artists":[{"score":100}]}"#, "artists")?,
+            100
+        );
+        assert_eq!(
+            parse_top_score(br#"{"release-groups":[{"score":"25"}]}"#, "release-groups")?,
+            25
+        );
+        assert_eq!(parse_top_score(br#"{}"#, "artists")?, 0);
+        assert!(parse_top_score(br#"{"artists":{}}"#, "artists").is_err());
+        assert!(parse_top_score(br#"{"artists":[{"score":101}]}"#, "artists").is_err());
+        assert_eq!(lucene_quote(r#"AC/DC \ "Live""#), r#""AC/DC \\ \"Live\"""#);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn client_identifies_paces_and_bounds_the_two_searches()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let router = Router::new()
+            .route("/ws/2/artist", get(musicbrainz_fixture))
+            .route("/ws/2/release-group", get(musicbrainz_fixture))
+            .with_state(observed.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(async move { axum::serve(listener, router).await });
+        let minimum_interval = Duration::from_millis(25);
+        let lookup = MusicBrainzNameLookup::with_endpoint(
+            format!("http://{address}/ws/2"),
+            minimum_interval,
+        )?;
+
+        let scores = lookup.scores(r#"AC/DC "Live""#).await?;
+        assert_eq!(scores.artist(), 100);
+        assert_eq!(scores.album(), 25);
+        let requests = observed.lock().await.clone();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].path, "/ws/2/artist");
+        assert_eq!(requests[1].path, "/ws/2/release-group");
+        assert_eq!(requests[0].user_agent, MUSICBRAINZ_USER_AGENT);
+        assert_eq!(requests[1].user_agent, MUSICBRAINZ_USER_AGENT);
+        assert!(
+            requests[1]
+                .started_at
+                .duration_since(requests[0].started_at)
+                >= minimum_interval
+        );
+        for request in requests {
+            let url = reqwest::Url::parse(&format!("http://fixture/?{}", request.query))?;
+            let parameters = url
+                .query_pairs()
+                .collect::<std::collections::BTreeMap<_, _>>();
+            assert_eq!(
+                parameters.get("fmt").map(|value| value.as_ref()),
+                Some("json")
+            );
+            assert_eq!(
+                parameters.get("limit").map(|value| value.as_ref()),
+                Some("1")
+            );
+            assert!(parameters.get("query").is_some_and(|query| {
+                query.starts_with("artist:\"") || query.starts_with("releasegroup:\"")
+            }));
+        }
+
+        server.abort();
+        let join = server.await;
+        assert!(join.is_err_and(|error| error.is_cancelled()));
+        Ok(())
+    }
 }

@@ -452,7 +452,11 @@ commit for that item, while any ambiguous post-replacement failure stops the bat
 - Authoring remains source -> pure preview -> explicit selection -> atomic commit. The commit stages
   every output and records a recovery journal before replacing target files or database rows.
 - Library cleanup remains detect -> review -> journal -> execute -> optional revert. Detection has
-  no write-capable dependency.
+  no write-capable dependency. Optional name verification is a separate operator-triggered adapter:
+  it paces identifiable MusicBrainz searches to the public limit, bounds deadlines and response
+  bodies, and may write only successful score verdicts to the dedicated cache. Lookup failures are
+  not cached, so a later explicit attempt can retry them
+  ([MusicBrainz rate-limit policy](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)).
 
 ## Durable jobs
 
