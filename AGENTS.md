@@ -34,6 +34,8 @@ cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
 cargo deny --manifest-path fuzz/Cargo.toml --locked check
 cargo audit --file fuzz/Cargo.lock --deny warnings
 node --test .github/scripts/voice-differential.test.mjs
+node --test .github/scripts/rewrite-tree.test.mjs
+node .github/scripts/rewrite-tree.mjs reference
 ```
 
 The checked-in toolchain is authoritative. On Windows hosts without the Visual Studio C++ build
@@ -402,6 +404,10 @@ Runtime data lives outside the image.
 - Run the private-corpus voice differential only on an explicitly selected local Linux corpus with
   the pinned model and frozen Essentia oracle. Keep its report path-free, do not widen the checked-in
   tolerances at runtime, and do not delete the oracle until that evidence and the cgroup soak pass.
+- Before Python removal, `rewrite-tree.mjs reference` must keep the complete oracle fingerprint
+  unchanged and reject Python artifacts outside its quarantine. After accepted external evidence and
+  the deletion commit, replace that gate with `rewrite-tree.mjs final`; do not weaken its allowlist to
+  make a stale runtime, workflow, generated artifact, or transition tool pass.
 - This repository does not SSH to production. Deployment rollout, reverse
   proxy, bind mounts, and production `.env` live in `junak.eu`.
 

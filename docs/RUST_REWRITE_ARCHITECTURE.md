@@ -361,6 +361,24 @@ creates `remembered_devices`, `legacy_device_imports`, and `recovery_journal`. M
 created directly because there is no prior state to back up. `music-cli db doctor` is read-only;
 `music-cli db migrate` takes the same lifetime lock as the server and follows this identical path.
 
+### Frozen reference and final-tree boundary
+
+The Python implementation is an immutable compatibility oracle during rewrite acceptance, not a
+second implementation that may continue evolving. `contracts/reference/python-oracle-tree.json`
+fingerprints the ordered Git blob set for the complete backend, its production Dockerfile and
+legacy headless appliance. The rewrite workflow runs
+`.github/scripts/rewrite-tree.mjs reference`, which requires a clean checkout, rejects Python files
+outside that explicit quarantine, and fails on any added, removed, or changed oracle blob.
+
+After the external Linux, performance, voice, and speaker gates are accepted, the deletion commit
+switches that command to `rewrite-tree.mjs final`. Final mode requires the canonical `Dockerfile`,
+rejects the quarantined backend and every common Python project artifact, rejects transition-only
+comparison scripts and `Dockerfile.rust`, scans active workflows/operator instructions for stale
+runtime commands, and rejects tracked build output, databases, audio, environments, or key material.
+Historical ADR prose and Rust compatibility fixtures remain valid evidence and are deliberately not
+mistaken for executable Python. Image inspection, gitleaks, and unused-dependency checks remain
+separate gates because a source-tree allowlist cannot prove those properties.
+
 ### Compatibility-sensitive data
 
 - Existing Argon2 password hashes are verified directly by the Rust Argon2 implementation.

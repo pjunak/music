@@ -159,6 +159,9 @@ reviews and moves an accepted summary into durable project records.
   workflow because libFuzzer is not supported on this Windows host.
 - The path-free voice-probe binary classifies generated audio end to end with the exact pinned graph,
   and all five deterministic report/tool-policy tests pass. The Essentia side remains Linux-only.
+- The complete 186-file Python oracle is content-fingerprinted and quarantined; four deterministic
+  tree-policy tests pass. CI now rejects oracle drift or new Python artifacts outside that boundary,
+  while the prepared final mode rejects all executable/runtime remnants after the gated deletion.
 - Docker/WSL and a real Linux audio device are unavailable on this workstation. The rewrite-only
   workflow, Unix mpv tests, cgroup voice soak, Essentia differential, and speaker smoke therefore
   remain explicit external acceptance evidence rather than inferred success.
@@ -620,6 +623,8 @@ must finish before the reference implementation is deleted.
   protocol, path/root, YAML, import, and model-output attack surfaces.
 - [x] Add a local-only, path-free private-corpus Essentia/Rust voice differential harness and an
   explicit intended-speaker acceptance procedure.
+- [x] Fingerprint the complete frozen Python oracle and add separate pre-removal and final Rust-only
+  tree verification modes.
 - [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
 - [ ] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report.
 - [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.

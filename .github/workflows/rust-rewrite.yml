@@ -117,8 +117,11 @@ jobs:
         with:
           node-version: "26"
 
-      - name: Test acceptance-report tooling
-        run: node --test .github/scripts/voice-differential.test.mjs
+      - name: Test acceptance and tree-boundary tooling
+        run: |
+          node --test .github/scripts/voice-differential.test.mjs
+          node --test .github/scripts/rewrite-tree.test.mjs
+          node .github/scripts/rewrite-tree.mjs reference
 
       - name: Lint, typecheck, test, and build
         working-directory: frontend
