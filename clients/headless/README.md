@@ -51,6 +51,10 @@ sudo systemctl enable --now music-output
 journalctl -u music-output -f          # watch it
 ```
 
+The unit uses a dynamic unprivileged user, adds only the host's `audio` group, and keeps its stable
+client identity in systemd's protected `/var/lib/music-output` state directory. Filesystem access is
+otherwise read-only; no long-lived service account or writable home directory is required.
+
 ## Options
 
 Most options also have an environment-variable equivalent (handy for the systemd env file):

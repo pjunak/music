@@ -13,6 +13,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+DynamicUser=yes
+SupplementaryGroups=audio
+StateDirectory=music-output
+StateDirectoryMode=0700
+Environment=HOME=/var/lib/music-output
+Environment=MUSIC_STATE_DIR=/var/lib/music-output
 # An env file keeps the server URL / name / control port out of the unit:
 #   MUSIC_SERVER_URL=http://192.168.1.50:8000
 #   MUSIC_OUTPUT_NAME=Living-room speaker
@@ -21,9 +27,17 @@ EnvironmentFile=/etc/music-output.env
 ExecStart=/opt/music-output/music-output
 Restart=always
 RestartSec=3
-# Needs audio-device access; add the service user to the audio group, or run as
-# a user that already has it. (On a single-purpose box, a dedicated user is tidy.)
-SupplementaryGroups=audio
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

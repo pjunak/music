@@ -1,6 +1,7 @@
 name: Rust rewrite verification
 
 on:
+  workflow_dispatch:
   push:
     branches: ["rewrite/rust"]
   pull_request:
@@ -109,10 +110,10 @@ jobs:
 
       - name: Boot as non-root and serve the SPA
         run: |
-          container_id=$(docker run --detach --publish 18000:8000 music-rust-rewrite:test)
+          container_id=$(docker run --detach --cpus 3 --memory 4g --publish 18000:8000 music-rust-rewrite:test)
           trap 'docker logs "$container_id"; docker rm --force "$container_id"' EXIT
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:18000/api/health >/dev/null; then
+            if curl --fail --silent http://127.0.0.1:18000/api/readiness >/dev/null; then
               break
             fi
             if [ "$attempt" -eq 30 ]; then
@@ -121,4 +122,8 @@ jobs:
             sleep 1
           done
           test "$(docker inspect --format '{{.Config.User}}' "$container_id")" = "music"
+          docker run --rm --entrypoint sh music-rust-rewrite:test -c \
+            '! command -v python && ! command -v python3'
+          curl --fail --silent http://127.0.0.1:18000/api/health | \
+            grep --quiet '"status":"ok"'
           curl --fail --silent http://127.0.0.1:18000/ | grep --quiet '<!doctype html>'

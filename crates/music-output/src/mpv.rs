@@ -383,6 +383,17 @@ pub use platform::MpvPlayer;
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use std::path::PathBuf;
+    #[cfg(unix)]
+    use tokio::io::AsyncBufReadExt;
+    #[cfg(unix)]
+    use tokio::net::UnixListener;
+
     #[tokio::test]
     async fn correlates_commands_while_ignoring_unsolicited_events()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -420,5 +431,123 @@ mod tests {
         assert_eq!(data, json!(12.5));
         fake.await??;
         Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn supervises_real_unix_socket_processes_and_commands_both_lanes()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let directory = tempfile::tempdir()?;
+        let executable = fake_mpv_wrapper(directory.path(), false)?;
+        let player = MpvPlayer::start(&executable, true).await?;
+
+        player
+            .execute(&[
+                PlaybackCommand::SetVolume(0.4),
+                PlaybackCommand::Load {
+                    url: "http://music.test/api/library/tracks/7/stream".to_owned(),
+                    start_seconds: 3.5,
+                },
+                PlaybackCommand::SeekAbsolute(4.0),
+                PlaybackCommand::SetPaused(false),
+            ])
+            .await?;
+        assert_eq!(player.time_position_seconds().await?, Some(1.25));
+        player
+            .fire_sfx("http://music.test/api/sfx/file?path=bell.ogg", 0.5)
+            .await?;
+        player.healthcheck().await?;
+        player.shutdown().await;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reports_a_dead_sfx_child_so_the_service_can_restart_both_lanes()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let directory = tempfile::tempdir()?;
+        let executable = fake_mpv_wrapper(directory.path(), true)?;
+        let player = MpvPlayer::start(&executable, true).await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let error = player
+            .healthcheck()
+            .await
+            .err()
+            .ok_or("expected the exited SFX lane to fail the health check")?;
+        assert!(error.to_string().contains("sfx lane exited unexpectedly"));
+        player.shutdown().await;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn fake_mpv_wrapper(
+        directory: &Path,
+        exit_sfx: bool,
+    ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        let test_executable = shell_quote(&std::env::current_exe()?.to_string_lossy());
+        let sfx_mode = if exit_sfx { "exit" } else { "serve" };
+        let script = format!(
+            "#!/bin/sh\n\
+             socket=''\n\
+             for argument in \"$@\"; do\n\
+               case \"$argument\" in\n\
+                 --input-ipc-server=*) socket=${{argument#--input-ipc-server=}} ;;\n\
+               esac\n\
+             done\n\
+             case \"$socket\" in\n\
+               *-sfx-*) mode='{sfx_mode}' ;;\n\
+               *) mode='serve' ;;\n\
+             esac\n\
+             MUSIC_OUTPUT_FAKE_MPV_SOCKET=\"$socket\" \\\n\
+             MUSIC_OUTPUT_FAKE_MPV_MODE=\"$mode\" \\\n\
+             exec {test_executable} --quiet --exact mpv::tests::fake_mpv_process\n"
+        );
+        let path = directory.join("fake-mpv");
+        fs::write(&path, script)?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
+        Ok(path)
+    }
+
+    #[cfg(unix)]
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fake_mpv_process() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let Some(socket_path) = std::env::var_os("MUSIC_OUTPUT_FAKE_MPV_SOCKET") else {
+            return Ok(());
+        };
+        let listener = UnixListener::bind(socket_path)?;
+        let (stream, _) = listener.accept().await?;
+        if std::env::var("MUSIC_OUTPUT_FAKE_MPV_MODE").as_deref() == Ok("exit") {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            return Ok(());
+        }
+
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            if reader.read_until(b'\n', &mut line).await? == 0 {
+                return Ok(());
+            }
+            let request: Value = serde_json::from_slice(&line)?;
+            let request_id = request
+                .get("request_id")
+                .and_then(Value::as_u64)
+                .ok_or("fake mpv request did not contain an ID")?;
+            let response = json!({
+                "request_id": request_id,
+                "error": "success",
+                "data": 1.25,
+            });
+            writer.write_all(&serde_json::to_vec(&response)?).await?;
+            writer.write_all(b"\n").await?;
+            writer.flush().await?;
+        }
     }
 }
