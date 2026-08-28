@@ -542,6 +542,14 @@ Handlers are async coordinators, not arbitrary blocking callbacks. CPU work ente
 analysis pool, filesystem work enters bounded media workers, and provider calls use bounded async
 I/O. The two actual lanes remain intentionally simpler than a generic scheduler or broker.
 
+The job fault suite wraps the real SQLite repository only in test builds. It injects lost
+acknowledgements after committed claim, checkpoint, and completion transactions, and it aborts a
+lane after an idempotent external effect but before its checkpoint. Restart then proves that a
+claimed-but-not-started job is recovered, a safe checkpoint prevents duplicate effects, and a
+committed completion is never replayed. A two-lane shutdown case proves restartable local work is
+requeued while non-restartable provider work is failed and retained for explicit operator review;
+cooperative cancellation and concurrent claim contention cover the remaining lease transitions.
+
 ## Local audio/context analysis
 
 Signal analysis is streaming and allocation-bounded:

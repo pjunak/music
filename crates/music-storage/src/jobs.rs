@@ -571,6 +571,10 @@ where
 }
 
 #[cfg(test)]
+#[path = "jobs_fault_tests.rs"]
+mod fault_tests;
+
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::error::Error;

@@ -427,9 +427,9 @@ without half-authored state.
 
 ## Phase 7 — durable job framework
 
-**Status:** In progress — the production job framework and HTTP surface are implemented and used by
-library analysis and provider work. Phase closure still requires the planned explicit fault-injection
-matrix at each external-effect boundary.
+**Status:** Complete — the production job framework and HTTP surface are implemented and used by
+library analysis and provider work, with explicit fault injection proving every persisted boundary
+and uncertain-shutdown policy.
 
 - [x] Typed job registry with persisted lane/schema/restart/checkpoint policy, per-claim execution IDs,
   transactional claim, checkpoints, cancellation, retry, recovery, and shutdown behavior.
@@ -437,7 +437,10 @@ matrix at each external-effect boundary.
   work restricted to bounded media workers, and provider calls restricted to bounded async I/O.
 - [x] Historical unknown-job rendering.
 - [x] Jobs HTTP API and generated frontend types.
-- [ ] Test-only fault injection at claim, external effect, checkpoint, completion, and shutdown points.
+- [x] Test-only fault injection at claim, external effect, checkpoint, completion, and shutdown
+  points. The harness loses acknowledgements after committed claims/checkpoints/completions, aborts
+  a lane after an idempotent filesystem effect, exercises cooperative cancellation, interrupts both
+  lanes during shutdown, and races 16 SQLite claimers for one execution lease.
 
 Gate: restartable work resumes only from safe checkpoints; provider work never repeats silently;
 lane isolation, cancellation, refresh restoration, and SQLite contention tests pass.
