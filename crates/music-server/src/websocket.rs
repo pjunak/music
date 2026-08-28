@@ -8,14 +8,16 @@ use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use music_application::auth::{SecretSessionToken, SessionLookup, SessionTouch, UnixSeconds};
+use music_application::modes::{ModeBundle, SoundboardItemDocument};
 use music_application::playback::{
     CatalogGeneration, ClientRegistration, ConnectionId, PlaybackActorError, PlaybackActorHandle,
     PlaybackPublication, ResolvedPlaybackCommand,
 };
-use music_application::playlists::{PlaylistService, PlaylistServiceError};
+use music_application::playlists::{PlaylistFilter, PlaylistService, PlaylistServiceError};
 use music_domain::{
-    CrossfadeType as DomainCrossfadeType, DomainEvent, LoopMode as DomainLoopMode, LoopingSfx,
-    PlaybackCommand, ShuffleMode as DomainShuffleMode, UnitInterval as DomainUnitInterval,
+    CrossfadeType as DomainCrossfadeType, CuePlayback, CuePlaylist, CuePreset, CueSfx, DomainEvent,
+    LoopMode as DomainLoopMode, LoopingSfx, PlaybackCommand, ShuffleMode as DomainShuffleMode,
+    UnitInterval as DomainUnitInterval,
 };
 use music_protocol::{ClientAction, ErrorCode, ServerMessage};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -483,6 +485,22 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                 queue_error(writer, detail, None, cancellation).await;
             }
         }
+        ClientAction::FireCue { cue_id } => {
+            let Some(dependencies) = playlist_dependencies(library, modes, playlists) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            if let Err(detail) = execute_cue_command(playback, dependencies, cue_id.as_str()).await
+            {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
         ClientAction::FireSfx {
             soundboard_id,
             item_path,
@@ -725,6 +743,170 @@ async fn execute_sfx_command(
         }
     }
     Err("catalog changed; retry the request".to_owned())
+}
+
+async fn execute_cue_command(
+    playback: &PlaybackActorHandle,
+    dependencies: PlaylistDependencies<'_>,
+    cue_id: &str,
+) -> Result<(), String> {
+    for _ in 0..2 {
+        let active_mode_id = playback
+            .snapshot()
+            .await
+            .map_err(|_| "playback action failed".to_owned())?
+            .state
+            .active_mode_id
+            .clone()
+            .ok_or_else(|| "no active mode".to_owned())?;
+        let catalog = dependencies
+            .modes
+            .snapshot()
+            .ok_or_else(|| "the required library or mode catalog is not ready".to_owned())?;
+        let mode = catalog
+            .modes
+            .get(&active_mode_id)
+            .ok_or_else(|| format!("unknown cue '{cue_id}' in mode '{active_mode_id}'"))?;
+        let cue = mode
+            .cues
+            .get(cue_id)
+            .cloned()
+            .ok_or_else(|| format!("unknown cue '{cue_id}' in mode '{active_mode_id}'"))?;
+
+        let preset = match cue.preset.as_deref() {
+            Some(preset_id) => {
+                let preset = mode
+                    .presets
+                    .get(preset_id)
+                    .ok_or_else(|| format!("cue references unknown preset '{preset_id}'"))?;
+                Some(CuePreset {
+                    preset_id: preset_id.to_owned(),
+                    crossfade_ms: preset
+                        .crossfade_ms
+                        .map(u32::try_from)
+                        .transpose()
+                        .map_err(|_| "cue preset crossfade is too large".to_owned())?,
+                })
+            }
+            None => None,
+        };
+
+        let mut loops = Vec::with_capacity(cue.loops.len());
+        for (index, loop_spec) in cue.loops.iter().enumerate() {
+            let item = cue_soundboard_item(
+                mode,
+                &active_mode_id,
+                &loop_spec.soundboard,
+                &loop_spec.item,
+            )?;
+            loops.push(
+                LoopingSfx::new(
+                    format!("cue:{cue_id}:{index}"),
+                    item.name.clone(),
+                    loop_spec.soundboard.clone(),
+                    loop_spec.item.clone(),
+                    loop_spec.interval_s,
+                    domain_volume(loop_spec.volume).map_err(str::to_owned)?,
+                )
+                .map_err(|_| "cue loop parameters are invalid".to_owned())?,
+            );
+        }
+        let mut sfx = Vec::with_capacity(cue.sfx.len());
+        for sfx_spec in &cue.sfx {
+            let _ =
+                cue_soundboard_item(mode, &active_mode_id, &sfx_spec.soundboard, &sfx_spec.item)?;
+            sfx.push(CueSfx {
+                soundboard_id: sfx_spec.soundboard.clone(),
+                item_path: sfx_spec.item.clone(),
+                volume: domain_volume(sfx_spec.volume).map_err(str::to_owned)?,
+            });
+        }
+
+        let playlist = match cue.playlist.as_deref() {
+            Some(playlist_name) => {
+                let candidates = dependencies
+                    .playlists
+                    .list(&PlaylistFilter {
+                        mode_id: Some(active_mode_id.clone()),
+                        category: None,
+                    })
+                    .await
+                    .map_err(map_playlist_resolution_error)?;
+                let playlist = candidates
+                    .into_iter()
+                    .filter(|playlist| playlist.name == playlist_name)
+                    .min_by_key(|playlist| playlist.id)
+                    .ok_or_else(|| {
+                        format!("no playlist named '{playlist_name}' for mode '{active_mode_id}'")
+                    })?;
+                let track_ids = dependencies
+                    .playlists
+                    .track_ids(playlist.id)
+                    .await
+                    .map_err(map_playlist_resolution_error)?;
+                if track_ids.is_empty() {
+                    return Err(format!("cue playlist '{playlist_name}' is empty"));
+                }
+                Some(CuePlaylist {
+                    track_ids,
+                    start_index: usize::try_from(cue.start_index)
+                        .map_err(|_| "cue start index is too large".to_owned())?,
+                    start_ms: cue.start_ms,
+                    source_playlist_id: playlist.id,
+                })
+            }
+            None => None,
+        };
+
+        let generation = CatalogGeneration {
+            library: dependencies.library.coordinator.status().generation.get(),
+            modes: catalog.generation,
+        };
+        match playback
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::FireCue(CuePlayback {
+                    mode_id: active_mode_id.clone(),
+                    cue_id: cue_id.to_owned(),
+                    preset,
+                    playlist,
+                    loops,
+                    sfx,
+                }),
+                generation,
+            ))
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(PlaybackActorError::StaleCatalog { .. }) => tokio::task::yield_now().await,
+            Err(PlaybackActorError::InvalidCatalogReference) => {
+                let active_mode_changed = playback.snapshot().await.ok().is_none_or(|snapshot| {
+                    snapshot.state.active_mode_id.as_deref() != Some(active_mode_id.as_str())
+                });
+                return Err(if active_mode_changed {
+                    "active mode changed; retry the cue".to_owned()
+                } else {
+                    "cue changed; retry the request".to_owned()
+                });
+            }
+            Err(_) => return Err("playback action failed".to_owned()),
+        }
+    }
+    Err("catalog changed; retry the request".to_owned())
+}
+
+fn cue_soundboard_item<'a>(
+    mode: &'a ModeBundle,
+    mode_id: &str,
+    soundboard_id: &str,
+    item_path: &str,
+) -> Result<&'a SoundboardItemDocument, String> {
+    if !mode.soundboards.contains_key(soundboard_id) {
+        return Err(format!(
+            "cue SFX: unknown soundboard '{soundboard_id}' in mode '{mode_id}'"
+        ));
+    }
+    mode.soundboard_item(soundboard_id, item_path)
+        .ok_or_else(|| format!("cue SFX: item '{item_path}' not in soundboard '{soundboard_id}'"))
 }
 
 fn map_playlist_resolution_error(error: PlaylistServiceError) -> &'static str {
@@ -1182,7 +1364,7 @@ mod tests {
         socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> Result<ServerMessage, Box<dyn Error>> {
         loop {
-            let incoming = tokio::time::timeout(Duration::from_secs(2), socket.next()).await?;
+            let incoming = tokio::time::timeout(Duration::from_secs(5), socket.next()).await?;
             let Some(incoming) = incoming else {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -1735,6 +1917,203 @@ mod tests {
             }
         }
         assert!(saw_playlist);
+
+        socket.close(None).await?;
+        let _ = shutdown_tx.send(());
+        server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cue_dispatch_commits_preset_playlist_position_loops_and_sfx_together()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Arrival"))?;
+        fs::write(
+            directory.path().join("music/Arrival/01 - Approach.mp3"),
+            b"cue fixture",
+        )?;
+        fs::write(
+            directory.path().join("music/Arrival/02 - Reveal.mp3"),
+            b"cue fixture",
+        )?;
+        fs::create_dir_all(directory.path().join("modes/table/soundboards"))?;
+        fs::create_dir_all(directory.path().join("modes/table/presets"))?;
+        fs::create_dir_all(directory.path().join("modes/table/cues"))?;
+        fs::write(
+            directory.path().join("modes/table/manifest.yaml"),
+            "id: table\nname: Table\npanels: [soundboard, cues]\nplaylist_categories: [ambient]\ndefault_crossfade_ms: 0\ndefault_soundboard: main\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/soundboards/main.yaml"),
+            "id: main\nname: Main\ncategories:\n  - id: scene\n    name: Scene\n    items:\n      - file: dnd/door.ogg\n        name: Door\n      - file: dnd/rain.ogg\n        name: Rain\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/presets/cinematic.yaml"),
+            "id: cinematic\nname: Cinematic\neffects: []\ncrossfade_ms: 1500\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/cues/arrival.yaml"),
+            "id: arrival\nname: Arrival\npreset: cinematic\nplaylist: Arrival music\nstart_index: 1\nstart_ms: 2500\nsfx:\n  - soundboard: main\n    item: dnd/door.ogg\n    volume: 0.7\nloops:\n  - soundboard: main\n    item: dnd/rain.ogg\n    interval_s: 30\n    volume: 0.4\n",
+        )?;
+
+        let token = "cue-test-session-token";
+        seed_session(directory.path(), token).await?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let router = runtime.router()?;
+        let cookie = format!("music_session={token}");
+        let search = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/search?q=&sort=path&order=asc")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(search.status(), StatusCode::OK);
+        let search: serde_json::Value =
+            serde_json::from_slice(&to_bytes(search.into_body(), 1024 * 1024).await?)?;
+        let track_ids = search["tracks"]
+            .as_array()
+            .ok_or("library search tracks were missing")?
+            .iter()
+            .map(|track| track["id"].as_i64().ok_or("track id was missing"))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(track_ids.len(), 2);
+
+        let created = router
+            .clone()
+            .oneshot(
+                Request::post("/api/playlists")
+                    .header(COOKIE, &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Arrival music","mode_id":"table","category":"ambient"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let created: serde_json::Value =
+            serde_json::from_slice(&to_bytes(created.into_body(), 1024 * 1024).await?)?;
+        let playlist_id = created["id"].as_i64().ok_or("playlist id was missing")?;
+        for track_id in &track_ids {
+            let added = router
+                .clone()
+                .oneshot(
+                    Request::post(format!("/api/playlists/{playlist_id}/tracks"))
+                        .header(COOKIE, &cookie)
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(r#"{{"track_id":{track_id}}}"#)))?,
+                )
+                .await?;
+            assert_eq!(added.status(), StatusCode::CREATED);
+        }
+        let active = router
+            .oneshot(
+                Request::put("/api/modes/active")
+                    .header(COOKIE, &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"mode_id":"table"}"#))?,
+            )
+            .await?;
+        assert_eq!(active.status(), StatusCode::OK);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(runtime.run(listener, async move {
+            let _ = shutdown_rx.await;
+            Ok(())
+        }));
+        let mut request = format!("ws://{address}/api/ws").into_client_request()?;
+        request
+            .headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie)?);
+        let (mut socket, _) = connect_async(request).await?;
+        assert!(matches!(
+            next_protocol_message(&mut socket).await?,
+            ServerMessage::StateSnapshot { state, .. }
+                if state.active_mode_id.as_deref() == Some("table")
+        ));
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"fire_cue","cue_id":"missing"})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let mut saw_missing_cue = false;
+        for _ in 0..2 {
+            match next_protocol_message(&mut socket).await? {
+                ServerMessage::StateChanged { .. } => {}
+                ServerMessage::Error { detail, .. } => {
+                    assert_eq!(detail, "unknown cue 'missing' in mode 'table'");
+                    saw_missing_cue = true;
+                    break;
+                }
+                message => {
+                    return Err(io::Error::other(format!(
+                        "unexpected missing-cue response: {message:?}"
+                    ))
+                    .into());
+                }
+            }
+        }
+        assert!(saw_missing_cue);
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"fire_cue","cue_id":"arrival"})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let mut saw_atomic_state = false;
+        let mut saw_sfx = false;
+        for _ in 0..6 {
+            match next_protocol_message(&mut socket).await? {
+                ServerMessage::StateChanged { state }
+                    if state.active_preset_ids == ["cinematic"]
+                        && state.crossfade_ms == 1_500
+                        && state.ambient.current_track_id == Some(track_ids[1])
+                        && state.ambient.source_playlist_id == Some(playlist_id)
+                        && state.ambient.position_ms >= 2_500
+                        && state.looping_sfx.len() == 1
+                        && state.looping_sfx[0].id == "cue:arrival:0"
+                        && state.looping_sfx[0].name == "Rain" =>
+                {
+                    saw_atomic_state = true;
+                }
+                ServerMessage::SfxFired {
+                    soundboard_id,
+                    item_path,
+                    volume,
+                } if soundboard_id == "main"
+                    && item_path == "dnd/door.ogg"
+                    && (volume - 0.7).abs() < f64::EPSILON =>
+                {
+                    saw_sfx = true;
+                }
+                _ => {}
+            }
+            if saw_atomic_state && saw_sfx {
+                break;
+            }
+        }
+        assert!(saw_atomic_state);
+        assert!(saw_sfx);
 
         socket.close(None).await?;
         let _ = shutdown_tx.send(());

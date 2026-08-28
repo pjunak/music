@@ -279,6 +279,7 @@ pub struct ModePresetKey {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct ModePlaybackReferences {
     pub soundboard_items: BTreeMap<String, BTreeSet<String>>,
+    pub cue_ids: BTreeSet<String>,
     pub preset_ids: BTreeSet<String>,
 }
 
@@ -1269,6 +1270,7 @@ fn playback_references(
                             )
                         })
                         .collect(),
+                    cue_ids: mode.cues.keys().cloned().collect(),
                     preset_ids: mode.presets.keys().cloned().collect(),
                 },
             )

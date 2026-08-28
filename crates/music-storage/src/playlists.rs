@@ -64,15 +64,19 @@ impl PlaylistRepository for SqliteStorage {
         Box::pin(async move {
             let mut query =
                 QueryBuilder::<Sqlite>::new(format!("SELECT {PLAYLIST_COLUMNS} FROM playlists"));
-            if filter.mode_id.is_some() || filter.category.is_some() {
-                query.push(" WHERE ");
-                let mut clauses = query.separated(" AND ");
-                if let Some(mode_id) = &filter.mode_id {
-                    clauses.push("mode_id = ").push_bind(mode_id);
-                }
-                if let Some(category) = &filter.category {
-                    clauses.push("category = ").push_bind(category);
-                }
+            let mut has_filter = false;
+            if let Some(mode_id) = &filter.mode_id {
+                query.push(" WHERE mode_id = ").push_bind(mode_id);
+                has_filter = true;
+            }
+            if let Some(category) = &filter.category {
+                query
+                    .push(if has_filter {
+                        " AND category = "
+                    } else {
+                        " WHERE category = "
+                    })
+                    .push_bind(category);
             }
             query.push(" ORDER BY created_at DESC, id DESC");
             let rows = query
@@ -853,6 +857,58 @@ mod tests {
         sqlx::query("INSERT INTO tracks (path, title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, bpm, display_title, origin, size_bytes, mtime, added_at) VALUES ('a.mp3', 'A', '', '', '', NULL, NULL, NULL, '', 60.0, 90, 'A', '', 1, 1, CURRENT_TIMESTAMP), ('b.mp3', 'B', '', '', '', NULL, NULL, NULL, '', 60.0, 120, 'B', '', 1, 1, CURRENT_TIMESTAMP), ('c.mp3', 'C', '', '', '', NULL, NULL, NULL, '', 60.0, NULL, 'C', '', 1, 1, CURRENT_TIMESTAMP)")
             .execute(&storage.pool).await?;
         Ok((directory, storage))
+    }
+
+    #[tokio::test]
+    async fn playlist_filters_bind_each_clause_without_corrupting_sql()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        for (name, mode_id, category) in [
+            ("Table ambience", Some("table"), Some("ambient")),
+            ("Table combat", Some("table"), Some("combat")),
+            ("Other ambience", Some("other"), Some("ambient")),
+        ] {
+            storage
+                .create(&PlaylistCreate {
+                    name: name.to_owned(),
+                    mode_id: mode_id.map(str::to_owned),
+                    category: category.map(str::to_owned),
+                })
+                .await?;
+        }
+
+        assert_eq!(
+            storage
+                .list(&PlaylistFilter {
+                    mode_id: Some("table".to_owned()),
+                    category: None,
+                })
+                .await?
+                .len(),
+            2
+        );
+        assert_eq!(
+            storage
+                .list(&PlaylistFilter {
+                    mode_id: None,
+                    category: Some("ambient".to_owned()),
+                })
+                .await?
+                .len(),
+            2
+        );
+        assert_eq!(
+            storage
+                .list(&PlaylistFilter {
+                    mode_id: Some("table".to_owned()),
+                    category: Some("ambient".to_owned()),
+                })
+                .await?
+                .len(),
+            1
+        );
+        assert_eq!(storage.list(&PlaylistFilter::default()).await?.len(), 3);
+        Ok(())
     }
 
     #[tokio::test]

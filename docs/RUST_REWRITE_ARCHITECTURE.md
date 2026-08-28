@@ -240,6 +240,15 @@ coalescing missed ticks instead of producing a burst after actor or host suspens
 and their deadlines are removed together by stop, catalog pruning, shutdown, and restart
 normalization.
 
+Cue firing is one resolved actor command rather than a transport-side sequence. Resolution binds
+the authored cue to the active mode ID and the exact library/mode generations, chooses the oldest
+same-name playlist inside that mode deterministically, and validates every preset, track, and
+soundboard item before admission. The reducer applies the preset override, playlist and initial
+position, replacement cue loops, and transient SFX as one candidate. It persists and publishes the
+single durable state before emitting any transient; a failed compare-and-swap therefore cannot
+half-fire a cue. Cue loop IDs reserve `cue:<cue-id>:<index>`, so re-firing also removes stale loops
+left by an older version of the same cue while leaving manual and other-cue loops untouched.
+
 ### Clock representation
 
 The live actor uses a monotonic clock for elapsed playback. Persisted and wire DTOs materialize a

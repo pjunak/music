@@ -29,7 +29,8 @@ pub use media_path::{
 };
 
 pub use playback::{
-    AmbientState, ClockSample, CrossfadeType, DomainEvent, InterruptState, LoopMode, LoopingSfx,
-    PersistenceIntent, PlaybackCommand, PlaybackError, PlaybackState, PositionReport, Reduction,
-    ReductionContext, ShuffleMode, TrackId, UnitInterval, materialize_positions, reduce,
+    AmbientState, ClockSample, CrossfadeType, CuePlayback, CuePlaylist, CuePreset, CueSfx,
+    DomainEvent, InterruptState, LoopMode, LoopingSfx, PersistenceIntent, PlaybackCommand,
+    PlaybackError, PlaybackState, PositionReport, Reduction, ReductionContext, ShuffleMode,
+    TrackId, UnitInterval, materialize_positions, reduce,
 };

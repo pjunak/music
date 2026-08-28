@@ -37,6 +37,7 @@ pub struct CatalogGeneration {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct CatalogMode {
     pub soundboard_items: BTreeMap<String, BTreeSet<String>>,
+    pub cue_ids: BTreeSet<String>,
     pub preset_ids: BTreeSet<String>,
 }
 
@@ -862,6 +863,7 @@ where
                                 mode_id,
                                 CatalogMode {
                                     soundboard_items: mode.soundboard_items,
+                                    cue_ids: mode.cue_ids,
                                     preset_ids: mode.preset_ids,
                                 },
                             )
@@ -1550,6 +1552,7 @@ fn command_requires_catalog(command: &PlaybackCommand) -> bool {
             | PlaybackCommand::AmbientEnqueue { .. }
             | PlaybackCommand::AmbientPlaySequence { .. }
             | PlaybackCommand::FireInterruptSequence { .. }
+            | PlaybackCommand::FireCue(_)
             | PlaybackCommand::FireSfx { .. }
             | PlaybackCommand::StartLoop(_)
     ) || matches!(
@@ -1586,6 +1589,35 @@ fn catalog_references_valid(
             .is_some_and(|modes| modes.contains_key(mode_id)),
         PlaybackCommand::SetActiveSoundboard(Some(soundboard_id)) => {
             mode.is_some_and(|mode| mode.soundboard_items.contains_key(soundboard_id))
+        }
+        PlaybackCommand::FireCue(cue) => {
+            let mode = catalog
+                .modes
+                .as_ref()
+                .and_then(|modes| modes.get(&cue.mode_id));
+            state.active_mode_id.as_deref() == Some(cue.mode_id.as_str())
+                && mode.is_some_and(|mode| {
+                    let item_valid = |soundboard_id: &str, item_path: &str| {
+                        mode.soundboard_items
+                            .get(soundboard_id)
+                            .is_some_and(|items| items.contains(item_path))
+                    };
+                    mode.cue_ids.contains(&cue.cue_id)
+                        && cue
+                            .preset
+                            .as_ref()
+                            .is_none_or(|preset| mode.preset_ids.contains(&preset.preset_id))
+                        && cue.playlist.as_ref().is_none_or(|playlist| {
+                            !playlist.track_ids.is_empty() && tracks_valid(&playlist.track_ids)
+                        })
+                        && cue.loops.iter().all(|looping_sfx| {
+                            item_valid(&looping_sfx.soundboard_id, &looping_sfx.item_path)
+                        })
+                        && cue
+                            .sfx
+                            .iter()
+                            .all(|sfx| item_valid(&sfx.soundboard_id, &sfx.item_path))
+                })
         }
         PlaybackCommand::FireSfx {
             soundboard_id,
@@ -1743,7 +1775,8 @@ mod tests {
     use std::time::Duration;
 
     use music_domain::{
-        DomainEvent, LibraryPath, LoopMode, LoopingSfx, PlaybackCommand, TrackId, UnitInterval,
+        CuePlayback, CuePlaylist, CuePreset, CueSfx, DomainEvent, LibraryPath, LoopMode,
+        LoopingSfx, PlaybackCommand, TrackId, UnitInterval,
     };
     use serde_json::Value;
 
@@ -2004,6 +2037,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cue_transients_wait_for_the_atomic_state_persistence() -> Result<(), Box<dyn Error>> {
+        let store = Arc::new(FakeStore::default());
+        let generation = CatalogGeneration {
+            library: 2,
+            modes: 3,
+        };
+        let spawned = start_playback_actor(
+            Arc::clone(&store),
+            TestClock::default(),
+            FirstRandom,
+            test_config(),
+            CatalogSnapshot {
+                generation,
+                tracks: Some(BTreeMap::from([(
+                    TrackId::new(1)?,
+                    CatalogTrack::default(),
+                )])),
+                modes: Some(BTreeMap::from([(
+                    "table".to_owned(),
+                    CatalogMode {
+                        soundboard_items: BTreeMap::from([(
+                            "main".to_owned(),
+                            BTreeSet::from(["door.wav".to_owned()]),
+                        )]),
+                        cue_ids: BTreeSet::from(["arrival".to_owned()]),
+                        preset_ids: BTreeSet::from(["cinematic".to_owned()]),
+                    },
+                )])),
+            },
+        )
+        .await?;
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::SetActiveMode(Some("table".to_owned())),
+                generation,
+            ))
+            .await?;
+        let states = spawned.handle.subscribe_state();
+        let mut events = spawned.handle.subscribe_events();
+        store.set_compare_and_swap_failure(true);
+
+        let result = spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::FireCue(CuePlayback {
+                    mode_id: "table".to_owned(),
+                    cue_id: "arrival".to_owned(),
+                    preset: Some(CuePreset {
+                        preset_id: "cinematic".to_owned(),
+                        crossfade_ms: Some(1_500),
+                    }),
+                    playlist: Some(CuePlaylist {
+                        track_ids: vec![TrackId::new(1)?],
+                        start_index: 0,
+                        start_ms: 2_500,
+                        source_playlist_id: 9,
+                    }),
+                    loops: Vec::new(),
+                    sfx: vec![CueSfx {
+                        soundboard_id: "main".to_owned(),
+                        item_path: "door.wav".to_owned(),
+                        volume: UnitInterval::new(0.7)?,
+                    }],
+                }),
+                generation,
+            ))
+            .await;
+
+        assert!(matches!(result, Err(PlaybackActorError::Persistence(_))));
+        assert_eq!(
+            states.borrow().state.active_mode_id.as_deref(),
+            Some("table")
+        );
+        assert!(states.borrow().state.active_preset_ids.is_empty());
+        assert!(states.borrow().state.ambient.current_track_id.is_none());
+        assert!(events.try_recv().is_err());
+        assert!(matches!(
+            spawned.task.await?,
+            Err(PlaybackActorError::Persistence(_))
+        ));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn position_report_is_silent_and_flushes_on_shutdown() -> Result<(), Box<dyn Error>> {
         let store = Arc::new(FakeStore::default());
         let clock = TestClock::default();
@@ -2160,6 +2278,7 @@ mod tests {
                         "storm".to_owned(),
                         BTreeSet::from(["thunder.mp3".to_owned()]),
                     )]),
+                    cue_ids: BTreeSet::new(),
                     preset_ids: BTreeSet::new(),
                 },
             )])),
@@ -2249,6 +2368,7 @@ mod tests {
         };
         let mode = || ModePlaybackReferences {
             soundboard_items: BTreeMap::new(),
+            cue_ids: BTreeSet::new(),
             preset_ids: BTreeSet::from(["calm".to_owned()]),
         };
         let catalog = CatalogSnapshot {
@@ -2258,6 +2378,7 @@ mod tests {
                 "tabletop".to_owned(),
                 CatalogMode {
                     soundboard_items: BTreeMap::new(),
+                    cue_ids: BTreeSet::new(),
                     preset_ids: BTreeSet::from(["calm".to_owned()]),
                 },
             )])),
@@ -2516,6 +2637,7 @@ mod tests {
                         "storm".to_owned(),
                         BTreeSet::from(["rain.mp3".to_owned()]),
                     )]),
+                    cue_ids: BTreeSet::new(),
                     preset_ids: BTreeSet::new(),
                 },
             )])),

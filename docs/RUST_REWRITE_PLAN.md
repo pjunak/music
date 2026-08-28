@@ -391,8 +391,9 @@ committed or logged.
 ## Phase 6 — modes, presets, playlists, cues, and authoring
 
 **Status:** In progress — Rust now owns the bounded mode catalog, all existing mode, soundboard,
-interrupt, cue, and preset CRUD, the complete playlist HTTP and playback boundary, and exact-item
-SFX/loop dispatch. Cue execution and import authoring remain.
+interrupt, cue, and preset CRUD, the complete playlist HTTP surface, resolved playlist/cue playback,
+and exact-item SFX/loop dispatch. Remaining catalog-scoped WebSocket actions and import authoring
+remain.
 
 - [x] `ModeCoordinator`, typed immutable catalog snapshots, generations, last-good reload behavior,
   health/diagnostic status, and authenticated plus guest-compatible read routes.
@@ -407,7 +408,12 @@ SFX/loop dispatch. Cue execution and import authoring remain.
 - [x] Generation-checked SFX and looping-SFX dispatch through the playback actor. Compact mode
   publications carry exact soundboard item paths, invalid items are rejected before broadcast,
   and a mode edit prunes loops whose item disappeared even when the soundboard still exists.
-- Cue dispatch through the playback actor.
+- [x] Atomic generation-checked cue dispatch through the playback actor. Preset activation,
+  mode-scoped named-playlist resolution, initial position, stable replacement loops, durable state,
+  and transient SFX are validated before one reducer/persistence boundary; a failed persistence
+  cannot emit a partial cue.
+- Remaining generation-checked catalog WebSocket actions: mode selection, direct track/queue/folder
+  playback, soundboard/preset selection, and single-track interrupts.
 - Authoring document schema, source adapters, preview/dependency validation, journaled commit, and
   create-only conflict behavior.
 

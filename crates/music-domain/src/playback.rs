@@ -169,6 +169,37 @@ impl LoopingSfx {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct CuePreset {
+    pub preset_id: String,
+    pub crossfade_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CuePlaylist {
+    pub track_ids: Vec<TrackId>,
+    pub start_index: usize,
+    pub start_ms: u64,
+    pub source_playlist_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CueSfx {
+    pub soundboard_id: String,
+    pub item_path: String,
+    pub volume: UnitInterval,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CuePlayback {
+    pub mode_id: String,
+    pub cue_id: String,
+    pub preset: Option<CuePreset>,
+    pub playlist: Option<CuePlaylist>,
+    pub loops: Vec<LoopingSfx>,
+    pub sfx: Vec<CueSfx>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct PositionReport {
     pub device_id: String,
     pub position_ms: u64,
@@ -297,6 +328,7 @@ pub enum PlaybackCommand {
     },
     InterruptSeek(u64),
     CancelInterrupt,
+    FireCue(CuePlayback),
     FireSfx {
         soundboard_id: String,
         item_path: String,
@@ -349,6 +381,7 @@ pub enum PlaybackError {
     InvalidUnitInterval,
     InvalidClock,
     InvalidLoopingSfx,
+    InvalidCuePlayback,
     RandomChoiceRequired,
     RandomChoiceOutOfRange,
     PositionEpochOverflow,
@@ -362,6 +395,7 @@ impl Display for PlaybackError {
             Self::InvalidUnitInterval => "value must be finite and between zero and one",
             Self::InvalidClock => "clock sample must contain a finite non-negative wall time",
             Self::InvalidLoopingSfx => "looping sound effect is outside its domain bounds",
+            Self::InvalidCuePlayback => "resolved cue is outside its domain bounds",
             Self::RandomChoiceRequired => "shuffle advance requires an explicit random choice",
             Self::RandomChoiceOutOfRange => "shuffle choice is outside the current queue",
             Self::PositionEpochOverflow => "playback position epoch overflowed",
@@ -526,6 +560,14 @@ pub fn reduce(
             interrupt_seek(&mut next, position_ms, context.clock.monotonic_ms)?
         }
         PlaybackCommand::CancelInterrupt => end_interrupt(&mut next, context.clock.monotonic_ms)?,
+        PlaybackCommand::FireCue(cue) => {
+            let changed = fire_cue(&mut next, cue, context.clock.monotonic_ms, &mut events)?;
+            if !changed {
+                publish_state = false;
+                persistence = PersistenceIntent::None;
+            }
+            changed
+        }
         PlaybackCommand::FireSfx {
             soundboard_id,
             item_path,
@@ -730,6 +772,76 @@ fn set_active_presets(
         changed = true;
     }
     changed
+}
+
+fn fire_cue(
+    state: &mut PlaybackState,
+    cue: CuePlayback,
+    now_ms: u64,
+    events: &mut Vec<DomainEvent>,
+) -> Result<bool, PlaybackError> {
+    let loop_prefix = format!("cue:{}:", cue.cue_id);
+    let valid = !cue.mode_id.is_empty()
+        && !cue.cue_id.is_empty()
+        && state.active_mode_id.as_deref() == Some(cue.mode_id.as_str())
+        && cue
+            .preset
+            .as_ref()
+            .is_none_or(|preset| !preset.preset_id.is_empty())
+        && cue.playlist.as_ref().is_none_or(|playlist| {
+            !playlist.track_ids.is_empty() && playlist.source_playlist_id > 0
+        })
+        && cue.loops.iter().enumerate().all(|(index, looping_sfx)| {
+            looping_sfx.id == format!("{loop_prefix}{index}")
+                && !looping_sfx.name.is_empty()
+                && !looping_sfx.soundboard_id.is_empty()
+                && !looping_sfx.item_path.is_empty()
+                && looping_sfx.interval_seconds.is_finite()
+                && (1.0..=3600.0).contains(&looping_sfx.interval_seconds)
+        })
+        && cue
+            .sfx
+            .iter()
+            .all(|sfx| !sfx.soundboard_id.is_empty() && !sfx.item_path.is_empty());
+    if !valid {
+        return Err(PlaybackError::InvalidCuePlayback);
+    }
+
+    let mut changed = false;
+    if let Some(preset) = cue.preset {
+        changed |= set_active_presets(state, vec![preset.preset_id], preset.crossfade_ms);
+    }
+    if let Some(playlist) = cue.playlist {
+        ambient_play_sequence(
+            state,
+            playlist.track_ids,
+            playlist.start_index,
+            Some(playlist.source_playlist_id),
+            now_ms,
+        )?;
+        if playlist.start_ms > 0 {
+            state.ambient.position_ms = playlist.start_ms.min(MAX_POSITION_MS);
+            state.ambient.position_anchor_ms = ambient_anchor(state, now_ms);
+        }
+        changed = true;
+    }
+
+    let previous_loop_count = state.looping_sfx.len();
+    state
+        .looping_sfx
+        .retain(|looping_sfx| !looping_sfx.id.starts_with(&loop_prefix));
+    changed |= state.looping_sfx.len() != previous_loop_count;
+    for looping_sfx in cue.loops {
+        state.looping_sfx.push(looping_sfx.clone());
+        events.push(DomainEvent::LoopStarted(looping_sfx));
+        changed = true;
+    }
+    events.extend(cue.sfx.into_iter().map(|sfx| DomainEvent::SfxFired {
+        soundboard_id: sfx.soundboard_id,
+        item_path: sfx.item_path,
+        volume: sfx.volume,
+    }));
+    Ok(changed)
 }
 
 fn set_crossfade(
@@ -1081,7 +1193,8 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{
-        ClockSample, CrossfadeType, LoopMode, PlaybackCommand, PlaybackError, PlaybackState,
+        ClockSample, CrossfadeType, CuePlayback, CuePlaylist, CuePreset, CueSfx, DomainEvent,
+        LoopMode, LoopingSfx, PersistenceIntent, PlaybackCommand, PlaybackError, PlaybackState,
         ReductionContext, ShuffleMode, TrackId, UnitInterval, materialize_positions, reduce,
     };
 
@@ -1106,6 +1219,136 @@ mod tests {
         monotonic_ms: u64,
     ) -> Result<PlaybackState, PlaybackError> {
         Ok(reduce(state, command, context(monotonic_ms)?)?.next_state)
+    }
+
+    #[test]
+    fn cue_reduction_applies_one_atomic_state_and_ordered_transients() -> Result<(), Box<dyn Error>>
+    {
+        let mut state = PlaybackState {
+            active_mode_id: Some("table".to_owned()),
+            ..PlaybackState::default()
+        };
+        state.looping_sfx = vec![
+            LoopingSfx::new(
+                "cue:arrival:1".to_owned(),
+                "Old cue loop".to_owned(),
+                "main".to_owned(),
+                "old.wav".to_owned(),
+                10.0,
+                UnitInterval::new(0.2)?,
+            )?,
+            LoopingSfx::new(
+                "manual".to_owned(),
+                "Manual loop".to_owned(),
+                "main".to_owned(),
+                "manual.wav".to_owned(),
+                20.0,
+                UnitInterval::new(0.3)?,
+            )?,
+        ];
+        let cue_loop = LoopingSfx::new(
+            "cue:arrival:0".to_owned(),
+            "Rain".to_owned(),
+            "main".to_owned(),
+            "rain.wav".to_owned(),
+            30.0,
+            UnitInterval::new(0.4)?,
+        )?;
+        let cue_sfx = CueSfx {
+            soundboard_id: "main".to_owned(),
+            item_path: "door.wav".to_owned(),
+            volume: UnitInterval::new(0.7)?,
+        };
+        let reduction = reduce(
+            &state,
+            PlaybackCommand::FireCue(CuePlayback {
+                mode_id: "table".to_owned(),
+                cue_id: "arrival".to_owned(),
+                preset: Some(CuePreset {
+                    preset_id: "cinematic".to_owned(),
+                    crossfade_ms: Some(1_500),
+                }),
+                playlist: Some(CuePlaylist {
+                    track_ids: vec![track(1)?, track(2)?, track(3)?],
+                    start_index: 1,
+                    start_ms: 2_500,
+                    source_playlist_id: 7,
+                }),
+                loops: vec![cue_loop.clone()],
+                sfx: vec![cue_sfx.clone()],
+            }),
+            context(1_000)?,
+        )?;
+
+        assert!(reduction.changed);
+        assert!(reduction.publish_state);
+        assert_eq!(reduction.persistence, PersistenceIntent::Immediate);
+        assert_eq!(reduction.next_state.active_preset_ids, ["cinematic"]);
+        assert_eq!(reduction.next_state.crossfade_ms, 1_500);
+        assert_eq!(
+            reduction.next_state.ambient.current_track_id,
+            Some(track(2)?)
+        );
+        assert_eq!(reduction.next_state.ambient.history, [track(1)?]);
+        assert_eq!(reduction.next_state.ambient.queue, [track(3)?]);
+        assert_eq!(reduction.next_state.ambient.position_ms, 2_500);
+        assert_eq!(reduction.next_state.ambient.position_anchor_ms, Some(1_000));
+        assert_eq!(reduction.next_state.ambient.source_playlist_id, Some(7));
+        assert_eq!(reduction.next_state.position_epoch, 1);
+        assert_eq!(
+            reduction
+                .next_state
+                .looping_sfx
+                .iter()
+                .map(|looping_sfx| looping_sfx.id.as_str())
+                .collect::<Vec<_>>(),
+            ["manual", "cue:arrival:0"]
+        );
+        assert_eq!(
+            reduction.events,
+            [
+                DomainEvent::LoopStarted(cue_loop),
+                DomainEvent::SfxFired {
+                    soundboard_id: cue_sfx.soundboard_id,
+                    item_path: cue_sfx.item_path,
+                    volume: cue_sfx.volume,
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn transient_only_cue_never_requests_persistence() -> Result<(), Box<dyn Error>> {
+        let state = PlaybackState {
+            active_mode_id: Some("table".to_owned()),
+            ..PlaybackState::default()
+        };
+        let reduction = reduce(
+            &state,
+            PlaybackCommand::FireCue(CuePlayback {
+                mode_id: "table".to_owned(),
+                cue_id: "bell".to_owned(),
+                preset: None,
+                playlist: None,
+                loops: Vec::new(),
+                sfx: vec![CueSfx {
+                    soundboard_id: "main".to_owned(),
+                    item_path: "bell.wav".to_owned(),
+                    volume: UnitInterval::new(0.5)?,
+                }],
+            }),
+            context(1_000)?,
+        )?;
+        assert!(!reduction.changed);
+        assert!(!reduction.publish_state);
+        assert_eq!(reduction.persistence, PersistenceIntent::None);
+        assert_eq!(reduction.next_state, state);
+        assert!(matches!(
+            reduction.events.as_slice(),
+            [DomainEvent::SfxFired { item_path, .. }] if item_path == "bell.wav"
+        ));
+        Ok(())
     }
 
     #[test]
