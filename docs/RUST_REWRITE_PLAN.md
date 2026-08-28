@@ -167,6 +167,11 @@ reviews and moves an accepted summary into durable project records.
   workflow because libFuzzer is not supported on this Windows host.
 - The path-free voice-probe binary classifies generated audio end to end with the exact pinned graph,
   and all five deterministic report/tool-policy tests pass. The Essentia side remains Linux-only.
+- The Rust-specific Docker context is an explicit allowlist that excludes the Python oracle and
+  unrelated workspace files. The runtime now carries its required third-party notice, the smoke
+  scan rejects Python files as well as executables, and the bind-mount instructions prepare the
+  non-root data directory. A pinned optimized build of both server binaries succeeds, and Cargo's
+  dependency records show no project build inputs outside `crates/`, matching the context allowlist.
 - The complete 186-file Python oracle is content-fingerprinted and quarantined; four deterministic
   tree-policy tests pass. CI now rejects oracle drift or new Python artifacts outside that boundary,
   while the prepared final mode rejects all executable/runtime remnants after the gated deletion.

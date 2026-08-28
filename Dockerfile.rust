@@ -50,6 +50,7 @@ COPY --from=rust-builder /out/music-server /usr/local/bin/music-server
 COPY --from=rust-builder /out/music-cli /usr/local/bin/music-cli
 COPY --from=frontend-builder /frontend/dist /app/static
 COPY modes /seeds/modes
+COPY docs/THIRD_PARTY_NOTICES.md /usr/share/doc/music/THIRD_PARTY_NOTICES.md
 
 RUN mkdir -p /app/data /data && \
     chown -R music:music /app /data /seeds

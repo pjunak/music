@@ -49,6 +49,7 @@ test("final scan rejects runtime remnants, transition tools, and generated artif
   const violations = finalTreeViolations([
     entry("Dockerfile"),
     entry("Dockerfile.rust"),
+    entry("Dockerfile.rust.dockerignore"),
     entry("README.md"),
     entry("backend/app/main.py"),
     entry("tools/requirements-dev.txt"),
@@ -58,6 +59,7 @@ test("final scan rejects runtime remnants, transition tools, and generated artif
   ], (path) => contents.get(path) ?? "");
   const report = violations.join("\n");
   assert.match(report, /backend|Python artifact|transition-only|generated|container base|setup action/iu);
+  assert.match(report, /Dockerfile\.rust\.dockerignore: transition-only/iu);
   assert.equal(report.match(/backend\//gu)?.length, 1);
 });
 

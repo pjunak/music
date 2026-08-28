@@ -209,8 +209,11 @@ not mixed into the database/media backup.
 # Python release until the separately authorized main-branch cutover.
 docker build -f Dockerfile.rust -t music-rust .
 
-# Prepare the optional AI secrets directory for the image's non-root UID.
-# Skip this and its mount if no provider API keys will be used.
+# Prepare persistent data for the image's non-root UID.
+sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-data
+
+# Prepare the optional AI secrets directory for the same UID. Skip this and
+# its mount if no provider API keys will be used.
 sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-secrets
 
 # Run it — application data and optional secrets stay separate.

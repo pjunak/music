@@ -18,6 +18,7 @@ const TRANSITION_ONLY_PATHS = new Set([
   ".github/scripts/voice-differential.mjs",
   ".github/scripts/voice-differential.test.mjs",
   "Dockerfile.rust",
+  "Dockerfile.rust.dockerignore",
 ]);
 const PYTHON_BASENAMES = new Set([
   ".python-version",

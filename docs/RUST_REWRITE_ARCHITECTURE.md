@@ -769,6 +769,12 @@ The production image remains a multi-stage build:
 3. A slim Debian runtime receives `music-server`, `music-cli`, the static frontend, seed modes,
    CA certificates, FFmpeg/ffprobe, and no compiler or Python runtime.
 
+The rewrite Dockerfile has its own allowlisted build context, so the frozen Python oracle and local
+workspace state are not sent to that builder. The runtime retains the checked-in third-party notice,
+and its smoke gate rejects Python executables or files in addition to asserting the notice is
+readable. Bind-mounted data and optional secrets directories are prepared for the documented
+non-root UID before startup.
+
 The server runs as the current non-root UID, serves the SPA and API from one origin, uses the same
 mounts and environment names where possible, and preserves the compatibility health endpoint while
 adding component readiness. `DEVICES_FILE` becomes a migration/import setting rather than a mutable
