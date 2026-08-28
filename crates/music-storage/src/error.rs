@@ -22,6 +22,7 @@ pub enum StorageError {
     Migration(sqlx::migrate::MigrateError),
     IncompatibleSchema(Box<SchemaReport>),
     BackupPathNotUnicode(PathBuf),
+    BackupTargetExists(PathBuf),
     BackupVerificationFailed {
         path: PathBuf,
     },
@@ -75,12 +76,19 @@ impl Display for StorageError {
             }
             Self::BackupPathNotUnicode(path) => write!(
                 formatter,
-                "migration backup path is not valid Unicode: {}",
+                "database backup path is not valid Unicode: {}",
                 path.display()
             ),
+            Self::BackupTargetExists(path) => {
+                write!(
+                    formatter,
+                    "backup target already exists: {}",
+                    path.display()
+                )
+            }
             Self::BackupVerificationFailed { path } => write!(
                 formatter,
-                "migration backup failed verification: {}",
+                "database backup failed verification: {}",
                 path.display()
             ),
             Self::BackgroundTask(_) => {
@@ -146,6 +154,7 @@ impl Error for StorageError {
             | Self::InvalidOption(_)
             | Self::IncompatibleSchema(_)
             | Self::BackupPathNotUnicode(_)
+            | Self::BackupTargetExists(_)
             | Self::BackupVerificationFailed { .. }
             | Self::InvalidStorageRevision(_)
             | Self::StorageRevisionOverflow

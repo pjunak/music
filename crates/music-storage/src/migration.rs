@@ -373,7 +373,7 @@ fn path_exists(path: &Path) -> Result<bool, StorageError> {
     })
 }
 
-fn hash_and_sync(path: &Path) -> Result<(String, u64), StorageError> {
+pub(crate) fn hash_and_sync(path: &Path) -> Result<(String, u64), StorageError> {
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)

@@ -10,6 +10,7 @@
 //! exclusive process/offline-writer lock.
 
 mod auth;
+mod backup;
 mod crypto;
 mod devices;
 mod error;
@@ -22,6 +23,7 @@ mod schema;
 mod sqlite;
 
 pub use auth::Argon2PasswordVerifier;
+pub use backup::DatabaseSnapshot;
 pub use crypto::{
     CredentialVault, CryptoError, EncryptedCredential, SecretString, hash_password, verify_password,
 };
