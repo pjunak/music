@@ -3935,6 +3935,224 @@
         ],
         "type": "object"
       },
+      "ModelRoleDefinitionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_available": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "required_capability_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "required_capability_ids",
+          "configuration_available"
+        ],
+        "type": "object"
+      },
+      "ModelRoleOut": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_available": {
+            "type": "boolean"
+          },
+          "conformance_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conformance_status": {
+            "enum": [
+              "never",
+              "passed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "effective_enabled": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_conformance_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_output_tokens": {
+            "type": "integer"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "required_capability_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role_id": {
+            "type": "string"
+          },
+          "thinking_mode": {
+            "enum": [
+              "provider_default",
+              "enabled",
+              "disabled"
+            ],
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "never",
+                  "verified",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "role_id",
+          "label",
+          "description",
+          "required_capability_ids",
+          "configuration_available",
+          "connection_id",
+          "connection_name",
+          "model_id",
+          "enabled",
+          "effective_enabled",
+          "timeout_seconds",
+          "max_output_tokens",
+          "thinking_mode",
+          "verification_status",
+          "conformance_status",
+          "conformance_error_code",
+          "last_conformance_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ModelRoleUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "connection_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_output_tokens": {
+            "default": 2000,
+            "maximum": 65536,
+            "minimum": 128,
+            "type": "integer"
+          },
+          "model_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "thinking_mode": {
+            "default": "provider_default",
+            "enum": [
+              "provider_default",
+              "enabled",
+              "disabled"
+            ],
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "default": 30,
+            "maximum": 300,
+            "minimum": 5,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connection_id",
+          "model_id"
+        ],
+        "type": "object"
+      },
       "ModelTaggingScope": {
         "additionalProperties": false,
         "properties": {
@@ -4721,6 +4939,411 @@
         "required": [
           "id",
           "name"
+        ],
+        "type": "object"
+      },
+      "ProviderAdapterOut": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "capability_ids"
+        ],
+        "type": "object"
+      },
+      "ProviderCapabilityOut": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description"
+        ],
+        "type": "object"
+      },
+      "ProviderConnectionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "allow_private_network": {
+            "default": false,
+            "type": "boolean"
+          },
+          "api_key": {
+            "format": "password",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          },
+          "base_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "adapter_id",
+          "base_url",
+          "api_key"
+        ],
+        "type": "object"
+      },
+      "ProviderConnectionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter_id": {
+            "type": "string"
+          },
+          "allow_private_network": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credential_saved": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "verification_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification_status": {
+            "enum": [
+              "never",
+              "verified",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "verified_capability_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "verified_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "adapter_id",
+          "base_url",
+          "credential_saved",
+          "key_hint",
+          "allow_private_network",
+          "verification_status",
+          "verification_error_code",
+          "verified_models",
+          "verified_capability_ids",
+          "last_verified_at",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ProviderConnectionUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allow_private_network": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProviderCredentialStorageReset": {
+        "additionalProperties": false,
+        "properties": {
+          "current_password": {
+            "format": "password",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "current_password"
+        ],
+        "type": "object"
+      },
+      "ProviderCredentialStorageResetOut": {
+        "additionalProperties": false,
+        "properties": {
+          "deleted_credentials": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "master_key_removal_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "master_key_removed": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProviderFrameworkStatusOut"
+          }
+        },
+        "required": [
+          "deleted_credentials",
+          "master_key_removed",
+          "master_key_removal_error",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ProviderFrameworkStatusOut": {
+        "additionalProperties": false,
+        "properties": {
+          "adapters": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderAdapterOut"
+            },
+            "type": "array"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityOut"
+            },
+            "type": "array"
+          },
+          "credential_storage_can_initialize": {
+            "type": "boolean"
+          },
+          "credential_storage_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential_storage_host_directory_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential_storage_initialization_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential_storage_key_file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential_storage_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential_storage_ready": {
+            "type": "boolean"
+          },
+          "credential_storage_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "environment",
+                  "file"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRoleDefinitionOut"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "credential_storage_ready",
+          "credential_storage_error",
+          "credential_storage_source",
+          "credential_storage_key_id",
+          "credential_storage_key_file_path",
+          "credential_storage_host_directory_hint",
+          "credential_storage_can_initialize",
+          "credential_storage_initialization_error",
+          "capabilities",
+          "adapters",
+          "roles"
         ],
         "type": "object"
       },
@@ -6963,6 +7586,377 @@
               }
             },
             "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/connections": {
+      "get": {
+        "operationId": "get_connections_api_assistant_providers_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderConnectionOut"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      },
+      "post": {
+        "operationId": "add_connection_api_assistant_providers_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConnectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/connections/{connection_id}": {
+      "delete": {
+        "operationId": "remove_connection_api_assistant_providers_connections__connection_id__delete",
+        "parameters": [
+          {
+            "description": "Connection Id",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      },
+      "put": {
+        "operationId": "edit_connection_api_assistant_providers_connections__connection_id__put",
+        "parameters": [
+          {
+            "description": "Connection Id",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/connections/{connection_id}/credential": {
+      "delete": {
+        "operationId": "remove_connection_credential_api_assistant_providers_connections__connection_id__credential_delete",
+        "parameters": [
+          {
+            "description": "Connection Id",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/credential-storage/initialize": {
+      "post": {
+        "operationId": "initialize_provider_storage_api_assistant_providers_credential_storage_initialize_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderFrameworkStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/credential-storage/reset": {
+      "post": {
+        "operationId": "reset_provider_storage_api_assistant_providers_credential_storage_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCredentialStorageReset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCredentialStorageResetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/roles": {
+      "get": {
+        "operationId": "get_roles_api_assistant_providers_roles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelRoleOut"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/roles/{role_id}": {
+      "delete": {
+        "operationId": "remove_role_api_assistant_providers_roles__role_id__delete",
+        "parameters": [
+          {
+            "description": "Role Id",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      },
+      "put": {
+        "operationId": "set_role_api_assistant_providers_roles__role_id__put",
+        "parameters": [
+          {
+            "description": "Role Id",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelRoleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRoleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/status": {
+      "get": {
+        "operationId": "get_framework_status_api_assistant_providers_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderFrameworkStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
           }
         },
         "tags": [

@@ -406,8 +406,17 @@ impl ApiError {
 
     #[must_use]
     pub const fn coded_conflict(code: &'static str, message: &'static str) -> Self {
+        Self::coded(StatusCode::CONFLICT, code, message)
+    }
+
+    #[must_use]
+    pub(crate) const fn coded(
+        status: StatusCode,
+        code: &'static str,
+        message: &'static str,
+    ) -> Self {
         Self {
-            status: StatusCode::CONFLICT,
+            status,
             payload: ApiErrorPayload::Coded(PublicErrorDetail { code, message }),
         }
     }

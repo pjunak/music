@@ -144,6 +144,38 @@ impl RuntimeAuth {
     ) -> Result<SessionLookup, AuthServiceError> {
         self.service.authenticate(token, touch).await
     }
+
+    pub(crate) async fn reauthenticate(
+        &self,
+        throttle_key: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<(), PasswordConfirmationError> {
+        if self.throttle.blocked(throttle_key) {
+            return Err(PasswordConfirmationError::Throttled);
+        }
+        let _permit = Arc::clone(&self.password_slots)
+            .try_acquire_owned()
+            .map_err(|_| PasswordConfirmationError::Throttled)?;
+        match self.service.verify_credentials(username, password).await {
+            Ok(()) => {
+                self.throttle.record_success(throttle_key);
+                Ok(())
+            }
+            Err(AuthServiceError::InvalidCredentials) => {
+                self.throttle.record_failure(throttle_key);
+                Err(PasswordConfirmationError::Invalid)
+            }
+            Err(error) => Err(PasswordConfirmationError::Internal(error)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum PasswordConfirmationError {
+    Throttled,
+    Invalid,
+    Internal(AuthServiceError),
 }
 
 #[derive(Debug)]

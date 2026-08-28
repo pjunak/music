@@ -267,6 +267,41 @@ where
         username: &str,
         password: &str,
     ) -> Result<AuthenticatedSession, AuthServiceError> {
+        let record = self.verified_user(username, password).await?;
+
+        let now = self
+            .clock
+            .now()
+            .map_err(|source| AuthServiceError::dependency("system clock", source))?;
+        let expires_at = now.checked_add_days(self.config.session_ttl_days)?;
+        let token = self
+            .token_source
+            .generate()
+            .map_err(|source| AuthServiceError::dependency("session token generation", source))?;
+        self.repository
+            .create_session(record.user.id, token.expose_secret(), now, expires_at)
+            .await
+            .map_err(|source| AuthServiceError::dependency("session creation", source))?;
+        Ok(AuthenticatedSession {
+            user: record.user,
+            token,
+            expires_at,
+        })
+    }
+
+    pub async fn verify_credentials(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<(), AuthServiceError> {
+        self.verified_user(username, password).await.map(|_| ())
+    }
+
+    async fn verified_user(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<UserCredentialRecord, AuthServiceError> {
         if !(1..=64).contains(&username.chars().count())
             || !(1..=256).contains(&password.chars().count())
         {
@@ -291,25 +326,7 @@ where
         let Some(record) = record.filter(|_| verified) else {
             return Err(AuthServiceError::InvalidCredentials);
         };
-
-        let now = self
-            .clock
-            .now()
-            .map_err(|source| AuthServiceError::dependency("system clock", source))?;
-        let expires_at = now.checked_add_days(self.config.session_ttl_days)?;
-        let token = self
-            .token_source
-            .generate()
-            .map_err(|source| AuthServiceError::dependency("session token generation", source))?;
-        self.repository
-            .create_session(record.user.id, token.expose_secret(), now, expires_at)
-            .await
-            .map_err(|source| AuthServiceError::dependency("session creation", source))?;
-        Ok(AuthenticatedSession {
-            user: record.user,
-            token,
-            expires_at,
-        })
+        Ok(record)
     }
 
     pub async fn authenticate(

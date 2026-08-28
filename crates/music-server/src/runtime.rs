@@ -13,7 +13,7 @@ use music_analysis::{
 };
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
-    MetadataAnalysisJobHandler, VoiceAnalyzerStatus,
+    MetadataAnalysisJobHandler, ProviderConnectionPolicy, ProviderRepository, VoiceAnalyzerStatus,
 };
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
@@ -61,6 +61,9 @@ use crate::error::RuntimeError;
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::http::{RuntimeServices, build_router};
 use crate::library::RuntimeLibrary;
+use crate::provider_api::{RuntimeProviders, provider_runtime_contract_digest};
+use crate::provider_credentials::RuntimeCredentialStore;
+use crate::provider_transport::ProviderNetworkBoundary;
 use crate::sfx::RuntimeSfx;
 use crate::supervisor::{CriticalTaskError, TaskSupervisor};
 
@@ -88,6 +91,7 @@ pub struct AppRuntime {
     cleanup_service: Arc<CleanupService>,
     cleanup_verification_service: Arc<CleanupVerificationService>,
     playlist_service: Arc<PlaylistService>,
+    providers: Arc<RuntimeProviders>,
     jobs: Arc<JobService>,
     sfx: Arc<RuntimeSfx>,
     library_root: LibraryRoot,
@@ -158,6 +162,16 @@ impl AppRuntime {
         let auth = Arc::new(RuntimeAuth::new(Arc::clone(&storage), &config)?);
         let assistant_repository: Arc<dyn AssistantRepository> = storage.clone();
         let assistant = Arc::new(AssistantService::new(assistant_repository));
+        let provider_repository: Arc<dyn ProviderRepository> = storage.clone();
+        let provider_credentials = Arc::new(RuntimeCredentialStore::new(&config));
+        let provider_policy: Arc<dyn ProviderConnectionPolicy> =
+            Arc::new(ProviderNetworkBoundary::new());
+        let providers = Arc::new(RuntimeProviders::new(
+            provider_repository,
+            provider_credentials,
+            provider_policy,
+            provider_runtime_contract_digest(),
+        ));
         let local_analysis_repository: Arc<dyn LocalAnalysisRepository> = storage.clone();
         let voice_analyzer = VoiceAnalyzerStatus::not_configured();
         let local_analysis = Arc::new(LocalAnalysisService::with_voice_analyzer(
@@ -325,6 +339,7 @@ impl AppRuntime {
             cleanup_service,
             cleanup_verification_service,
             playlist_service,
+            providers,
             jobs,
             sfx,
             library_root,
@@ -370,6 +385,7 @@ impl AppRuntime {
                 }),
                 modes: self.modes.clone(),
                 playlists: Arc::clone(&self.playlist_service),
+                providers: Arc::clone(&self.providers),
                 jobs: Arc::clone(&self.jobs),
                 sfx: Arc::clone(&self.sfx),
             },

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use music_application::assistant::{
-    AssistantFuture, ModelRoleRecord, ProviderConnectionRecord, ProviderMutationOutcome,
-    ProviderRepository,
+    AssistantFuture, ModelRoleRecord, ProviderConnectionRecord, ProviderCredentialResetOutcome,
+    ProviderMutationOutcome, ProviderRepository,
 };
 use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
@@ -26,6 +26,77 @@ const ROLE_SELECT: &str = "SELECT role_id, connection_id, model_id, enabled, tim
     FROM assistant_model_roles";
 
 impl ProviderRepository for SqliteStorage {
+    fn saved_provider_credentials_exist(&self) -> AssistantFuture<'_, bool> {
+        Box::pin(async move {
+            sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM assistant_provider_connections \
+                 WHERE encrypted_api_key != '' OR api_key_nonce != '' LIMIT 1)",
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(box_storage)
+        })
+    }
+
+    fn reset_provider_credentials(&self) -> AssistantFuture<'_, ProviderCredentialResetOutcome> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let active: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM background_jobs \
+                 WHERE kind LIKE 'assistant.model%' \
+                 AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1)",
+            )
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            if active {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderCredentialResetOutcome::ModelJobActive);
+            }
+            let deleted_credentials = u64::try_from(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM assistant_provider_connections \
+                     WHERE encrypted_api_key != '' AND api_key_nonce != ''",
+                )
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(box_storage)?,
+            )
+            .map_err(|_| {
+                box_storage(StorageError::InvalidAssistantRecord(
+                    "invalid provider credential count",
+                ))
+            })?;
+            sqlx::query(
+                "UPDATE assistant_provider_connections SET encrypted_api_key = '', \
+                 api_key_nonce = '', api_key_hint = '', verification_status = 'never', \
+                 verification_error_code = NULL, verified_models_json = '[]', \
+                 verified_capabilities_json = '[]', last_verified_at = NULL, \
+                 updated_at = CURRENT_TIMESTAMP",
+            )
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            sqlx::query("DELETE FROM assistant_model_evaluations")
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+            sqlx::query(
+                "UPDATE assistant_model_roles SET conformance_status = 'never', \
+                 conformance_error_code = NULL, conformance_fingerprint = NULL, \
+                 last_conformance_at = NULL, updated_at = CURRENT_TIMESTAMP",
+            )
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderCredentialResetOutcome::Applied {
+                deleted_credentials,
+            })
+        })
+    }
+
     fn provider_connections(&self) -> AssistantFuture<'_, Vec<ProviderConnectionRecord>> {
         Box::pin(async move {
             let query = format!("{CONNECTION_SELECT} ORDER BY lower(name), id");
@@ -724,6 +795,33 @@ mod tests {
         assert_eq!(
             storage.delete_model_role("music_tagger").await?,
             ProviderMutationOutcome::RoleModelJobActive
+        );
+        assert_eq!(
+            storage.reset_provider_credentials().await?,
+            ProviderCredentialResetOutcome::ModelJobActive
+        );
+        sqlx::query("UPDATE background_jobs SET status = 'succeeded' WHERE id = 'active-job'")
+            .execute(&storage.pool)
+            .await?;
+        assert_eq!(
+            storage.reset_provider_credentials().await?,
+            ProviderCredentialResetOutcome::Applied {
+                deleted_credentials: 1
+            }
+        );
+        let cleared = storage
+            .provider_connection(&connection.id)
+            .await?
+            .ok_or("missing connection")?;
+        assert!(!cleared.credential_saved());
+        assert_eq!(
+            storage
+                .model_roles()
+                .await?
+                .pop()
+                .ok_or("missing role")?
+                .conformance_status,
+            "never"
         );
         Ok(())
     }

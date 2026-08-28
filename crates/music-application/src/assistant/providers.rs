@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Display, Formatter};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -382,21 +384,21 @@ pub struct ModelRoleView {
     pub updated_at_unix_seconds: Option<i64>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct ProviderConnectionCreate {
     pub name: String,
     pub adapter_id: String,
     pub base_url: String,
-    pub api_key: String,
+    pub api_key: ProviderSecret,
     pub allow_private_network: bool,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Default)]
 pub struct ProviderConnectionPatch {
     pub name: Option<String>,
     pub adapter_id: Option<String>,
     pub base_url: Option<String>,
-    pub api_key: Option<String>,
+    pub api_key: Option<ProviderSecret>,
     pub allow_private_network: Option<bool>,
 }
 
@@ -475,8 +477,16 @@ pub trait ProviderCredentialCipher: Debug + Send + Sync {
     ) -> Result<ProviderSecret, ProviderCredentialError>;
 }
 
+pub type ProviderCredentialFuture<'a> = Pin<
+    Box<
+        dyn Future<Output = Result<Arc<dyn ProviderCredentialCipher>, ProviderCredentialError>>
+            + Send
+            + 'a,
+    >,
+>;
+
 pub trait ProviderCredentialSource: Debug + Send + Sync {
-    fn current_cipher(&self) -> Result<Arc<dyn ProviderCredentialCipher>, ProviderCredentialError>;
+    fn current_cipher(&self) -> ProviderCredentialFuture<'_>;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -513,7 +523,15 @@ pub enum ProviderMutationOutcome {
     Changed,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ProviderCredentialResetOutcome {
+    Applied { deleted_credentials: u64 },
+    ModelJobActive,
+}
+
 pub trait ProviderRepository: Debug + Send + Sync {
+    fn saved_provider_credentials_exist(&self) -> AssistantFuture<'_, bool>;
+    fn reset_provider_credentials(&self) -> AssistantFuture<'_, ProviderCredentialResetOutcome>;
     fn provider_connections(&self) -> AssistantFuture<'_, Vec<ProviderConnectionRecord>>;
     fn provider_connection<'a>(
         &'a self,
@@ -667,7 +685,7 @@ impl ProviderService {
         normalize_required(&mut request.name, 128)?;
         normalize_required(&mut request.adapter_id, 64)?;
         normalize_required(&mut request.base_url, 2_048)?;
-        validate_api_key(&request.api_key)?;
+        validate_api_key(request.api_key.expose_secret())?;
         require_adapter(&request.adapter_id)?;
         let base_url = self
             .policy
@@ -681,8 +699,9 @@ impl ProviderService {
         let encrypted = self
             .credentials
             .current_cipher()
+            .await
             .map_err(map_credential_error)?
-            .encrypt(&id, &request.api_key)
+            .encrypt(&id, request.api_key.expose_secret())
             .map_err(map_credential_error)?;
         let record = ProviderConnectionRecord {
             id: id.clone(),
@@ -729,7 +748,7 @@ impl ProviderService {
             normalize_required(value, 2_048)?;
         }
         if let Some(value) = request.api_key.as_ref() {
-            validate_api_key(value)?;
+            validate_api_key(value.expose_secret())?;
         }
         let current = self.connection_record(connection_id).await?;
         if request.api_key.is_some() && current.credential_saved() {
@@ -761,8 +780,9 @@ impl ProviderService {
             let encrypted = self
                 .credentials
                 .current_cipher()
+                .await
                 .map_err(map_credential_error)?
-                .encrypt(connection_id, &api_key)
+                .encrypt(connection_id, api_key.expose_secret())
                 .map_err(map_credential_error)?;
             replacement.encrypted_api_key = encrypted.ciphertext;
             replacement.api_key_nonce = encrypted.nonce;
@@ -851,7 +871,7 @@ impl ProviderService {
             .filter(|role| model_role(&role.role_id).is_some())
             .map(|role| (role.role_id.clone(), role))
             .collect::<BTreeMap<_, _>>();
-        let cipher = self.credentials.current_cipher().ok();
+        let cipher = self.credentials.current_cipher().await.ok();
         Ok(MODEL_ROLES
             .iter()
             .map(|definition| {
@@ -911,7 +931,7 @@ impl ProviderService {
             return Err(incompatible_connection());
         }
         if request.enabled {
-            self.decrypt_credential(&connection)?;
+            self.decrypt_credential(&connection).await?;
         }
         let current = self
             .repository
@@ -1127,7 +1147,7 @@ impl ProviderService {
         format!("{:x}", Sha256::digest(value.as_bytes()))
     }
 
-    fn decrypt_credential(
+    async fn decrypt_credential(
         &self,
         connection: &ProviderConnectionRecord,
     ) -> Result<ProviderSecret, ProviderServiceError> {
@@ -1140,6 +1160,7 @@ impl ProviderService {
         }
         self.credentials
             .current_cipher()
+            .await
             .map_err(map_credential_error)?
             .decrypt(
                 &connection.id,
