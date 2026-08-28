@@ -9,9 +9,10 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use music_application::auth::{SecretSessionToken, SessionLookup, SessionTouch, UnixSeconds};
 use music_application::playback::{
-    ClientRegistration, ConnectionId, PlaybackActorHandle, PlaybackPublication,
-    ResolvedPlaybackCommand,
+    CatalogGeneration, ClientRegistration, ConnectionId, PlaybackActorError, PlaybackActorHandle,
+    PlaybackPublication, ResolvedPlaybackCommand,
 };
+use music_application::playlists::{PlaylistService, PlaylistServiceError};
 use music_domain::{
     CrossfadeType as DomainCrossfadeType, DomainEvent, LoopMode as DomainLoopMode, PlaybackCommand,
     ShuffleMode as DomainShuffleMode, UnitInterval as DomainUnitInterval,
@@ -25,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 use crate::auth::{CurrentSession, RuntimeAuth, optional_session};
 use crate::devices::RuntimeDevices;
 use crate::http::HttpState;
+use crate::library::RuntimeLibrary;
 use crate::playback_projection::{canonical_state, guest_state, legacy_state};
 
 const ABSOLUTE_VOLUME_PROTOCOL_VERSION: i64 = 2;
@@ -66,10 +68,22 @@ struct ReaderContext {
     connection_id: ConnectionId,
     auth: Option<Arc<RuntimeAuth>>,
     devices: Option<Arc<RuntimeDevices>>,
+    library: Option<Arc<RuntimeLibrary>>,
+    modes: Option<music_application::modes::ModeCoordinatorHandle>,
+    playlists: Option<Arc<PlaylistService>>,
     authorization: SessionAuthorization,
     projection: watch::Sender<SessionProjection>,
     writer: mpsc::Sender<WriterCommand>,
     cancellation: CancellationToken,
+}
+
+struct WebsocketServices {
+    playback: PlaybackActorHandle,
+    auth: Option<Arc<RuntimeAuth>>,
+    devices: Option<Arc<RuntimeDevices>>,
+    library: Option<Arc<RuntimeLibrary>>,
+    modes: Option<music_application::modes::ModeCoordinatorHandle>,
+    playlists: Option<Arc<PlaylistService>>,
 }
 
 impl SessionAuthorization {
@@ -107,14 +121,18 @@ pub async fn websocket_upgrade(
             Ok(session) => session,
             Err(error) => return error.into_response(),
         };
-    let auth = state.auth.clone();
-    let devices = state.devices.clone();
+    let services = WebsocketServices {
+        playback,
+        auth: state.auth.clone(),
+        devices: state.devices.clone(),
+        library: state.library.clone(),
+        modes: state.modes.clone(),
+        playlists: state.playlists.clone(),
+    };
     upgrade
         .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
-        .on_upgrade(move |socket| {
-            websocket_session(socket, playback, auth, devices, initial_session)
-        })
+        .on_upgrade(move |socket| websocket_session(socket, services, initial_session))
         .into_response()
 }
 
@@ -133,11 +151,17 @@ async fn unavailable_session(mut socket: WebSocket) {
 
 async fn websocket_session(
     socket: WebSocket,
-    playback: PlaybackActorHandle,
-    auth: Option<Arc<RuntimeAuth>>,
-    devices: Option<Arc<RuntimeDevices>>,
+    services: WebsocketServices,
     initial_session: Option<CurrentSession>,
 ) {
+    let WebsocketServices {
+        playback,
+        auth,
+        devices,
+        library,
+        modes,
+        playlists,
+    } = services;
     let connection_id = match playback.open_connection().await {
         Ok(connection_id) => connection_id,
         Err(_) => {
@@ -186,6 +210,9 @@ async fn websocket_session(
             connection_id,
             auth,
             devices,
+            library,
+            modes,
+            playlists,
             authorization,
             projection: projection_tx,
             writer: writer_tx,
@@ -278,6 +305,9 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
         playback,
         connection_id,
         devices,
+        library,
+        modes,
+        playlists,
         authorization,
         projection,
         writer,
@@ -366,6 +396,93 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
             .await;
             drop(action);
         }
+        ClientAction::AmbientPlayPlaylist {
+            playlist_id,
+            start_index,
+        } => {
+            let Some(dependencies) = playlist_dependencies(library, modes, playlists) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let start_index = match usize::try_from(start_index.get()) {
+                Ok(start_index) => start_index,
+                Err(_) => {
+                    queue_error(
+                        writer,
+                        "playlist start index is too large",
+                        None,
+                        cancellation,
+                    )
+                    .await;
+                    return;
+                }
+            };
+            let result =
+                execute_playlist_command(playback, dependencies, playlist_id, |track_ids| {
+                    PlaybackCommand::AmbientPlaySequence {
+                        track_ids,
+                        start_index,
+                        source_playlist_id: Some(playlist_id),
+                    }
+                })
+                .await;
+            if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::FireInterruptPlaylist {
+            playlist_id,
+            return_to_ambient,
+            fade_in_ms,
+            fade_out_ms,
+            duck_to,
+        } => {
+            let Some(dependencies) = playlist_dependencies(library, modes, playlists) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let Ok(fade_in_ms) = u32::try_from(fade_in_ms.get()) else {
+                queue_error(writer, "fade duration is too large", None, cancellation).await;
+                return;
+            };
+            let Ok(fade_out_ms) = u32::try_from(fade_out_ms.get()) else {
+                queue_error(writer, "fade duration is too large", None, cancellation).await;
+                return;
+            };
+            let duck_to = match duck_to.map(|value| domain_volume(value.get())).transpose() {
+                Ok(duck_to) => duck_to,
+                Err(detail) => {
+                    queue_error(writer, detail, None, cancellation).await;
+                    return;
+                }
+            };
+            let result =
+                execute_playlist_command(playback, dependencies, playlist_id, |track_ids| {
+                    PlaybackCommand::FireInterruptSequence {
+                        track_ids,
+                        return_to_ambient,
+                        fade_in_ms,
+                        fade_out_ms,
+                        duck_to,
+                    }
+                })
+                .await;
+            if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
         action => match direct_command(action) {
             Ok(Some(command)) => {
                 if let Err(error) = playback
@@ -387,6 +504,75 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
             }
             Err(detail) => queue_error(writer, detail, None, cancellation).await,
         },
+    }
+}
+
+struct PlaylistDependencies<'a> {
+    library: &'a RuntimeLibrary,
+    modes: &'a music_application::modes::ModeCoordinatorHandle,
+    playlists: &'a PlaylistService,
+}
+
+fn playlist_dependencies<'a>(
+    library: &'a Option<Arc<RuntimeLibrary>>,
+    modes: &'a Option<music_application::modes::ModeCoordinatorHandle>,
+    playlists: &'a Option<Arc<PlaylistService>>,
+) -> Option<PlaylistDependencies<'a>> {
+    Some(PlaylistDependencies {
+        library: library.as_deref()?,
+        modes: modes.as_ref()?,
+        playlists: playlists.as_deref()?,
+    })
+}
+
+async fn execute_playlist_command(
+    playback: &PlaybackActorHandle,
+    dependencies: PlaylistDependencies<'_>,
+    playlist_id: i64,
+    command: impl Fn(Vec<music_domain::TrackId>) -> PlaybackCommand,
+) -> Result<(), &'static str> {
+    for _ in 0..2 {
+        let track_ids = dependencies
+            .playlists
+            .track_ids(playlist_id)
+            .await
+            .map_err(map_playlist_resolution_error)?;
+        if track_ids.is_empty() {
+            return Err("playlist is empty");
+        }
+        let mode_generation = dependencies
+            .modes
+            .snapshot()
+            .ok_or("the required library or mode catalog is not ready")?
+            .generation;
+        let generation = CatalogGeneration {
+            library: dependencies.library.coordinator.status().generation.get(),
+            modes: mode_generation,
+        };
+        match playback
+            .execute(ResolvedPlaybackCommand::at_generation(
+                command(track_ids),
+                generation,
+            ))
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(PlaybackActorError::StaleCatalog { .. }) => tokio::task::yield_now().await,
+            Err(PlaybackActorError::InvalidCatalogReference) => {
+                return Err("playlist contains a track that is no longer in the library");
+            }
+            Err(_) => return Err("playback action failed"),
+        }
+    }
+    Err("catalog changed; retry the request")
+}
+
+fn map_playlist_resolution_error(error: PlaylistServiceError) -> &'static str {
+    match error {
+        PlaylistServiceError::NotFound => "playlist not found",
+        PlaylistServiceError::InvalidRule(_) => "automatic playlist rule is invalid",
+        PlaylistServiceError::ConcurrentChange => "playlist changed; retry the request",
+        _ => "playlist resolution failed",
     }
 }
 
@@ -751,15 +937,17 @@ async fn finish_writer(writer: &mut JoinHandle<Result<(), ()>>) {
 mod tests {
     use std::collections::BTreeMap;
     use std::error::Error;
+    use std::fs;
     use std::io;
     use std::path::Path;
     use std::time::Duration;
 
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use axum::http::header::COOKIE;
     use axum::http::{HeaderValue, Request, StatusCode};
     use futures_util::{SinkExt, StreamExt};
     use music_application::auth::{AuthRepository, UnixSeconds};
+    use music_application::library::ReconciliationStatus;
     use music_protocol::{ErrorCode, ServerMessage};
     use music_storage::{SqliteStorage, SqliteStorageOptions, hash_password};
     use tempfile::tempdir;
@@ -1045,6 +1233,189 @@ mod tests {
             }
         }
         assert!(saw_guest_rejection);
+
+        socket.close(None).await?;
+        let _ = shutdown_tx.send(());
+        server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn automatic_playlist_http_contract_resolves_into_playback_sequences()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Album"))?;
+        fs::write(
+            directory.path().join("music/Album/01 - First.mp3"),
+            b"playlist fixture",
+        )?;
+        fs::write(
+            directory.path().join("music/Album/02 - Second.mp3"),
+            b"playlist fixture",
+        )?;
+        let token = "playlist-test-session-token";
+        seed_session(directory.path(), token).await?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let router = runtime.router()?;
+        let cookie = format!("music_session={token}");
+
+        let search = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/search?q=&sort=path&order=asc")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(search.status(), StatusCode::OK);
+        let search: serde_json::Value =
+            serde_json::from_slice(&to_bytes(search.into_body(), 1024 * 1024).await?)?;
+        let track_ids = search["tracks"]
+            .as_array()
+            .ok_or("library search tracks were missing")?
+            .iter()
+            .map(|track| track["id"].as_i64().ok_or("track id was missing"))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(track_ids.len(), 2);
+
+        let created = router
+            .clone()
+            .oneshot(
+                Request::post("/api/playlists")
+                    .header(COOKIE, &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Quiet scenes","category":"ambient"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let created: serde_json::Value =
+            serde_json::from_slice(&to_bytes(created.into_body(), 1024 * 1024).await?)?;
+        let playlist_id = created["id"].as_i64().ok_or("playlist id was missing")?;
+
+        for track_id in &track_ids {
+            let added = router
+                .clone()
+                .oneshot(
+                    Request::post(format!("/api/playlists/{playlist_id}/tracks"))
+                        .header(COOKIE, &cookie)
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(r#"{{"track_id":{track_id}}}"#)))?,
+                )
+                .await?;
+            assert_eq!(added.status(), StatusCode::CREATED);
+        }
+
+        let rule = serde_json::json!({"schema":"automatic-playlist/v1"});
+        let preview = router
+            .clone()
+            .oneshot(
+                Request::post(format!("/api/playlists/{playlist_id}/automatic/preview"))
+                    .header(COOKIE, &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::json!({"rule":rule}).to_string()))?,
+            )
+            .await?;
+        assert_eq!(preview.status(), StatusCode::OK);
+        let preview: serde_json::Value =
+            serde_json::from_slice(&to_bytes(preview.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(preview["library_tracks"], 2);
+        assert_eq!(preview["matched_tracks"], 2);
+        let signature = preview["source_signature"]
+            .as_str()
+            .ok_or("automatic preview signature was missing")?;
+        let configured = router
+            .clone()
+            .oneshot(
+                Request::put(format!("/api/playlists/{playlist_id}/automatic"))
+                    .header(COOKIE, &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"rule":rule,"source_signature":signature}).to_string(),
+                    ))?,
+            )
+            .await?;
+        assert_eq!(configured.status(), StatusCode::OK);
+
+        let managed = router
+            .clone()
+            .oneshot(
+                Request::post(format!("/api/playlists/{playlist_id}/tracks"))
+                    .header(COOKIE, &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"track_id":{}}}"#, track_ids[0])))?,
+            )
+            .await?;
+        assert_eq!(managed.status(), StatusCode::CONFLICT);
+        let managed: serde_json::Value =
+            serde_json::from_slice(&to_bytes(managed.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            managed["detail"]["code"],
+            "automatic_playlist_items_managed"
+        );
+
+        let exported = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/playlists/{playlist_id}/export"))
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(exported.status(), StatusCode::OK);
+        let exported =
+            String::from_utf8(to_bytes(exported.into_body(), 1024 * 1024).await?.to_vec())?;
+        assert!(exported.starts_with("#EXTM3U\n#PLAYLIST:Quiet scenes\n"));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(runtime.run(listener, async move {
+            let _ = shutdown_rx.await;
+            Ok(())
+        }));
+        let mut request = format!("ws://{address}/api/ws").into_client_request()?;
+        request
+            .headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie)?);
+        let (mut socket, _) = connect_async(request).await?;
+        let _ = next_protocol_message(&mut socket).await?;
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"ambient_play_playlist",
+                    "playlist_id":playlist_id,
+                    "start_index":1
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let mut saw_playlist = false;
+        for _ in 0..4 {
+            if matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::StateChanged { state }
+                    if state.ambient.current_track_id == Some(track_ids[1])
+                        && state.ambient.source_playlist_id == Some(playlist_id)
+            ) {
+                saw_playlist = true;
+                break;
+            }
+        }
+        assert!(saw_playlist);
 
         socket.close(None).await?;
         let _ = shutdown_tx.send(());

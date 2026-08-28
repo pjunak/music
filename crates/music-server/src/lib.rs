@@ -23,6 +23,7 @@ mod http;
 mod library;
 mod modes;
 mod playback_projection;
+mod playlists;
 mod runtime;
 mod supervisor;
 mod websocket;

@@ -12,6 +12,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use music_application::modes::ModeCoordinatorHandle;
 use music_application::playback::PlaybackActorHandle;
+use music_application::playlists::PlaylistService;
 use music_protocol::PlayerState;
 use serde::Deserialize;
 use tower::ServiceBuilder;
@@ -51,6 +52,7 @@ pub(crate) struct HttpState {
     pub(crate) devices: Option<Arc<RuntimeDevices>>,
     pub(crate) library: Option<Arc<RuntimeLibrary>>,
     pub(crate) modes: Option<ModeCoordinatorHandle>,
+    pub(crate) playlists: Option<Arc<PlaylistService>>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +64,7 @@ pub(crate) struct RuntimeServices {
     pub(crate) devices: Arc<RuntimeDevices>,
     pub(crate) library: Arc<RuntimeLibrary>,
     pub(crate) modes: ModeCoordinatorHandle,
+    pub(crate) playlists: Arc<PlaylistService>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -102,6 +105,7 @@ pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Rou
             devices: Some(services.devices),
             library: Some(services.library),
             modes: Some(services.modes),
+            playlists: Some(services.playlists),
         },
     )
 }
@@ -121,6 +125,7 @@ fn build_router_without_playback(
             devices: None,
             library: None,
             modes: None,
+            playlists: None,
         },
     )
 }
@@ -164,6 +169,7 @@ fn documented_api_router() -> OpenApiRouter<HttpState> {
         .merge(crate::diagnostics::diagnostics_router())
         .merge(crate::library::library_router())
         .merge(crate::modes::mode_router())
+        .merge(crate::playlists::playlist_router())
         .merge(crate::cleanup::cleanup_router())
         .routes(routes!(liveness))
         .routes(routes!(readiness))

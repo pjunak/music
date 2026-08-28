@@ -25,7 +25,7 @@ use sqlx::{QueryBuilder, Row, Sqlite};
 
 use crate::{SqliteStorage, StorageError};
 
-const TRACK_COLUMNS: &str = "id, path, title, artist, album_artist, album, track_no, disc_no, \
+pub(crate) const TRACK_COLUMNS: &str = "id, path, title, artist, album_artist, album, track_no, disc_no, \
     year, genre, length_s, bpm, display_title, origin, size_bytes, mtime, \
     CAST(strftime('%s', added_at) AS INTEGER) AS added_at_unix_seconds";
 const MAX_RECONCILIATION_TRACKS: usize = 1_000_000;
@@ -1908,7 +1908,7 @@ async fn count_reconciliation_rows(
         .map_err(|_| StorageError::InvalidLibraryState("reconciliation count is negative"))
 }
 
-fn indexed_track_from_row(row: &SqliteRow) -> Result<IndexedTrack, StorageError> {
+pub(crate) fn indexed_track_from_row(row: &SqliteRow) -> Result<IndexedTrack, StorageError> {
     let numeric = |field: &'static str, value: Option<i64>| {
         value
             .map(|value| {

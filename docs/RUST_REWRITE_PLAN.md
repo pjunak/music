@@ -259,8 +259,8 @@ the client-ended path, unknown interrupts use the compatible five-minute safety 
 automatic skip carries the observed track ID so a simultaneous client skip remains idempotent.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 65 currently registered Rust operations, rather than presenting partial work as
-parity. Sixty-four operations overlap the reference and 63 are fully schema-compatible; the
+operations versus 79 currently registered Rust operations, rather than presenting partial work as
+parity. Seventy-eight operations overlap the reference and 77 are fully schema-compatible; the
 remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work.
 The browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
@@ -388,8 +388,9 @@ committed or logged.
 
 ## Phase 6 — modes, presets, playlists, cues, and authoring
 
-**Status:** In progress — Rust now owns the bounded mode catalog and all existing mode, soundboard,
-interrupt, cue, and preset CRUD. Playlists, SFX dispatch, and import authoring remain.
+**Status:** In progress — Rust now owns the bounded mode catalog, all existing mode, soundboard,
+interrupt, cue, and preset CRUD, and the complete playlist HTTP and playback boundary. SFX dispatch
+and import authoring remain.
 
 - [x] `ModeCoordinator`, typed immutable catalog snapshots, generations, last-good reload behavior,
   health/diagnostic status, and authenticated plus guest-compatible read routes.
@@ -397,7 +398,10 @@ interrupt, cue, and preset CRUD. Playlists, SFX dispatch, and import authoring r
   validation, staged and hashed YAML candidates, SQLite recovery journals, startup rollback,
   catalog-change publication, and active-preset revision updates. All 19 frozen write operations
   are OpenAPI-compatible.
-- Playlist ordering, automatic rules, materialization, export, and playback resolution.
+- [x] Playlist CRUD and duplicate-preserving contiguous ordering, automatic-rule preview and atomic
+  materialization, current manual/local-analysis tag sources, last-good damaged-rule behavior,
+  M3U/JSON export, and generation-checked playback resolution through the playback actor. All 14
+  frozen playlist operations are OpenAPI-compatible.
 - SFX/loop/cue dispatch through the playback actor.
 - Authoring document schema, source adapters, preview/dependency validation, journaled commit, and
   create-only conflict behavior.

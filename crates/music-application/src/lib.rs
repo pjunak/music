@@ -15,4 +15,5 @@ pub mod devices;
 pub mod library;
 pub mod modes;
 pub mod playback;
+pub mod playlists;
 pub mod recovery;

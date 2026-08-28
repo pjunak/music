@@ -23,6 +23,7 @@ use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
     SystemPlaybackClock, SystemQueueRandom, start_playback_actor,
 };
+use music_application::playlists::{PlaylistRepository, PlaylistService};
 use music_application::recovery::RecoveryJournalRepository;
 use music_media::{
     FfmpegTools, FilesystemLibraryDiscovery, FilesystemLibraryMutations,
@@ -68,6 +69,7 @@ pub struct AppRuntime {
     library_service: Arc<LibraryService>,
     cleanup_service: Arc<CleanupService>,
     cleanup_verification_service: Arc<CleanupVerificationService>,
+    playlist_service: Arc<PlaylistService>,
     library_root: LibraryRoot,
     library_metadata: MetadataAdapter,
 }
@@ -208,6 +210,8 @@ impl AppRuntime {
             cleanup_verification_repository,
             cleanup_lookup,
         ));
+        let playlist_repository: Arc<dyn PlaylistRepository> = storage.clone();
+        let playlist_service = Arc::new(PlaylistService::new(playlist_repository));
         health.set_component("library_coordinator", true, ComponentStatus::Ready);
         apply_library_health(&health, library.status().status);
         library.request_reconciliation()?;
@@ -234,6 +238,7 @@ impl AppRuntime {
             library_service,
             cleanup_service,
             cleanup_verification_service,
+            playlist_service,
             library_root,
             library_metadata,
         })
@@ -274,6 +279,7 @@ impl AppRuntime {
                     max_upload_file_bytes: self.config.max_upload_file_bytes,
                 }),
                 modes: self.modes.clone(),
+                playlists: Arc::clone(&self.playlist_service),
             },
         )
     }

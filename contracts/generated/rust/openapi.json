@@ -305,6 +305,214 @@
         ],
         "type": "object"
       },
+      "AutomaticPlaylistApplyResult": {
+        "properties": {
+          "materialized_tracks": {
+            "type": "integer"
+          },
+          "playlist": {
+            "$ref": "#/components/schemas/PlaylistMeta"
+          },
+          "schema_version": {
+            "const": "automatic-playlist-apply/v1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "playlist",
+          "materialized_tracks"
+        ],
+        "type": "object"
+      },
+      "AutomaticPlaylistConfigureRequest": {
+        "properties": {
+          "rule": {
+            "$ref": "#/components/schemas/AutomaticPlaylistRuleV1"
+          },
+          "source_signature": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule",
+          "source_signature"
+        ],
+        "type": "object"
+      },
+      "AutomaticPlaylistPreview": {
+        "properties": {
+          "library_tracks": {
+            "type": "integer"
+          },
+          "matched_tracks": {
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "automatic-playlist-preview/v1",
+            "type": "string"
+          },
+          "source_signature": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/AutomaticTrackSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "source_signature",
+          "library_tracks",
+          "matched_tracks",
+          "tracks"
+        ],
+        "type": "object"
+      },
+      "AutomaticPlaylistPreviewRequest": {
+        "properties": {
+          "rule": {
+            "$ref": "#/components/schemas/AutomaticPlaylistRuleV1"
+          }
+        },
+        "required": [
+          "rule"
+        ],
+        "type": "object"
+      },
+      "AutomaticPlaylistRuleV1": {
+        "additionalProperties": false,
+        "properties": {
+          "exclude_tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "include_tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "include_unknown_bpm": {
+            "default": true,
+            "type": "boolean"
+          },
+          "match": {
+            "default": "any",
+            "enum": [
+              "any",
+              "all"
+            ],
+            "type": "string"
+          },
+          "max_bpm": {
+            "anyOf": [
+              {
+                "maximum": 999,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maximum_tracks": {
+            "default": 200,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "min_bpm": {
+            "anyOf": [
+              {
+                "maximum": 999,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_by": {
+            "default": "title",
+            "enum": [
+              "title",
+              "newest",
+              "bpm_ascending",
+              "bpm_descending"
+            ],
+            "type": "string"
+          },
+          "schema": {
+            "const": "automatic-playlist/v1",
+            "type": "string"
+          },
+          "tag_sources": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "manual_and_local"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema"
+        ],
+        "type": "object"
+      },
+      "AutomaticTrackSummary": {
+        "properties": {
+          "album": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "bpm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "integer"
+          },
+          "length_s": {
+            "type": "number"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "title",
+          "artist",
+          "album",
+          "length_s",
+          "bpm"
+        ],
+        "type": "object"
+      },
       "BatchDetail": {
         "properties": {
           "created_at": {
@@ -1352,6 +1560,7 @@
         ],
         "type": "object"
       },
+      "ExportFileResponse": {},
       "FolderCreateRequest": {
         "properties": {
           "path": {
@@ -2073,6 +2282,164 @@
         },
         "type": "object"
       },
+      "PlaylistCreate": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "PlaylistMeta": {
+        "properties": {
+          "automatic": {
+            "type": "boolean"
+          },
+          "automatic_refreshed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "automatic_rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutomaticPlaylistRuleV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "automatic_rule_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "mode_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode_id",
+          "category",
+          "automatic",
+          "automatic_rule",
+          "automatic_refreshed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "PlaylistUpdate": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
       "PositionReport": {
         "properties": {
           "device_id": {
@@ -2464,6 +2831,81 @@
         "type": "object"
       },
       "ThemeFileResponse": {},
+      "TrackAddRequest": {
+        "properties": {
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id"
+        ],
+        "type": "object"
+      },
+      "TrackInPlaylist": {
+        "properties": {
+          "position": {
+            "type": "integer"
+          },
+          "track": {
+            "anyOf": [
+              {
+                "properties": {
+                  "album": {
+                    "type": "string"
+                  },
+                  "artist": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "integer"
+                  },
+                  "length_s": {
+                    "type": "number"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "path",
+                  "title",
+                  "artist",
+                  "album",
+                  "length_s"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "position",
+          "track_id",
+          "track"
+        ],
+        "type": "object"
+      },
       "TrackMetadataUpdate": {
         "properties": {
           "album": {
@@ -2927,6 +3369,18 @@
         "required": [
           "verified",
           "failed"
+        ],
+        "type": "object"
+      },
+      "app__api__playlists__TrackMoveRequest": {
+        "properties": {
+          "to_position": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "to_position"
         ],
         "type": "object"
       }
@@ -5533,6 +5987,641 @@
         },
         "tags": [
           "modes"
+        ]
+      }
+    },
+    "/api/playlists": {
+      "get": {
+        "operationId": "list_playlists_api_playlists_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mode_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlaylistMeta"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      },
+      "post": {
+        "operationId": "create_playlist_api_playlists_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaylistCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistMeta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      }
+    },
+    "/api/playlists/{playlist_id}": {
+      "delete": {
+        "operationId": "delete_playlist_api_playlists__playlist_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      },
+      "get": {
+        "operationId": "get_playlist_api_playlists__playlist_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistMeta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      },
+      "patch": {
+        "operationId": "update_playlist_api_playlists__playlist_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaylistUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistMeta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      }
+    },
+    "/api/playlists/{playlist_id}/automatic": {
+      "delete": {
+        "operationId": "disable_automatic_playlist_api_playlists__playlist_id__automatic_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistMeta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      },
+      "put": {
+        "operationId": "configure_automatic_playlist_api_playlists__playlist_id__automatic_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomaticPlaylistConfigureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticPlaylistApplyResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      }
+    },
+    "/api/playlists/{playlist_id}/automatic/preview": {
+      "post": {
+        "operationId": "preview_automatic_playlist_api_playlists__playlist_id__automatic_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomaticPlaylistPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticPlaylistPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      }
+    },
+    "/api/playlists/{playlist_id}/automatic/refresh": {
+      "post": {
+        "operationId": "refresh_automatic_playlist_api_playlists__playlist_id__automatic_refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticPlaylistApplyResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      }
+    },
+    "/api/playlists/{playlist_id}/export": {
+      "get": {
+        "description": "Download the playlist as M3U (default; for VLC, foobar2000, etc.) or\nJSON (structured, includes track metadata for re-import). M3U paths are\nrelative to MUSIC_DIR — drop the file at MUSIC_DIR's root to import.",
+        "operationId": "export_playlist_api_playlists__playlist_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "m3u",
+              "enum": [
+                "m3u",
+                "json"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportFileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      }
+    },
+    "/api/playlists/{playlist_id}/tracks": {
+      "get": {
+        "operationId": "get_tracks_api_playlists__playlist_id__tracks_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TrackInPlaylist"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      },
+      "post": {
+        "operationId": "add_track_api_playlists__playlist_id__tracks_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackInPlaylist"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      }
+    },
+    "/api/playlists/{playlist_id}/tracks/{position}": {
+      "delete": {
+        "operationId": "remove_track_api_playlists__playlist_id__tracks__position__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
+        ]
+      },
+      "patch": {
+        "operationId": "move_track_api_playlists__playlist_id__tracks__position__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__playlists__TrackMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "playlists"
         ]
       }
     },
