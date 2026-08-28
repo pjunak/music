@@ -10,7 +10,7 @@ can act as an output **with no special server setup and no login** — the proto
 already works today against an unmodified server.
 
 - Want a ready-made appliance? Use the reference client in [`headless/`](headless/) — a
-  single Python file you run on any Linux box (a Pi, an old x86 stick, the dnd-table
+  small Rust binary you run on any Linux box (a Pi, an old x86 stick, the dnd-table
   machine) to turn a speaker into an output.
 - Want to bake on/off + volume into your own project? Implement the ~30-line protocol
   below. A copy-paste browser example is included.
@@ -73,7 +73,8 @@ following state. Reconnect on close and repeat from step 2.
 ## The fields you actually need
 
 `PlayerState` is large; an output only cares about a handful (see
-[`backend/app/sync/protocol.py`](../backend/app/sync/protocol.py) for the full schema):
+[`music-protocol`](../crates/music-protocol/src/messages.rs) or the checked-in
+[`WebSocket schema`](../contracts/reference/v1/websocket-messages.schema.json) for the full shape):
 
 | Field | Meaning |
 |---|---|

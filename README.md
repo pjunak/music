@@ -5,8 +5,8 @@ drives playback from any device; audio comes out of one or more output devices �
 a TV in the room, a headless box wired to a speaker. The server is the single source of
 truth for *what should be playing right now*; every client reconciles to it.
 
-Built as a single FastAPI process that serves both the JSON API and the React SPA from one
-origin. SQLite for state, the filesystem for the music library, YAML for campaign content.
+Built as one safe-Rust modular monolith that serves both the JSON API and the React SPA from one
+origin. SQLite owns durable state, the filesystem owns media, and YAML owns campaign content.
 
 > Single-operator app, designed to run on a home server behind a reverse proxy. It is **not**
 > multi-tenant — there is one account, the operator's.
@@ -14,8 +14,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
 ## Features
 
 - **Filesystem-driven library** — your folder tree under `MUSIC_DIR` *is* the library. Drag in
-  a file or a whole album folder; tags are read via [mutagen], with a filename/parent-folder
-  fallback. The index is a materialised view of the tree, rebuilt on boot and on upload.
+  a file or a whole album folder; native Rust metadata adapters read its tags, with a
+  filename/parent-folder fallback. SQLite keeps a durable materialized index, and a visible,
+  retryable reconciliation job refreshes it without blocking startup.
 - **Server-as-reducer playback** — the server holds the canonical `PlayerState`, owns the
   playback clock (`position_ms` is live in every push), and advances the queue itself at end of
   track; clients follow state and seek only when `position_epoch` changes. Repeat, shuffle,
@@ -56,8 +57,8 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   removed, and the model may return only known track IDs. A current pass is required before that
   exact model configuration can be selected for a live-library suggestion.
   Bundled suites live under
-  [`backend/app/assistant/evaluation_suites/`](backend/app/assistant/evaluation_suites/);
-  see [`backend/evaluation/README.md`](backend/evaluation/README.md) for the harness guide.
+  [`crates/music-application/src/assistant/evaluation_suites/`](crates/music-application/src/assistant/evaluation_suites/);
+  the practical evaluation sequence is in [`ASSISTANT.md`](ASSISTANT.md).
 - **Review-first EQ Assistant** — connect a separately chosen structured-text model and describe
   the sound you want. A deterministic intent map first creates a conservative ten-band baseline
   and per-band safety envelope; the model may refine only inside that envelope in 0.5 dB steps.
@@ -134,11 +135,11 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   review, creation, and manual-tuning interaction contract.
 - **Durable library context analysis** — one restartable `local-context/v2` job runs two sequential
   library passes. The first decodes every new or changed track into factual whole-track context;
-  only after those rows are checkpointed does a separate worker pool perform optional voice
-  detection. The factual context includes signal-level and intensity development, rhythmic
+  only after those rows are checkpointed does the capacity-one model-owning thread perform
+  optional voice detection. The factual context includes signal-level and intensity development, rhythmic
   drive, perceptual brightness, spectral fullness, spectral change, local tempo behavior, major acoustic sections,
   repetition, technical details, explicit analysis-stage status, and bounded performance timings.
-  Native NumPy frame/spectrum math uses gain-invariant Mel spectral profiles, logarithmic brightness,
+  Native RustFFT frame/spectrum math uses gain-invariant Mel spectral profiles, logarithmic brightness,
   dB-based onset strength, octave-aware tempo confidence, and multiscale change detection. It stores condensed timelines
   in a separate context table, checkpoints each completed/failed track and each voice result, and
   never proposes semantic tags. A failed voice pass leaves the first-pass rows usable and resumable
@@ -146,9 +147,9 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
   supports playback, and shows the full
   stored context for a selected song. The production image includes FFmpeg for the indexed MP3,
   FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV fallback.
-  An opt-in, checksum-pinned Essentia MusiCNN stage can add a normalized voice score and vocal-window
-  coverage. It is never downloaded or enabled automatically because its runtime and model have
-  separate AGPL and non-commercial/share-alike license obligations; see
+  An opt-in, checksum-pinned MusiCNN model running through tract can add a normalized voice score
+  and vocal-window coverage. It is never downloaded or enabled automatically because the model has
+  separate non-commercial/share-alike license obligations; see
   [`ASSISTANT.md`](ASSISTANT.md#optional-local-voice-analysis) and
   [`ADR-009`](docs/ADR-009-opt-in-local-voice-analysis.md).
 - **Database mood tags** — attach operator-owned setting, period, scene, and mood context such as
@@ -197,14 +198,16 @@ origin. SQLite for state, the filesystem for the music library, YAML for campaig
 
 ## Quick start (Docker)
 
-The repo ships a multi-stage `Dockerfile` (Node build of the SPA → Python runtime serving both
-the API and the static bundle on port 8000). Application data lives under `/data`. The optional
-Assistant credential master key uses a second, dedicated secrets mount so it is not mixed into
-the database/media backup.
+During rewrite acceptance, `Dockerfile.rust` is the complete native candidate: it builds the React
+SPA and the Rust server/CLI, then copies only those binaries, the SPA, CA certificates, FFmpeg, and
+mode seeds into a non-root Debian runtime. It contains no Python runtime. Application data lives
+under `/data`; the optional Assistant credential master key uses a separate secrets mount so it is
+not mixed into the database/media backup.
 
 ```bash
-# Build the image
-docker build -t music .
+# Build the Rust candidate image. The default Dockerfile remains the frozen
+# Python release until the separately authorized main-branch cutover.
+docker build -f Dockerfile.rust -t music-rust .
 
 # Prepare the optional AI secrets directory for the image's non-root UID.
 # Skip this and its mount if no provider API keys will be used.
@@ -215,7 +218,7 @@ docker run -d --name music \
   -p 8000:8000 \
   -v /srv/music-data:/data \
   -v /srv/music-secrets:/run/music-secrets \
-  music
+  music-rust
 
 # Create the operator account (password prompts interactively)
 docker exec -it music music-cli create-user admin
@@ -224,13 +227,14 @@ docker exec -it music music-cli create-user admin
 Then open `http://localhost:8000` and sign in. A fresh install boots fine with **zero** audio
 files — drop music in through the Library tab (or straight into `/srv/music-data/music`).
 
-The image is also built and pushed to GHCR by CI on every push to `main`; the production
-rollout itself is handled by a separate infra repository.
+The rewrite workflow builds and smoke-tests this image without publishing it. The existing `main`
+workflow remains the only GHCR/deployment trigger until the owner explicitly authorizes cutover;
+production rollout itself belongs to the separate infrastructure repository.
 
 ## Configuration
 
-Set via environment variables (see [`backend/.env.example`](backend/.env.example)). The
-Dockerfile pre-sets the storage paths under `/data`, so a containerised run typically needs
+Set via environment variables (see [`.env.example`](.env.example)). The Rust image pre-sets the
+storage paths under `/data`, so a containerized run typically needs
 no environment variables at all. (There is no `SECRET_KEY`: sessions are opaque random
 DB-backed tokens, nothing is signed.)
 
@@ -239,7 +243,7 @@ DB-backed tokens, nothing is signed.)
 | `MUSIC_DIR` | | `/data/music` | Root of the scanned music library |
 | `SFX_LIBRARY_DIR` | | `/data/sfx` | Root for soundboard SFX files |
 | `MODES_DIR` | | `/data/modes` | On-disk mode bundles (seeded on first boot) |
-| `DEVICES_FILE` | | `/data/devices.json` | Remembered output-device registry |
+| `DEVICES_FILE` | | `/data/devices.json` | Legacy one-time device-import source; SQLite is authoritative afterward |
 | `DATABASE_URL` | | `sqlite:////data/app.db` | App DB (auth, playlists, indexed tracks) |
 | `STATIC_DIR` | | `/app/static` | Built SPA served at `/` |
 | `ALLOWED_ORIGINS` | | `http://localhost:5173` | Comma-separated CORS origins (only needed for split dev) |
@@ -249,6 +253,7 @@ DB-backed tokens, nothing is signed.)
 | `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional model setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; model settings may create it once when its private parent mount exists |
 | `ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT` | | — | Optional non-secret host path shown in model settings' copyable mount/setup guide |
 | `ASSISTANT_VOICE_MODEL_PATH` | Only for opt-in local voice analysis | — | Read-only path to the exact checksum-pinned Essentia voice/instrumental model |
+| `ASSISTANT_LIBRARY_CONTEXT_WORKERS` | | `1` | Bounded first-pass analysis workers (`1`–`4`); voice inference remains capacity one |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 
@@ -270,7 +275,9 @@ already exist, be private, and be writable by the container's UID 1000.
 Managed deployments may instead generate a key externally:
 
 ```powershell
-python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+[Convert]::ToBase64String(
+  [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+).Replace('+', '-').Replace('/', '_')
 ```
 
 Set the printed value as `ASSISTANT_CREDENTIAL_KEY` in the server environment and restart the
@@ -340,22 +347,20 @@ The complete first-run sequence—local baseline, connection verification, per-r
 quality checks, live-data acceptance, and isolated backup restore—is in
 [`ASSISTANT.md`](ASSISTANT.md).
 
-There is no general migration framework: the schema is created idempotently on boot, and
-compatible additive columns are applied automatically. Renames, drops, and type changes require
-a deliberate migration or a documented database reset. The track index remains regenerable from
-the filesystem.
+Rust owns an ordered SQLx migration ledger and refuses unknown or incompatible database shapes
+before opening them for writes. `music-cli db doctor` is read-only; `music-cli db migrate` creates
+and verifies a pre-migration backup before applying compatible migrations. The track index remains
+regenerable from the filesystem, while authored and human-owned state is preserved.
 
 ## Development
 
-Backend (Python 3.14+) and frontend (Node 26+) run as two processes in development.
+The Rust server and Node 26+ frontend run as two processes in development.
 
 ```bash
-# Backend — uv-managed (uv.lock is the pinned resolution)
-cd backend
-uv sync --locked --extra dev                         # creates .venv from uv.lock
+# Server — Rust 1.97.1 is pinned by rust-toolchain.toml
 cp .env.example .env                                 # dev defaults work as-is
-uv run music-cli create-user admin
-uv run uvicorn app.main:app --reload                 # http://localhost:8000
+cargo run --locked -p music-server --bin music-cli -- create-user admin
+cargo run --locked -p music-server --bin music-server # http://localhost:8000
 
 # Frontend (separate terminal)
 cd frontend
@@ -363,17 +368,18 @@ npm ci
 npm run dev                                          # http://localhost:5173, proxies to the API
 ```
 
-No `uv`? `python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"` works
-too — you just won't get the locked versions.
-
 Checks:
 
 ```bash
-# Backend
-cd backend
-uv run pytest                                        # tests
-uv run ruff check app tests                          # lint
-uv run mypy app tests                                # types
+# Rust
+cargo fmt --all --check
+cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo nextest run --workspace --all-features
+cargo test --workspace --all-features --doc
+cargo run --locked -p music-server --bin music-cli -- contracts check --root .
+cargo deny check
+cargo audit --deny warnings
 
 # Frontend
 cd frontend
@@ -390,23 +396,25 @@ The maintained documentation index is [`docs/README.md`](docs/README.md). In par
 inputs, outputs, disclosures, fingerprints, provider transport, or review behavior.
 
 ```
-backend/   FastAPI app. The sync package (app/sync/) is the authority: state-mutating
-           actions funnel through commit_and_broadcast → a state machine → DB persistence +
-           a WebSocket broadcast. HTTP handlers that mutate state route through the same funnel.
-           Two auth tiers: most endpoints require a session; the player/stream/cover endpoints
-           accept guests so a logged-out TV tab can act as an output.
-frontend/  React + TypeScript (Vite). A Web Audio engine (ambient crossfade + interrupt lane +
-           a preset effect chain) reconciles to PlayerState pushed over the WebSocket.
-modes/     On-disk campaign bundles, baked into the image as a seed and copied to MODES_DIR on
-           first boot. Everything authored is per-mode — playlists, soundboards, cues, EQ presets.
-clients/   The documented guest output protocol + a reference headless appliance.
+crates/music-domain/       pure playback, paths, playlists, and cleanup rules
+crates/music-application/  use-case contracts, actors/coordinators, jobs, Assistant logic
+crates/music-storage/      SQLite repositories, migrations, backup, crypto, recovery journals
+crates/music-media/        rooted filesystem capabilities, metadata, YAML, streaming adapters
+crates/music-analysis/     bounded RustFFT/EBU-R128 context and optional tract voice inference
+crates/music-protocol/     typed HTTP/WebSocket edge contracts and generated TypeScript DTOs
+crates/music-server/       Axum routes, composition root, supervision, CLI, provider transport
+crates/music-output/       native headless output appliance with supervised mpv subprocesses
+frontend/                  React + TypeScript; Web Audio reconciles canonical PlayerState
+modes/                     on-disk campaign bundles copied as an empty-target seed
+clients/                   guest output protocol and appliance installation material
 ```
 
 - **The library never moves files implicitly.** Moves, renames, and deletes happen only as
   explicit API actions, and the index follows.
 - **Single process, one origin.** `/api/*` and the SPA share a host; the SPA falls back to
-  client-side routing.
-- **Unhandled exceptions return JSON** with the error class + message — a single-user debug aid.
+  client-side routing. Mutable subsystems have explicit owners rather than process-global state.
+- **Unexpected failures are correlation-safe.** Clients receive stable codes and a correlation ID;
+  internal error details remain in structured server logs.
 
 ## Security model
 
@@ -420,8 +428,7 @@ clients/   The documented guest output protocol + a reference headless appliance
 
 ## Tech stack
 
-FastAPI · SQLAlchemy 2.0 · Pydantic · argon2 · mutagen — React · TypeScript 7 · Vite · Zustand · Oxlint ·
-Web Audio API. Packaged as a multi-stage Docker image (`node:26.7.0-alpine` build →
-`python:3.14.7-slim` runtime).
-
-[mutagen]: https://mutagen.readthedocs.io/
+Rust 1.97.1 · Tokio · Axum · SQLx/SQLite · Serde · Lofty · RustFFT · tract · argon2 · AES-GCM —
+React · TypeScript 7 · Vite · Zustand · Oxlint · Web Audio API. The candidate is packaged as a
+multi-stage image (`node:26.7.0-alpine` + `rust:1.97.1-trixie` builders → non-root
+`debian:trixie-slim` runtime).

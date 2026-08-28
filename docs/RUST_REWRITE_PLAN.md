@@ -1,6 +1,6 @@
 # Rust rewrite execution plan
 
-**Status:** Implementation in progress
+**Status:** Rust implementation complete; final Linux acceptance and Python removal in progress
 
 **Branch:** `rewrite/rust`
 **Architecture:** [RUST_REWRITE_ARCHITECTURE.md](RUST_REWRITE_ARCHITECTURE.md)
@@ -42,7 +42,7 @@ resource acceptance checks pass.
 
 | Source reference | Change or difference | Rust disposition | Evidence | Status |
 |---|---|---|---|---|
-| `b93f91d` | Rewrite baseline | Capture executable contracts in Phase 1 | `contracts/reference/v1` plus `music-protocol` corpus tests | In progress |
+| `b93f91d` | Rewrite baseline | Capture executable contracts in Phase 1 | `contracts/reference/v1` plus `music-protocol` corpus tests | Captured 2026-08-27 |
 | `b93f91d` | `devices.json` is a mutable runtime store | Import to SQLite; add explicit CLI export/import; preserve source file for rollback | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#4-make-operational-data-ownership-consistent) | Accepted 2026-08-27 |
 | `b93f91d` | Full library scan blocks startup | Serve the durable index, expose reconciliation state, and scan as a durable job | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#6-remove-full-scanning-from-the-critical-boot-path) | Accepted 2026-08-27 |
 | `b93f91d` | Unexpected HTTP/WS errors expose exception text | Return safe code/message/correlation ID; keep internal detail in logs | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#10-separate-public-compatibility-from-internal-correctness) | Accepted 2026-08-27 |
@@ -88,7 +88,7 @@ cargo nextest run --workspace --all-features
 cargo test --workspace --all-features --doc
 cargo deny check
 cargo audit --deny warnings
-cargo test -p music-protocol export_bindings
+cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd run test
@@ -96,9 +96,36 @@ npm.cmd run build
 git diff --exit-code -- frontend/src/generated contracts/generated .sqlx
 ```
 
-The exact commands will be added to `AGENTS.md`, CI, and repository scripts when their files exist.
-Voice tests that require the separately licensed model are an explicit operator acceptance gate,
-not a public CI dependency.
+These commands are mirrored in `AGENTS.md` and the rewrite-only CI workflow. Voice tests that
+require the separately licensed model are an explicit operator acceptance gate, not a public CI
+dependency. The repeated-inference test additionally refuses to run unless Linux reports a cgroup
+limit of at most three CPUs and four GiB:
+
+```text
+MUSIC_TEST_VOICE_MODEL=/models/voice_instrumental-musicnn-msd-2.pb \
+MUSIC_TEST_FFMPEG=/usr/bin/ffmpeg \
+cargo test -p music-analysis \
+  voice::tests::repeated_voice_inference_stays_inside_the_production_resource_envelope \
+  -- --ignored --exact
+```
+
+### Current verification record — 2026-08-28
+
+- Windows GNU Rust host: formatting, all-target check, strict all-target/all-feature Clippy,
+  283/283 nextest cases, and all workspace doctests pass. The run included the exact
+  checksum-pinned voice graph and end-to-end FFmpeg/worker inference.
+- Contract generation is clean: all 144 frozen Python HTTP operations remain compatible, the
+  readiness route is the sole Rust addition, and generated TypeScript/OpenAPI/SQLx artifacts have
+  no drift.
+- Dependency policy and advisories pass with `cargo-deny` 0.20.2 and `cargo-audit` 0.22.2.
+- Frontend lint, TypeScript checks, all 250 Vitest cases, and the production build pass; the entry
+  bundle is 320.77 kB (97.73 kB gzip), below the 450 kB regression budget.
+- The unchanged Baton repository's `core-model` and `core-sync` JVM suites pass against the
+  preserved protocol assumptions; Baton has no rewrite-branch source changes.
+- The frozen Python oracle passes 705 tests with one intentionally skipped live-provider case.
+- Docker/WSL and a real Linux audio device are unavailable on this workstation. The rewrite-only
+  workflow, Unix mpv tests, cgroup voice soak, Essentia differential, and speaker smoke therefore
+  remain explicit external acceptance evidence rather than inferred success.
 
 ## Phase 0 — architecture and baseline
 
@@ -117,7 +144,7 @@ Gate: no application implementation begins until the unchecked owner decision is
 
 ## Phase 1 — executable reference and feasibility gates
 
-**Status:** In progress
+**Status:** Candidate implementation complete; final Linux differential and resource evidence pending
 
 Evidence so far:
 
@@ -158,13 +185,13 @@ Evidence so far:
 - `deny.toml` rejects unknown registries and Git sources, wildcard requirements, OpenSSL/native-TLS
   backends, and both deprecated YAML implementations. RustSec findings remain denied except for
   `RUSTSEC-2024-0436`: Lofty alone pulls the archived `paste` 1.0.15 proc macro at compile time, and
-  that informational exception carries an explicit removal condition. The resulting 175-crate
-  graph has no reported vulnerability, unsoundness, or yanked-package finding. Six upstream
+  that informational exception carries an explicit removal condition. The locked dependency graph
+  has no reported vulnerability, unsoundness, or yanked-package finding. Six upstream
   duplicate families remain visible as review warnings (four at the SQLx/RustCrypto generation
   boundary, plus `hashbrown` and `syn`).
-- The eight-crate workspace shell compiles with the accepted dependency direction and workspace
-  safe-Rust/panic lints. It exists now to host Phase 1 contract and feasibility tests; no production
-  endpoint is routed to Rust before its parity gate.
+- The complete eight-crate candidate compiles with the accepted dependency direction and workspace
+  safe-Rust/panic lints. The production workflow still routes only `main` to the frozen Python image;
+  the rewrite branch is exercised by its non-publishing Rust workflow.
 
 Capture the old system before replacing it:
 
@@ -212,7 +239,7 @@ not introduce a Python sidecar.
 
 ## Phase 2 — workspace, process shell, and CI
 
-**Status:** In progress — the workspace, immutable configuration, supervised process shell,
+**Status:** Candidate implementation complete — the workspace, immutable configuration, supervised process shell,
 compatibility health/readiness, SPA serving, generated contract pipelines, and rewrite-only
 container/CI path are implemented. The container smoke gate still needs to execute on CI because
 Docker is not installed in the current Windows development environment.
@@ -274,6 +301,8 @@ the Rust container boots non-root with empty storage and serves the unchanged SP
 
 ## Phase 3 — playback domain, actor, and WebSocket protocol
 
+**Status:** Complete
+
 Implement the highest-value invariant early:
 
 - [x] pure playback reducer and deterministic clock/random inputs;
@@ -294,9 +323,8 @@ reconciliation and bounded slow-client behavior.
 
 ## Phase 4 — authentication, devices, diagnostics, and administration
 
-**Status:** In progress — runtime authentication, remembered-device ownership, diagnostics, and
-maintenance-gated backup/restore are implemented; the remaining Phase 4 work is hardening against
-the full gate before moving the phase marker to complete.
+**Status:** Complete — runtime authentication, remembered-device ownership, diagnostics, and
+maintenance-gated backup/restore are implemented and covered by the full local gate.
 
 - [x] Users, Python-compatible Argon2 verification, dummy verification, bounded login hashing,
   direct-peer/global throttles, opaque sessions, configured cookies, revocation, expiry, and
@@ -336,6 +364,8 @@ Gate: cross-language password/session fixtures, auth route differential tests, c
 backup checks, symlink/permission tests, and long-lived WebSocket downgrade tests pass.
 
 ## Phase 5 — library, metadata, streaming, uploads, and cleanup
+
+**Status:** Complete
 
 - [x] Typed `LibraryPath`/`SfxPath` values with canonical POSIX-relative encoding and matching
   rooted filesystem capabilities that reject absolute, traversal, platform-prefix, control-byte,
@@ -513,8 +543,8 @@ the selected thread or process boundary's deadline.
 
 - [x] Recreate every `music-cli` command with compatible safe defaults and add `db doctor`, migration,
   healthcheck, device import/export, and contract-export commands.
-  The new database, contract, healthcheck, user/password, and device-transfer commands are already
-  implemented; library, provider, job, and evaluation commands follow their owning coordinators.
+  Database, contract, healthcheck, user/password, device-transfer, library, provider, job, and
+  evaluation commands all call their owning Rust coordinators.
 - [x] Implement `music-output` using the shared protocol, WebSocket ping/reconnect, stable ID,
   position-epoch reconciliation, server/local volume, position reports, SFX, and local control API.
 - [x] Supervise two local mpv processes through Unix-socket JSON IPC; use no libmpv FFI. A dead
@@ -527,15 +557,24 @@ safe, local control auth/CORS behavior matches, and a Linux speaker-device smoke
 
 ## Phase 12 — full parity, hardening, and Python removal
 
-- Run the complete differential harness and classify every difference.
-- Run all Rust, frontend, compatibility, security, fuzz-regression, corpus, soak, and release-image
-  gates.
-- Confirm every Python feature and CLI/client entry in the inventory has a Rust owner and test.
-- Update README, Assistant docs, client docs, environment examples, architecture map, AGENTS, and
-  deployment references.
-- Delete Python source, tests, lockfiles, virtual-environment instructions, and image stages only
+**Status:** In progress — all locally executable gates pass; Linux/container/device acceptance
+must finish before the reference implementation is deleted.
+
+- [x] Compare all 144 frozen HTTP operations and the complete WebSocket/action corpus; the only
+  additive route is authenticated component readiness.
+- [x] Run the local Rust, frontend, compatibility, security, dependency, and generated-artifact
+  gates, including the exact pinned voice graph and end-to-end worker.
+- [x] Confirm every Python feature and CLI/client entry in the inventory has a Rust owner and test.
+- [x] Update README, Assistant docs, client docs, environment examples, architecture map, AGENTS,
+  and candidate deployment references.
+- [x] Add Linux-only real-process/Unix-socket mpv supervision tests, an ignored cgroup-enforcing
+  voice soak, and a resource-limited non-root/no-Python container smoke gate.
+- [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
+- [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.
+- [ ] Run the Rust output appliance against the intended Linux speaker device.
+- [ ] Delete Python source, tests, lockfiles, virtual-environment instructions, and image stages only
   after their replacement evidence passes.
-- Scan the final tree and image for accidental Python/runtime remnants, secrets, generated media,
+- [ ] Scan the final tree and image for accidental Python/runtime remnants, secrets, generated media,
   stale contract references, mutable service globals, and unused dependencies.
 
 Gate: the final branch builds and tests from a clean clone, the release image contains no Python

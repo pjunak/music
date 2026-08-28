@@ -12,18 +12,22 @@ registry, absolute storage paths, or media.
 - the complete SQLAlchemy SQLite DDL, including foreign keys, unique constraints, and indexes; and
 - the current mode, soundboard, cue, and preset schemas.
 
-From `backend/`, check the bundle with:
+From the repository root, verify the immutable baseline, generated Rust contracts, and semantic
+OpenAPI compatibility report with:
 
 ```powershell
-python -m app.reference_contracts --check
+cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 ```
 
-Regeneration is deliberate and reviewable:
+The Python baseline is no longer regenerated on the rewrite branch. An owner-approved contract
+break must create a new reference version from the preserved legacy revision, never silently edit
+`v1`. Rust-owned generated artifacts are refreshed with:
 
 ```powershell
-python -m app.reference_contracts --write
+cargo run --locked -p music-server --bin music-cli -- contracts export --root .
 ```
 
-Later Phase 1 fixtures add observed HTTP/WebSocket behavior, synthetic database records, legacy
-device imports, mode YAML round trips, media ranges, and normalized differential scenarios. Schema
-snapshots alone are not parity proof.
+Rust tests consume this corpus directly and add observed HTTP/WebSocket behavior, representative
+database migration, legacy-device import, mode YAML round trips, media ranges, metadata mutation,
+authentication/crypto, and normalized compatibility scenarios. Schema snapshots alone are not
+parity proof; the runtime integration tests and generated semantic report are part of the gate.

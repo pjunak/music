@@ -17,6 +17,7 @@ not a second description of the implementation.
 - Python-era architecture reassessment:
   [Rust architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md)
 - Rust rewrite phases, gates, and cutover: [Rust rewrite execution plan](RUST_REWRITE_PLAN.md)
+- Rust runtime license obligations: [third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Architecture decisions
 

@@ -1,7 +1,7 @@
 # Assistant architecture and contract map
 
 **Status:** Living documentation
-**Last audited:** 2026-08-26
+**Last audited:** 2026-08-28
 
 This is the current map for the local-first Assistant and its optional model workflows. Use it to
 find ownership, privacy boundaries, contract versions, evaluation gates, and regression tests.
@@ -12,7 +12,7 @@ the reasons behind durable choices remain in the linked ADRs.
 
 When two descriptions disagree, resolve the disagreement in the same change:
 
-1. strict Pydantic models, provider definitions, and registered job/API code define current runtime
+1. strict Rust task types, provider definitions, and registered job/API code define current runtime
    behavior;
 2. tests and checked-in synthetic suites define executable acceptance boundaries;
 3. this map records current ownership and version inventory;
@@ -61,7 +61,7 @@ operator request / indexed library / local audio
   explicit provider adapter + verified role configuration
                     |
                     v
- strict parse -> Pydantic -> identity/bounds validation
+ strict Serde parse -> identity/bounds validation
                     |
                     v
   local reconstruction -> durable review-only result
@@ -74,22 +74,21 @@ operator request / indexed library / local audio
 
 | Concern | Current owner | Executable evidence | Rationale |
 |---|---|---|---|
-| Task prompt, example, schema, untrusted-data labels | [`structured_harness.py`](../backend/app/assistant/structured_harness.py) | [`test_assistant_structured_harness.py`](../backend/tests/test_assistant_structured_harness.py) | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
-| Adapter/capability/role inventory and runtime fingerprints | [`providers/definitions.py`](../backend/app/assistant/providers/definitions.py) | [`test_assistant_providers.py`](../backend/tests/test_assistant_providers.py) | [ADR-001](ADR-001-assistant-provider-connections.md), [ADR-002](ADR-002-assistant-model-execution.md) |
-| Provider-specific model IDs and inference parameters | [`providers/handlers.py`](../backend/app/assistant/providers/handlers.py) | [`test_assistant_provider_execution.py`](../backend/tests/test_assistant_provider_execution.py), [`test_assistant_provider_verification.py`](../backend/tests/test_assistant_provider_verification.py) | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
-| Request execution and response parsing | [`providers/execution.py`](../backend/app/assistant/providers/execution.py) | [`test_assistant_provider_execution.py`](../backend/tests/test_assistant_provider_execution.py) | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
-| URL validation, SSRF boundary, redirect refusal, byte/time limits | [`providers/transport.py`](../backend/app/assistant/providers/transport.py) | [`test_assistant_provider_verification.py`](../backend/tests/test_assistant_provider_verification.py) | [ADR-001](ADR-001-assistant-provider-connections.md) |
-| Credential encryption, initialization, reset, and offline rotation | [`providers/credentials.py`](../backend/app/assistant/providers/credentials.py), [`providers/credential_admin.py`](../backend/app/assistant/providers/credential_admin.py) | [`test_assistant_credential_admin.py`](../backend/tests/test_assistant_credential_admin.py), [`test_assistant_providers.py`](../backend/tests/test_assistant_providers.py) | [ADR-001](ADR-001-assistant-provider-connections.md) |
-| Role preparation and stale-gate enforcement | [`providers/service.py`](../backend/app/assistant/providers/service.py), [`model_evaluation.py`](../backend/app/assistant/model_evaluation.py) | [`test_assistant_providers.py`](../backend/tests/test_assistant_providers.py) | [ADR-004](ADR-004-durable-model-quality-gates.md) |
-| Attempt/token accounting | [`providers/usage.py`](../backend/app/assistant/providers/usage.py) | [`test_assistant_provider_usage.py`](../backend/tests/test_assistant_provider_usage.py) | [ADR-004](ADR-004-durable-model-quality-gates.md) |
-| Durable job lifecycle | [`jobs/`](../backend/app/jobs), task-specific job modules | [`test_jobs.py`](../backend/tests/test_jobs.py) | [Repository persistence rules](../AGENTS.md#persistence-and-deployment) |
+| Task prompt, example, schema, untrusted-data labels | [`structured_harness.rs`](../crates/music-application/src/assistant/structured_harness.rs) | colocated strict-shape and bounds tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| Adapter/capability/role inventory and runtime fingerprints | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`runtime_contract.rs`](../crates/music-application/src/assistant/runtime_contract.rs) | colocated inventory and digest tests | [ADR-001](ADR-001-assistant-provider-connections.md), [ADR-002](ADR-002-assistant-model-execution.md) |
+| Provider-specific model IDs and inference parameters | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | transport-free adapter and request-shape tests in the same module | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
+| Request execution and response parsing | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs), task types under [`assistant/`](../crates/music-application/src/assistant) | local fixture-server, strict parsing, and bounds tests | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
+| URL validation, SSRF boundary, redirect refusal, byte/time limits | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | pinned-DNS, special-range, redirect, timeout, and response-limit tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
+| Credential encryption, initialization, reset, and offline rotation | [`crypto.rs`](../crates/music-storage/src/crypto.rs), [`provider_credentials.rs`](../crates/music-server/src/provider_credentials.rs), [`providers.rs`](../crates/music-storage/src/providers.rs) | Python-compatibility fixture plus reset/rotation transaction tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
+| Role preparation and stale-gate enforcement | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`provider_api.rs`](../crates/music-server/src/provider_api.rs) | role fingerprint, conformance, quality, and active-job tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
+| Attempt/token accounting | [`provider_usage.rs`](../crates/music-application/src/assistant/provider_usage.rs), [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs) | colocated usage and checkpoint tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
+| Durable job lifecycle | [`jobs.rs`](../crates/music-application/src/jobs.rs), [`jobs.rs`](../crates/music-storage/src/jobs.rs), [`jobs.rs`](../crates/music-server/src/jobs.rs) | persisted-boundary fault tests in `music-storage` | [Repository persistence rules](../AGENTS.md#persistence-and-deployment) |
 | Browser API/types and review workflows | [`frontend/src/core/api.ts`](../frontend/src/core/api.ts), [`frontend/src/views/assistant/`](../frontend/src/views/assistant) | colocated Vitest files | [Assistant UX philosophy](assistant-ux-philosophy.md) |
 
 ## Current contract inventory
 
-The exact values below are intentionally checked by
-[`test_documentation.py`](../backend/tests/test_documentation.py). Update the owning code, this
-table, its evaluation suite, disclosure copy, and tests together.
+The exact values below are Rust constants included in the executable runtime fingerprint. Update
+the owning code, this table, its evaluation suite, disclosure copy, and tests together.
 
 Shared contracts:
 
@@ -108,7 +107,7 @@ Both Gemini adapter IDs use the exact base URL
 `https://generativelanguage.googleapis.com/v1beta/openai`, canonicalize `models/` resource IDs,
 send Google's integration-identification header, and constrain results with a Gemini-compatible
 projection of the task's JSON Schema. The complete generated schema remains in the fixed prompt and
-is always enforced by the task's local Pydantic validation; the provider projection removes only
+is always enforced by the task's local strict Rust validation; the provider projection removes only
 JSON Schema keywords outside Gemini's documented structured-output subset.
 The older Gemini strict-schema ID remains a saved-connection compatibility alias. Provider error
 payloads may contribute only allowlisted machine codes; upstream messages never reach diagnostics.
@@ -130,12 +129,12 @@ configurable.
 
 | Workflow | Local authority and provider contract | Durable/API layer | Suite and regression tests | Decision record |
 |---|---|---|---|---|
-| Playlist draft | [`local.py`](../backend/app/assistant/local.py), [`model_playlist.py`](../backend/app/assistant/model_playlist.py) | [`model_suggestions.py`](../backend/app/assistant/model_suggestions.py), [`api/assistant.py`](../backend/app/api/assistant.py) | local baseline [`playlist-local-v1.json`](../backend/app/assistant/evaluation_suites/playlist-local-v1.json), model gate [`playlist-model-v1.json`](../backend/app/assistant/evaluation_suites/playlist-model-v1.json), [`test_assistant_model_playlist.py`](../backend/tests/test_assistant_model_playlist.py), [`test_assistant_model_suggestions.py`](../backend/tests/test_assistant_model_suggestions.py) | [ADR-003](ADR-003-hybrid-model-playlist-evaluation.md), [ADR-005](ADR-005-consent-bound-model-playlist-suggestions.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
-| Local track context | [`audio_context.py`](../backend/app/assistant/audio_context.py), [`library_context.py`](../backend/app/assistant/library_context.py), optional [`voice_analysis.py`](../backend/app/assistant/voice_analysis.py) | [`api/assistant.py`](../backend/app/api/assistant.py) | [`test_assistant_library_context.py`](../backend/tests/test_assistant_library_context.py), [`test_assistant_voice_analysis.py`](../backend/tests/test_assistant_voice_analysis.py) | [ADR-008](ADR-008-comprehensive-local-track-context.md), [ADR-009](ADR-009-opt-in-local-voice-analysis.md), [ADR-014](ADR-014-perceptual-context-measurements.md) |
-| Mood-tag suggestion and review | [`model_tagger.py`](../backend/app/assistant/model_tagger.py), [`tag_vocabulary.py`](../backend/app/assistant/tag_vocabulary.py) | [`model_tagging.py`](../backend/app/assistant/model_tagging.py), [`api/assistant_tags.py`](../backend/app/api/assistant_tags.py), [`tag_reviews.py`](../backend/app/assistant/tag_reviews.py) | [`music-tagging-v1.json`](../backend/app/assistant/evaluation_suites/music-tagging-v1.json), [`test_assistant_model_tagging.py`](../backend/tests/test_assistant_model_tagging.py), [evaluation guide](../backend/evaluation/MUSIC_TAGGING.md) | [ADR-006](ADR-006-review-only-model-music-tagging.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-008](ADR-008-comprehensive-local-track-context.md) |
-| Mood-tag cleanup | [`tag_cleanup.py`](../backend/app/assistant/tag_cleanup.py), [`model_tag_cleanup.py`](../backend/app/assistant/model_tag_cleanup.py) | [`model_tag_cleanup_job.py`](../backend/app/assistant/model_tag_cleanup_job.py), [`api/assistant_tags.py`](../backend/app/api/assistant_tags.py) | [`tag-cleanup-v1.json`](../backend/app/assistant/evaluation_suites/tag-cleanup-v1.json), [`test_assistant_model_tag_cleanup.py`](../backend/tests/test_assistant_model_tag_cleanup.py) | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
-| EQ draft | [`model_eq.py`](../backend/app/assistant/model_eq.py) | [`model_eq_job.py`](../backend/app/assistant/model_eq_job.py), [`api/assistant.py`](../backend/app/api/assistant.py) | [`eq-assistant-v1.json`](../backend/app/assistant/evaluation_suites/eq-assistant-v1.json), [`test_assistant_model_eq.py`](../backend/tests/test_assistant_model_eq.py) | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
-| Shared quality certification | [`model_evaluation.py`](../backend/app/assistant/model_evaluation.py) | [`api/assistant_providers.py`](../backend/app/api/assistant_providers.py) | [`test_assistant_model_evaluation_assets.py`](../backend/tests/test_assistant_model_evaluation_assets.py), task tests above | [ADR-004](ADR-004-durable-model-quality-gates.md) |
+| Playlist draft | [`planner.rs`](../crates/music-application/src/assistant/planner.rs), [`model_playlist.rs`](../crates/music-application/src/assistant/model_playlist.rs) | [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs), [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs) | local [`playlist-local-v1.json`](../crates/music-application/src/assistant/evaluation_suites/playlist-local-v1.json), model [`playlist-model-v1.json`](../crates/music-application/src/assistant/evaluation_suites/playlist-model-v1.json), colocated task/runtime tests | [ADR-003](ADR-003-hybrid-model-playlist-evaluation.md), [ADR-005](ADR-005-consent-bound-model-playlist-suggestions.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| Local track context | [`context.rs`](../crates/music-analysis/src/context.rs), [`voice.rs`](../crates/music-analysis/src/voice.rs), [`local_analysis.rs`](../crates/music-application/src/assistant/local_analysis.rs) | [`analysis.rs`](../crates/music-server/src/analysis.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | controlled numeric, exact-model, checkpoint, and runtime route tests | [ADR-008](ADR-008-comprehensive-local-track-context.md), [ADR-009](ADR-009-opt-in-local-voice-analysis.md), [ADR-014](ADR-014-perceptual-context-measurements.md) |
+| Mood-tag suggestion and review | [`model_tagger.rs`](../crates/music-application/src/assistant/model_tagger.rs), [`vocabulary.rs`](../crates/music-application/src/assistant/vocabulary.rs), [`tags.rs`](../crates/music-application/src/assistant/tags.rs) | [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs), storage review transactions | [`music-tagging-v1.json`](../crates/music-application/src/assistant/evaluation_suites/music-tagging-v1.json) and colocated contract/runtime tests | [ADR-006](ADR-006-review-only-model-music-tagging.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-008](ADR-008-comprehensive-local-track-context.md) |
+| Mood-tag cleanup | [`model_tag_cleanup.rs`](../crates/music-application/src/assistant/model_tag_cleanup.rs), [`tags.rs`](../crates/music-application/src/assistant/tags.rs) | [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | [`tag-cleanup-v1.json`](../crates/music-application/src/assistant/evaluation_suites/tag-cleanup-v1.json) and colocated strict-result tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| EQ draft | [`model_eq.rs`](../crates/music-application/src/assistant/model_eq.rs) | [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | [`eq-assistant-v1.json`](../crates/music-application/src/assistant/evaluation_suites/eq-assistant-v1.json) and envelope/runtime tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| Shared quality certification | [`model_quality.rs`](../crates/music-application/src/assistant/model_quality.rs) | [`provider_api.rs`](../crates/music-server/src/provider_api.rs), [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs) | fixed suites plus complete/retest identity tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
 
 ## Provider disclosure boundaries
 
@@ -166,7 +165,7 @@ prior consent.
 
 1. Identify whether the change affects only local evidence, provider input, provider output,
    disclosure, storage identity, execution transport, or review/commit behavior.
-2. Change the strict model and local validators first. Generate the provider schema from that same
+2. Change the strict Rust type and local validators first. Generate the provider schema from that same
    model; do not hand-maintain a second schema description.
 3. Advance the smallest owning contract version. If runtime behavior or harness semantics changed,
    also update `MODEL_ROLE_RUNTIME_CONTRACTS` or the shared harness version so old gates become stale.
@@ -177,7 +176,7 @@ prior consent.
    handler. Keep network I/O in the shared transport, update the handler fingerprint coverage, and
    never select behavior from a connection name, URL, or model-name guess.
 7. Update this inventory and amend the relevant ADR when the reasoning or trade-off changed.
-8. Run the narrow task tests, documentation tests, full backend gates, frontend gates, and a real
+8. Run the narrow task tests, documentation checks, full Rust workspace gates, frontend gates, and a real
    provider conformance/quality run before enabling the changed configuration in production.
 9. Treat real-provider and real-audio checks as manual acceptance. Passing mocked automation does
    not establish compatibility with a provider or accuracy on the operator's library.

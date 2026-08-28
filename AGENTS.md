@@ -1,6 +1,6 @@
 # Music
 
-Self-hosted FastAPI + React music player and tabletop-session orchestrator.
+Self-hosted Rust + React music player and tabletop-session orchestrator.
 The server owns canonical playback state; browser and headless clients register
 as controllers and optional audio outputs.
 
@@ -9,31 +9,14 @@ as controllers and optional audio outputs.
 - [`README.md`](README.md) for setup, product behavior, and deployment.
 - [`clients/README.md`](clients/README.md) before changing the external output
   protocol; the reference appliance is under `clients/headless/`.
-- [`backend/.env.example`](backend/.env.example) for storage/config defaults.
+- [`.env.example`](.env.example) for storage/config defaults.
 - [`docs/README.md`](docs/README.md) for the maintained documentation index and
   [`docs/ASSISTANT_ARCHITECTURE.md`](docs/ASSISTANT_ARCHITECTURE.md) before changing model tasks,
   provider boundaries, disclosures, fingerprints, or review flows.
-- Protocol schemas and state transitions in `backend/app/sync/` before changing
+- `crates/music-protocol` and `crates/music-application/src/playback/` before changing
   WebSocket messages or playback semantics.
 
 ## Commands
-
-Backend, from `backend/`:
-
-```powershell
-uv sync --locked --extra dev
-uv run ruff check app tests
-uv run mypy app tests
-uv run pytest
-```
-
-An existing Windows virtual environment may be used instead:
-
-```powershell
-.\.venv\Scripts\ruff.exe check app tests
-.\.venv\Scripts\mypy.exe app tests
-.\.venv\Scripts\pytest.exe
-```
 
 Rust, from the repository root:
 
@@ -41,8 +24,9 @@ Rust, from the repository root:
 cargo fmt --all --check
 cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
+cargo nextest run --workspace --all-features
 cargo test --workspace --all-features --doc
+cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 cargo deny check
 cargo audit --deny warnings
 ```
@@ -72,31 +56,25 @@ The frontend uses the native TypeScript 7 compiler and Oxlint. The local
 Run locally:
 
 ```powershell
-# backend/
-uv run uvicorn app.main:app --reload
+# repository root
+cargo run --locked -p music-server --bin music-server
 
 # frontend/
 npm run dev
 ```
 
-Keep `backend/uv.lock` synchronized with `pyproject.toml`; CI and the container
-build use the locked graph.
-
 ## Architecture
 
 ```text
-backend/app/
-  assistant/     provider-independent suggestion contracts and local engines
-  api/           HTTP routes and dependencies
-  core/          settings, database, security
-  devices/       file-backed remembered-device registry
-  domain/        playlist and persisted playback helpers
-  jobs/          durable background-job registry, runner, and lifecycle
-  library/       filesystem index, metadata, cleanup
-  models/        SQLAlchemy models
-  modes/         mode bundle loader
-  presets/       effect validation and crossfade resolution
-  sync/          protocol, state machine, WS router, broadcasts, loops
+crates/
+  music-domain/       pure playback, path, playlist, and cleanup rules
+  music-application/  actors, coordinators, jobs, Assistant use cases
+  music-storage/      SQLx repositories, migrations, crypto, recovery
+  music-media/        rooted filesystem, metadata, YAML, delivery
+  music-analysis/     context DSP and optional tract voice inference
+  music-protocol/     HTTP/WebSocket edge DTOs and generated bindings
+  music-server/       Axum routes, runtime composition, CLI, transport
+  music-output/       native headless mpv output appliance
 frontend/src/
   core/          API/WS clients, stores, audio engine, shared pure helpers
   shell/         routing, auth gates, app shell, footer
@@ -106,15 +84,14 @@ clients/         documented guest output protocol and headless reference client
 modes/           seed mode bundles and per-mode authored resources
 ```
 
-The production image builds the frontend and serves it from the FastAPI app.
+The Rust release image builds the frontend and serves it from the Rust server.
 Runtime data lives outside the image.
 
 ## State and synchronization
 
-- `backend/app/sync/` is authoritative. Every state mutation goes through
-  `commit_and_broadcast` and the state machine; HTTP mutations use the same
-  funnel as WebSocket actions.
-- `protocol.py` is the wire contract. Update backend schemas, frontend types and
+- The `PlaybackHandle` actor in `music-application` is authoritative. Every state mutation is
+  reduced, persisted, and only then published; HTTP and WebSocket actions use the same owner.
+- `music-protocol` is the wire contract. Update Rust schemas, frontend types and
   guards, compatibility behavior, external-client docs, and tests together.
 - Clients reconcile server snapshots. Do not create an independent frontend
   truth or optimistically invent lasting playback state.
@@ -127,8 +104,8 @@ Runtime data lives outside the image.
 
 ## Authentication
 
-- Authoring APIs use `CurrentUser`; player/output read surfaces use
-  `OptionalUser` where documented.
+- Authoring APIs resolve a `CurrentSession`; player/output read surfaces use the optional-session
+  lookup where documented.
 - Guest sockets may register and act as read-only outputs. Mutating actions
   require a valid session; active-output position reports follow the documented
   exception.
@@ -144,8 +121,9 @@ Runtime data lives outside the image.
 
 - `MUSIC_DIR` is the library. The `tracks` table is a materialized filesystem
   index keyed by normalized relative path.
-- Every index write serializes on `library_index.write_lock`. A disk move and
-  its index update must hold the same lock across both operations.
+- Every index write and app-owned filesystem mutation goes through the bounded
+  `LibraryCoordinator`. Its recovery journal and catalog transaction must close the disk/database
+  crash window before a new catalog generation is published.
 - All paths under music or SFX roots pass through the existing normalization
   and containment helpers. Never use string-prefix or `..` substring checks.
 - A missing or empty media directory is valid and must return coherent empty
@@ -153,9 +131,9 @@ Runtime data lives outside the image.
 - Moves, renames, deletes, uploads, and metadata edits happen only through
   explicit user actions. Conflict handling remains ask-first with `rename`,
   `overwrite`, and `skip` race-safe on the server.
-- Tag-backed metadata round-trips through the declarative `TAG_REGISTRY`.
-  Database-only fields stay independent. Preserve per-track partial-failure
-  results for bulk operations.
+- Tag-backed metadata round-trips through typed `TagPatch` values and the format-specific
+  Lofty/FFmpeg adapters. Database-only fields stay independent. Preserve per-track
+  partial-failure results for bulk operations.
 - Library cleanup is propose -> review -> journal -> execute. Detection must
   remain pure and must never mutate files while merely scanning.
 - SFX paths are rooted under `SFX_LIBRARY_DIR`; serving remains gated by loaded
@@ -165,7 +143,8 @@ Runtime data lives outside the image.
 
 - Activation, output-by-default designation, and volume are separate:
   - `active_output_device_ids` is live session state.
-  - `devices.json` stores operator-curated remembered devices and default-on.
+  - SQLite stores operator-curated remembered devices and default-on; `devices.json` is only a
+    preserved one-time migration input.
   - `device_volumes` stores canonical absolute software levels by `client_id`.
 - Any connected device may be activated. Designation only auto-activates a
   device when it connects and must not gate manual activation.
@@ -184,7 +163,7 @@ Runtime data lives outside the image.
   them through Authoring import. Keep local heuristics and future model providers behind the same
   suggestion contracts; never let a ranking engine write playlists or mutate the library directly.
 - Playlist recommendation changes must run the versioned synthetic suites under
-  `backend/app/assistant/evaluation_suites/` through the provider-neutral evaluator. Add
+  `crates/music-application/src/assistant/evaluation_suites/` through the provider-neutral evaluator. Add
   representative cases and explicit thresholds without copying private library data or freezing
   one incidental exact ranking. Future model providers must pass the same unknown-track,
   source-integrity, exclusion, selection-plan, and candidate-limit checks before UI integration.
@@ -368,7 +347,7 @@ Runtime data lives outside the image.
   or interrupt cannot commit unless its source-side dependencies are also selected (or already
   exist in the target). Keep the v1 contract in `clients/authoring-import-v1.md` backward compatible.
 - Authored IDs are derived with `uniqueSlug`; do not add manual ID fields.
-- Preset effect types must stay aligned across backend validation, editor UI,
+- Preset effect types must stay aligned across Rust validation, editor UI,
   frontend types, and the playback-engine switch.
 - Effect-aware outputs cache manifests by active mode/id and must invalidate
   them when `PlayerState.preset_revision` changes. The guest-readable preset
@@ -400,26 +379,28 @@ Runtime data lives outside the image.
 
 - Long-running server work uses the durable background-job runner. Enqueue the
   database row before waking the worker, report cooperative progress/cancellation,
-  and declare restartability explicitly. Job handlers run outside the event loop
-  and must be idempotent or checkpointed before they may be restartable.
+  and declare restartability explicitly. CPU and blocking work goes through bounded
+  analysis/media adapters rather than running directly on Tokio workers; a restartable handler
+  must be idempotent or checkpointed.
 - Graceful shutdown follows the same restartability policy as crash recovery. Never requeue a
   non-restartable provider job after it may have incurred cost; retain its latest safe checkpoint
   and mark it interrupted instead.
-- SQLite schema creation is idempotent. `_apply_additive_columns()` handles
-  only additive compatible columns; renames, drops, and type changes require a
-  deliberate migration or documented reset.
-- Runtime persistence is `app.db`, `devices.json`, media directories, and mode
-  data under `/data`. Seed modes copy only when the target is empty.
-- The GitHub workflow runs backend lint/type/tests and frontend
-  lint/type/tests before building, publishing to GHCR, and dispatching the
-  sibling infrastructure repository.
+- SQLx owns an ordered migration ledger. The schema doctor accepts only documented legacy/additive
+  shapes; renames, drops, type changes, and future versions require a deliberate migration and a
+  verified pre-migration backup.
+- Runtime persistence is `app.db`, media directories, mode data, and the separately held Assistant
+  key. A legacy `devices.json` may be imported but is never a second authority. Seed modes copy
+  only when the target is empty.
+- The rewrite workflow validates Rust, the frontend, the frozen compatibility oracle, and the
+  non-root candidate image without publishing. The existing `main` workflow remains the only
+  image-publish/infrastructure-dispatch path until cutover is explicitly authorized.
 - This repository does not SSH to production. Deployment rollout, reverse
   proxy, bind mounts, and production `.env` live in `junak.eu`.
 
 ## Completion
 
 - Run the affected narrow tests while iterating.
-- Before handoff, run all relevant backend and frontend gates listed above.
+- Before handoff, run all relevant Rust and frontend gates listed above.
 - Add regression tests for protocol, persistence, path, auth, synchronization,
   or audio-state bugs.
 - Update `README.md`, `clients/README.md`, `.env.example`, and this file when

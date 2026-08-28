@@ -33,22 +33,29 @@ provider adapter, data limit, disclosure, quality suite, and review contract.
 
 ## 1. Prepare the deployment
 
-1. Make a copy of `app.db`. This is the only application data changed by the
-   additive schema update in this release.
-2. If provider credentials are already saved, confirm that the matching Assistant
+1. For rewrite acceptance, clone the complete persistence set described in
+   [`docs/RUST_REWRITE_PLAN.md`](docs/RUST_REWRITE_PLAN.md#phase-13--cutover-and-rollback-window):
+   `app.db`, legacy `devices.json` when present, modes, and the separately held Assistant key.
+   Point the Rust candidate only at this isolated copy.
+2. Run `music-cli db doctor` against the copy before migration. Unknown or damaged schema shapes
+   are a stop condition; `music-cli db migrate` creates and verifies its own pre-migration database
+   backup before applying the ordered SQLx migrations.
+3. If provider credentials are already saved, confirm that the matching Assistant
    credential master key is still available through `ASSISTANT_CREDENTIAL_KEY` or the
    dedicated key-file mount. A database backup and this key are one restore set.
-3. Confirm the deployment still mounts the existing music, SFX, modes, and device
-   paths in their usual locations. These features do not migrate or rewrite those
-   files, so a new full media backup is not required for this release.
-4. Build and deploy the current `main` revision through the normal CI and
-   infrastructure workflow. Do not copy a development database over production.
-5. After startup, sign in and confirm that normal playback, output-device selection,
+4. Confirm the deployment still mounts the existing music, SFX, modes, and legacy device paths in
+   their intended locations. Database migration does not rewrite media or mode documents;
+   `devices.json` is imported once without modifying the source and SQLite is authoritative after
+   that. Keep the normal long-term backup for media and authored modes.
+5. Build and deploy only an accepted release revision through the normal CI and
+   infrastructure workflow. During rewrite validation, use `Dockerfile.rust` against a copied
+   data set; do not copy a development database over production.
+6. After startup, sign in and confirm that normal playback, output-device selection,
    Authoring, and the Library still work before enabling optional models.
 
-The schema changes are additive and applied at startup. Music and SFX should still be
-covered by the server's normal long-term backup policy because they are valuable source
-data, not because this release introduces a special risk to them.
+The server refuses incompatible or future schema versions before opening them for writes. Music
+and SFX remain under the normal long-term backup policy because they are valuable source data, not
+because the Rust migration mutates them.
 
 ## 2. Establish the local baseline first
 
@@ -79,17 +86,15 @@ the bounded evidence and candidates used by model workflows.
 ### Optional local voice analysis
 
 Until a model path is configured, the application reports voice as `not_classified`. The supported
-opt-in uses
-Essentia's purpose-trained `voice_instrumental-musicnn-msd-2.pb` model and never sends audio over the
-network. Essentia's TensorFlow runtime is AGPL-3.0-only and the MTG model weights are licensed
+opt-in runs Essentia's purpose-trained `voice_instrumental-musicnn-msd-2.pb` graph directly through
+the Rust tract runtime and never sends audio over the network. The MTG model weights are licensed
 CC BY-NC-SA 4.0; confirm those terms fit the deployment before proceeding. The application does not
-download or accept a different model silently.
+download or accept a different model or checksum silently. Runtime license handling is recorded in
+[`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md).
 
-On a supported Linux x86-64 development environment with Python 3.14:
+On a supported development machine:
 
 ```bash
-cd backend
-uv sync --locked --extra dev --extra voice
 mkdir -p ./models
 curl --fail --location \
   --output ./models/voice_instrumental-musicnn-msd-2.pb \
@@ -98,24 +103,22 @@ echo "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a  ./models
 export ASSISTANT_VOICE_MODEL_PATH="$PWD/models/voice_instrumental-musicnn-msd-2.pb"
 ```
 
-The project-published production image includes the optional runtime, but never downloads or embeds
-the separately licensed model. Point it at a checksum-verified, read-only model mount. Other builds
-remain lightweight by default; to create an explicit voice-capable custom image, build and run it as
-follows:
+The Rust image includes the native inference code but never downloads or embeds the separately
+licensed model. Point it at a checksum-verified, read-only model mount:
 
 ```bash
-docker build --build-arg INSTALL_VOICE_ANALYZER=true -t music-voice .
+docker build -f Dockerfile.rust -t music-rust .
 docker run -d --name music \
   -p 8000:8000 \
   -v /srv/music-data:/data \
   -v /srv/music-models:/models:ro \
   -e ASSISTANT_VOICE_MODEL_PATH=/models/voice_instrumental-musicnn-msd-2.pb \
-  music-voice
+  music-rust
 ```
 
 After restarting, existing context built without that exact classifier is shown as stale. Run the
 normal comprehensive context job. It first checkpoints signal, structure, tempo, and loudness for
-every eligible track, then starts a separate voice-only worker pool. The Library Context page shows
+every eligible track, then sends voice-only work to one capacity-one model-owning Rust thread. The Library Context page shows
 one progress bar for each pass. If native voice inference is interrupted, retrying the job resumes
 the remaining voice rows from the saved first-pass context instead of decoding the library again.
 Then inspect several known vocal, instrumental, and intermittent-vocal tracks in
@@ -124,7 +127,7 @@ the fraction of windows where voice led instrumental. These are classifier measu
 calibrated probability or guarantee; library-specific threshold calibration is not required for
 this bounded factual-evidence use.
 Disabling or changing the model also requires a normal context rebuild. A per-track optional-stage
-failure keeps the rest of that track context and reports voice as `unavailable`; a worker-pool crash
+failure keeps the rest of that track context and reports voice as `unavailable`; a worker failure
 leaves unprocessed rows as partial checkpoints for the next retry.
 
 ## 3. Enable encrypted provider credentials
@@ -145,7 +148,9 @@ material is returned to the page.
 Managed deployments may instead generate a URL-safe base64 key outside the repository:
 
 ```powershell
-python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+[Convert]::ToBase64String(
+  [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+).Replace('+', '-').Replace('/', '_')
 ```
 
 1. Save the result as `ASSISTANT_CREDENTIAL_KEY` in the deployment's secret store.
