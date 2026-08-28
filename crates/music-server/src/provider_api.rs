@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection};
@@ -8,13 +9,15 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use music_application::assistant::{
     MODEL_ROLES, ModelConformanceStatus, ModelRoleUpdate, ModelRoleView, PROVIDER_ADAPTERS,
-    PROVIDER_CAPABILITIES, ProviderConnectionCreate, ProviderConnectionPatch,
-    ProviderConnectionView, ProviderCredentialSource, ProviderRepository, ProviderSecret,
-    ProviderService, ProviderServiceError, ProviderServiceErrorKind, ProviderVerificationStatus,
+    PROVIDER_CAPABILITIES, PROVIDER_CONFORMANCE_CONTRACT, ProviderConformanceView,
+    ProviderConnectionCreate, ProviderConnectionPatch, ProviderConnectionView,
+    ProviderCredentialSource, ProviderRepository, ProviderSecret, ProviderService,
+    ProviderServiceError, ProviderServiceErrorKind, ProviderVerificationStatus,
     ProviderVerificationView, ThinkingMode,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 use utoipa::openapi::RefOr;
@@ -407,6 +410,44 @@ impl TryFrom<ProviderVerificationView> for ProviderVerificationResponse {
     }
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelConformanceOut)]
+struct ModelConformanceResponse {
+    role: ModelRoleResponse,
+    passed: bool,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    error_code: Option<String>,
+    #[schema(schema_with = conformance_contract_schema)]
+    contract_version: &'static str,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    provider_model_id: Option<String>,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    finish_reason: Option<String>,
+    #[schema(required = true, schema_with = nullable_integer_schema)]
+    input_tokens: Option<i64>,
+    #[schema(required = true, schema_with = nullable_integer_schema)]
+    output_tokens: Option<i64>,
+    #[schema(schema_with = integer_schema)]
+    duration_ms: i64,
+}
+
+impl ModelConformanceResponse {
+    fn from_view(value: ProviderConformanceView, duration_ms: u128) -> Result<Self, ApiError> {
+        Ok(Self {
+            role: value.role.try_into()?,
+            passed: value.passed,
+            error_code: value.error_code,
+            contract_version: PROVIDER_CONFORMANCE_CONTRACT,
+            provider_model_id: value.provider_model_id,
+            finish_reason: value.finish_reason,
+            input_tokens: value.input_tokens.map(saturating_i64),
+            output_tokens: value.output_tokens.map(saturating_i64),
+            duration_ms: i64::try_from(duration_ms).unwrap_or(i64::MAX),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 enum ThinkingModeWire {
@@ -555,6 +596,7 @@ pub(crate) fn provider_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(delete_connection_credential))
         .routes(routes!(verify_connection))
         .routes(routes!(list_roles))
+        .routes(routes!(test_role_model))
         .routes(routes!(update_role, delete_role))
 }
 
@@ -836,6 +878,49 @@ async fn list_roles(
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()?,
     ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/providers/roles/{role_id}/test",
+    operation_id = "test_role_model_api_assistant_providers_roles__role_id__test_post",
+    params(("role_id" = String, Path, description = "Role Id")),
+    responses(
+        (status = 200, description = "Successful Response", body = ModelConformanceResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn test_role_model(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    role_id: Result<Path<String>, PathRejection>,
+) -> Result<Json<ModelConformanceResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let Path(role_id) = role_id.map_err(|_| ApiError::validation())?;
+    let providers = providers(&state)?;
+    let target = providers
+        .service
+        .prepare_role_conformance(&role_id)
+        .await
+        .map_err(map_provider_error)?;
+    let request = target.request();
+    let started_at = Instant::now();
+    let result = providers
+        .network
+        .execute_structured_model_request(&target.execution, &request)
+        .await;
+    let duration_ms = started_at.elapsed().as_millis();
+    let result = target.evaluate(result);
+    let value = providers
+        .service
+        .finish_role_conformance(&target, result)
+        .await
+        .map_err(map_provider_error)?;
+    Ok(Json(ModelConformanceResponse::from_view(
+        value,
+        duration_ms,
+    )?))
 }
 
 #[utoipa::path(
@@ -1129,6 +1214,31 @@ fn integer_schema() -> RefOr<Schema> {
     ObjectBuilder::new().schema_type(Type::Integer).into()
 }
 
+fn nullable_integer_schema() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(integer_schema())
+            .item(ObjectBuilder::new().schema_type(Type::Null))
+            .build(),
+    )
+    .into()
+}
+
+fn conformance_contract_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .extensions(Some(
+            [("const", json!(PROVIDER_CONFORMANCE_CONTRACT))]
+                .into_iter()
+                .collect(),
+        ))
+        .into()
+}
+
+fn saturating_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
 fn nonnegative_integer_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::Integer)
@@ -1171,10 +1281,11 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::header::{CONTENT_TYPE, COOKIE, SET_COOKIE};
     use axum::http::{HeaderMap, Request, StatusCode};
-    use axum::routing::get;
+    use axum::routing::{get, post};
     use axum::{Json as AxumJson, Router};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE;
+    use music_application::assistant::PROVIDER_CONFORMANCE_CONTRACT;
     use music_application::auth::UnixSeconds;
     use music_storage::{SqliteStorage, SqliteStorageOptions, hash_password};
     use serde_json::Value;
@@ -1247,20 +1358,70 @@ mod tests {
         let provider_listener = TcpListener::bind("127.0.0.1:0").await?;
         let provider_address = provider_listener.local_addr()?;
         let provider_server = tokio::spawn(async move {
-            let app = Router::new().route(
-                "/v1/models",
-                get(|headers: HeaderMap| async move {
-                    assert_eq!(
-                        headers
-                            .get("authorization")
-                            .and_then(|value| value.to_str().ok()),
-                        Some("Bearer provider-secret-value")
-                    );
-                    AxumJson(serde_json::json!({
-                        "data": [{"id": "fixture-model"}, {"id": "second-model"}]
-                    }))
-                }),
-            );
+            let app = Router::new()
+                .route(
+                    "/v1/models",
+                    get(|headers: HeaderMap| async move {
+                        assert_eq!(
+                            headers
+                                .get("authorization")
+                                .and_then(|value| value.to_str().ok()),
+                            Some("Bearer provider-secret-value")
+                        );
+                        AxumJson(serde_json::json!({
+                            "data": [{"id": "fixture-model"}, {"id": "second-model"}]
+                        }))
+                    }),
+                )
+                .route(
+                    "/v1/chat/completions",
+                    post(
+                        |headers: HeaderMap, AxumJson(payload): AxumJson<Value>| async move {
+                            if headers
+                                .get("authorization")
+                                .and_then(|value| value.to_str().ok())
+                                != Some("Bearer provider-secret-value")
+                            {
+                                return Err(StatusCode::UNAUTHORIZED);
+                            }
+                            if payload
+                                .pointer("/response_format/type")
+                                .and_then(Value::as_str)
+                                != Some("json_object")
+                            {
+                                return Err(StatusCode::BAD_REQUEST);
+                            }
+                            let user_prompt = payload
+                                .pointer("/messages/1/content")
+                                .and_then(Value::as_str)
+                                .ok_or(StatusCode::BAD_REQUEST)?;
+                            let input: Value = serde_json::from_str(user_prompt)
+                                .map_err(|_| StatusCode::BAD_REQUEST)?;
+                            let contract = input
+                                .get("contract")
+                                .and_then(Value::as_str)
+                                .ok_or(StatusCode::BAD_REQUEST)?;
+                            let challenge = input
+                                .get("challenge")
+                                .and_then(Value::as_str)
+                                .ok_or(StatusCode::BAD_REQUEST)?;
+                            let content = serde_json::json!({
+                                "contract": contract,
+                                "challenge": challenge,
+                                "accepted": true,
+                            })
+                            .to_string();
+                            Ok(AxumJson(serde_json::json!({
+                                "model": "fixture-model",
+                                "choices": [{
+                                    "finish_reason": "stop",
+                                    "message": {"content": content}
+                                }],
+                                "usage": {"prompt_tokens": 23, "completion_tokens": 11}
+                            })))
+                        },
+                    ),
+                );
             let _result = axum::serve(provider_listener, app).await;
         });
         let login = router
@@ -1354,6 +1515,28 @@ mod tests {
         let configured = body_json(configured).await?;
         assert_eq!(configured["enabled"], false);
         assert_eq!(configured["effective_enabled"], false);
+
+        let conformance = router
+            .clone()
+            .oneshot(
+                Request::post("/api/assistant/providers/roles/music_tagger/test")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(conformance.status(), StatusCode::OK);
+        let conformance = body_json(conformance).await?;
+        assert_eq!(conformance["passed"], true);
+        assert_eq!(conformance["error_code"], Value::Null);
+        assert_eq!(
+            conformance["contract_version"],
+            PROVIDER_CONFORMANCE_CONTRACT
+        );
+        assert_eq!(conformance["provider_model_id"], "fixture-model");
+        assert_eq!(conformance["input_tokens"], 23);
+        assert_eq!(conformance["output_tokens"], 11);
+        assert_eq!(conformance["role"]["conformance_status"], "passed");
+        assert!(!conformance.to_string().contains("provider-secret-value"));
 
         let in_use = router
             .clone()

@@ -2,9 +2,9 @@
   "schema_version": "openapi-compatibility/v1",
   "verdict": "incomplete",
   "reference_operation_count": 144,
-  "candidate_operation_count": 130,
-  "matched_operation_count": 129,
-  "fully_compatible_operation_count": 128,
+  "candidate_operation_count": 131,
+  "matched_operation_count": 130,
+  "fully_compatible_operation_count": 129,
   "missing_operations": [
     "GET /api/assistant/eq/model-status",
     "GET /api/assistant/library-tags/catalog/model-cleanup-status",
@@ -19,8 +19,7 @@
     "POST /api/assistant/library-tags/query",
     "POST /api/assistant/playlists/model-suggestions/jobs",
     "POST /api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs",
-    "POST /api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs",
-    "POST /api/assistant/providers/roles/{role_id}/test"
+    "POST /api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs"
   ],
   "candidate_only_operations": [
     "GET /api/readiness"

@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
 use music_application::assistant::{
-    AssistantFuture, ModelRoleRecord, ProviderConnectionPreparation, ProviderConnectionRecord,
-    ProviderCredentialResetOutcome, ProviderMutationOutcome, ProviderRepository,
-    ProviderVerificationWrite, ProviderVerificationWriteOutcome,
+    AssistantFuture, ModelRoleRecord, ProviderConformanceWrite, ProviderConformanceWriteOutcome,
+    ProviderConnectionPreparation, ProviderConnectionRecord, ProviderCredentialResetOutcome,
+    ProviderMutationOutcome, ProviderRepository, ProviderRolePreparation,
+    ProviderRoleRuntimeRecord, ProviderVerificationWrite, ProviderVerificationWriteOutcome,
 };
 use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
@@ -436,6 +437,111 @@ impl ProviderRepository for SqliteStorage {
         })
     }
 
+    fn prepare_model_role<'a>(
+        &'a self,
+        role_id: &'a str,
+    ) -> AssistantFuture<'a, ProviderRolePreparation> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(role) = load_role_tx(&mut transaction, role_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderRolePreparation::NotConfigured);
+            };
+            if role_has_active_model_job(&mut transaction, role_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderRolePreparation::ModelJobActive);
+            }
+            let Some(connection) = load_connection_tx(&mut transaction, &role.connection_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderRolePreparation::ConnectionNotFound);
+            };
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderRolePreparation::Ready(Box::new(
+                ProviderRoleRuntimeRecord { role, connection },
+            )))
+        })
+    }
+
+    fn finish_role_conformance<'a>(
+        &'a self,
+        conformance: &'a ProviderConformanceWrite,
+    ) -> AssistantFuture<'a, ProviderConformanceWriteOutcome> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(role) = load_role_tx(&mut transaction, &conformance.role_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderConformanceWriteOutcome::RoleChanged);
+            };
+            if role.configuration_fingerprint()
+                != conformance.expected_role_configuration_fingerprint
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderConformanceWriteOutcome::RoleChanged);
+            }
+            let Some(connection) = load_connection_tx(&mut transaction, &role.connection_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderConformanceWriteOutcome::ConnectionChanged);
+            };
+            if connection.fingerprint() != conformance.expected_connection_fingerprint {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderConformanceWriteOutcome::ConnectionChanged);
+            }
+            if role_has_active_model_job(&mut transaction, &conformance.role_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderConformanceWriteOutcome::ModelJobActive);
+            }
+            sqlx::query(
+                "UPDATE assistant_model_roles SET conformance_status = ?, \
+                 conformance_error_code = ?, conformance_fingerprint = ?, \
+                 last_conformance_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP \
+                 WHERE role_id = ?",
+            )
+            .bind(if conformance.passed {
+                "passed"
+            } else {
+                "failed"
+            })
+            .bind(&conformance.error_code)
+            .bind(&conformance.runtime_fingerprint)
+            .bind(&conformance.role_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            let role = load_role_tx(&mut transaction, &conformance.role_id)
+                .await
+                .map_err(box_storage)?
+                .ok_or_else(|| {
+                    box_storage(StorageError::InvalidAssistantRecord(
+                        "model role disappeared during conformance update",
+                    ))
+                })?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderConformanceWriteOutcome::Applied(Box::new(
+                ProviderRoleRuntimeRecord { role, connection },
+            )))
+        })
+    }
+
     fn save_model_role<'a>(
         &'a self,
         expected_connection_fingerprint: &'a str,
@@ -552,6 +658,18 @@ async fn load_connection_tx(
         .fetch_optional(&mut **transaction)
         .await?;
     row.as_ref().map(connection_from_row).transpose()
+}
+
+async fn load_role_tx(
+    transaction: &mut Transaction<'_, Sqlite>,
+    role_id: &str,
+) -> Result<Option<ModelRoleRecord>, StorageError> {
+    let query = format!("{ROLE_SELECT} WHERE role_id = ?");
+    let row = sqlx::query(AssertSqlSafe(query))
+        .bind(role_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+    row.as_ref().map(role_from_row).transpose()
 }
 
 fn connection_from_row(row: &SqliteRow) -> Result<ProviderConnectionRecord, StorageError> {
@@ -732,8 +850,9 @@ mod tests {
     use std::sync::Arc;
 
     use music_application::assistant::{
-        ModelRoleRecord, ProviderConnectionPreparation, ProviderConnectionRecord,
-        ProviderMutationOutcome, ProviderRepository, ProviderVerificationWrite,
+        ModelRoleRecord, ProviderConformanceWrite, ProviderConformanceWriteOutcome,
+        ProviderConnectionPreparation, ProviderConnectionRecord, ProviderMutationOutcome,
+        ProviderRepository, ProviderRolePreparation, ProviderVerificationWrite,
         ProviderVerificationWriteOutcome,
     };
     use tempfile::TempDir;
@@ -913,6 +1032,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn role_conformance_is_fingerprint_bound_and_atomic()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let connection = connection("aabbccddeeff00112233445566778899", "Fixture");
+        storage.create_provider_connection(&connection).await?;
+        let role = role(&connection.id);
+        storage
+            .save_model_role(&connection.fingerprint(), &role, false)
+            .await?;
+        assert!(matches!(
+            storage.prepare_model_role(&role.role_id).await?,
+            ProviderRolePreparation::Ready(ref runtime)
+                if runtime.role.model_id == "fixture-model"
+                    && runtime.connection.id == connection.id
+        ));
+        let conformance = ProviderConformanceWrite {
+            role_id: role.role_id.clone(),
+            expected_role_configuration_fingerprint: role.configuration_fingerprint(),
+            expected_connection_fingerprint: connection.fingerprint(),
+            runtime_fingerprint: "a".repeat(64),
+            passed: true,
+            error_code: None,
+        };
+        let applied = storage.finish_role_conformance(&conformance).await?;
+        let ProviderConformanceWriteOutcome::Applied(runtime) = applied else {
+            return Err(format!("unexpected conformance outcome: {applied:?}").into());
+        };
+        assert_eq!(runtime.role.conformance_status, "passed");
+        assert_eq!(
+            runtime.role.conformance_fingerprint.as_deref(),
+            Some("a".repeat(64).as_str())
+        );
+        assert!(runtime.role.last_conformance_at_unix_seconds.is_some());
+
+        let mut changed_role = runtime.role.clone();
+        changed_role.model_id = "changed-model".to_owned();
+        assert_eq!(
+            storage
+                .save_model_role(&connection.fingerprint(), &changed_role, true)
+                .await?,
+            ProviderMutationOutcome::Applied
+        );
+        assert_eq!(
+            storage.finish_role_conformance(&conformance).await?,
+            ProviderConformanceWriteOutcome::RoleChanged
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn active_model_jobs_block_connection_and_role_mutations()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let (_directory, storage) = storage().await?;
@@ -937,6 +1106,10 @@ mod tests {
             ProviderConnectionPreparation::ModelJobActive
         );
         assert_eq!(
+            storage.prepare_model_role("music_tagger").await?,
+            ProviderRolePreparation::ModelJobActive
+        );
+        assert_eq!(
             storage
                 .finish_provider_verification(&ProviderVerificationWrite {
                     connection_id: connection.id.clone(),
@@ -948,6 +1121,20 @@ mod tests {
                 })
                 .await?,
             ProviderVerificationWriteOutcome::ModelJobActive
+        );
+        assert_eq!(
+            storage
+                .finish_role_conformance(&ProviderConformanceWrite {
+                    role_id: "music_tagger".to_owned(),
+                    expected_role_configuration_fingerprint: role(&connection.id)
+                        .configuration_fingerprint(),
+                    expected_connection_fingerprint: connection.fingerprint(),
+                    runtime_fingerprint: "a".repeat(64),
+                    passed: false,
+                    error_code: Some("network_error".to_owned()),
+                })
+                .await?,
+            ProviderConformanceWriteOutcome::ModelJobActive
         );
         assert_eq!(
             storage.clear_provider_credential(&connection.id).await?,

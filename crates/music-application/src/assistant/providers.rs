@@ -4,7 +4,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use rand::TryRngCore;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -21,6 +26,7 @@ pub const STRICT_JSON_SCHEMA_CAPABILITY: &str = "strict-json-schema/v1";
 pub const AUDIO_INPUT_CAPABILITY: &str = "audio-input/v1";
 pub const PROVIDER_CONFORMANCE_CONTRACT: &str = "assistant-provider-conformance/v3";
 pub const STRUCTURED_HARNESS_CONTRACT: &str = "assistant-structured-harness/v3";
+const CONFORMANCE_CHALLENGE_BYTES: usize = 24;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ProviderCapabilityDefinition {
@@ -362,6 +368,25 @@ pub struct ModelRoleRecord {
     pub updated_at_unix_seconds: i64,
 }
 
+impl ModelRoleRecord {
+    #[must_use]
+    pub fn configuration_fingerprint(&self) -> String {
+        let timeout_seconds = self.timeout_seconds.to_string();
+        let max_output_tokens = self.max_output_tokens.to_string();
+        let value = [
+            self.role_id.as_str(),
+            self.connection_id.as_str(),
+            self.model_id.as_str(),
+            if self.enabled { "1" } else { "0" },
+            timeout_seconds.as_str(),
+            max_output_tokens.as_str(),
+            ThinkingMode::parse(&self.thinking_mode).as_str(),
+        ]
+        .join("\0");
+        format!("{:x}", Sha256::digest(value.as_bytes()))
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ModelRoleView {
     pub role_id: String,
@@ -586,6 +611,155 @@ pub struct ProviderVerificationView {
     pub models: Vec<String>,
 }
 
+#[derive(Debug)]
+pub struct ProviderExecutionTarget {
+    pub adapter_id: String,
+    pub base_url: String,
+    pub api_key: ProviderSecret,
+    pub allow_private_network: bool,
+    pub model_id: String,
+    pub timeout_seconds: u16,
+    pub max_output_tokens: u32,
+    pub thinking_mode: ThinkingMode,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StructuredModelRequest {
+    pub system_prompt: String,
+    pub user_prompt: String,
+    pub max_output_tokens: u32,
+    pub output_schema_name: Option<String>,
+    pub output_schema: Option<Value>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StructuredModelResult {
+    pub succeeded: bool,
+    pub error_code: Option<String>,
+    pub payload: Option<Value>,
+    pub provider_model_id: Option<String>,
+    pub finish_reason: Option<String>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderConformanceResult {
+    pub passed: bool,
+    pub error_code: Option<String>,
+    pub provider_model_id: Option<String>,
+    pub finish_reason: Option<String>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+#[derive(Debug)]
+pub struct ProviderConformanceTarget {
+    pub role_id: String,
+    pub execution: ProviderExecutionTarget,
+    pub challenge: String,
+    pub runtime_fingerprint: String,
+    pub role_configuration_fingerprint: String,
+    pub connection_fingerprint: String,
+}
+
+impl ProviderConformanceTarget {
+    #[must_use]
+    pub fn request(&self) -> StructuredModelRequest {
+        StructuredModelRequest {
+            system_prompt: "This is a connection conformance test. Return only one JSON object with exactly these keys: contract, challenge, accepted. Copy the supplied contract and challenge exactly and set accepted to true. Do not use a Markdown code fence or add any other text.".to_owned(),
+            user_prompt: json!({
+                "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                "challenge": self.challenge,
+            })
+            .to_string(),
+            max_output_tokens: 256,
+            output_schema_name: Some("assistant-provider-conformance".to_owned()),
+            output_schema: Some(json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["contract", "challenge", "accepted"],
+                "properties": {
+                    "contract": {
+                        "type": "string",
+                        "const": PROVIDER_CONFORMANCE_CONTRACT,
+                    },
+                    "challenge": {"type": "string", "const": self.challenge},
+                    "accepted": {"type": "boolean", "const": true},
+                },
+            })),
+        }
+    }
+
+    #[must_use]
+    pub fn evaluate(&self, result: StructuredModelResult) -> ProviderConformanceResult {
+        let passed = result.succeeded
+            && result.payload.as_ref()
+                == Some(&json!({
+                    "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                    "challenge": self.challenge,
+                    "accepted": true,
+                }));
+        ProviderConformanceResult {
+            passed,
+            error_code: if passed {
+                None
+            } else if result.succeeded {
+                Some("conformance_mismatch".to_owned())
+            } else {
+                result.error_code
+            },
+            provider_model_id: result.provider_model_id,
+            finish_reason: result.finish_reason,
+            input_tokens: result.input_tokens,
+            output_tokens: result.output_tokens,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderRoleRuntimeRecord {
+    pub role: ModelRoleRecord,
+    pub connection: ProviderConnectionRecord,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ProviderRolePreparation {
+    Ready(Box<ProviderRoleRuntimeRecord>),
+    NotConfigured,
+    ConnectionNotFound,
+    ModelJobActive,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderConformanceWrite {
+    pub role_id: String,
+    pub expected_role_configuration_fingerprint: String,
+    pub expected_connection_fingerprint: String,
+    pub runtime_fingerprint: String,
+    pub passed: bool,
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ProviderConformanceWriteOutcome {
+    Applied(Box<ProviderRoleRuntimeRecord>),
+    RoleChanged,
+    ConnectionChanged,
+    ModelJobActive,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderConformanceView {
+    pub role: ModelRoleView,
+    pub passed: bool,
+    pub error_code: Option<String>,
+    pub provider_model_id: Option<String>,
+    pub finish_reason: Option<String>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ProviderCredentialResetOutcome {
     Applied { deleted_credentials: u64 },
@@ -627,6 +801,14 @@ pub trait ProviderRepository: Debug + Send + Sync {
         connection_id: &'a str,
     ) -> AssistantFuture<'a, ProviderMutationOutcome>;
     fn model_roles(&self) -> AssistantFuture<'_, Vec<ModelRoleRecord>>;
+    fn prepare_model_role<'a>(
+        &'a self,
+        role_id: &'a str,
+    ) -> AssistantFuture<'a, ProviderRolePreparation>;
+    fn finish_role_conformance<'a>(
+        &'a self,
+        conformance: &'a ProviderConformanceWrite,
+    ) -> AssistantFuture<'a, ProviderConformanceWriteOutcome>;
     fn save_model_role<'a>(
         &'a self,
         expected_connection_fingerprint: &'a str,
@@ -1071,6 +1253,114 @@ impl ProviderService {
             .collect())
     }
 
+    pub async fn prepare_role_conformance(
+        &self,
+        role_id: &str,
+    ) -> Result<ProviderConformanceTarget, ProviderServiceError> {
+        let definition = configurable_role(role_id)?;
+        let runtime = match self
+            .repository
+            .prepare_model_role(role_id)
+            .await
+            .map_err(ProviderServiceError::dependency)?
+        {
+            ProviderRolePreparation::Ready(runtime) => *runtime,
+            ProviderRolePreparation::NotConfigured => return Err(role_not_configured()),
+            ProviderRolePreparation::ConnectionNotFound => {
+                return Err(connection_not_found());
+            }
+            ProviderRolePreparation::ModelJobActive => return Err(role_job_active()),
+        };
+        if ProviderVerificationStatus::parse(&runtime.connection.verification_status)
+            != ProviderVerificationStatus::Verified
+        {
+            return Err(ProviderServiceError::public(
+                ProviderServiceErrorKind::Conflict,
+                "connection_not_verified",
+                "Verify this provider connection before testing the model.",
+            ));
+        }
+        if !capabilities_satisfy(
+            &verified_capabilities(&runtime.connection),
+            definition.required_capability_ids,
+        ) {
+            return Err(incompatible_connection());
+        }
+        let api_key = self.decrypt_credential(&runtime.connection).await?;
+        let runtime_fingerprint = self.role_runtime_fingerprint(&runtime.role, &runtime.connection);
+        Ok(ProviderConformanceTarget {
+            role_id: role_id.to_owned(),
+            execution: ProviderExecutionTarget {
+                adapter_id: runtime.connection.adapter_id.clone(),
+                base_url: runtime.connection.base_url.clone(),
+                api_key,
+                allow_private_network: runtime.connection.allow_private_network,
+                model_id: runtime.role.model_id.clone(),
+                timeout_seconds: runtime.role.timeout_seconds,
+                max_output_tokens: runtime.role.max_output_tokens,
+                thinking_mode: ThinkingMode::parse(&runtime.role.thinking_mode),
+            },
+            challenge: random_conformance_challenge()?,
+            runtime_fingerprint,
+            role_configuration_fingerprint: runtime.role.configuration_fingerprint(),
+            connection_fingerprint: runtime.connection.fingerprint(),
+        })
+    }
+
+    pub async fn finish_role_conformance(
+        &self,
+        target: &ProviderConformanceTarget,
+        result: ProviderConformanceResult,
+    ) -> Result<ProviderConformanceView, ProviderServiceError> {
+        let error_code = normalize_verification_error(result.error_code.as_deref());
+        let passed = result.passed && error_code.is_none();
+        let write = ProviderConformanceWrite {
+            role_id: target.role_id.clone(),
+            expected_role_configuration_fingerprint: target.role_configuration_fingerprint.clone(),
+            expected_connection_fingerprint: target.connection_fingerprint.clone(),
+            runtime_fingerprint: target.runtime_fingerprint.clone(),
+            passed,
+            error_code: if passed {
+                None
+            } else {
+                Some(error_code.unwrap_or_else(|| "conformance_failed".to_owned()))
+            },
+        };
+        let runtime = match self
+            .repository
+            .finish_role_conformance(&write)
+            .await
+            .map_err(ProviderServiceError::dependency)?
+        {
+            ProviderConformanceWriteOutcome::Applied(runtime) => *runtime,
+            ProviderConformanceWriteOutcome::ModelJobActive => return Err(role_job_active()),
+            ProviderConformanceWriteOutcome::RoleChanged
+            | ProviderConformanceWriteOutcome::ConnectionChanged => {
+                return Err(ProviderServiceError::public(
+                    ProviderServiceErrorKind::Conflict,
+                    "role_changed",
+                    "The model role changed while its test was running. Test it again.",
+                ));
+            }
+        };
+        let definition = configurable_role(&target.role_id)?;
+        let role = self.role_view(
+            definition,
+            Some(&runtime.role),
+            Some(&runtime.connection),
+            true,
+        );
+        Ok(ProviderConformanceView {
+            passed: role.conformance_status == ModelConformanceStatus::Passed,
+            error_code: role.conformance_error_code.clone(),
+            provider_model_id: bounded_optional_text(result.provider_model_id, 256),
+            finish_reason: bounded_optional_text(result.finish_reason, 64),
+            input_tokens: result.input_tokens,
+            output_tokens: result.output_tokens,
+            role,
+        })
+    }
+
     pub async fn update_model_role(
         &self,
         role_id: &str,
@@ -1391,6 +1681,22 @@ fn normalize_verification_error(value: Option<&str>) -> Option<String> {
     Some(value.to_owned())
 }
 
+fn bounded_optional_text(value: Option<String>, maximum: usize) -> Option<String> {
+    value.filter(|value| !value.is_empty() && value.len() <= maximum)
+}
+
+fn random_conformance_challenge() -> Result<String, ProviderServiceError> {
+    let mut bytes = [0_u8; CONFORMANCE_CHALLENGE_BYTES];
+    OsRng.try_fill_bytes(&mut bytes).map_err(|_| {
+        ProviderServiceError::public(
+            ProviderServiceErrorKind::Unavailable,
+            "secure_random_unavailable",
+            "A secure model-test challenge could not be generated.",
+        )
+    })?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
 fn capabilities_satisfy(available: &[impl AsRef<str>], required: &[&str]) -> bool {
     let available = available.iter().map(AsRef::as_ref).collect::<BTreeSet<_>>();
     required.iter().all(|value| available.contains(value))
@@ -1510,6 +1816,14 @@ fn role_not_found() -> ProviderServiceError {
     )
 }
 
+fn role_not_configured() -> ProviderServiceError {
+    ProviderServiceError::public(
+        ProviderServiceErrorKind::Conflict,
+        "role_not_configured",
+        "Save a model configuration before testing it.",
+    )
+}
+
 fn incompatible_connection() -> ProviderServiceError {
     ProviderServiceError::public(
         ProviderServiceErrorKind::Conflict,
@@ -1544,7 +1858,11 @@ fn unexpected_mutation() -> ProviderServiceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{MODEL_ROLES, PROVIDER_ADAPTERS, ProviderConnectionRecord};
+    use super::{
+        MODEL_ROLES, OPENAI_COMPATIBLE_ADAPTER, PROVIDER_ADAPTERS, PROVIDER_CONFORMANCE_CONTRACT,
+        ProviderConformanceTarget, ProviderConnectionRecord, ProviderExecutionTarget,
+        ProviderSecret, StructuredModelResult, ThinkingMode,
+    };
 
     #[test]
     fn static_provider_inventory_is_unique_and_role_contracts_are_versioned() {
@@ -1587,5 +1905,66 @@ mod tests {
         let rendered = format!("{record:?}");
         assert!(!rendered.contains("secret-ciphertext"));
         assert!(!rendered.contains("secret-nonce"));
+    }
+
+    #[test]
+    fn conformance_challenge_is_schema_bound_and_requires_an_exact_echo() {
+        let target = ProviderConformanceTarget {
+            role_id: "music_tagger".to_owned(),
+            execution: ProviderExecutionTarget {
+                adapter_id: OPENAI_COMPATIBLE_ADAPTER.to_owned(),
+                base_url: "https://example.test/v1".to_owned(),
+                api_key: ProviderSecret::new("secret"),
+                allow_private_network: false,
+                model_id: "fixture-model".to_owned(),
+                timeout_seconds: 30,
+                max_output_tokens: 2_000,
+                thinking_mode: ThinkingMode::ProviderDefault,
+            },
+            challenge: "one-time-challenge".to_owned(),
+            runtime_fingerprint: "a".repeat(64),
+            role_configuration_fingerprint: "b".repeat(64),
+            connection_fingerprint: "c".repeat(64),
+        };
+        let request = target.request();
+        assert_eq!(request.max_output_tokens, 256);
+        assert_eq!(
+            request.output_schema.as_ref().and_then(|schema| {
+                schema
+                    .pointer("/properties/challenge/const")
+                    .and_then(serde_json::Value::as_str)
+            }),
+            Some("one-time-challenge")
+        );
+        let passed = target.evaluate(StructuredModelResult {
+            succeeded: true,
+            error_code: None,
+            payload: Some(serde_json::json!({
+                "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                "challenge": "one-time-challenge",
+                "accepted": true,
+            })),
+            provider_model_id: Some("fixture-model".to_owned()),
+            finish_reason: Some("stop".to_owned()),
+            input_tokens: Some(12),
+            output_tokens: Some(8),
+        });
+        assert!(passed.passed);
+
+        let mismatch = target.evaluate(StructuredModelResult {
+            succeeded: true,
+            error_code: None,
+            payload: Some(serde_json::json!({
+                "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                "challenge": "different",
+                "accepted": true,
+            })),
+            provider_model_id: None,
+            finish_reason: None,
+            input_tokens: None,
+            output_tokens: None,
+        });
+        assert!(!mismatch.passed);
+        assert_eq!(mismatch.error_code.as_deref(), Some("conformance_mismatch"));
     }
 }

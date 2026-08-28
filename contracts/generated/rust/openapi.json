@@ -3935,6 +3935,86 @@
         ],
         "type": "object"
       },
+      "ModelConformanceOut": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "const": "assistant-provider-conformance/v3",
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "provider_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/ModelRoleOut"
+          }
+        },
+        "required": [
+          "role",
+          "passed",
+          "error_code",
+          "contract_version",
+          "provider_model_id",
+          "finish_reason",
+          "input_tokens",
+          "output_tokens",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
       "ModelRoleDefinitionOut": {
         "additionalProperties": false,
         "properties": {
@@ -7998,6 +8078,47 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModelRoleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/roles/{role_id}/test": {
+      "post": {
+        "operationId": "test_role_model_api_assistant_providers_roles__role_id__test_post",
+        "parameters": [
+          {
+            "description": "Role Id",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConformanceOut"
                 }
               }
             },
