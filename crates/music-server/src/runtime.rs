@@ -1218,6 +1218,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn diagnostics_requires_auth_and_projects_live_owner_state() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if runtime.library_status().status == ReconciliationStatus::Current {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+
+        let unauthorized = router
+            .clone()
+            .oneshot(Request::get("/api/diagnostics").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?;
+        let response = router
+            .oneshot(
+                Request::get("/api/diagnostics")
+                    .header("cookie", cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(body["track_count"], 0);
+        assert!(body["last_scan_at"].is_number());
+        assert_eq!(body["modes"]["last_load_at"], Value::Null);
+        assert_eq!(body["modes"]["loaded_ids"], serde_json::json!([]));
+        assert_eq!(body["modes"]["errors"], serde_json::json!({}));
+        assert_eq!(body["connected_device_count"], 0);
+        assert_eq!(body["state_revision"], 0);
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn seeds_only_an_empty_mode_directory() -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
         let seed = directory.path().join("seed");

@@ -391,6 +391,12 @@ the operator can enter the UI and repair it. Public health responses expose only
 component errors, versions, and timings remain behind authenticated diagnostics and never include
 paths or secrets.
 
+The compatibility `/api/diagnostics` projection reads counts and timestamps from the library
+coordinator's immutable status and connection/revision data from a playback-actor snapshot. It does
+not query mutable module globals or create another status owner. Until `ModeCoordinator` exists,
+its mode-loader fields remain the contract's explicit not-yet-loaded value: no timestamp, no loaded
+IDs, and no fabricated errors.
+
 During the rewrite, readiness remains `starting` until the real playback owner is running. The
 Phase-2 WebSocket transport shell returns a protocol-shaped availability error and closes instead
 of publishing a synthetic snapshot. Static files are optional and degradable: a valid built SPA

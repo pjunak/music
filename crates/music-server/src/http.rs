@@ -149,6 +149,7 @@ fn documented_api_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .merge(crate::auth::auth_router())
         .merge(crate::devices::device_router())
+        .merge(crate::diagnostics::diagnostics_router())
         .merge(crate::library::library_router())
         .merge(crate::cleanup::cleanup_router())
         .routes(routes!(liveness))

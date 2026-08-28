@@ -815,6 +815,40 @@
         ],
         "type": "object"
       },
+      "DiagnosticsResponse": {
+        "properties": {
+          "connected_device_count": {
+            "type": "integer"
+          },
+          "last_scan_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "modes": {
+            "$ref": "#/components/schemas/LoaderStatus"
+          },
+          "state_revision": {
+            "type": "integer"
+          },
+          "track_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_count",
+          "last_scan_at",
+          "modes",
+          "connected_device_count",
+          "state_revision"
+        ],
+        "type": "object"
+      },
       "FolderCreateRequest": {
         "properties": {
           "path": {
@@ -956,6 +990,38 @@
         "additionalProperties": {
           "type": "string"
         },
+        "type": "object"
+      },
+      "LoaderStatus": {
+        "properties": {
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "last_load_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loaded_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "last_load_at",
+          "loaded_ids",
+          "errors"
+        ],
         "type": "object"
       },
       "LoginRequest": {
@@ -1995,6 +2061,26 @@
         },
         "tags": [
           "devices"
+        ]
+      }
+    },
+    "/api/diagnostics": {
+      "get": {
+        "operationId": "get_diagnostics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "diagnostics"
         ]
       }
     },

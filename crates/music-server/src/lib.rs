@@ -15,6 +15,7 @@ mod cleanup;
 mod config;
 mod contracts;
 mod devices;
+mod diagnostics;
 mod error;
 mod health;
 mod http;

@@ -259,8 +259,8 @@ the client-ended path, unknown interrupts use the compatible five-minute safety 
 automatic skip carries the observed track ID so a simultaneous client skip remains idempotent.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 37 currently registered Rust operations, rather than presenting partial work as
-parity. Thirty-six operations overlap the reference and 35 are fully schema-compatible; the
+operations versus 38 currently registered Rust operations, rather than presenting partial work as
+parity. Thirty-seven operations overlap the reference and 36 are fully schema-compatible; the
 remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work.
 The browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
@@ -292,8 +292,9 @@ reconciliation and bounded slow-client behavior.
 
 ## Phase 4 — authentication, devices, diagnostics, and administration
 
-**Status:** In progress — runtime authentication, remembered-device ownership, and foundational
-offline administration are implemented; diagnostics and maintenance-gated backup/restore remain.
+**Status:** In progress — runtime authentication, remembered-device ownership, foundational
+offline administration, and authenticated diagnostics are implemented; maintenance-gated
+backup/restore remains.
 
 - [x] Users, Python-compatible Argon2 verification, dummy verification, bounded login hashing,
   direct-peer/global throttles, opaque sessions, configured cookies, revocation, expiry, and
@@ -306,9 +307,11 @@ offline administration are implemented; diagnostics and maintenance-gated backup
 - [x] Offline `create-user`, `set-password`, database doctor/migrate, healthcheck, and contract
   commands. Password input defaults to a hidden prompt; password replacement atomically revokes
   active sessions unless the operator explicitly preserves them.
-- Diagnostics, maintenance-gated streaming backup/restore verification, and storage
-  initialization.
-- Compatibility liveness, component readiness/degradation, security headers, and safe
+- [x] Authenticated diagnostics from the live playback actor and library coordinator, preserving
+  the existing frontend response contract without exposing log-only internals. Mode load status is
+  truthfully empty until the Rust mode coordinator owns it.
+- Maintenance-gated streaming backup/restore verification and storage initialization.
+- [x] Compatibility liveness, component readiness/degradation, security headers, and safe
   `detail`/error-code/correlation-ID mappings.
 
 The HTTP and WebSocket paths share one opaque-session service and the configured cookie name.
