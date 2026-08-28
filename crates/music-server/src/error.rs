@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::Json;
@@ -38,6 +39,9 @@ pub enum RuntimeError {
     ShutdownTimedOut {
         timeout: Duration,
     },
+    PendingRestore {
+        journal: PathBuf,
+    },
 }
 
 impl RuntimeError {
@@ -72,6 +76,11 @@ impl Display for RuntimeError {
             Self::ShutdownTimedOut { timeout } => {
                 write!(formatter, "runtime shutdown exceeded {timeout:?}")
             }
+            Self::PendingRestore { journal } => write!(
+                formatter,
+                "interrupted restore must be recovered before startup: {}",
+                journal.display()
+            ),
         }
     }
 }
@@ -90,7 +99,8 @@ impl Error for RuntimeError {
             | Self::TaskAdmissionClosed
             | Self::SupervisorPoisoned
             | Self::CriticalTaskFailed { .. }
-            | Self::ShutdownTimedOut { .. } => None,
+            | Self::ShutdownTimedOut { .. }
+            | Self::PendingRestore { .. } => None,
         }
     }
 }

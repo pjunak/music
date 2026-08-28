@@ -26,6 +26,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
+use crate::admin::BackupService;
 use crate::auth::RuntimeAuth;
 use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
@@ -45,6 +46,7 @@ pub(crate) struct HttpState {
     pub(crate) health: HealthRegistry,
     pub(crate) playback: Option<PlaybackActorHandle>,
     pub(crate) auth: Option<Arc<RuntimeAuth>>,
+    pub(crate) backup: Option<Arc<BackupService>>,
     pub(crate) devices: Option<Arc<RuntimeDevices>>,
     pub(crate) library: Option<Arc<RuntimeLibrary>>,
 }
@@ -80,6 +82,7 @@ pub fn build_router(
     health: HealthRegistry,
     playback: PlaybackActorHandle,
     auth: Arc<RuntimeAuth>,
+    backup: Arc<BackupService>,
     devices: Arc<RuntimeDevices>,
     library: Arc<RuntimeLibrary>,
 ) -> Result<Router, RuntimeError> {
@@ -88,6 +91,7 @@ pub fn build_router(
         health,
         Some(playback),
         Some(auth),
+        Some(backup),
         Some(devices),
         Some(library),
     )
@@ -98,7 +102,7 @@ fn build_router_without_playback(
     config: &AppConfig,
     health: HealthRegistry,
 ) -> Result<Router, RuntimeError> {
-    build_router_inner(config, health, None, None, None, None)
+    build_router_inner(config, health, None, None, None, None, None)
 }
 
 fn build_router_inner(
@@ -106,6 +110,7 @@ fn build_router_inner(
     health: HealthRegistry,
     playback: Option<PlaybackActorHandle>,
     auth: Option<Arc<RuntimeAuth>>,
+    backup: Option<Arc<BackupService>>,
     devices: Option<Arc<RuntimeDevices>>,
     library: Option<Arc<RuntimeLibrary>>,
 ) -> Result<Router, RuntimeError> {
@@ -113,6 +118,7 @@ fn build_router_inner(
         health: health.clone(),
         playback,
         auth,
+        backup,
         devices,
         library,
     };
@@ -148,6 +154,7 @@ fn build_router_inner(
 fn documented_api_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .merge(crate::auth::auth_router())
+        .merge(crate::admin::admin_router())
         .merge(crate::devices::device_router())
         .merge(crate::diagnostics::diagnostics_router())
         .merge(crate::library::library_router())

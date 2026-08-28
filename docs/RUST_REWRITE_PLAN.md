@@ -292,9 +292,9 @@ reconciliation and bounded slow-client behavior.
 
 ## Phase 4 — authentication, devices, diagnostics, and administration
 
-**Status:** In progress — runtime authentication, remembered-device ownership, foundational
-offline administration, and authenticated diagnostics are implemented; maintenance-gated
-backup/restore remains.
+**Status:** In progress — runtime authentication, remembered-device ownership, diagnostics, and
+maintenance-gated backup/restore are implemented; the remaining Phase 4 work is hardening against
+the full gate before moving the phase marker to complete.
 
 - [x] Users, Python-compatible Argon2 verification, dummy verification, bounded login hashing,
   direct-peer/global throttles, opaque sessions, configured cookies, revocation, expiry, and
@@ -310,7 +310,15 @@ backup/restore remains.
 - [x] Authenticated diagnostics from the live playback actor and library coordinator, preserving
   the existing frontend response contract without exposing log-only internals. Mode load status is
   truthfully empty until the Rust mode coordinator owns it.
-- Maintenance-gated streaming backup/restore verification and storage initialization.
+- [x] Maintenance-gated, authenticated backup streams a verified versioned `tar.gz` from disk.
+  The manifest hashes the SQLite snapshot and every mode file, records empty mode directories, and
+  carries only the one-way assistant credential-key ID. The master key and legacy `devices.json`
+  are never archived; remembered devices are already SQLite-owned.
+- [x] Offline `music-cli backup restore` requires both `--replace` and `--server-stopped`, verifies
+  archive bounds, paths, payload hashes, schema integrity, and credential-key pairing before any
+  replacement, stages on each target filesystem, and retains the prior database, WAL/SHM files,
+  and modes tree. `music-cli backup recover` rolls back an interrupted journaled restore, and the
+  server refuses startup while such a journal exists.
 - [x] Compatibility liveness, component readiness/degradation, security headers, and safe
   `detail`/error-code/correlation-ID mappings.
 

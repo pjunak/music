@@ -11,7 +11,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use music_application::auth::{AuthRepository, UnixSeconds};
-use music_server::{AppConfig, check_contracts, export_contracts};
+use music_server::{
+    AppConfig, RestoreOptions, check_contracts, export_contracts, recover_interrupted_restore,
+    restore_backup,
+};
 use music_storage::{
     DeviceImportOutcome, SchemaReport, SecretString, SqliteStorage, SqliteStorageOptions,
     StorageError, hash_password,
@@ -110,6 +113,11 @@ enum Command {
         #[command(subcommand)]
         command: DeviceCommand,
     },
+    /// Restore or recover a versioned application backup while the server is stopped.
+    Backup {
+        #[command(subcommand)]
+        command: BackupCommand,
+    },
     /// Probe the local HTTP liveness endpoint (used by the Rust container).
     Healthcheck {
         /// Plain HTTP socket address for the local server.
@@ -182,6 +190,45 @@ enum DeviceCommand {
         /// Database file; defaults to DATABASE_URL from the application configuration.
         #[arg(long, value_name = "PATH")]
         database: Option<PathBuf>,
+        /// Emit a stable machine-readable outcome.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BackupCommand {
+    /// Verify, stage, and journal the database and modes-tree replacement.
+    Restore {
+        #[arg(value_name = "ARCHIVE")]
+        archive: PathBuf,
+        /// Database file; defaults to DATABASE_URL from the application configuration.
+        #[arg(long, value_name = "PATH")]
+        database: Option<PathBuf>,
+        /// Modes directory; defaults to MODES_DIR from the application configuration.
+        #[arg(long, value_name = "PATH")]
+        modes: Option<PathBuf>,
+        /// Confirm replacement of current database and modes targets.
+        #[arg(long)]
+        replace: bool,
+        /// Confirm that every server using this database has been stopped.
+        #[arg(long)]
+        server_stopped: bool,
+        /// Emit a stable machine-readable outcome.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Roll back an interrupted restore from its durable journal.
+    Recover {
+        /// Database file; defaults to DATABASE_URL from the application configuration.
+        #[arg(long, value_name = "PATH")]
+        database: Option<PathBuf>,
+        /// Modes directory; defaults to MODES_DIR from the application configuration.
+        #[arg(long, value_name = "PATH")]
+        modes: Option<PathBuf>,
+        /// Confirm that every server using this database has been stopped.
+        #[arg(long)]
+        server_stopped: bool,
         /// Emit a stable machine-readable outcome.
         #[arg(long)]
         json: bool,
@@ -319,6 +366,63 @@ async fn run(cli: Cli) -> Result<ExitCode, CliError> {
             let database = database_path(database)?;
             import_devices(&database, &path, replace, json).await
         }
+        Command::Backup {
+            command:
+                BackupCommand::Restore {
+                    archive,
+                    database,
+                    modes,
+                    replace,
+                    server_stopped,
+                    json,
+                },
+        } => {
+            let config = AppConfig::load()?;
+            let database_path = database.unwrap_or_else(|| config.database_path.clone());
+            let modes_path = modes.unwrap_or_else(|| config.modes_dir.clone());
+            let outcome = restore_backup(
+                &config,
+                RestoreOptions {
+                    archive_path: archive,
+                    database_path,
+                    modes_path,
+                    replace,
+                    server_stopped,
+                },
+            )
+            .await?;
+            print_restore_outcome(&outcome, json)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Backup {
+            command:
+                BackupCommand::Recover {
+                    database,
+                    modes,
+                    server_stopped,
+                    json,
+                },
+        } => {
+            let config = AppConfig::load()?;
+            let database = database.unwrap_or_else(|| config.database_path.clone());
+            let modes = modes.unwrap_or_else(|| config.modes_dir.clone());
+            let outcome = recover_interrupted_restore(&database, &modes, server_stopped)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&outcome)?);
+            } else {
+                println!(
+                    "recovered interrupted restore recorded by {}",
+                    outcome.journal_path.display()
+                );
+                for path in &outcome.recovered_targets {
+                    println!("recovered: {}", path.display());
+                }
+                for path in &outcome.preserved_interrupted_targets {
+                    println!("preserved interrupted target: {}", path.display());
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Healthcheck {
             address,
             timeout_ms,
@@ -327,6 +431,33 @@ async fn run(cli: Cli) -> Result<ExitCode, CliError> {
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+fn print_restore_outcome(
+    outcome: &music_server::RestoreOutcome,
+    json: bool,
+) -> Result<(), serde_json::Error> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(outcome)?);
+        return Ok(());
+    }
+    println!("restored database: {}", outcome.database_path.display());
+    println!("restored modes: {}", outcome.modes_path.display());
+    println!("database sha256: {}", outcome.database_sha256);
+    println!("restored mode files: {}", outcome.restored_mode_files);
+    if let Some(key_id) = &outcome.credential_key_id {
+        println!("credential key id: {key_id}");
+    }
+    if let Some(path) = &outcome.previous_database_path {
+        println!("retained previous database: {}", path.display());
+    }
+    if let Some(path) = &outcome.previous_modes_path {
+        println!("retained previous modes: {}", path.display());
+    }
+    for path in &outcome.previous_sidecar_paths {
+        println!("retained previous SQLite sidecar: {}", path.display());
+    }
+    Ok(())
 }
 
 async fn create_user(
@@ -612,7 +743,7 @@ mod tests {
 
     use clap::Parser;
 
-    use super::{Cli, Command, DeviceCommand, probe_liveness};
+    use super::{BackupCommand, Cli, Command, DeviceCommand, probe_liveness};
 
     #[test]
     fn parser_redacts_inline_passwords_and_accepts_explicit_device_replacement()
@@ -641,6 +772,25 @@ mod tests {
             import.command,
             Command::Devices {
                 command: DeviceCommand::Import { replace: true, .. }
+            }
+        ));
+
+        let restore = Cli::try_parse_from([
+            "music-cli",
+            "backup",
+            "restore",
+            "music-backup.tar.gz",
+            "--replace",
+            "--server-stopped",
+        ])?;
+        assert!(matches!(
+            restore.command,
+            Command::Backup {
+                command: BackupCommand::Restore {
+                    replace: true,
+                    server_stopped: true,
+                    ..
+                }
             }
         ));
 

@@ -31,6 +31,7 @@ use tokio::net::TcpListener;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing_subscriber::EnvFilter;
 
+use crate::admin::{BackupService, MaintenanceGate, pending_restore_journal};
 use crate::auth::RuntimeAuth;
 use crate::cleanup::MusicBrainzNameLookup;
 use crate::config::AppConfig;
@@ -55,6 +56,7 @@ pub struct AppRuntime {
     storage: Arc<SqliteStorage>,
     playback: PlaybackActorHandle,
     auth: Arc<RuntimeAuth>,
+    backup: Arc<BackupService>,
     devices: Arc<RuntimeDevices>,
     library: LibraryCoordinatorHandle,
     library_service: Arc<LibraryService>,
@@ -66,6 +68,9 @@ pub struct AppRuntime {
 
 impl AppRuntime {
     pub async fn start(config: AppConfig) -> Result<Self, RuntimeError> {
+        if let Some(journal) = pending_restore_journal(&config.database_path) {
+            return Err(RuntimeError::PendingRestore { journal });
+        }
         let config = Arc::new(config);
         let health = HealthRegistry::new();
         health.set_component("configuration", true, ComponentStatus::Ready);
@@ -119,6 +124,11 @@ impl AppRuntime {
 
         initialize_legacy_devices(&storage, &config.devices_file, &health).await?;
         let auth = Arc::new(RuntimeAuth::new(Arc::clone(&storage), &config)?);
+        let backup = Arc::new(BackupService::new(
+            Arc::clone(&storage),
+            Arc::clone(&config),
+            MaintenanceGate::default(),
+        ));
         let devices = Arc::new(RuntimeDevices::new(Arc::clone(&storage)));
         health.set_component("authentication", true, ComponentStatus::Ready);
 
@@ -192,6 +202,7 @@ impl AppRuntime {
             storage,
             playback,
             auth,
+            backup,
             devices,
             library,
             library_service,
@@ -223,6 +234,7 @@ impl AppRuntime {
             self.health.clone(),
             self.playback.clone(),
             Arc::clone(&self.auth),
+            Arc::clone(&self.backup),
             Arc::clone(&self.devices),
             Arc::new(RuntimeLibrary {
                 service: Arc::clone(&self.library_service),
@@ -561,6 +573,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::error::Error;
     use std::fs;
+    use std::io::Cursor;
     use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
@@ -573,6 +586,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
+    use flate2::read::GzDecoder;
     use music_application::auth::UnixSeconds;
     use music_application::cleanup::{
         CleanupBatchAppend, CleanupFuture, CleanupNameLookup, CleanupNameScores, CleanupRepository,
@@ -585,6 +599,7 @@ mod tests {
     };
     use music_storage::{SqliteStorage, SqliteStorageOptions, StorageError};
     use serde_json::Value;
+    use tar::Archive;
     use tempfile::tempdir;
     use tokio::sync::Mutex;
     use tower::ServiceExt;
@@ -658,6 +673,120 @@ mod tests {
             .and_then(|case| case["source_base64"].as_str())
             .ok_or("WAV metadata fixture is missing")?;
         Ok(STANDARD.decode(encoded)?)
+    }
+
+    #[tokio::test]
+    async fn authenticated_backup_streams_a_verified_database_and_modes_archive()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("modes/table/presets"))?;
+        fs::write(
+            directory.path().join("modes/table/mode.yaml"),
+            "name: Table\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/presets/calm.yaml"),
+            "gain: -2\n",
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+
+        let unauthorized = router
+            .clone()
+            .oneshot(Request::get("/api/admin/backup").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?
+            .to_owned();
+
+        let backup = router
+            .oneshot(
+                Request::get("/api/admin/backup")
+                    .header("cookie", cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(backup.status(), StatusCode::OK);
+        assert_eq!(backup.headers()[CONTENT_TYPE], "application/gzip");
+        assert_eq!(backup.headers()["cache-control"], "no-store");
+        let disposition = backup.headers()[CONTENT_DISPOSITION].to_str()?;
+        assert!(disposition.contains("music-backup-"));
+        assert!(disposition.ends_with(".tar.gz\""));
+        let expected_bytes = backup.headers()["content-length"]
+            .to_str()?
+            .parse::<usize>()?;
+        let body = to_bytes(backup.into_body(), 16 * 1_024 * 1_024).await?;
+        assert_eq!(body.len(), expected_bytes);
+
+        let mut archive = Archive::new(GzDecoder::new(Cursor::new(body)));
+        let mut names = archive
+            .entries()?
+            .map(|entry| {
+                entry.and_then(|entry| {
+                    entry
+                        .path()
+                        .map(|path| path.to_string_lossy().replace('\\', "/"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        names.sort();
+        assert!(names.iter().any(|name| name == "manifest.json"));
+        assert!(names.iter().any(|name| name == "app.db"));
+        assert!(names.iter().any(|name| name == "modes"));
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "modes/table/presets/calm.yaml")
+        );
+        assert!(!fs::read_dir(directory.path())?.any(|entry| {
+            entry
+                .ok()
+                .and_then(|entry| entry.file_name().into_string().ok())
+                .is_some_and(|name| name.starts_with(".music-backup-"))
+        }));
+
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_refuses_an_interrupted_restore_journal()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let journal = directory.path().join("app.db.restore-journal.json");
+        fs::write(&journal, "{}")?;
+
+        let result = AppRuntime::start(runtime_config(directory.path())?).await;
+
+        assert!(matches!(
+            result,
+            Err(RuntimeError::PendingRestore { journal: path }) if path == journal
+        ));
+        Ok(())
     }
 
     #[tokio::test]

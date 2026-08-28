@@ -10,6 +10,7 @@
 //! and authorize; they never become alternate owners of mutable application
 //! state.
 
+mod admin;
 mod auth;
 mod cleanup;
 mod config;
@@ -25,6 +26,10 @@ mod runtime;
 mod supervisor;
 mod websocket;
 
+pub use admin::{
+    BackupError, RestoreOptions, RestoreOutcome, RestoreRecoveryOutcome,
+    recover_interrupted_restore, restore_backup,
+};
 pub use config::{AppConfig, ConfigError, LogLevel};
 pub use contracts::{
     ContractArtifact, ContractError, check_contracts, export_contracts, render_contracts,

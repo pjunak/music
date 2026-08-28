@@ -1828,6 +1828,24 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/backup": {
+      "get": {
+        "operationId": "download_backup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/auth/login": {
       "post": {
         "operationId": "login",
