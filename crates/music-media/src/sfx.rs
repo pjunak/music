@@ -1460,7 +1460,7 @@ mod tests {
         let effects = FilesystemSfxEffects::new(SfxRoot::open(&root)?);
 
         assert!(effects.list_files().await?.is_empty());
-        let error = effects
+        let result = effects
             .apply(
                 &RecoveryJournalId::new(),
                 SfxMutation::DeleteFile {
@@ -1468,8 +1468,10 @@ mod tests {
                 },
                 false,
             )
-            .await
-            .expect_err("symlink mutation should be rejected");
+            .await;
+        let Err(error) = result else {
+            return Err(std::io::Error::other("symlink mutation should be rejected").into());
+        };
         assert_eq!(error.kind(), SfxMutationFailureKind::Invalid);
         assert!(outside.join("secret.wav").is_file());
         Ok(())
