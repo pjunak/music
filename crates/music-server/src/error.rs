@@ -219,6 +219,16 @@ pub(crate) fn openapi_datetime() -> RefOr<Schema> {
     .into()
 }
 
+pub(crate) fn openapi_nullable_datetime() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(openapi_datetime())
+            .item(openapi_primitive(Type::Null))
+            .build(),
+    )
+    .into()
+}
+
 pub(crate) fn openapi_nullable_string() -> RefOr<Schema> {
     Schema::AnyOf(
         AnyOfBuilder::new()

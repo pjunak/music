@@ -1,18 +1,19 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Json;
-use axum::extract::State;
-use axum::extract::rejection::JsonRejection;
+use axum::extract::rejection::{JsonRejection, PathRejection};
+use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use futures_util::TryStreamExt;
 use music_application::auth::SessionTouch;
 use music_application::cleanup::{
-    CleanupAnalysis, CleanupError, CleanupFuture, CleanupNameLookup, CleanupNameScoreError,
-    CleanupNameScores, CleanupScope, CleanupVerificationError, CleanupVerificationResult,
-    MAX_CLEANUP_VERIFY_NAMES,
+    CleanupAnalysis, CleanupBatchDetail, CleanupBatchSummary, CleanupError, CleanupFuture,
+    CleanupNameLookup, CleanupNameScoreError, CleanupNameScores, CleanupScope,
+    CleanupVerificationError, CleanupVerificationResult, MAX_CLEANUP_VERIFY_NAMES,
 };
 use music_domain::{
     CleanupFolderSuggestion, CleanupRule, CleanupRuleSet, CleanupSuggestion, CleanupTrackPlan,
@@ -24,11 +25,16 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use utoipa::ToSchema;
 use utoipa::openapi::RefOr;
-use utoipa::openapi::schema::{AnyOfBuilder, ArrayBuilder, ObjectBuilder, Schema, Type};
+use utoipa::openapi::schema::{
+    AdditionalProperties, AnyOfBuilder, ArrayBuilder, ObjectBuilder, Schema, Type,
+};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::error::{ApiError, HttpValidationErrorBody, openapi_integer, openapi_nullable_string};
+use crate::error::{
+    ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer,
+    openapi_nullable_datetime, openapi_nullable_string,
+};
 use crate::http::HttpState;
 
 const MAX_SCOPE_TRACKS: usize = 5_000;
@@ -42,6 +48,8 @@ pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(analyze))
         .routes(routes!(verify_names))
+        .routes(routes!(list_batches))
+        .routes(routes!(get_batch))
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -135,6 +143,81 @@ impl From<CleanupVerificationResult> for VerifyResponse {
             verified: result.verified,
             failed: result.failed,
         }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BatchSummary)]
+struct CleanupBatchSummaryResponse {
+    #[schema(schema_with = openapi_integer)]
+    id: i64,
+    #[schema(schema_with = openapi_datetime)]
+    created_at: String,
+    scope_label: String,
+    #[schema(schema_with = openapi_integer)]
+    item_count: usize,
+    #[schema(required = true, schema_with = openapi_nullable_datetime)]
+    reverted_at: Option<String>,
+}
+
+impl TryFrom<CleanupBatchSummary> for CleanupBatchSummaryResponse {
+    type Error = ApiError;
+
+    fn try_from(batch: CleanupBatchSummary) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: batch.id,
+            created_at: crate::auth::format_rfc3339(music_application::auth::UnixSeconds::new(
+                batch.created_at_unix_seconds,
+            ))?,
+            scope_label: batch.scope_label,
+            item_count: batch.item_count,
+            reverted_at: batch
+                .reverted_at_unix_seconds
+                .map(music_application::auth::UnixSeconds::new)
+                .map(crate::auth::format_rfc3339)
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BatchDetail)]
+struct CleanupBatchDetailResponse {
+    #[schema(schema_with = openapi_integer)]
+    id: i64,
+    #[schema(schema_with = openapi_datetime)]
+    created_at: String,
+    scope_label: String,
+    #[schema(schema_with = openapi_integer)]
+    item_count: usize,
+    #[schema(required = true, schema_with = openapi_nullable_datetime)]
+    reverted_at: Option<String>,
+    #[schema(schema_with = cleanup_batch_items_schema)]
+    items: Vec<BTreeMap<String, Value>>,
+}
+
+impl TryFrom<CleanupBatchDetail> for CleanupBatchDetailResponse {
+    type Error = ApiError;
+
+    fn try_from(batch: CleanupBatchDetail) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: batch.id,
+            created_at: crate::auth::format_rfc3339(music_application::auth::UnixSeconds::new(
+                batch.created_at_unix_seconds,
+            ))?,
+            scope_label: batch.scope_label,
+            item_count: batch.item_count,
+            reverted_at: batch
+                .reverted_at_unix_seconds
+                .map(music_application::auth::UnixSeconds::new)
+                .map(crate::auth::format_rfc3339)
+                .transpose()?,
+            items: batch
+                .items
+                .into_iter()
+                .map(|item| item.into_iter().collect())
+                .collect(),
+        })
     }
 }
 
@@ -330,6 +413,62 @@ async fn verify_names(
     Ok(Json(result.into()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/library/cleanup/batches",
+    operation_id = "list_batches_api_library_cleanup_batches_get",
+    summary = "List Batches",
+    responses(
+        (status = 200, description = "Successful Response", body = Vec<CleanupBatchSummaryResponse>)
+    ),
+    tag = "library-cleanup"
+)]
+async fn list_batches(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<CleanupBatchSummaryResponse>>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let batches = crate::library::library(&state)?
+        .cleanup
+        .batches()
+        .await
+        .map_err(map_cleanup_error)?;
+    Ok(Json(
+        batches
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/library/cleanup/batches/{batch_id}",
+    operation_id = "get_batch_api_library_cleanup_batches__batch_id__get",
+    summary = "Get Batch",
+    params(("batch_id" = i128, Path)),
+    responses(
+        (status = 200, description = "Successful Response", body = CleanupBatchDetailResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn get_batch(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    batch_id: Result<Path<i64>, PathRejection>,
+) -> Result<Json<CleanupBatchDetailResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(batch_id) = batch_id.map_err(|_| ApiError::validation())?;
+    let batch = crate::library::library(&state)?
+        .cleanup
+        .batch(batch_id)
+        .await
+        .map_err(map_cleanup_error)?
+        .ok_or_else(|| ApiError::plain_not_found("cleanup batch not found"))?;
+    Ok(Json(batch.try_into()?))
+}
+
 fn cleanup_scope(scope: CleanupScopeRequest) -> Result<CleanupScope, ApiError> {
     match scope.kind {
         CleanupScopeKind::All => Ok(CleanupScope::All),
@@ -483,6 +622,16 @@ fn cleanup_value_schema() -> RefOr<Schema> {
             .build(),
     )
     .into()
+}
+
+fn cleanup_batch_items_schema() -> RefOr<Schema> {
+    ArrayBuilder::new()
+        .items(
+            ObjectBuilder::new()
+                .schema_type(Type::Object)
+                .additional_properties(Some(AdditionalProperties::FreeForm(true))),
+        )
+        .into()
 }
 
 #[derive(Debug, Clone)]

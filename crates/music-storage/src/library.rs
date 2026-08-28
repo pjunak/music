@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use music_application::cleanup::{
-    CleanupFuture, CleanupNameVerdict, CleanupRepository, CleanupVerificationRepository,
+    CleanupBatchDetail, CleanupBatchSummary, CleanupFuture, CleanupNameVerdict, CleanupRepository,
+    CleanupVerificationRepository, MAX_CLEANUP_BATCH_HISTORY,
 };
 use music_application::library::{
     DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFuture,
@@ -26,6 +27,7 @@ const TRACK_COLUMNS: &str = "id, path, title, artist, album_artist, album, track
     CAST(strftime('%s', added_at) AS INTEGER) AS added_at_unix_seconds";
 const MAX_RECONCILIATION_TRACKS: usize = 1_000_000;
 const RECONCILIATION_BATCH_SIZE: usize = 500;
+const MAX_CLEANUP_BATCH_JSON_BYTES: i64 = 16 * 1024 * 1024;
 const UPDATED_COUNT_SQL: &str = "SELECT COUNT(*) FROM temp.library_scan_stage AS staged \
     JOIN tracks ON tracks.path = staged.path WHERE \
     tracks.title IS NOT staged.title OR tracks.artist IS NOT staged.artist OR \
@@ -281,6 +283,106 @@ impl CleanupRepository for SqliteStorage {
                 .collect()
         })
     }
+
+    fn cleanup_batches(&self) -> CleanupFuture<'_, Vec<CleanupBatchSummary>> {
+        Box::pin(async move {
+            let rows = sqlx::query_as::<_, (i64, i64, String, i64, Option<i64>)>(
+                "SELECT id, CAST(strftime('%s', created_at) AS INTEGER), scope_label, \
+                 CASE WHEN json_valid(items_json) = 0 THEN -1 \
+                      WHEN json_type(items_json) != 'array' THEN -1 \
+                      ELSE json_array_length(items_json) END, \
+                 CAST(strftime('%s', reverted_at) AS INTEGER) \
+                 FROM cleanup_batches ORDER BY created_at DESC, id DESC LIMIT ?",
+            )
+            .bind(i64::try_from(MAX_CLEANUP_BATCH_HISTORY).map_err(|_| {
+                box_storage(StorageError::InvalidLibraryState(
+                    "cleanup batch history limit is invalid",
+                ))
+            })?)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StorageError::from)
+            .map_err(box_storage)?;
+            rows.into_iter()
+                .map(|(id, created_at, scope_label, item_count, reverted_at)| {
+                    cleanup_batch_summary(id, created_at, scope_label, item_count, reverted_at)
+                        .map_err(box_storage)
+                })
+                .collect()
+        })
+    }
+
+    fn cleanup_batch(&self, batch_id: i64) -> CleanupFuture<'_, Option<CleanupBatchDetail>> {
+        Box::pin(async move {
+            let row = sqlx::query_as::<_, (i64, i64, String, Option<String>, Option<i64>)>(
+                "SELECT id, CAST(strftime('%s', created_at) AS INTEGER), scope_label, \
+                 CASE WHEN length(items_json) <= ? THEN items_json ELSE NULL END, \
+                 CAST(strftime('%s', reverted_at) AS INTEGER) \
+                 FROM cleanup_batches WHERE id = ?",
+            )
+            .bind(MAX_CLEANUP_BATCH_JSON_BYTES)
+            .bind(batch_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(StorageError::from)
+            .map_err(box_storage)?;
+            row.map(|(id, created_at, scope_label, items_json, reverted_at)| {
+                let items_json = items_json.ok_or(StorageError::InvalidLibraryRecord(
+                    "cleanup batch journal is too large",
+                ))?;
+                let items =
+                    serde_json::from_str::<Vec<serde_json::Map<String, serde_json::Value>>>(
+                        &items_json,
+                    )
+                    .map_err(|_| {
+                        StorageError::InvalidLibraryRecord("cleanup batch journal is invalid")
+                    })?;
+                let item_count = items.len();
+                cleanup_batch_summary(
+                    id,
+                    created_at,
+                    scope_label,
+                    i64::try_from(item_count).map_err(|_| {
+                        StorageError::InvalidLibraryRecord("cleanup batch item count is invalid")
+                    })?,
+                    reverted_at,
+                )
+                .map(|summary| CleanupBatchDetail {
+                    id: summary.id,
+                    created_at_unix_seconds: summary.created_at_unix_seconds,
+                    scope_label: summary.scope_label,
+                    item_count: summary.item_count,
+                    reverted_at_unix_seconds: summary.reverted_at_unix_seconds,
+                    items,
+                })
+            })
+            .transpose()
+            .map_err(box_storage)
+        })
+    }
+}
+
+fn cleanup_batch_summary(
+    id: i64,
+    created_at_unix_seconds: i64,
+    scope_label: String,
+    item_count: i64,
+    reverted_at_unix_seconds: Option<i64>,
+) -> Result<CleanupBatchSummary, StorageError> {
+    if id <= 0 {
+        return Err(StorageError::InvalidLibraryRecord(
+            "cleanup batch id is invalid",
+        ));
+    }
+    let item_count = usize::try_from(item_count)
+        .map_err(|_| StorageError::InvalidLibraryRecord("cleanup batch item count is invalid"))?;
+    Ok(CleanupBatchSummary {
+        id,
+        created_at_unix_seconds,
+        scope_label,
+        item_count,
+        reverted_at_unix_seconds,
+    })
 }
 
 impl CleanupVerificationRepository for SqliteStorage {
@@ -1558,6 +1660,60 @@ mod tests {
         );
         let refreshed = CleanupRepository::cleanup_name_verdicts(&storage).await?;
         assert_eq!(refreshed.get(cached.loose_key()), Some(&(10, 100)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cleanup_batch_history_is_newest_first_bounded_and_decoded()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(
+            directory.path().join("cleanup-history.db"),
+        ))
+        .await?;
+        for id in 1..=105_i64 {
+            sqlx::query(
+                "INSERT INTO cleanup_batches \
+                 (id, created_at, scope_label, items_json, reverted_at) \
+                 VALUES (?, datetime('2026-08-28 12:00:00', ?), ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(format!("+{id} seconds"))
+            .bind(format!("batch-{id}"))
+            .bind(
+                serde_json::json!([{
+                    "kind": "rename",
+                    "track_id": id,
+                    "before": format!("old-{id}.mp3"),
+                    "after": format!("new-{id}.mp3")
+                }])
+                .to_string(),
+            )
+            .bind((id == 105).then_some("2026-08-28 13:00:00"))
+            .execute(&storage.pool)
+            .await?;
+        }
+
+        let batches = CleanupRepository::cleanup_batches(&storage).await?;
+        assert_eq!(batches.len(), 100);
+        assert_eq!(batches[0].id, 105);
+        assert_eq!(batches[0].scope_label, "batch-105");
+        assert_eq!(batches[0].item_count, 1);
+        assert!(batches[0].reverted_at_unix_seconds.is_some());
+        assert_eq!(batches[99].id, 6);
+
+        let detail = CleanupRepository::cleanup_batch(&storage, 42)
+            .await?
+            .ok_or("cleanup batch was missing")?;
+        assert_eq!(detail.id, 42);
+        assert_eq!(detail.item_count, 1);
+        assert_eq!(detail.items[0]["kind"], "rename");
+        assert_eq!(detail.items[0]["track_id"], 42);
+        assert!(
+            CleanupRepository::cleanup_batch(&storage, 999)
+                .await?
+                .is_none()
+        );
         Ok(())
     }
 

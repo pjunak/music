@@ -19,6 +19,31 @@ pub type CleanupFuture<'a, T> =
 
 pub trait CleanupRepository: LibraryRepository {
     fn cleanup_name_verdicts(&self) -> CleanupFuture<'_, NameVerdicts>;
+
+    fn cleanup_batches(&self) -> CleanupFuture<'_, Vec<CleanupBatchSummary>>;
+
+    fn cleanup_batch(&self, batch_id: i64) -> CleanupFuture<'_, Option<CleanupBatchDetail>>;
+}
+
+pub const MAX_CLEANUP_BATCH_HISTORY: usize = 100;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CleanupBatchSummary {
+    pub id: i64,
+    pub created_at_unix_seconds: i64,
+    pub scope_label: String,
+    pub item_count: usize,
+    pub reverted_at_unix_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CleanupBatchDetail {
+    pub id: i64,
+    pub created_at_unix_seconds: i64,
+    pub scope_label: String,
+    pub item_count: usize,
+    pub reverted_at_unix_seconds: Option<i64>,
+    pub items: Vec<serde_json::Map<String, serde_json::Value>>,
 }
 
 pub const MAX_CLEANUP_VERIFY_NAMES: usize = 5;
@@ -327,6 +352,20 @@ impl CleanupService {
             folders,
             pending_lookups,
         })
+    }
+
+    pub async fn batches(&self) -> Result<Vec<CleanupBatchSummary>, CleanupError> {
+        self.repository
+            .cleanup_batches()
+            .await
+            .map_err(|source| dependency("load cleanup batch history", source))
+    }
+
+    pub async fn batch(&self, batch_id: i64) -> Result<Option<CleanupBatchDetail>, CleanupError> {
+        self.repository
+            .cleanup_batch(batch_id)
+            .await
+            .map_err(|source| dependency("load a cleanup batch", source))
     }
 }
 

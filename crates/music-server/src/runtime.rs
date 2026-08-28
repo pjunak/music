@@ -1347,6 +1347,11 @@ mod tests {
             )
             .await?;
         assert_eq!(unauthorized_verify.status(), StatusCode::UNAUTHORIZED);
+        let unauthorized_batches = router
+            .clone()
+            .oneshot(Request::get("/api/library/cleanup/batches").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized_batches.status(), StatusCode::UNAUTHORIZED);
 
         let login = router
             .clone()
@@ -1453,6 +1458,31 @@ mod tests {
             cleanup_lookup.calls.lock().await.as_slice(),
             ["Andrey Vinogradov"]
         );
+
+        let cleanup_batches = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/cleanup/batches")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(cleanup_batches.status(), StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &to_bytes(cleanup_batches.into_body(), 1024 * 1024).await?
+            )?,
+            serde_json::json!([])
+        );
+        let missing_cleanup_batch = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/cleanup/batches/999")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(missing_cleanup_batch.status(), StatusCode::NOT_FOUND);
 
         let search = router
             .clone()

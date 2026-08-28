@@ -168,6 +168,86 @@
         ],
         "type": "object"
       },
+      "BatchDetail": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "item_count": {
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "reverted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scope_label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "scope_label",
+          "item_count",
+          "reverted_at",
+          "items"
+        ],
+        "type": "object"
+      },
+      "BatchSummary": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "item_count": {
+            "type": "integer"
+          },
+          "reverted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scope_label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "scope_label",
+          "item_count",
+          "reverted_at"
+        ],
+        "type": "object"
+      },
       "Body_upload_api_library_upload_post": {
         "properties": {
           "files": {
@@ -1801,6 +1881,71 @@
           }
         },
         "summary": "Analyze",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/batches": {
+      "get": {
+        "operationId": "list_batches_api_library_cleanup_batches_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BatchSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Batches",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/batches/{batch_id}": {
+      "get": {
+        "operationId": "get_batch_api_library_cleanup_batches__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Batch",
         "tags": [
           "library-cleanup"
         ]
