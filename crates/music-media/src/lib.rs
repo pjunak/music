@@ -12,6 +12,7 @@
 mod delivery;
 mod discovery;
 mod metadata;
+mod modes;
 mod mutation;
 mod path;
 mod yaml;
@@ -28,12 +29,13 @@ pub use metadata::{
     StagedTagUpdate, TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata,
     stage_tag_update,
 };
+pub use modes::FilesystemModeCatalogSource;
 pub use mutation::{FilesystemLibraryMutations, library_upload_target_exists};
 
 pub use path::{LibraryRoot, MediaRoot, RootedPathError, SfxRoot};
 
+pub use music_application::modes::{CueDocument, ModeDocument, PresetDocument, SoundboardDocument};
 pub use yaml::{
-    CueDocument, ModeDocument, PresetDocument, SoundboardDocument, YamlDocumentError,
-    parse_cue_document, parse_mode_document, parse_preset_document, parse_soundboard_document,
-    serialize_document,
+    YamlDocumentError, parse_cue_document, parse_mode_document, parse_preset_document,
+    parse_soundboard_document, serialize_document,
 };

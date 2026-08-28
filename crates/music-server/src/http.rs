@@ -10,6 +10,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use music_application::modes::ModeCoordinatorHandle;
 use music_application::playback::PlaybackActorHandle;
 use music_protocol::PlayerState;
 use serde::Deserialize;
@@ -49,6 +50,18 @@ pub(crate) struct HttpState {
     pub(crate) backup: Option<Arc<BackupService>>,
     pub(crate) devices: Option<Arc<RuntimeDevices>>,
     pub(crate) library: Option<Arc<RuntimeLibrary>>,
+    pub(crate) modes: Option<ModeCoordinatorHandle>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeServices {
+    pub(crate) health: HealthRegistry,
+    pub(crate) playback: PlaybackActorHandle,
+    pub(crate) auth: Arc<RuntimeAuth>,
+    pub(crate) backup: Arc<BackupService>,
+    pub(crate) devices: Arc<RuntimeDevices>,
+    pub(crate) library: Arc<RuntimeLibrary>,
+    pub(crate) modes: ModeCoordinatorHandle,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -62,6 +75,7 @@ impl CorrelationId {
 }
 
 #[derive(utoipa::OpenApi)]
+#[openapi(components(schemas(crate::modes::SoundboardManifest, crate::modes::CueSpec)))]
 struct MusicApi;
 
 struct LivenessContract;
@@ -77,23 +91,18 @@ impl PartialSchema for LivenessContract {
 
 impl ToSchema for LivenessContract {}
 
-pub fn build_router(
-    config: &AppConfig,
-    health: HealthRegistry,
-    playback: PlaybackActorHandle,
-    auth: Arc<RuntimeAuth>,
-    backup: Arc<BackupService>,
-    devices: Arc<RuntimeDevices>,
-    library: Arc<RuntimeLibrary>,
-) -> Result<Router, RuntimeError> {
+pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Router, RuntimeError> {
     build_router_inner(
         config,
-        health,
-        Some(playback),
-        Some(auth),
-        Some(backup),
-        Some(devices),
-        Some(library),
+        HttpState {
+            health: services.health,
+            playback: Some(services.playback),
+            auth: Some(services.auth),
+            backup: Some(services.backup),
+            devices: Some(services.devices),
+            library: Some(services.library),
+            modes: Some(services.modes),
+        },
     )
 }
 
@@ -102,26 +111,22 @@ fn build_router_without_playback(
     config: &AppConfig,
     health: HealthRegistry,
 ) -> Result<Router, RuntimeError> {
-    build_router_inner(config, health, None, None, None, None, None)
+    build_router_inner(
+        config,
+        HttpState {
+            health,
+            playback: None,
+            auth: None,
+            backup: None,
+            devices: None,
+            library: None,
+            modes: None,
+        },
+    )
 }
 
-fn build_router_inner(
-    config: &AppConfig,
-    health: HealthRegistry,
-    playback: Option<PlaybackActorHandle>,
-    auth: Option<Arc<RuntimeAuth>>,
-    backup: Option<Arc<BackupService>>,
-    devices: Option<Arc<RuntimeDevices>>,
-    library: Option<Arc<RuntimeLibrary>>,
-) -> Result<Router, RuntimeError> {
-    let state = HttpState {
-        health: health.clone(),
-        playback,
-        auth,
-        backup,
-        devices,
-        library,
-    };
+fn build_router_inner(config: &AppConfig, state: HttpState) -> Result<Router, RuntimeError> {
+    let health = state.health.clone();
     let api = documented_api_router().with_state(state);
     let (mut router, _) = OpenApiRouter::with_openapi(<MusicApi as utoipa::OpenApi>::openapi())
         .nest("/api", api)
@@ -158,6 +163,7 @@ fn documented_api_router() -> OpenApiRouter<HttpState> {
         .merge(crate::devices::device_router())
         .merge(crate::diagnostics::diagnostics_router())
         .merge(crate::library::library_router())
+        .merge(crate::modes::mode_router())
         .merge(crate::cleanup::cleanup_router())
         .routes(routes!(liveness))
         .routes(routes!(readiness))

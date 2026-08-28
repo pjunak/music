@@ -1,6 +1,24 @@
 {
   "components": {
     "schemas": {
+      "ActiveMode": {
+        "properties": {
+          "mode_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode_id"
+        ],
+        "type": "object"
+      },
       "ActiveSessionResponse": {
         "properties": {
           "created_at": {
@@ -743,6 +761,121 @@
         ],
         "type": "string"
       },
+      "CueLoop": {
+        "properties": {
+          "interval_s": {
+            "maximum": 3600,
+            "minimum": 1,
+            "type": "number"
+          },
+          "item": {
+            "type": "string"
+          },
+          "soundboard": {
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item",
+          "interval_s"
+        ],
+        "type": "object"
+      },
+      "CueSfx": {
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "soundboard": {
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item"
+        ],
+        "type": "object"
+      },
+      "CueSpec": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "loops": {
+            "items": {
+              "$ref": "#/components/schemas/CueLoop"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "playlist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sfx": {
+            "items": {
+              "$ref": "#/components/schemas/CueSfx"
+            },
+            "type": "array"
+          },
+          "start_index": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start_ms": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
       "DeviceInfo": {
         "properties": {
           "client_id": {
@@ -849,6 +982,18 @@
         ],
         "type": "object"
       },
+      "EffectSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
       "FolderCreateRequest": {
         "properties": {
           "path": {
@@ -936,6 +1081,77 @@
             "type": "array"
           }
         },
+        "type": "object"
+      },
+      "IntegrationsSpec": {
+        "properties": {
+          "lights": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "InterruptSpec": {
+        "properties": {
+          "duck_to": {
+            "anyOf": [
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fade_in_ms": {
+            "default": 0,
+            "type": "integer"
+          },
+          "fade_out_ms": {
+            "default": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "playlist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "return_to_ambient": {
+            "default": true,
+            "type": "boolean"
+          },
+          "soundboard_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
         "type": "object"
       },
       "InterruptState": {
@@ -1081,6 +1297,134 @@
           "soundboard_id",
           "item_path",
           "interval_s"
+        ],
+        "type": "object"
+      },
+      "ModeDetail": {
+        "properties": {
+          "cues": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CueSpec"
+            },
+            "type": "object"
+          },
+          "default_crossfade_ms": {
+            "type": "integer"
+          },
+          "default_soundboard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_theme": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "integrations": {
+            "$ref": "#/components/schemas/IntegrationsSpec"
+          },
+          "interrupts": {
+            "items": {
+              "$ref": "#/components/schemas/InterruptSpec"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "panels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "playlist_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "presets": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PresetManifest"
+            },
+            "type": "object"
+          },
+          "soundboards": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SoundboardManifest"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "panels",
+          "playlist_categories",
+          "has_theme",
+          "default_crossfade_ms",
+          "default_soundboard",
+          "interrupts",
+          "integrations",
+          "soundboards",
+          "cues",
+          "presets"
+        ],
+        "type": "object"
+      },
+      "ModeSummary": {
+        "properties": {
+          "default_crossfade_ms": {
+            "type": "integer"
+          },
+          "default_soundboard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_theme": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "panels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "playlist_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "panels",
+          "playlist_categories",
+          "has_theme",
+          "default_crossfade_ms",
+          "default_soundboard"
         ],
         "type": "object"
       },
@@ -1244,6 +1588,49 @@
         ],
         "type": "object"
       },
+      "PresetManifest": {
+        "properties": {
+          "crossfade_ms": {
+            "anyOf": [
+              {
+                "maximum": 60000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effects": {
+            "items": {
+              "$ref": "#/components/schemas/EffectSpec"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
       "ReadinessSnapshot": {
         "properties": {
           "components": {
@@ -1273,6 +1660,27 @@
           "not_ready"
         ],
         "type": "string"
+      },
+      "ReloadResult": {
+        "properties": {
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "loaded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "loaded",
+          "errors"
+        ],
+        "type": "object"
       },
       "RescanResult": {
         "properties": {
@@ -1387,6 +1795,24 @@
         ],
         "type": "string"
       },
+      "SetActiveModeRequest": {
+        "properties": {
+          "mode_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode_id"
+        ],
+        "type": "object"
+      },
       "ShuffleMode": {
         "enum": [
           "off",
@@ -1394,6 +1820,90 @@
         ],
         "type": "string"
       },
+      "SoundboardCategory": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SoundboardItem"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "SoundboardItem": {
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "hotkey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "name"
+        ],
+        "type": "object"
+      },
+      "SoundboardManifest": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/SoundboardCategory"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "ThemeFileResponse": {},
       "TrackMetadataUpdate": {
         "properties": {
           "album": {
@@ -3212,6 +3722,230 @@
         },
         "tags": [
           "library"
+        ]
+      }
+    },
+    "/api/modes": {
+      "get": {
+        "operationId": "list_modes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModeSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "modes"
+        ]
+      }
+    },
+    "/api/modes/active": {
+      "get": {
+        "operationId": "get_active_mode",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveMode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "modes"
+        ]
+      },
+      "put": {
+        "operationId": "set_active_mode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetActiveModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveMode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "modes"
+        ]
+      }
+    },
+    "/api/modes/reload": {
+      "post": {
+        "operationId": "reload_modes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReloadResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "modes"
+        ]
+      }
+    },
+    "/api/modes/{mode_id}": {
+      "get": {
+        "operationId": "get_mode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mode_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModeDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "modes"
+        ]
+      }
+    },
+    "/api/modes/{mode_id}/presets": {
+      "get": {
+        "operationId": "list_mode_presets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mode_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PresetManifest"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "modes"
+        ]
+      }
+    },
+    "/api/modes/{mode_id}/theme.css": {
+      "get": {
+        "operationId": "get_mode_theme",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mode_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeFileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "modes"
         ]
       }
     },

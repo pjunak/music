@@ -1,10 +1,9 @@
-use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
+use music_application::modes::{CueDocument, ModeDocument, PresetDocument, SoundboardDocument};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 const MAX_YAML_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_SCALAR_BYTES: usize = 512 * 1024;
@@ -58,156 +57,6 @@ impl Display for YamlDocumentError {
 }
 
 impl Error for YamlDocumentError {}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InterruptDocument {
-    pub name: String,
-    #[serde(default)]
-    pub playlist: Option<String>,
-    #[serde(default)]
-    pub soundboard_item: Option<String>,
-    #[serde(default)]
-    pub fade_in_ms: i64,
-    #[serde(default)]
-    pub fade_out_ms: i64,
-    #[serde(default = "default_true")]
-    pub return_to_ambient: bool,
-    #[serde(default)]
-    pub duck_to: Option<f64>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct IntegrationsDocument {
-    #[serde(default)]
-    pub lights: Option<BTreeMap<String, Value>>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ModeDocument {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub theme: Option<String>,
-    #[serde(default)]
-    pub panels: Vec<String>,
-    #[serde(default)]
-    pub playlist_categories: Vec<String>,
-    #[serde(default)]
-    pub interrupts: Vec<InterruptDocument>,
-    #[serde(default)]
-    pub integrations: IntegrationsDocument,
-    #[serde(default)]
-    pub default_crossfade_ms: i64,
-    #[serde(default)]
-    pub default_soundboard: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SoundboardItemDocument {
-    pub file: String,
-    pub name: String,
-    #[serde(default)]
-    pub icon: Option<String>,
-    #[serde(default)]
-    pub hotkey: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SoundboardCategoryDocument {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub items: Vec<SoundboardItemDocument>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SoundboardDocument {
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub categories: Vec<SoundboardCategoryDocument>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CueSfxDocument {
-    pub soundboard: String,
-    pub item: String,
-    #[serde(default = "default_volume")]
-    pub volume: f64,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CueLoopDocument {
-    pub soundboard: String,
-    pub item: String,
-    pub interval_s: f64,
-    #[serde(default = "default_volume")]
-    pub volume: f64,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CueDocument {
-    #[serde(default)]
-    pub id: Option<String>,
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub preset: Option<String>,
-    #[serde(default)]
-    pub playlist: Option<String>,
-    #[serde(default)]
-    pub start_index: u64,
-    #[serde(default)]
-    pub start_ms: u64,
-    #[serde(default)]
-    pub sfx: Vec<CueSfxDocument>,
-    #[serde(default)]
-    pub loops: Vec<CueLoopDocument>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EffectDocument {
-    #[serde(rename = "type")]
-    pub effect_type: String,
-    #[serde(flatten)]
-    pub parameters: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PresetDocument {
-    #[serde(default)]
-    pub id: Option<String>,
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub effects: Vec<EffectDocument>,
-    #[serde(default)]
-    pub crossfade_ms: Option<u64>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
 
 pub fn parse_mode_document(
     input: &str,
@@ -375,14 +224,6 @@ fn is_supported_effect(effect_type: &str) -> bool {
         effect_type,
         "eq" | "reverb" | "lowpass" | "highpass" | "bandpass" | "delay" | "distortion" | "tremolo"
     )
-}
-
-const fn default_true() -> bool {
-    true
-}
-
-const fn default_volume() -> f64 {
-    1.0
 }
 
 #[cfg(test)]

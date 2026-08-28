@@ -16,6 +16,7 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 use crate::library::LibraryCatalogTrack;
+use crate::modes::ModeCatalogPublication;
 
 use super::persistence::{
     PlaybackStateStore, StoreCompareAndSwap, decode_persisted_state, encode_persisted_state,
@@ -378,6 +379,14 @@ impl PlaybackActorHandle {
         .await
     }
 
+    pub async fn replace_mode_catalog(
+        &self,
+        publication: ModeCatalogPublication,
+    ) -> Result<PlaybackCommandResult, PlaybackActorError> {
+        self.request(|reply| ActorMessage::ReplaceModeCatalog { publication, reply })
+            .await
+    }
+
     #[must_use]
     pub fn subscribe_state(&self) -> watch::Receiver<PlaybackPublication> {
         self.publications.clone()
@@ -450,6 +459,10 @@ enum ActorMessage {
     ReplaceLibraryCatalog {
         generation: LibraryGeneration,
         tracks: BTreeMap<TrackId, CatalogTrack>,
+        reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
+    },
+    ReplaceModeCatalog {
+        publication: ModeCatalogPublication,
         reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
     },
 }
@@ -820,6 +833,44 @@ where
                 catalog.generation.library = generation.get();
                 catalog.tracks = Some(tracks);
                 let result = self.replace_catalog(catalog, false).await;
+                let fatal = result.as_ref().err().is_some_and(is_fatal);
+                let fatal_error = result.as_ref().err().cloned();
+                let _ = reply.send(result);
+                if fatal && let Some(error) = fatal_error {
+                    return Err(error);
+                }
+            }
+            ActorMessage::ReplaceModeCatalog { publication, reply } => {
+                let active_preset_content_changed =
+                    self.state
+                        .active_mode_id
+                        .as_ref()
+                        .is_some_and(|active_mode_id| {
+                            publication.changed_presets.iter().any(|key| {
+                                key.mode_id == *active_mode_id
+                                    && self.state.active_preset_ids.contains(&key.preset_id)
+                            })
+                        });
+                let mut catalog = self.catalog.clone();
+                catalog.generation.modes = publication.generation;
+                catalog.modes = Some(
+                    publication
+                        .modes
+                        .into_iter()
+                        .map(|(mode_id, mode)| {
+                            (
+                                mode_id,
+                                CatalogMode {
+                                    soundboard_ids: mode.soundboard_ids,
+                                    preset_ids: mode.preset_ids,
+                                },
+                            )
+                        })
+                        .collect(),
+                );
+                let result = self
+                    .replace_catalog(catalog, active_preset_content_changed)
+                    .await;
                 let fatal = result.as_ref().err().is_some_and(is_fatal);
                 let fatal_error = result.as_ref().err().cloned();
                 let _ = reply.send(result);
@@ -1641,7 +1692,7 @@ fn prune_for_catalog(
         changed |= previous_loops != state.looping_sfx.len();
     }
 
-    if active_preset_content_changed && !state.active_preset_ids.is_empty() {
+    if active_preset_content_changed {
         state.preset_revision = state
             .preset_revision
             .checked_add(1)
@@ -1688,6 +1739,7 @@ mod tests {
         ResolvedPlaybackCommand, playback_catalog_tracks, start_playback_actor,
     };
     use crate::library::LibraryCatalogTrack;
+    use crate::modes::{ModeCatalogPublication, ModePlaybackReferences, ModePresetKey};
     use crate::playback::{
         PlaybackStateStore, StoreCompareAndSwap, StoreFuture, StoredPlaybackSnapshot,
     };
@@ -2150,6 +2202,88 @@ mod tests {
             events.recv().await?,
             DomainEvent::SfxFired { soundboard_id, .. } if soundboard_id == "storm"
         ));
+        spawned.handle.shutdown();
+        spawned.task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mode_publication_revises_changed_active_presets_and_prunes_deleted_ones()
+    -> Result<(), Box<dyn Error>> {
+        let store = Arc::new(FakeStore::default());
+        let initial_generation = CatalogGeneration {
+            library: 0,
+            modes: 1,
+        };
+        let mode = || ModePlaybackReferences {
+            soundboard_ids: BTreeSet::new(),
+            preset_ids: BTreeSet::from(["calm".to_owned()]),
+        };
+        let catalog = CatalogSnapshot {
+            generation: initial_generation,
+            tracks: None,
+            modes: Some(BTreeMap::from([(
+                "tabletop".to_owned(),
+                CatalogMode {
+                    soundboard_ids: BTreeSet::new(),
+                    preset_ids: BTreeSet::from(["calm".to_owned()]),
+                },
+            )])),
+        };
+        let spawned = start_playback_actor(
+            store,
+            TestClock::default(),
+            FirstRandom,
+            test_config(),
+            catalog,
+        )
+        .await?;
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::SetActiveMode(Some("tabletop".to_owned())),
+                initial_generation,
+            ))
+            .await?;
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::SetActivePresets {
+                    preset_ids: vec!["calm".to_owned()],
+                    crossfade_ms: None,
+                },
+                initial_generation,
+            ))
+            .await?;
+        let before = spawned.handle.snapshot().await?.state.preset_revision;
+        let changed = BTreeSet::from([ModePresetKey {
+            mode_id: "tabletop".to_owned(),
+            preset_id: "calm".to_owned(),
+        }]);
+
+        spawned
+            .handle
+            .replace_mode_catalog(ModeCatalogPublication {
+                generation: 2,
+                modes: BTreeMap::from([("tabletop".to_owned(), mode())]),
+                changed_presets: changed.clone(),
+            })
+            .await?;
+        let revised = spawned.handle.snapshot().await?;
+        assert_eq!(revised.state.preset_revision, before + 1);
+        assert_eq!(revised.state.active_preset_ids, ["calm"]);
+
+        spawned
+            .handle
+            .replace_mode_catalog(ModeCatalogPublication {
+                generation: 3,
+                modes: BTreeMap::from([("tabletop".to_owned(), ModePlaybackReferences::default())]),
+                changed_presets: changed,
+            })
+            .await?;
+        let pruned = spawned.handle.snapshot().await?;
+        assert_eq!(pruned.state.preset_revision, before + 2);
+        assert!(pruned.state.active_preset_ids.is_empty());
         spawned.handle.shutdown();
         spawned.task.await??;
         Ok(())

@@ -15,13 +15,17 @@ use music_application::library::{
     LibraryCatalogSink, LibraryCoordinatorHandle, LibraryRepository, LibraryService,
     ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
 };
+use music_application::modes::{
+    ModeCatalogSink, ModeCoordinatorHandle, ModeLoadState, SpawnedModeCoordinator,
+    start_mode_coordinator,
+};
 use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
     SystemPlaybackClock, SystemQueueRandom, start_playback_actor,
 };
 use music_media::{
-    FfmpegTools, FilesystemLibraryDiscovery, FilesystemLibraryMutations, LibraryRoot,
-    MetadataAdapter,
+    FfmpegTools, FilesystemLibraryDiscovery, FilesystemLibraryMutations,
+    FilesystemModeCatalogSource, LibraryRoot, MetadataAdapter,
 };
 use music_storage::{
     LegacyDeviceImportOutcome, LegacyDeviceImportStatus, SqliteStorage, SqliteStorageOptions,
@@ -38,7 +42,7 @@ use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
 use crate::error::RuntimeError;
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
-use crate::http::build_router;
+use crate::http::{RuntimeServices, build_router};
 use crate::library::RuntimeLibrary;
 use crate::supervisor::{CriticalTaskError, TaskSupervisor};
 
@@ -59,6 +63,7 @@ pub struct AppRuntime {
     backup: Arc<BackupService>,
     devices: Arc<RuntimeDevices>,
     library: LibraryCoordinatorHandle,
+    modes: ModeCoordinatorHandle,
     library_service: Arc<LibraryService>,
     cleanup_service: Arc<CleanupService>,
     cleanup_verification_service: Arc<CleanupVerificationService>,
@@ -83,6 +88,8 @@ impl AppRuntime {
         health.set_component("remembered_devices", false, ComponentStatus::Starting);
         health.set_component("library_coordinator", true, ComponentStatus::Starting);
         health.set_component("library", false, ComponentStatus::Starting);
+        health.set_component("mode_coordinator", true, ComponentStatus::Starting);
+        health.set_component("modes", false, ComponentStatus::Starting);
         health.set_component("runtime", true, ComponentStatus::Starting);
 
         initialize_directories(&config, &health)?;
@@ -150,6 +157,13 @@ impl AppRuntime {
             }
         };
         health.set_component("playback", true, ComponentStatus::Ready);
+        let mode_source = Arc::new(FilesystemModeCatalogSource::open(&config.modes_dir)?);
+        let mode_sink: Arc<dyn ModeCatalogSink> = Arc::new(playback.clone());
+        let spawned_modes = start_mode_coordinator(mode_source, mode_sink);
+        let modes = supervise_modes(&supervisor, spawned_modes, health.clone())?;
+        let initial_mode_status = modes.wait_until_initialized().await?;
+        health.set_component("mode_coordinator", true, ComponentStatus::Ready);
+        apply_mode_health(&health, initial_mode_status.state);
         let library_root = LibraryRoot::open(&config.music_dir)?;
         let library_metadata = MetadataAdapter::with_ffmpeg(FfmpegTools::new("ffmpeg", "ffprobe"));
         let discovery = Arc::new(FilesystemLibraryDiscovery::new(
@@ -205,6 +219,7 @@ impl AppRuntime {
             backup,
             devices,
             library,
+            modes,
             library_service,
             cleanup_service,
             cleanup_verification_service,
@@ -231,21 +246,24 @@ impl AppRuntime {
     pub fn router(&self) -> Result<Router, RuntimeError> {
         build_router(
             &self.config,
-            self.health.clone(),
-            self.playback.clone(),
-            Arc::clone(&self.auth),
-            Arc::clone(&self.backup),
-            Arc::clone(&self.devices),
-            Arc::new(RuntimeLibrary {
-                service: Arc::clone(&self.library_service),
-                cleanup: Arc::clone(&self.cleanup_service),
-                cleanup_verification: Arc::clone(&self.cleanup_verification_service),
-                coordinator: self.library.clone(),
-                root: self.library_root.clone(),
-                metadata: self.library_metadata.clone(),
-                max_upload_files: self.config.max_upload_files,
-                max_upload_file_bytes: self.config.max_upload_file_bytes,
-            }),
+            RuntimeServices {
+                health: self.health.clone(),
+                playback: self.playback.clone(),
+                auth: Arc::clone(&self.auth),
+                backup: Arc::clone(&self.backup),
+                devices: Arc::clone(&self.devices),
+                library: Arc::new(RuntimeLibrary {
+                    service: Arc::clone(&self.library_service),
+                    cleanup: Arc::clone(&self.cleanup_service),
+                    cleanup_verification: Arc::clone(&self.cleanup_verification_service),
+                    coordinator: self.library.clone(),
+                    root: self.library_root.clone(),
+                    metadata: self.library_metadata.clone(),
+                    max_upload_files: self.config.max_upload_files,
+                    max_upload_file_bytes: self.config.max_upload_file_bytes,
+                }),
+                modes: self.modes.clone(),
+            },
         )
     }
 
@@ -372,6 +390,49 @@ fn map_playback_exit(
     }
 }
 
+fn supervise_modes(
+    supervisor: &TaskSupervisor,
+    spawned: SpawnedModeCoordinator,
+    health: HealthRegistry,
+) -> Result<ModeCoordinatorHandle, RuntimeError> {
+    let handle = spawned.handle;
+    let shutdown_handle = handle.clone();
+    let mut status = handle.subscribe_status();
+    let cancellation = supervisor.cancellation_token();
+    let mut task = spawned.task;
+    supervisor.spawn_critical("mode-owner", "mode_coordinator", async move {
+        loop {
+            tokio::select! {
+                result = &mut task => return map_mode_exit(result),
+                () = cancellation.cancelled() => {
+                    shutdown_handle.shutdown();
+                    return map_mode_exit(task.await);
+                }
+                changed = status.changed() => {
+                    if changed.is_err() {
+                        return Err(CriticalTaskError::new("mode_status_channel_closed"));
+                    }
+                    apply_mode_health(&health, status.borrow().state);
+                }
+            }
+        }
+    })?;
+    Ok(handle)
+}
+
+fn map_mode_exit(
+    result: Result<
+        Result<(), music_application::modes::ModeCoordinatorError>,
+        tokio::task::JoinError,
+    >,
+) -> Result<(), CriticalTaskError> {
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(CriticalTaskError::new("mode_owner_failed")),
+        Err(_) => Err(CriticalTaskError::new("mode_owner_panicked")),
+    }
+}
+
 fn supervise_library(
     supervisor: &TaskSupervisor,
     spawned: SpawnedLibraryCoordinator,
@@ -425,6 +486,15 @@ fn apply_library_health(health: &HealthRegistry, status: ReconciliationStatus) {
             ComponentStatus::Ready
         },
     );
+}
+
+fn apply_mode_health(health: &HealthRegistry, status: ModeLoadState) {
+    let health_status = match status {
+        ModeLoadState::Starting => ComponentStatus::Starting,
+        ModeLoadState::Current => ComponentStatus::Ready,
+        ModeLoadState::Degraded | ModeLoadState::Failed => ComponentStatus::Degraded,
+    };
+    health.set_component("modes", false, health_status);
 }
 
 pub fn initialize_tracing(config: &AppConfig) -> Result<(), RuntimeError> {
@@ -1403,11 +1473,198 @@ mod tests {
             serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await?)?;
         assert_eq!(body["track_count"], 0);
         assert!(body["last_scan_at"].is_number());
-        assert_eq!(body["modes"]["last_load_at"], Value::Null);
+        assert!(body["modes"]["last_load_at"].is_number());
         assert_eq!(body["modes"]["loaded_ids"], serde_json::json!([]));
         assert_eq!(body["modes"]["errors"], serde_json::json!({}));
         assert_eq!(body["connected_device_count"], 0);
         assert_eq!(body["state_revision"], 0);
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mode_reads_active_selection_theme_and_reload_use_the_rust_catalog()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("modes/table/soundboards"))?;
+        fs::create_dir_all(directory.path().join("modes/table/presets"))?;
+        fs::write(
+            directory.path().join("modes/table/manifest.yaml"),
+            "id: table\nname: Table\ntheme: theme.css\npanels: [now-playing]\nplaylist_categories: [ambient]\ndefault_crossfade_ms: 1250\ndefault_soundboard: main\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/theme.css"),
+            "[data-mode='table'] { color: teal; }\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/soundboards/main.yaml"),
+            "id: main\nname: Main\ncategories: []\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/presets/calm.yaml"),
+            "id: calm\nname: Calm\neffects:\n  - type: eq\n    low: -2\n",
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if runtime.library_status().status == ReconciliationStatus::Current {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+
+        let unauthorized = router
+            .clone()
+            .oneshot(Request::get("/api/modes").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let guest_presets = router
+            .clone()
+            .oneshot(Request::get("/api/modes/table/presets").body(Body::empty())?)
+            .await?;
+        assert_eq!(guest_presets.status(), StatusCode::OK);
+        let guest_presets: Value =
+            serde_json::from_slice(&to_bytes(guest_presets.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(guest_presets[0]["id"], "calm");
+        assert_eq!(guest_presets[0]["effects"][0]["low"], -2);
+
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?
+            .to_owned();
+
+        let listed = router
+            .clone()
+            .oneshot(
+                Request::get("/api/modes")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let listed: Value =
+            serde_json::from_slice(&to_bytes(listed.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(listed[0]["id"], "table");
+        assert_eq!(listed[0]["has_theme"], true);
+        assert_eq!(listed[0]["default_crossfade_ms"], 1250);
+
+        let detail = router
+            .clone()
+            .oneshot(
+                Request::get("/api/modes/table")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let detail: Value =
+            serde_json::from_slice(&to_bytes(detail.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(detail["soundboards"]["main"]["name"], "Main");
+        assert_eq!(detail["presets"]["calm"]["effects"][0]["type"], "eq");
+
+        let theme = router
+            .clone()
+            .oneshot(
+                Request::get("/api/modes/table/theme.css")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(theme.status(), StatusCode::OK);
+        assert!(
+            theme.headers()[CONTENT_TYPE]
+                .to_str()?
+                .starts_with("text/css")
+        );
+        assert!(
+            String::from_utf8(to_bytes(theme.into_body(), 1024).await?.to_vec())?.contains("teal")
+        );
+
+        let selected = router
+            .clone()
+            .oneshot(
+                Request::put("/api/modes/active")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"mode_id":"table"}"#))?,
+            )
+            .await?;
+        assert_eq!(selected.status(), StatusCode::OK);
+        let selected: Value = serde_json::from_slice(&to_bytes(selected.into_body(), 1024).await?)?;
+        assert_eq!(selected, serde_json::json!({"mode_id":"table"}));
+        let unknown = router
+            .clone()
+            .oneshot(
+                Request::put("/api/modes/active")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"mode_id":"missing"}"#))?,
+            )
+            .await?;
+        assert_eq!(unknown.status(), StatusCode::BAD_REQUEST);
+
+        fs::create_dir(directory.path().join("modes/cyber"))?;
+        fs::write(
+            directory.path().join("modes/cyber/manifest.yaml"),
+            "id: cyber\nname: Cyber\n",
+        )?;
+        let reload = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/reload")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(reload.status(), StatusCode::OK);
+        let reload: Value =
+            serde_json::from_slice(&to_bytes(reload.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(reload["errors"], serde_json::json!({}));
+        assert!(reload["loaded"].as_array().is_some_and(|ids| {
+            ids.iter().any(|id| id == "table") && ids.iter().any(|id| id == "cyber")
+        }));
+
+        fs::create_dir(directory.path().join("modes/broken"))?;
+        fs::write(
+            directory.path().join("modes/broken/manifest.yaml"),
+            "id: wrong\nname: Broken\n",
+        )?;
+        let degraded = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/reload")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let degraded: Value =
+            serde_json::from_slice(&to_bytes(degraded.into_body(), 1024 * 1024).await?)?;
+        assert!(degraded["errors"].get("broken").is_some());
+        assert!(runtime.modes.snapshot().is_some_and(|catalog| {
+            catalog.modes.contains_key("table") && catalog.modes.contains_key("cyber")
+        }));
+
         runtime.shutdown().await?;
         Ok(())
     }

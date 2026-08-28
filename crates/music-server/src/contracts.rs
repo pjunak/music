@@ -516,6 +516,12 @@ mod tests {
         assert!(paths.contains_key("/api/library/cleanup/analyze"));
         assert!(paths.contains_key("/api/library/cleanup/verify"));
         assert!(paths.contains_key("/api/library/rescan"));
+        assert!(paths.contains_key("/api/modes"));
+        assert!(paths.contains_key("/api/modes/active"));
+        assert!(paths.contains_key("/api/modes/reload"));
+        assert!(paths.contains_key("/api/modes/{mode_id}"));
+        assert!(paths.contains_key("/api/modes/{mode_id}/presets"));
+        assert!(paths.contains_key("/api/modes/{mode_id}/theme.css"));
         assert!(!paths.contains_key("/health"));
         assert!(!paths.contains_key("/api/ws"));
         Ok(())

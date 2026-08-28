@@ -60,6 +60,10 @@ async fn get_diagnostics(
         .playback
         .as_ref()
         .ok_or_else(ApiError::service_unavailable)?;
+    let modes = state
+        .modes
+        .as_ref()
+        .ok_or_else(ApiError::service_unavailable)?;
     let library_status = library.coordinator.status();
     let snapshot = playback.snapshot().await.map_err(|error| {
         tracing::error!(error = %error, "diagnostics playback snapshot failed");
@@ -71,12 +75,20 @@ async fn get_diagnostics(
         last_scan_at: library_status
             .last_scan_at_unix_seconds
             .map(|timestamp| timestamp as f64),
-        // The mode coordinator will replace this truthful not-yet-loaded
-        // projection when Phase 6 publishes its immutable catalog status.
-        modes: LoaderStatus::default(),
+        modes: mode_status(modes.status()),
         connected_device_count: checked_count(snapshot.connected_clients.len())?,
         state_revision: checked_count(snapshot.state.publication_revision)?,
     }))
+}
+
+fn mode_status(status: music_application::modes::ModeStatus) -> LoaderStatus {
+    LoaderStatus {
+        last_load_at: status
+            .last_load_at_unix_seconds
+            .map(|timestamp| timestamp as f64),
+        loaded_ids: status.loaded_ids,
+        errors: status.errors,
+    }
 }
 
 fn checked_count(value: impl TryInto<i64>) -> Result<i64, ApiError> {

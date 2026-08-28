@@ -21,6 +21,7 @@ mod error;
 mod health;
 mod http;
 mod library;
+mod modes;
 mod playback_projection;
 mod runtime;
 mod supervisor;
