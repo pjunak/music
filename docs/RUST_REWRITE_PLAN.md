@@ -172,6 +172,9 @@ reviews and moves an accepted summary into durable project records.
   scan rejects Python files as well as executables, and the bind-mount instructions prepare the
   non-root data directory. A pinned optimized build of both server binaries succeeds, and Cargo's
   dependency records show no project build inputs outside `crates/`, matching the context allowlist.
+- The separately deployed `music-output` appliance also builds as a locked optimized binary with
+  project inputs confined to `crates/`; the Linux workflow now makes that release build a permanent
+  gate before physical speaker acceptance.
 - The complete 186-file Python oracle is content-fingerprinted and quarantined; four deterministic
   tree-policy tests pass. CI now rejects oracle drift or new Python artifacts outside that boundary,
   while the prepared final mode rejects all executable/runtime remnants after the gated deletion.

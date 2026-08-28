@@ -51,6 +51,7 @@ jobs:
           cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
           cargo test --workspace --all-features
           cargo test --workspace --all-features --doc
+          cargo build --locked --release -p music-output --bin music-output
           cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 
       - name: Install pinned dependency auditors

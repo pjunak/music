@@ -28,6 +28,7 @@ cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo nextest run --workspace --all-features
 cargo test --workspace --all-features --doc
+cargo build --locked --release -p music-output --bin music-output
 cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 cargo deny check
 cargo audit --deny warnings
