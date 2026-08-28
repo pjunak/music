@@ -392,8 +392,8 @@ committed or logged.
 
 **Status:** In progress — Rust now owns the bounded mode catalog, all existing mode, soundboard,
 interrupt, cue, and preset CRUD, the complete playlist HTTP surface, resolved playlist/cue playback,
-and exact-item SFX/loop dispatch. Remaining catalog-scoped WebSocket actions and import authoring
-remain.
+exact-item SFX/loop dispatch, and all catalog-scoped WebSocket playback actions. Import authoring
+remains.
 
 - [x] `ModeCoordinator`, typed immutable catalog snapshots, generations, last-good reload behavior,
   health/diagnostic status, and authenticated plus guest-compatible read routes.
@@ -412,8 +412,10 @@ remain.
   mode-scoped named-playlist resolution, initial position, stable replacement loops, durable state,
   and transient SFX are validated before one reducer/persistence boundary; a failed persistence
   cannot emit a partial cue.
-- Remaining generation-checked catalog WebSocket actions: mode selection, direct track/queue/folder
-  playback, soundboard/preset selection, and single-track interrupts.
+- [x] Generation-checked mode selection, direct track, whole-queue, enqueue, recursive folder,
+  soundboard, preset, and single-track interrupt WebSocket actions. Queue validation is all-or-none,
+  preset crossfade remains last-active-wins, output selection rejects newly added disconnected IDs,
+  and manual follow-mode advance resolves inside the playback actor.
 - Authoring document schema, source adapters, preview/dependency validation, journaled commit, and
   create-only conflict behavior.
 

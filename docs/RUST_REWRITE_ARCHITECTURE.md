@@ -201,6 +201,13 @@ generation used during resolution. A committed library or mode mutation sends th
 catalog-change command. The actor rejects stale resolved commands and prunes invalidated references
 before publishing the next revision.
 
+WebSocket actions follow the same rule as HTTP orchestration: mode and soundboard selection,
+preset activation, direct track and queue changes, recursive folder playback, and interrupt
+takeovers are resolved against immutable catalog views before admission. Queue requests validate
+the complete set before changing state, and selecting an output validates only newly added IDs
+against the actor-owned live connection set. Compatibility errors therefore do not leave partial
+playback or device state behind.
+
 For an accepted durable mutation, the actor:
 
 1. reduces the command against the current state;
@@ -233,6 +240,9 @@ Ambient tracks without a duration remain client-advance-only, while an unknown-d
 uses a five-minute fallback so it cannot wedge ambient playback indefinitely. The server waits
 750 ms beyond a known duration, allowing a healthy client's lower-latency `ended` message to win.
 Both paths carry the observed track ID into the reducer, so only one racing advance can commit.
+Client-requested next-track actions enter through a dedicated actor message. The actor resolves a
+follow successor from its own current state and compact path-ordered catalog, then reduces it in the
+same mailbox turn; a WebSocket snapshot can never select a successor for an already-replaced track.
 
 Loop starts replace and restart the deadline for the same loop ID. A due tick emits one transient
 SFX event and schedules the next interval from the current monotonic sample, deliberately

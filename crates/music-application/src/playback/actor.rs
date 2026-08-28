@@ -309,6 +309,20 @@ impl PlaybackActorHandle {
         self.request(|reply| ActorMessage::Snapshot { reply }).await
     }
 
+    /// Advance using the actor-owned state and catalog as one serialized
+    /// decision. This keeps follow-mode successor resolution from racing a
+    /// concurrent queue, track, or catalog change.
+    pub async fn ambient_skip_next(
+        &self,
+        expected_track_id: Option<TrackId>,
+    ) -> Result<PlaybackCommandResult, PlaybackActorError> {
+        self.request(|reply| ActorMessage::AmbientSkipNext {
+            expected_track_id,
+            reply,
+        })
+        .await
+    }
+
     pub async fn open_connection(&self) -> Result<ConnectionId, PlaybackActorError> {
         self.request(|reply| ActorMessage::OpenConnection { reply })
             .await
@@ -433,6 +447,10 @@ enum ActorMessage {
     },
     Snapshot {
         reply: oneshot::Sender<Result<PlaybackPublication, PlaybackActorError>>,
+    },
+    AmbientSkipNext {
+        expected_track_id: Option<TrackId>,
+        reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
     },
     OpenConnection {
         reply: oneshot::Sender<Result<ConnectionId, PlaybackActorError>>,
@@ -771,6 +789,18 @@ where
                     .map(|sample| publication(&self.state, &self.connections, sample));
                 let _ = reply.send(result);
             }
+            ActorMessage::AmbientSkipNext {
+                expected_track_id,
+                reply,
+            } => {
+                let result = self.execute_ambient_skip_next(expected_track_id).await;
+                let fatal = result.as_ref().err().is_some_and(is_fatal);
+                let fatal_error = result.as_ref().err().cloned();
+                let _ = reply.send(result);
+                if fatal && let Some(error) = fatal_error {
+                    return Err(error);
+                }
+            }
             ActorMessage::OpenConnection { reply } => {
                 let result = self.open_connection();
                 let _ = reply.send(result);
@@ -953,6 +983,31 @@ where
                 Ok(self.result(true))
             }
         }
+    }
+
+    async fn execute_ambient_skip_next(
+        &mut self,
+        expected_track_id: Option<TrackId>,
+    ) -> Result<PlaybackCommandResult, PlaybackActorError> {
+        let follow_next_id = (self.state.ambient.loop_mode == LoopMode::Follow
+            && self.state.ambient.queue.is_empty())
+        .then(|| {
+            let current_track_id = self.state.ambient.current_track_id?;
+            self.catalog
+                .tracks
+                .as_ref()?
+                .get(&current_track_id)?
+                .follow_next_id
+        })
+        .flatten();
+        self.execute(ResolvedPlaybackCommand::at_generation(
+            PlaybackCommand::AmbientSkipNext {
+                follow_next_id,
+                expected_track_id,
+            },
+            self.catalog.generation,
+        ))
+        .await
     }
 
     fn open_connection(&mut self) -> Result<ConnectionId, PlaybackActorError> {
@@ -2529,6 +2584,18 @@ mod tests {
         .await??;
         assert!(states.borrow().state.ambient.queue.is_empty());
         assert_eq!(states.borrow().state.ambient.history, [first, second]);
+
+        spawned.handle.ambient_skip_next(Some(first)).await?;
+        let manually_advanced = spawned.handle.snapshot().await?;
+        assert_eq!(
+            manually_advanced.state.ambient.current_track_id,
+            Some(second)
+        );
+        assert!(manually_advanced.state.ambient.queue.is_empty());
+        assert_eq!(
+            manually_advanced.state.ambient.history,
+            [first, second, first]
+        );
         spawned.handle.shutdown();
         spawned.task.await??;
         Ok(())

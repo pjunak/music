@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use music_application::auth::{SecretSessionToken, SessionLookup, SessionTouch, UnixSeconds};
-use music_application::modes::{ModeBundle, SoundboardItemDocument};
+use music_application::modes::{ModeBundle, ModeCatalog, SoundboardItemDocument};
 use music_application::playback::{
     CatalogGeneration, ClientRegistration, ConnectionId, PlaybackActorError, PlaybackActorHandle,
     PlaybackPublication, ResolvedPlaybackCommand,
@@ -398,6 +398,165 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
             .await;
             drop(action);
         }
+        ClientAction::SetActiveMode { mode_id } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let mode_id = mode_id.into_inner();
+            let result = execute_catalog_action(
+                playback,
+                dependencies,
+                |_, catalog| {
+                    if let Some(mode_id) = mode_id.as_deref()
+                        && !catalog.modes.contains_key(mode_id)
+                    {
+                        return Err(format!("unknown mode: {mode_id}"));
+                    }
+                    Ok(PlaybackCommand::SetActiveMode(mode_id.clone()))
+                },
+                "mode changed; retry the request",
+            )
+            .await;
+            if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::SetActiveOutputs { device_ids } => {
+            match playback
+                .execute(ResolvedPlaybackCommand::direct(
+                    PlaybackCommand::SetActiveOutputs(device_ids),
+                ))
+                .await
+            {
+                Ok(_) => {}
+                Err(PlaybackActorError::DisconnectedOutput(device_ids)) => {
+                    queue_error(
+                        writer,
+                        format!(
+                            "device(s) not connected: {}",
+                            python_string_list(&device_ids)
+                        ),
+                        None,
+                        cancellation,
+                    )
+                    .await;
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "active-output selection was rejected");
+                    queue_error(writer, "playback action failed", None, cancellation).await;
+                }
+            }
+        }
+        ClientAction::AmbientPlayTrack { track_id } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let track_id = match music_domain::TrackId::new(track_id) {
+                Ok(track_id) => track_id,
+                Err(_) => {
+                    queue_error(writer, "track ID must be positive", None, cancellation).await;
+                    return;
+                }
+            };
+            if let Err(detail) = execute_catalog_action(
+                playback,
+                dependencies,
+                |_, _| Ok(PlaybackCommand::AmbientPlayTrack(track_id)),
+                "track not in library",
+            )
+            .await
+            {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::AmbientSetQueue { track_ids } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let track_ids = match domain_track_ids(track_ids) {
+                Ok(track_ids) => track_ids,
+                Err(detail) => {
+                    queue_error(writer, detail, None, cancellation).await;
+                    return;
+                }
+            };
+            if let Err(detail) = execute_catalog_action(
+                playback,
+                dependencies,
+                |_, _| Ok(PlaybackCommand::AmbientSetQueue(track_ids.clone())),
+                "track not in library",
+            )
+            .await
+            {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::AmbientEnqueue { track_id, position } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let track_id = match music_domain::TrackId::new(track_id) {
+                Ok(track_id) => track_id,
+                Err(_) => {
+                    queue_error(writer, "track ID must be positive", None, cancellation).await;
+                    return;
+                }
+            };
+            let position =
+                position.map(|position| usize::try_from(position.max(0)).unwrap_or(usize::MAX));
+            if let Err(detail) = execute_catalog_action(
+                playback,
+                dependencies,
+                |_, _| Ok(PlaybackCommand::AmbientEnqueue { track_id, position }),
+                "track not in library",
+            )
+            .await
+            {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::AmbientSkipNext { from_track_id } => {
+            let expected_track_id = match from_track_id.map(music_domain::TrackId::new).transpose()
+            {
+                Ok(track_id) => track_id,
+                Err(_) => {
+                    queue_error(writer, "track ID must be positive", None, cancellation).await;
+                    return;
+                }
+            };
+            if let Err(error) = playback.ambient_skip_next(expected_track_id).await {
+                tracing::warn!(error = %error, "ambient skip was rejected");
+                queue_error(writer, "playback action failed", None, cancellation).await;
+            }
+        }
         ClientAction::AmbientPlayPlaylist {
             playlist_id,
             start_index,
@@ -435,6 +594,190 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                 })
                 .await;
             if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::AmbientPlayFolder { path, start_index } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let path = path.into_inner();
+            let start_index = match usize::try_from(start_index.get()) {
+                Ok(start_index) => start_index,
+                Err(_) => {
+                    queue_error(
+                        writer,
+                        "folder start index is too large",
+                        None,
+                        cancellation,
+                    )
+                    .await;
+                    return;
+                }
+            };
+            if let Err(detail) =
+                execute_folder_command(playback, dependencies, path.as_str(), start_index).await
+            {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::SetActiveSoundboard { soundboard_id } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let soundboard_id = soundboard_id.into_inner();
+            let result = execute_catalog_action(
+                playback,
+                dependencies,
+                |state, catalog| {
+                    if let Some(soundboard_id) = soundboard_id.as_deref() {
+                        let mode_id = state.active_mode_id.as_deref().ok_or_else(|| {
+                            "no active mode; cannot set soundboard without a mode".to_owned()
+                        })?;
+                        if !catalog
+                            .modes
+                            .get(mode_id)
+                            .is_some_and(|mode| mode.soundboards.contains_key(soundboard_id))
+                        {
+                            return Err(format!(
+                                "soundboard '{soundboard_id}' not in active mode '{mode_id}'"
+                            ));
+                        }
+                    }
+                    Ok(PlaybackCommand::SetActiveSoundboard(soundboard_id.clone()))
+                },
+                "soundboard changed; retry the request",
+            )
+            .await;
+            if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::SetActivePresets { preset_ids } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let result = execute_catalog_action(
+                playback,
+                dependencies,
+                |state, catalog| {
+                    let loaded = state
+                        .active_mode_id
+                        .as_deref()
+                        .and_then(|mode_id| catalog.modes.get(mode_id));
+                    let unknown = preset_ids
+                        .iter()
+                        .filter(|preset_id| {
+                            !loaded.is_some_and(|mode| mode.presets.contains_key(*preset_id))
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if !unknown.is_empty() {
+                        return Err(format!(
+                            "unknown preset(s): {}",
+                            python_string_list(&unknown)
+                        ));
+                    }
+                    let crossfade_ms = loaded
+                        .and_then(|mode| {
+                            preset_ids.iter().fold(None, |effective, preset_id| {
+                                mode.presets
+                                    .get(preset_id)
+                                    .and_then(|preset| preset.crossfade_ms)
+                                    .or(effective)
+                            })
+                        })
+                        .map(u32::try_from)
+                        .transpose()
+                        .map_err(|_| "preset crossfade is too large".to_owned())?;
+                    Ok(PlaybackCommand::SetActivePresets {
+                        preset_ids: preset_ids.clone(),
+                        crossfade_ms,
+                    })
+                },
+                "preset selection changed; retry the request",
+            )
+            .await;
+            if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::FireInterruptTrack {
+            duck_to,
+            track_id,
+            return_to_ambient,
+            fade_in_ms,
+            fade_out_ms,
+        } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let track_id = match music_domain::TrackId::new(track_id) {
+                Ok(track_id) => track_id,
+                Err(_) => {
+                    queue_error(writer, "track ID must be positive", None, cancellation).await;
+                    return;
+                }
+            };
+            let Ok(fade_in_ms) = u32::try_from(fade_in_ms.get()) else {
+                queue_error(writer, "fade duration is too large", None, cancellation).await;
+                return;
+            };
+            let Ok(fade_out_ms) = u32::try_from(fade_out_ms.get()) else {
+                queue_error(writer, "fade duration is too large", None, cancellation).await;
+                return;
+            };
+            let duck_to = match duck_to.map(|value| domain_volume(value.get())).transpose() {
+                Ok(duck_to) => duck_to,
+                Err(detail) => {
+                    queue_error(writer, detail, None, cancellation).await;
+                    return;
+                }
+            };
+            if let Err(detail) = execute_catalog_action(
+                playback,
+                dependencies,
+                |_, _| {
+                    Ok(PlaybackCommand::FireInterruptSequence {
+                        track_ids: vec![track_id],
+                        return_to_ambient,
+                        fade_in_ms,
+                        fade_out_ms,
+                        duck_to,
+                    })
+                },
+                "track not in library",
+            )
+            .await
+            {
                 queue_error(writer, detail, None, cancellation).await;
             }
         }
@@ -631,6 +974,137 @@ fn catalog_dependencies<'a>(
         library: library.as_deref()?,
         modes: modes.as_ref()?,
     })
+}
+
+async fn execute_catalog_action(
+    playback: &PlaybackActorHandle,
+    dependencies: CatalogDependencies<'_>,
+    mut resolve: impl FnMut(
+        &music_domain::PlaybackState,
+        &ModeCatalog,
+    ) -> Result<PlaybackCommand, String>,
+    invalid_detail: &str,
+) -> Result<(), String> {
+    for attempt in 0..2 {
+        let state = playback
+            .snapshot()
+            .await
+            .map_err(|_| "playback action failed".to_owned())?;
+        let catalog = dependencies
+            .modes
+            .snapshot()
+            .ok_or_else(|| "the required library or mode catalog is not ready".to_owned())?;
+        let command = resolve(state.state.as_ref(), catalog.as_ref())?;
+        let generation = CatalogGeneration {
+            library: dependencies.library.coordinator.status().generation.get(),
+            modes: catalog.generation,
+        };
+        match playback
+            .execute(ResolvedPlaybackCommand::at_generation(command, generation))
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(PlaybackActorError::StaleCatalog { .. }) => tokio::task::yield_now().await,
+            Err(PlaybackActorError::InvalidCatalogReference) if attempt == 0 => {
+                tokio::task::yield_now().await;
+            }
+            Err(PlaybackActorError::InvalidCatalogReference) => {
+                return Err(invalid_detail.to_owned());
+            }
+            Err(_) => return Err("playback action failed".to_owned()),
+        }
+    }
+    Err("catalog changed; retry the request".to_owned())
+}
+
+async fn execute_folder_command(
+    playback: &PlaybackActorHandle,
+    dependencies: CatalogDependencies<'_>,
+    requested_path: &str,
+    start_index: usize,
+) -> Result<(), String> {
+    let normalized_path = requested_path
+        .trim_matches(&['/', '\\'][..])
+        .replace('\\', "/");
+    for _ in 0..2 {
+        let before = dependencies.library.coordinator.status().generation;
+        let tracks = dependencies
+            .library
+            .service
+            .all_tracks()
+            .await
+            .map_err(|_| "library resolution failed".to_owned())?;
+        let after = dependencies.library.coordinator.status().generation;
+        if before != after {
+            tokio::task::yield_now().await;
+            continue;
+        }
+        let track_ids = tracks
+            .into_iter()
+            .filter(|track| {
+                normalized_path.is_empty()
+                    || track.path.as_str() == normalized_path
+                    || track
+                        .path
+                        .as_str()
+                        .strip_prefix(normalized_path.as_str())
+                        .is_some_and(|suffix| suffix.starts_with('/'))
+            })
+            .map(|track| track.id)
+            .collect::<Vec<_>>();
+        if track_ids.is_empty() {
+            return Err(if requested_path.is_empty() {
+                "no tracks in the library".to_owned()
+            } else {
+                format!("no tracks in \"{requested_path}\"")
+            });
+        }
+        let catalog = dependencies
+            .modes
+            .snapshot()
+            .ok_or_else(|| "the required library or mode catalog is not ready".to_owned())?;
+        let generation = CatalogGeneration {
+            library: after.get(),
+            modes: catalog.generation,
+        };
+        match playback
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::AmbientPlaySequence {
+                    track_ids,
+                    start_index,
+                    source_playlist_id: None,
+                },
+                generation,
+            ))
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(
+                PlaybackActorError::StaleCatalog { .. }
+                | PlaybackActorError::InvalidCatalogReference,
+            ) => tokio::task::yield_now().await,
+            Err(_) => return Err("playback action failed".to_owned()),
+        }
+    }
+    Err("catalog changed; retry the request".to_owned())
+}
+
+fn domain_track_ids(track_ids: Vec<i64>) -> Result<Vec<music_domain::TrackId>, &'static str> {
+    track_ids
+        .into_iter()
+        .map(|track_id| {
+            music_domain::TrackId::new(track_id).map_err(|_| "track ID must be positive")
+        })
+        .collect()
+}
+
+fn python_string_list(values: &[String]) -> String {
+    let values = values
+        .iter()
+        .map(|value| format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{values}]")
 }
 
 fn playlist_dependencies<'a>(
@@ -1039,13 +1513,6 @@ fn direct_command(action: ClientAction) -> Result<Option<PlaybackCommand>, &'sta
             usize::try_from(position.get()).map_err(|_| "queue position is too large")?,
         ),
         ClientAction::AmbientClearQueue => PlaybackCommand::AmbientClearQueue,
-        ClientAction::AmbientSkipNext { from_track_id } => PlaybackCommand::AmbientSkipNext {
-            follow_next_id: None,
-            expected_track_id: from_track_id
-                .map(music_domain::TrackId::new)
-                .transpose()
-                .map_err(|_| "track ID must be positive")?,
-        },
         ClientAction::AmbientSkipPrev => PlaybackCommand::AmbientSkipPrevious,
         ClientAction::AmbientSeek { position_ms } => PlaybackCommand::AmbientSeek(
             u64::try_from(position_ms.get()).map_err(|_| "position is too large")?,
@@ -1092,6 +1559,7 @@ fn direct_command(action: ClientAction) -> Result<Option<PlaybackCommand>, &'sta
         | ClientAction::AmbientPlayTrack { .. }
         | ClientAction::AmbientSetQueue { .. }
         | ClientAction::AmbientEnqueue { .. }
+        | ClientAction::AmbientSkipNext { .. }
         | ClientAction::AmbientPlayPlaylist { .. }
         | ClientAction::AmbientPlayFolder { .. }
         | ClientAction::SetActiveSoundboard { .. }
@@ -1394,6 +1862,23 @@ mod tests {
         }
     }
 
+    async fn wait_for_protocol_message(
+        socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+        description: &str,
+        mut matches: impl FnMut(&ServerMessage) -> bool,
+    ) -> Result<ServerMessage, Box<dyn Error>> {
+        for _ in 0..8 {
+            let message = next_protocol_message(socket).await?;
+            if matches(&message) {
+                return Ok(message);
+            }
+        }
+        Err(io::Error::other(format!(
+            "WebSocket did not publish {description} within eight messages"
+        ))
+        .into())
+    }
+
     #[tokio::test]
     async fn guest_socket_registers_but_cannot_control_playback() -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
@@ -1583,6 +2068,365 @@ mod tests {
             }
         }
         assert!(saw_guest_rejection);
+
+        socket.close(None).await?;
+        let _ = shutdown_tx.send(());
+        server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn catalog_scoped_actions_resolve_before_mutating_playback() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Album/Sub"))?;
+        fs::create_dir_all(directory.path().join("music/Else"))?;
+        fs::write(
+            directory.path().join("music/Album/01 - First.mp3"),
+            b"catalog action fixture",
+        )?;
+        fs::write(
+            directory.path().join("music/Album/Sub/02 - Second.mp3"),
+            b"catalog action fixture",
+        )?;
+        fs::write(
+            directory.path().join("music/Else/03 - Third.mp3"),
+            b"catalog action fixture",
+        )?;
+        fs::create_dir_all(directory.path().join("modes/table/soundboards"))?;
+        fs::create_dir_all(directory.path().join("modes/table/presets"))?;
+        fs::write(
+            directory.path().join("modes/table/manifest.yaml"),
+            "id: table\nname: Table\npanels: [soundboard]\nplaylist_categories: []\ndefault_crossfade_ms: 0\ndefault_soundboard: main\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/soundboards/main.yaml"),
+            "id: main\nname: Main\ncategories: []\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/presets/warm.yaml"),
+            "id: warm\nname: Warm\neffects: []\ncrossfade_ms: 750\n",
+        )?;
+
+        let token = "catalog-actions-test-session-token";
+        seed_session(directory.path(), token).await?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let router = runtime.router()?;
+        let cookie = format!("music_session={token}");
+        let search = router
+            .oneshot(
+                Request::get("/api/library/search?q=&sort=path&order=asc")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(search.status(), StatusCode::OK);
+        let search: serde_json::Value =
+            serde_json::from_slice(&to_bytes(search.into_body(), 1024 * 1024).await?)?;
+        let track_ids = search["tracks"]
+            .as_array()
+            .ok_or("library search tracks were missing")?
+            .iter()
+            .map(|track| track["id"].as_i64().ok_or("track id was missing"))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(track_ids.len(), 3);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(runtime.run(listener, async move {
+            let _ = shutdown_rx.await;
+            Ok(())
+        }));
+        let mut request = format!("ws://{address}/api/ws").into_client_request()?;
+        request
+            .headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie)?);
+        let (mut socket, _) = connect_async(request).await?;
+        assert!(matches!(
+            next_protocol_message(&mut socket).await?,
+            ServerMessage::StateSnapshot { .. }
+        ));
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"register",
+                    "name":"Controller",
+                    "client_id":"controller",
+                    "protocol_version":2
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the registered controller", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.connected_devices.iter().any(|device| device.client_id == "controller"))
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_outputs","device_ids":["ghost"]})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        assert!(matches!(
+            wait_for_protocol_message(&mut socket, "the disconnected-output error", |message| {
+                matches!(message, ServerMessage::Error { detail, .. }
+                    if detail == "device(s) not connected: ['ghost']")
+            })
+            .await?,
+            ServerMessage::Error { .. }
+        ));
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_outputs","device_ids":["controller"]})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the active output", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.active_output_device_ids == ["controller"])
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_mode","mode_id":"missing"})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the unknown-mode error", |message| {
+            matches!(message, ServerMessage::Error { detail, .. }
+                if detail == "unknown mode: missing")
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_soundboard","soundboard_id":"main"})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the no-active-mode error", |message| {
+            matches!(message, ServerMessage::Error { detail, .. }
+                if detail == "no active mode; cannot set soundboard without a mode")
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_mode","mode_id":"table"})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the active mode", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.active_mode_id.as_deref() == Some("table"))
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_soundboard","soundboard_id":"main"})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the active soundboard", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.active_soundboard_id.as_deref() == Some("main"))
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_presets","preset_ids":["missing"]})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the unknown-preset error", |message| {
+            matches!(message, ServerMessage::Error { detail, .. }
+                if detail == "unknown preset(s): ['missing']")
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"set_active_presets","preset_ids":["warm"]})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the effective preset", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.active_preset_ids == ["warm"] && state.crossfade_ms == 750)
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"ambient_play_track","track_id":i64::MAX})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the missing-track error", |message| {
+            matches!(message, ServerMessage::Error { detail, .. }
+                if detail == "track not in library")
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"ambient_play_track","track_id":track_ids[0]})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the direct ambient track", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.ambient.current_track_id == Some(track_ids[0]))
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"ambient_set_queue",
+                    "track_ids":[track_ids[2], i64::MAX]
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the invalid-queue error", |message| {
+            matches!(message, ServerMessage::Error { detail, .. }
+                if detail == "track not in library")
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"ambient_set_queue","track_ids":[track_ids[2]]})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the resolved queue", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.ambient.queue == [track_ids[2]])
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"ambient_enqueue",
+                    "track_id":track_ids[1],
+                    "position":-1
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the clamped enqueue", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.ambient.queue == [track_ids[1], track_ids[2]])
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"ambient_play_folder",
+                    "path":"/Album/",
+                    "start_index":1
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "recursive folder playback", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.ambient.current_track_id == Some(track_ids[1])
+                    && state.ambient.history == [track_ids[0]]
+                    && state.ambient.queue.is_empty()
+                    && state.ambient.source_playlist_id.is_none())
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({"type":"ambient_set_loop","loop":"follow"})
+                    .to_string()
+                    .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "follow mode", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.ambient.loop_mode == music_protocol::LoopMode::Follow)
+        })
+        .await?;
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"ambient_skip_next",
+                    "from_track_id":track_ids[1]
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the follow successor", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.ambient.current_track_id == Some(track_ids[2]))
+        })
+        .await?;
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"fire_interrupt_track",
+                    "track_id":track_ids[0],
+                    "return_to_ambient":true,
+                    "fade_in_ms":25,
+                    "fade_out_ms":50,
+                    "duck_to":0.4
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let _ = wait_for_protocol_message(&mut socket, "the resolved interrupt", |message| {
+            matches!(message, ServerMessage::StateChanged { state }
+                if state.interrupt.as_ref().is_some_and(|interrupt|
+                    interrupt.current_track_id == track_ids[0]
+                        && interrupt.fade_in_ms == 25
+                        && interrupt.fade_out_ms == 50
+                        && interrupt.duck_to == Some(0.4)))
+        })
+        .await?;
 
         socket.close(None).await?;
         let _ = shutdown_tx.send(());
