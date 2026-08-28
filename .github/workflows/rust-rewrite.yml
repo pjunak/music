@@ -127,3 +127,47 @@ jobs:
           curl --fail --silent http://127.0.0.1:18000/api/health | \
             grep --quiet '"status":"ok"'
           curl --fail --silent http://127.0.0.1:18000/ | grep --quiet '<!doctype html>'
+
+  performance-baseline:
+    name: Python to Rust runtime comparison
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
+      - name: Install media fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
+      - name: Build the frozen production baseline
+        run: |
+          docker build \
+            --build-arg INSTALL_VOICE_ANALYZER=true \
+            --file Dockerfile \
+            --tag music-python-baseline:test \
+            .
+
+      - name: Build the Rust candidate
+        run: docker build --file Dockerfile.rust --tag music-rust-rewrite:test .
+
+      - name: Compare resource and request paths
+        run: |
+          bash .github/scripts/compare-runtime.sh \
+            music-python-baseline:test \
+            music-rust-rewrite:test \
+            runtime-performance.md
+
+      - name: Publish the comparison summary
+        if: always()
+        run: |
+          if [ -f runtime-performance.md ]; then
+            cat runtime-performance.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The runtime comparison failed before it could write a report." >> "$GITHUB_STEP_SUMMARY"
+          fi

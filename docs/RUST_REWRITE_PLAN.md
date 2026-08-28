@@ -211,6 +211,12 @@ Capture the old system before replacing it:
 - Create a differential harness capable of launching Python and Rust candidates on separate ports
   against cloned temporary state and normalizing clocks, tokens, IDs, and timestamps.
 
+The manual `rust-rewrite` workflow now builds the frozen production image and the Rust candidate,
+launches each under the same three-CPU/four-GiB limits, and records cold/warm scan startup, API,
+WebSocket connection-to-state, authenticated upload, range streaming, container memory, and image
+size from generated media. The representative private-corpus signal/voice comparison remains a
+separate acceptance gate because committing or uploading that corpus would violate data boundaries.
+
 Run feasibility spikes before depending on uncertain adapters:
 
 1. **Voice:** load the exact pinned TF1 model with tract, decide direct TF1 versus checksum-bound
@@ -569,7 +575,9 @@ must finish before the reference implementation is deleted.
   and candidate deployment references.
 - [x] Add Linux-only real-process/Unix-socket mpv supervision tests, an ignored cgroup-enforcing
   voice soak, and a resource-limited non-root/no-Python container smoke gate.
+- [x] Add a manual, non-publishing dual-image performance harness using only generated media.
 - [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
+- [ ] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report.
 - [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.
 - [ ] Run the Rust output appliance against the intended Linux speaker device.
 - [ ] Delete Python source, tests, lockfiles, virtual-environment instructions, and image stages only
