@@ -1231,6 +1231,41 @@
         ],
         "type": "object"
       },
+      "RevertJournalRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RevertResult": {
+        "properties": {
+          "reverted": {
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupSkip"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "reverted",
+          "skipped"
+        ],
+        "type": "object"
+      },
       "SearchOrder": {
         "enum": [
           "asc",
@@ -2122,6 +2157,89 @@
           }
         },
         "summary": "Get Batch",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/batches/{batch_id}/revert": {
+      "post": {
+        "operationId": "revert_batch_api_library_cleanup_batches__batch_id__revert_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevertResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revert Batch",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/revert": {
+      "post": {
+        "description": "Revert from an uploaded journal (the downloaded batch JSON). Exists\nfor the disaster path — app.db was wiped/rebuilt so the server-side\nbatch row is gone, but journal items carry paths and survive re-minted\ntrack ids.",
+        "operationId": "revert_from_journal_api_library_cleanup_revert_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevertJournalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevertResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revert From Journal",
         "tags": [
           "library-cleanup"
         ]

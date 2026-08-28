@@ -31,6 +31,7 @@ pub trait CleanupRepository: LibraryRepository {
 }
 
 pub const MAX_CLEANUP_APPLY_OPERATIONS: usize = 500;
+pub const MAX_CLEANUP_REVERT_ITEMS: usize = 5_000;
 pub const MAX_CLEANUP_SCOPE_LABEL_CHARS: usize = 512;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -79,11 +80,94 @@ pub struct CleanupApplyResult {
     pub skipped: Vec<CleanupSkip>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CleanupRevertResult {
+    pub reverted: usize,
+    pub skipped: Vec<CleanupSkip>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CleanupBatchAppend {
     batch_id: Option<i64>,
     scope_label: String,
     item: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CleanupRevertMutation {
+    batch_id: Option<i64>,
+    item_index: usize,
+}
+
+impl CleanupRevertMutation {
+    pub fn new(
+        batch_id: Option<i64>,
+        item_index: usize,
+    ) -> Result<Self, CleanupMutationValidationError> {
+        if batch_id.is_some_and(|id| id <= 0) {
+            return Err(CleanupMutationValidationError::InvalidBatchId);
+        }
+        Ok(Self {
+            batch_id,
+            item_index,
+        })
+    }
+
+    pub fn from_journal(
+        entry: &RecoveryJournalEntry,
+    ) -> Result<Self, CleanupMutationValidationError> {
+        let cleanup = entry
+            .plan
+            .get("cleanup_revert")
+            .and_then(Value::as_object)
+            .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?;
+        if cleanup.len() != 2 {
+            return Err(CleanupMutationValidationError::InvalidJournalPlan);
+        }
+        let batch_id = match cleanup.get("batch_id") {
+            Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_i64()
+                    .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?,
+            ),
+            None => return Err(CleanupMutationValidationError::InvalidJournalPlan),
+        };
+        let item_index = cleanup
+            .get("item_index")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?;
+        Self::new(batch_id, item_index)
+    }
+
+    #[must_use]
+    pub const fn batch_id(&self) -> Option<i64> {
+        self.batch_id
+    }
+
+    #[must_use]
+    pub const fn item_index(&self) -> usize {
+        self.item_index
+    }
+
+    pub fn journal_plan(
+        &self,
+        mutation: &LibraryFileMutation,
+    ) -> Result<Value, CleanupMutationValidationError> {
+        let mut plan = mutation.plan();
+        let object = plan
+            .as_object_mut()
+            .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?;
+        object.insert(
+            "cleanup_revert".to_owned(),
+            json!({
+                "batch_id": self.batch_id,
+                "item_index": self.item_index,
+            }),
+        );
+        Ok(plan)
+    }
 }
 
 impl CleanupBatchAppend {
@@ -203,6 +287,13 @@ pub struct CleanupMutationCommit {
     pub batch_id: i64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CleanupRevertMutationCommit {
+    pub status: LibraryStatus,
+    pub affected_tracks: u64,
+    pub track: Option<IndexedTrack>,
+}
+
 pub trait CleanupMutationRepository: LibraryMutationRepository + CleanupRepository {
     fn commit_cleanup_mutation<'a>(
         &'a self,
@@ -211,6 +302,22 @@ pub trait CleanupMutationRepository: LibraryMutationRepository + CleanupReposito
         outcome: LibraryFileMutationOutcome,
         append: &'a CleanupBatchAppend,
     ) -> CleanupFuture<'a, CleanupMutationCommit>;
+
+    fn commit_cleanup_revert_mutation<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        mutation: &'a LibraryFileMutation,
+        outcome: LibraryFileMutationOutcome,
+        revert: &'a CleanupRevertMutation,
+    ) -> CleanupFuture<'a, CleanupRevertMutationCommit>;
+
+    fn finish_cleanup_batch_revert<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        batch_id: i64,
+        reverted: usize,
+        skipped: usize,
+    ) -> CleanupFuture<'a, ()>;
 }
 
 pub const MAX_CLEANUP_BATCH_HISTORY: usize = 100;
@@ -579,7 +686,8 @@ mod tests {
 
     use super::{
         CleanupBatchAppend, CleanupFuture, CleanupNameLookup, CleanupNameScores,
-        CleanupNameVerdict, CleanupVerificationRepository, CleanupVerificationService,
+        CleanupNameVerdict, CleanupRevertMutation, CleanupVerificationRepository,
+        CleanupVerificationService,
     };
     use crate::library::LibraryFileMutation;
     use crate::recovery::{
@@ -738,6 +846,36 @@ mod tests {
             completed_at_unix_seconds: None,
         };
         assert_eq!(CleanupBatchAppend::from_journal(&entry)?, append);
+        assert_eq!(LibraryFileMutation::from_journal(&entry)?, mutation);
+        Ok(())
+    }
+
+    #[test]
+    fn cleanup_revert_context_round_trips_with_its_library_mutation() -> Result<(), Box<dyn Error>>
+    {
+        let mutation = LibraryFileMutation::MoveTrack {
+            track_id: TrackId::new(17)?,
+            source: LibraryPath::parse("Album/Song.wav")?,
+            destination: LibraryPath::parse("Album/01 - Song.wav")?,
+        };
+        let revert = CleanupRevertMutation::new(Some(9), 4)?;
+        let draft = RecoveryJournalDraft::new(
+            RecoveryDomain::Cleanup,
+            mutation.operation()?,
+            revert.journal_plan(&mutation)?,
+        )?;
+        let entry = RecoveryJournalEntry {
+            id: draft.id,
+            domain: draft.domain,
+            operation: draft.operation,
+            state: RecoveryState::Applying,
+            plan: draft.plan,
+            progress: draft.progress,
+            created_at_unix_seconds: 1,
+            updated_at_unix_seconds: 1,
+            completed_at_unix_seconds: None,
+        };
+        assert_eq!(CleanupRevertMutation::from_journal(&entry)?, revert);
         assert_eq!(LibraryFileMutation::from_journal(&entry)?, mutation);
         Ok(())
     }

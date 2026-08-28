@@ -580,8 +580,8 @@ mod tests {
     };
     use music_application::library::{LibraryFileMutation, ReconciliationStatus};
     use music_application::recovery::{
-        RecoveryDomain, RecoveryJournalDraft, RecoveryJournalRepository, RecoveryState,
-        RecoveryTransition,
+        RecoveryDomain, RecoveryJournalDraft, RecoveryJournalRepository, RecoveryOperation,
+        RecoveryState, RecoveryTransition,
     };
     use music_storage::{SqliteStorage, SqliteStorageOptions, StorageError};
     use serde_json::Value;
@@ -818,9 +818,9 @@ mod tests {
                 Request::post("/api/library/cleanup/apply")
                     .header("content-type", "application/json")
                     .header("cookie", &cookie)
-                    .body(Body::from(
-                        r#"{"ops":[{"track_id":0,"kind":"folder_rename","old":"Cleanup","new":"Cleaned","path":"Cleanup"},{"track_id":0,"kind":"folder_rename","old":"Disc_1","new":"Disc 1","path":"Cleanup/Disc_1"}]}"#,
-                    ))?,
+                    .body(Body::from(format!(
+                        "{{\"batch_id\":{batch_id},\"ops\":[{{\"track_id\":0,\"kind\":\"folder_rename\",\"old\":\"Cleanup\",\"new\":\"Cleaned\",\"path\":\"Cleanup\"}},{{\"track_id\":0,\"kind\":\"folder_rename\",\"old\":\"Disc_1\",\"new\":\"Disc 1\",\"path\":\"Cleanup/Disc_1\"}}]}}"
+                    )))?,
             )
             .await?;
         assert_eq!(folders.status(), StatusCode::OK);
@@ -867,6 +867,7 @@ mod tests {
         );
 
         let missing_batch = router
+            .clone()
             .oneshot(
                 Request::post("/api/library/cleanup/apply")
                     .header("content-type", "application/json")
@@ -878,6 +879,131 @@ mod tests {
             )
             .await?;
         assert_eq!(missing_batch.status(), StatusCode::NOT_FOUND);
+
+        let reverted = router
+            .clone()
+            .oneshot(
+                Request::post(format!("/api/library/cleanup/batches/{batch_id}/revert"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(reverted.status(), StatusCode::OK);
+        let reverted_json: Value =
+            serde_json::from_slice(&to_bytes(reverted.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(reverted_json["reverted"], 6);
+        assert_eq!(reverted_json["skipped"], serde_json::json!([]));
+        assert!(
+            directory
+                .path()
+                .join("music/Cleanup/Disc_1/03 - Gamma.wav")
+                .is_file()
+        );
+        assert!(!directory.path().join("music/Cleaned").exists());
+        let restored = runtime
+            .library_service
+            .track(track_id)
+            .await?
+            .ok_or("reverted cleanup lost its catalog row")?;
+        assert_eq!(restored.path.as_str(), "Cleanup/Disc_1/03 - Gamma.wav");
+        assert_eq!(restored.metadata.title, "Round Trip");
+        assert_eq!(restored.metadata.track_no, Some(7));
+        let file_metadata = music_media::MetadataAdapter::native_only()
+            .read(&directory.path().join("music/Cleanup/Disc_1/03 - Gamma.wav"))?;
+        assert_eq!(file_metadata.title, "Round Trip");
+        assert_eq!(file_metadata.track_no, Some(7));
+
+        let reverted_detail = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/cleanup/batches/{batch_id}"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let reverted_detail_json: Value =
+            serde_json::from_slice(&to_bytes(reverted_detail.into_body(), 1024 * 1024).await?)?;
+        assert!(!reverted_detail_json["reverted_at"].is_null());
+        let second_revert = router
+            .clone()
+            .oneshot(
+                Request::post(format!("/api/library/cleanup/batches/{batch_id}/revert"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(second_revert.status(), StatusCode::CONFLICT);
+
+        let journal_apply = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/apply")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(format!(
+                        "{{\"ops\":[{{\"track_id\":{},\"kind\":\"rename\",\"old\":\"03 - Gamma\",\"new\":\"Journal Restore\"}}]}}",
+                        track_id.get()
+                    )))?,
+            )
+            .await?;
+        let journal_apply_json: Value =
+            serde_json::from_slice(&to_bytes(journal_apply.into_body(), 1024 * 1024).await?)?;
+        let journal_batch_id = journal_apply_json["batch_id"]
+            .as_i64()
+            .ok_or("uploaded-journal cleanup did not create a batch")?;
+        let journal_detail = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/cleanup/batches/{journal_batch_id}"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let journal_detail_json: Value =
+            serde_json::from_slice(&to_bytes(journal_detail.into_body(), 1024 * 1024).await?)?;
+        let uploaded_revert = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/revert")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        serde_json::json!({"items": journal_detail_json["items"]}).to_string(),
+                    ))?,
+            )
+            .await?;
+        assert_eq!(uploaded_revert.status(), StatusCode::OK);
+        let uploaded_revert_json: Value =
+            serde_json::from_slice(&to_bytes(uploaded_revert.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(uploaded_revert_json["reverted"], 1);
+        assert_eq!(uploaded_revert_json["skipped"], serde_json::json!([]));
+        assert!(
+            directory
+                .path()
+                .join("music/Cleanup/Disc_1/03 - Gamma.wav")
+                .is_file()
+        );
+
+        let empty_uploaded_revert = router
+            .oneshot(
+                Request::post("/api/library/cleanup/revert")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"items":[]}"#))?,
+            )
+            .await?;
+        assert_eq!(
+            empty_uploaded_revert.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                runtime.storage.as_ref(),
+                RecoveryDomain::Cleanup,
+            )
+            .await?
+            .is_empty()
+        );
 
         runtime.shutdown().await?;
         Ok(())
@@ -970,6 +1096,7 @@ mod tests {
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].scope_label, "recovered cleanup");
         assert_eq!(batches[0].item_count, 1);
+        let batch_id = batches[0].id;
         assert!(
             RecoveryJournalRepository::unfinished_recovery_journals(
                 recovered.storage.as_ref(),
@@ -979,6 +1106,55 @@ mod tests {
             .is_empty()
         );
         recovered.shutdown().await?;
+        drop(recovered);
+
+        let draft = RecoveryJournalDraft::new(
+            RecoveryDomain::Cleanup,
+            RecoveryOperation::parse("revert_batch")?,
+            serde_json::json!({"batch_id": batch_id}),
+        )?;
+        let journal_id = draft.id.clone();
+        let storage =
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?;
+        RecoveryJournalRepository::create_recovery_journal(&storage, draft).await?;
+        let transition = RecoveryJournalRepository::transition_recovery_journal(
+            &storage,
+            &journal_id,
+            RecoveryState::Planned,
+            RecoveryState::Applying,
+            serde_json::json!({"simulated_crash": true}),
+        )
+        .await?;
+        assert!(matches!(transition, RecoveryTransition::Applied(_)));
+        storage.close().await;
+        drop(storage);
+
+        let reverted = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let track = reverted
+            .library_service
+            .track(track_id)
+            .await?
+            .ok_or("recovered batch revert lost its catalog row")?;
+        assert_eq!(track.path, source);
+        assert!(
+            directory
+                .path()
+                .join("music/Recovery/01 - Song.wav")
+                .is_file()
+        );
+        let batch = CleanupRepository::cleanup_batch(reverted.storage.as_ref(), batch_id)
+            .await?
+            .ok_or("recovered batch revert lost its batch history")?;
+        assert!(batch.reverted_at_unix_seconds.is_some());
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                reverted.storage.as_ref(),
+                RecoveryDomain::Cleanup,
+            )
+            .await?
+            .is_empty()
+        );
+        reverted.shutdown().await?;
         Ok(())
     }
 

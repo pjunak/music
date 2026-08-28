@@ -8,20 +8,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::cleanup::{
     CleanupApplyOperation, CleanupApplyResult, CleanupBatchAppend, CleanupInputValue,
-    CleanupMutationRepository, CleanupMutationValidationError, CleanupOperationKind, CleanupSkip,
-    MAX_CLEANUP_APPLY_OPERATIONS, MAX_CLEANUP_SCOPE_LABEL_CHARS,
+    CleanupMutationRepository, CleanupMutationValidationError, CleanupOperationKind,
+    CleanupRevertMutation, CleanupRevertResult, CleanupSkip, MAX_CLEANUP_APPLY_OPERATIONS,
+    MAX_CLEANUP_REVERT_ITEMS, MAX_CLEANUP_SCOPE_LABEL_CHARS,
 };
 use crate::playback::PlaybackActorHandle;
 use crate::recovery::{
     RecoveryDomain, RecoveryJournalDraft, RecoveryJournalEntry, RecoveryJournalRepository,
-    RecoveryState, RecoveryTransition,
+    RecoveryOperation, RecoveryState, RecoveryTransition,
 };
 
 mod metadata_patch;
@@ -170,6 +171,11 @@ pub trait LibraryRepository: std::fmt::Debug + Send + Sync {
     fn catalog_track_ids(&self) -> LibraryFuture<'_, Vec<TrackId>>;
 
     fn track(&self, track_id: TrackId) -> LibraryFuture<'_, Option<IndexedTrack>>;
+
+    fn track_by_path<'a>(
+        &'a self,
+        path: &'a LibraryPath,
+    ) -> LibraryFuture<'a, Option<IndexedTrack>>;
 
     fn tracks_by_ids<'a>(
         &'a self,
@@ -323,6 +329,7 @@ pub enum LibraryCoordinatorError {
         track_id: TrackId,
     },
     InvalidCleanupBatchSize,
+    InvalidCleanupRevertSize,
     InvalidCleanupScopeLabel,
     CleanupBatchNotFound,
     CleanupBatchReverted,
@@ -359,6 +366,10 @@ impl Display for LibraryCoordinatorError {
                 formatter,
                 "cleanup apply requires between 1 and {MAX_CLEANUP_APPLY_OPERATIONS} operations"
             ),
+            Self::InvalidCleanupRevertSize => write!(
+                formatter,
+                "cleanup revert requires between 1 and {MAX_CLEANUP_REVERT_ITEMS} journal items"
+            ),
             Self::InvalidCleanupScopeLabel => {
                 formatter.write_str("cleanup scope label is too long")
             }
@@ -384,6 +395,7 @@ impl Error for LibraryCoordinatorError {
             | Self::InvalidMutationOutcome
             | Self::TrackNotFound { .. }
             | Self::InvalidCleanupBatchSize
+            | Self::InvalidCleanupRevertSize
             | Self::InvalidCleanupScopeLabel
             | Self::CleanupBatchNotFound
             | Self::CleanupBatchReverted
@@ -646,6 +658,34 @@ impl LibraryCoordinatorHandle {
             .map_err(|_| LibraryCoordinatorError::Unavailable)?
     }
 
+    pub async fn revert_cleanup_batch(
+        &self,
+        batch_id: i64,
+    ) -> Result<CleanupRevertResult, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::RevertCleanupBatch { batch_id, reply })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
+    pub async fn revert_cleanup_journal(
+        &self,
+        items: Vec<Map<String, Value>>,
+    ) -> Result<CleanupRevertResult, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::RevertCleanupJournal { items, reply })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
     async fn mutate(
         &self,
         mutation: LibraryFileMutation,
@@ -774,6 +814,14 @@ enum LibraryCommand {
         operations: Vec<CleanupApplyOperation>,
         reply: oneshot::Sender<Result<CleanupApplyResult, LibraryCoordinatorError>>,
     },
+    RevertCleanupBatch {
+        batch_id: i64,
+        reply: oneshot::Sender<Result<CleanupRevertResult, LibraryCoordinatorError>>,
+    },
+    RevertCleanupJournal {
+        items: Vec<Map<String, Value>>,
+        reply: oneshot::Sender<Result<CleanupRevertResult, LibraryCoordinatorError>>,
+    },
 }
 
 #[derive(Debug)]
@@ -802,6 +850,21 @@ enum PreparedCleanupKind {
 struct AppliedCleanupMutation {
     affected_tracks: u64,
     batch_id: i64,
+}
+
+#[derive(Debug)]
+struct PreparedCleanupRevert {
+    track_id: i64,
+    kind: PreparedCleanupRevertKind,
+    mutation: LibraryFileMutation,
+    revert: CleanupRevertMutation,
+}
+
+#[derive(Debug)]
+enum PreparedCleanupRevertKind {
+    Rename { original_name: String },
+    Tag,
+    FolderRename { original_name: String },
 }
 
 #[derive(Debug)]
@@ -909,6 +972,14 @@ impl LibraryCoordinator {
                             let result = self
                                 .apply_cleanup_once(batch_id, scope_label, operations)
                                 .await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::RevertCleanupBatch { batch_id, reply } => {
+                            let result = self.revert_cleanup_batch_once(batch_id).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::RevertCleanupJournal { items, reply } => {
+                            let result = self.revert_cleanup_journal_once(items).await;
                             let _ = reply.send(result);
                         }
                     }
@@ -1070,6 +1141,283 @@ impl LibraryCoordinator {
             batch_id: current_batch_id,
             applied,
             skipped,
+        })
+    }
+
+    async fn revert_cleanup_batch_once(
+        &self,
+        batch_id: i64,
+    ) -> Result<CleanupRevertResult, LibraryCoordinatorError> {
+        if batch_id <= 0 {
+            return Err(LibraryCoordinatorError::CleanupBatchNotFound);
+        }
+        let batch = self
+            .repository
+            .cleanup_batch(batch_id)
+            .await
+            .map_err(|source| dependency("load the cleanup batch for reverting", source))?
+            .ok_or(LibraryCoordinatorError::CleanupBatchNotFound)?;
+        if batch.reverted_at_unix_seconds.is_some() {
+            return Err(LibraryCoordinatorError::CleanupBatchReverted);
+        }
+
+        let operation = RecoveryOperation::parse("revert_batch").map_err(|source| {
+            dependency("validate a cleanup batch revert journal", Box::new(source))
+        })?;
+        let draft = RecoveryJournalDraft::new(
+            RecoveryDomain::Cleanup,
+            operation,
+            json!({"batch_id": batch_id}),
+        )
+        .map_err(|source| {
+            dependency("validate a cleanup batch revert journal", Box::new(source))
+        })?;
+        let planned = self
+            .repository
+            .create_recovery_journal(draft)
+            .await
+            .map_err(|source| dependency("create a cleanup batch revert journal", source))?;
+        let applying = transition_applied(
+            self.repository
+                .transition_recovery_journal(
+                    &planned.id,
+                    RecoveryState::Planned,
+                    RecoveryState::Applying,
+                    json!({}),
+                )
+                .await
+                .map_err(|source| dependency("start a cleanup batch revert journal", source))?,
+        )?;
+        let result = self
+            .revert_cleanup_items(Some(batch_id), batch.items)
+            .await?;
+        self.repository
+            .finish_cleanup_batch_revert(
+                &applying.id,
+                batch_id,
+                result.reverted,
+                result.skipped.len(),
+            )
+            .await
+            .map_err(|source| dependency("finish a cleanup batch revert", source))?;
+        Ok(result)
+    }
+
+    async fn revert_cleanup_journal_once(
+        &self,
+        items: Vec<Map<String, Value>>,
+    ) -> Result<CleanupRevertResult, LibraryCoordinatorError> {
+        if !(1..=MAX_CLEANUP_REVERT_ITEMS).contains(&items.len()) {
+            return Err(LibraryCoordinatorError::InvalidCleanupRevertSize);
+        }
+        self.revert_cleanup_items(None, items).await
+    }
+
+    async fn revert_cleanup_items(
+        &self,
+        batch_id: Option<i64>,
+        items: Vec<Map<String, Value>>,
+    ) -> Result<CleanupRevertResult, LibraryCoordinatorError> {
+        let mut reverted = 0_usize;
+        let mut catalog_changed = false;
+        let mut skipped = Vec::new();
+        for (item_index, item) in items.into_iter().enumerate().rev() {
+            let prepared = match self
+                .prepare_cleanup_revert(batch_id, item_index, &item)
+                .await
+            {
+                Ok(prepared) => prepared,
+                Err(CleanupPreparationError::Skip(skip)) => {
+                    skipped.push(skip);
+                    continue;
+                }
+                Err(CleanupPreparationError::Fatal(error)) => return Err(error),
+            };
+            match self.apply_cleanup_revert_mutation(&prepared).await {
+                Ok(affected_tracks) => {
+                    reverted += 1;
+                    catalog_changed |= affected_tracks > 0;
+                }
+                Err(LibraryCoordinatorError::Mutation(failure)) if !failure.requires_recovery() => {
+                    skipped.push(CleanupSkip {
+                        track_id: prepared.track_id,
+                        reason: cleanup_revert_failure_reason(&prepared.kind, &failure),
+                    });
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if catalog_changed {
+            self.publish_current_catalog().await?;
+        }
+        Ok(CleanupRevertResult { reverted, skipped })
+    }
+
+    async fn prepare_cleanup_revert(
+        &self,
+        batch_id: Option<i64>,
+        item_index: usize,
+        item: &Map<String, Value>,
+    ) -> Result<PreparedCleanupRevert, CleanupPreparationError> {
+        let track_id = item.get("track_id").and_then(Value::as_i64).unwrap_or(0);
+        match item.get("kind").and_then(Value::as_str) {
+            Some("rename") => {
+                self.prepare_cleanup_rename_revert(batch_id, item_index, track_id, item)
+                    .await
+            }
+            Some("tag") => {
+                self.prepare_cleanup_tag_revert(batch_id, item_index, track_id, item)
+                    .await
+            }
+            Some("folder_rename") => {
+                self.prepare_cleanup_folder_revert(batch_id, item_index, track_id, item)
+            }
+            kind => {
+                Err(cleanup_skip(track_id, format!("unknown journal item kind: {kind:?}")).into())
+            }
+        }
+    }
+
+    async fn prepare_cleanup_rename_revert(
+        &self,
+        batch_id: Option<i64>,
+        item_index: usize,
+        recorded_track_id: i64,
+        item: &Map<String, Value>,
+    ) -> Result<PreparedCleanupRevert, CleanupPreparationError> {
+        let (path_before, path_after) = cleanup_revert_paths(item)
+            .map_err(|()| cleanup_skip(recorded_track_id, "malformed journal item"))?;
+        let track = self
+            .resolve_cleanup_revert_track(recorded_track_id, &path_after)
+            .await?
+            .ok_or_else(|| {
+                cleanup_skip(
+                    recorded_track_id,
+                    "no track at the recorded path (renamed or removed since)",
+                )
+            })?;
+        let original_name = path_before.file_name().to_owned();
+        let revert = CleanupRevertMutation::new(batch_id, item_index).map_err(|error| {
+            CleanupPreparationError::Fatal(LibraryCoordinatorError::InvalidCleanupMutation(error))
+        })?;
+        Ok(PreparedCleanupRevert {
+            track_id: recorded_track_id,
+            kind: PreparedCleanupRevertKind::Rename { original_name },
+            mutation: LibraryFileMutation::MoveTrack {
+                track_id: track.id,
+                source: path_after,
+                destination: path_before,
+            },
+            revert,
+        })
+    }
+
+    async fn prepare_cleanup_tag_revert(
+        &self,
+        batch_id: Option<i64>,
+        item_index: usize,
+        recorded_track_id: i64,
+        item: &Map<String, Value>,
+    ) -> Result<PreparedCleanupRevert, CleanupPreparationError> {
+        let field = item
+            .get("field")
+            .and_then(Value::as_str)
+            .and_then(cleanup_tag_field)
+            .ok_or_else(|| cleanup_skip(recorded_track_id, "malformed journal item"))?;
+        let path = item
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or(())
+            .and_then(|path| LibraryPath::parse(path).map_err(|_| ()))
+            .map_err(|()| cleanup_skip(recorded_track_id, "malformed journal item"))?;
+        let track = self
+            .resolve_cleanup_revert_track(recorded_track_id, &path)
+            .await?
+            .ok_or_else(|| {
+                cleanup_skip(
+                    recorded_track_id,
+                    "no track at the recorded path (moved or removed since)",
+                )
+            })?;
+        let expected = cleanup_input_from_json(item.get("new"))
+            .map_err(|()| cleanup_skip(recorded_track_id, "malformed journal item"))?;
+        let current = cleanup_track_value(&track, field);
+        if !cleanup_values_match(current.as_ref(), expected.as_ref()) {
+            return Err(cleanup_skip(
+                recorded_track_id,
+                format!("{} changed since this batch was applied", field.as_str()),
+            )
+            .into());
+        }
+        let restore_value = if item.contains_key("file_old") {
+            item.get("file_old")
+        } else {
+            item.get("old")
+        };
+        let restore = cleanup_input_from_json(restore_value)
+            .map_err(|()| cleanup_skip(recorded_track_id, "malformed journal item"))?;
+        let patch = cleanup_tag_patch(field, restore.as_ref())
+            .map_err(|_| cleanup_skip(recorded_track_id, "malformed journal item"))?;
+        let revert = CleanupRevertMutation::new(batch_id, item_index).map_err(|error| {
+            CleanupPreparationError::Fatal(LibraryCoordinatorError::InvalidCleanupMutation(error))
+        })?;
+        Ok(PreparedCleanupRevert {
+            track_id: recorded_track_id,
+            kind: PreparedCleanupRevertKind::Tag,
+            mutation: LibraryFileMutation::UpdateTrackMetadata {
+                track_id: track.id,
+                path,
+                patch,
+            },
+            revert,
+        })
+    }
+
+    fn prepare_cleanup_folder_revert(
+        &self,
+        batch_id: Option<i64>,
+        item_index: usize,
+        recorded_track_id: i64,
+        item: &Map<String, Value>,
+    ) -> Result<PreparedCleanupRevert, CleanupPreparationError> {
+        let (path_before, path_after) = cleanup_revert_paths(item)
+            .map_err(|()| cleanup_skip(recorded_track_id, "malformed journal item"))?;
+        let original_name = path_before.file_name().to_owned();
+        let revert = CleanupRevertMutation::new(batch_id, item_index).map_err(|error| {
+            CleanupPreparationError::Fatal(LibraryCoordinatorError::InvalidCleanupMutation(error))
+        })?;
+        Ok(PreparedCleanupRevert {
+            track_id: recorded_track_id,
+            kind: PreparedCleanupRevertKind::FolderRename { original_name },
+            mutation: LibraryFileMutation::RenameFolder {
+                source: path_after,
+                destination: path_before,
+            },
+            revert,
+        })
+    }
+
+    async fn resolve_cleanup_revert_track(
+        &self,
+        recorded_track_id: i64,
+        path: &LibraryPath,
+    ) -> Result<Option<IndexedTrack>, CleanupPreparationError> {
+        if let Ok(track_id) = TrackId::new(recorded_track_id) {
+            let track = self.repository.track(track_id).await.map_err(|source| {
+                CleanupPreparationError::Fatal(dependency(
+                    "load a cleanup revert track by id",
+                    source,
+                ))
+            })?;
+            if track.as_ref().is_some_and(|track| &track.path == path) {
+                return Ok(track);
+            }
+        }
+        self.repository.track_by_path(path).await.map_err(|source| {
+            CleanupPreparationError::Fatal(dependency(
+                "load a cleanup revert track by path",
+                source,
+            ))
         })
     }
 
@@ -1385,71 +1733,260 @@ impl LibraryCoordinator {
         })
     }
 
-    async fn recover_cleanup_mutations(&self) -> Result<(), LibraryCoordinatorError> {
-        let entries = self
+    async fn apply_cleanup_revert_mutation(
+        &self,
+        prepared: &PreparedCleanupRevert,
+    ) -> Result<u64, LibraryCoordinatorError> {
+        let operation = prepared
+            .mutation
+            .operation()
+            .map_err(LibraryCoordinatorError::InvalidMutation)?;
+        let plan = prepared
+            .revert
+            .journal_plan(&prepared.mutation)
+            .map_err(LibraryCoordinatorError::InvalidCleanupMutation)?;
+        let draft = RecoveryJournalDraft::new(RecoveryDomain::Cleanup, operation, plan).map_err(
+            |source| {
+                dependency(
+                    "validate a cleanup revert mutation journal",
+                    Box::new(source),
+                )
+            },
+        )?;
+        let planned = self
             .repository
-            .unfinished_recovery_journals(RecoveryDomain::Cleanup)
+            .create_recovery_journal(draft)
             .await
-            .map_err(|source| dependency("load unfinished cleanup mutations", source))?;
-        for entry in entries {
-            let mutation = LibraryFileMutation::from_journal(&entry)
-                .map_err(LibraryCoordinatorError::InvalidMutation)?;
-            let append = CleanupBatchAppend::from_journal(&entry)
-                .map_err(LibraryCoordinatorError::InvalidCleanupMutation)?;
-            let applying = match entry.state {
-                RecoveryState::Planned => transition_applied(
-                    self.repository
-                        .transition_recovery_journal(
-                            &entry.id,
-                            RecoveryState::Planned,
-                            RecoveryState::Applying,
-                            json!({"recovered": true}),
-                        )
-                        .await
-                        .map_err(|source| {
-                            dependency("resume a planned cleanup mutation", source)
-                        })?,
-                )?,
-                RecoveryState::Applying => entry,
-                RecoveryState::Committed
-                | RecoveryState::RollingBack
-                | RecoveryState::RolledBack
-                | RecoveryState::Failed => {
-                    return Err(LibraryCoordinatorError::RecoveryConflict);
-                }
-            };
-            let outcome = match self
-                .effects
-                .apply(&applying.id, mutation.clone(), true)
+            .map_err(|source| dependency("create a cleanup revert mutation journal", source))?;
+        let applying = transition_applied(
+            self.repository
+                .transition_recovery_journal(
+                    &planned.id,
+                    RecoveryState::Planned,
+                    RecoveryState::Applying,
+                    json!({}),
+                )
                 .await
-            {
-                Ok(outcome) => outcome,
-                Err(failure) if !failure.requires_recovery() => {
+                .map_err(|source| dependency("start a cleanup revert mutation journal", source))?,
+        )?;
+        let outcome = match self
+            .effects
+            .apply(&applying.id, prepared.mutation.clone(), false)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                if !failure.requires_recovery() {
                     transition_applied(
                         self.repository
                             .transition_recovery_journal(
                                 &applying.id,
                                 RecoveryState::Applying,
                                 RecoveryState::Failed,
-                                json!({"error_code": failure.code(), "recovered": true}),
+                                json!({"error_code": failure.code()}),
                             )
                             .await
                             .map_err(|source| {
-                                dependency("record a failed recovered cleanup mutation", source)
+                                dependency("record a failed cleanup revert mutation", source)
                             })?,
                     )?;
-                    continue;
                 }
-                Err(failure) => return Err(LibraryCoordinatorError::Mutation(failure)),
-            };
-            let commit = self
-                .repository
-                .commit_cleanup_mutation(&applying.id, &mutation, outcome, &append)
-                .await
-                .map_err(|source| dependency("commit a recovered cleanup mutation", source))?;
-            self.status.send_replace(commit.status);
+                return Err(LibraryCoordinatorError::Mutation(failure));
+            }
+        };
+        let commit = self
+            .repository
+            .commit_cleanup_revert_mutation(
+                &applying.id,
+                &prepared.mutation,
+                outcome,
+                &prepared.revert,
+            )
+            .await
+            .map_err(|source| dependency("commit a cleanup revert mutation", source))?;
+        self.status.send_replace(commit.status);
+        Ok(commit.affected_tracks)
+    }
+
+    async fn recover_cleanup_mutations(&self) -> Result<(), LibraryCoordinatorError> {
+        let entries = self
+            .repository
+            .unfinished_recovery_journals(RecoveryDomain::Cleanup)
+            .await
+            .map_err(|source| dependency("load unfinished cleanup mutations", source))?;
+        let mut apply_mutations = Vec::new();
+        let mut revert_mutations = Vec::new();
+        let mut batch_reverts = Vec::new();
+        for entry in entries {
+            if entry.operation.as_str() == "revert_batch" {
+                if entry.plan.get("cleanup_batch").is_some()
+                    || entry.plan.get("cleanup_revert").is_some()
+                {
+                    return Err(LibraryCoordinatorError::RecoveryConflict);
+                }
+                batch_reverts.push(entry);
+            } else if entry.plan.get("cleanup_revert").is_some() {
+                revert_mutations.push(entry);
+            } else if entry.plan.get("cleanup_batch").is_some() {
+                apply_mutations.push(entry);
+            } else {
+                return Err(LibraryCoordinatorError::RecoveryConflict);
+            }
+        }
+        for entry in apply_mutations {
+            self.recover_cleanup_apply_mutation(entry).await?;
+        }
+        for entry in revert_mutations {
+            self.recover_cleanup_revert_mutation(entry).await?;
+        }
+        for entry in batch_reverts {
+            self.recover_cleanup_batch_revert(entry).await?;
         }
         Ok(())
+    }
+
+    async fn recover_cleanup_apply_mutation(
+        &self,
+        entry: RecoveryJournalEntry,
+    ) -> Result<(), LibraryCoordinatorError> {
+        let mutation = LibraryFileMutation::from_journal(&entry)
+            .map_err(LibraryCoordinatorError::InvalidMutation)?;
+        let append = CleanupBatchAppend::from_journal(&entry)
+            .map_err(LibraryCoordinatorError::InvalidCleanupMutation)?;
+        let applying = self
+            .resume_cleanup_mutation(entry, "resume a planned cleanup mutation")
+            .await?;
+        let Some(outcome) = self
+            .recover_cleanup_file_effect(&applying, mutation.clone())
+            .await?
+        else {
+            return Ok(());
+        };
+        let commit = self
+            .repository
+            .commit_cleanup_mutation(&applying.id, &mutation, outcome, &append)
+            .await
+            .map_err(|source| dependency("commit a recovered cleanup mutation", source))?;
+        self.status.send_replace(commit.status);
+        Ok(())
+    }
+
+    async fn recover_cleanup_revert_mutation(
+        &self,
+        entry: RecoveryJournalEntry,
+    ) -> Result<(), LibraryCoordinatorError> {
+        let mutation = LibraryFileMutation::from_journal(&entry)
+            .map_err(LibraryCoordinatorError::InvalidMutation)?;
+        let revert = CleanupRevertMutation::from_journal(&entry)
+            .map_err(LibraryCoordinatorError::InvalidCleanupMutation)?;
+        let applying = self
+            .resume_cleanup_mutation(entry, "resume a planned cleanup revert mutation")
+            .await?;
+        let Some(outcome) = self
+            .recover_cleanup_file_effect(&applying, mutation.clone())
+            .await?
+        else {
+            return Ok(());
+        };
+        let commit = self
+            .repository
+            .commit_cleanup_revert_mutation(&applying.id, &mutation, outcome, &revert)
+            .await
+            .map_err(|source| dependency("commit a recovered cleanup revert mutation", source))?;
+        self.status.send_replace(commit.status);
+        Ok(())
+    }
+
+    async fn recover_cleanup_batch_revert(
+        &self,
+        entry: RecoveryJournalEntry,
+    ) -> Result<(), LibraryCoordinatorError> {
+        let plan = entry
+            .plan
+            .as_object()
+            .filter(|plan| plan.len() == 1)
+            .ok_or(LibraryCoordinatorError::RecoveryConflict)?;
+        let batch_id = plan
+            .get("batch_id")
+            .and_then(Value::as_i64)
+            .filter(|batch_id| *batch_id > 0)
+            .ok_or(LibraryCoordinatorError::RecoveryConflict)?;
+        let batch = self
+            .repository
+            .cleanup_batch(batch_id)
+            .await
+            .map_err(|source| dependency("load a recovering cleanup batch revert", source))?
+            .ok_or(LibraryCoordinatorError::RecoveryConflict)?;
+        if batch.reverted_at_unix_seconds.is_some() {
+            return Err(LibraryCoordinatorError::RecoveryConflict);
+        }
+        let applying = self
+            .resume_cleanup_mutation(entry, "resume a planned cleanup batch revert")
+            .await?;
+        let result = self
+            .revert_cleanup_items(Some(batch_id), batch.items)
+            .await?;
+        self.repository
+            .finish_cleanup_batch_revert(
+                &applying.id,
+                batch_id,
+                result.reverted,
+                result.skipped.len(),
+            )
+            .await
+            .map_err(|source| dependency("finish a recovered cleanup batch revert", source))
+    }
+
+    async fn resume_cleanup_mutation(
+        &self,
+        entry: RecoveryJournalEntry,
+        operation: &'static str,
+    ) -> Result<RecoveryJournalEntry, LibraryCoordinatorError> {
+        match entry.state {
+            RecoveryState::Planned => transition_applied(
+                self.repository
+                    .transition_recovery_journal(
+                        &entry.id,
+                        RecoveryState::Planned,
+                        RecoveryState::Applying,
+                        json!({"recovered": true}),
+                    )
+                    .await
+                    .map_err(|source| dependency(operation, source))?,
+            ),
+            RecoveryState::Applying => Ok(entry),
+            RecoveryState::Committed
+            | RecoveryState::RollingBack
+            | RecoveryState::RolledBack
+            | RecoveryState::Failed => Err(LibraryCoordinatorError::RecoveryConflict),
+        }
+    }
+
+    async fn recover_cleanup_file_effect(
+        &self,
+        applying: &RecoveryJournalEntry,
+        mutation: LibraryFileMutation,
+    ) -> Result<Option<LibraryFileMutationOutcome>, LibraryCoordinatorError> {
+        match self.effects.apply(&applying.id, mutation, true).await {
+            Ok(outcome) => Ok(Some(outcome)),
+            Err(failure) if !failure.requires_recovery() => {
+                transition_applied(
+                    self.repository
+                        .transition_recovery_journal(
+                            &applying.id,
+                            RecoveryState::Applying,
+                            RecoveryState::Failed,
+                            json!({"error_code": failure.code(), "recovered": true}),
+                        )
+                        .await
+                        .map_err(|source| {
+                            dependency("record a failed recovered cleanup mutation", source)
+                        })?,
+                )?;
+                Ok(None)
+            }
+            Err(failure) => Err(LibraryCoordinatorError::Mutation(failure)),
+        }
     }
 
     async fn move_track_once(
@@ -1985,6 +2522,33 @@ fn cleanup_input_json(value: Option<&CleanupInputValue>) -> serde_json::Value {
     value.map_or(serde_json::Value::Null, CleanupInputValue::to_json)
 }
 
+fn cleanup_input_from_json(value: Option<&Value>) -> Result<Option<CleanupInputValue>, ()> {
+    match value {
+        Some(Value::Null) | None => Ok(None),
+        Some(Value::String(value)) => Ok(Some(CleanupInputValue::Text(value.clone()))),
+        Some(Value::Number(value)) => value
+            .as_i64()
+            .map(CleanupInputValue::Integer)
+            .map(Some)
+            .ok_or(()),
+        Some(_) => Err(()),
+    }
+}
+
+fn cleanup_revert_paths(item: &Map<String, Value>) -> Result<(LibraryPath, LibraryPath), ()> {
+    let before = item
+        .get("path_before")
+        .and_then(Value::as_str)
+        .ok_or(())
+        .and_then(|path| LibraryPath::parse(path).map_err(|_| ()))?;
+    let after = item
+        .get("path_after")
+        .and_then(Value::as_str)
+        .ok_or(())
+        .and_then(|path| LibraryPath::parse(path).map_err(|_| ()))?;
+    Ok((before, after))
+}
+
 fn library_file_tag_json(value: Option<&LibraryFileTagValue>) -> serde_json::Value {
     match value {
         Some(LibraryFileTagValue::Text(value)) => json!(value),
@@ -2020,6 +2584,38 @@ fn cleanup_mutation_failure_reason(
             format!("file rename failed: {}", failure.code())
         }
         (PreparedCleanupKind::FolderRename { .. }, _) => {
+            format!("folder rename failed: {}", failure.code())
+        }
+    }
+}
+
+fn cleanup_revert_failure_reason(
+    kind: &PreparedCleanupRevertKind,
+    failure: &LibraryMutationFailure,
+) -> String {
+    match (kind, failure.kind()) {
+        (PreparedCleanupRevertKind::Rename { .. }, LibraryMutationFailureKind::NotFound)
+        | (PreparedCleanupRevertKind::Tag, LibraryMutationFailureKind::NotFound) => {
+            "file missing on disk".to_owned()
+        }
+        (
+            PreparedCleanupRevertKind::Rename { original_name },
+            LibraryMutationFailureKind::Conflict,
+        ) => format!("original name {original_name} is taken"),
+        (PreparedCleanupRevertKind::FolderRename { .. }, LibraryMutationFailureKind::NotFound) => {
+            "no folder at the recorded path (moved or removed since)".to_owned()
+        }
+        (
+            PreparedCleanupRevertKind::FolderRename { original_name },
+            LibraryMutationFailureKind::Conflict,
+        ) => format!("original folder name {original_name} is taken"),
+        (PreparedCleanupRevertKind::Tag, _) => {
+            format!("tag write failed: {}", failure.code())
+        }
+        (PreparedCleanupRevertKind::Rename { .. }, _) => {
+            format!("file rename failed: {}", failure.code())
+        }
+        (PreparedCleanupRevertKind::FolderRename { .. }, _) => {
             format!("folder rename failed: {}", failure.code())
         }
     }

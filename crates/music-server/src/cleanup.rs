@@ -13,9 +13,10 @@ use music_application::auth::SessionTouch;
 use music_application::cleanup::{
     CleanupAnalysis, CleanupApplyOperation, CleanupApplyResult, CleanupBatchDetail,
     CleanupBatchSummary, CleanupError, CleanupFuture, CleanupInputValue, CleanupNameLookup,
-    CleanupNameScoreError, CleanupNameScores, CleanupOperationKind, CleanupScope,
-    CleanupVerificationError, CleanupVerificationResult, MAX_CLEANUP_APPLY_OPERATIONS,
-    MAX_CLEANUP_SCOPE_LABEL_CHARS, MAX_CLEANUP_VERIFY_NAMES,
+    CleanupNameScoreError, CleanupNameScores, CleanupOperationKind, CleanupRevertResult,
+    CleanupScope, CleanupVerificationError, CleanupVerificationResult,
+    MAX_CLEANUP_APPLY_OPERATIONS, MAX_CLEANUP_REVERT_ITEMS, MAX_CLEANUP_SCOPE_LABEL_CHARS,
+    MAX_CLEANUP_VERIFY_NAMES,
 };
 use music_application::library::LibraryCoordinatorError;
 use music_domain::{
@@ -54,6 +55,8 @@ pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(apply_cleanup))
         .routes(routes!(list_batches))
         .routes(routes!(get_batch))
+        .routes(routes!(revert_batch))
+        .routes(routes!(revert_from_journal))
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -245,6 +248,37 @@ impl From<CleanupApplyResult> for CleanupApplyResponse {
         Self {
             batch_id: result.batch_id,
             applied: result.applied,
+            skipped: result
+                .skipped
+                .into_iter()
+                .map(|skip| CleanupSkipResponse {
+                    track_id: skip.track_id,
+                    reason: skip.reason,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = RevertJournalRequest)]
+struct CleanupRevertJournalRequest {
+    #[schema(schema_with = cleanup_revert_items_schema)]
+    items: Vec<BTreeMap<String, Value>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = RevertResult)]
+struct CleanupRevertResponse {
+    #[schema(schema_with = openapi_integer)]
+    reverted: usize,
+    skipped: Vec<CleanupSkipResponse>,
+}
+
+impl From<CleanupRevertResult> for CleanupRevertResponse {
+    fn from(result: CleanupRevertResult) -> Self {
+        Self {
+            reverted: result.reverted,
             skipped: result
                 .skipped
                 .into_iter()
@@ -625,6 +659,70 @@ async fn get_batch(
     Ok(Json(batch.try_into()?))
 }
 
+#[utoipa::path(
+    post,
+    path = "/library/cleanup/batches/{batch_id}/revert",
+    operation_id = "revert_batch_api_library_cleanup_batches__batch_id__revert_post",
+    summary = "Revert Batch",
+    params(("batch_id" = i128, Path)),
+    responses(
+        (status = 200, description = "Successful Response", body = CleanupRevertResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn revert_batch(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    batch_id: Result<Path<i64>, PathRejection>,
+) -> Result<Json<CleanupRevertResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(batch_id) = batch_id.map_err(|_| ApiError::validation())?;
+    let result = crate::library::library(&state)?
+        .coordinator
+        .revert_cleanup_batch(batch_id)
+        .await
+        .map_err(map_cleanup_revert_error)?;
+    Ok(Json(result.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/cleanup/revert",
+    operation_id = "revert_from_journal_api_library_cleanup_revert_post",
+    summary = "Revert From Journal",
+    description = "Revert from an uploaded journal (the downloaded batch JSON). Exists\nfor the disaster path — app.db was wiped/rebuilt so the server-side\nbatch row is gone, but journal items carry paths and survive re-minted\ntrack ids.",
+    request_body = CleanupRevertJournalRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = CleanupRevertResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn revert_from_journal(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<CleanupRevertJournalRequest>, JsonRejection>,
+) -> Result<Json<CleanupRevertResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=MAX_CLEANUP_REVERT_ITEMS).contains(&payload.items.len()) {
+        return Err(ApiError::validation());
+    }
+    let result = crate::library::library(&state)?
+        .coordinator
+        .revert_cleanup_journal(
+            payload
+                .items
+                .into_iter()
+                .map(|item| item.into_iter().collect())
+                .collect(),
+        )
+        .await
+        .map_err(map_cleanup_revert_error)?;
+    Ok(Json(result.into()))
+}
+
 fn cleanup_scope(scope: CleanupScopeRequest) -> Result<CleanupScope, ApiError> {
     match scope.kind {
         CleanupScopeKind::All => Ok(CleanupScope::All),
@@ -700,6 +798,25 @@ fn map_cleanup_apply_error(error: LibraryCoordinatorError) -> ApiError {
         }
         error => {
             tracing::error!(error = %error, "library cleanup apply failed");
+            ApiError::internal()
+        }
+    }
+}
+
+fn map_cleanup_revert_error(error: LibraryCoordinatorError) -> ApiError {
+    match error {
+        LibraryCoordinatorError::InvalidCleanupRevertSize => ApiError::validation(),
+        LibraryCoordinatorError::CleanupBatchNotFound => {
+            ApiError::plain_not_found("batch not found")
+        }
+        LibraryCoordinatorError::CleanupBatchReverted => {
+            ApiError::conflict("batch already reverted")
+        }
+        LibraryCoordinatorError::CommandQueueFull | LibraryCoordinatorError::Unavailable => {
+            ApiError::service_unavailable()
+        }
+        error => {
+            tracing::error!(error = %error, "library cleanup revert failed");
             ApiError::internal()
         }
     }
@@ -814,6 +931,18 @@ fn cleanup_batch_items_schema() -> RefOr<Schema> {
                 .schema_type(Type::Object)
                 .additional_properties(Some(AdditionalProperties::FreeForm(true))),
         )
+        .into()
+}
+
+fn cleanup_revert_items_schema() -> RefOr<Schema> {
+    ArrayBuilder::new()
+        .items(
+            ObjectBuilder::new()
+                .schema_type(Type::Object)
+                .additional_properties(Some(AdditionalProperties::FreeForm(true))),
+        )
+        .min_items(Some(1))
+        .max_items(Some(MAX_CLEANUP_REVERT_ITEMS))
         .into()
 }
 

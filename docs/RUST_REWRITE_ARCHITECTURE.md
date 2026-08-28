@@ -462,8 +462,12 @@ commit for that item, while any ambiguous post-replacement failure stops the bat
   effect; the refreshed catalog row or folder paths, compatible `cleanup_batches` append, and
   terminal journal state then commit in one SQLite transaction. Tag journals retain the actual
   pre-write file value rather than a filename-derived display fallback. A process restart replays
-  unfinished cleanup effects forward before publishing the catalog. Batch revert uses the same
-  serialized boundary and is implemented in the next Phase 5 slice.
+  unfinished cleanup effects forward before publishing the catalog. Batch and uploaded-journal
+  reverts use the same serialized boundary, walk items in reverse order, resolve re-minted tracks
+  by their journaled paths, and stale-check every inverse before touching disk. Each accepted
+  inverse has its own recovery record. A batch revert additionally has a parent recovery record;
+  marking the batch reverted and completing that parent share one SQLite transaction, so startup
+  can safely finish an interrupted rollback without making cleanup a second file/catalog writer.
 
 ## Durable jobs
 

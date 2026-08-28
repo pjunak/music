@@ -344,7 +344,7 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
   stable track identities, explicit clear/unset semantics, and compatible single/bulk HTTP routes.
   Mixed bulk updates report per-track tag failures while still applying DB-only fields; a failure
   after file replacement stops for forward recovery.
-- Staged-file mutation execution for SFX files and cleanup revert. Rooted library folder and track
+- Staged-file mutation execution for SFX files. Rooted library folder and track
   move/delete/upload operations, cleanup apply, per-item bulk outcomes, metadata refresh on move,
   stable track identities, and crash replay are complete.
 - [x] Pure deterministic cleanup analysis with no write-capable dependency, cached-verdict reads,
@@ -358,7 +358,11 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
   compatible history append, and cleanup-journal completion share one SQLite transaction. Exact
   pre-write file tags are retained for faithful revert, and startup replay closes the filesystem /
   database crash window.
-- Domain-specific cleanup batch and uploaded-journal revert.
+- [x] Domain-specific cleanup batch and uploaded-journal revert. Inverses run in reverse journal
+  order through `LibraryCoordinator`, stale-check IDs plus durable paths, preserve exact pre-write
+  tags, and emit per-item skips rather than clobbering drift. Child recovery journals close each
+  filesystem/catalog window; a batch parent journal atomically records `reverted_at` and resumes
+  safely after a process interruption.
 
 Gate: generated-format metadata corpus, path property/fuzz tests, symlink/race tests, range tests,
 all library/SFX/cleanup HTTP fixtures, and copied-library scan comparison pass. No private media is

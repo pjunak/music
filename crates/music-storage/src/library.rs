@@ -4,7 +4,8 @@ use std::time::Duration;
 use music_application::cleanup::{
     CleanupBatchAppend, CleanupBatchDetail, CleanupBatchSummary, CleanupFuture,
     CleanupMutationCommit, CleanupMutationRepository, CleanupNameVerdict, CleanupRepository,
-    CleanupVerificationRepository, MAX_CLEANUP_BATCH_HISTORY, MAX_CLEANUP_SCOPE_LABEL_CHARS,
+    CleanupRevertMutation, CleanupRevertMutationCommit, CleanupVerificationRepository,
+    MAX_CLEANUP_BATCH_HISTORY, MAX_CLEANUP_SCOPE_LABEL_CHARS,
 };
 use music_application::library::{
     DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFileMutationOutcome,
@@ -101,6 +102,26 @@ impl LibraryRepository for SqliteStorage {
                 "SELECT {TRACK_COLUMNS} FROM tracks WHERE id = "
             ));
             query.push_bind(track_id.get());
+            let row = query
+                .build()
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(StorageError::from)
+                .map_err(box_storage)?;
+            row.map(|row| indexed_track_from_row(&row).map_err(box_storage))
+                .transpose()
+        })
+    }
+
+    fn track_by_path<'a>(
+        &'a self,
+        path: &'a LibraryPath,
+    ) -> LibraryFuture<'a, Option<IndexedTrack>> {
+        Box::pin(async move {
+            let mut query = QueryBuilder::<Sqlite>::new(format!(
+                "SELECT {TRACK_COLUMNS} FROM tracks WHERE path = "
+            ));
+            query.push_bind(path.as_str());
             let row = query
                 .build()
                 .fetch_optional(&self.pool)
@@ -447,7 +468,7 @@ impl CleanupMutationRepository for SqliteStorage {
                             journal_id,
                             source,
                             destination,
-                            Some(append),
+                            MutationJournalContext::CleanupApply(append),
                         )
                         .await
                         .map_err(box_storage)?;
@@ -470,7 +491,7 @@ impl CleanupMutationRepository for SqliteStorage {
                             *track_id,
                             source,
                             &discovered,
-                            Some(append),
+                            MutationJournalContext::CleanupApply(append),
                         )
                         .await
                         .map_err(box_storage)?;
@@ -496,7 +517,7 @@ impl CleanupMutationRepository for SqliteStorage {
                             path,
                             patch,
                             discovered.as_ref(),
-                            Some(append),
+                            MutationJournalContext::CleanupApply(append),
                         )
                         .await
                         .map_err(box_storage)?;
@@ -519,6 +540,176 @@ impl CleanupMutationRepository for SqliteStorage {
                 track,
                 batch_id,
             })
+        })
+    }
+
+    fn commit_cleanup_revert_mutation<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        mutation: &'a LibraryFileMutation,
+        outcome: LibraryFileMutationOutcome,
+        revert: &'a CleanupRevertMutation,
+    ) -> CleanupFuture<'a, CleanupRevertMutationCommit> {
+        Box::pin(async move {
+            let (status, affected_tracks, track, batch_id) = match (mutation, outcome) {
+                (
+                    LibraryFileMutation::RenameFolder {
+                        source,
+                        destination,
+                    },
+                    LibraryFileMutationOutcome::Folder { path, .. },
+                ) if destination == &path => {
+                    let (commit, batch_id) = self
+                        .commit_library_folder_rename_with_cleanup(
+                            journal_id,
+                            source,
+                            destination,
+                            MutationJournalContext::CleanupRevert(revert),
+                        )
+                        .await
+                        .map_err(box_storage)?;
+                    (commit.status, commit.affected_tracks, None, batch_id)
+                }
+                (
+                    LibraryFileMutation::MoveTrack {
+                        track_id,
+                        source,
+                        destination,
+                    },
+                    LibraryFileMutationOutcome::TrackMoved {
+                        track_id: moved_id,
+                        track: discovered,
+                    },
+                ) if track_id == &moved_id && destination == &discovered.path => {
+                    let (commit, batch_id) = self
+                        .commit_library_track_move_with_cleanup(
+                            journal_id,
+                            *track_id,
+                            source,
+                            &discovered,
+                            MutationJournalContext::CleanupRevert(revert),
+                        )
+                        .await
+                        .map_err(box_storage)?;
+                    (commit.status, 1, Some(commit.track), batch_id)
+                }
+                (
+                    LibraryFileMutation::UpdateTrackMetadata {
+                        track_id,
+                        path,
+                        patch,
+                    },
+                    LibraryFileMutationOutcome::TrackMetadataUpdated {
+                        track_id: updated_id,
+                        discovered,
+                    },
+                ) if track_id == &updated_id
+                    && discovered.as_ref().is_none_or(|track| &track.path == path) =>
+                {
+                    let (commit, batch_id) = self
+                        .commit_library_track_metadata_with_cleanup(
+                            journal_id,
+                            *track_id,
+                            path,
+                            patch,
+                            discovered.as_ref(),
+                            MutationJournalContext::CleanupRevert(revert),
+                        )
+                        .await
+                        .map_err(box_storage)?;
+                    (commit.status, 1, Some(commit.track), batch_id)
+                }
+                _ => {
+                    return Err(box_storage(StorageError::InvalidLibraryState(
+                        "cleanup revert mutation outcome is invalid",
+                    )));
+                }
+            };
+            if batch_id.is_some() {
+                return Err(box_storage(StorageError::InvalidLibraryState(
+                    "cleanup revert unexpectedly appended batch history",
+                )));
+            }
+            Ok(CleanupRevertMutationCommit {
+                status,
+                affected_tracks,
+                track,
+            })
+        })
+    }
+
+    fn finish_cleanup_batch_revert<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        batch_id: i64,
+        reverted: usize,
+        skipped: usize,
+    ) -> CleanupFuture<'a, ()> {
+        Box::pin(async move {
+            if batch_id <= 0 {
+                return Err(box_storage(StorageError::InvalidLibraryRecord(
+                    "cleanup batch id is invalid",
+                )));
+            }
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(StorageError::from)?;
+            let plan = read_applying_mutation_journal(
+                &mut transaction,
+                journal_id,
+                "cleanup",
+                "revert_batch",
+            )
+            .await
+            .map_err(box_storage)?;
+            let plan = plan
+                .as_object()
+                .filter(|plan| plan.len() == 1)
+                .ok_or_else(|| box_storage(StorageError::InvalidRecoveryJournalRecord))?;
+            if plan.get("batch_id").and_then(Value::as_i64) != Some(batch_id) {
+                return Err(box_storage(StorageError::InvalidRecoveryJournalRecord));
+            }
+
+            let batch = sqlx::query(
+                "UPDATE cleanup_batches SET reverted_at = CURRENT_TIMESTAMP \
+                 WHERE id = ? AND reverted_at IS NULL",
+            )
+            .bind(batch_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(StorageError::from)
+            .map_err(box_storage)?;
+            if batch.rows_affected() != 1 {
+                return Err(box_storage(StorageError::InvalidLibraryRecord(
+                    "cleanup batch changed during revert",
+                )));
+            }
+
+            let progress_json = serde_json::to_string(&json!({
+                "reverted": reverted,
+                "skipped": skipped,
+            }))
+            .map_err(StorageError::RecoveryJournalSerialization)
+            .map_err(box_storage)?;
+            let journal = sqlx::query(
+                "UPDATE recovery_journal SET state = 'committed', progress_json = ?, \
+                 updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP \
+                 WHERE id = ? AND domain = 'cleanup' AND operation = 'revert_batch' \
+                 AND state = 'applying'",
+            )
+            .bind(progress_json)
+            .bind(journal_id.as_str())
+            .execute(&mut *transaction)
+            .await
+            .map_err(StorageError::from)
+            .map_err(box_storage)?;
+            if journal.rows_affected() != 1 {
+                return Err(box_storage(StorageError::InvalidRecoveryJournalRecord));
+            }
+            transaction
+                .commit()
+                .await
+                .map_err(StorageError::from)
+                .map_err(box_storage)
         })
     }
 }
@@ -645,6 +836,41 @@ impl LibraryMutationRepository for SqliteStorage {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum MutationJournalContext<'a> {
+    Library,
+    CleanupApply(&'a CleanupBatchAppend),
+    CleanupRevert(&'a CleanupRevertMutation),
+}
+
+impl<'a> MutationJournalContext<'a> {
+    const fn domain(self) -> &'static str {
+        match self {
+            Self::Library => "library",
+            Self::CleanupApply(_) | Self::CleanupRevert(_) => "cleanup",
+        }
+    }
+
+    fn expected_plan(self, mutation: &LibraryFileMutation) -> Result<Value, StorageError> {
+        match self {
+            Self::Library => Ok(mutation.plan()),
+            Self::CleanupApply(append) => append
+                .journal_plan(mutation)
+                .map_err(|_| StorageError::InvalidRecoveryJournalRecord),
+            Self::CleanupRevert(revert) => revert
+                .journal_plan(mutation)
+                .map_err(|_| StorageError::InvalidRecoveryJournalRecord),
+        }
+    }
+
+    const fn batch_append(self) -> Option<&'a CleanupBatchAppend> {
+        match self {
+            Self::CleanupApply(append) => Some(append),
+            Self::Library | Self::CleanupRevert(_) => None,
+        }
+    }
+}
+
 impl SqliteStorage {
     async fn commit_library_track_move(
         &self,
@@ -653,9 +879,15 @@ impl SqliteStorage {
         source: &LibraryPath,
         discovered: &DiscoveredTrack,
     ) -> Result<LibraryTrackMutationCommit, StorageError> {
-        self.commit_library_track_move_with_cleanup(journal_id, track_id, source, discovered, None)
-            .await
-            .map(|(commit, _)| commit)
+        self.commit_library_track_move_with_cleanup(
+            journal_id,
+            track_id,
+            source,
+            discovered,
+            MutationJournalContext::Library,
+        )
+        .await
+        .map(|(commit, _)| commit)
     }
 
     async fn commit_library_track_move_with_cleanup(
@@ -664,7 +896,7 @@ impl SqliteStorage {
         track_id: TrackId,
         source: &LibraryPath,
         discovered: &DiscoveredTrack,
-        cleanup: Option<&CleanupBatchAppend>,
+        context: MutationJournalContext<'_>,
     ) -> Result<(LibraryTrackMutationCommit, Option<i64>), StorageError> {
         if discovered.size_bytes > i64::MAX as u64 {
             return Err(StorageError::InvalidLibraryRecord(
@@ -681,7 +913,7 @@ impl SqliteStorage {
                 source: source.clone(),
                 destination: discovered.path.clone(),
             },
-            cleanup,
+            context,
         )
         .await?;
         let updated = sqlx::query(
@@ -718,7 +950,7 @@ impl SqliteStorage {
             "move_track",
             1,
             LibraryCatalogEffect::PreserveMembership,
-            cleanup,
+            context,
         )
         .await?;
         let mut query =
@@ -751,7 +983,7 @@ impl SqliteStorage {
                 track_id,
                 path: path.clone(),
             },
-            None,
+            MutationJournalContext::Library,
         )
         .await?;
         let deleted = sqlx::query("DELETE FROM tracks WHERE id = ? AND path = ?")
@@ -766,7 +998,7 @@ impl SqliteStorage {
             "delete_track",
             affected_tracks,
             LibraryCatalogEffect::RemoveTracks,
-            None,
+            MutationJournalContext::Library,
         )
         .await?;
         transaction.commit().await?;
@@ -785,7 +1017,12 @@ impl SqliteStorage {
         discovered: Option<&DiscoveredTrack>,
     ) -> Result<LibraryTrackMutationCommit, StorageError> {
         self.commit_library_track_metadata_with_cleanup(
-            journal_id, track_id, path, patch, discovered, None,
+            journal_id,
+            track_id,
+            path,
+            patch,
+            discovered,
+            MutationJournalContext::Library,
         )
         .await
         .map(|(commit, _)| commit)
@@ -798,7 +1035,7 @@ impl SqliteStorage {
         path: &LibraryPath,
         patch: &TrackMetadataPatch,
         discovered: Option<&DiscoveredTrack>,
-        cleanup: Option<&CleanupBatchAppend>,
+        context: MutationJournalContext<'_>,
     ) -> Result<(LibraryTrackMutationCommit, Option<i64>), StorageError> {
         if patch.is_empty() || patch.has_tag_changes() != discovered.is_some() {
             return Err(StorageError::InvalidLibraryState(
@@ -826,7 +1063,7 @@ impl SqliteStorage {
                 path: path.clone(),
                 patch: patch.clone(),
             },
-            cleanup,
+            context,
         )
         .await?;
 
@@ -904,7 +1141,7 @@ impl SqliteStorage {
             "update_track_metadata",
             1,
             LibraryCatalogEffect::PreserveMembership,
-            cleanup,
+            context,
         )
         .await?;
         let mut query =
@@ -951,7 +1188,7 @@ impl SqliteStorage {
                 destination: destination.clone(),
                 replace_existing,
             },
-            None,
+            MutationJournalContext::Library,
         )
         .await?;
 
@@ -1007,7 +1244,7 @@ impl SqliteStorage {
             "publish_upload",
             affected_tracks,
             catalog_effect,
-            None,
+            MutationJournalContext::Library,
         )
         .await?;
         transaction.commit().await?;
@@ -1024,9 +1261,14 @@ impl SqliteStorage {
         source: &LibraryPath,
         destination: &LibraryPath,
     ) -> Result<LibraryIndexMutationCommit, StorageError> {
-        self.commit_library_folder_rename_with_cleanup(journal_id, source, destination, None)
-            .await
-            .map(|(commit, _)| commit)
+        self.commit_library_folder_rename_with_cleanup(
+            journal_id,
+            source,
+            destination,
+            MutationJournalContext::Library,
+        )
+        .await
+        .map(|(commit, _)| commit)
     }
 
     async fn commit_library_folder_rename_with_cleanup(
@@ -1034,7 +1276,7 @@ impl SqliteStorage {
         journal_id: &RecoveryJournalId,
         source: &LibraryPath,
         destination: &LibraryPath,
-        cleanup: Option<&CleanupBatchAppend>,
+        context: MutationJournalContext<'_>,
     ) -> Result<(LibraryIndexMutationCommit, Option<i64>), StorageError> {
         let _admission = self.write_gate.lock().await;
         let mut transaction = self.pool.begin().await?;
@@ -1045,7 +1287,7 @@ impl SqliteStorage {
                 source: source.clone(),
                 destination: destination.clone(),
             },
-            cleanup,
+            context,
         )
         .await?;
 
@@ -1102,7 +1344,7 @@ impl SqliteStorage {
             "rename_folder",
             affected_tracks,
             LibraryCatalogEffect::PreserveMembership,
-            cleanup,
+            context,
         )
         .await?;
         transaction.commit().await?;
@@ -1136,7 +1378,7 @@ impl SqliteStorage {
             "delete_folder",
             affected_tracks,
             LibraryCatalogEffect::RemoveTracks,
-            None,
+            MutationJournalContext::Library,
         )
         .await?;
         transaction.commit().await?;
@@ -1405,26 +1647,19 @@ async fn validate_library_mutation_journal(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     journal_id: &RecoveryJournalId,
     mutation: &LibraryFileMutation,
-    cleanup: Option<&CleanupBatchAppend>,
+    context: MutationJournalContext<'_>,
 ) -> Result<(), StorageError> {
     let operation = mutation
         .operation()
         .map_err(|_| StorageError::InvalidRecoveryJournalRecord)?;
-    let domain = if cleanup.is_some() {
-        "cleanup"
-    } else {
-        "library"
-    };
-    let plan =
-        read_applying_mutation_journal(transaction, journal_id, domain, operation.as_str()).await?;
-    let expected = cleanup.map_or_else(
-        || Ok(mutation.plan()),
-        |append| {
-            append
-                .journal_plan(mutation)
-                .map_err(|_| StorageError::InvalidRecoveryJournalRecord)
-        },
-    )?;
+    let plan = read_applying_mutation_journal(
+        transaction,
+        journal_id,
+        context.domain(),
+        operation.as_str(),
+    )
+    .await?;
+    let expected = context.expected_plan(mutation)?;
     if plan != expected {
         return Err(StorageError::InvalidRecoveryJournalRecord);
     }
@@ -1479,7 +1714,7 @@ async fn finish_library_index_mutation(
     operation: &'static str,
     affected_tracks: u64,
     catalog_effect: LibraryCatalogEffect,
-    cleanup: Option<&CleanupBatchAppend>,
+    context: MutationJournalContext<'_>,
 ) -> Result<Option<i64>, StorageError> {
     if affected_tracks > 0 {
         let state =
@@ -1530,7 +1765,7 @@ async fn finish_library_index_mutation(
         }
     }
 
-    let batch_id = match cleanup {
+    let batch_id = match context.batch_append() {
         Some(append) => Some(append_cleanup_batch(transaction, append).await?),
         None => None,
     };
@@ -1540,11 +1775,6 @@ async fn finish_library_index_mutation(
     );
     let progress_json =
         serde_json::to_string(&progress).map_err(StorageError::RecoveryJournalSerialization)?;
-    let domain = if cleanup.is_some() {
-        "cleanup"
-    } else {
-        "library"
-    };
     let journal = sqlx::query(
         "UPDATE recovery_journal SET state = 'committed', progress_json = ?, \
          updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP \
@@ -1552,7 +1782,7 @@ async fn finish_library_index_mutation(
     )
     .bind(progress_json)
     .bind(journal_id.as_str())
-    .bind(domain)
+    .bind(context.domain())
     .bind(operation)
     .execute(&mut **transaction)
     .await?;
