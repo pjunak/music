@@ -12,7 +12,7 @@ use music_application::assistant::{
 };
 use music_storage::{CredentialVault, SecretString};
 use rand::TryRngCore;
-use tokio::sync::RwLock;
+use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::config::AppConfig;
@@ -88,7 +88,7 @@ pub(crate) struct RuntimeCredentialStore {
     environment_key: Option<SecretString>,
     key_file: Option<PathBuf>,
     host_directory_hint: Option<String>,
-    lifecycle: RwLock<()>,
+    lifecycle: Arc<RwLock<()>>,
 }
 
 impl RuntimeCredentialStore {
@@ -100,7 +100,7 @@ impl RuntimeCredentialStore {
                 .map(|key| SecretString::new(key.expose_secret())),
             key_file: config.assistant_credential_key_file.clone(),
             host_directory_hint: config.assistant_credential_host_directory_hint.clone(),
-            lifecycle: RwLock::new(()),
+            lifecycle: Arc::new(RwLock::new(())),
         }
     }
 
@@ -299,12 +299,53 @@ impl RuntimeCredentialStore {
 impl ProviderCredentialSource for RuntimeCredentialStore {
     fn current_cipher(&self) -> ProviderCredentialFuture<'_> {
         Box::pin(async move {
-            let _lifecycle = self.lifecycle.read().await;
+            let lifecycle = Arc::clone(&self.lifecycle).read_owned().await;
             let (vault, _) = self
                 .configured_vault_unlocked()
                 .map_err(provider_credential_error)?;
-            Ok(Arc::new(vault) as Arc<dyn ProviderCredentialCipher>)
+            let lease = Arc::new(CredentialReadLease {
+                _lifecycle: lifecycle,
+            });
+            Ok(Arc::new(LeasedCredentialCipher { vault, lease })
+                as Arc<dyn ProviderCredentialCipher>)
         })
+    }
+}
+
+struct CredentialReadLease {
+    _lifecycle: OwnedRwLockReadGuard<()>,
+}
+
+impl fmt::Debug for CredentialReadLease {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CredentialReadLease")
+    }
+}
+
+#[derive(Debug)]
+struct LeasedCredentialCipher {
+    vault: CredentialVault,
+    lease: Arc<CredentialReadLease>,
+}
+
+impl ProviderCredentialCipher for LeasedCredentialCipher {
+    fn encrypt(
+        &self,
+        connection_id: &str,
+        api_key: &str,
+    ) -> Result<music_application::assistant::EncryptedProviderCredential, ProviderCredentialError>
+    {
+        ProviderCredentialCipher::encrypt(&self.vault, connection_id, api_key)
+    }
+
+    fn decrypt(
+        &self,
+        connection_id: &str,
+        ciphertext: &str,
+        nonce: &str,
+    ) -> Result<music_application::assistant::ProviderSecret, ProviderCredentialError> {
+        ProviderCredentialCipher::decrypt(&self.vault, connection_id, ciphertext, nonce)
+            .map(|secret| secret.with_lifetime_guard(self.lease.clone()))
     }
 }
 
@@ -588,6 +629,45 @@ mod tests {
             store.initialize(true).await.err().map(|error| error.code()),
             Some("saved_credentials_require_existing_key")
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reset_waits_until_decrypted_credentials_leave_the_request_scope()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempfile::tempdir()?;
+        let key_parent = directory.path().join("credentials");
+        fs::create_dir(&key_parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&key_parent, fs::Permissions::from_mode(0o700))?;
+        }
+        let config = config(directory.path())?;
+        let store = Arc::new(RuntimeCredentialStore::new(&config));
+        store.initialize(false).await?;
+        let cipher = store.current_cipher().await?;
+        let encrypted = cipher.encrypt("fixture", "provider-secret")?;
+        let secret = cipher.decrypt("fixture", &encrypted.ciphertext, &encrypted.nonce)?;
+        drop(cipher);
+
+        let storage =
+            Arc::new(SqliteStorage::open(SqliteStorageOptions::new(&config.database_path)).await?);
+        let reset = {
+            let store = Arc::clone(&store);
+            let storage = Arc::clone(&storage);
+            tokio::spawn(async move { store.reset(storage.as_ref()).await })
+        };
+        tokio::pin!(reset);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut reset)
+                .await
+                .is_err()
+        );
+        assert_eq!(secret.expose_secret(), "provider-secret");
+        drop(secret);
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), reset).await???;
+        assert!(outcome.master_key_removed);
         Ok(())
     }
 }

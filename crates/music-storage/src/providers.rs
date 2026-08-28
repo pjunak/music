@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use music_application::assistant::{
-    AssistantFuture, ModelRoleRecord, ProviderConnectionRecord, ProviderCredentialResetOutcome,
-    ProviderMutationOutcome, ProviderRepository,
+    AssistantFuture, ModelRoleRecord, ProviderConnectionPreparation, ProviderConnectionRecord,
+    ProviderCredentialResetOutcome, ProviderMutationOutcome, ProviderRepository,
+    ProviderVerificationWrite, ProviderVerificationWriteOutcome,
 };
 use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
@@ -126,6 +127,96 @@ impl ProviderRepository for SqliteStorage {
                 .map(connection_from_row)
                 .transpose()
                 .map_err(box_storage)
+        })
+    }
+
+    fn prepare_provider_connection<'a>(
+        &'a self,
+        connection_id: &'a str,
+    ) -> AssistantFuture<'a, ProviderConnectionPreparation> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(connection) = load_connection_tx(&mut transaction, connection_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderConnectionPreparation::NotFound);
+            };
+            if connection_has_active_model_job(&mut transaction, connection_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderConnectionPreparation::ModelJobActive);
+            }
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderConnectionPreparation::Ready(Box::new(connection)))
+        })
+    }
+
+    fn finish_provider_verification<'a>(
+        &'a self,
+        verification: &'a ProviderVerificationWrite,
+    ) -> AssistantFuture<'a, ProviderVerificationWriteOutcome> {
+        Box::pin(async move {
+            let models = encode_string_list(&verification.models).map_err(box_storage)?;
+            let capabilities =
+                encode_string_list(&verification.capability_ids).map_err(box_storage)?;
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(current) = load_connection_tx(&mut transaction, &verification.connection_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderVerificationWriteOutcome::NotFound);
+            };
+            if current.fingerprint() != verification.expected_fingerprint {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderVerificationWriteOutcome::Changed);
+            }
+            if connection_has_active_model_job(&mut transaction, &verification.connection_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderVerificationWriteOutcome::ModelJobActive);
+            }
+            sqlx::query(
+                "UPDATE assistant_provider_connections SET verification_status = ?, \
+                 verification_error_code = ?, verified_models_json = ?, \
+                 verified_capabilities_json = ?, last_verified_at = CURRENT_TIMESTAMP, \
+                 updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(if verification.verified {
+                "verified"
+            } else {
+                "failed"
+            })
+            .bind(&verification.error_code)
+            .bind(models)
+            .bind(capabilities)
+            .bind(&verification.connection_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            reset_roles_for_connection(&mut transaction, &verification.connection_id)
+                .await
+                .map_err(box_storage)?;
+            let connection = load_connection_tx(&mut transaction, &verification.connection_id)
+                .await
+                .map_err(box_storage)?
+                .ok_or_else(|| {
+                    box_storage(StorageError::InvalidAssistantRecord(
+                        "provider connection disappeared during verification",
+                    ))
+                })?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderVerificationWriteOutcome::Applied(Box::new(
+                connection,
+            )))
         })
     }
 
@@ -641,7 +732,9 @@ mod tests {
     use std::sync::Arc;
 
     use music_application::assistant::{
-        ModelRoleRecord, ProviderConnectionRecord, ProviderMutationOutcome, ProviderRepository,
+        ModelRoleRecord, ProviderConnectionPreparation, ProviderConnectionRecord,
+        ProviderMutationOutcome, ProviderRepository, ProviderVerificationWrite,
+        ProviderVerificationWriteOutcome,
     };
     use tempfile::TempDir;
 
@@ -763,6 +856,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn provider_verification_publishes_atomically_and_rejects_stale_results()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let original = connection("aabbccddeeff00112233445566778899", "Fixture");
+        storage.create_provider_connection(&original).await?;
+        storage
+            .save_model_role(&original.fingerprint(), &role(&original.id), false)
+            .await?;
+        let prepared = storage.prepare_provider_connection(&original.id).await?;
+        assert!(matches!(
+            prepared,
+            ProviderConnectionPreparation::Ready(ref value) if value.id == original.id
+        ));
+        let verification = ProviderVerificationWrite {
+            connection_id: original.id.clone(),
+            expected_fingerprint: original.fingerprint(),
+            verified: true,
+            error_code: None,
+            models: vec!["new-model".to_owned()],
+            capability_ids: vec!["structured-text/v1".to_owned()],
+        };
+        let applied = storage.finish_provider_verification(&verification).await?;
+        let ProviderVerificationWriteOutcome::Applied(applied) = applied else {
+            return Err(format!("unexpected verification outcome: {applied:?}").into());
+        };
+        assert_eq!(applied.verification_status, "verified");
+        assert_eq!(applied.verified_models, ["new-model"]);
+        assert!(applied.last_verified_at_unix_seconds.is_some());
+        assert_eq!(
+            storage
+                .model_roles()
+                .await?
+                .pop()
+                .ok_or("missing role")?
+                .conformance_status,
+            "never"
+        );
+
+        let stale_fingerprint = applied.fingerprint();
+        let mut changed = applied.clone();
+        changed.base_url = "https://changed.example.test/v1".to_owned();
+        assert_eq!(
+            storage
+                .replace_provider_connection(&stale_fingerprint, &changed, true)
+                .await?,
+            ProviderMutationOutcome::Applied
+        );
+        let mut stale = verification;
+        stale.expected_fingerprint = stale_fingerprint;
+        assert_eq!(
+            storage.finish_provider_verification(&stale).await?,
+            ProviderVerificationWriteOutcome::Changed
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn active_model_jobs_block_connection_and_role_mutations()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let (_directory, storage) = storage().await?;
@@ -782,6 +932,23 @@ mod tests {
         )
         .execute(&storage.pool)
         .await?;
+        assert_eq!(
+            storage.prepare_provider_connection(&connection.id).await?,
+            ProviderConnectionPreparation::ModelJobActive
+        );
+        assert_eq!(
+            storage
+                .finish_provider_verification(&ProviderVerificationWrite {
+                    connection_id: connection.id.clone(),
+                    expected_fingerprint: connection.fingerprint(),
+                    verified: false,
+                    error_code: Some("network_error".to_owned()),
+                    models: Vec::new(),
+                    capability_ids: Vec::new(),
+                })
+                .await?,
+            ProviderVerificationWriteOutcome::ModelJobActive
+        );
         assert_eq!(
             storage.clear_provider_credential(&connection.id).await?,
             ProviderMutationOutcome::ConnectionModelJobActive

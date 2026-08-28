@@ -11,7 +11,7 @@ use music_application::assistant::{
     PROVIDER_CAPABILITIES, ProviderConnectionCreate, ProviderConnectionPatch,
     ProviderConnectionView, ProviderCredentialSource, ProviderRepository, ProviderSecret,
     ProviderService, ProviderServiceError, ProviderServiceErrorKind, ProviderVerificationStatus,
-    ThinkingMode,
+    ProviderVerificationView, ThinkingMode,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use serde::{Deserialize, Serialize};
@@ -30,22 +30,26 @@ use crate::provider_credentials::{
     CredentialStorageReset, CredentialStorageSource, CredentialStorageStatus, CredentialStoreError,
     RuntimeCredentialStore,
 };
+use crate::provider_transport::ProviderNetworkBoundary;
 
 #[derive(Debug)]
 pub(crate) struct RuntimeProviders {
     service: ProviderService,
     repository: Arc<dyn ProviderRepository>,
     credentials: Arc<RuntimeCredentialStore>,
+    network: Arc<ProviderNetworkBoundary>,
 }
 
 impl RuntimeProviders {
     pub(crate) fn new(
         repository: Arc<dyn ProviderRepository>,
         credentials: Arc<RuntimeCredentialStore>,
-        policy: Arc<dyn music_application::assistant::ProviderConnectionPolicy>,
+        network: Arc<ProviderNetworkBoundary>,
         executable_contract_digest: String,
     ) -> Self {
         let credential_source: Arc<dyn ProviderCredentialSource> = credentials.clone();
+        let policy: Arc<dyn music_application::assistant::ProviderConnectionPolicy> =
+            network.clone();
         Self {
             service: ProviderService::new(
                 Arc::clone(&repository),
@@ -55,6 +59,7 @@ impl RuntimeProviders {
             ),
             repository,
             credentials,
+            network,
         }
     }
 
@@ -378,6 +383,30 @@ impl TryFrom<ProviderConnectionView> for ProviderConnectionResponse {
     }
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ProviderVerificationOut)]
+struct ProviderVerificationResponse {
+    connection: ProviderConnectionResponse,
+    verified: bool,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    error_code: Option<String>,
+    models: Vec<String>,
+}
+
+impl TryFrom<ProviderVerificationView> for ProviderVerificationResponse {
+    type Error = ApiError;
+
+    fn try_from(value: ProviderVerificationView) -> Result<Self, Self::Error> {
+        Ok(Self {
+            connection: value.connection.try_into()?,
+            verified: value.verified,
+            error_code: value.error_code,
+            models: value.models,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 enum ThinkingModeWire {
@@ -524,6 +553,7 @@ pub(crate) fn provider_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(list_connections, create_connection))
         .routes(routes!(update_connection, delete_connection))
         .routes(routes!(delete_connection_credential))
+        .routes(routes!(verify_connection))
         .routes(routes!(list_roles))
         .routes(routes!(update_role, delete_role))
 }
@@ -745,6 +775,39 @@ async fn delete_connection_credential(
     let value = providers(&state)?
         .service
         .delete_connection_credential(&connection_id)
+        .await
+        .map_err(map_provider_error)?;
+    Ok(Json(value.try_into()?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/providers/connections/{connection_id}/verify",
+    operation_id = "verify_connection_api_assistant_providers_connections__connection_id__verify_post",
+    params(("connection_id" = String, Path, description = "Connection Id")),
+    responses(
+        (status = 200, description = "Successful Response", body = ProviderVerificationResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn verify_connection(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    connection_id: Result<Path<String>, PathRejection>,
+) -> Result<Json<ProviderVerificationResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let Path(connection_id) = connection_id.map_err(|_| ApiError::validation())?;
+    let providers = providers(&state)?;
+    let target = providers
+        .service
+        .prepare_connection_verification(&connection_id)
+        .await
+        .map_err(map_provider_error)?;
+    let result = providers.network.verify_provider_connection(&target).await;
+    let value = providers
+        .service
+        .finish_connection_verification(&target, result)
         .await
         .map_err(map_provider_error)?;
     Ok(Json(value.try_into()?))
@@ -1107,13 +1170,16 @@ mod tests {
 
     use axum::body::{Body, to_bytes};
     use axum::http::header::{CONTENT_TYPE, COOKIE, SET_COOKIE};
-    use axum::http::{Request, StatusCode};
+    use axum::http::{HeaderMap, Request, StatusCode};
+    use axum::routing::get;
+    use axum::{Json as AxumJson, Router};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE;
     use music_application::auth::UnixSeconds;
     use music_storage::{SqliteStorage, SqliteStorageOptions, hash_password};
     use serde_json::Value;
     use tempfile::tempdir;
+    use tokio::net::TcpListener;
     use tower::ServiceExt;
 
     use crate::{AppConfig, AppRuntime};
@@ -1178,6 +1244,25 @@ mod tests {
 
         let runtime = AppRuntime::start(config).await?;
         let router = runtime.router()?;
+        let provider_listener = TcpListener::bind("127.0.0.1:0").await?;
+        let provider_address = provider_listener.local_addr()?;
+        let provider_server = tokio::spawn(async move {
+            let app = Router::new().route(
+                "/v1/models",
+                get(|headers: HeaderMap| async move {
+                    assert_eq!(
+                        headers
+                            .get("authorization")
+                            .and_then(|value| value.to_str().ok()),
+                        Some("Bearer provider-secret-value")
+                    );
+                    AxumJson(serde_json::json!({
+                        "data": [{"id": "fixture-model"}, {"id": "second-model"}]
+                    }))
+                }),
+            );
+            let _result = axum::serve(provider_listener, app).await;
+        });
         let login = router
             .clone()
             .oneshot(
@@ -1219,19 +1304,40 @@ mod tests {
                 Request::post("/api/assistant/providers/connections")
                     .header(CONTENT_TYPE, "application/json")
                     .header(COOKIE, &cookie)
-                    .body(Body::from(
-                        r#"{"name":"Local fixture","adapter_id":"openai-compatible/v1","base_url":"http://127.0.0.1:11434/v1/","api_key":"provider-secret-value","allow_private_network":true}"#,
-                    ))?,
+                    .body(Body::from(format!(
+                        r#"{{"name":"Local fixture","adapter_id":"openai-compatible/v1","base_url":"http://{provider_address}/v1/","api_key":"provider-secret-value","allow_private_network":true}}"#,
+                    )))?,
             )
             .await?;
         assert_eq!(created.status(), StatusCode::CREATED);
         let created = body_json(created).await?;
-        assert_eq!(created["base_url"], "http://127.0.0.1:11434/v1");
+        assert_eq!(created["base_url"], format!("http://{provider_address}/v1"));
         assert_eq!(created["credential_saved"], true);
         assert_eq!(created["key_hint"], "••••alue");
         assert!(created.get("api_key").is_none());
         assert!(!created.to_string().contains("provider-secret-value"));
         let connection_id = created["id"].as_str().ok_or("missing ID")?;
+
+        let verified = router
+            .clone()
+            .oneshot(
+                Request::post(format!(
+                    "/api/assistant/providers/connections/{connection_id}/verify"
+                ))
+                .header(COOKIE, &cookie)
+                .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(verified.status(), StatusCode::OK);
+        let verified = body_json(verified).await?;
+        assert_eq!(verified["verified"], true);
+        assert_eq!(verified["error_code"], Value::Null);
+        assert_eq!(
+            verified["models"],
+            serde_json::json!(["fixture-model", "second-model"])
+        );
+        assert_eq!(verified["connection"]["verification_status"], "verified");
+        assert!(!verified.to_string().contains("provider-secret-value"));
 
         let configured = router
             .clone()
@@ -1280,6 +1386,7 @@ mod tests {
             "master_key_managed_by_environment"
         );
 
+        provider_server.abort();
         runtime.shutdown().await?;
         Ok(())
     }

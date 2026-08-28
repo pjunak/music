@@ -430,17 +430,29 @@ impl Debug for EncryptedProviderCredential {
     }
 }
 
-pub struct ProviderSecret(Zeroizing<String>);
+pub struct ProviderSecret {
+    value: Zeroizing<String>,
+    _lifetime_guard: Option<Arc<dyn Debug + Send + Sync>>,
+}
 
 impl ProviderSecret {
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
-        Self(Zeroizing::new(value.into()))
+        Self {
+            value: Zeroizing::new(value.into()),
+            _lifetime_guard: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_lifetime_guard(mut self, guard: Arc<dyn Debug + Send + Sync>) -> Self {
+        self._lifetime_guard = Some(guard);
+        self
     }
 
     #[must_use]
     pub fn expose_secret(&self) -> &str {
-        self.0.as_str()
+        self.value.as_str()
     }
 }
 
@@ -523,6 +535,57 @@ pub enum ProviderMutationOutcome {
     Changed,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ProviderConnectionPreparation {
+    Ready(Box<ProviderConnectionRecord>),
+    NotFound,
+    ModelJobActive,
+}
+
+#[derive(Debug)]
+pub struct ProviderVerificationTarget {
+    pub connection_id: String,
+    pub adapter_id: String,
+    pub base_url: String,
+    pub api_key: ProviderSecret,
+    pub allow_private_network: bool,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderVerificationResult {
+    pub verified: bool,
+    pub error_code: Option<String>,
+    pub models: Vec<String>,
+    pub capability_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderVerificationWrite {
+    pub connection_id: String,
+    pub expected_fingerprint: String,
+    pub verified: bool,
+    pub error_code: Option<String>,
+    pub models: Vec<String>,
+    pub capability_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ProviderVerificationWriteOutcome {
+    Applied(Box<ProviderConnectionRecord>),
+    NotFound,
+    ModelJobActive,
+    Changed,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderVerificationView {
+    pub connection: ProviderConnectionView,
+    pub verified: bool,
+    pub error_code: Option<String>,
+    pub models: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ProviderCredentialResetOutcome {
     Applied { deleted_credentials: u64 },
@@ -537,6 +600,14 @@ pub trait ProviderRepository: Debug + Send + Sync {
         &'a self,
         connection_id: &'a str,
     ) -> AssistantFuture<'a, Option<ProviderConnectionRecord>>;
+    fn prepare_provider_connection<'a>(
+        &'a self,
+        connection_id: &'a str,
+    ) -> AssistantFuture<'a, ProviderConnectionPreparation>;
+    fn finish_provider_verification<'a>(
+        &'a self,
+        verification: &'a ProviderVerificationWrite,
+    ) -> AssistantFuture<'a, ProviderVerificationWriteOutcome>;
     fn create_provider_connection<'a>(
         &'a self,
         connection: &'a ProviderConnectionRecord,
@@ -696,11 +767,12 @@ impl ProviderService {
             )
             .map_err(map_policy_error)?;
         let id = Uuid::new_v4().simple().to_string();
-        let encrypted = self
+        let cipher = self
             .credentials
             .current_cipher()
             .await
-            .map_err(map_credential_error)?
+            .map_err(map_credential_error)?;
+        let encrypted = cipher
             .encrypt(&id, request.api_key.expose_secret())
             .map_err(map_credential_error)?;
         let record = ProviderConnectionRecord {
@@ -720,12 +792,13 @@ impl ProviderService {
             created_at_unix_seconds: 0,
             updated_at_unix_seconds: 0,
         };
-        match self
+        let result = self
             .repository
             .create_provider_connection(&record)
             .await
-            .map_err(ProviderServiceError::dependency)?
-        {
+            .map_err(ProviderServiceError::dependency)?;
+        drop(cipher);
+        match result {
             ProviderMutationOutcome::Applied => self.connection_view(&id).await,
             ProviderMutationOutcome::DuplicateName => Err(duplicate_name()),
             _ => Err(unexpected_mutation()),
@@ -772,21 +845,24 @@ impl ProviderService {
             .normalize_base_url(&adapter_id, &raw_url, allow_private_network)
             .map_err(map_policy_error)?;
         let mut replacement = current.clone();
+        let mut credential_lease: Option<Arc<dyn ProviderCredentialCipher>> = None;
         replacement.name = name;
         replacement.adapter_id = adapter_id;
         replacement.base_url = base_url;
         replacement.allow_private_network = allow_private_network;
         if let Some(api_key) = request.api_key {
-            let encrypted = self
+            let cipher = self
                 .credentials
                 .current_cipher()
                 .await
-                .map_err(map_credential_error)?
+                .map_err(map_credential_error)?;
+            let encrypted = cipher
                 .encrypt(connection_id, api_key.expose_secret())
                 .map_err(map_credential_error)?;
             replacement.encrypted_api_key = encrypted.ciphertext;
             replacement.api_key_nonce = encrypted.nonce;
             replacement.api_key_hint = encrypted.hint;
+            credential_lease = Some(cipher);
         }
         let reset = replacement.adapter_id != current.adapter_id
             || replacement.base_url != current.base_url
@@ -796,12 +872,13 @@ impl ProviderService {
         if reset {
             reset_connection_verification(&mut replacement);
         }
-        match self
+        let result = self
             .repository
             .replace_provider_connection(&current.fingerprint(), &replacement, reset)
             .await
-            .map_err(ProviderServiceError::dependency)?
-        {
+            .map_err(ProviderServiceError::dependency)?;
+        drop(credential_lease);
+        match result {
             ProviderMutationOutcome::Applied => self.connection_view(connection_id).await,
             ProviderMutationOutcome::NotFound => Err(connection_not_found()),
             ProviderMutationOutcome::DuplicateName => Err(duplicate_name()),
@@ -851,6 +928,106 @@ impl ProviderService {
             ProviderMutationOutcome::ConnectionModelJobActive => Err(connection_job_active()),
             _ => Err(unexpected_mutation()),
         }
+    }
+
+    pub async fn prepare_connection_verification(
+        &self,
+        connection_id: &str,
+    ) -> Result<ProviderVerificationTarget, ProviderServiceError> {
+        validate_identifier(connection_id, 32)?;
+        let connection = match self
+            .repository
+            .prepare_provider_connection(connection_id)
+            .await
+            .map_err(ProviderServiceError::dependency)?
+        {
+            ProviderConnectionPreparation::Ready(connection) => *connection,
+            ProviderConnectionPreparation::NotFound => return Err(connection_not_found()),
+            ProviderConnectionPreparation::ModelJobActive => {
+                return Err(connection_job_active());
+            }
+        };
+        let api_key = self.decrypt_credential(&connection).await?;
+        Ok(ProviderVerificationTarget {
+            connection_id: connection.id.clone(),
+            adapter_id: connection.adapter_id.clone(),
+            base_url: connection.base_url.clone(),
+            api_key,
+            allow_private_network: connection.allow_private_network,
+            fingerprint: connection.fingerprint(),
+        })
+    }
+
+    pub async fn finish_connection_verification(
+        &self,
+        target: &ProviderVerificationTarget,
+        result: ProviderVerificationResult,
+    ) -> Result<ProviderVerificationView, ProviderServiceError> {
+        let adapter = require_adapter(&target.adapter_id)?;
+        let error_code = normalize_verification_error(result.error_code.as_deref());
+        let verified = result.verified && error_code.is_none();
+        let models = if verified {
+            bounded_unique_strings(&result.models, 200)
+        } else {
+            Vec::new()
+        };
+        let known = PROVIDER_CAPABILITIES
+            .iter()
+            .map(|definition| definition.id)
+            .collect::<BTreeSet<_>>();
+        let supported = adapter
+            .capability_ids
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let capability_ids = if verified {
+            bounded_unique_strings(&result.capability_ids, PROVIDER_CAPABILITIES.len())
+                .into_iter()
+                .filter(|value| {
+                    known.contains(value.as_str()) && supported.contains(value.as_str())
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let verification = ProviderVerificationWrite {
+            connection_id: target.connection_id.clone(),
+            expected_fingerprint: target.fingerprint.clone(),
+            verified,
+            error_code: if verified {
+                None
+            } else {
+                Some(error_code.unwrap_or_else(|| "verification_failed".to_owned()))
+            },
+            models,
+            capability_ids,
+        };
+        let connection = match self
+            .repository
+            .finish_provider_verification(&verification)
+            .await
+            .map_err(ProviderServiceError::dependency)?
+        {
+            ProviderVerificationWriteOutcome::Applied(connection) => *connection,
+            ProviderVerificationWriteOutcome::NotFound => return Err(connection_not_found()),
+            ProviderVerificationWriteOutcome::ModelJobActive => {
+                return Err(connection_job_active());
+            }
+            ProviderVerificationWriteOutcome::Changed => {
+                return Err(ProviderServiceError::public(
+                    ProviderServiceErrorKind::Conflict,
+                    "connection_changed",
+                    "The connection changed while verification was running. Verify it again.",
+                ));
+            }
+        };
+        let connection = ProviderConnectionView::from(&connection);
+        Ok(ProviderVerificationView {
+            verified: connection.verification_status == ProviderVerificationStatus::Verified,
+            error_code: connection.verification_error_code.clone(),
+            models: connection.verified_models.clone(),
+            connection,
+        })
     }
 
     pub async fn list_model_roles(&self) -> Result<Vec<ModelRoleView>, ProviderServiceError> {
@@ -1199,6 +1376,19 @@ fn bounded_unique_strings(values: &[String], limit: usize) -> Vec<String> {
         .take(limit)
         .cloned()
         .collect()
+}
+
+fn normalize_verification_error(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    {
+        return Some("verification_failed".to_owned());
+    }
+    Some(value.to_owned())
 }
 
 fn capabilities_satisfy(available: &[impl AsRef<str>], required: &[&str]) -> bool {

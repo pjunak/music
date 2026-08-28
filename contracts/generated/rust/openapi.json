@@ -5347,6 +5347,40 @@
         ],
         "type": "object"
       },
+      "ProviderVerificationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/ProviderConnectionOut"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "connection",
+          "verified",
+          "error_code",
+          "models"
+        ],
+        "type": "object"
+      },
       "ReadinessSnapshot": {
         "properties": {
           "components": {
@@ -7757,6 +7791,47 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProviderConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/connections/{connection_id}/verify": {
+      "post": {
+        "operationId": "verify_connection_api_assistant_providers_connections__connection_id__verify_post",
+        "parameters": [
+          {
+            "description": "Connection Id",
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderVerificationOut"
                 }
               }
             },
