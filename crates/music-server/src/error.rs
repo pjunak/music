@@ -308,6 +308,11 @@ impl ApiError {
     }
 
     #[must_use]
+    pub const fn payload_too_large(detail: &'static str) -> Self {
+        Self::plain(StatusCode::PAYLOAD_TOO_LARGE, detail)
+    }
+
+    #[must_use]
     pub const fn plain_not_found(detail: &'static str) -> Self {
         Self::plain(StatusCode::NOT_FOUND, detail)
     }

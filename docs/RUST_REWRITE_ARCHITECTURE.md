@@ -407,9 +407,16 @@ library generation; final diff application is short and is rejected/reconciled w
 mutation changed that generation. External filesystem edits remain eventually reconciled and media
 serving always verifies the current file.
 
-Uploads stream to a uniquely named temporary file in the destination directory, enforce file-count
-and byte limits while streaming, flush and sync, then atomically rename according to the operator's
-`rename`/`overwrite`/`skip` decision. No request body or whole media file is buffered in memory.
+Uploads stream to uniquely named sibling staging files, enforce file-count and per-file byte limits
+while streaming, then flush and sync before transferring ownership to `LibraryCoordinator`. The
+coordinator serializes `rename`/`overwrite`/`skip` resolution with other managed mutations and
+journals the selected destination before publishing it. Create-only publication uses a no-clobber
+hard link and verifies file identity when replaying the link-created crash window; replacement uses
+a deterministic journal-owned backup and completes forward on startup. Skips discard their staged
+file, unsupported media is stored without entering the audio catalog, and a batch publishes one
+final catalog snapshot. Multipart extraction disables Axum's small default body cap only on this
+route; the global request cap includes bounded framing overhead and streaming limits remain
+authoritative. No request body or whole media file is buffered in memory.
 
 Media streaming implements single-range and normal full responses with the same headers the current
 clients require. Range, conditional request, missing-file, traversal, content-type, and disconnect

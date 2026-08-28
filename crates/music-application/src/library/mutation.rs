@@ -16,6 +16,29 @@ pub type LibraryMutationFuture<'a> = Pin<
     >,
 >;
 
+pub type LibraryUploadResolutionFuture<'a> = Pin<
+    Box<dyn Future<Output = Result<LibraryUploadResolution, LibraryMutationFailure>> + Send + 'a>,
+>;
+
+pub type LibraryUploadDiscardFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), LibraryMutationFailure>> + Send + 'a>>;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum UploadConflictPolicy {
+    Rename,
+    Overwrite,
+    Skip,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum LibraryUploadResolution {
+    Publish {
+        destination: LibraryPath,
+        replace_existing: bool,
+    },
+    Skip,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum LibraryFileMutation {
     CreateFolder {
@@ -43,6 +66,11 @@ pub enum LibraryFileMutation {
         path: LibraryPath,
         patch: TrackMetadataPatch,
     },
+    PublishUpload {
+        staged: LibraryPath,
+        destination: LibraryPath,
+        replace_existing: bool,
+    },
 }
 
 impl LibraryFileMutation {
@@ -54,6 +82,7 @@ impl LibraryFileMutation {
             Self::MoveTrack { .. } => "move_track",
             Self::DeleteTrack { .. } => "delete_track",
             Self::UpdateTrackMetadata { .. } => "update_track_metadata",
+            Self::PublishUpload { .. } => "publish_upload",
         })
         .map_err(|_| LibraryMutationValidationError::InvalidJournalOperation)
     }
@@ -92,6 +121,15 @@ impl LibraryFileMutation {
                 "track_id": track_id.get(),
                 "path": path.as_str(),
                 "updates": patch.to_json(),
+            }),
+            Self::PublishUpload {
+                staged,
+                destination,
+                replace_existing,
+            } => json!({
+                "staged": staged.as_str(),
+                "destination": destination.as_str(),
+                "replace_existing": replace_existing,
             }),
         }
     }
@@ -134,6 +172,15 @@ impl LibraryFileMutation {
                         .ok_or(LibraryMutationValidationError::InvalidJournalPlan)?,
                 )
                 .map_err(|_| LibraryMutationValidationError::InvalidJournalPlan)?,
+            }),
+            "publish_upload" => Ok(Self::PublishUpload {
+                staged: parse_path(&entry.plan, "staged")?,
+                destination: parse_path(&entry.plan, "destination")?,
+                replace_existing: entry
+                    .plan
+                    .get("replace_existing")
+                    .and_then(Value::as_bool)
+                    .ok_or(LibraryMutationValidationError::InvalidJournalPlan)?,
             }),
             _ => Err(LibraryMutationValidationError::UnknownJournalOperation),
         }
@@ -183,10 +230,22 @@ pub enum LibraryFileMutationOutcome {
         track_id: TrackId,
         discovered: Option<DiscoveredTrack>,
     },
+    UploadPublished {
+        destination: LibraryPath,
+        discovered: Option<DiscoveredTrack>,
+    },
     Deleted,
 }
 
 pub trait LibraryMutationEffects: std::fmt::Debug + Send + Sync {
+    fn resolve_upload<'a>(
+        &'a self,
+        requested: &'a LibraryPath,
+        policy: UploadConflictPolicy,
+    ) -> LibraryUploadResolutionFuture<'a>;
+
+    fn discard_upload<'a>(&'a self, staged: &'a LibraryPath) -> LibraryUploadDiscardFuture<'a>;
+
     fn apply<'a>(
         &'a self,
         journal_id: &'a RecoveryJournalId,
@@ -281,6 +340,13 @@ pub struct LibraryTrackMutationCommit {
     pub track: IndexedTrack,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryUploadMutationCommit {
+    pub status: LibraryStatus,
+    pub track: Option<IndexedTrack>,
+    pub affected_tracks: u64,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FolderMutationResult {
     pub path: LibraryPath,
@@ -347,6 +413,11 @@ mod tests {
                     path: LibraryPath::parse("New/track.mp3")?,
                     patch,
                 }
+            },
+            LibraryFileMutation::PublishUpload {
+                staged: LibraryPath::parse("Uploads/.song.1234.upload-partial")?,
+                destination: LibraryPath::parse("Uploads/song.mp3")?,
+                replace_existing: true,
             },
         ];
         for mutation in mutations {

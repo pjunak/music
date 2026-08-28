@@ -508,6 +508,7 @@ mod tests {
             ("MAX_UPLOAD_FILES", "1".to_owned()),
             ("MAX_UPLOAD_FILE_BYTES", "4".to_owned()),
         ])?;
+        let oversized_content_length = config.request_body_limit_bytes + 1;
         let router = build_router(&config, HealthRegistry::new())?;
 
         let preflight = router
@@ -534,8 +535,8 @@ mod tests {
         let too_large = router
             .oneshot(
                 Request::post("/api/does-not-exist")
-                    .header("content-length", "5")
-                    .body(Body::from("12345"))?,
+                    .header("content-length", oversized_content_length.to_string())
+                    .body(Body::from("x"))?,
             )
             .await?;
         assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);

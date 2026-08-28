@@ -21,14 +21,14 @@ pub use delivery::{
 };
 pub use discovery::{
     FilesystemDiscoveryError, FilesystemLibraryDiscovery, LibraryDirectory, inspect_library_track,
-    list_library_directories,
+    is_supported_library_path, list_library_directories,
 };
 pub use metadata::{
     AudioMetadata, FfmpegTools, MetadataAdapter, MetadataError, MetadataWriteCapability,
     StagedTagUpdate, TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata,
     stage_tag_update,
 };
-pub use mutation::FilesystemLibraryMutations;
+pub use mutation::{FilesystemLibraryMutations, library_upload_target_exists};
 
 pub use path::{LibraryRoot, MediaRoot, RootedPathError, SfxRoot};
 

@@ -205,6 +205,8 @@ impl AppRuntime {
                 coordinator: self.library.clone(),
                 root: self.library_root.clone(),
                 metadata: self.library_metadata.clone(),
+                max_upload_files: self.config.max_upload_files,
+                max_upload_file_bytes: self.config.max_upload_file_bytes,
             }),
         )
     }
@@ -600,6 +602,25 @@ mod tests {
             .and_then(|case| case["source_base64"].as_str())
             .ok_or("WAV metadata fixture is missing")?;
         Ok(STANDARD.decode(encoded)?)
+    }
+
+    fn multipart_upload(files: &[(&str, &[u8])]) -> (String, Vec<u8>) {
+        let boundary = "music-rust-upload-boundary";
+        let mut body = Vec::new();
+        for (name, bytes) in files {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!(
+                    "Content-Disposition: form-data; name=\"files\"; filename=\"{name}\"\r\n\
+                     Content-Type: application/octet-stream\r\n\r\n"
+                )
+                .as_bytes(),
+            );
+            body.extend_from_slice(bytes);
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        (format!("multipart/form-data; boundary={boundary}"), body)
     }
 
     #[tokio::test]
@@ -998,6 +1019,201 @@ mod tests {
             .is_empty()
         );
 
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn upload_routes_stream_resolve_conflicts_and_commit_the_catalog()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let wav = reference_wav()?;
+        let mut config = runtime_config(directory.path())?;
+        config.max_upload_files = 2;
+        config.max_upload_file_bytes = 2_200_000;
+        let runtime = AppRuntime::start(config).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?
+            .to_owned();
+
+        let (content_type, body) = multipart_upload(&[("song.wav", &wav)]);
+        let first = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Uploads")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?;
+        assert_eq!(first.status(), StatusCode::CREATED);
+        let first_json: Value =
+            serde_json::from_slice(&to_bytes(first.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(first_json["destination"], "Uploads");
+        assert_eq!(first_json["saved"][0]["path"], "Uploads/song.wav");
+        let first_id = first_json["saved"][0]["id"]
+            .as_i64()
+            .ok_or("uploaded track id is missing")?;
+
+        let (content_type, body) = multipart_upload(&[("song.wav", &wav)]);
+        let renamed = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Uploads")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?;
+        assert_eq!(renamed.status(), StatusCode::CREATED);
+        let renamed_json: Value =
+            serde_json::from_slice(&to_bytes(renamed.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(renamed_json["saved"][0]["path"], "Uploads/song-1.wav");
+
+        let (content_type, body) = multipart_upload(&[("song.wav", &wav)]);
+        let overwritten = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Uploads&conflict=overwrite")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?;
+        assert_eq!(overwritten.status(), StatusCode::CREATED);
+        let overwritten_json: Value =
+            serde_json::from_slice(&to_bytes(overwritten.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(overwritten_json["saved"][0]["id"], first_id);
+        assert_eq!(overwritten_json["saved"][0]["path"], "Uploads/song.wav");
+
+        let (content_type, body) = multipart_upload(&[("song.wav", &wav)]);
+        let skipped = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Uploads&conflict=skip")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?;
+        assert_eq!(skipped.status(), StatusCode::CREATED);
+        let skipped_json: Value =
+            serde_json::from_slice(&to_bytes(skipped.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(skipped_json["saved"].as_array().map(Vec::len), Some(0));
+        assert_eq!(skipped_json["skipped"][0], "song.wav");
+
+        let large_unindexed = vec![0_u8; 2_100_000];
+        let (content_type, body) = multipart_upload(&[("large-unindexed.bin", &large_unindexed)]);
+        let large = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Uploads")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?;
+        assert_eq!(large.status(), StatusCode::CREATED);
+        assert!(
+            directory
+                .path()
+                .join("music/Uploads/large-unindexed.bin")
+                .is_file()
+        );
+
+        let checked = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload/check")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"items":[{"dest":"Uploads","name":"song.wav"},{"dest":"Uploads","name":"new.wav"}]}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(checked.status(), StatusCode::OK);
+        let checked_json: Value =
+            serde_json::from_slice(&to_bytes(checked.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(checked_json["collisions"].as_array().map(Vec::len), Some(1));
+        assert_eq!(checked_json["collisions"][0]["name"], "song.wav");
+
+        let (content_type, body) = multipart_upload(&[
+            ("flood-1.wav", &wav),
+            ("flood-2.wav", &wav),
+            ("flood-3.wav", &wav),
+        ]);
+        let too_many = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Flood")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?;
+        assert_eq!(too_many.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(!directory.path().join("music/Flood/flood-1.wav").exists());
+
+        let oversized = vec![0_u8; 2_200_001];
+        let (content_type, body) = multipart_upload(&[("oversized.wav", &oversized)]);
+        let too_large = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Oversized")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?;
+        assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(
+            std::fs::read_dir(directory.path().join("music/Oversized"))?
+                .all(|entry| entry.is_ok_and(|entry| !entry.path().is_file()))
+        );
+
+        assert_eq!(runtime.library_status().discovered_tracks, 2);
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                runtime.storage.as_ref(),
+                RecoveryDomain::Library,
+            )
+            .await?
+            .is_empty()
+        );
         runtime.shutdown().await?;
         Ok(())
     }

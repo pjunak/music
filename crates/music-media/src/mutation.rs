@@ -4,15 +4,18 @@ use std::path::Path;
 
 use music_application::library::{
     LibraryFileMutation, LibraryFileMutationOutcome, LibraryMutationEffects,
-    LibraryMutationFailure, LibraryMutationFailureKind, LibraryMutationFuture, TrackMetadataField,
-    TrackMetadataPatch, TrackMetadataPatchValue,
+    LibraryMutationFailure, LibraryMutationFailureKind, LibraryMutationFuture,
+    LibraryUploadDiscardFuture, LibraryUploadResolution, LibraryUploadResolutionFuture,
+    TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue, UploadConflictPolicy,
 };
 use music_application::recovery::RecoveryJournalId;
 
 use crate::{
     FilesystemDiscoveryError, LibraryRoot, MetadataAdapter, MetadataError, RootedPathError,
-    TagField, TagPatch, inspect_library_track,
+    TagField, TagPatch, inspect_library_track, is_supported_library_path,
 };
+
+const MAX_UPLOAD_RENAME_ATTEMPTS: u32 = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct FilesystemLibraryMutations {
@@ -242,6 +245,17 @@ impl FilesystemLibraryMutations {
                 path,
                 patch,
             } => self.apply_metadata_update(journal_id, track_id, path, &patch, replay),
+            LibraryFileMutation::PublishUpload {
+                staged,
+                destination,
+                replace_existing,
+            } => self.apply_upload_publish(
+                journal_id,
+                &staged,
+                destination,
+                replace_existing,
+                replay,
+            ),
         }
     }
 
@@ -367,6 +381,311 @@ impl FilesystemLibraryMutations {
             discovered: Some(discovered),
         })
     }
+
+    fn apply_upload_publish(
+        &self,
+        journal_id: &RecoveryJournalId,
+        staged: &music_domain::LibraryPath,
+        destination: music_domain::LibraryPath,
+        replace_existing: bool,
+        replay: bool,
+    ) -> Result<LibraryFileMutationOutcome, FilesystemMutationError> {
+        let staged_absolute = self
+            .root
+            .resolve_for_creation(staged)
+            .map_err(FilesystemMutationError::RootedPath)?;
+        let destination_absolute = self
+            .root
+            .resolve_for_creation(&destination)
+            .map_err(FilesystemMutationError::RootedPath)?;
+        let backup_path = upload_backup_path(&destination, journal_id)?;
+        let backup_absolute = self
+            .root
+            .resolve_for_creation(&backup_path)
+            .map_err(FilesystemMutationError::RootedPath)?;
+        let stage_state = mutation_artifact_state(&staged_absolute)?;
+        let target_state = upload_target_state(&destination_absolute)?;
+        let backup_state = mutation_artifact_state(&backup_absolute)?;
+
+        if replace_existing {
+            publish_replacing_upload(
+                &staged_absolute,
+                &destination_absolute,
+                &backup_absolute,
+                ReplacingUploadState {
+                    staged: stage_state,
+                    target: target_state,
+                    backup: backup_state,
+                },
+                replay,
+            )?;
+        } else {
+            if backup_state != MutationArtifactState::Missing {
+                return Err(FilesystemMutationError::RecoveryArtifactConflict);
+            }
+            publish_new_upload(
+                &staged_absolute,
+                &destination_absolute,
+                stage_state,
+                target_state,
+                replay,
+            )?;
+        }
+
+        let discovered = if is_supported_library_path(&destination) {
+            Some(
+                inspect_library_track(&self.root, &self.metadata, &destination)
+                    .map_err(FilesystemMutationError::Discovery)?,
+            )
+        } else {
+            None
+        };
+        Ok(LibraryFileMutationOutcome::UploadPublished {
+            destination,
+            discovered,
+        })
+    }
+}
+
+pub fn library_upload_target_exists(
+    root: &LibraryRoot,
+    path: &music_domain::LibraryPath,
+) -> Result<bool, RootedPathError> {
+    let absolute = match root.resolve_for_creation(path) {
+        Ok(absolute) => absolute,
+        Err(RootedPathError::SymbolicLinkTarget(_)) => return Ok(true),
+        Err(error) => return Err(error),
+    };
+    match std::fs::symlink_metadata(&absolute) {
+        Ok(_) => Ok(true),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(RootedPathError::Io {
+            operation: "inspect library upload target",
+            path: absolute,
+            source,
+        }),
+    }
+}
+
+fn resolve_upload_destination(
+    root: &LibraryRoot,
+    requested: &music_domain::LibraryPath,
+    policy: UploadConflictPolicy,
+) -> Result<LibraryUploadResolution, FilesystemMutationError> {
+    if !library_upload_target_exists(root, requested)
+        .map_err(FilesystemMutationError::RootedPath)?
+    {
+        return Ok(LibraryUploadResolution::Publish {
+            destination: requested.clone(),
+            replace_existing: policy == UploadConflictPolicy::Overwrite,
+        });
+    }
+    match policy {
+        UploadConflictPolicy::Overwrite => {
+            let absolute = root
+                .resolve_for_creation(requested)
+                .map_err(|error| match error {
+                    RootedPathError::SymbolicLinkTarget(_) => {
+                        FilesystemMutationError::UnexpectedMutationArtifact
+                    }
+                    other => FilesystemMutationError::RootedPath(other),
+                })?;
+            if upload_target_state(&absolute)? != UploadTargetState::RegularFile {
+                return Err(FilesystemMutationError::UnexpectedMutationArtifact);
+            }
+            Ok(LibraryUploadResolution::Publish {
+                destination: requested.clone(),
+                replace_existing: true,
+            })
+        }
+        UploadConflictPolicy::Skip => Ok(LibraryUploadResolution::Skip),
+        UploadConflictPolicy::Rename => {
+            for sequence in 1..=MAX_UPLOAD_RENAME_ATTEMPTS {
+                let candidate = renamed_upload_path(requested, sequence)?;
+                if !library_upload_target_exists(root, &candidate)
+                    .map_err(FilesystemMutationError::RootedPath)?
+                {
+                    return Ok(LibraryUploadResolution::Publish {
+                        destination: candidate,
+                        replace_existing: false,
+                    });
+                }
+            }
+            Err(FilesystemMutationError::UploadRenameExhausted)
+        }
+    }
+}
+
+fn renamed_upload_path(
+    requested: &music_domain::LibraryPath,
+    sequence: u32,
+) -> Result<music_domain::LibraryPath, FilesystemMutationError> {
+    let file_name = requested.file_name();
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(file_name);
+    let suffix = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .map_or_else(String::new, |extension| format!(".{extension}"));
+    let candidate = format!("{stem}-{sequence}{suffix}");
+    requested
+        .parent()
+        .map_or_else(
+            || music_domain::LibraryPath::parse(&candidate),
+            |parent| parent.join(&candidate),
+        )
+        .map_err(|_| FilesystemMutationError::InvalidMutationPath)
+}
+
+fn upload_backup_path(
+    destination: &music_domain::LibraryPath,
+    journal_id: &RecoveryJournalId,
+) -> Result<music_domain::LibraryPath, FilesystemMutationError> {
+    let name = format!(
+        ".{}.{}.upload-backup",
+        destination.file_name(),
+        journal_id.as_str()
+    );
+    destination
+        .parent()
+        .map_or_else(
+            || music_domain::LibraryPath::parse(&name),
+            |parent| parent.join(&name),
+        )
+        .map_err(|_| FilesystemMutationError::InvalidMutationPath)
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum UploadTargetState {
+    Missing,
+    RegularFile,
+    Occupied,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct ReplacingUploadState {
+    staged: MutationArtifactState,
+    target: UploadTargetState,
+    backup: MutationArtifactState,
+}
+
+fn upload_target_state(path: &Path) -> Result<UploadTargetState, FilesystemMutationError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Ok(UploadTargetState::Occupied)
+        }
+        Ok(_) => Ok(UploadTargetState::RegularFile),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            Ok(UploadTargetState::Missing)
+        }
+        Err(source) => Err(FilesystemMutationError::Io {
+            operation: "inspect library upload destination",
+            source,
+        }),
+    }
+}
+
+fn publish_new_upload(
+    staged: &Path,
+    destination: &Path,
+    stage_state: MutationArtifactState,
+    target_state: UploadTargetState,
+    replay: bool,
+) -> Result<(), FilesystemMutationError> {
+    match (stage_state, target_state) {
+        (MutationArtifactState::RegularFile, UploadTargetState::Missing) => {
+            match std::fs::hard_link(staged, destination) {
+                Ok(()) => {}
+                Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(FilesystemMutationError::DestinationExists);
+                }
+                Err(source) => {
+                    return Err(FilesystemMutationError::SafeIo {
+                        operation: "publish new library upload",
+                        source,
+                    });
+                }
+            }
+            remove_regular_file_if_present(staged, "remove published library upload stage")
+        }
+        (MutationArtifactState::RegularFile, UploadTargetState::RegularFile)
+            if replay && files_share_identity(staged, destination)? =>
+        {
+            remove_regular_file_if_present(staged, "finish published library upload")
+        }
+        (MutationArtifactState::Missing, UploadTargetState::RegularFile) if replay => Ok(()),
+        (MutationArtifactState::Missing, UploadTargetState::Missing) => {
+            Err(FilesystemMutationError::UploadStageMissing)
+        }
+        (_, UploadTargetState::Occupied) => Err(FilesystemMutationError::RecoveryArtifactConflict),
+        _ => Err(FilesystemMutationError::DestinationExists),
+    }
+}
+
+fn publish_replacing_upload(
+    staged: &Path,
+    destination: &Path,
+    backup: &Path,
+    state: ReplacingUploadState,
+    replay: bool,
+) -> Result<(), FilesystemMutationError> {
+    if state.target == UploadTargetState::Occupied {
+        return Err(FilesystemMutationError::RecoveryArtifactConflict);
+    }
+    match state.staged {
+        MutationArtifactState::RegularFile => {
+            match (state.target, state.backup) {
+                (UploadTargetState::RegularFile, MutationArtifactState::Missing) => {
+                    std::fs::rename(destination, backup).map_err(|source| {
+                        FilesystemMutationError::Io {
+                            operation: "stage replaced library upload",
+                            source,
+                        }
+                    })?;
+                }
+                (UploadTargetState::Missing, _) => {}
+                (UploadTargetState::RegularFile, MutationArtifactState::RegularFile) => {
+                    return Err(FilesystemMutationError::RecoveryArtifactConflict);
+                }
+                (UploadTargetState::Occupied, _) => {
+                    return Err(FilesystemMutationError::RecoveryArtifactConflict);
+                }
+            }
+            std::fs::rename(staged, destination).map_err(|source| FilesystemMutationError::Io {
+                operation: "publish replacing library upload",
+                source,
+            })?;
+            remove_regular_file_if_present(backup, "remove replaced library upload backup")
+        }
+        MutationArtifactState::Missing
+            if replay && state.target == UploadTargetState::RegularFile =>
+        {
+            remove_regular_file_if_present(backup, "finish replacing library upload")
+        }
+        MutationArtifactState::Missing
+            if state.target == UploadTargetState::Missing
+                && state.backup == MutationArtifactState::RegularFile =>
+        {
+            std::fs::rename(backup, destination).map_err(|source| FilesystemMutationError::Io {
+                operation: "restore interrupted library upload",
+                source,
+            })?;
+            Err(FilesystemMutationError::UploadStageMissing)
+        }
+        MutationArtifactState::Missing => Err(FilesystemMutationError::UploadStageMissing),
+    }
+}
+
+fn files_share_identity(left: &Path, right: &Path) -> Result<bool, FilesystemMutationError> {
+    same_file::is_same_file(left, right).map_err(|source| FilesystemMutationError::Io {
+        operation: "compare staged and published upload identities",
+        source,
+    })
 }
 
 fn metadata_sibling_path(
@@ -461,6 +780,54 @@ fn mutation_artifact_state(path: &Path) -> Result<MutationArtifactState, Filesys
 }
 
 impl LibraryMutationEffects for FilesystemLibraryMutations {
+    fn resolve_upload<'a>(
+        &'a self,
+        requested: &'a music_domain::LibraryPath,
+        policy: UploadConflictPolicy,
+    ) -> LibraryUploadResolutionFuture<'a> {
+        let root = self.root.clone();
+        let requested = requested.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                resolve_upload_destination(&root, &requested, policy)
+            })
+            .await
+            .map_err(|source| {
+                LibraryMutationFailure::without_recovery(
+                    LibraryMutationFailureKind::Io,
+                    "upload_resolution_worker_failed",
+                    Box::new(source),
+                )
+            })?
+            .map_err(map_failure)
+        })
+    }
+
+    fn discard_upload<'a>(
+        &'a self,
+        staged: &'a music_domain::LibraryPath,
+    ) -> LibraryUploadDiscardFuture<'a> {
+        let root = self.root.clone();
+        let staged = staged.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let absolute = root
+                    .resolve_for_creation(&staged)
+                    .map_err(FilesystemMutationError::RootedPath)?;
+                remove_regular_file_if_present(&absolute, "discard staged library upload")
+            })
+            .await
+            .map_err(|source| {
+                LibraryMutationFailure::without_recovery(
+                    LibraryMutationFailureKind::Io,
+                    "upload_discard_worker_failed",
+                    Box::new(source),
+                )
+            })?
+            .map_err(map_failure)
+        })
+    }
+
     fn apply<'a>(
         &'a self,
         journal_id: &'a RecoveryJournalId,
@@ -495,12 +862,19 @@ enum FilesystemMutationError {
         operation: &'static str,
         source: std::io::Error,
     },
+    SafeIo {
+        operation: &'static str,
+        source: std::io::Error,
+    },
     NotADirectory,
     DestinationExists,
     DirectoryNotEmpty,
     InvalidMove,
     InvalidMutationPath,
     UnexpectedMutationArtifact,
+    RecoveryArtifactConflict,
+    UploadStageMissing,
+    UploadRenameExhausted,
 }
 
 impl Display for FilesystemMutationError {
@@ -510,13 +884,21 @@ impl Display for FilesystemMutationError {
             Self::Discovery(source) => Display::fmt(source, formatter),
             Self::Metadata(source) => Display::fmt(source, formatter),
             Self::Io { operation, .. } => write!(formatter, "failed to {operation}"),
+            Self::SafeIo { operation, .. } => write!(formatter, "failed to {operation}"),
             Self::NotADirectory => formatter.write_str("library folder path is not a directory"),
-            Self::DestinationExists => formatter.write_str("folder destination already exists"),
+            Self::DestinationExists => formatter.write_str("library destination already exists"),
             Self::DirectoryNotEmpty => formatter.write_str("library folder is not empty"),
             Self::InvalidMove => formatter.write_str("folder destination is invalid"),
             Self::InvalidMutationPath => formatter.write_str("mutation path is invalid"),
             Self::UnexpectedMutationArtifact => {
                 formatter.write_str("mutation staging artifact is invalid")
+            }
+            Self::RecoveryArtifactConflict => {
+                formatter.write_str("recovery artifact conflicts with the library destination")
+            }
+            Self::UploadStageMissing => formatter.write_str("staged library upload is missing"),
+            Self::UploadRenameExhausted => {
+                formatter.write_str("no available upload filename was found")
             }
         }
     }
@@ -529,12 +911,16 @@ impl Error for FilesystemMutationError {
             Self::Discovery(source) => Some(source),
             Self::Metadata(source) => Some(source),
             Self::Io { source, .. } => Some(source),
+            Self::SafeIo { source, .. } => Some(source),
             Self::NotADirectory
             | Self::DestinationExists
             | Self::DirectoryNotEmpty
             | Self::InvalidMove
             | Self::InvalidMutationPath
-            | Self::UnexpectedMutationArtifact => None,
+            | Self::UnexpectedMutationArtifact
+            | Self::RecoveryArtifactConflict
+            | Self::UploadStageMissing
+            | Self::UploadRenameExhausted => None,
         }
     }
 }
@@ -605,6 +991,11 @@ fn map_failure(error: FilesystemMutationError) -> LibraryMutationFailure {
             "library_file_io_failed",
             true,
         ),
+        FilesystemMutationError::SafeIo { .. } => (
+            LibraryMutationFailureKind::Io,
+            "library_file_io_failed",
+            false,
+        ),
         FilesystemMutationError::Discovery(_) => (
             LibraryMutationFailureKind::Io,
             "track_metadata_refresh_failed",
@@ -622,12 +1013,27 @@ fn map_failure(error: FilesystemMutationError) -> LibraryMutationFailure {
         ),
         FilesystemMutationError::InvalidMutationPath => (
             LibraryMutationFailureKind::Invalid,
-            "metadata_mutation_path_invalid",
+            "library_mutation_path_invalid",
             false,
         ),
         FilesystemMutationError::UnexpectedMutationArtifact => (
             LibraryMutationFailureKind::Conflict,
             "metadata_mutation_artifact_conflict",
+            false,
+        ),
+        FilesystemMutationError::RecoveryArtifactConflict => (
+            LibraryMutationFailureKind::Conflict,
+            "library_recovery_artifact_conflict",
+            true,
+        ),
+        FilesystemMutationError::UploadStageMissing => (
+            LibraryMutationFailureKind::NotFound,
+            "upload_stage_missing",
+            false,
+        ),
+        FilesystemMutationError::UploadRenameExhausted => (
+            LibraryMutationFailureKind::Conflict,
+            "upload_rename_exhausted",
             false,
         ),
     };
@@ -646,7 +1052,8 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
     use music_application::library::{
         LibraryFileMutation, LibraryFileMutationOutcome, LibraryMutationEffects,
-        LibraryMutationFailureKind, TrackMetadataField, TrackMetadataPatch,
+        LibraryMutationFailureKind, LibraryUploadResolution, TrackMetadataField,
+        TrackMetadataPatch, UploadConflictPolicy,
     };
     use music_application::recovery::RecoveryJournalId;
     use music_domain::{LibraryPath, TrackId};
@@ -973,6 +1380,144 @@ mod tests {
         ));
         assert!(!root.join(recovery_stage.as_str()).exists());
         assert!(!root.join(recovery_backup.as_str()).exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn upload_effects_resolve_publish_replace_skip_and_replay()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/reference/v1/metadata.examples.json"
+        ))?;
+        let wav = fixture["cases"]
+            .as_array()
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case["extension"].as_str() == Some(".wav"))
+            })
+            .and_then(|case| case["source_base64"].as_str())
+            .ok_or("WAV metadata fixture is missing")?;
+        let source_bytes = STANDARD.decode(wav)?;
+        let directory = tempdir()?;
+        let root = directory.path().join("music");
+        std::fs::create_dir_all(root.join("Uploads"))?;
+        let effects = FilesystemLibraryMutations::new(
+            LibraryRoot::open(&root)?,
+            crate::MetadataAdapter::native_only(),
+        );
+
+        let requested = LibraryPath::parse("Uploads/song.wav")?;
+        let staged = LibraryPath::parse("Uploads/.upload-first.partial")?;
+        std::fs::write(root.join(staged.as_str()), &source_bytes)?;
+        assert_eq!(
+            effects
+                .resolve_upload(&requested, UploadConflictPolicy::Rename)
+                .await?,
+            LibraryUploadResolution::Publish {
+                destination: requested.clone(),
+                replace_existing: false,
+            }
+        );
+        let first_id = RecoveryJournalId::new();
+        let first = LibraryFileMutation::PublishUpload {
+            staged: staged.clone(),
+            destination: requested.clone(),
+            replace_existing: false,
+        };
+        assert!(matches!(
+            effects.apply(&first_id, first.clone(), false).await?,
+            LibraryFileMutationOutcome::UploadPublished {
+                discovered: Some(_),
+                ..
+            }
+        ));
+        assert!(!root.join(staged.as_str()).exists());
+        assert!(root.join(requested.as_str()).is_file());
+        assert!(matches!(
+            effects.apply(&first_id, first, true).await?,
+            LibraryFileMutationOutcome::UploadPublished { .. }
+        ));
+
+        let renamed_stage = LibraryPath::parse("Uploads/.upload-second.partial")?;
+        std::fs::write(root.join(renamed_stage.as_str()), &source_bytes)?;
+        let LibraryUploadResolution::Publish {
+            destination: renamed,
+            replace_existing,
+        } = effects
+            .resolve_upload(&requested, UploadConflictPolicy::Rename)
+            .await?
+        else {
+            return Err("rename upload was unexpectedly skipped".into());
+        };
+        assert_eq!(renamed.as_str(), "Uploads/song-1.wav");
+        assert!(!replace_existing);
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::PublishUpload {
+                    staged: renamed_stage,
+                    destination: renamed.clone(),
+                    replace_existing,
+                },
+                false,
+            )
+            .await?;
+        assert!(root.join(renamed.as_str()).is_file());
+
+        let overwrite_stage = LibraryPath::parse("Uploads/.upload-overwrite.partial")?;
+        std::fs::write(root.join(overwrite_stage.as_str()), &source_bytes)?;
+        assert!(matches!(
+            effects
+                .resolve_upload(&requested, UploadConflictPolicy::Overwrite)
+                .await?,
+            LibraryUploadResolution::Publish {
+                replace_existing: true,
+                ..
+            }
+        ));
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::PublishUpload {
+                    staged: overwrite_stage,
+                    destination: requested.clone(),
+                    replace_existing: true,
+                },
+                false,
+            )
+            .await?;
+
+        let skipped_stage = LibraryPath::parse("Uploads/.upload-skipped.partial")?;
+        std::fs::write(root.join(skipped_stage.as_str()), &source_bytes)?;
+        assert_eq!(
+            effects
+                .resolve_upload(&requested, UploadConflictPolicy::Skip)
+                .await?,
+            LibraryUploadResolution::Skip
+        );
+        effects.discard_upload(&skipped_stage).await?;
+        assert!(!root.join(skipped_stage.as_str()).exists());
+
+        let replay_stage = LibraryPath::parse("Uploads/.upload-replay.partial")?;
+        let replay_target = LibraryPath::parse("Uploads/replay.wav")?;
+        std::fs::write(root.join(replay_stage.as_str()), &source_bytes)?;
+        std::fs::hard_link(
+            root.join(replay_stage.as_str()),
+            root.join(replay_target.as_str()),
+        )?;
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::PublishUpload {
+                    staged: replay_stage.clone(),
+                    destination: replay_target,
+                    replace_existing: false,
+                },
+                true,
+            )
+            .await?;
+        assert!(!root.join(replay_stage.as_str()).exists());
         Ok(())
     }
 }

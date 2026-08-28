@@ -11,6 +11,8 @@ use music_storage::SecretString;
 const DEFAULT_DATABASE_URL: &str = "sqlite:///./app.db";
 const DEFAULT_ALLOWED_ORIGINS: &str = "http://localhost:5173";
 const DEFAULT_STATIC_DIR: &str = "/app/static";
+const MULTIPART_BASE_OVERHEAD_BYTES: u64 = 64 * 1_024;
+const MULTIPART_FILE_OVERHEAD_BYTES: u64 = 8 * 1_024;
 
 const ENVIRONMENT_NAMES: &[&str] = &[
     "DATABASE_URL",
@@ -109,17 +111,32 @@ impl AppConfig {
             1024_u64.pow(3),
             "a positive integer number of bytes",
         )?;
+        let upload_file_count = u64::try_from(max_upload_files).map_err(|_| {
+            ConfigError::invalid("MAX_UPLOAD_FILES", "a platform-sized positive integer")
+        })?;
         let aggregate_upload_bytes = max_upload_file_bytes
-            .checked_mul(u64::try_from(max_upload_files).map_err(|_| {
-                ConfigError::invalid("MAX_UPLOAD_FILES", "a platform-sized positive integer")
-            })?)
+            .checked_mul(upload_file_count)
             .ok_or_else(|| {
                 ConfigError::invalid(
                     "MAX_UPLOAD_FILES/MAX_UPLOAD_FILE_BYTES",
                     "a bounded aggregate request size",
                 )
             })?;
-        let request_body_limit_bytes = usize::try_from(aggregate_upload_bytes).map_err(|_| {
+        let multipart_overhead = upload_file_count
+            .checked_mul(MULTIPART_FILE_OVERHEAD_BYTES)
+            .and_then(|overhead| overhead.checked_add(MULTIPART_BASE_OVERHEAD_BYTES))
+            .ok_or_else(|| {
+                ConfigError::invalid("MAX_UPLOAD_FILES", "a bounded multipart request overhead")
+            })?;
+        let request_body_limit = aggregate_upload_bytes
+            .checked_add(multipart_overhead)
+            .ok_or_else(|| {
+                ConfigError::invalid(
+                    "MAX_UPLOAD_FILES/MAX_UPLOAD_FILE_BYTES",
+                    "a bounded multipart request size",
+                )
+            })?;
+        let request_body_limit_bytes = usize::try_from(request_body_limit).map_err(|_| {
             ConfigError::invalid(
                 "MAX_UPLOAD_FILES/MAX_UPLOAD_FILE_BYTES",
                 "an aggregate size supported by this platform",
@@ -563,7 +580,7 @@ mod tests {
             ["https://music.example", "http://localhost:5173"]
         );
         assert!(!config.session_cookie_secure);
-        assert_eq!(config.request_body_limit_bytes, 8192);
+        assert_eq!(config.request_body_limit_bytes, 90_112);
         assert_eq!(config.log_level, LogLevel::Warn);
         let debug = format!("{config:?}");
         assert!(debug.contains("[REDACTED]"));

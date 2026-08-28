@@ -1,9 +1,11 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Body;
+use axum::extract::multipart::{Field, MultipartError, MultipartRejection};
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
-use axum::extract::{Path, Query, Request, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State};
 use axum::http::header::{
     CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS,
 };
@@ -12,15 +14,17 @@ use axum::response::{IntoResponse, Response};
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::library::{
     FolderMutationResult, LibraryCoordinatorError, LibraryCoordinatorHandle,
-    LibraryMutationFailureKind, LibrarySearch, LibraryService, LibrarySortKey, SortOrder,
-    TrackMetadataField, TrackMetadataPatch,
+    LibraryMutationFailureKind, LibrarySearch, LibraryService, LibrarySortKey,
+    LibraryUploadBatchItem, SortOrder, StagedLibraryUpload, TrackMetadataField, TrackMetadataPatch,
+    UploadConflictPolicy,
 };
 use music_domain::{IndexedTrack, LibraryPath, TrackId};
 use music_media::{
-    LibraryRoot, MediaDeliveryError, MetadataAdapter, list_library_directories,
-    read_library_cover_art, resolve_library_media_file,
+    LibraryRoot, MediaDeliveryError, MetadataAdapter, library_upload_target_exists,
+    list_library_directories, read_library_cover_art, resolve_library_media_file,
 };
 use serde::{Deserialize, Deserializer, Serialize};
+use tokio::io::AsyncWriteExt;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 use utoipa::openapi::RefOr;
@@ -28,6 +32,7 @@ use utoipa::openapi::schema::{AnyOfBuilder, ArrayBuilder, ObjectBuilder, Schema,
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use uuid::Uuid;
 
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_integer,
@@ -41,9 +46,14 @@ pub(crate) struct RuntimeLibrary {
     pub(crate) coordinator: LibraryCoordinatorHandle,
     pub(crate) root: LibraryRoot,
     pub(crate) metadata: MetadataAdapter,
+    pub(crate) max_upload_files: usize,
+    pub(crate) max_upload_file_bytes: u64,
 }
 
 pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
+    let upload = OpenApiRouter::default()
+        .routes(routes!(upload))
+        .layer(DefaultBodyLimit::disable());
     OpenApiRouter::default()
         .routes(routes!(search))
         .routes(routes!(tree))
@@ -51,6 +61,8 @@ pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(create_folder))
         .routes(routes!(delete_folder))
         .routes(routes!(rename_folder))
+        .merge(upload)
+        .routes(routes!(upload_check))
         .routes(routes!(tracks_batch))
         .routes(routes!(bulk_update_metadata))
         .routes(routes!(bulk_move_tracks))
@@ -223,6 +235,96 @@ struct BulkDeleteResponse {
     #[schema(value_type = Vec<i128>)]
     deleted_ids: Vec<i64>,
     skipped: Vec<BulkActionSkipResponse>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum UploadConflictQuery {
+    #[default]
+    Rename,
+    Overwrite,
+    Skip,
+}
+
+impl From<UploadConflictQuery> for UploadConflictPolicy {
+    fn from(value: UploadConflictQuery) -> Self {
+        match value {
+            UploadConflictQuery::Rename => Self::Rename,
+            UploadConflictQuery::Overwrite => Self::Overwrite,
+            UploadConflictQuery::Skip => Self::Skip,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct UploadQuery {
+    /// Destination folder under MUSIC_DIR.
+    #[serde(default = "default_upload_destination")]
+    #[param(default = "Uploads", required = false)]
+    dest: String,
+    /// Policy for existing files.
+    #[serde(default)]
+    #[param(schema_with = upload_conflict_schema, required = false)]
+    conflict: UploadConflictQuery,
+}
+
+fn upload_conflict_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["rename", "overwrite", "skip"]))
+        .default(Some(serde_json::json!("rename")))
+        .into()
+}
+
+fn default_upload_destination() -> String {
+    "Uploads".to_owned()
+}
+
+#[derive(Debug, ToSchema)]
+#[schema(as = Body_upload_api_library_upload_post)]
+#[allow(dead_code)]
+struct LibraryUploadMultipartBody {
+    #[schema(schema_with = multipart_upload_files_schema)]
+    files: Vec<String>,
+}
+
+fn multipart_upload_files_schema() -> RefOr<Schema> {
+    ArrayBuilder::new()
+        .items(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .content_media_type("application/octet-stream"),
+        )
+        .into()
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = UploadResult)]
+struct UploadResponse {
+    saved: Vec<TrackResponse>,
+    destination: String,
+    #[schema(required = false)]
+    skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[schema(as = UploadCheckItem)]
+struct UploadCheckItemRequest {
+    dest: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = UploadCheckRequest)]
+struct UploadCheckRequest {
+    items: Vec<UploadCheckItemRequest>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = UploadCheckResponse)]
+struct UploadCheckResponse {
+    collisions: Vec<UploadCheckItemRequest>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1234,6 +1336,140 @@ async fn cover(
 
 #[utoipa::path(
     post,
+    path = "/library/upload",
+    params(UploadQuery),
+    request_body(content = LibraryUploadMultipartBody, content_type = "multipart/form-data"),
+    responses(
+        (status = 201, description = "Successful Response", body = UploadResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn upload(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    query: Result<Query<UploadQuery>, QueryRejection>,
+    multipart: Result<Multipart, MultipartRejection>,
+) -> Result<(StatusCode, Json<UploadResponse>), ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Query(query) = query.map_err(|_| ApiError::validation())?;
+    let mut multipart = multipart.map_err(|_| ApiError::validation())?;
+    let library = library(&state)?;
+    let directory = upload_directory(&query.dest)?;
+    if let Some(directory) = directory.clone() {
+        library
+            .coordinator
+            .create_folder(directory)
+            .await
+            .map_err(map_folder_mutation_error)?;
+    }
+
+    let mut staged = Vec::new();
+    while let Some(field) = multipart.next_field().await.map_err(map_multipart_error)? {
+        if field.name() != Some("files") {
+            continue;
+        }
+        let Some(file_name) = field.file_name().map(str::to_owned) else {
+            continue;
+        };
+        if file_name.is_empty() {
+            continue;
+        }
+        if staged.len() >= library.max_upload_files {
+            return Err(ApiError::payload_too_large(
+                "too many files in one upload request",
+            ));
+        }
+        let requested = upload_destination(directory.as_ref(), &file_name)?;
+        staged.push(
+            stage_upload_field(
+                &library.root,
+                requested,
+                field,
+                library.max_upload_file_bytes,
+            )
+            .await?,
+        );
+    }
+    if staged.is_empty() {
+        return Err(ApiError::bad_request("no files provided"));
+    }
+
+    let uploads = staged
+        .into_iter()
+        .map(StagedUpload::transfer)
+        .collect::<Vec<_>>();
+    let results = library
+        .coordinator
+        .publish_uploads(uploads, query.conflict.into())
+        .await
+        .map_err(map_upload_error)?;
+    let mut saved = Vec::new();
+    let mut skipped = Vec::new();
+    for result in results {
+        match result {
+            LibraryUploadBatchItem::Published {
+                track: Some(track), ..
+            } => saved.push((*track).try_into()?),
+            LibraryUploadBatchItem::Published { track: None, .. } => {}
+            LibraryUploadBatchItem::Skipped { requested } => {
+                skipped.push(requested.file_name().to_owned());
+            }
+        }
+    }
+    Ok((
+        StatusCode::CREATED,
+        Json(UploadResponse {
+            saved,
+            destination: directory.map_or_else(String::new, LibraryPath::into_string),
+            skipped,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/upload/check",
+    request_body = UploadCheckRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = UploadCheckResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn upload_check(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<UploadCheckRequest>, JsonRejection>,
+) -> Result<Json<UploadCheckResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let root = library(&state)?.root.clone();
+    let collisions = tokio::task::spawn_blocking(move || {
+        payload
+            .items
+            .into_iter()
+            .filter(|item| {
+                let Ok(directory) = upload_directory(&item.dest) else {
+                    return false;
+                };
+                let Ok(path) = upload_destination(directory.as_ref(), &item.name) else {
+                    return false;
+                };
+                library_upload_target_exists(&root, &path).unwrap_or(false)
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, "upload collision worker failed");
+        ApiError::internal()
+    })?;
+    Ok(Json(UploadCheckResponse { collisions }))
+}
+
+#[utoipa::path(
+    post,
     path = "/library/rescan",
     responses((status = 200, description = "Successful Response", body = RescanResponse)),
     tag = "library"
@@ -1265,6 +1501,161 @@ fn folder_response(folder: FolderMutationResult) -> FolderResponse {
         path: folder.path.into_string(),
         track_count: 0,
         has_children: folder.has_children,
+    }
+}
+
+struct StagedUpload {
+    requested: LibraryPath,
+    staged: LibraryPath,
+    absolute: Option<PathBuf>,
+}
+
+impl StagedUpload {
+    fn transfer(mut self) -> StagedLibraryUpload {
+        self.absolute = None;
+        StagedLibraryUpload {
+            staged: self.staged.clone(),
+            requested: self.requested.clone(),
+        }
+    }
+}
+
+impl Drop for StagedUpload {
+    fn drop(&mut self) {
+        if let Some(path) = self.absolute.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn upload_directory(value: &str) -> Result<Option<LibraryPath>, ApiError> {
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        LibraryPath::parse(value.to_owned())
+            .map(Some)
+            .map_err(|_| ApiError::bad_request("invalid upload destination"))
+    }
+}
+
+fn upload_destination(
+    directory: Option<&LibraryPath>,
+    file_name: &str,
+) -> Result<LibraryPath, ApiError> {
+    if file_name.contains(['/', '\\']) {
+        return Err(ApiError::bad_request("invalid upload filename"));
+    }
+    directory.map_or_else(
+        || {
+            LibraryPath::parse(file_name.to_owned())
+                .map_err(|_| ApiError::bad_request("invalid upload filename"))
+        },
+        |directory| {
+            directory
+                .join(file_name)
+                .map_err(|_| ApiError::bad_request("invalid upload filename"))
+        },
+    )
+}
+
+fn upload_stage_path(requested: &LibraryPath) -> Result<LibraryPath, ApiError> {
+    let name = format!(".upload-{}.partial", Uuid::new_v4().simple());
+    requested.parent().map_or_else(
+        || LibraryPath::parse(&name).map_err(|_| ApiError::bad_request("upload path is too long")),
+        |parent| {
+            parent
+                .join(&name)
+                .map_err(|_| ApiError::bad_request("upload path is too long"))
+        },
+    )
+}
+
+async fn stage_upload_field(
+    root: &LibraryRoot,
+    requested: LibraryPath,
+    mut field: Field<'_>,
+    max_bytes: u64,
+) -> Result<StagedUpload, ApiError> {
+    let staged = upload_stage_path(&requested)?;
+    let absolute = root.resolve_for_creation(&staged).map_err(|error| {
+        tracing::error!(error = %error, "upload staging path resolution failed");
+        ApiError::internal()
+    })?;
+    let guard = StagedUpload {
+        requested,
+        staged,
+        absolute: Some(absolute.clone()),
+    };
+    let mut output = tokio::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&absolute)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "upload staging file creation failed");
+            ApiError::internal()
+        })?;
+    let mut written = 0_u64;
+    while let Some(chunk) = field.chunk().await.map_err(map_multipart_error)? {
+        written = written
+            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                ApiError::payload_too_large("upload file exceeds the configured size limit")
+            })?)
+            .ok_or_else(|| {
+                ApiError::payload_too_large("upload file exceeds the configured size limit")
+            })?;
+        if written > max_bytes {
+            return Err(ApiError::payload_too_large(
+                "upload file exceeds the configured size limit",
+            ));
+        }
+        output.write_all(&chunk).await.map_err(|error| {
+            tracing::error!(error = %error, "upload staging write failed");
+            ApiError::internal()
+        })?;
+    }
+    output.flush().await.map_err(|error| {
+        tracing::error!(error = %error, "upload staging flush failed");
+        ApiError::internal()
+    })?;
+    output.sync_all().await.map_err(|error| {
+        tracing::error!(error = %error, "upload staging synchronization failed");
+        ApiError::internal()
+    })?;
+    drop(output);
+    Ok(guard)
+}
+
+fn map_multipart_error(error: MultipartError) -> ApiError {
+    if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        ApiError::payload_too_large("upload request exceeds the configured size limit")
+    } else {
+        ApiError::validation()
+    }
+}
+
+fn map_upload_error(error: LibraryCoordinatorError) -> ApiError {
+    match error {
+        LibraryCoordinatorError::Mutation(failure) => match failure.kind() {
+            LibraryMutationFailureKind::NotFound => {
+                tracing::error!(error = %failure, "staged library upload disappeared");
+                ApiError::internal()
+            }
+            LibraryMutationFailureKind::Conflict | LibraryMutationFailureKind::NotEmpty => {
+                ApiError::conflict("upload destination changed during publication")
+            }
+            LibraryMutationFailureKind::Invalid => {
+                ApiError::bad_request("invalid upload destination")
+            }
+            LibraryMutationFailureKind::Io => {
+                tracing::error!(error = %failure, "library upload publication failed");
+                ApiError::internal()
+            }
+        },
+        other => {
+            tracing::error!(error = %other, "library upload coordinator failed");
+            ApiError::internal()
+        }
     }
 }
 

@@ -240,6 +240,14 @@ pub fn inspect_library_track(
     })
 }
 
+#[must_use]
+pub fn is_supported_library_path(path: &LibraryPath) -> bool {
+    Path::new(path.as_str())
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(is_audio_extension)
+}
+
 impl LibraryDiscovery for FilesystemLibraryDiscovery {
     fn discover(&self, cancellation: CancellationToken) -> LibraryDiscoveryFuture<'_> {
         let discovery = self.clone();
@@ -365,11 +373,13 @@ impl Error for FilesystemDiscoveryError {
 fn is_audio_file(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            AUDIO_EXTENSIONS
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
+        .is_some_and(is_audio_extension)
+}
+
+fn is_audio_extension(extension: &str) -> bool {
+    AUDIO_EXTENSIONS
+        .iter()
+        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
 }
 
 fn library_path(

@@ -5,8 +5,8 @@ use music_application::library::{
     DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFuture,
     LibraryIndexMutationCommit, LibraryMutationRepository, LibraryRepository, LibrarySearch,
     LibrarySearchResult, LibrarySortKey, LibraryStatus, LibraryTrackMutationCommit,
-    ReconciliationCommit, ReconciliationStatus, ReconciliationSummary, SortOrder,
-    TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue,
+    LibraryUploadMutationCommit, ReconciliationCommit, ReconciliationStatus, ReconciliationSummary,
+    SortOrder, TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue,
 };
 use music_application::recovery::RecoveryJournalId;
 use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
@@ -329,6 +329,27 @@ impl LibraryMutationRepository for SqliteStorage {
                 .map_err(box_storage)
         })
     }
+
+    fn commit_upload<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        staged: &'a LibraryPath,
+        destination: &'a LibraryPath,
+        replace_existing: bool,
+        discovered: Option<&'a DiscoveredTrack>,
+    ) -> LibraryFuture<'a, LibraryUploadMutationCommit> {
+        Box::pin(async move {
+            self.commit_library_upload(
+                journal_id,
+                staged,
+                destination,
+                replace_existing,
+                discovered,
+            )
+            .await
+            .map_err(box_storage)
+        })
+    }
 }
 
 impl SqliteStorage {
@@ -564,6 +585,100 @@ impl SqliteStorage {
         Ok(LibraryTrackMutationCommit {
             status: self.read_library_status().await?,
             track,
+        })
+    }
+
+    async fn commit_library_upload(
+        &self,
+        journal_id: &RecoveryJournalId,
+        staged: &LibraryPath,
+        destination: &LibraryPath,
+        replace_existing: bool,
+        discovered: Option<&DiscoveredTrack>,
+    ) -> Result<LibraryUploadMutationCommit, StorageError> {
+        if discovered.is_some_and(|track| track.path != *destination) {
+            return Err(StorageError::InvalidLibraryRecord(
+                "uploaded track path changed",
+            ));
+        }
+        if discovered.is_some_and(|track| track.size_bytes > i64::MAX as u64) {
+            return Err(StorageError::InvalidLibraryRecord(
+                "uploaded track size exceeds SQLite integer range",
+            ));
+        }
+
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        validate_library_mutation_journal(
+            &mut transaction,
+            journal_id,
+            &LibraryFileMutation::PublishUpload {
+                staged: staged.clone(),
+                destination: destination.clone(),
+                replace_existing,
+            },
+        )
+        .await?;
+
+        let existed = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tracks WHERE path = ?")
+            .bind(destination.as_str())
+            .fetch_one(&mut *transaction)
+            .await?
+            != 0;
+        let (affected_tracks, catalog_effect, track) = if let Some(discovered) = discovered {
+            sqlx::query(
+                "INSERT INTO tracks (path, title, artist, album_artist, album, track_no, disc_no, \
+                 year, genre, length_s, bpm, display_title, origin, size_bytes, mtime, added_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, CURRENT_TIMESTAMP) \
+                 ON CONFLICT(path) DO UPDATE SET title = excluded.title, artist = excluded.artist, \
+                 album_artist = excluded.album_artist, album = excluded.album, \
+                 track_no = excluded.track_no, disc_no = excluded.disc_no, year = excluded.year, \
+                 genre = excluded.genre, length_s = excluded.length_s, bpm = excluded.bpm, \
+                 size_bytes = excluded.size_bytes, mtime = excluded.mtime",
+            )
+            .bind(destination.as_str())
+            .bind(&discovered.metadata.title)
+            .bind(&discovered.metadata.artist)
+            .bind(&discovered.metadata.album_artist)
+            .bind(&discovered.metadata.album)
+            .bind(discovered.metadata.track_no.map(i64::from))
+            .bind(discovered.metadata.disc_no.map(i64::from))
+            .bind(discovered.metadata.year.map(i64::from))
+            .bind(&discovered.metadata.genre)
+            .bind(discovered.duration.as_secs_f64())
+            .bind(discovered.metadata.bpm.map(i64::from))
+            .bind(discovered.size_bytes as i64)
+            .bind(discovered.mtime_unix_seconds)
+            .execute(&mut *transaction)
+            .await?;
+            let catalog_effect = if existed {
+                LibraryCatalogEffect::PreserveMembership
+            } else {
+                LibraryCatalogEffect::AddTracks
+            };
+            let mut query = QueryBuilder::<Sqlite>::new(format!(
+                "SELECT {TRACK_COLUMNS} FROM tracks WHERE path = "
+            ));
+            query.push_bind(destination.as_str());
+            let row = query.build().fetch_one(&mut *transaction).await?;
+            (1, catalog_effect, Some(indexed_track_from_row(&row)?))
+        } else {
+            (0, LibraryCatalogEffect::PreserveMembership, None)
+        };
+
+        finish_library_index_mutation(
+            &mut transaction,
+            journal_id,
+            "publish_upload",
+            affected_tracks,
+            catalog_effect,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(LibraryUploadMutationCommit {
+            status: self.read_library_status().await?,
+            track,
+            affected_tracks,
         })
     }
 
@@ -1009,6 +1124,11 @@ async fn finish_library_index_mutation(
             .map_err(|_| StorageError::InvalidLibraryState("track count is invalid"))?;
         let track_count = match catalog_effect {
             LibraryCatalogEffect::PreserveMembership => current_track_count,
+            LibraryCatalogEffect::AddTracks => current_track_count
+                .checked_add(affected_tracks)
+                .ok_or(StorageError::InvalidLibraryState(
+                    "catalog count overflowed during track addition",
+                ))?,
             LibraryCatalogEffect::RemoveTracks => {
                 current_track_count.checked_sub(affected_tracks).ok_or(
                     StorageError::InvalidLibraryState("track removal exceeds the catalog count"),
@@ -1060,6 +1180,7 @@ async fn finish_library_index_mutation(
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum LibraryCatalogEffect {
     PreserveMembership,
+    AddTracks,
     RemoveTracks,
 }
 
@@ -1717,6 +1838,91 @@ mod tests {
             .await?
             .is_empty()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn journaled_uploads_insert_replace_and_ignore_non_audio_membership()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(
+            directory.path().join("uploads.db"),
+        ))
+        .await?;
+        let staged = LibraryPath::parse("Uploads/.upload-first.partial")?;
+        let destination = LibraryPath::parse("Uploads/song.wav")?;
+        let first_mutation = LibraryFileMutation::PublishUpload {
+            staged: staged.clone(),
+            destination: destination.clone(),
+            replace_existing: false,
+        };
+        let first_journal = applying_journal(&storage, &first_mutation).await?;
+        let first_discovered = discovered("Uploads/song.wav", "First", "Artist", 100, 200)?;
+        let first = LibraryMutationRepository::commit_upload(
+            &storage,
+            &first_journal,
+            &staged,
+            &destination,
+            false,
+            Some(&first_discovered),
+        )
+        .await?;
+        let track_id = first
+            .track
+            .as_ref()
+            .ok_or("uploaded track was not indexed")?
+            .id;
+        assert_eq!(first.affected_tracks, 1);
+        assert_eq!(first.status.discovered_tracks, 1);
+        assert_eq!(first.status.generation, LibraryGeneration::new(1));
+
+        let replacement_stage = LibraryPath::parse("Uploads/.upload-second.partial")?;
+        let replacement_mutation = LibraryFileMutation::PublishUpload {
+            staged: replacement_stage.clone(),
+            destination: destination.clone(),
+            replace_existing: true,
+        };
+        let replacement_journal = applying_journal(&storage, &replacement_mutation).await?;
+        let replacement = discovered("Uploads/song.wav", "Replacement", "Artist", 300, 400)?;
+        let replaced = LibraryMutationRepository::commit_upload(
+            &storage,
+            &replacement_journal,
+            &replacement_stage,
+            &destination,
+            true,
+            Some(&replacement),
+        )
+        .await?;
+        let replaced_track = replaced
+            .track
+            .as_ref()
+            .ok_or("replacement track was not indexed")?;
+        assert_eq!(replaced_track.id, track_id);
+        assert_eq!(replaced_track.metadata.title, "Replacement");
+        assert_eq!(replaced.status.discovered_tracks, 1);
+        assert_eq!(replaced.status.generation, LibraryGeneration::new(2));
+
+        let text_stage = LibraryPath::parse("Uploads/.upload-text.partial")?;
+        let text_destination = LibraryPath::parse("Uploads/notes.txt")?;
+        let text_mutation = LibraryFileMutation::PublishUpload {
+            staged: text_stage.clone(),
+            destination: text_destination.clone(),
+            replace_existing: false,
+        };
+        let text_journal = applying_journal(&storage, &text_mutation).await?;
+        let text = LibraryMutationRepository::commit_upload(
+            &storage,
+            &text_journal,
+            &text_stage,
+            &text_destination,
+            false,
+            None,
+        )
+        .await?;
+        assert!(text.track.is_none());
+        assert_eq!(text.affected_tracks, 0);
+        assert_eq!(text.status.discovered_tracks, 1);
+        assert_eq!(text.status.generation, LibraryGeneration::new(2));
         Ok(())
     }
 }

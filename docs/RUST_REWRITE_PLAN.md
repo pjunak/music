@@ -252,10 +252,10 @@ bounded self projection and cannot mutate control state. Long-lived WebSockets r
 state and downgrade in place after logout, revocation, or expiry.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 28 currently registered Rust operations, rather than presenting partial work as
-parity. Twenty-seven operations overlap the reference and 26 are fully schema-compatible; the
-remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work. The
-browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
+operations versus 30 currently registered Rust operations, rather than presenting partial work as
+parity. Twenty-nine operations overlap the reference and 28 are fully schema-compatible; the
+remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work.
+The browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
 validate untrusted frames at runtime.
 
@@ -327,21 +327,26 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
   schema v3.
 - [x] Durable-index startup, generation-checked full reconciliation, visible scan status,
   tree/folder/search/batch/rescan HTTP APIs, metadata fallback, and source signatures.
-- Incremental reconciliation after every committed app-managed mutation and optional watcher hints.
+- [x] Incremental catalog updates after every committed app-managed library mutation. Folder and
+  track move/delete operations update the durable catalog directly; metadata is refreshed as part
+  of the same journaled operation or through generation-checked reconciliation where required.
+  Optional watcher hints remain future work.
   Folder delete updates the catalog directly; folder rename does the same and then refreshes metadata
   through a generation-checked reconciliation.
 - [x] Chunked full/single-range media streaming with ETag/conditional handling, bounded cover
   extraction and folder fallback, inert MIME allow-listing, and disconnect-safe file bodies.
-- Streaming uploads and explicit conflict handling.
+- [x] Streaming uploads with bounded multipart framing, file-count and per-file byte limits;
+  serialized `rename`/`overwrite`/`skip` resolution; no-clobber create publication; journaled
+  replacement and startup replay; one final catalog publication; and compatible upload/check APIs.
 - [x] Shared bounded recovery-journal types and compare-and-swap persistence with explicit legal
   transitions and cross-domain ownership.
 - [x] Staged metadata editing with journal replay, verified tag replacement, atomic index commits,
   stable track identities, explicit clear/unset semantics, and compatible single/bulk HTTP routes.
   Mixed bulk updates report per-track tag failures while still applying DB-only fields; a failure
   after file replacement stops for forward recovery.
-- Staged-file mutation execution for uploads, SFX files, and remaining bulk actions. Rooted folder
-  and track move/delete operations, per-item bulk outcomes, metadata refresh on move, stable track
-  identities, and crash replay are complete.
+- Staged-file mutation execution for SFX files and remaining cleanup actions. Rooted library folder
+  and track move/delete/upload operations, per-item bulk outcomes, metadata refresh on move, stable
+  track identities, and crash replay are complete.
 - Pure cleanup analysis, verification, domain-specific journaled apply, history, and revert.
 
 Gate: generated-format metadata corpus, path property/fuzz tests, symlink/race tests, range tests,

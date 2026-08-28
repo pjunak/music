@@ -28,7 +28,8 @@ pub use mutation::{
     FolderDeletionResult, FolderMutationResult, LibraryFileMutation, LibraryFileMutationOutcome,
     LibraryIndexMutationCommit, LibraryMutationEffects, LibraryMutationFailure,
     LibraryMutationFailureKind, LibraryMutationFuture, LibraryMutationValidationError,
-    LibraryTrackMutationCommit,
+    LibraryTrackMutationCommit, LibraryUploadDiscardFuture, LibraryUploadMutationCommit,
+    LibraryUploadResolution, LibraryUploadResolutionFuture, UploadConflictPolicy,
 };
 
 const LIBRARY_COMMAND_CAPACITY: usize = 4;
@@ -227,6 +228,15 @@ pub trait LibraryMutationRepository: LibraryRepository + RecoveryJournalReposito
         patch: &'a TrackMetadataPatch,
         discovered: Option<&'a DiscoveredTrack>,
     ) -> LibraryFuture<'a, LibraryTrackMutationCommit>;
+
+    fn commit_upload<'a>(
+        &'a self,
+        journal_id: &'a crate::recovery::RecoveryJournalId,
+        staged: &'a LibraryPath,
+        destination: &'a LibraryPath,
+        replace_existing: bool,
+        discovered: Option<&'a DiscoveredTrack>,
+    ) -> LibraryFuture<'a, LibraryUploadMutationCommit>;
 }
 
 #[derive(Debug)]
@@ -365,6 +375,23 @@ pub struct TrackMetadataBatchItem {
 }
 
 pub type TrackMetadataBatchResults = Vec<TrackMetadataBatchItem>;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StagedLibraryUpload {
+    pub staged: LibraryPath,
+    pub requested: LibraryPath,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LibraryUploadBatchItem {
+    Published {
+        destination: LibraryPath,
+        track: Option<Box<IndexedTrack>>,
+    },
+    Skipped {
+        requested: LibraryPath,
+    },
+}
 
 #[derive(Debug, Clone)]
 pub struct LibraryCoordinatorHandle {
@@ -550,6 +577,25 @@ impl LibraryCoordinatorHandle {
             .map_err(|_| LibraryCoordinatorError::Unavailable)?
     }
 
+    pub async fn publish_uploads(
+        &self,
+        uploads: Vec<StagedLibraryUpload>,
+        policy: UploadConflictPolicy,
+    ) -> Result<Vec<LibraryUploadBatchItem>, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::PublishUploads {
+                uploads,
+                policy,
+                reply,
+            })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
     async fn mutate(
         &self,
         mutation: LibraryFileMutation,
@@ -661,12 +707,18 @@ enum LibraryCommand {
         patch: TrackMetadataPatch,
         reply: oneshot::Sender<Result<TrackMetadataBatchResults, LibraryCoordinatorError>>,
     },
+    PublishUploads {
+        uploads: Vec<StagedLibraryUpload>,
+        policy: UploadConflictPolicy,
+        reply: oneshot::Sender<Result<Vec<LibraryUploadBatchItem>, LibraryCoordinatorError>>,
+    },
 }
 
 #[derive(Debug)]
 struct AppliedLibraryMutation {
     outcome: LibraryFileMutationOutcome,
     affected_tracks: u64,
+    track: Option<IndexedTrack>,
 }
 
 #[derive(Debug)]
@@ -743,6 +795,14 @@ impl LibraryCoordinator {
                             reply,
                         } => {
                             let result = self.update_tracks_metadata_once(track_ids, patch).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::PublishUploads {
+                            uploads,
+                            policy,
+                            reply,
+                        } => {
+                            let result = self.publish_uploads_once(uploads, policy).await;
                             let _ = reply.send(result);
                         }
                     }
@@ -861,11 +921,9 @@ impl LibraryCoordinator {
         ) {
             return Err(LibraryCoordinatorError::InvalidMutationOutcome);
         }
-        self.repository
-            .track(track_id)
-            .await
-            .map_err(|source| dependency("reload a moved track", source))?
-            .ok_or(LibraryCoordinatorError::TrackNotFound { track_id })
+        applied
+            .track
+            .ok_or(LibraryCoordinatorError::InvalidMutationOutcome)
     }
 
     async fn delete_track_once(
@@ -977,11 +1035,9 @@ impl LibraryCoordinator {
         ) {
             return Err(LibraryCoordinatorError::InvalidMutationOutcome);
         }
-        self.repository
-            .track(track_id)
-            .await
-            .map_err(|source| dependency("reload a metadata-edited track", source))?
-            .ok_or(LibraryCoordinatorError::TrackNotFound { track_id })
+        applied
+            .track
+            .ok_or(LibraryCoordinatorError::InvalidMutationOutcome)
     }
 
     async fn update_tracks_metadata_once(
@@ -1061,6 +1117,91 @@ impl LibraryCoordinator {
             self.publish_current_catalog().await?;
         }
         Ok(results)
+    }
+
+    async fn publish_uploads_once(
+        &self,
+        uploads: Vec<StagedLibraryUpload>,
+        policy: UploadConflictPolicy,
+    ) -> Result<Vec<LibraryUploadBatchItem>, LibraryCoordinatorError> {
+        let mut results = Vec::with_capacity(uploads.len());
+        let mut catalog_changed = false;
+        let mut uploads = uploads.into_iter();
+        while let Some(upload) = uploads.next() {
+            let resolution = match self.effects.resolve_upload(&upload.requested, policy).await {
+                Ok(resolution) => resolution,
+                Err(failure) => {
+                    let _ = self.effects.discard_upload(&upload.staged).await;
+                    self.discard_staged_uploads(uploads).await;
+                    return Err(LibraryCoordinatorError::Mutation(failure));
+                }
+            };
+            let LibraryUploadResolution::Publish {
+                destination,
+                replace_existing,
+            } = resolution
+            else {
+                if let Err(failure) = self.effects.discard_upload(&upload.staged).await {
+                    self.discard_staged_uploads(uploads).await;
+                    return Err(LibraryCoordinatorError::Mutation(failure));
+                }
+                results.push(LibraryUploadBatchItem::Skipped {
+                    requested: upload.requested,
+                });
+                continue;
+            };
+            let mutation = LibraryFileMutation::PublishUpload {
+                staged: upload.staged.clone(),
+                destination: destination.clone(),
+                replace_existing,
+            };
+            let applied = match self.apply_mutation(mutation, false).await {
+                Ok(applied) => applied,
+                Err(error) => {
+                    if !mutation_error_requires_recovery(&error) {
+                        let _ = self.effects.discard_upload(&upload.staged).await;
+                    }
+                    self.discard_staged_uploads(uploads).await;
+                    if catalog_changed {
+                        self.publish_current_catalog().await?;
+                    }
+                    return Err(error);
+                }
+            };
+            catalog_changed |= applied.affected_tracks > 0;
+            let LibraryFileMutationOutcome::UploadPublished {
+                destination: published,
+                ..
+            } = applied.outcome
+            else {
+                self.discard_staged_uploads(uploads).await;
+                if catalog_changed {
+                    self.publish_current_catalog().await?;
+                }
+                return Err(LibraryCoordinatorError::InvalidMutationOutcome);
+            };
+            if published != destination {
+                self.discard_staged_uploads(uploads).await;
+                if catalog_changed {
+                    self.publish_current_catalog().await?;
+                }
+                return Err(LibraryCoordinatorError::InvalidMutationOutcome);
+            }
+            results.push(LibraryUploadBatchItem::Published {
+                destination: published,
+                track: applied.track.map(Box::new),
+            });
+        }
+        if catalog_changed {
+            self.publish_current_catalog().await?;
+        }
+        Ok(results)
+    }
+
+    async fn discard_staged_uploads(&self, uploads: impl IntoIterator<Item = StagedLibraryUpload>) {
+        for upload in uploads {
+            let _ = self.effects.discard_upload(&upload.staged).await;
+        }
     }
 
     async fn publish_current_catalog(&self) -> Result<(), LibraryCoordinatorError> {
@@ -1190,10 +1331,26 @@ async fn recover_library_mutations(
             | RecoveryState::RolledBack
             | RecoveryState::Failed => return Err(LibraryCoordinatorError::RecoveryConflict),
         };
-        let outcome = effects
-            .apply(&applying.id, mutation.clone(), true)
-            .await
-            .map_err(LibraryCoordinatorError::Mutation)?;
+        let outcome = match effects.apply(&applying.id, mutation.clone(), true).await {
+            Ok(outcome) => outcome,
+            Err(failure) if !failure.requires_recovery() => {
+                transition_applied(
+                    repository
+                        .transition_recovery_journal(
+                            &applying.id,
+                            RecoveryState::Applying,
+                            RecoveryState::Failed,
+                            json!({"error_code": failure.code()}),
+                        )
+                        .await
+                        .map_err(|source| {
+                            dependency("record a failed recovered library mutation", source)
+                        })?,
+                )?;
+                continue;
+            }
+            Err(failure) => return Err(LibraryCoordinatorError::Mutation(failure)),
+        };
         commit_applied_library_mutation(repository, &applying, &mutation, outcome).await?;
     }
     Ok(())
@@ -1225,6 +1382,7 @@ async fn commit_applied_library_mutation(
                 AppliedLibraryMutation {
                     outcome: LibraryFileMutationOutcome::Folder { path, has_children },
                     affected_tracks: 0,
+                    track: None,
                 },
                 None,
             ))
@@ -1245,6 +1403,7 @@ async fn commit_applied_library_mutation(
                 AppliedLibraryMutation {
                     outcome: LibraryFileMutationOutcome::Folder { path, has_children },
                     affected_tracks,
+                    track: None,
                 },
                 Some(commit.status),
             ))
@@ -1259,6 +1418,7 @@ async fn commit_applied_library_mutation(
                 AppliedLibraryMutation {
                     outcome: LibraryFileMutationOutcome::Deleted,
                     affected_tracks,
+                    track: None,
                 },
                 Some(commit.status),
             ))
@@ -1285,6 +1445,7 @@ async fn commit_applied_library_mutation(
                         track,
                     },
                     affected_tracks: 1,
+                    track: Some(commit.track),
                 },
                 Some(commit.status),
             ))
@@ -1306,6 +1467,7 @@ async fn commit_applied_library_mutation(
                         track_id: deleted_id,
                     },
                     affected_tracks,
+                    track: None,
                 },
                 Some(commit.status),
             ))
@@ -1334,6 +1496,45 @@ async fn commit_applied_library_mutation(
                         discovered,
                     },
                     affected_tracks: 1,
+                    track: Some(commit.track),
+                },
+                Some(commit.status),
+            ))
+        }
+        (
+            LibraryFileMutation::PublishUpload {
+                staged,
+                destination,
+                replace_existing,
+            },
+            LibraryFileMutationOutcome::UploadPublished {
+                destination: published,
+                discovered,
+            },
+        ) if destination == &published
+            && discovered
+                .as_ref()
+                .is_none_or(|track| track.path == published) =>
+        {
+            let commit = repository
+                .commit_upload(
+                    &journal.id,
+                    staged,
+                    destination,
+                    *replace_existing,
+                    discovered.as_ref(),
+                )
+                .await
+                .map_err(|source| dependency("commit a library upload", source))?;
+            let affected_tracks = commit.affected_tracks;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::UploadPublished {
+                        destination: published,
+                        discovered,
+                    },
+                    affected_tracks,
+                    track: commit.track,
                 },
                 Some(commit.status),
             ))
