@@ -400,6 +400,11 @@ impl ApiError {
     }
 
     #[must_use]
+    pub fn unprocessable_message(detail: impl Into<String>) -> Self {
+        Self::plain_owned(StatusCode::UNPROCESSABLE_ENTITY, detail)
+    }
+
+    #[must_use]
     pub const fn coded_conflict(code: &'static str, message: &'static str) -> Self {
         Self {
             status: StatusCode::CONFLICT,

@@ -11,6 +11,7 @@
 //! state.
 
 mod admin;
+mod assistant;
 mod auth;
 mod authoring;
 mod cleanup;

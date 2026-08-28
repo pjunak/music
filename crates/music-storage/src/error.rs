@@ -44,6 +44,8 @@ pub enum StorageError {
     RecoveryJournalCapacityExceeded,
     JobSerialization(serde_json::Error),
     InvalidJobRecord(&'static str),
+    AssistantSerialization(serde_json::Error),
+    InvalidAssistantRecord(&'static str),
 }
 
 impl Display for StorageError {
@@ -142,6 +144,12 @@ impl Display for StorageError {
             Self::InvalidJobRecord(detail) => {
                 write!(formatter, "stored background job is invalid: {detail}")
             }
+            Self::AssistantSerialization(_) => {
+                formatter.write_str("failed to encode or decode an Assistant document")
+            }
+            Self::InvalidAssistantRecord(detail) => {
+                write!(formatter, "stored Assistant record is invalid: {detail}")
+            }
         }
     }
 }
@@ -176,6 +184,8 @@ impl Error for StorageError {
             | Self::RecoveryJournalCapacityExceeded
             | Self::InvalidJobRecord(_) => None,
             Self::JobSerialization(source) => Some(source),
+            Self::AssistantSerialization(source) => Some(source),
+            Self::InvalidAssistantRecord(_) => None,
         }
     }
 }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use music_application::assistant::{AssistantRepository, AssistantService};
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
     CleanupVerificationRepository, CleanupVerificationService,
@@ -68,6 +69,7 @@ pub struct AppRuntime {
     storage: Arc<SqliteStorage>,
     playback: PlaybackActorHandle,
     auth: Arc<RuntimeAuth>,
+    assistant: Arc<AssistantService>,
     backup: Arc<BackupService>,
     devices: Arc<RuntimeDevices>,
     library: LibraryCoordinatorHandle,
@@ -144,6 +146,8 @@ impl AppRuntime {
 
         initialize_legacy_devices(&storage, &config.devices_file, &health).await?;
         let auth = Arc::new(RuntimeAuth::new(Arc::clone(&storage), &config)?);
+        let assistant_repository: Arc<dyn AssistantRepository> = storage.clone();
+        let assistant = Arc::new(AssistantService::new(assistant_repository));
         let backup = Arc::new(BackupService::new(
             Arc::clone(&storage),
             Arc::clone(&config),
@@ -264,6 +268,7 @@ impl AppRuntime {
             storage,
             playback,
             auth,
+            assistant,
             backup,
             devices,
             library,
@@ -299,6 +304,7 @@ impl AppRuntime {
             &self.config,
             RuntimeServices {
                 health: self.health.clone(),
+                assistant: Arc::clone(&self.assistant),
                 playback: self.playback.clone(),
                 auth: Arc::clone(&self.auth),
                 backup: Arc::clone(&self.backup),
@@ -4006,6 +4012,149 @@ mod tests {
             )
             .await?;
         assert_eq!(retried.status(), StatusCode::CONFLICT);
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn deterministic_assistant_routes_keep_suggestions_review_only_and_cleanup_bound()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music"))?;
+        fs::write(
+            directory.path().join("music/Tavern Battle.wav"),
+            reference_wav().map_err(|_| "missing reference wav")?,
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if !runtime
+                    .library_service
+                    .all_tracks()
+                    .await
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let (router, cookie) = operator_router(&runtime).await?;
+
+        let unauthorized = router
+            .clone()
+            .oneshot(
+                Request::post("/api/assistant/playlists/suggest")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"prompt":"tavern battle"}"#))?,
+            )
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let listed = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/library-tags")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed_json: Value =
+            serde_json::from_slice(&to_bytes(listed.into_body(), 1024 * 1024).await?)?;
+        let track_id = listed_json["items"][0]["track_id"]
+            .as_i64()
+            .ok_or("Assistant track id missing")?;
+
+        let tagged = router
+            .clone()
+            .oneshot(
+                Request::patch(format!("/api/assistant/library-tags/{track_id}"))
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"add":["inn"]}"#))?,
+            )
+            .await?;
+        assert_eq!(tagged.status(), StatusCode::OK);
+        let tagged_json: Value =
+            serde_json::from_slice(&to_bytes(tagged.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(tagged_json["manual_tags"], json!(["inn"]));
+
+        let suggestion = router
+            .clone()
+            .oneshot(
+                Request::post("/api/assistant/playlists/suggest")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"prompt":"tavern music","target_minutes":5}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(suggestion.status(), StatusCode::OK);
+        let suggestion_json: Value =
+            serde_json::from_slice(&to_bytes(suggestion.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(suggestion_json["engine"], "local-planner/v2");
+        assert_eq!(suggestion_json["candidates"][0]["track_id"], track_id);
+        assert_eq!(
+            suggestion_json["candidates"][0]["manual_tags"],
+            json!(["inn"])
+        );
+
+        let playlists = router
+            .clone()
+            .oneshot(
+                Request::get("/api/playlists")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(playlists.status(), StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&to_bytes(playlists.into_body(), 1024 * 1024).await?)?,
+            json!([])
+        );
+
+        let preview = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/library-tags/catalog/cleanup-preview")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(preview.status(), StatusCode::OK);
+        let preview_json: Value =
+            serde_json::from_slice(&to_bytes(preview.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(preview_json["suggestions"][0]["source"], "inn");
+        assert_eq!(preview_json["suggestions"][0]["target"], "tavern");
+        let apply_body = json!({
+            "catalog_signature": preview_json["catalog_signature"],
+            "vocabulary_fingerprint": preview_json["vocabulary_fingerprint"],
+            "items": [{"source": "inn", "target": "tavern"}],
+        });
+        let applied = router
+            .clone()
+            .oneshot(
+                Request::post("/api/assistant/library-tags/catalog/cleanup-apply")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&apply_body)?))?,
+            )
+            .await?;
+        assert_eq!(applied.status(), StatusCode::OK);
+        let stale = router
+            .oneshot(
+                Request::post("/api/assistant/library-tags/catalog/cleanup-apply")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&apply_body)?))?,
+            )
+            .await?;
+        assert_eq!(stale.status(), StatusCode::CONFLICT);
+
         runtime.shutdown().await?;
         Ok(())
     }

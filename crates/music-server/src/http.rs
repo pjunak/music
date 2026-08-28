@@ -10,6 +10,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use music_application::assistant::AssistantService;
 use music_application::jobs::JobService;
 use music_application::modes::ModeCoordinatorHandle;
 use music_application::playback::PlaybackActorHandle;
@@ -48,6 +49,7 @@ const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-poli
 #[derive(Debug, Clone)]
 pub(crate) struct HttpState {
     pub(crate) health: HealthRegistry,
+    pub(crate) assistant: Option<Arc<AssistantService>>,
     pub(crate) playback: Option<PlaybackActorHandle>,
     pub(crate) auth: Option<Arc<RuntimeAuth>>,
     pub(crate) backup: Option<Arc<BackupService>>,
@@ -62,6 +64,7 @@ pub(crate) struct HttpState {
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeServices {
     pub(crate) health: HealthRegistry,
+    pub(crate) assistant: Arc<AssistantService>,
     pub(crate) playback: PlaybackActorHandle,
     pub(crate) auth: Arc<RuntimeAuth>,
     pub(crate) backup: Arc<BackupService>,
@@ -84,7 +87,12 @@ impl CorrelationId {
 }
 
 #[derive(utoipa::OpenApi)]
-#[openapi(components(schemas(crate::modes::SoundboardManifest, crate::modes::CueSpec)))]
+#[openapi(components(schemas(
+    crate::modes::SoundboardManifest,
+    crate::modes::CueSpec,
+    crate::assistant::PlaylistAudioSignalResponse,
+    crate::assistant::AudioSignalProfileResponse
+)))]
 struct MusicApi;
 
 struct LivenessContract;
@@ -105,6 +113,7 @@ pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Rou
         config,
         HttpState {
             health: services.health,
+            assistant: Some(services.assistant),
             playback: Some(services.playback),
             auth: Some(services.auth),
             backup: Some(services.backup),
@@ -127,6 +136,7 @@ fn build_router_without_playback(
         config,
         HttpState {
             health,
+            assistant: None,
             playback: None,
             auth: None,
             backup: None,
@@ -174,6 +184,7 @@ fn build_router_inner(config: &AppConfig, state: HttpState) -> Result<Router, Ru
 fn documented_api_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .merge(crate::auth::auth_router())
+        .merge(crate::assistant::assistant_router())
         .merge(crate::authoring::authoring_router())
         .merge(crate::admin::admin_router())
         .merge(crate::devices::device_router())

@@ -9,6 +9,7 @@
 //! This crate owns the small read pool, serialized short-write admission, and
 //! exclusive process/offline-writer lock.
 
+mod assistant;
 mod auth;
 mod backup;
 mod crypto;

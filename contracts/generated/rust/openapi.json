@@ -174,6 +174,124 @@
         },
         "type": "object"
       },
+      "AnalysisTagReviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "source_signature": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag",
+          "analyzer_id",
+          "source_signature",
+          "decision"
+        ],
+        "type": "object"
+      },
+      "AnalysisTagReviewResult": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "manual_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source_signature": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "tag",
+          "analyzer_id",
+          "source_signature",
+          "decision",
+          "manual_tags"
+        ],
+        "type": "object"
+      },
+      "AnalysisTagSuggestionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source_signature": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag",
+          "analyzer_id",
+          "source_signature",
+          "confidence",
+          "evidence",
+          "status"
+        ],
+        "type": "object"
+      },
       "AnalyzeRequest": {
         "properties": {
           "rules": {
@@ -302,6 +420,54 @@
           "batch_id",
           "applied",
           "skipped"
+        ],
+        "type": "object"
+      },
+      "AudioSignalProfileOut": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "analyzer_id",
+          "confidence",
+          "evidence",
+          "metrics"
         ],
         "type": "object"
       },
@@ -1150,6 +1316,156 @@
         ],
         "type": "object"
       },
+      "BulkAnalysisTagReviewApplied": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "source_signature": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "tag",
+          "analyzer_id",
+          "source_signature",
+          "decision"
+        ],
+        "type": "object"
+      },
+      "BulkAnalysisTagReviewFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "type": "string"
+          },
+          "code": {
+            "enum": [
+              "not_found",
+              "stale",
+              "tag_limit"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "source_signature": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "tag",
+          "analyzer_id",
+          "source_signature",
+          "code",
+          "error"
+        ],
+        "type": "object"
+      },
+      "BulkAnalysisTagReviewItem": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_signature": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "track_id": {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tag",
+          "analyzer_id",
+          "source_signature",
+          "track_id"
+        ],
+        "type": "object"
+      },
+      "BulkAnalysisTagReviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BulkAnalysisTagReviewItem"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "decision"
+        ],
+        "type": "object"
+      },
+      "BulkAnalysisTagReviewResult": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/BulkAnalysisTagReviewApplied"
+            },
+            "type": "array"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/BulkAnalysisTagReviewFailure"
+            },
+            "type": "array"
+          },
+          "requested_items": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requested_items",
+          "applied",
+          "failures"
+        ],
+        "type": "object"
+      },
       "BulkDeleteRequest": {
         "properties": {
           "track_ids": {
@@ -1184,6 +1500,90 @@
         "required": [
           "deleted_ids",
           "skipped"
+        ],
+        "type": "object"
+      },
+      "BulkManualTagFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "error"
+        ],
+        "type": "object"
+      },
+      "BulkManualTagPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "remove": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "track_ids"
+        ],
+        "type": "object"
+      },
+      "BulkManualTagResult": {
+        "additionalProperties": false,
+        "properties": {
+          "changed_track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/BulkManualTagFailure"
+            },
+            "type": "array"
+          },
+          "matched_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "missing_track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "requested_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requested_tracks",
+          "matched_tracks",
+          "changed_track_ids",
+          "missing_track_ids",
+          "failures"
         ],
         "type": "object"
       },
@@ -2870,6 +3270,127 @@
         },
         "type": "object"
       },
+      "LibraryTagPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryTagTrack"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "LibraryTagTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "album": {
+            "type": "string"
+          },
+          "analysis_analyzer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "analysis_confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "analysis_suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisTagSuggestionOut"
+            },
+            "type": "array"
+          },
+          "analysis_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "audio_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudioSignalProfileOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "display_title": {
+            "type": "string"
+          },
+          "manual_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "path",
+          "title",
+          "display_title",
+          "artist",
+          "album",
+          "manual_tags",
+          "analysis_analyzer",
+          "analysis_tags",
+          "analysis_confidence",
+          "analysis_suggestions",
+          "audio_signal"
+        ],
+        "type": "object"
+      },
       "LivenessContract": {
         "additionalProperties": {
           "type": "string"
@@ -2965,6 +3486,111 @@
           "soundboard_id",
           "item_path",
           "interval_s"
+        ],
+        "type": "object"
+      },
+      "ManualTagCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "starter_groups": {
+            "items": {
+              "$ref": "#/components/schemas/StarterTagGroupOut"
+            },
+            "type": "array"
+          },
+          "tag_usage": {
+            "items": {
+              "$ref": "#/components/schemas/ManualTagUsage"
+            },
+            "type": "array"
+          },
+          "used_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "starter_groups",
+          "used_tags",
+          "tag_usage"
+        ],
+        "type": "object"
+      },
+      "ManualTagPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "remove": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ManualTagRenameRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ],
+        "type": "object"
+      },
+      "ManualTagRenameResult": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_tracks": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "merged": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "affected_tracks",
+          "merged"
+        ],
+        "type": "object"
+      },
+      "ManualTagUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "tag": {
+            "type": "string"
+          },
+          "track_count": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tag",
+          "track_count"
         ],
         "type": "object"
       },
@@ -3235,6 +3861,181 @@
         },
         "type": "object"
       },
+      "PlaylistAudioSignal": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "type": "string"
+          },
+          "brightness": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "energy": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "tempo_bpm": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 999,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tension": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "analyzer_id",
+          "energy",
+          "brightness",
+          "tension",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "PlaylistCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "album": {
+            "type": "string"
+          },
+          "analysis_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "audio_signal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlaylistAudioSignal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bpm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "default_selected": {
+            "type": "boolean"
+          },
+          "display_title": {
+            "type": "string"
+          },
+          "genre": {
+            "type": "string"
+          },
+          "length_s": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "manual_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "match_score": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "planning_energy": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sequence_position": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "path",
+          "title",
+          "display_title",
+          "artist",
+          "album",
+          "origin",
+          "genre",
+          "manual_tags",
+          "analysis_tags",
+          "length_s",
+          "bpm",
+          "match_score",
+          "confidence",
+          "reasons",
+          "default_selected",
+          "planning_energy",
+          "audio_signal"
+        ],
+        "type": "object"
+      },
       "PlaylistCreate": {
         "properties": {
           "category": {
@@ -3267,6 +4068,46 @@
         },
         "required": [
           "name"
+        ],
+        "type": "object"
+      },
+      "PlaylistIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "brightness": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "energy": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "matched_moods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "search_terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tension": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "matched_moods",
+          "search_terms",
+          "energy",
+          "brightness",
+          "tension"
         ],
         "type": "object"
       },
@@ -3351,6 +4192,147 @@
           "automatic_refreshed_at",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "PlaylistPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_profile_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "energy_curve": {
+            "enum": [
+              "steady",
+              "rising",
+              "falling",
+              "arc"
+            ],
+            "type": "string"
+          },
+          "selected_duration_s": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "selected_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "energy_curve",
+          "selected_tracks",
+          "selected_duration_s",
+          "audio_profile_tracks"
+        ],
+        "type": "object"
+      },
+      "PlaylistSuggestionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_limit": {
+            "default": 40,
+            "maximum": 100,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "energy_curve": {
+            "default": "steady",
+            "enum": [
+              "steady",
+              "rising",
+              "falling",
+              "arc"
+            ],
+            "type": "string"
+          },
+          "exclude_track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 5000,
+            "type": "array"
+          },
+          "include_unknown_bpm": {
+            "default": true,
+            "type": "boolean"
+          },
+          "max_bpm": {
+            "anyOf": [
+              {
+                "maximum": 999,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "min_bpm": {
+            "anyOf": [
+              {
+                "maximum": 999,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt": {
+            "maxLength": 500,
+            "minLength": 2,
+            "type": "string"
+          },
+          "target_minutes": {
+            "default": 60,
+            "maximum": 600,
+            "minimum": 5,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "type": "object"
+      },
+      "PlaylistSuggestionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistCandidate"
+            },
+            "type": "array"
+          },
+          "eligible_tracks": {
+            "type": "integer"
+          },
+          "engine": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/PlaylistIntent"
+          },
+          "library_tracks": {
+            "type": "integer"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/PlaylistPlan"
+          }
+        },
+        "required": [
+          "engine",
+          "library_tracks",
+          "eligible_tracks",
+          "intent",
+          "plan",
+          "candidates"
         ],
         "type": "object"
       },
@@ -3916,6 +4898,307 @@
         },
         "required": [
           "id"
+        ],
+        "type": "object"
+      },
+      "StarterTagGroupOut": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "tags"
+        ],
+        "type": "object"
+      },
+      "TagCleanupApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_signature": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagCleanupSelectionIn"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "vocabulary_fingerprint": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "catalog_signature",
+          "vocabulary_fingerprint",
+          "items"
+        ],
+        "type": "object"
+      },
+      "TagCleanupApplyResult": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/ManualTagRenameResult"
+            },
+            "type": "array"
+          },
+          "catalog_signature": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "requested_items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "assistant-tag-cleanup-apply/v1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "requested_items",
+          "applied",
+          "catalog_signature"
+        ],
+        "type": "object"
+      },
+      "TagCleanupPreviewOut": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_signature": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "assistant-tag-cleanup-preview/v2",
+            "type": "string"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/TagCleanupSuggestionOut"
+            },
+            "type": "array"
+          },
+          "vocabulary_fingerprint": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "catalog_signature",
+          "vocabulary_fingerprint",
+          "suggestions"
+        ],
+        "type": "object"
+      },
+      "TagCleanupSelectionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ],
+        "type": "object"
+      },
+      "TagCleanupSuggestionOut": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "merged": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reason_code": {
+            "enum": [
+              "vocabulary_alias",
+              "vocabulary_plural",
+              "vocabulary_typo"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_track_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "type": "string"
+          },
+          "target_track_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "reason_code",
+          "reason",
+          "source_track_count",
+          "target_track_count",
+          "merged"
+        ],
+        "type": "object"
+      },
+      "TagVocabularyEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 24,
+            "type": "array"
+          },
+          "context_cues": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "description": {
+            "maxLength": 300,
+            "minLength": 2,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
+      "TagVocabularyGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 300,
+            "type": "string"
+          },
+          "key": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{1,31}$",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagVocabularyEntry"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TagVocabularyOut": {
+        "additionalProperties": false,
+        "properties": {
+          "fingerprint": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/TagVocabularyGroup"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "assistant-tag-vocabulary/v1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "revision",
+          "fingerprint",
+          "groups"
+        ],
+        "type": "object"
+      },
+      "TagVocabularyUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/TagVocabularyGroup"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "assistant-tag-vocabulary/v1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "expected_revision",
+          "groups"
         ],
         "type": "object"
       },
@@ -4545,6 +5828,503 @@
         },
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/assistant/library-tags": {
+      "get": {
+        "operationId": "list_library_tags_api_assistant_library_tags_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "review",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "accepted",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTagPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/analysis-tags/reviews/bulk": {
+      "post": {
+        "operationId": "update_analysis_tag_reviews_bulk_api_assistant_library_tags_analysis_tags_reviews_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkAnalysisTagReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkAnalysisTagReviewResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/bulk": {
+      "post": {
+        "operationId": "update_library_tags_bulk_api_assistant_library_tags_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkManualTagPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkManualTagResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/catalog": {
+      "get": {
+        "operationId": "tag_catalog_api_assistant_library_tags_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualTagCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/catalog/cleanup-apply": {
+      "post": {
+        "operationId": "apply_library_tag_cleanup_api_assistant_library_tags_catalog_cleanup_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagCleanupApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagCleanupApplyResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/catalog/cleanup-preview": {
+      "get": {
+        "operationId": "preview_library_tag_cleanup_api_assistant_library_tags_catalog_cleanup_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagCleanupPreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/catalog/rename": {
+      "post": {
+        "operationId": "rename_library_tag_api_assistant_library_tags_catalog_rename_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualTagRenameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualTagRenameResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/vocabulary": {
+      "get": {
+        "operationId": "get_tag_vocabulary_api_assistant_library_tags_vocabulary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagVocabularyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      },
+      "put": {
+        "operationId": "update_tag_vocabulary_api_assistant_library_tags_vocabulary_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagVocabularyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagVocabularyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/{track_id}": {
+      "patch": {
+        "operationId": "update_library_tags_api_assistant_library_tags__track_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualTagPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTagTrack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/{track_id}/analysis-tags/review": {
+      "put": {
+        "operationId": "update_analysis_tag_review_api_assistant_library_tags__track_id__analysis_tags_review_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisTagReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisTagReviewResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/playlists/suggest": {
+      "post": {
+        "operationId": "suggest_playlist_api_assistant_playlists_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaylistSuggestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistSuggestionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
         ]
       }
     },
