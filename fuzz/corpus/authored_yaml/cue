@@ -1,0 +1,6 @@
+id: fuzz
+name: Fuzz cue
+sfx:
+  - soundboard: effects
+    item: bell.opus
+    volume: 0.5

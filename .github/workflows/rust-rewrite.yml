@@ -38,8 +38,10 @@ jobs:
       - name: Format, lint, test, and document
         run: |
           cargo fmt --all --check
+          cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
           cargo check --workspace --all-targets
           cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
           cargo test --workspace --all-features
           cargo test --workspace --all-features --doc
           cargo run --locked -p music-server --bin music-cli -- contracts check --root .
@@ -52,7 +54,9 @@ jobs:
       - name: Audit dependencies
         run: |
           cargo deny check
+          cargo deny --manifest-path fuzz/Cargo.toml --locked check
           cargo audit --deny warnings
+          cargo audit --file fuzz/Cargo.lock --deny warnings
 
   python-reference:
     name: Python compatibility oracle
@@ -75,6 +79,31 @@ jobs:
           uv run ruff check app tests
           uv run mypy app tests
           uv run pytest
+
+  fuzz-smoke:
+    name: Rust parser fuzz smoke
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install nightly Rust and pinned cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Build and exercise every fuzz target
+        run: |
+          cargo +nightly fuzz build
+          for target in protocol_json media_path authored_yaml authoring_import assistant_output; do
+            cargo +nightly fuzz run "$target" -- \
+              -runs=2000 \
+              -max_len=65536 \
+              -timeout=10 \
+              -rss_limit_mb=2048 \
+              -print_final_stats=1
+          done
 
   frontend:
     name: Frontend compatibility

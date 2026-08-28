@@ -31,6 +31,16 @@ pub(crate) fn authoring_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(commit_document_import))
 }
 
+#[cfg(feature = "fuzzing")]
+pub(crate) fn exercise_document_parser(input: &[u8]) {
+    if let Ok(payload) = serde_json::from_slice::<AuthoringDocumentPreviewRequest>(input) {
+        let _ = payload.validate();
+    }
+    if let Ok(payload) = serde_json::from_slice::<AuthoringDocumentCommitRequest>(input) {
+        let _ = payload.validate();
+    }
+}
+
 struct DocumentSchemaContract;
 
 impl PartialSchema for DocumentSchemaContract {

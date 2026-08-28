@@ -70,7 +70,9 @@ the Python reference runner, while Docker/Linux-specific checks run in CI or on 
 - `cargo-nextest` for the main test suite; `cargo test --doc` separately because nextest does not
   run doctests.
 - `cargo-deny` and `cargo-audit` for source/license/advisory policy.
-- `cargo-fuzz` on Linux/nightly for protocol, path, YAML, import, and provider-response parsers.
+- `cargo-fuzz` 0.13.2 on Linux/nightly for protocol, rooted path, bounded YAML, authoring-import,
+  and Assistant structured-response parsers. The independent `fuzz/` workspace keeps libFuzzer and
+  nightly-only instrumentation out of normal production builds.
 - SQLx CLI for migration creation/checking and offline query metadata.
 - Node/npm for the existing frontend and generated binding checks.
 - FFmpeg/ffprobe for media integration and corpus generation.
@@ -128,6 +130,11 @@ cargo test -p music-analysis \
   22-observation semantic transcript covering health, SPA fallback/cache, auth/cookies, validation
   status and envelope, library reads, single-range streaming, multipart conflicts, partial batch
   failure, session revocation, and guest protocol-v1/v2 WebSocket projection.
+- Five seeded libFuzzer targets now call the real protocol, rooted-path, bounded-YAML,
+  authoring-import, and all four Assistant structured-output validators. Their feature-gated
+  production support compiles under the strict all-feature Clippy gate, and every target type-checks
+  locally with libFuzzer linking disabled; sanitizer execution remains part of the manual Linux
+  workflow because libFuzzer is not supported on this Windows host.
 - Docker/WSL and a real Linux audio device are unavailable on this workstation. The rewrite-only
   workflow, Unix mpv tests, cgroup voice soak, Essentia differential, and speaker smoke therefore
   remain explicit external acceptance evidence rather than inferred success.
@@ -585,6 +592,8 @@ must finish before the reference implementation is deleted.
 - [x] Add Linux-only real-process/Unix-socket mpv supervision tests, an ignored cgroup-enforcing
   voice soak, and a resource-limited non-root/no-Python container smoke gate.
 - [x] Add a manual, non-publishing dual-image performance harness using only generated media.
+- [x] Add a separate seeded `cargo-fuzz` workspace and bounded manual Linux/nightly smoke job for
+  protocol, path/root, YAML, import, and model-output attack surfaces.
 - [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
 - [ ] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report.
 - [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.

@@ -4,6 +4,8 @@
 //! inputs to an explicit review operation; they never mutate operator-owned
 //! tags, playlists, or presets by themselves.
 
+#[cfg(feature = "fuzzing")]
+mod fuzzing;
 mod local_analysis;
 mod model_eq;
 mod model_playlist;
@@ -19,6 +21,9 @@ mod structured_harness;
 mod tags;
 mod vocabulary;
 
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub use fuzzing::exercise_structured_model_outputs;
 pub use local_analysis::{
     AUDIO_ANALYSIS_JOB_KIND, AnalysisFailureState, AnalysisFailureWrite, AnalysisState,
     AnalysisWrite, ContextScope, ContextState, ContextWrite, CurrentTrackContext,

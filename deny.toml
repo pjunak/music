@@ -18,6 +18,8 @@ allow = [
     "ISC",
     "MIT",
     "MIT-0",
+    # LLVM's libFuzzer runtime; fuzz-only and absent from release images.
+    "NCSA",
     "Unicode-3.0",
     "Zlib",
 ]

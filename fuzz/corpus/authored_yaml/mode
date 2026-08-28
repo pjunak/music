@@ -1,0 +1,4 @@
+id: fuzz
+name: Fuzz mode
+panels:
+  - now-playing

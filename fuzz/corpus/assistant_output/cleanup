@@ -1,0 +1,1 @@
+{"schema_version":"assistant-model-tag-cleanup-output/v2","decisions":[{"source_id":"source-001","target_tag_id":null,"confidence":"low","reason":"No safe match."}]}

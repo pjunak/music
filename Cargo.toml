@@ -9,6 +9,7 @@ members = [
     "crates/music-server",
     "crates/music-storage",
 ]
+exclude = ["fuzz"]
 resolver = "3"
 
 [workspace.package]

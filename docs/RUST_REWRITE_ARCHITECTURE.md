@@ -427,8 +427,9 @@ JSON 404 boundary and can never fall through to `index.html`.
 All stored library and SFX paths use a validated POSIX-relative `LibraryPath`/`SfxPath` newtype.
 Absolute paths, prefixes, empty forbidden components, `.`/`..`, NUL, and platform prefixes are
 rejected before filesystem access. Existing targets and creation parents are canonicalized and
-verified beneath their configured roots. Property and fuzz tests cover Windows and POSIX forms,
-Unicode, separators, symlinks, and rename races.
+verified beneath their configured roots. Property tests cover arbitrary Unicode and portable path
+forms; the independent Linux/nightly fuzz workspace drives those same parsers plus rooted
+resolution. Deterministic platform tests retain the explicit symlink and rename-race fixtures.
 
 `LibraryCoordinator` is the only owner of app-managed file/index mutations. A mutation is planned
 and journaled durably before its rooted filesystem effect, then its index change and terminal

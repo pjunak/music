@@ -60,3 +60,11 @@ pub use provider_credentials::{CredentialStoreError, load_configured_credential_
 pub use runtime::{AppRuntime, initialize_tracing};
 pub use storage_admin::{ModeSeedOutcome, StorageInitializationOutcome, initialize_storage};
 pub use supervisor::{CriticalFailure, CriticalTaskError, TaskSupervisor};
+
+/// Exercises the public authoring-import JSON shapes and semantic validators.
+/// This is compiled only for the separate fuzzing workspace.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn exercise_authoring_import_parser(input: &[u8]) {
+    authoring::exercise_document_parser(input);
+}

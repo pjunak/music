@@ -64,6 +64,8 @@ dmypy.json
 /target/
 **/target/
 *.profraw
+/fuzz/artifacts/
+/fuzz/coverage/
 
 # Env / secrets
 .env

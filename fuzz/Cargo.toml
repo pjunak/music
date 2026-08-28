@@ -1,0 +1,62 @@
+[package]
+name = "music-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+music-application = { path = "../crates/music-application", version = "0.1.0", features = ["fuzzing"] }
+music-domain = { path = "../crates/music-domain", version = "0.1.0" }
+music-media = { path = "../crates/music-media", version = "0.1.0" }
+music-protocol = { path = "../crates/music-protocol", version = "0.1.0" }
+music-server = { path = "../crates/music-server", version = "0.1.0", features = ["fuzzing"] }
+serde_json = "1.0"
+tempfile = "3.23"
+
+[target.'cfg(unix)'.dependencies]
+libfuzzer-sys = "0.4"
+
+[target.'cfg(not(unix))'.dependencies]
+libfuzzer-sys = { version = "0.4", default-features = false }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "protocol_json"
+path = "fuzz_targets/protocol_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_path"
+path = "fuzz_targets/media_path.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "authored_yaml"
+path = "fuzz_targets/authored_yaml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "authoring_import"
+path = "fuzz_targets/authoring_import.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "assistant_output"
+path = "fuzz_targets/assistant_output.rs"
+test = false
+doc = false
+bench = false

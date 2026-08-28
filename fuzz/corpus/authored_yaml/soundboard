@@ -1,0 +1,6 @@
+id: fuzz
+name: Fuzz soundboard
+categories:
+  - id: effects
+    name: Effects
+    items: []
