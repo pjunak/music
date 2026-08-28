@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use music_application::cleanup::{CleanupRepository, CleanupService};
 use music_application::library::{
     LibraryCatalogSink, LibraryCoordinatorHandle, LibraryMutationRepository, LibraryRepository,
     LibraryService, ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
@@ -53,6 +54,7 @@ pub struct AppRuntime {
     devices: Arc<RuntimeDevices>,
     library: LibraryCoordinatorHandle,
     library_service: Arc<LibraryService>,
+    cleanup_service: Arc<CleanupService>,
     library_root: LibraryRoot,
     library_metadata: MetadataAdapter,
 }
@@ -141,6 +143,7 @@ impl AppRuntime {
         ));
         let mutation_repository: Arc<dyn LibraryMutationRepository> = storage.clone();
         let read_repository: Arc<dyn LibraryRepository> = storage.clone();
+        let cleanup_repository: Arc<dyn CleanupRepository> = storage.clone();
         let catalog_sink: Arc<dyn LibraryCatalogSink> = Arc::new(playback.clone());
         let effects = Arc::new(FilesystemLibraryMutations::new(
             library_root.clone(),
@@ -151,6 +154,7 @@ impl AppRuntime {
                 .await?;
         let library = supervise_library(&supervisor, spawned_library, health.clone())?;
         let library_service = Arc::new(LibraryService::new(read_repository));
+        let cleanup_service = Arc::new(CleanupService::new(cleanup_repository));
         health.set_component("library_coordinator", true, ComponentStatus::Ready);
         apply_library_health(&health, library.status().status);
         library.request_reconciliation()?;
@@ -173,6 +177,7 @@ impl AppRuntime {
             devices,
             library,
             library_service,
+            cleanup_service,
             library_root,
             library_metadata,
         })
@@ -202,6 +207,7 @@ impl AppRuntime {
             Arc::clone(&self.devices),
             Arc::new(RuntimeLibrary {
                 service: Arc::clone(&self.library_service),
+                cleanup: Arc::clone(&self.cleanup_service),
                 coordinator: self.library.clone(),
                 root: self.library_root.clone(),
                 metadata: self.library_metadata.clone(),
@@ -1269,6 +1275,15 @@ mod tests {
             .oneshot(Request::get("/api/library/search").body(Body::empty())?)
             .await?;
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let unauthorized_cleanup = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/analyze")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"scope":{"type":"all"}}"#))?,
+            )
+            .await?;
+        assert_eq!(unauthorized_cleanup.status(), StatusCode::UNAUTHORIZED);
 
         let login = router
             .clone()
@@ -1290,6 +1305,43 @@ mod tests {
             .next()
             .ok_or("session cookie was empty")?
             .to_owned();
+
+        let cleanup = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/analyze")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"scope":{"type":"folder","path":"Album","recursive":false}}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(cleanup.status(), StatusCode::OK);
+        let cleanup_json: Value =
+            serde_json::from_slice(&to_bytes(cleanup.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(cleanup_json["scanned"], 2);
+        assert_eq!(cleanup_json["plans"].as_array().map(Vec::len), Some(2));
+        assert!(cleanup_json["plans"].as_array().is_some_and(|plans| {
+            plans.iter().all(|plan| {
+                plan["ops"].as_array().is_some_and(|operations| {
+                    operations.iter().any(|operation| {
+                        operation["kind"] == "rename" && operation["confidence"] == "high"
+                    })
+                })
+            })
+        }));
+
+        let empty_track_scope = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/analyze")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"scope":{"type":"tracks","track_ids":[]}}"#))?,
+            )
+            .await?;
+        assert_eq!(empty_track_scope.status(), StatusCode::BAD_REQUEST);
 
         let search = router
             .clone()

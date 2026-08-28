@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use music_application::cleanup::{CleanupFuture, CleanupRepository};
 use music_application::library::{
     DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFuture,
     LibraryIndexMutationCommit, LibraryMutationRepository, LibraryRepository, LibrarySearch,
@@ -9,7 +10,9 @@ use music_application::library::{
     SortOrder, TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue,
 };
 use music_application::recovery::RecoveryJournalId;
-use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
+use music_domain::{
+    IndexedTrack, LibraryGeneration, LibraryPath, NameVerdicts, TrackId, TrackMetadata,
+};
 use serde_json::{Value, json};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Row, Sqlite};
@@ -50,6 +53,24 @@ const TRACK_UPSERT_SQL: &str = "INSERT INTO tracks (\
 impl LibraryRepository for SqliteStorage {
     fn status(&self) -> LibraryFuture<'_, LibraryStatus> {
         Box::pin(async move { self.read_library_status().await.map_err(box_storage) })
+    }
+
+    fn all_tracks(&self) -> LibraryFuture<'_, Vec<IndexedTrack>> {
+        Box::pin(async move {
+            let mut query =
+                QueryBuilder::<Sqlite>::new(format!("SELECT {TRACK_COLUMNS} FROM tracks"));
+            query.push(" ORDER BY path, id");
+            let rows = query
+                .build()
+                .fetch_all(&self.pool)
+                .await
+                .map_err(StorageError::from)
+                .map_err(box_storage)?;
+            rows.iter()
+                .map(indexed_track_from_row)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(box_storage)
+        })
     }
 
     fn catalog_track_ids(&self) -> LibraryFuture<'_, Vec<TrackId>> {
@@ -226,6 +247,36 @@ impl LibraryRepository for SqliteStorage {
                 }
             }
             Ok(counts)
+        })
+    }
+}
+
+impl CleanupRepository for SqliteStorage {
+    fn cleanup_name_verdicts(&self) -> CleanupFuture<'_, NameVerdicts> {
+        Box::pin(async move {
+            let rows = sqlx::query_as::<_, (String, i64, i64)>(
+                "SELECT loose_key, artist_score, album_score FROM cleanup_name_lookups \
+                 ORDER BY id",
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StorageError::from)
+            .map_err(box_storage)?;
+            rows.into_iter()
+                .map(|(key, artist, album)| {
+                    let artist = i32::try_from(artist).map_err(|_| {
+                        box_storage(StorageError::InvalidLibraryRecord(
+                            "cleanup artist score is invalid",
+                        ))
+                    })?;
+                    let album = i32::try_from(album).map_err(|_| {
+                        box_storage(StorageError::InvalidLibraryRecord(
+                            "cleanup album score is invalid",
+                        ))
+                    })?;
+                    Ok((key, (artist, album)))
+                })
+                .collect()
         })
     }
 }
@@ -1322,6 +1373,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use music_application::cleanup::CleanupRepository;
     use music_application::library::{
         DiscoveredTrack, LibraryFileMutation, LibraryMutationRepository, LibraryRepository,
         LibrarySearch, LibrarySortKey, ReconciliationCommit, ReconciliationStatus,
@@ -1331,7 +1383,7 @@ mod tests {
         RecoveryDomain, RecoveryJournalDraft, RecoveryJournalId, RecoveryJournalRepository,
         RecoveryState, RecoveryTransition,
     };
-    use music_domain::{LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
+    use music_domain::{LibraryGeneration, LibraryPath, TrackId, TrackMetadata, cleanup_loose_key};
     use tempfile::tempdir;
 
     use crate::{SqliteStorage, SqliteStorageOptions};
@@ -1409,6 +1461,40 @@ mod tests {
         .await?;
         assert!(matches!(transition, RecoveryTransition::Applied(_)));
         Ok(id)
+    }
+
+    #[tokio::test]
+    async fn cleanup_reads_the_complete_ordered_catalog_and_bounded_verdict_cache()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(
+            directory.path().join("cleanup-read-model.db"),
+        ))
+        .await?;
+        let later_id = insert_track(&storage, "Zulu/later.mp3", "Later", "Artist").await?;
+        let earlier_id = insert_track(&storage, "Alpha/earlier.mp3", "Earlier", "Artist").await?;
+        sqlx::query(
+            "INSERT INTO cleanup_name_lookups \
+             (id, loose_key, name, artist_score, album_score, fetched_at) \
+             VALUES (1, ?, ?, 100, 25, '2026-08-28 12:00:00')",
+        )
+        .bind(cleanup_loose_key("Andrey Vinogradov"))
+        .bind("Andrey Vinogradov")
+        .execute(&storage.pool)
+        .await?;
+
+        let tracks = LibraryRepository::all_tracks(&storage).await?;
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].id.get(), earlier_id);
+        assert_eq!(tracks[0].path.as_str(), "Alpha/earlier.mp3");
+        assert_eq!(tracks[1].id.get(), later_id);
+
+        let verdicts = CleanupRepository::cleanup_name_verdicts(&storage).await?;
+        assert_eq!(
+            verdicts.get(&cleanup_loose_key("Andrey Vinogradov")),
+            Some(&(100, 25))
+        );
+        Ok(())
     }
 
     #[tokio::test]

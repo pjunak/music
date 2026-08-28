@@ -11,6 +11,7 @@
 //! state.
 
 mod auth;
+mod cleanup;
 mod config;
 mod contracts;
 mod devices;

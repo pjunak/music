@@ -10,6 +10,7 @@
 //! media, analysis, or transport adapters.
 
 pub mod auth;
+pub mod cleanup;
 pub mod devices;
 pub mod library;
 pub mod playback;

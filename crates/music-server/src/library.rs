@@ -12,6 +12,7 @@ use axum::http::header::{
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use music_application::auth::{SessionTouch, UnixSeconds};
+use music_application::cleanup::CleanupService;
 use music_application::library::{
     FolderMutationResult, LibraryCoordinatorError, LibraryCoordinatorHandle,
     LibraryMutationFailureKind, LibrarySearch, LibraryService, LibrarySortKey,
@@ -43,6 +44,7 @@ use crate::http::HttpState;
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeLibrary {
     pub(crate) service: Arc<LibraryService>,
+    pub(crate) cleanup: Arc<CleanupService>,
     pub(crate) coordinator: LibraryCoordinatorHandle,
     pub(crate) root: LibraryRoot,
     pub(crate) metadata: MetadataAdapter,
@@ -1801,7 +1803,7 @@ fn map_folder_mutation_error(error: LibraryCoordinatorError) -> ApiError {
     }
 }
 
-fn library(state: &HttpState) -> Result<&RuntimeLibrary, ApiError> {
+pub(crate) fn library(state: &HttpState) -> Result<&RuntimeLibrary, ApiError> {
     state
         .library
         .as_deref()

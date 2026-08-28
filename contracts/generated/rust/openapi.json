@@ -97,6 +97,77 @@
         },
         "type": "object"
       },
+      "AnalyzeRequest": {
+        "properties": {
+          "rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "strip_track_numbers",
+                    "strip_artist",
+                    "strip_album",
+                    "strip_junk",
+                    "normalize_separators",
+                    "normalize_case",
+                    "tag_title",
+                    "tag_artist",
+                    "tag_album",
+                    "tag_number",
+                    "tag_year",
+                    "rename_folders"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Enabled rule ids; omit for the default set"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/CleanupScope"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "type": "object"
+      },
+      "AnalyzeResult": {
+        "properties": {
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupFolderOut"
+            },
+            "type": "array"
+          },
+          "pending_lookups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupTrackPlanOut"
+            },
+            "type": "array"
+          },
+          "scanned": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scanned",
+          "plans",
+          "folders",
+          "pending_lookups"
+        ],
+        "type": "object"
+      },
       "Body_upload_api_library_upload_post": {
         "properties": {
           "files": {
@@ -258,6 +329,185 @@
         "required": [
           "moved",
           "skipped"
+        ],
+        "type": "object"
+      },
+      "CleanupFolderOut": {
+        "properties": {
+          "confidence": {
+            "enum": [
+              "high",
+              "low"
+            ],
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "op_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "op_id",
+          "path",
+          "old",
+          "new",
+          "rules",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "CleanupOpOut": {
+        "properties": {
+          "confidence": {
+            "enum": [
+              "high",
+              "low"
+            ],
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "rename",
+              "tag"
+            ],
+            "type": "string"
+          },
+          "new": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "old": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "op_id": {
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "track_id": {
+            "type": "integer"
+          },
+          "verified": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "op_id",
+          "track_id",
+          "kind",
+          "field",
+          "old",
+          "new",
+          "rules",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "CleanupScope": {
+        "properties": {
+          "path": {
+            "default": "",
+            "type": "string"
+          },
+          "recursive": {
+            "default": true,
+            "type": "boolean"
+          },
+          "track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 5000,
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "folder",
+              "tracks"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "CleanupTrackPlanOut": {
+        "properties": {
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ops": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupOpOut"
+            },
+            "type": "array"
+          },
+          "path": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "path",
+          "ops",
+          "notes"
         ],
         "type": "object"
       },
@@ -1479,6 +1729,47 @@
             "description": "Successful Response"
           }
         }
+      }
+    },
+    "/api/library/cleanup/analyze": {
+      "post": {
+        "operationId": "analyze_api_library_cleanup_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze",
+        "tags": [
+          "library-cleanup"
+        ]
       }
     },
     "/api/library/folders": {

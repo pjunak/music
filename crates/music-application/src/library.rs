@@ -158,6 +158,8 @@ impl Error for LibraryQueryError {}
 pub trait LibraryRepository: std::fmt::Debug + Send + Sync {
     fn status(&self) -> LibraryFuture<'_, LibraryStatus>;
 
+    fn all_tracks(&self) -> LibraryFuture<'_, Vec<IndexedTrack>>;
+
     fn catalog_track_ids(&self) -> LibraryFuture<'_, Vec<TrackId>>;
 
     fn track(&self, track_id: TrackId) -> LibraryFuture<'_, Option<IndexedTrack>>;
@@ -1573,6 +1575,10 @@ impl LibraryService {
 
     pub async fn catalog_track_ids(&self) -> Result<Vec<TrackId>, LibraryDependencyError> {
         self.repository.catalog_track_ids().await
+    }
+
+    pub async fn all_tracks(&self) -> Result<Vec<IndexedTrack>, LibraryDependencyError> {
+        self.repository.all_tracks().await
     }
 
     pub async fn track(
