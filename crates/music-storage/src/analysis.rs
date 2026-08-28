@@ -1,7 +1,8 @@
 use music_application::assistant::{
     AnalysisFailureState, AnalysisFailureWrite, AnalysisState, AnalysisWrite, AssistantFuture,
-    LOCAL_AUDIO_ANALYZER_ID, LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository,
-    audio_source_signature, metadata_source_signature,
+    ContextState, ContextWrite, LOCAL_AUDIO_ANALYZER_ID, LOCAL_CONTEXT_ANALYZER_ID,
+    LOCAL_CONTEXT_IMPLEMENTATION_ID, LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository,
+    audio_source_signature, context_source_signature, metadata_source_signature,
 };
 use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 
@@ -288,6 +289,196 @@ impl LocalAnalysisRepository for SqliteStorage {
             Ok(true)
         })
     }
+
+    fn context_states<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+    ) -> AssistantFuture<'a, Vec<ContextState>> {
+        Box::pin(async move {
+            if analyzer_id != LOCAL_CONTEXT_ANALYZER_ID {
+                return Err(box_storage(StorageError::InvalidAssistantRecord(
+                    "context analyzer id is invalid",
+                )));
+            }
+            let rows = sqlx::query(
+                "SELECT track_id, source_signature, job_id, completeness, confidence, \
+                 summary_json, timeline_json, sections_json, technical_json, stages_json, \
+                 CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
+                 FROM track_contexts WHERE analyzer_id = ? ORDER BY track_id",
+            )
+            .bind(analyzer_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(box_storage)?;
+            rows.iter()
+                .map(|row| {
+                    let raw_id: i64 = row.try_get("track_id").map_err(StorageError::from)?;
+                    Ok(ContextState {
+                        track_id: music_domain::TrackId::new(raw_id).map_err(|_| {
+                            StorageError::InvalidAssistantRecord("context track id is invalid")
+                        })?,
+                        source_signature: row
+                            .try_get("source_signature")
+                            .map_err(StorageError::from)?,
+                        job_id: row.try_get("job_id").map_err(StorageError::from)?,
+                        completeness: row.try_get("completeness").map_err(StorageError::from)?,
+                        confidence: row.try_get("confidence").map_err(StorageError::from)?,
+                        summary_json: row.try_get("summary_json").map_err(StorageError::from)?,
+                        timeline_json: row.try_get("timeline_json").map_err(StorageError::from)?,
+                        sections_json: row.try_get("sections_json").map_err(StorageError::from)?,
+                        technical_json: row
+                            .try_get("technical_json")
+                            .map_err(StorageError::from)?,
+                        stages_json: row.try_get("stages_json").map_err(StorageError::from)?,
+                        updated_at_unix_seconds: row
+                            .try_get::<Option<i64>, _>("updated_at_unix_seconds")
+                            .map_err(StorageError::from)?
+                            .ok_or(StorageError::InvalidAssistantRecord(
+                                "context timestamp is invalid",
+                            ))?,
+                    })
+                })
+                .collect::<Result<Vec<_>, StorageError>>()
+                .map_err(box_storage)
+        })
+    }
+
+    fn store_context<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        implementation_id: &'a str,
+        voice_signature: Option<&'a str>,
+        job_id: &'a str,
+        document: &'a ContextWrite,
+    ) -> AssistantFuture<'a, bool> {
+        Box::pin(async move {
+            if analyzer_id != LOCAL_CONTEXT_ANALYZER_ID
+                || implementation_id != LOCAL_CONTEXT_IMPLEMENTATION_ID
+                || !valid_context(document)
+            {
+                return Err(box_storage(StorageError::InvalidAssistantRecord(
+                    "track context document is invalid",
+                )));
+            }
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(track) = load_track(&mut transaction, document.track_id).await? else {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            };
+            let current_signature =
+                context_source_signature(&track, implementation_id, voice_signature).map_err(
+                    |_| {
+                        box_storage(StorageError::InvalidAssistantRecord(
+                            "track context fingerprint is invalid",
+                        ))
+                    },
+                )?;
+            if current_signature != document.source_signature {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            }
+            let summary = context_json(&document.summary)?;
+            let timeline = context_json(&document.timeline)?;
+            let sections = context_json(&document.sections)?;
+            let technical = context_json(&document.technical)?;
+            let stages = context_json(&document.stages)?;
+            sqlx::query(
+                "INSERT INTO track_contexts \
+                 (track_id, analyzer_id, source_signature, job_id, completeness, confidence, \
+                  summary_json, timeline_json, sections_json, technical_json, stages_json, \
+                  updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
+                 ON CONFLICT(track_id, analyzer_id) DO UPDATE SET \
+                   source_signature = excluded.source_signature, job_id = excluded.job_id, \
+                   completeness = excluded.completeness, confidence = excluded.confidence, \
+                   summary_json = excluded.summary_json, timeline_json = excluded.timeline_json, \
+                   sections_json = excluded.sections_json, technical_json = excluded.technical_json, \
+                   stages_json = excluded.stages_json, updated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(document.track_id.get())
+            .bind(analyzer_id)
+            .bind(&document.source_signature)
+            .bind(job_id)
+            .bind(&document.completeness)
+            .bind(&document.confidence)
+            .bind(summary)
+            .bind(timeline)
+            .bind(sections)
+            .bind(technical)
+            .bind(stages)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            sqlx::query(
+                "DELETE FROM track_analysis_failures WHERE track_id = ? AND analyzer_id = ?",
+            )
+            .bind(document.track_id.get())
+            .bind(analyzer_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(true)
+        })
+    }
+
+    fn store_context_failure<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        implementation_id: &'a str,
+        voice_signature: Option<&'a str>,
+        job_id: &'a str,
+        failure: &'a AnalysisFailureWrite,
+    ) -> AssistantFuture<'a, bool> {
+        Box::pin(async move {
+            if analyzer_id != LOCAL_CONTEXT_ANALYZER_ID
+                || implementation_id != LOCAL_CONTEXT_IMPLEMENTATION_ID
+                || failure.source_signature.len() != 64
+                || failure.error.is_empty()
+            {
+                return Err(box_storage(StorageError::InvalidAssistantRecord(
+                    "track context failure is invalid",
+                )));
+            }
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(track) = load_track(&mut transaction, failure.track_id).await? else {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            };
+            let current_signature =
+                context_source_signature(&track, implementation_id, voice_signature).map_err(
+                    |_| {
+                        box_storage(StorageError::InvalidAssistantRecord(
+                            "track context fingerprint is invalid",
+                        ))
+                    },
+                )?;
+            if current_signature != failure.source_signature {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            }
+            sqlx::query(
+                "INSERT INTO track_analysis_failures \
+                 (track_id, analyzer_id, source_signature, job_id, error, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
+                 ON CONFLICT(track_id, analyzer_id) DO UPDATE SET \
+                   source_signature = excluded.source_signature, job_id = excluded.job_id, \
+                   error = excluded.error, updated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(failure.track_id.get())
+            .bind(analyzer_id)
+            .bind(&failure.source_signature)
+            .bind(job_id)
+            .bind(truncate_utf8(&failure.error, 2_000))
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(true)
+        })
+    }
 }
 
 fn valid_profile(profile: &AnalysisWrite) -> bool {
@@ -314,6 +505,38 @@ fn valid_audio_profile(profile: &AnalysisWrite) -> bool {
                     | serde_json::Value::Number(_)
             )
         })
+}
+
+fn valid_context(document: &ContextWrite) -> bool {
+    document.source_signature.len() == 64
+        && matches!(document.completeness.as_str(), "full" | "partial")
+        && matches!(document.confidence.as_str(), "high" | "medium" | "low")
+        && document
+            .summary
+            .get("schema_version")
+            .and_then(serde_json::Value::as_str)
+            == Some(LOCAL_CONTEXT_ANALYZER_ID)
+        && document.timeline.len() <= 43_200
+        && document.sections.len() <= 10
+        && document
+            .timeline
+            .iter()
+            .flat_map(serde_json::Map::values)
+            .all(serde_json::Value::is_number)
+}
+
+fn context_json(
+    value: &impl serde::Serialize,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let encoded = serde_json::to_string(value)
+        .map_err(StorageError::AssistantSerialization)
+        .map_err(box_storage)?;
+    if encoded.len() > 16 * 1_024 * 1_024 {
+        return Err(box_storage(StorageError::InvalidAssistantRecord(
+            "track context document is too large",
+        )));
+    }
+    Ok(encoded)
 }
 
 async fn load_track(
@@ -352,8 +575,9 @@ mod tests {
     use std::error::Error;
 
     use music_application::assistant::{
-        AnalysisFailureWrite, AnalysisWrite, Confidence, LOCAL_AUDIO_ANALYZER_ID,
-        LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository, audio_source_signature,
+        AnalysisFailureWrite, AnalysisWrite, Confidence, ContextWrite, LOCAL_AUDIO_ANALYZER_ID,
+        LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LOCAL_METADATA_ANALYZER_ID,
+        LocalAnalysisRepository, audio_source_signature, context_source_signature,
         metadata_source_signature,
     };
     use music_application::library::LibraryRepository;
@@ -495,6 +719,98 @@ mod tests {
                 LOCAL_AUDIO_ANALYZER_ID,
                 "stale-job",
                 &profile,
+            )
+            .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn context_success_rechecks_identity_and_replaces_failure_atomically()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let track = LibraryRepository::all_tracks(&storage).await?.remove(0);
+        let signature = context_source_signature(&track, LOCAL_CONTEXT_IMPLEMENTATION_ID, None)?;
+        let failure = AnalysisFailureWrite {
+            track_id: track.id,
+            source_signature: signature.clone(),
+            error: "AudioContextError: decoder failed".to_owned(),
+        };
+        assert!(
+            LocalAnalysisRepository::store_context_failure(
+                &storage,
+                LOCAL_CONTEXT_ANALYZER_ID,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                None,
+                "context-job",
+                &failure,
+            )
+            .await?
+        );
+        let document = ContextWrite {
+            track_id: track.id,
+            source_signature: signature,
+            completeness: "full".to_owned(),
+            confidence: "medium".to_owned(),
+            summary: serde_json::Map::from_iter([
+                (
+                    "schema_version".to_owned(),
+                    serde_json::json!(LOCAL_CONTEXT_ANALYZER_ID),
+                ),
+                (
+                    "voice".to_owned(),
+                    serde_json::json!({"status": "not_classified"}),
+                ),
+            ]),
+            timeline: vec![serde_json::Map::from_iter([
+                ("start_s".to_owned(), serde_json::json!(0.0)),
+                ("duration_s".to_owned(), serde_json::json!(1.0)),
+            ])],
+            sections: vec![serde_json::Map::from_iter([(
+                "id".to_owned(),
+                serde_json::json!("s1"),
+            )])],
+            technical: serde_json::Map::from_iter([(
+                "probe_status".to_owned(),
+                serde_json::json!("complete"),
+            )]),
+            stages: serde_json::Map::from_iter([(
+                "voice".to_owned(),
+                serde_json::json!({"status": "not_configured"}),
+            )]),
+        };
+        assert!(
+            LocalAnalysisRepository::store_context(
+                &storage,
+                LOCAL_CONTEXT_ANALYZER_ID,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                None,
+                "context-job",
+                &document,
+            )
+            .await?
+        );
+        assert!(
+            LocalAnalysisRepository::analysis_failures(&storage, LOCAL_CONTEXT_ANALYZER_ID)
+                .await?
+                .is_empty()
+        );
+        let states =
+            LocalAnalysisRepository::context_states(&storage, LOCAL_CONTEXT_ANALYZER_ID).await?;
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].completeness, "full");
+        sqlx::query("UPDATE tracks SET mtime = 21 WHERE id = ?")
+            .bind(track.id.get())
+            .execute(&storage.pool)
+            .await?;
+        assert!(
+            !LocalAnalysisRepository::store_context(
+                &storage,
+                LOCAL_CONTEXT_ANALYZER_ID,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                None,
+                "stale-job",
+                &document,
             )
             .await?
         );

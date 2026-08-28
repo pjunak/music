@@ -11,8 +11,12 @@ mod vocabulary;
 
 pub use local_analysis::{
     AUDIO_ANALYSIS_JOB_KIND, AnalysisFailureState, AnalysisFailureWrite, AnalysisState,
-    AnalysisWrite, LibraryAnalysisSummary, LocalAnalysisError, LocalAnalysisRepository,
-    LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND, MetadataAnalysisJobHandler,
+    AnalysisWrite, ContextScope, ContextState, ContextWrite, CurrentTrackContext,
+    LIBRARY_CONTEXT_JOB_KIND, LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID,
+    LibraryAnalysisSummary, LibraryContextPassSummary, LibraryContextSummary, LocalAnalysisError,
+    LocalAnalysisRepository, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
+    MetadataAnalysisJobHandler, TrackContextDetail, VOICE_ANALYZER_ID, VOICE_MODEL_FILENAME,
+    VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature, parse_context_state,
 };
 pub use planner::{
     EnergyCurve, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent, PlaylistPlan,

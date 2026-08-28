@@ -7,10 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use music_analysis::{AnalysisExecutor, AudioSignalAnalyzer, FfmpegSignalAnalyzer};
+use music_analysis::{
+    AnalysisExecutor, AudioContextAnalyzer, AudioSignalAnalyzer, FfmpegContextAnalyzer,
+    FfmpegSignalAnalyzer,
+};
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
-    MetadataAnalysisJobHandler,
+    MetadataAnalysisJobHandler, VoiceAnalyzerStatus,
 };
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
@@ -49,7 +52,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tracing_subscriber::EnvFilter;
 
 use crate::admin::{BackupService, MaintenanceGate, pending_restore_journal};
-use crate::analysis::AudioAnalysisJobHandler;
+use crate::analysis::{AudioAnalysisJobHandler, ContextAnalysisJobHandler};
 use crate::auth::RuntimeAuth;
 use crate::cleanup::MusicBrainzNameLookup;
 use crate::config::AppConfig;
@@ -156,9 +159,11 @@ impl AppRuntime {
         let assistant_repository: Arc<dyn AssistantRepository> = storage.clone();
         let assistant = Arc::new(AssistantService::new(assistant_repository));
         let local_analysis_repository: Arc<dyn LocalAnalysisRepository> = storage.clone();
-        let local_analysis = Arc::new(LocalAnalysisService::new(Arc::clone(
-            &local_analysis_repository,
-        )));
+        let voice_analyzer = VoiceAnalyzerStatus::not_configured();
+        let local_analysis = Arc::new(LocalAnalysisService::with_voice_analyzer(
+            Arc::clone(&local_analysis_repository),
+            voice_analyzer.clone(),
+        ));
         let backup = Arc::new(BackupService::new(
             Arc::clone(&storage),
             Arc::clone(&config),
@@ -265,16 +270,25 @@ impl AppRuntime {
                 )
             })?;
         let signal_analyzer: Arc<dyn AudioSignalAnalyzer> =
-            Arc::new(FfmpegSignalAnalyzer::new(ffmpeg));
+            Arc::new(FfmpegSignalAnalyzer::new(ffmpeg.clone()));
+        let context_analyzer: Arc<dyn AudioContextAnalyzer> =
+            Arc::new(FfmpegContextAnalyzer::new(ffmpeg, ffprobe_executable()));
         let job_handlers: Vec<Arc<dyn JobHandler>> = vec![
             Arc::new(MetadataAnalysisJobHandler::new(Arc::clone(
                 &local_analysis_repository,
             ))),
             Arc::new(AudioAnalysisJobHandler::new(
+                Arc::clone(&local_analysis_repository),
+                library_root.clone(),
+                analysis_executor.clone(),
+                signal_analyzer,
+            )),
+            Arc::new(ContextAnalysisJobHandler::new(
                 local_analysis_repository,
                 library_root.clone(),
                 analysis_executor,
-                signal_analyzer,
+                context_analyzer,
+                voice_analyzer,
             )),
         ];
         let jobs = supervise_jobs(
@@ -4229,6 +4243,98 @@ mod tests {
         assert_eq!(audio_summary_json["analyzer"], "local-audio/v1");
         assert_eq!(audio_summary_json["analyzed_tracks"], 1);
         assert_eq!(audio_summary_json["failed_tracks"], 0);
+
+        let context_job = router
+            .clone()
+            .oneshot(
+                Request::post("/api/assistant/library-context/jobs")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"force":false,"scope":{"type":"all"}}"#))?,
+            )
+            .await?;
+        assert_eq!(context_job.status(), StatusCode::ACCEPTED);
+        let context_job_json: Value =
+            serde_json::from_slice(&to_bytes(context_job.into_body(), 1024 * 1024).await?)?;
+        let context_job_id = context_job_json["id"]
+            .as_str()
+            .ok_or("context analysis job id missing")?
+            .to_owned();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = runtime
+                    .jobs
+                    .get(&context_job_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|job| job.status.as_str());
+                if matches!(status, Some("succeeded" | "failed" | "cancelled")) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let context_record = runtime
+            .jobs
+            .get(&context_job_id)
+            .await?
+            .ok_or("context analysis job disappeared")?;
+        assert_eq!(context_record.status.as_str(), "succeeded");
+        assert_eq!(
+            context_record
+                .result
+                .as_ref()
+                .and_then(|result| result.get("analyzer")),
+            Some(&json!("local-context/v2"))
+        );
+
+        let context_summary = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/library-context/summary")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(context_summary.status(), StatusCode::OK);
+        let context_summary_json: Value =
+            serde_json::from_slice(&to_bytes(context_summary.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(context_summary_json["analyzer"], "local-context/v2");
+        assert_eq!(context_summary_json["analyzed_tracks"], 1);
+        assert_eq!(context_summary_json["full_tracks"], 1);
+        assert_eq!(context_summary_json["failed_tracks"], 0);
+        assert_eq!(
+            context_summary_json["voice_analyzer"]["status"],
+            "not_configured"
+        );
+        assert_eq!(
+            context_summary_json["passes"]["voice_detection"]["skipped_tracks"],
+            1
+        );
+
+        let context_detail = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/assistant/library-context/tracks/{track_id}"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(context_detail.status(), StatusCode::OK);
+        let context_detail_json: Value =
+            serde_json::from_slice(&to_bytes(context_detail.into_body(), 4 * 1024 * 1024).await?)?;
+        assert_eq!(context_detail_json["status"], "full");
+        assert_eq!(
+            context_detail_json["summary"]["schema_version"],
+            "local-context/v2"
+        );
+        assert_eq!(
+            context_detail_json["stages"]["spectrum"]["implementation"],
+            "rustfft+mel-profile/v2"
+        );
+        assert!(context_detail_json["timeline"].is_array());
 
         let analyzed_tags = router
             .clone()

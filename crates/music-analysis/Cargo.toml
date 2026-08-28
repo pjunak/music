@@ -9,8 +9,12 @@ authors.workspace = true
 [dependencies]
 music-application = { path = "../music-application", version = "0.1.0" }
 music-domain = { path = "../music-domain", version = "0.1.0" }
+rustfft.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

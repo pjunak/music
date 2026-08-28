@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -5,9 +7,11 @@ use axum::http::{HeaderMap, StatusCode};
 use music_application::assistant::{
     AUDIO_ANALYSIS_JOB_KIND, AnalysisReviewDecision, AnalysisReviewTarget, AssistantService,
     AssistantServiceError, AssistantTrackView, CleanupSelection, Confidence, EnergyCurve,
-    LibraryAnalysisSummary, LocalAnalysisError, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
+    LIBRARY_CONTEXT_JOB_KIND, LibraryAnalysisSummary, LibraryContextPassSummary,
+    LibraryContextSummary, LocalAnalysisError, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
     ManualTagQuery, PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument,
-    TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot,
+    TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail,
+    VoiceAnalyzerStatus,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_domain::TrackId;
@@ -21,6 +25,7 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::analysis::{ContextAnalysisParameters, ContextScopeKind, ContextScopeParameters};
 use crate::auth::{current_session, format_rfc3339};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_integer, openapi_nullable_datetime, openapi_number,
@@ -666,12 +671,213 @@ struct LibraryAnalysisSummaryResponse {
     last_updated_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = LibraryContextStartRequest)]
+struct LibraryContextStartRequest {
+    #[schema(required = false, default = false)]
+    force: bool,
+    #[schema(required = false, schema_with = model_tagging_scope_ref)]
+    scope: ModelTaggingScopeWire,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ModelTaggingScope)]
+pub(crate) struct ModelTaggingScopeWire {
+    #[serde(rename = "type")]
+    #[schema(required = false, schema_with = context_scope_kind_schema)]
+    kind: ContextScopeKindWire,
+    #[schema(required = false, max_length = 1024, default = "")]
+    path: String,
+    #[schema(required = false, default = true)]
+    recursive: bool,
+    #[schema(required = false, schema_with = context_track_ids_schema)]
+    track_ids: Vec<i64>,
+}
+
+impl Default for ModelTaggingScopeWire {
+    fn default() -> Self {
+        Self {
+            kind: ContextScopeKindWire::All,
+            path: String::new(),
+            recursive: true,
+            track_ids: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ContextScopeKindWire {
+    #[default]
+    All,
+    Folder,
+    Tracks,
+}
+
+impl ModelTaggingScopeWire {
+    fn into_parameters(mut self) -> Result<ContextScopeParameters, ApiError> {
+        if self.path.len() > 1_024 || self.track_ids.len() > 5_000 {
+            return Err(ApiError::validation());
+        }
+        let raw_path = self.path.trim();
+        if raw_path.starts_with(['/', '\\'])
+            || raw_path
+                .as_bytes()
+                .get(1)
+                .is_some_and(|value| *value == b':')
+        {
+            return Err(ApiError::validation());
+        }
+        let normalized_path = raw_path.replace('\\', "/").trim_matches('/').to_owned();
+        if normalized_path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .any(|part| matches!(part, "." | ".."))
+        {
+            return Err(ApiError::validation());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        self.track_ids.retain(|value| seen.insert(*value));
+        if self.track_ids.iter().any(|value| *value <= 0) {
+            return Err(ApiError::validation());
+        }
+        let kind = match self.kind {
+            ContextScopeKindWire::All => ContextScopeKind::All,
+            ContextScopeKindWire::Folder => ContextScopeKind::Folder,
+            ContextScopeKindWire::Tracks => ContextScopeKind::Tracks,
+        };
+        match kind {
+            ContextScopeKind::Tracks if self.track_ids.is_empty() => {
+                return Err(ApiError::validation());
+            }
+            ContextScopeKind::All | ContextScopeKind::Folder if !self.track_ids.is_empty() => {
+                return Err(ApiError::validation());
+            }
+            ContextScopeKind::All | ContextScopeKind::Tracks if !normalized_path.is_empty() => {
+                return Err(ApiError::validation());
+            }
+            _ => {}
+        }
+        Ok(ContextScopeParameters {
+            kind,
+            path: normalized_path,
+            recursive: self.recursive,
+            track_ids: self.track_ids,
+        })
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = VoiceAnalyzerStatus)]
+struct VoiceAnalyzerStatusResponse {
+    #[schema(schema_with = voice_analyzer_id_schema)]
+    analyzer_id: String,
+    #[schema(schema_with = voice_analyzer_status_schema)]
+    status: String,
+    #[schema(required = true, schema_with = nullable_voice_reason_schema)]
+    reason: Option<String>,
+    model_filename: String,
+    model_sha256: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = LibraryContextPassSummary)]
+struct LibraryContextPassSummaryResponse {
+    #[schema(schema_with = nonnegative_integer_schema)]
+    completed_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    failed_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    skipped_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    total_tracks: usize,
+    #[schema(required = false, default = true)]
+    enabled: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = LibraryContextPasses)]
+struct LibraryContextPassesResponse {
+    audio_context: LibraryContextPassSummaryResponse,
+    voice_detection: LibraryContextPassSummaryResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = LibraryContextSummary)]
+struct LibraryContextSummaryResponse {
+    #[schema(schema_with = context_analyzer_id_schema)]
+    analyzer: String,
+    voice_analyzer: VoiceAnalyzerStatusResponse,
+    passes: LibraryContextPassesResponse,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    library_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    analyzed_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    full_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    partial_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    missing_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    failed_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    stale_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    high_confidence: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    medium_confidence: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    low_confidence: usize,
+    #[schema(required = true, schema_with = openapi_nullable_datetime)]
+    last_updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = TrackContextDetail)]
+struct TrackContextDetailResponse {
+    #[schema(schema_with = positive_exclusive_integer_schema)]
+    track_id: i64,
+    title: String,
+    artist: String,
+    #[schema(schema_with = context_status_schema)]
+    status: String,
+    #[schema(schema_with = context_analyzer_id_schema)]
+    analyzer_id: String,
+    #[schema(required = true, schema_with = nullable_confidence_schema)]
+    confidence: Option<String>,
+    #[schema(required = true, schema_with = openapi_nullable_datetime)]
+    updated_at: Option<String>,
+    #[schema(required = true, schema_with = nullable_object_schema)]
+    summary: Option<Map<String, Value>>,
+    #[schema(schema_with = context_timeline_schema)]
+    timeline: Vec<BTreeMap<String, f64>>,
+    #[schema(schema_with = context_sections_schema)]
+    sections: Vec<Map<String, Value>>,
+    #[schema(required = true, schema_with = nullable_object_schema)]
+    technical: Option<Map<String, Value>>,
+    #[schema(required = true, schema_with = nullable_object_schema)]
+    stages: Option<Map<String, Value>>,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    error: Option<String>,
+}
+
 pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(start_library_analysis))
         .routes(routes!(library_analysis_summary))
         .routes(routes!(start_library_audio_analysis))
         .routes(routes!(library_audio_analysis_summary))
+        .routes(routes!(start_library_context_analysis))
+        .routes(routes!(library_context_summary))
+        .routes(routes!(library_track_context))
         .routes(routes!(suggest_playlist))
         .routes(routes!(tag_catalog))
         .routes(routes!(get_tag_vocabulary))
@@ -778,6 +984,93 @@ async fn library_audio_analysis_summary(
         .await
         .map_err(map_local_analysis_error)?;
     Ok(Json(library_analysis_summary_response(summary)?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-context/jobs",
+    operation_id = "start_library_context_analysis_api_assistant_library_context_jobs_post",
+    request_body = LibraryContextStartRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn start_library_context_analysis(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<LibraryContextStartRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let parameters = ContextAnalysisParameters {
+        force: payload.force,
+        scope: payload.scope.into_parameters()?,
+    };
+    let parameters = serde_json::to_value(parameters).map_err(|_| ApiError::internal())?;
+    let (job, created) = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?
+        .enqueue_unique_active(LIBRARY_CONTEXT_JOB_KIND, parameters.clone())
+        .await
+        .map_err(map_job_error)?;
+    if !created && job.parameters != parameters.as_object().cloned().unwrap_or_default() {
+        return Err(ApiError::conflict_message(
+            "Another library context analysis is already running. Wait for it to finish or cancel it first.",
+        ));
+    }
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/assistant/library-context/summary",
+    operation_id = "library_context_summary_api_assistant_library_context_summary_get",
+    responses((status = 200, description = "Successful Response", body = LibraryContextSummaryResponse)),
+    tag = "assistant"
+)]
+async fn library_context_summary(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<LibraryContextSummaryResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let summary = analysis_service(&state)?
+        .context_summary()
+        .await
+        .map_err(map_local_analysis_error)?;
+    Ok(Json(library_context_summary_response(summary)?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/assistant/library-context/tracks/{track_id}",
+    operation_id = "library_track_context_api_assistant_library_context_tracks__track_id__get",
+    params(("track_id" = i128, Path, description = "Track Id")),
+    responses(
+        (status = 200, description = "Successful Response", body = TrackContextDetailResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn library_track_context(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    track_id: Result<Path<i128>, PathRejection>,
+) -> Result<Json<TrackContextDetailResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let Path(track_id) = track_id.map_err(|_| ApiError::validation())?;
+    let track_id = i64::try_from(track_id)
+        .ok()
+        .and_then(|value| TrackId::new(value).ok())
+        .ok_or_else(ApiError::validation)?;
+    let detail = analysis_service(&state)?
+        .context_detail(track_id)
+        .await
+        .map_err(map_local_analysis_error)?
+        .ok_or_else(|| ApiError::not_found_message("Track not found"))?;
+    Ok(Json(track_context_detail_response(detail)?))
 }
 
 #[utoipa::path(
@@ -1446,6 +1739,93 @@ fn library_analysis_summary_response(
     })
 }
 
+fn library_context_summary_response(
+    summary: LibraryContextSummary,
+) -> Result<LibraryContextSummaryResponse, ApiError> {
+    Ok(LibraryContextSummaryResponse {
+        analyzer: summary.analyzer,
+        voice_analyzer: voice_analyzer_status_response(summary.voice_analyzer),
+        passes: LibraryContextPassesResponse {
+            audio_context: context_pass_response(summary.audio_context),
+            voice_detection: context_pass_response(summary.voice_detection),
+        },
+        library_tracks: summary.library_tracks,
+        analyzed_tracks: summary.analyzed_tracks,
+        full_tracks: summary.full_tracks,
+        partial_tracks: summary.partial_tracks,
+        missing_tracks: summary.missing_tracks,
+        failed_tracks: summary.failed_tracks,
+        stale_tracks: summary.stale_tracks,
+        high_confidence: summary.high_confidence,
+        medium_confidence: summary.medium_confidence,
+        low_confidence: summary.low_confidence,
+        last_updated_at: summary
+            .last_updated_at_unix_seconds
+            .map(UnixSeconds::new)
+            .map(format_rfc3339)
+            .transpose()?,
+    })
+}
+
+fn voice_analyzer_status_response(value: VoiceAnalyzerStatus) -> VoiceAnalyzerStatusResponse {
+    VoiceAnalyzerStatusResponse {
+        analyzer_id: value.analyzer_id,
+        status: value.status,
+        reason: value.reason,
+        model_filename: value.model_filename,
+        model_sha256: value.model_sha256,
+    }
+}
+
+fn context_pass_response(value: LibraryContextPassSummary) -> LibraryContextPassSummaryResponse {
+    LibraryContextPassSummaryResponse {
+        completed_tracks: value.completed_tracks,
+        failed_tracks: value.failed_tracks,
+        skipped_tracks: value.skipped_tracks,
+        total_tracks: value.total_tracks,
+        enabled: value.enabled,
+    }
+}
+
+fn track_context_detail_response(
+    value: TrackContextDetail,
+) -> Result<TrackContextDetailResponse, ApiError> {
+    let timeline = value
+        .timeline
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|(key, value)| {
+                    value
+                        .as_f64()
+                        .filter(|number| number.is_finite())
+                        .map(|number| (key, number))
+                        .ok_or_else(ApiError::internal)
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(TrackContextDetailResponse {
+        track_id: value.track_id.get(),
+        title: value.title,
+        artist: value.artist,
+        status: value.status,
+        analyzer_id: value.analyzer_id,
+        confidence: value.confidence,
+        updated_at: value
+            .updated_at_unix_seconds
+            .map(UnixSeconds::new)
+            .map(format_rfc3339)
+            .transpose()?,
+        summary: value.summary,
+        timeline,
+        sections: value.sections,
+        technical: value.technical,
+        stages: value.stages,
+        error: value.error,
+    })
+}
+
 fn map_local_analysis_error(error: LocalAnalysisError) -> ApiError {
     tracing::error!(error = %error, "Local analysis request failed");
     ApiError::internal()
@@ -1774,4 +2154,95 @@ fn audio_metrics_schema() -> RefOr<Schema> {
             .into(),
         )))
         .into()
+}
+
+fn context_scope_kind_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["all", "folder", "tracks"]))
+        .default(Some(json!("all")))
+        .into()
+}
+
+fn model_tagging_scope_ref() -> RefOr<Schema> {
+    RefOr::Ref(utoipa::openapi::Ref::from_schema_name("ModelTaggingScope"))
+}
+
+fn context_track_ids_schema() -> RefOr<Schema> {
+    ArrayBuilder::new()
+        .items(openapi_integer())
+        .max_items(Some(5_000))
+        .into()
+}
+
+fn context_analyzer_id_schema() -> RefOr<Schema> {
+    const_string_schema("local-context/v2")
+}
+
+fn voice_analyzer_id_schema() -> RefOr<Schema> {
+    const_string_schema("essentia-musicnn-voice/v1")
+}
+
+fn voice_analyzer_status_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["not_configured", "ready", "unavailable"]))
+        .into()
+}
+
+fn nullable_voice_reason_schema() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(
+                ObjectBuilder::new()
+                    .schema_type(Type::String)
+                    .enum_values(Some([
+                        "model_missing",
+                        "model_unreadable",
+                        "unsupported_model",
+                        "runtime_missing",
+                    ])),
+            )
+            .item(ObjectBuilder::new().schema_type(Type::Null))
+            .build(),
+    )
+    .into()
+}
+
+fn context_status_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["full", "partial", "missing", "stale", "failed"]))
+        .into()
+}
+
+fn free_object_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Object)
+        .additional_properties(Some(AdditionalProperties::FreeForm(true)))
+        .into()
+}
+
+fn nullable_object_schema() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(free_object_schema())
+            .item(ObjectBuilder::new().schema_type(Type::Null))
+            .build(),
+    )
+    .into()
+}
+
+fn context_timeline_schema() -> RefOr<Schema> {
+    ArrayBuilder::new()
+        .items(
+            ObjectBuilder::new()
+                .schema_type(Type::Object)
+                .additional_properties(Some(AdditionalProperties::RefOr(openapi_number()))),
+        )
+        .into()
+}
+
+fn context_sections_schema() -> RefOr<Schema> {
+    ArrayBuilder::new().items(free_object_schema()).into()
 }

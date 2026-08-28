@@ -116,6 +116,11 @@ impl AnalysisExecutor {
             })?;
         receiver.await.map_err(|_| AnalysisExecutorError::Stopped)
     }
+
+    #[must_use]
+    pub fn worker_count(&self) -> usize {
+        self.inner.workers.lock().map_or(0, |workers| workers.len())
+    }
 }
 
 fn worker_loop(receiver: &Arc<Mutex<Receiver<Message>>>) {

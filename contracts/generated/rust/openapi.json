@@ -3339,6 +3339,150 @@
         ],
         "type": "object"
       },
+      "LibraryContextPassSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "failed_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "skipped_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "completed_tracks",
+          "failed_tracks",
+          "skipped_tracks",
+          "total_tracks"
+        ],
+        "type": "object"
+      },
+      "LibraryContextPasses": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_context": {
+            "$ref": "#/components/schemas/LibraryContextPassSummary"
+          },
+          "voice_detection": {
+            "$ref": "#/components/schemas/LibraryContextPassSummary"
+          }
+        },
+        "required": [
+          "audio_context",
+          "voice_detection"
+        ],
+        "type": "object"
+      },
+      "LibraryContextStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "default": false,
+            "type": "boolean"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ModelTaggingScope"
+          }
+        },
+        "type": "object"
+      },
+      "LibraryContextSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzed_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "analyzer": {
+            "const": "local-context/v2",
+            "type": "string"
+          },
+          "failed_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "full_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "high_confidence": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "library_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "low_confidence": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "medium_confidence": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "missing_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "partial_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "passes": {
+            "$ref": "#/components/schemas/LibraryContextPasses"
+          },
+          "stale_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "voice_analyzer": {
+            "$ref": "#/components/schemas/VoiceAnalyzerStatus"
+          }
+        },
+        "required": [
+          "analyzer",
+          "voice_analyzer",
+          "passes",
+          "library_tracks",
+          "analyzed_tracks",
+          "full_tracks",
+          "partial_tracks",
+          "missing_tracks",
+          "failed_tracks",
+          "stale_tracks",
+          "high_confidence",
+          "medium_confidence",
+          "low_confidence",
+          "last_updated_at"
+        ],
+        "type": "object"
+      },
       "LibraryTagPage": {
         "additionalProperties": false,
         "properties": {
@@ -3789,6 +3933,37 @@
           "default_crossfade_ms",
           "default_soundboard"
         ],
+        "type": "object"
+      },
+      "ModelTaggingScope": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "default": "",
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "recursive": {
+            "default": true,
+            "type": "boolean"
+          },
+          "track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 5000,
+            "type": "array"
+          },
+          "type": {
+            "default": "all",
+            "enum": [
+              "all",
+              "folder",
+              "tracks"
+            ],
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "PlayerState": {
@@ -5293,6 +5468,136 @@
         ],
         "type": "object"
       },
+      "TrackContextDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "const": "local-context/v2",
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sections": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "stages": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "full",
+              "partial",
+              "missing",
+              "stale",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "technical": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeline": {
+            "items": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_id": {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "track_id",
+          "title",
+          "artist",
+          "status",
+          "analyzer_id",
+          "confidence",
+          "updated_at",
+          "summary",
+          "timeline",
+          "sections",
+          "technical",
+          "stages",
+          "error"
+        ],
+        "type": "object"
+      },
       "TrackInPlaylist": {
         "properties": {
           "position": {
@@ -5813,6 +6118,53 @@
         ],
         "type": "object"
       },
+      "VoiceAnalyzerStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer_id": {
+            "const": "essentia-musicnn-voice/v1",
+            "type": "string"
+          },
+          "model_filename": {
+            "type": "string"
+          },
+          "model_sha256": {
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model_missing",
+                  "model_unreadable",
+                  "unsupported_model",
+                  "runtime_missing"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "not_configured",
+              "ready",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "analyzer_id",
+          "status",
+          "reason",
+          "model_filename",
+          "model_sha256"
+        ],
+        "type": "object"
+      },
       "app__api__playlists__TrackMoveRequest": {
         "properties": {
           "to_position": {
@@ -6013,6 +6365,107 @@
               }
             },
             "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/library-context/jobs": {
+      "post": {
+        "operationId": "start_library_context_analysis_api_assistant_library_context_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryContextStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/library-context/summary": {
+      "get": {
+        "operationId": "library_context_summary_api_assistant_library_context_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryContextSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/library-context/tracks/{track_id}": {
+      "get": {
+        "operationId": "library_track_context_api_assistant_library_context_tracks__track_id__get",
+        "parameters": [
+          {
+            "description": "Track Id",
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackContextDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "tags": [
