@@ -12,6 +12,7 @@
 mod delivery;
 mod discovery;
 mod metadata;
+mod mode_mutation;
 mod modes;
 mod mutation;
 mod path;
@@ -29,6 +30,7 @@ pub use metadata::{
     StagedTagUpdate, TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata,
     stage_tag_update,
 };
+pub use mode_mutation::{FilesystemModeMutations, ModeFilesystemMutationError};
 pub use modes::FilesystemModeCatalogSource;
 pub use mutation::{FilesystemLibraryMutations, library_upload_target_exists};
 

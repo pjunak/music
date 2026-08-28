@@ -259,8 +259,8 @@ the client-ended path, unknown interrupts use the compatible five-minute safety 
 automatic skip carries the observed track ID so a simultaneous client skip remains idempotent.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 38 currently registered Rust operations, rather than presenting partial work as
-parity. Thirty-seven operations overlap the reference and 36 are fully schema-compatible; the
+operations versus 65 currently registered Rust operations, rather than presenting partial work as
+parity. Sixty-four operations overlap the reference and 63 are fully schema-compatible; the
 remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work.
 The browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
@@ -307,9 +307,9 @@ the full gate before moving the phase marker to complete.
 - [x] Offline `create-user`, `set-password`, database doctor/migrate, healthcheck, and contract
   commands. Password input defaults to a hidden prompt; password replacement atomically revokes
   active sessions unless the operator explicitly preserves them.
-- [x] Authenticated diagnostics from the live playback actor and library coordinator, preserving
-  the existing frontend response contract without exposing log-only internals. Mode load status is
-  truthfully empty until the Rust mode coordinator owns it.
+- [x] Authenticated diagnostics from the live playback actor, library coordinator, and mode
+  coordinator, preserving the existing frontend response contract without exposing log-only
+  internals.
 - [x] Maintenance-gated, authenticated backup streams a verified versioned `tar.gz` from disk.
   The manifest hashes the SQLite snapshot and every mode file, records empty mode directories, and
   carries only the one-way assistant credential-key ID. The master key and legacy `devices.json`
@@ -388,9 +388,15 @@ committed or logged.
 
 ## Phase 6 — modes, presets, playlists, cues, and authoring
 
-- `ModeCoordinator`, typed immutable catalog snapshots, generations, and reload status.
-- Mode/soundboard/interrupt/cue/preset CRUD with staged writes, recovery journal, catalog-change
-  notification, and preset revision updates.
+**Status:** In progress — Rust now owns the bounded mode catalog and all existing mode, soundboard,
+interrupt, cue, and preset CRUD. Playlists, SFX dispatch, and import authoring remain.
+
+- [x] `ModeCoordinator`, typed immutable catalog snapshots, generations, last-good reload behavior,
+  health/diagnostic status, and authenticated plus guest-compatible read routes.
+- [x] Mode/soundboard/interrupt/cue/preset CRUD through the single coordinator, with typed
+  validation, staged and hashed YAML candidates, SQLite recovery journals, startup rollback,
+  catalog-change publication, and active-preset revision updates. All 19 frozen write operations
+  are OpenAPI-compatible.
 - Playlist ordering, automatic rules, materialization, export, and playback resolution.
 - SFX/loop/cue dispatch through the playback actor.
 - Authoring document schema, source adapters, preview/dependency validation, journaled commit, and

@@ -17,15 +17,16 @@ use music_application::library::{
 };
 use music_application::modes::{
     ModeCatalogSink, ModeCoordinatorHandle, ModeLoadState, SpawnedModeCoordinator,
-    start_mode_coordinator,
+    start_mutable_mode_coordinator,
 };
 use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
     SystemPlaybackClock, SystemQueueRandom, start_playback_actor,
 };
+use music_application::recovery::RecoveryJournalRepository;
 use music_media::{
     FfmpegTools, FilesystemLibraryDiscovery, FilesystemLibraryMutations,
-    FilesystemModeCatalogSource, LibraryRoot, MetadataAdapter,
+    FilesystemModeCatalogSource, FilesystemModeMutations, LibraryRoot, MetadataAdapter,
 };
 use music_storage::{
     LegacyDeviceImportOutcome, LegacyDeviceImportStatus, SqliteStorage, SqliteStorageOptions,
@@ -159,7 +160,17 @@ impl AppRuntime {
         health.set_component("playback", true, ComponentStatus::Ready);
         let mode_source = Arc::new(FilesystemModeCatalogSource::open(&config.modes_dir)?);
         let mode_sink: Arc<dyn ModeCatalogSink> = Arc::new(playback.clone());
-        let spawned_modes = start_mode_coordinator(mode_source, mode_sink);
+        let mode_journal: Arc<dyn RecoveryJournalRepository> = storage.clone();
+        let mode_effects = Arc::new(FilesystemModeMutations::open(&config.modes_dir).map_err(
+            |_| {
+                music_application::modes::ModeCoordinatorError::MutationRecovery(
+                    "mode mutation filesystem could not be initialized",
+                )
+            },
+        )?);
+        let spawned_modes =
+            start_mutable_mode_coordinator(mode_source, mode_sink, mode_journal, mode_effects)
+                .await?;
         let modes = supervise_modes(&supervisor, spawned_modes, health.clone())?;
         let initial_mode_status = modes.wait_until_initialized().await?;
         health.set_component("mode_coordinator", true, ComponentStatus::Ready);
@@ -648,6 +659,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::header::{
         ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_RANGE, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
@@ -663,10 +675,14 @@ mod tests {
         CleanupVerificationService,
     };
     use music_application::library::{LibraryFileMutation, ReconciliationStatus};
-    use music_application::recovery::{
-        RecoveryDomain, RecoveryJournalDraft, RecoveryJournalRepository, RecoveryOperation,
-        RecoveryState, RecoveryTransition,
+    use music_application::modes::{
+        ModeDocument, ModeMutation, ModeMutationEffects, ModeMutationFailureKind,
     };
+    use music_application::recovery::{
+        RecoveryDomain, RecoveryJournalDraft, RecoveryJournalId, RecoveryJournalRepository,
+        RecoveryOperation, RecoveryState, RecoveryTransition,
+    };
+    use music_media::FilesystemModeMutations;
     use music_storage::{SqliteStorage, SqliteStorageOptions, StorageError};
     use serde_json::Value;
     use tar::Archive;
@@ -727,6 +743,35 @@ mod tests {
             ),
         ]))
         .map_err(Into::into)
+    }
+
+    async fn operator_router(runtime: &AppRuntime) -> Result<(Router, String), Box<dyn Error>> {
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?
+            .to_owned();
+        Ok((router, cookie))
     }
 
     fn reference_wav() -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
@@ -1665,6 +1710,372 @@ mod tests {
             catalog.modes.contains_key("table") && catalog.modes.contains_key("cyber")
         }));
 
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mode_authoring_crud_is_journaled_validated_and_immediately_visible()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let (router, cookie) = operator_router(&runtime).await?;
+        let initial_generation = runtime
+            .modes
+            .snapshot()
+            .ok_or("mode catalog was not initialized")?
+            .generation;
+
+        let unauthorized = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"table","name":"Table"}"#))?,
+            )
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let created = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"table","name":"Table"}"#))?,
+            )
+            .await?;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let created: Value =
+            serde_json::from_slice(&to_bytes(created.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(created["id"], "table");
+        assert!(directory.path().join("modes/table/manifest.yaml").is_file());
+        let stale = runtime
+            .modes
+            .mutate(ModeMutation::DeleteMode {
+                expected_generation: initial_generation,
+                mode_id: "table".to_owned(),
+            })
+            .await
+            .err()
+            .ok_or("stale mode mutation unexpectedly succeeded")?;
+        assert_eq!(stale.kind, ModeMutationFailureKind::Stale);
+        assert!(directory.path().join("modes/table").is_dir());
+
+        let renamed = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/modes/table")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"Game Table"}"#))?,
+            )
+            .await?;
+        assert_eq!(renamed.status(), StatusCode::OK);
+
+        let soundboard = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/table/soundboards")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"combat","name":"Combat"}"#))?,
+            )
+            .await?;
+        assert_eq!(soundboard.status(), StatusCode::CREATED);
+
+        let category = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/table/soundboards/combat/categories")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"weapons","name":"Weapons"}"#))?,
+            )
+            .await?;
+        assert_eq!(category.status(), StatusCode::CREATED);
+
+        let item = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/table/soundboards/combat/categories/weapons/items")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"file":"weapons/sword.wav","name":"Sword","icon":"S"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(item.status(), StatusCode::CREATED);
+
+        let patched_item = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/modes/table/soundboards/combat/categories/weapons/items/0")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"Longsword","icon":null}"#))?,
+            )
+            .await?;
+        assert_eq!(patched_item.status(), StatusCode::OK);
+        let patched_item: Value =
+            serde_json::from_slice(&to_bytes(patched_item.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            patched_item["categories"][0]["items"][0]["name"],
+            "Longsword"
+        );
+        assert!(patched_item["categories"][0]["items"][0]["icon"].is_null());
+
+        let poisoned_item = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/modes/table/soundboards/combat/categories/weapons/items/0")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":null}"#))?,
+            )
+            .await?;
+        assert_eq!(poisoned_item.status(), StatusCode::BAD_REQUEST);
+
+        let interrupt = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/table/interrupts")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Battle","playlist":"battle","duck_to":0.4}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(interrupt.status(), StatusCode::CREATED);
+
+        let switched_interrupt = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/modes/table/interrupts/0")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"playlist":null,"soundboard_item":"combat:weapons:0"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(switched_interrupt.status(), StatusCode::OK);
+
+        let cue = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/table/cues")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"ambush","name":"Ambush","playlist":"battle","sfx":[{"soundboard":"combat","item":"weapons:0","volume":0.8}]}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(cue.status(), StatusCode::CREATED);
+
+        let updated_cue = router
+            .clone()
+            .oneshot(
+                Request::put("/api/modes/table/cues/ambush")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Ambush Again","start_ms":1250,"loops":[{"soundboard":"combat","item":"weapons:0","interval_s":30.0}]}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(updated_cue.status(), StatusCode::OK);
+
+        let rejected_preset = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/table/presets")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"unsafe","name":"Unsafe","effects":[{"type":"pitch_shift"}]}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(rejected_preset.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            !directory
+                .path()
+                .join("modes/table/presets/unsafe.yaml")
+                .exists()
+        );
+
+        let preset = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes/table/presets")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"cave","name":"Cave","effects":[{"type":"eq","low":-2}],"crossfade_ms":500}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(preset.status(), StatusCode::CREATED);
+
+        let updated_preset = router
+            .clone()
+            .oneshot(
+                Request::put("/api/modes/table/presets/cave")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Deep Cave","effects":[{"type":"reverb","room_size":0.8}]}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(updated_preset.status(), StatusCode::OK);
+
+        let detail = router
+            .clone()
+            .oneshot(
+                Request::get("/api/modes/table")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let detail: Value =
+            serde_json::from_slice(&to_bytes(detail.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(detail["name"], "Game Table");
+        assert_eq!(detail["cues"]["ambush"]["start_ms"], 1250);
+        assert_eq!(detail["presets"]["cave"]["effects"][0]["type"], "reverb");
+        assert_eq!(
+            detail["interrupts"][0]["soundboard_item"],
+            "combat:weapons:0"
+        );
+
+        for (method, path) in [
+            ("DELETE", "/api/modes/table/presets/cave"),
+            ("DELETE", "/api/modes/table/cues/ambush"),
+            ("DELETE", "/api/modes/table/interrupts/0"),
+            (
+                "DELETE",
+                "/api/modes/table/soundboards/combat/categories/weapons/items/0",
+            ),
+            (
+                "DELETE",
+                "/api/modes/table/soundboards/combat/categories/weapons",
+            ),
+            ("DELETE", "/api/modes/table/soundboards/combat"),
+        ] {
+            let request = Request::builder()
+                .method(method)
+                .uri(path)
+                .header("cookie", &cookie)
+                .body(Body::empty())?;
+            let response = router.clone().oneshot(request).await?;
+            assert!(
+                response.status().is_success(),
+                "{method} {path} returned {}",
+                response.status()
+            );
+        }
+
+        let deleted = router
+            .oneshot(
+                Request::delete("/api/modes/table")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+        assert!(!directory.path().join("modes/table").exists());
+        assert!(!directory.path().join("modes/.music-mode-journal").exists());
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                runtime.storage.as_ref(),
+                RecoveryDomain::Modes,
+            )
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))?
+            .is_empty()
+        );
+        assert!(
+            runtime
+                .modes
+                .snapshot()
+                .is_some_and(|catalog| catalog.modes.is_empty())
+        );
+
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_rolls_back_an_interrupted_mode_publication()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let config = runtime_config(directory.path())?;
+        fs::create_dir_all(&config.modes_dir)?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(&config.database_path)).await?;
+        let effects = FilesystemModeMutations::open(&config.modes_dir)?;
+        let journal_id = RecoveryJournalId::new();
+        let prepared = effects
+            .prepare(
+                &journal_id,
+                &ModeMutation::CreateMode {
+                    expected_generation: 1,
+                    manifest: ModeDocument {
+                        id: "interrupted".to_owned(),
+                        name: "Interrupted".to_owned(),
+                        theme: None,
+                        panels: Vec::new(),
+                        playlist_categories: Vec::new(),
+                        interrupts: Vec::new(),
+                        integrations: Default::default(),
+                        default_crossfade_ms: 0,
+                        default_soundboard: None,
+                        extra: BTreeMap::new(),
+                    },
+                },
+            )
+            .await?;
+        let mut draft =
+            RecoveryJournalDraft::new(RecoveryDomain::Modes, prepared.operation, prepared.plan)?;
+        draft.id = journal_id;
+        let planned = RecoveryJournalRepository::create_recovery_journal(&storage, draft).await?;
+        let applying = match RecoveryJournalRepository::transition_recovery_journal(
+            &storage,
+            &planned.id,
+            RecoveryState::Planned,
+            RecoveryState::Applying,
+            serde_json::json!({"stage": "applying"}),
+        )
+        .await?
+        {
+            RecoveryTransition::Applied(entry) => entry,
+            RecoveryTransition::Conflict(_) => return Err("journal transition conflicted".into()),
+        };
+        effects.apply(&applying).await?;
+        assert!(config.modes_dir.join("interrupted/manifest.yaml").is_file());
+        storage.close().await;
+        drop(storage);
+
+        let runtime = AppRuntime::start(config).await?;
+        assert!(!runtime.config.modes_dir.join("interrupted").exists());
+        assert!(
+            !runtime
+                .config
+                .modes_dir
+                .join(".music-mode-journal")
+                .exists()
+        );
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                runtime.storage.as_ref(),
+                RecoveryDomain::Modes,
+            )
+            .await?
+            .is_empty()
+        );
         runtime.shutdown().await?;
         Ok(())
     }

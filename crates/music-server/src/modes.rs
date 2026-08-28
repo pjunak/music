@@ -29,6 +29,8 @@ use crate::auth::{current_session, optional_session};
 use crate::error::{ApiError, HttpValidationErrorBody, openapi_integer, openapi_nullable_string};
 use crate::http::HttpState;
 
+mod write;
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 struct ModeSummary {
     id: String,
@@ -231,6 +233,7 @@ pub(crate) fn mode_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(get_mode))
         .routes(routes!(list_mode_presets))
         .routes(routes!(get_mode_theme))
+        .merge(write::mode_write_router())
 }
 
 #[utoipa::path(

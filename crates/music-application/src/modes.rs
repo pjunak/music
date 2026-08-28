@@ -13,6 +13,17 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::playback::PlaybackActorHandle;
+use crate::recovery::{
+    RecoveryDomain, RecoveryJournalDraft, RecoveryJournalEntry, RecoveryJournalId,
+    RecoveryJournalRepository, RecoveryState, RecoveryTransition,
+};
+
+mod mutation;
+
+pub use mutation::{
+    ModeMutation, ModeMutationDependencyError, ModeMutationEffects, ModeMutationError,
+    ModeMutationFailureKind, ModeMutationFuture, ModeMutationReport, PreparedModeMutation,
+};
 
 const MODE_COMMAND_CAPACITY: usize = 16;
 const MAX_MODE_ERRORS: usize = 128;
@@ -317,6 +328,7 @@ pub enum ModeCoordinatorError {
     ReplyDropped,
     GenerationOverflow,
     CatalogSink(ModeCatalogSinkError),
+    MutationRecovery(&'static str),
 }
 
 impl Display for ModeCoordinatorError {
@@ -326,6 +338,7 @@ impl Display for ModeCoordinatorError {
             Self::ReplyDropped => formatter.write_str("mode coordinator dropped its reply"),
             Self::GenerationOverflow => formatter.write_str("mode catalog generation overflowed"),
             Self::CatalogSink(error) => Display::fmt(error, formatter),
+            Self::MutationRecovery(detail) => formatter.write_str(detail),
         }
     }
 }
@@ -334,7 +347,10 @@ impl Error for ModeCoordinatorError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::CatalogSink(source) => Some(source),
-            Self::CommandClosed | Self::ReplyDropped | Self::GenerationOverflow => None,
+            Self::CommandClosed
+            | Self::ReplyDropped
+            | Self::GenerationOverflow
+            | Self::MutationRecovery(_) => None,
         }
     }
 }
@@ -394,6 +410,31 @@ impl ModeCoordinatorHandle {
             .map_err(|_| ModeCoordinatorError::ReplyDropped)?
     }
 
+    pub async fn mutate(
+        &self,
+        mutation: ModeMutation,
+    ) -> Result<ModeMutationReport, ModeMutationError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(ModeCommand::Mutate {
+                mutation: Box::new(mutation),
+                reply,
+            })
+            .await
+            .map_err(|_| {
+                ModeMutationError::new(
+                    ModeMutationFailureKind::Unavailable,
+                    "mode coordinator is unavailable",
+                )
+            })?;
+        response.await.map_err(|_| {
+            ModeMutationError::new(
+                ModeMutationFailureKind::Unavailable,
+                "mode coordinator dropped its mutation reply",
+            )
+        })?
+    }
+
     pub fn shutdown(&self) {
         self.cancellation.cancel();
     }
@@ -408,6 +449,28 @@ pub struct SpawnedModeCoordinator {
 pub fn start_mode_coordinator(
     source: Arc<dyn ModeCatalogSource>,
     sink: Arc<dyn ModeCatalogSink>,
+) -> SpawnedModeCoordinator {
+    spawn_mode_coordinator(source, sink, None)
+}
+
+pub async fn start_mutable_mode_coordinator(
+    source: Arc<dyn ModeCatalogSource>,
+    sink: Arc<dyn ModeCatalogSink>,
+    journal: Arc<dyn RecoveryJournalRepository>,
+    effects: Arc<dyn ModeMutationEffects>,
+) -> Result<SpawnedModeCoordinator, ModeCoordinatorError> {
+    recover_mode_mutations(journal.as_ref(), effects.as_ref()).await?;
+    Ok(spawn_mode_coordinator(
+        source,
+        sink,
+        Some(MutationDependencies { journal, effects }),
+    ))
+}
+
+fn spawn_mode_coordinator(
+    source: Arc<dyn ModeCatalogSource>,
+    sink: Arc<dyn ModeCatalogSink>,
+    mutations: Option<MutationDependencies>,
 ) -> SpawnedModeCoordinator {
     let (commands, receiver) = mpsc::channel(MODE_COMMAND_CAPACITY);
     let (catalog_sender, catalog) = watch::channel(None);
@@ -426,6 +489,7 @@ pub fn start_mode_coordinator(
         catalog_sender,
         status_sender,
         cancellation,
+        mutations,
     ));
     SpawnedModeCoordinator { handle, task }
 }
@@ -435,6 +499,16 @@ enum ModeCommand {
     Reload {
         reply: oneshot::Sender<Result<ModeReloadReport, ModeCoordinatorError>>,
     },
+    Mutate {
+        mutation: Box<ModeMutation>,
+        reply: oneshot::Sender<Result<ModeMutationReport, ModeMutationError>>,
+    },
+}
+
+#[derive(Clone)]
+struct MutationDependencies {
+    journal: Arc<dyn RecoveryJournalRepository>,
+    effects: Arc<dyn ModeMutationEffects>,
 }
 
 async fn run_mode_coordinator(
@@ -444,6 +518,7 @@ async fn run_mode_coordinator(
     catalog_sender: watch::Sender<Option<Arc<ModeCatalog>>>,
     status_sender: watch::Sender<ModeStatus>,
     cancellation: CancellationToken,
+    mutations: Option<MutationDependencies>,
 ) -> Result<(), ModeCoordinatorError> {
     let mut catalog = None;
     perform_reload(
@@ -479,6 +554,40 @@ async fn run_mode_coordinator(
                 let _ = reply.send(result);
                 if let Some(error) = fatal {
                     return Err(error);
+                }
+            }
+            ModeCommand::Mutate { mutation, reply } => {
+                let Some(dependencies) = mutations.as_ref() else {
+                    let _ = reply.send(Err(ModeMutationError::new(
+                        ModeMutationFailureKind::Unavailable,
+                        "mode mutations are not configured",
+                    )));
+                    continue;
+                };
+                match perform_mutation(
+                    source.as_ref(),
+                    sink.as_ref(),
+                    dependencies,
+                    &mut catalog,
+                    &catalog_sender,
+                    &status_sender,
+                    *mutation,
+                )
+                .await
+                {
+                    Ok(report) => {
+                        let _ = reply.send(Ok(report));
+                    }
+                    Err(ModeMutationExecutionError::Rejected(error)) => {
+                        let _ = reply.send(Err(error));
+                    }
+                    Err(ModeMutationExecutionError::Fatal(error)) => {
+                        let _ = reply.send(Err(ModeMutationError::new(
+                            ModeMutationFailureKind::Unavailable,
+                            "mode mutation recovery failed",
+                        )));
+                        return Err(error);
+                    }
                 }
             }
         }
@@ -569,6 +678,528 @@ async fn perform_reload(
         published: true,
         generation,
     })
+}
+
+#[derive(Debug)]
+enum ModeMutationExecutionError {
+    Rejected(ModeMutationError),
+    Fatal(ModeCoordinatorError),
+}
+
+impl From<ModeMutationError> for ModeMutationExecutionError {
+    fn from(error: ModeMutationError) -> Self {
+        Self::Rejected(error)
+    }
+}
+
+async fn perform_mutation(
+    source: &dyn ModeCatalogSource,
+    sink: &dyn ModeCatalogSink,
+    dependencies: &MutationDependencies,
+    current: &mut Option<Arc<ModeCatalog>>,
+    catalog_sender: &watch::Sender<Option<Arc<ModeCatalog>>>,
+    status_sender: &watch::Sender<ModeStatus>,
+    mutation: ModeMutation,
+) -> Result<ModeMutationReport, ModeMutationExecutionError> {
+    let current_catalog = current.as_deref().ok_or_else(|| {
+        ModeMutationError::new(
+            ModeMutationFailureKind::Unavailable,
+            "mode catalog is not loaded",
+        )
+    })?;
+    if mutation.expected_generation() != current_catalog.generation {
+        return Err(ModeMutationError::new(
+            ModeMutationFailureKind::Stale,
+            "mode catalog generation changed",
+        )
+        .into());
+    }
+    let generation =
+        current_catalog
+            .generation
+            .checked_add(1)
+            .ok_or(ModeMutationExecutionError::Fatal(
+                ModeCoordinatorError::GenerationOverflow,
+            ))?;
+    let mut proposed_modes = apply_catalog_mutation(current_catalog, &mutation)?;
+    let target_mode_id = mutation.mode_id().to_owned();
+    let deletes_mode = mutation.deletes_mode();
+    let journal_id = RecoveryJournalId::new();
+    let prepared = dependencies
+        .effects
+        .prepare(&journal_id, &mutation)
+        .await
+        .map_err(|_| {
+            ModeMutationExecutionError::Rejected(ModeMutationError::new(
+                ModeMutationFailureKind::Unavailable,
+                "mode mutation could not be staged",
+            ))
+        })?;
+    let mut draft =
+        RecoveryJournalDraft::new(RecoveryDomain::Modes, prepared.operation, prepared.plan)
+            .map_err(|_| {
+                ModeMutationExecutionError::Fatal(ModeCoordinatorError::MutationRecovery(
+                    "mode mutation journal plan is invalid",
+                ))
+            })?;
+    draft.id = journal_id;
+    let planned = match dependencies.journal.create_recovery_journal(draft).await {
+        Ok(planned) => planned,
+        Err(_) => {
+            dependencies.effects.cleanup_orphans().await.map_err(|_| {
+                ModeMutationExecutionError::Fatal(ModeCoordinatorError::MutationRecovery(
+                    "unjournaled mode staging could not be cleaned",
+                ))
+            })?;
+            return Err(ModeMutationExecutionError::Fatal(
+                ModeCoordinatorError::MutationRecovery(
+                    "mode mutation journal could not be created",
+                ),
+            ));
+        }
+    };
+    let applying = transition_mode_journal(
+        dependencies.journal.as_ref(),
+        &planned,
+        RecoveryState::Applying,
+        serde_json::json!({"stage": "applying"}),
+    )
+    .await
+    .map_err(ModeMutationExecutionError::Fatal)?;
+
+    if dependencies.effects.apply(&applying).await.is_err() {
+        rollback_mode_mutation(dependencies, &applying).await?;
+        return Err(ModeMutationError::new(
+            ModeMutationFailureKind::Unavailable,
+            "mode filesystem mutation failed",
+        )
+        .into());
+    }
+
+    let attempt = match source.load().await {
+        Ok(attempt) => attempt,
+        Err(_) => {
+            rollback_mode_mutation(dependencies, &applying).await?;
+            return Err(ModeMutationError::new(
+                ModeMutationFailureKind::Unavailable,
+                "mode mutation could not be verified",
+            )
+            .into());
+        }
+    };
+    if deletes_mode {
+        if attempt.modes.contains_key(&target_mode_id)
+            || attempt.errors.contains_key(&target_mode_id)
+        {
+            rollback_mode_mutation(dependencies, &applying).await?;
+            return Err(ModeMutationError::new(
+                ModeMutationFailureKind::Unavailable,
+                "deleted mode remained visible on disk",
+            )
+            .into());
+        }
+    } else {
+        let Some(disk_mode) = attempt.modes.get(&target_mode_id).cloned() else {
+            rollback_mode_mutation(dependencies, &applying).await?;
+            return Err(ModeMutationError::new(
+                ModeMutationFailureKind::Unavailable,
+                "written mode did not pass catalog validation",
+            )
+            .into());
+        };
+        proposed_modes.insert(target_mode_id, disk_mode);
+    }
+
+    let committed = match transition_mode_journal(
+        dependencies.journal.as_ref(),
+        &applying,
+        RecoveryState::Committed,
+        serde_json::json!({"catalog_generation": generation}),
+    )
+    .await
+    {
+        Ok(committed) => committed,
+        Err(error) => {
+            let _ = dependencies.effects.rollback(&applying).await;
+            return Err(ModeMutationExecutionError::Fatal(error));
+        }
+    };
+    let changed_presets = changed_presets(Some(current_catalog), &proposed_modes);
+    sink.publish(ModeCatalogPublication {
+        generation,
+        modes: playback_references(&proposed_modes),
+        changed_presets,
+    })
+    .await
+    .map_err(|error| ModeMutationExecutionError::Fatal(error.into()))?;
+    let next = Arc::new(ModeCatalog {
+        generation,
+        modes: proposed_modes,
+    });
+    *current = Some(Arc::clone(&next));
+    catalog_sender.send_replace(Some(Arc::clone(&next)));
+    let errors = bounded_errors(attempt.errors);
+    status_sender.send_replace(ModeStatus {
+        state: if errors.is_empty() {
+            ModeLoadState::Current
+        } else {
+            ModeLoadState::Degraded
+        },
+        generation,
+        last_load_at_unix_seconds: Some(current_unix_seconds()),
+        loaded_ids: attempt.modes.keys().cloned().collect(),
+        errors,
+    });
+    let _ = dependencies.effects.finish(&committed).await;
+    Ok(ModeMutationReport { catalog: next })
+}
+
+fn apply_catalog_mutation(
+    current: &ModeCatalog,
+    mutation: &ModeMutation,
+) -> Result<BTreeMap<String, ModeBundle>, ModeMutationError> {
+    let mut modes = current.modes.clone();
+    match mutation {
+        ModeMutation::CreateMode { manifest, .. } => {
+            validate_slug(&manifest.id)?;
+            validate_manifest(manifest, &BTreeMap::new())?;
+            if modes.contains_key(&manifest.id) {
+                return Err(conflict("mode already exists"));
+            }
+            modes.insert(
+                manifest.id.clone(),
+                ModeBundle {
+                    manifest: manifest.clone(),
+                    soundboards: BTreeMap::new(),
+                    cues: BTreeMap::new(),
+                    presets: BTreeMap::new(),
+                    theme_css: None,
+                },
+            );
+        }
+        ModeMutation::DeleteMode { mode_id, .. } => {
+            validate_slug(mode_id)?;
+            if modes.remove(mode_id).is_none() {
+                return Err(not_found("mode not found"));
+            }
+        }
+        ModeMutation::PutManifest {
+            mode_id, manifest, ..
+        } => {
+            validate_slug(mode_id)?;
+            if manifest.id != *mode_id {
+                return Err(invalid("mode manifest id does not match the mode"));
+            }
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            validate_manifest(manifest, &mode.soundboards)?;
+            mode.manifest = manifest.clone();
+        }
+        ModeMutation::PutSoundboard {
+            mode_id,
+            soundboard_id,
+            document,
+            create_only,
+            ..
+        } => {
+            validate_slug(mode_id)?;
+            validate_slug(soundboard_id)?;
+            if document.id.as_deref() != Some(soundboard_id) {
+                return Err(invalid("soundboard id does not match its filename"));
+            }
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            let exists = mode.soundboards.contains_key(soundboard_id);
+            if *create_only && exists {
+                return Err(conflict("soundboard already exists"));
+            }
+            if !*create_only && !exists {
+                return Err(not_found("soundboard not found"));
+            }
+            mode.soundboards
+                .insert(soundboard_id.clone(), document.clone());
+        }
+        ModeMutation::DeleteSoundboard {
+            mode_id,
+            soundboard_id,
+            ..
+        } => {
+            validate_slug(mode_id)?;
+            validate_slug(soundboard_id)?;
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            if mode.manifest.default_soundboard.as_deref() == Some(soundboard_id) {
+                return Err(conflict("default soundboard cannot be deleted"));
+            }
+            if mode.soundboards.remove(soundboard_id).is_none() {
+                return Err(not_found("soundboard not found"));
+            }
+        }
+        ModeMutation::PutCue {
+            mode_id,
+            cue_id,
+            document,
+            create_only,
+            ..
+        } => {
+            validate_slug(mode_id)?;
+            validate_slug(cue_id)?;
+            validate_cue(cue_id, document)?;
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            let exists = mode.cues.contains_key(cue_id);
+            if *create_only && exists {
+                return Err(conflict("cue already exists"));
+            }
+            if !*create_only && !exists {
+                return Err(not_found("cue not found"));
+            }
+            mode.cues.insert(cue_id.clone(), document.clone());
+        }
+        ModeMutation::DeleteCue {
+            mode_id, cue_id, ..
+        } => {
+            validate_slug(mode_id)?;
+            validate_slug(cue_id)?;
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            if mode.cues.remove(cue_id).is_none() {
+                return Err(not_found("cue not found"));
+            }
+        }
+        ModeMutation::PutPreset {
+            mode_id,
+            preset_id,
+            document,
+            create_only,
+            ..
+        } => {
+            validate_slug(mode_id)?;
+            validate_slug(preset_id)?;
+            validate_preset(preset_id, document)?;
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            let exists = mode.presets.contains_key(preset_id);
+            if *create_only && exists {
+                return Err(conflict("preset already exists"));
+            }
+            if !*create_only && !exists {
+                return Err(not_found("preset not found"));
+            }
+            mode.presets.insert(preset_id.clone(), document.clone());
+        }
+        ModeMutation::DeletePreset {
+            mode_id, preset_id, ..
+        } => {
+            validate_slug(mode_id)?;
+            validate_slug(preset_id)?;
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            if mode.presets.remove(preset_id).is_none() {
+                return Err(not_found("preset not found"));
+            }
+        }
+    }
+    Ok(modes)
+}
+
+fn validate_manifest(
+    manifest: &ModeDocument,
+    soundboards: &BTreeMap<String, SoundboardDocument>,
+) -> Result<(), ModeMutationError> {
+    validate_slug(&manifest.id)?;
+    if manifest
+        .default_soundboard
+        .as_ref()
+        .is_some_and(|id| !soundboards.contains_key(id))
+    {
+        return Err(invalid("default soundboard is not present"));
+    }
+    if manifest.interrupts.iter().any(|interrupt| {
+        interrupt
+            .duck_to
+            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+    }) {
+        return Err(invalid("interrupt ducking is outside the supported range"));
+    }
+    Ok(())
+}
+
+fn validate_cue(id: &str, document: &CueDocument) -> Result<(), ModeMutationError> {
+    if document.id.as_deref() != Some(id) {
+        return Err(invalid("cue id does not match its filename"));
+    }
+    if document
+        .sfx
+        .iter()
+        .any(|sfx| !sfx.volume.is_finite() || !(0.0..=1.0).contains(&sfx.volume))
+        || document.loops.iter().any(|loop_spec| {
+            !loop_spec.volume.is_finite()
+                || !(0.0..=1.0).contains(&loop_spec.volume)
+                || !loop_spec.interval_s.is_finite()
+                || !(1.0..=3600.0).contains(&loop_spec.interval_s)
+        })
+    {
+        return Err(invalid(
+            "cue timing or volume is outside the supported range",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_preset(id: &str, document: &PresetDocument) -> Result<(), ModeMutationError> {
+    if document.id.as_deref() != Some(id) {
+        return Err(invalid("preset id does not match its filename"));
+    }
+    if document.crossfade_ms.is_some_and(|value| value > 60_000)
+        || document.effects.iter().any(|effect| {
+            !matches!(
+                effect.effect_type.as_str(),
+                "eq" | "reverb"
+                    | "lowpass"
+                    | "highpass"
+                    | "bandpass"
+                    | "delay"
+                    | "distortion"
+                    | "tremolo"
+            )
+        })
+    {
+        return Err(invalid("preset contains an unsupported effect"));
+    }
+    Ok(())
+}
+
+fn validate_slug(value: &str) -> Result<(), ModeMutationError> {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return Err(invalid("resource id is empty"));
+    };
+    if value.chars().count() > 64
+        || !(first.is_ascii_lowercase() || first.is_ascii_digit())
+        || !characters.all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '-' | '_')
+        })
+    {
+        return Err(invalid("resource id is not a lowercase filesystem slug"));
+    }
+    Ok(())
+}
+
+const fn invalid(code: &'static str) -> ModeMutationError {
+    ModeMutationError::new(ModeMutationFailureKind::Invalid, code)
+}
+
+const fn not_found(code: &'static str) -> ModeMutationError {
+    ModeMutationError::new(ModeMutationFailureKind::NotFound, code)
+}
+
+const fn conflict(code: &'static str) -> ModeMutationError {
+    ModeMutationError::new(ModeMutationFailureKind::Conflict, code)
+}
+
+async fn transition_mode_journal(
+    repository: &dyn RecoveryJournalRepository,
+    current: &RecoveryJournalEntry,
+    next: RecoveryState,
+    progress: Value,
+) -> Result<RecoveryJournalEntry, ModeCoordinatorError> {
+    match repository
+        .transition_recovery_journal(&current.id, current.state, next, progress)
+        .await
+        .map_err(|_| {
+            ModeCoordinatorError::MutationRecovery("mode mutation journal transition failed")
+        })? {
+        RecoveryTransition::Applied(entry) => Ok(entry),
+        RecoveryTransition::Conflict(_) => Err(ModeCoordinatorError::MutationRecovery(
+            "mode mutation journal transition conflicted",
+        )),
+    }
+}
+
+async fn rollback_mode_mutation(
+    dependencies: &MutationDependencies,
+    applying: &RecoveryJournalEntry,
+) -> Result<(), ModeMutationExecutionError> {
+    let rolling_back = transition_mode_journal(
+        dependencies.journal.as_ref(),
+        applying,
+        RecoveryState::RollingBack,
+        serde_json::json!({"stage": "rolling_back"}),
+    )
+    .await
+    .map_err(ModeMutationExecutionError::Fatal)?;
+    if dependencies.effects.rollback(&rolling_back).await.is_err() {
+        let _ = transition_mode_journal(
+            dependencies.journal.as_ref(),
+            &rolling_back,
+            RecoveryState::Failed,
+            serde_json::json!({"stage": "rollback_failed"}),
+        )
+        .await;
+        return Err(ModeMutationExecutionError::Fatal(
+            ModeCoordinatorError::MutationRecovery("mode mutation rollback failed"),
+        ));
+    }
+    transition_mode_journal(
+        dependencies.journal.as_ref(),
+        &rolling_back,
+        RecoveryState::RolledBack,
+        serde_json::json!({"stage": "rolled_back"}),
+    )
+    .await
+    .map_err(ModeMutationExecutionError::Fatal)?;
+    Ok(())
+}
+
+async fn recover_mode_mutations(
+    journal: &dyn RecoveryJournalRepository,
+    effects: &dyn ModeMutationEffects,
+) -> Result<(), ModeCoordinatorError> {
+    let unfinished = journal
+        .unfinished_recovery_journals(RecoveryDomain::Modes)
+        .await
+        .map_err(|_| {
+            ModeCoordinatorError::MutationRecovery("mode recovery journals could not be loaded")
+        })?;
+    for entry in unfinished {
+        let rolling_back = if entry.state == RecoveryState::RollingBack {
+            entry
+        } else {
+            transition_mode_journal(
+                journal,
+                &entry,
+                RecoveryState::RollingBack,
+                serde_json::json!({"stage": "startup_rollback"}),
+            )
+            .await?
+        };
+        effects
+            .rollback(&rolling_back)
+            .await
+            .map_err(|_| ModeCoordinatorError::MutationRecovery("mode startup rollback failed"))?;
+        transition_mode_journal(
+            journal,
+            &rolling_back,
+            RecoveryState::RolledBack,
+            serde_json::json!({"stage": "startup_rolled_back"}),
+        )
+        .await?;
+    }
+    effects
+        .cleanup_orphans()
+        .await
+        .map_err(|_| ModeCoordinatorError::MutationRecovery("mode staging cleanup failed"))?;
+    Ok(())
 }
 
 fn playback_references(
