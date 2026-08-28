@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use music_domain::{IndexedTrack, LibraryPath, TrackId, TrackMetadata};
@@ -8,13 +10,16 @@ use sha2::{Digest, Sha256};
 
 use super::{
     AssistantTrackEvidence, Confidence, EnergyCurve, LOCAL_AUDIO_ANALYZER_ID,
-    LOCAL_METADATA_ANALYZER_ID, MODEL_PLAYLIST_ENGINE_ID, ModelPlaylistTask, ModelTaskError,
-    PLAYLIST_QUALITY_SUITE_ID, PlaylistCandidate, PlaylistSuggestion, PlaylistSuggestionRequest,
-    StoredAnalysis, audio_source_signature, metadata_source_signature, playlist_suggestion_payload,
+    LOCAL_METADATA_ANALYZER_ID, LOCAL_PLAYLIST_ENGINE_ID, MODEL_PLAYLIST_ENGINE_ID,
+    ModelPlaylistTask, ModelTaskError, PLAYLIST_QUALITY_SUITE_ID, PlaylistCandidate,
+    PlaylistSuggestion, PlaylistSuggestionRequest, StoredAnalysis, audio_source_signature,
+    metadata_source_signature, playlist_suggestion_payload, suggest_local_playlist,
 };
 
 pub const PLAYLIST_EVALUATION_CONTRACT: &str = "playlist-evaluation/v1";
 pub const PLAYLIST_EVALUATION_RESULT_CONTRACT: &str = "playlist-evaluation-result/v1";
+const MAX_EVALUATION_SUITE_BYTES: u64 = 4 * 1_024 * 1_024;
+const MAX_EVALUATION_INCLUDE_DEPTH: usize = 8;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -228,10 +233,20 @@ impl PlaylistQualityCase {
         first: Result<PlaylistSuggestion, ModelTaskError>,
         repeated: Option<Result<PlaylistSuggestion, ModelTaskError>>,
     ) -> PlaylistEvaluationCaseResult {
+        self.assess_for_engine(MODEL_PLAYLIST_ENGINE_ID, first, repeated)
+    }
+
+    #[must_use]
+    pub fn assess_for_engine(
+        &self,
+        engine_id: &str,
+        first: Result<PlaylistSuggestion, ModelTaskError>,
+        repeated: Option<Result<PlaylistSuggestion, ModelTaskError>>,
+    ) -> PlaylistEvaluationCaseResult {
         let Ok(response) = first else {
             return engine_error_result(self, first.err());
         };
-        let assessment = assess_response(self, &response);
+        let assessment = assess_response(self, engine_id, &response);
         let mut metrics = assessment.metrics.clone();
         let mut failures = assessment.failures.clone();
         let mut repeated_top_track_ids = None;
@@ -242,7 +257,7 @@ impl PlaylistQualityCase {
         if self.thresholds.require_deterministic {
             match repeated {
                 Some(Ok(repeated_response)) => {
-                    let repeated_assessment = assess_response(self, &repeated_response);
+                    let repeated_assessment = assess_response(self, engine_id, &repeated_response);
                     let exact =
                         assessment.response_fingerprint == repeated_assessment.response_fingerprint;
                     let top_stable = assessment
@@ -383,6 +398,7 @@ pub struct PlaylistQualityEvaluationResult {
 impl PlaylistQualityEvaluationResult {
     pub fn from_cases(
         suite: &PlaylistQualitySuite,
+        engine_id: &'static str,
         cases: Vec<PlaylistEvaluationCaseResult>,
     ) -> Result<Self, ModelTaskError> {
         if cases
@@ -398,7 +414,7 @@ impl PlaylistQualityEvaluationResult {
         Ok(Self {
             schema_version: PLAYLIST_EVALUATION_RESULT_CONTRACT,
             suite_id: suite.id.clone(),
-            engine_id: MODEL_PLAYLIST_ENGINE_ID,
+            engine_id,
             passed: passed_cases == total_cases,
             summary: PlaylistEvaluationSummary {
                 cases: total_cases,
@@ -463,10 +479,92 @@ pub fn playlist_quality_suite() -> Result<PlaylistQualitySuite, ModelTaskError> 
     {
         return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
     }
-    let cases = local
+    let cases = local.cases.into_iter().chain(model.cases).collect();
+    materialize_suite(RawPlaylistQualitySuite {
+        schema_version: model.schema_version,
+        id: model.id,
+        description: model.description,
+        include_cases_from: None,
+        cases,
+    })
+}
+
+pub fn load_playlist_quality_suite(path: &Path) -> Result<PlaylistQualitySuite, ModelTaskError> {
+    let mut visited = BTreeSet::new();
+    let raw = load_raw_suite(path, 0, &mut visited)?;
+    materialize_suite(raw)
+}
+
+pub fn evaluate_local_playlist_suite(
+    suite: &PlaylistQualitySuite,
+) -> Result<PlaylistQualityEvaluationResult, ModelTaskError> {
+    let cases = suite
+        .cases
+        .iter()
+        .map(|case| {
+            let evaluate = || {
+                suggest_local_playlist(&case.source, &case.request)
+                    .map_err(|_| ModelTaskError::new("local_evaluation_failed"))
+            };
+            let first = evaluate();
+            let repeated = case.requires_repeat().then(evaluate);
+            case.assess_for_engine(LOCAL_PLAYLIST_ENGINE_ID, first, repeated)
+        })
+        .collect();
+    PlaylistQualityEvaluationResult::from_cases(suite, LOCAL_PLAYLIST_ENGINE_ID, cases)
+}
+
+fn load_raw_suite(
+    path: &Path,
+    depth: usize,
+    visited: &mut BTreeSet<PathBuf>,
+) -> Result<RawPlaylistQualitySuite, ModelTaskError> {
+    if depth > MAX_EVALUATION_INCLUDE_DEPTH {
+        return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+    }
+    let canonical = fs::canonicalize(path)
+        .map_err(|_| ModelTaskError::new("model_evaluation_suite_unreadable"))?;
+    if !visited.insert(canonical.clone()) {
+        return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+    }
+    let metadata = fs::metadata(&canonical)
+        .map_err(|_| ModelTaskError::new("model_evaluation_suite_unreadable"))?;
+    if !metadata.is_file() || metadata.len() > MAX_EVALUATION_SUITE_BYTES {
+        return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+    }
+    let source = fs::read_to_string(&canonical)
+        .map_err(|_| ModelTaskError::new("model_evaluation_suite_unreadable"))?;
+    let mut raw: RawPlaylistQualitySuite = serde_json::from_str(&source)
+        .map_err(|_| ModelTaskError::new("model_evaluation_suite_invalid"))?;
+    if let Some(include) = raw.include_cases_from.take() {
+        let include_path = Path::new(&include);
+        if include_path.components().count() != 1
+            || !matches!(include_path.components().next(), Some(Component::Normal(_)))
+        {
+            return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+        }
+        let parent = canonical
+            .parent()
+            .ok_or_else(|| ModelTaskError::new("model_evaluation_suite_invalid"))?;
+        let included = load_raw_suite(&parent.join(include_path), depth + 1, visited)?;
+        raw.cases = included.cases.into_iter().chain(raw.cases).collect();
+    }
+    visited.remove(&canonical);
+    Ok(raw)
+}
+
+fn materialize_suite(raw: RawPlaylistQualitySuite) -> Result<PlaylistQualitySuite, ModelTaskError> {
+    if raw.schema_version != PLAYLIST_EVALUATION_CONTRACT
+        || !valid_case_id(&raw.id)
+        || raw.description.is_empty()
+        || raw.description.chars().count() > 2_000
+        || raw.include_cases_from.is_some()
+    {
+        return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+    }
+    let cases = raw
         .cases
         .into_iter()
-        .chain(model.cases)
         .map(materialize_case)
         .collect::<Result<Vec<_>, _>>()?;
     let case_ids = cases
@@ -478,8 +576,8 @@ pub fn playlist_quality_suite() -> Result<PlaylistQualitySuite, ModelTaskError> 
     }
     Ok(PlaylistQualitySuite {
         schema_version: PLAYLIST_EVALUATION_CONTRACT,
-        id: model.id,
-        description: model.description,
+        id: raw.id,
+        description: raw.description,
         cases,
     })
 }
@@ -739,6 +837,7 @@ fn evaluation_track_evidence(
 
 fn assess_response(
     case: &PlaylistQualityCase,
+    engine_id: &str,
     response: &PlaylistSuggestion,
 ) -> ResponseAssessment {
     let candidate_ids = response
@@ -908,7 +1007,7 @@ fn assess_response(
             sorted == (1..=selected.len()).collect::<Vec<_>>()
         }
         && response.plan.selected_tracks == selected.len();
-    let contract_valid = response.engine == MODEL_PLAYLIST_ENGINE_ID
+    let contract_valid = response.engine == engine_id
         && response.library_tracks == case.fixture_tracks.len()
         && candidate_ids.iter().copied().collect::<BTreeSet<_>>().len() == candidate_ids.len()
         && response.candidates.len() <= usize::from(case.request.candidate_limit)
@@ -1143,7 +1242,12 @@ fn default_thresholds() -> EvaluationThresholds {
 
 #[cfg(test)]
 mod tests {
-    use super::{PLAYLIST_QUALITY_SUITE_ID, playlist_quality_suite};
+    use std::path::Path;
+
+    use super::{
+        LOCAL_PLAYLIST_ENGINE_ID, PLAYLIST_QUALITY_SUITE_ID, evaluate_local_playlist_suite,
+        load_playlist_quality_suite, playlist_quality_suite,
+    };
 
     #[test]
     fn bundled_model_playlist_suite_includes_the_local_safety_baseline()
@@ -1163,6 +1267,20 @@ mod tests {
             let task = case.task()?;
             assert!(task.request().is_some() || task.immediate_result().is_some());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn external_suite_loader_resolves_only_the_declared_sibling_baseline()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/assistant/evaluation_suites/playlist-model-v1.json");
+        let suite = load_playlist_quality_suite(&path)?;
+        assert_eq!(suite.id, PLAYLIST_QUALITY_SUITE_ID);
+        assert_eq!(suite.cases.len(), 11);
+        let result = evaluate_local_playlist_suite(&suite)?;
+        assert_eq!(result.engine_id, LOCAL_PLAYLIST_ENGINE_ID);
+        assert_eq!(result.summary.cases, 11);
         Ok(())
     }
 }

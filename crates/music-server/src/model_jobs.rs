@@ -192,8 +192,9 @@ impl ModelEvaluationJobHandler {
             )
             .await?;
         }
-        let result = PlaylistQualityEvaluationResult::from_cases(&suite, results)
-            .map_err(model_task_failure)?;
+        let result =
+            PlaylistQualityEvaluationResult::from_cases(&suite, MODEL_PLAYLIST_ENGINE_ID, results)
+                .map_err(model_task_failure)?;
         context
             .check_cancelled()
             .await

@@ -35,8 +35,8 @@ pub use model_quality::*;
 pub use model_tag_cleanup::*;
 pub use model_tagger::*;
 pub use planner::{
-    EnergyCurve, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent, PlaylistPlan,
-    PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
+    EnergyCurve, LOCAL_PLAYLIST_ENGINE_ID, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent,
+    PlaylistPlan, PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
 };
 pub use playlist_evaluation::*;
 pub use provider_usage::*;

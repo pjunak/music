@@ -8,11 +8,12 @@ use music_application::assistant::{
     ProviderRolePreparation, ProviderRoleRuntimeRecord, ProviderVerificationWrite,
     ProviderVerificationWriteOutcome,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 
-use crate::{SqliteStorage, StorageError};
+use crate::{CredentialVault, EncryptedCredential, SqliteStorage, StorageError};
 
 const CONNECTION_SELECT: &str = "SELECT id, name, adapter_id, base_url, encrypted_api_key, \
     api_key_nonce, api_key_hint, allow_private_network, verification_status, \
@@ -28,6 +29,189 @@ const ROLE_SELECT: &str = "SELECT role_id, connection_id, model_id, enabled, tim
     CAST(strftime('%s', last_conformance_at) AS INTEGER) AS last_conformance_at_unix_seconds, \
     CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
     FROM assistant_model_roles";
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProviderCredentialAudit {
+    pub key_id: String,
+    pub total_connections: u64,
+    pub saved_credentials: u64,
+    pub connections_without_credentials: u64,
+    pub unreadable_credentials: u64,
+}
+
+impl ProviderCredentialAudit {
+    #[must_use]
+    pub const fn healthy(&self) -> bool {
+        self.unreadable_credentials == 0
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ProviderCredentialRotationOutcome {
+    Applied { rotated_credentials: u64 },
+    UnreadableCredentials { unreadable_credentials: u64 },
+    ModelJobActive,
+    ChangedDuringPreflight,
+}
+
+#[derive(Debug)]
+struct CredentialRotation {
+    id: String,
+    original_ciphertext: String,
+    original_nonce: String,
+    replacement: EncryptedCredential,
+}
+
+impl SqliteStorage {
+    pub async fn audit_provider_credentials(
+        &self,
+        vault: &CredentialVault,
+    ) -> Result<ProviderCredentialAudit, StorageError> {
+        let rows = sqlx::query(
+            "SELECT id, encrypted_api_key, api_key_nonce FROM assistant_provider_connections \
+             ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let total_connections = u64::try_from(rows.len()).map_err(|_| {
+            StorageError::InvalidAssistantRecord("invalid provider connection count")
+        })?;
+        let mut saved_credentials = 0_u64;
+        let mut connections_without_credentials = 0_u64;
+        let mut unreadable_credentials = 0_u64;
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let ciphertext: String = row.try_get("encrypted_api_key")?;
+            let nonce: String = row.try_get("api_key_nonce")?;
+            if ciphertext.is_empty() && nonce.is_empty() {
+                connections_without_credentials += 1;
+            } else if ciphertext.is_empty()
+                || nonce.is_empty()
+                || vault.decrypt(&id, &ciphertext, &nonce).is_err()
+            {
+                unreadable_credentials += 1;
+            } else {
+                saved_credentials += 1;
+            }
+        }
+        Ok(ProviderCredentialAudit {
+            key_id: vault.key_id().to_owned(),
+            total_connections,
+            saved_credentials,
+            connections_without_credentials,
+            unreadable_credentials,
+        })
+    }
+
+    pub async fn rotate_provider_credentials(
+        &self,
+        current: &CredentialVault,
+        replacement: &CredentialVault,
+    ) -> Result<ProviderCredentialRotationOutcome, StorageError> {
+        let rows = sqlx::query(
+            "SELECT id, encrypted_api_key, api_key_nonce FROM assistant_provider_connections \
+             ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut unreadable_credentials = 0_u64;
+        let mut rotations = Vec::new();
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let ciphertext: String = row.try_get("encrypted_api_key")?;
+            let nonce: String = row.try_get("api_key_nonce")?;
+            if ciphertext.is_empty() && nonce.is_empty() {
+                continue;
+            }
+            if ciphertext.is_empty() || nonce.is_empty() {
+                unreadable_credentials += 1;
+                continue;
+            }
+            let Ok(secret) = current.decrypt(&id, &ciphertext, &nonce) else {
+                unreadable_credentials += 1;
+                continue;
+            };
+            let encrypted = replacement
+                .encrypt(&id, secret.expose_secret())
+                .map_err(StorageError::CredentialCrypto)?;
+            rotations.push(CredentialRotation {
+                id,
+                original_ciphertext: ciphertext,
+                original_nonce: nonce,
+                replacement: encrypted,
+            });
+        }
+        if unreadable_credentials > 0 {
+            return Ok(ProviderCredentialRotationOutcome::UnreadableCredentials {
+                unreadable_credentials,
+            });
+        }
+
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin().await?;
+        let active: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM background_jobs \
+             WHERE kind LIKE 'assistant.model%' \
+             AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1)",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if active {
+            transaction.rollback().await?;
+            return Ok(ProviderCredentialRotationOutcome::ModelJobActive);
+        }
+        let current_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM assistant_provider_connections \
+             WHERE encrypted_api_key != '' OR api_key_nonce != ''",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if usize::try_from(current_count).ok() != Some(rotations.len()) {
+            transaction.rollback().await?;
+            return Ok(ProviderCredentialRotationOutcome::ChangedDuringPreflight);
+        }
+        for rotation in &rotations {
+            let result = sqlx::query(
+                "UPDATE assistant_provider_connections SET encrypted_api_key = ?, \
+                 api_key_nonce = ?, api_key_hint = ?, verification_status = 'never', \
+                 verification_error_code = NULL, verified_models_json = '[]', \
+                 verified_capabilities_json = '[]', last_verified_at = NULL, \
+                 updated_at = CURRENT_TIMESTAMP \
+                 WHERE id = ? AND encrypted_api_key = ? AND api_key_nonce = ?",
+            )
+            .bind(&rotation.replacement.ciphertext)
+            .bind(&rotation.replacement.nonce)
+            .bind(&rotation.replacement.hint)
+            .bind(&rotation.id)
+            .bind(&rotation.original_ciphertext)
+            .bind(&rotation.original_nonce)
+            .execute(&mut *transaction)
+            .await?;
+            if result.rows_affected() != 1 {
+                transaction.rollback().await?;
+                return Ok(ProviderCredentialRotationOutcome::ChangedDuringPreflight);
+            }
+        }
+        sqlx::query("DELETE FROM assistant_model_evaluations")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query(
+            "UPDATE assistant_model_roles SET conformance_status = 'never', \
+             conformance_error_code = NULL, conformance_fingerprint = NULL, \
+             last_conformance_at = NULL, updated_at = CURRENT_TIMESTAMP",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        let rotated_credentials = u64::try_from(rotations.len()).map_err(|_| {
+            StorageError::InvalidAssistantRecord("invalid rotated credential count")
+        })?;
+        Ok(ProviderCredentialRotationOutcome::Applied {
+            rotated_credentials,
+        })
+    }
+}
 
 impl ModelEvaluationRepository for SqliteStorage {
     fn model_evaluations<'a>(
@@ -1429,6 +1613,119 @@ mod tests {
             }
         }
         assert_eq!((applied, changed), (1, 1));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn audits_and_rotates_credentials_as_one_offline_transaction()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let current = CredentialVault::from_key([7; 32])?;
+        let replacement = CredentialVault::from_key([9; 32])?;
+        let encrypted = current.encrypt("aabbccddeeff00112233445566778899", "fixture-secret")?;
+        let mut saved = connection("aabbccddeeff00112233445566778899", "Fixture");
+        saved.encrypted_api_key = encrypted.ciphertext;
+        saved.api_key_nonce = encrypted.nonce;
+        saved.api_key_hint = encrypted.hint;
+        storage.create_provider_connection(&saved).await?;
+        storage
+            .save_model_role(&saved.fingerprint(), &role(&saved.id), false)
+            .await?;
+        sqlx::query(
+            "INSERT INTO background_jobs \
+             (id, kind, status, parameters_json, result_json, error, progress_current, \
+              progress_total, progress_phase, progress_message, attempts, retry_of_id, \
+              created_at, updated_at, lane, schema_version, restartable, checkpoint_policy) \
+             VALUES ('rotation-job', 'assistant.model.test', 'running', '{}', NULL, NULL, 0, 1, \
+                     'Running', 'Running', 1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, \
+                     'provider', 1, 0, 'replace')",
+        )
+        .execute(&storage.pool)
+        .await?;
+
+        let audit = storage.audit_provider_credentials(&current).await?;
+        assert!(audit.healthy());
+        assert_eq!(audit.saved_credentials, 1);
+        assert_eq!(
+            storage
+                .audit_provider_credentials(&CredentialVault::from_key([8; 32])?)
+                .await?
+                .unreadable_credentials,
+            1
+        );
+
+        assert_eq!(
+            storage
+                .rotate_provider_credentials(&current, &replacement)
+                .await?,
+            ProviderCredentialRotationOutcome::ModelJobActive
+        );
+        sqlx::query(
+            "UPDATE background_jobs SET status = 'succeeded', result_json = '{}' \
+             WHERE id = 'rotation-job'",
+        )
+        .execute(&storage.pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO assistant_model_evaluations \
+             (role_id, evaluation_id, role_fingerprint, status, suite_id, engine_id, \
+              passed_cases, total_cases, job_id, evaluated_at) \
+             VALUES ('music_tagger', 'rotation-evaluation', 'fixture', 'passed', 'suite', \
+                     'engine', 1, 1, 'rotation-job', CURRENT_TIMESTAMP)",
+        )
+        .execute(&storage.pool)
+        .await?;
+
+        assert_eq!(
+            storage
+                .rotate_provider_credentials(&current, &replacement)
+                .await?,
+            ProviderCredentialRotationOutcome::Applied {
+                rotated_credentials: 1
+            }
+        );
+        assert_eq!(
+            storage
+                .audit_provider_credentials(&current)
+                .await?
+                .unreadable_credentials,
+            1
+        );
+        assert!(
+            storage
+                .audit_provider_credentials(&replacement)
+                .await?
+                .healthy()
+        );
+        let rotated = storage
+            .provider_connection(&saved.id)
+            .await?
+            .ok_or("missing rotated connection")?;
+        assert_eq!(rotated.verification_status, "never");
+        assert_eq!(
+            storage
+                .model_roles()
+                .await?
+                .pop()
+                .ok_or("missing rotated role")?
+                .conformance_status,
+            "never"
+        );
+        let evaluations: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM assistant_model_evaluations")
+                .fetch_one(&storage.pool)
+                .await?;
+        assert_eq!(evaluations, 0);
+        assert_eq!(
+            replacement
+                .decrypt(
+                    &rotated.id,
+                    &rotated.encrypted_api_key,
+                    &rotated.api_key_nonce
+                )?
+                .expose_secret(),
+            "fixture-secret"
+        );
         Ok(())
     }
 }

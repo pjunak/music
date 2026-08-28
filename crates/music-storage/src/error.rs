@@ -45,6 +45,7 @@ pub enum StorageError {
     JobSerialization(serde_json::Error),
     InvalidJobRecord(&'static str),
     AssistantSerialization(serde_json::Error),
+    CredentialCrypto(crate::CryptoError),
     InvalidAssistantRecord(&'static str),
 }
 
@@ -147,6 +148,7 @@ impl Display for StorageError {
             Self::AssistantSerialization(_) => {
                 formatter.write_str("failed to encode or decode an Assistant document")
             }
+            Self::CredentialCrypto(source) => Display::fmt(source, formatter),
             Self::InvalidAssistantRecord(detail) => {
                 write!(formatter, "stored Assistant record is invalid: {detail}")
             }
@@ -185,6 +187,7 @@ impl Error for StorageError {
             | Self::InvalidJobRecord(_) => None,
             Self::JobSerialization(source) => Some(source),
             Self::AssistantSerialization(source) => Some(source),
+            Self::CredentialCrypto(source) => Some(source),
             Self::InvalidAssistantRecord(_) => None,
         }
     }

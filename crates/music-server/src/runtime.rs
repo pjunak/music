@@ -1,4 +1,3 @@
-use std::fs;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
@@ -71,8 +70,6 @@ use crate::supervisor::{CriticalTaskError, TaskSupervisor};
 const DATABASE_HEALTH_INTERVAL: Duration = Duration::from_secs(30);
 const DATABASE_HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
-const MAX_SEED_DEPTH: usize = 32;
-const MAX_SEED_ENTRIES: usize = 10_000;
 
 #[derive(Debug)]
 pub struct AppRuntime {
@@ -732,105 +729,26 @@ fn start_database_monitor(
 }
 
 fn initialize_directories(config: &AppConfig, health: &HealthRegistry) -> Result<(), RuntimeError> {
-    create_directory(&config.music_dir, "create the music library directory")?;
-    create_directory(
-        &config.sfx_library_dir,
-        "create the sound-effects library directory",
-    )?;
-    create_directory(&config.modes_dir, "create the mode directory")?;
+    crate::storage_admin::create_storage_directories(config)
+        .map_err(|source| RuntimeError::io("initialize storage directories", source))?;
     health.set_component("filesystem", true, ComponentStatus::Ready);
 
-    match seed_modes_if_empty(config) {
-        Ok(SeedOutcome::Ready) => {
+    match crate::storage_admin::seed_modes_if_empty(config) {
+        Ok(
+            crate::storage_admin::ModeSeedOutcome::NotConfigured
+            | crate::storage_admin::ModeSeedOutcome::NotRequested
+            | crate::storage_admin::ModeSeedOutcome::Seeded
+            | crate::storage_admin::ModeSeedOutcome::TargetNotEmpty,
+        ) => {
             health.set_component("mode_seed", false, ComponentStatus::Ready);
         }
-        Ok(SeedOutcome::Unavailable) => {
+        Ok(crate::storage_admin::ModeSeedOutcome::SourceUnavailable) => {
             health.set_component("mode_seed", false, ComponentStatus::Degraded);
             tracing::warn!("configured mode seed is unavailable; continuing without seeding");
         }
         Err(error) => {
             health.set_component("mode_seed", false, ComponentStatus::Degraded);
             tracing::warn!(error_kind = ?error.kind(), "mode seeding was incomplete");
-        }
-    }
-    Ok(())
-}
-
-fn create_directory(path: &Path, operation: &'static str) -> Result<(), RuntimeError> {
-    fs::create_dir_all(path).map_err(|source| RuntimeError::io(operation, source))
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum SeedOutcome {
-    Ready,
-    Unavailable,
-}
-
-fn seed_modes_if_empty(config: &AppConfig) -> io::Result<SeedOutcome> {
-    let Some(seed) = config.modes_seed_dir.as_deref() else {
-        return Ok(SeedOutcome::Ready);
-    };
-    if !seed.is_dir() {
-        return Ok(SeedOutcome::Unavailable);
-    }
-    if fs::read_dir(&config.modes_dir)?
-        .next()
-        .transpose()?
-        .is_some()
-    {
-        return Ok(SeedOutcome::Ready);
-    }
-    if fs::canonicalize(seed)? == fs::canonicalize(&config.modes_dir)? {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "mode seed and target are the same directory",
-        ));
-    }
-
-    let mut remaining = MAX_SEED_ENTRIES;
-    copy_seed_directory(seed, &config.modes_dir, 0, &mut remaining)?;
-    Ok(SeedOutcome::Ready)
-}
-
-fn copy_seed_directory(
-    source: &Path,
-    target: &Path,
-    depth: usize,
-    remaining: &mut usize,
-) -> io::Result<()> {
-    if depth > MAX_SEED_DEPTH {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "mode seed exceeds the directory depth limit",
-        ));
-    }
-    for entry in fs::read_dir(source)? {
-        if *remaining == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "mode seed exceeds the entry limit",
-            ));
-        }
-        *remaining -= 1;
-        let entry = entry?;
-        let metadata = entry.file_type()?;
-        let destination = target.join(entry.file_name());
-        if metadata.is_symlink() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "mode seed contains a symbolic link",
-            ));
-        }
-        if metadata.is_dir() {
-            fs::create_dir(&destination)?;
-            copy_seed_directory(&entry.path(), &destination, depth + 1, remaining)?;
-        } else if metadata.is_file() {
-            fs::copy(entry.path(), destination)?;
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "mode seed contains an unsupported file type",
-            ));
         }
     }
     Ok(())
@@ -1641,7 +1559,13 @@ mod tests {
         assert!(directory.path().join("music").is_dir());
         assert!(directory.path().join("sfx").is_dir());
         assert!(directory.path().join("modes").is_dir());
-        assert_eq!(runtime.readiness().status, ReadinessStatus::Ready);
+        let readiness = runtime.readiness();
+        assert_eq!(
+            readiness.status,
+            ReadinessStatus::Ready,
+            "startup components: {:?}",
+            readiness.components
+        );
         assert_eq!(
             runtime.readiness().components.get("playback"),
             Some(&ComponentStatus::Ready)

@@ -28,12 +28,14 @@ mod library;
 mod model_jobs;
 mod modes;
 mod playback_projection;
+mod playlist_evaluation_admin;
 mod playlists;
 mod provider_api;
 mod provider_credentials;
 mod provider_transport;
 mod runtime;
 mod sfx;
+mod storage_admin;
 mod supervisor;
 mod websocket;
 
@@ -51,5 +53,10 @@ pub use error::{
 };
 pub use health::{ComponentStatus, HealthRegistry, ReadinessSnapshot, ReadinessStatus};
 pub use http::CorrelationId;
+pub use playlist_evaluation_admin::{
+    ConfiguredPlaylistEvaluationError, evaluate_configured_playlist_suite,
+};
+pub use provider_credentials::{CredentialStoreError, load_configured_credential_vault};
 pub use runtime::{AppRuntime, initialize_tracing};
+pub use storage_admin::{ModeSeedOutcome, StorageInitializationOutcome, initialize_storage};
 pub use supervisor::{CriticalFailure, CriticalTaskError, TaskSupervisor};

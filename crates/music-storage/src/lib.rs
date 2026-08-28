@@ -40,6 +40,7 @@ pub use devices::{
 pub use error::StorageError;
 pub use instance_lock::InstanceLock;
 pub use migration::{MigrationBackup, MigrationOutcome};
+pub use providers::{ProviderCredentialAudit, ProviderCredentialRotationOutcome};
 pub use schema::{
     CURRENT_SCHEMA_VERSION, SchemaCompatibility, SchemaIssue, SchemaIssueLevel, SchemaReport,
     inspect_database,

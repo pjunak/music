@@ -9,15 +9,22 @@ use std::process::ExitCode;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use music_application::assistant::{
+    PlaylistQualityEvaluationResult, evaluate_local_playlist_suite, load_playlist_quality_suite,
+};
 use music_application::auth::{AuthRepository, UnixSeconds};
+use music_application::modes::ModeCatalogSource;
+use music_media::FilesystemModeCatalogSource;
 use music_server::{
-    AppConfig, RestoreOptions, check_contracts, export_contracts, recover_interrupted_restore,
-    restore_backup,
+    AppConfig, RestoreOptions, check_contracts, evaluate_configured_playlist_suite,
+    export_contracts, initialize_storage, load_configured_credential_vault,
+    recover_interrupted_restore, restore_backup,
 };
 use music_storage::{
-    DeviceImportOutcome, SchemaReport, SecretString, SqliteStorage, SqliteStorageOptions,
-    StorageError, hash_password,
+    CredentialVault, DeviceImportOutcome, ProviderCredentialAudit,
+    ProviderCredentialRotationOutcome, SchemaReport, SecretString, SqliteStorage,
+    SqliteStorageOptions, StorageError, hash_password,
 };
 
 const INCOMPATIBLE_EXIT_CODE: u8 = 2;
@@ -118,6 +125,47 @@ enum Command {
         #[command(subcommand)]
         command: BackupCommand,
     },
+    /// Create the configured media directories without starting the server.
+    #[command(name = "init-storage")]
+    InitStorage {
+        /// Seed the modes directory when it is empty.
+        #[arg(long)]
+        seed: bool,
+        /// Emit a stable machine-readable outcome.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Parse every authored mode and report isolated mode errors.
+    #[command(name = "reload-modes")]
+    ReloadModes {
+        /// Modes directory; defaults to MODES_DIR from the application configuration.
+        #[arg(long, value_name = "PATH")]
+        modes: Option<PathBuf>,
+        /// Emit a stable machine-readable outcome.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a versioned playlist recommendation evaluation suite.
+    #[command(name = "evaluate-playlists")]
+    EvaluatePlaylists {
+        #[arg(value_name = "SUITE")]
+        suite: PathBuf,
+        /// Planner implementation to evaluate.
+        #[arg(long, value_enum, default_value_t = PlaylistEngine::Local)]
+        engine: PlaylistEngine,
+        /// Explicitly permit synthetic suite content to leave this machine.
+        #[arg(long)]
+        send_suite_to_provider: bool,
+        /// Emit the full machine-readable result.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Audit or rotate provider credential encryption while the server is stopped.
+    #[command(name = "assistant-credentials")]
+    AssistantCredentials {
+        #[command(subcommand)]
+        command: CredentialCommand,
+    },
     /// Probe the local HTTP liveness endpoint (used by the Rust container).
     Healthcheck {
         /// Plain HTTP socket address for the local server.
@@ -126,6 +174,40 @@ enum Command {
         /// Connection and response timeout.
         #[arg(long, default_value_t = 2_000)]
         timeout_ms: u64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
+enum PlaylistEngine {
+    Local,
+    ConfiguredModel,
+}
+
+#[derive(Debug, Subcommand)]
+enum CredentialCommand {
+    /// Verify that the configured key decrypts every saved provider credential.
+    Check {
+        /// Database file; defaults to DATABASE_URL from the application configuration.
+        #[arg(long, value_name = "PATH")]
+        database: Option<PathBuf>,
+        /// Emit a stable machine-readable report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Validate or atomically rotate to ASSISTANT_CREDENTIAL_KEY_NEW.
+    Rotate {
+        /// Commit the rotation; omission performs a read-only dry run.
+        #[arg(long)]
+        apply: bool,
+        /// Confirm that every server using this database has been stopped.
+        #[arg(long)]
+        server_stopped: bool,
+        /// Database file; defaults to DATABASE_URL from the application configuration.
+        #[arg(long, value_name = "PATH")]
+        database: Option<PathBuf>,
+        /// Emit a stable machine-readable outcome.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -423,6 +505,37 @@ async fn run(cli: Cli) -> Result<ExitCode, CliError> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        Command::InitStorage { seed, json } => {
+            let config = AppConfig::load()?;
+            let outcome = initialize_storage(&config, seed)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&outcome)?);
+            } else {
+                println!("music    {}", outcome.music_dir.display());
+                println!("sfx      {}", outcome.sfx_library_dir.display());
+                println!("modes    {}", outcome.modes_dir.display());
+                println!("mode seed: {:?}", outcome.mode_seed);
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::ReloadModes { modes, json } => reload_modes(modes, json).await,
+        Command::EvaluatePlaylists {
+            suite,
+            engine,
+            send_suite_to_provider,
+            json,
+        } => evaluate_playlists(&suite, engine, send_suite_to_provider, json).await,
+        Command::AssistantCredentials { command } => match command {
+            CredentialCommand::Check { database, json } => {
+                check_provider_credentials(database, json).await
+            }
+            CredentialCommand::Rotate {
+                apply,
+                server_stopped,
+                database,
+                json,
+            } => rotate_provider_credentials(database, apply, server_stopped, json).await,
+        },
         Command::Healthcheck {
             address,
             timeout_ms,
@@ -431,6 +544,295 @@ async fn run(cli: Cli) -> Result<ExitCode, CliError> {
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+async fn reload_modes(modes: Option<PathBuf>, json: bool) -> Result<ExitCode, CliError> {
+    let config = AppConfig::load()?;
+    let path = modes.unwrap_or(config.modes_dir);
+    let attempt = FilesystemModeCatalogSource::open(&path)?.load().await?;
+    if json {
+        let modes = attempt
+            .modes
+            .iter()
+            .map(|(id, mode)| {
+                serde_json::json!({
+                    "id": id,
+                    "name": mode.manifest.name,
+                    "panels": mode.manifest.panels.len(),
+                    "soundboards": mode.soundboards.len(),
+                    "cues": mode.cues.len(),
+                    "presets": mode.presets.len(),
+                })
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "modes": modes,
+                "errors": attempt.errors,
+            }))?
+        );
+    } else if attempt.modes.is_empty() && attempt.errors.is_empty() {
+        println!("no modes loaded");
+    } else {
+        for (id, mode) in &attempt.modes {
+            println!(
+                "- {id}: {} ({} panels, {} soundboards, {} cues, {} presets)",
+                mode.manifest.name,
+                mode.manifest.panels.len(),
+                mode.soundboards.len(),
+                mode.cues.len(),
+                mode.presets.len(),
+            );
+        }
+        for (id, error) in &attempt.errors {
+            println!("! {id}: {error}");
+        }
+    }
+    Ok(if !attempt.errors.is_empty() {
+        ExitCode::from(INCOMPATIBLE_EXIT_CODE)
+    } else if attempt.modes.is_empty() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+async fn evaluate_playlists(
+    suite_path: &Path,
+    engine: PlaylistEngine,
+    send_suite_to_provider: bool,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let suite = match load_playlist_quality_suite(suite_path) {
+        Ok(suite) => suite,
+        Err(error) => {
+            eprintln!("Could not load evaluation suite: {}", error.code);
+            return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+        }
+    };
+    let result = match engine {
+        PlaylistEngine::Local => evaluate_local_playlist_suite(&suite)?,
+        PlaylistEngine::ConfiguredModel => {
+            if !send_suite_to_provider {
+                eprintln!(
+                    "Configured-model evaluation requires --send-suite-to-provider. Only run it with a synthetic suite you are willing to disclose."
+                );
+                return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+            }
+            let config = AppConfig::load()?;
+            match evaluate_configured_playlist_suite(&config, &config.database_path, &suite).await {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!(
+                        "Could not prepare or execute configured playlist model ({}).",
+                        error.code()
+                    );
+                    return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+                }
+            }
+        }
+    };
+    print_playlist_evaluation(&result, json)?;
+    Ok(if result.passed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
+fn print_playlist_evaluation(
+    result: &PlaylistQualityEvaluationResult,
+    json: bool,
+) -> Result<(), serde_json::Error> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result)?);
+        return Ok(());
+    }
+    println!(
+        "{} {} with {}: {}/{} cases passed",
+        if result.passed { "PASS" } else { "FAIL" },
+        result.suite_id,
+        result.engine_id,
+        result.summary.passed_cases,
+        result.summary.cases,
+    );
+    for case in &result.cases {
+        println!(
+            "  {} {}: precision={:.2}, recall={:.2}, rr={:.2}, reasons={:.2}",
+            if case.passed { "PASS" } else { "FAIL" },
+            case.id,
+            case.metrics.precision_at_k,
+            case.metrics.recall_at_k,
+            case.metrics.reciprocal_rank,
+            case.metrics.reason_coverage,
+        );
+        for failure in &case.failures {
+            println!("    - {failure}");
+        }
+    }
+    Ok(())
+}
+
+async fn check_provider_credentials(
+    database: Option<PathBuf>,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let config = AppConfig::load()?;
+    let vault = match load_configured_credential_vault(&config) {
+        Ok(vault) => vault,
+        Err(error) => {
+            eprintln!("Credential key is not usable ({}).", error.code());
+            return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+        }
+    };
+    let path = database.unwrap_or(config.database_path);
+    let storage = SqliteStorage::open(SqliteStorageOptions::new(path)).await?;
+    let audit = storage.audit_provider_credentials(&vault).await?;
+    print_credential_audit(&audit, json)?;
+    let healthy = audit.healthy();
+    storage.close().await;
+    Ok(if healthy {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(INCOMPATIBLE_EXIT_CODE)
+    })
+}
+
+async fn rotate_provider_credentials(
+    database: Option<PathBuf>,
+    apply: bool,
+    server_stopped: bool,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let config = AppConfig::load()?;
+    let current = match load_configured_credential_vault(&config) {
+        Ok(vault) => vault,
+        Err(error) => {
+            eprintln!("Credential key is not usable ({}).", error.code());
+            return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+        }
+    };
+    let Some(encoded_new_key) = std::env::var_os("ASSISTANT_CREDENTIAL_KEY_NEW") else {
+        eprintln!("Set ASSISTANT_CREDENTIAL_KEY_NEW to a new URL-safe base64 32-byte key first.");
+        return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+    };
+    let Some(encoded_new_key) = encoded_new_key.to_str() else {
+        eprintln!("New credential key is not usable (invalid_master_key).");
+        return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+    };
+    let replacement = match CredentialVault::from_encoded_key(encoded_new_key) {
+        Ok(vault) => vault,
+        Err(_) => {
+            eprintln!("New credential key is not usable (invalid_master_key).");
+            return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+        }
+    };
+    if current.key_id() == replacement.key_id() {
+        eprintln!("The new key is the same as the current key.");
+        return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+    }
+    let path = database.unwrap_or(config.database_path);
+    let storage = SqliteStorage::open(SqliteStorageOptions::new(path)).await?;
+    let audit = storage.audit_provider_credentials(&current).await?;
+    if !json {
+        print_credential_audit(&audit, false)?;
+    }
+    if !audit.healthy() {
+        storage.close().await;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "unreadable_credentials",
+                    "audit": audit,
+                    "database_changed": false,
+                }))?
+            );
+        }
+        eprintln!("Rotation stopped: the current key cannot decrypt every saved credential.");
+        return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+    }
+    if !apply {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": "dry_run_passed",
+                    "audit": audit,
+                    "new_key_id": replacement.key_id(),
+                    "database_changed": false,
+                }))?
+            );
+        } else {
+            println!("new key id: {}", replacement.key_id());
+            println!("Dry run passed. No database rows were changed.");
+            println!("Stop the Music server, then rerun with --apply --server-stopped.");
+        }
+        storage.close().await;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !server_stopped {
+        storage.close().await;
+        eprintln!("Refusing to rotate without --server-stopped.");
+        return Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE));
+    }
+    let outcome = storage
+        .rotate_provider_credentials(&current, &replacement)
+        .await?;
+    storage.close().await;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "audit": audit,
+                "new_key_id": replacement.key_id(),
+                "outcome": outcome,
+            }))?
+        );
+    }
+    match outcome {
+        ProviderCredentialRotationOutcome::Applied {
+            rotated_credentials,
+        } => {
+            if !json {
+                println!("Rotated {rotated_credentials} saved provider credential(s) atomically.");
+                println!(
+                    "Before restarting, configure the credential key whose id is {}.",
+                    replacement.key_id()
+                );
+                println!("Provider connections must be verified and model quality gates rerun.");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        ProviderCredentialRotationOutcome::UnreadableCredentials { .. }
+        | ProviderCredentialRotationOutcome::ModelJobActive
+        | ProviderCredentialRotationOutcome::ChangedDuringPreflight => {
+            if !json {
+                eprintln!("Rotation failed before commit ({outcome:?}).");
+            }
+            Ok(ExitCode::from(INCOMPATIBLE_EXIT_CODE))
+        }
+    }
+}
+
+fn print_credential_audit(
+    audit: &ProviderCredentialAudit,
+    json: bool,
+) -> Result<(), serde_json::Error> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(audit)?);
+    } else {
+        println!("key id: {}", audit.key_id);
+        println!("connections: {}", audit.total_connections);
+        println!("saved credentials: {}", audit.saved_credentials);
+        println!(
+            "connections without a credential: {}",
+            audit.connections_without_credentials
+        );
+        println!("unreadable credentials: {}", audit.unreadable_credentials);
+    }
+    Ok(())
 }
 
 fn print_restore_outcome(
@@ -743,7 +1145,10 @@ mod tests {
 
     use clap::Parser;
 
-    use super::{BackupCommand, Cli, Command, DeviceCommand, probe_liveness};
+    use super::{
+        BackupCommand, Cli, Command, CredentialCommand, DeviceCommand, PlaylistEngine,
+        probe_liveness,
+    };
 
     #[test]
     fn parser_redacts_inline_passwords_and_accepts_explicit_device_replacement()
@@ -805,6 +1210,41 @@ mod tests {
             ])
             .is_err()
         );
+
+        let evaluate = Cli::try_parse_from([
+            "music-cli",
+            "evaluate-playlists",
+            "suite.json",
+            "--engine",
+            "configured-model",
+            "--send-suite-to-provider",
+        ])?;
+        assert!(matches!(
+            evaluate.command,
+            Command::EvaluatePlaylists {
+                engine: PlaylistEngine::ConfiguredModel,
+                send_suite_to_provider: true,
+                ..
+            }
+        ));
+
+        let rotate = Cli::try_parse_from([
+            "music-cli",
+            "assistant-credentials",
+            "rotate",
+            "--apply",
+            "--server-stopped",
+        ])?;
+        assert!(matches!(
+            rotate.command,
+            Command::AssistantCredentials {
+                command: CredentialCommand::Rotate {
+                    apply: true,
+                    server_stopped: true,
+                    ..
+                }
+            }
+        ));
         Ok(())
     }
 

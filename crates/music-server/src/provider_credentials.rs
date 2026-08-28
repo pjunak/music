@@ -47,7 +47,7 @@ pub(crate) struct CredentialStorageReset {
 }
 
 #[derive(Debug)]
-pub(crate) struct CredentialStoreError {
+pub struct CredentialStoreError {
     code: &'static str,
     source: Option<io::Error>,
 }
@@ -64,9 +64,17 @@ impl CredentialStoreError {
         }
     }
 
-    pub(crate) const fn code(&self) -> &'static str {
+    pub const fn code(&self) -> &'static str {
         self.code
     }
+}
+
+pub fn load_configured_credential_vault(
+    config: &AppConfig,
+) -> Result<CredentialVault, CredentialStoreError> {
+    RuntimeCredentialStore::new(config)
+        .configured_vault_unlocked()
+        .map(|(vault, _)| vault)
 }
 
 impl Display for CredentialStoreError {
