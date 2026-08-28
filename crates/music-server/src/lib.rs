@@ -15,6 +15,7 @@ mod analysis;
 mod assistant;
 mod auth;
 mod authoring;
+mod blocking;
 mod cleanup;
 mod config;
 mod contracts;

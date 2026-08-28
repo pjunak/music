@@ -21,6 +21,7 @@ use reqwest::header::{
 };
 use reqwest::{StatusCode, Url};
 use serde_json::Value;
+use tokio::sync::Semaphore;
 
 const GOOGLE_GEMINI_OPENAI_BASE_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/openai";
@@ -33,6 +34,7 @@ const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFIER_USER_AGENT: &str = "music-assistant-provider-verifier/1";
 const EXECUTOR_USER_AGENT: &str = "music-assistant-model-executor/1";
 const GEMINI_HEADERS: &[(&str, &str)] = &[("x-goog-api-client", "music-assistant-oai/1.0")];
+const PROVIDER_REQUEST_CONCURRENCY: usize = 4;
 
 type ResolveFuture<'a> = Pin<Box<dyn Future<Output = io::Result<Vec<SocketAddr>>> + Send + 'a>>;
 
@@ -56,6 +58,7 @@ impl ProviderDnsResolver for SystemProviderDnsResolver {
 #[derive(Debug)]
 pub(crate) struct ProviderNetworkBoundary {
     resolver: Arc<dyn ProviderDnsResolver>,
+    request_slots: Arc<Semaphore>,
 }
 
 impl Default for ProviderNetworkBoundary {
@@ -68,6 +71,7 @@ impl ProviderNetworkBoundary {
     pub(crate) fn new() -> Self {
         Self {
             resolver: Arc::new(SystemProviderDnsResolver),
+            request_slots: Arc::new(Semaphore::new(PROVIDER_REQUEST_CONCURRENCY)),
         }
     }
 
@@ -75,6 +79,9 @@ impl ProviderNetworkBoundary {
         &self,
         target: &ProviderVerificationTarget,
     ) -> ProviderVerificationResult {
+        let Ok(_permit) = self.request_slots.try_acquire() else {
+            return failed_verification("provider_busy");
+        };
         let Some(handler) = provider_handler(&target.adapter_id) else {
             return failed_verification("unsupported_adapter");
         };
@@ -139,6 +146,9 @@ impl ProviderNetworkBoundary {
         target: &ProviderExecutionTarget,
         request: &StructuredModelRequest,
     ) -> StructuredModelResult {
+        let Ok(_permit) = self.request_slots.try_acquire() else {
+            return failed_structured_model("provider_busy");
+        };
         let Some(handler) = provider_handler(&target.adapter_id) else {
             return failed_structured_model("unsupported_adapter");
         };
@@ -371,7 +381,10 @@ impl ProviderNetworkBoundary {
 
     #[cfg(test)]
     fn with_resolver(resolver: Arc<dyn ProviderDnsResolver>) -> Self {
-        Self { resolver }
+        Self {
+            resolver,
+            request_slots: Arc::new(Semaphore::new(PROVIDER_REQUEST_CONCURRENCY)),
+        }
     }
 }
 
@@ -1161,6 +1174,39 @@ mod tests {
                 },
             })),
         }
+    }
+
+    #[tokio::test]
+    async fn saturated_provider_boundary_load_sheds_without_starting_network_work()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let boundary = ProviderNetworkBoundary::new();
+        let _occupied = boundary
+            .request_slots
+            .acquire_many(PROVIDER_REQUEST_CONCURRENCY as u32)
+            .await?;
+
+        let verification = boundary
+            .verify_provider_connection(&target(
+                "https://provider.example.test/v1".to_owned(),
+                false,
+            ))
+            .await;
+        assert!(!verification.verified);
+        assert_eq!(verification.error_code.as_deref(), Some("provider_busy"));
+
+        let execution = boundary
+            .execute_structured_model_request(
+                &execution_target(
+                    OPENAI_COMPATIBLE_ADAPTER,
+                    "https://provider.example.test/v1".to_owned(),
+                    ThinkingMode::ProviderDefault,
+                ),
+                &structured_request(),
+            )
+            .await;
+        assert!(!execution.succeeded);
+        assert_eq!(execution.error_code.as_deref(), Some("provider_busy"));
+        Ok(())
     }
 
     #[test]

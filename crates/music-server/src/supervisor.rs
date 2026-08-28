@@ -36,9 +36,19 @@ struct SupervisorInner {
     health: HealthRegistry,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TaskSupervisor {
     inner: Arc<SupervisorInner>,
+}
+
+impl Drop for TaskSupervisor {
+    fn drop(&mut self) {
+        if let Ok(mut accepting) = self.inner.accepting.lock() {
+            *accepting = false;
+        }
+        self.inner.tasks.close();
+        self.inner.root.cancel();
+    }
 }
 
 impl TaskSupervisor {
@@ -212,6 +222,25 @@ mod tests {
             Some("playback_store_failed")
         );
         supervisor.shutdown(Duration::from_secs(1)).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dropping_the_runtime_owner_cancels_partially_started_tasks()
+    -> Result<(), Box<dyn Error>> {
+        let health = HealthRegistry::new();
+        let supervisor = TaskSupervisor::new(health);
+        let cancellation = supervisor.cancellation_token();
+        let (stopped, observed) = tokio::sync::oneshot::channel();
+        supervisor.spawn_critical("startup-owner", "runtime", async move {
+            cancellation.cancelled().await;
+            let _ = stopped.send(());
+            Ok(())
+        })?;
+
+        drop(supervisor);
+
+        tokio::time::timeout(Duration::from_secs(1), observed).await??;
         Ok(())
     }
 }

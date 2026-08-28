@@ -47,6 +47,28 @@ const FUZZ_STATIC_ALLOWLIST = new Map([
   ["crates/music-application/src/assistant/fuzzing.rs:TAGGER_TASK", "OnceLock<Option<ModelTaggerBatch>>"],
   ["crates/music-application/src/assistant/fuzzing.rs:VOCABULARY", "OnceLock<Option<super::TagVocabularySnapshot>>"],
 ]);
+const APPROVED_TOKIO_SPAWN_COUNTS = new Map([
+  ["crates/music-application/src/jobs.rs", 2],
+  ["crates/music-application/src/library.rs", 1],
+  ["crates/music-application/src/modes.rs", 1],
+  ["crates/music-application/src/playback/actor.rs", 1],
+  ["crates/music-server/src/supervisor.rs", 1],
+  ["crates/music-server/src/websocket.rs", 1],
+]);
+const APPROVED_SPAWN_BLOCKING_COUNTS = new Map([
+  ["crates/music-application/src/auth.rs", 1],
+  ["crates/music-media/src/discovery.rs", 1],
+  ["crates/music-media/src/mode_mutation.rs", 5],
+  ["crates/music-media/src/modes.rs", 1],
+  ["crates/music-media/src/mutation.rs", 4],
+  ["crates/music-media/src/sfx.rs", 8],
+  ["crates/music-server/src/admin.rs", 4],
+  ["crates/music-server/src/bin/music-cli.rs", 1],
+  ["crates/music-server/src/blocking.rs", 1],
+  ["crates/music-storage/src/backup.rs", 1],
+  ["crates/music-storage/src/devices.rs", 3],
+  ["crates/music-storage/src/migration.rs", 2],
+]);
 
 function portablePath(path) {
   return String(path).replaceAll("\\", "/").replace(/\/+$/u, "");
@@ -143,6 +165,45 @@ export function sourceStateViolations(files) {
   return [...new Set(violations)].sort();
 }
 
+function productionSource(content) {
+  const source = String(content);
+  const testModule = /^\s*#\[cfg\(test\)\]\s*\r?\n\s*mod\s+tests\s*\{/mu.exec(source);
+  return testModule ? source.slice(0, testModule.index) : source;
+}
+
+function occurrenceCount(source, pattern) {
+  return [...source.matchAll(pattern)].length;
+}
+
+export function sourceConcurrencyViolations(files) {
+  const violations = [];
+  const unboundedChannel = /\bmpsc::unbounded_channel\s*\(|\bmpsc::channel\s*\(\s*\)|\b(?:async_channel|crossbeam_channel|flume)::unbounded\s*\(/gu;
+  for (const file of files) {
+    const path = portablePath(file.path);
+    const source = productionSource(file.content);
+    if (occurrenceCount(source, unboundedChannel) > 0) {
+      violations.push(`${path}: unbounded production channel is forbidden`);
+    }
+
+    const tokioSpawns = occurrenceCount(source, /\btokio::spawn\s*\(/gu);
+    const approvedTokioSpawns = APPROVED_TOKIO_SPAWN_COUNTS.get(path) ?? 0;
+    if (tokioSpawns !== approvedTokioSpawns) {
+      violations.push(
+        `${path}: production tokio::spawn count changed (approved ${approvedTokioSpawns}, observed ${tokioSpawns}); review ownership and supervision`,
+      );
+    }
+
+    const blockingSpawns = occurrenceCount(source, /\btokio::task::spawn_blocking\s*\(/gu);
+    const approvedBlockingSpawns = APPROVED_SPAWN_BLOCKING_COUNTS.get(path) ?? 0;
+    if (blockingSpawns !== approvedBlockingSpawns) {
+      violations.push(
+        `${path}: production spawn_blocking count changed (approved ${approvedBlockingSpawns}, observed ${blockingSpawns}); review bounded admission`,
+      );
+    }
+  }
+  return [...new Set(violations)].sort();
+}
+
 function rustSourceFiles(directory = resolve(REPOSITORY_ROOT, "crates")) {
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -208,9 +269,11 @@ function main() {
     process.stdout.write(`${usage()}\n`);
     return;
   }
+  const sourceFiles = rustSourceFiles();
   const violations = [
     ...architectureViolations(loadMetadata(options)),
-    ...sourceStateViolations(rustSourceFiles()),
+    ...sourceStateViolations(sourceFiles),
+    ...sourceConcurrencyViolations(sourceFiles),
   ].sort();
   if (violations.length > 0) {
     throw new Error(`Rust architecture check failed:\n${violations.map((item) => `- ${item}`).join("\n")}`);

@@ -53,6 +53,7 @@ use tracing_subscriber::EnvFilter;
 use crate::admin::{BackupService, MaintenanceGate, pending_restore_journal};
 use crate::analysis::{AudioAnalysisJobHandler, ContextAnalysisJobHandler};
 use crate::auth::RuntimeAuth;
+use crate::blocking::BlockingMediaExecutor;
 use crate::cleanup::MusicBrainzNameLookup;
 use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
@@ -94,6 +95,7 @@ pub struct AppRuntime {
     sfx: Arc<RuntimeSfx>,
     library_root: LibraryRoot,
     library_metadata: MetadataAdapter,
+    media_executor: BlockingMediaExecutor,
 }
 
 impl AppRuntime {
@@ -240,6 +242,7 @@ impl AppRuntime {
         let initial_mode_status = modes.wait_until_initialized().await?;
         health.set_component("mode_coordinator", true, ComponentStatus::Ready);
         apply_mode_health(&health, initial_mode_status.state);
+        let media_executor = BlockingMediaExecutor::default();
         let sfx_root = SfxRoot::open(&config.sfx_library_dir)?;
         let sfx_journal: Arc<dyn RecoveryJournalRepository> = storage.clone();
         let sfx_effects = Arc::new(FilesystemSfxEffects::new(sfx_root.clone()));
@@ -249,6 +252,7 @@ impl AppRuntime {
             root: sfx_root,
             max_upload_files: config.max_upload_files,
             max_upload_file_bytes: config.max_upload_file_bytes,
+            media_executor: media_executor.clone(),
         });
         health.set_component("sfx", true, ComponentStatus::Ready);
         let library_root = LibraryRoot::open(&config.music_dir)?;
@@ -368,6 +372,7 @@ impl AppRuntime {
             sfx,
             library_root,
             library_metadata,
+            media_executor,
         })
     }
 
@@ -406,6 +411,7 @@ impl AppRuntime {
                     metadata: self.library_metadata.clone(),
                     max_upload_files: self.config.max_upload_files,
                     max_upload_file_bytes: self.config.max_upload_file_bytes,
+                    media_executor: self.media_executor.clone(),
                 }),
                 modes: self.modes.clone(),
                 playlists: Arc::clone(&self.playlist_service),

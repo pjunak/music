@@ -645,6 +645,9 @@ must finish before the reference implementation is deleted.
   explicit intended-speaker acceptance procedure.
 - [x] Fingerprint the complete frozen Python oracle and add separate pre-removal and final Rust-only
   tree verification modes.
+- [x] Re-audit runtime ownership and concurrency: partial startup now cancels its task tree, direct
+  HTTP media work and provider I/O load-shed at fixed admission caps, and the architecture gate
+  rejects unbounded channels or unreviewed `tokio::spawn`/`spawn_blocking` drift.
 - [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
 - [ ] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report.
 - [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.

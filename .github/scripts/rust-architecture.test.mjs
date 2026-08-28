@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { architectureViolations, sourceStateViolations } from "./rust-architecture.mjs";
+import {
+  architectureViolations,
+  sourceConcurrencyViolations,
+  sourceStateViolations,
+} from "./rust-architecture.mjs";
 
 const ALLOWED_DEPENDENCIES = new Map([
   ["music-domain", []],
@@ -117,4 +121,33 @@ test("runtime module globals fail while the isolated fuzz caches remain explicit
   }]), [
     "crates/music-application/src/assistant/fuzzing.rs: module-global static EQ_TASK is not approved; inject owned state through AppRuntime",
   ]);
+});
+
+test("unbounded channels and new detached task sites fail", () => {
+  assert.deepEqual(sourceConcurrencyViolations([{
+    path: "crates/music-server/src/new_owner.rs",
+    content: [
+      "let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();",
+      "tokio::spawn(async move { run(receiver).await });",
+      "tokio::task::spawn_blocking(move || scan());",
+    ].join("\n"),
+  }]), [
+    "crates/music-server/src/new_owner.rs: production spawn_blocking count changed (approved 0, observed 1); review bounded admission",
+    "crates/music-server/src/new_owner.rs: production tokio::spawn count changed (approved 0, observed 1); review ownership and supervision",
+    "crates/music-server/src/new_owner.rs: unbounded production channel is forbidden",
+  ]);
+});
+
+test("reviewed task sites pass and test-only spawns are ignored", () => {
+  assert.deepEqual(sourceConcurrencyViolations([{
+    path: "crates/music-application/src/jobs.rs",
+    content: [
+      "let local = tokio::spawn(local_lane());",
+      "let provider = tokio::spawn(provider_lane());",
+      "#[cfg(test)]",
+      "mod tests {",
+      "  fn fixture() { tokio::spawn(async {}); }",
+      "}",
+    ].join("\n"),
+  }]), []);
 });

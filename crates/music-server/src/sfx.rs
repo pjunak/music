@@ -29,6 +29,7 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::auth::format_rfc3339;
+use crate::blocking::{BlockingMediaError, BlockingMediaExecutor};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_string,
 };
@@ -40,6 +41,7 @@ pub(crate) struct RuntimeSfx {
     pub(crate) root: SfxRoot,
     pub(crate) max_upload_files: usize,
     pub(crate) max_upload_file_bytes: u64,
+    pub(crate) media_executor: BlockingMediaExecutor,
 }
 
 pub(crate) fn sfx_router() -> OpenApiRouter<HttpState> {
@@ -280,17 +282,16 @@ async fn get_sfx_file(
     }
     let root = sfx(&state)?.root.clone();
     let path_for_worker = path.clone();
-    let absolute = tokio::task::spawn_blocking(move || {
-        let absolute = root.resolve_existing(&path_for_worker)?;
-        Ok::<_, RootedPathError>(absolute.is_file().then_some(absolute))
-    })
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "SFX playback path worker failed");
-        ApiError::internal()
-    })?
-    .map_err(map_sfx_delivery_error)?
-    .ok_or_else(|| ApiError::gone("sfx file missing on disk"))?;
+    let absolute = sfx(&state)?
+        .media_executor
+        .execute(move || {
+            let absolute = root.resolve_existing(&path_for_worker)?;
+            Ok::<_, RootedPathError>(absolute.is_file().then_some(absolute))
+        })
+        .await
+        .map_err(map_media_worker_error)?
+        .map_err(map_sfx_delivery_error)?
+        .ok_or_else(|| ApiError::gone("sfx file missing on disk"))?;
 
     let response = ServeFile::new(absolute)
         .oneshot(request)
@@ -716,27 +717,34 @@ async fn upload_check(
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let root = sfx(&state)?.root.clone();
-    let collisions = tokio::task::spawn_blocking(move || {
-        payload
-            .items
-            .into_iter()
-            .filter(|item| {
-                let Ok(directory) = parse_optional_folder(&item.dest) else {
-                    return false;
-                };
-                let Ok(path) = destination_path(directory.as_ref(), &item.name) else {
-                    return false;
-                };
-                sfx_upload_target_exists(&root, &path).unwrap_or(false)
-            })
-            .collect::<Vec<_>>()
-    })
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "SFX upload collision worker failed");
-        ApiError::internal()
-    })?;
+    let collisions = sfx(&state)?
+        .media_executor
+        .execute(move || {
+            payload
+                .items
+                .into_iter()
+                .filter(|item| {
+                    let Ok(directory) = parse_optional_folder(&item.dest) else {
+                        return false;
+                    };
+                    let Ok(path) = destination_path(directory.as_ref(), &item.name) else {
+                        return false;
+                    };
+                    sfx_upload_target_exists(&root, &path).unwrap_or(false)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(map_media_worker_error)?;
     Ok(Json(UploadCheckResponse { collisions }))
+}
+
+fn map_media_worker_error(error: BlockingMediaError) -> ApiError {
+    if error == BlockingMediaError::Busy {
+        return ApiError::service_unavailable();
+    }
+    tracing::error!(error = %error, "SFX media worker failed");
+    ApiError::internal()
 }
 
 async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {

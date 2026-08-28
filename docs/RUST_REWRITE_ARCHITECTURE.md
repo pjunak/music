@@ -117,7 +117,8 @@ music-output      -> music-protocol
 
 The permanent `rust-architecture.mjs` gate reads locked Cargo metadata and source, rejecting a ninth
 workspace crate, a moved crate manifest, an internal registry stand-in or alias, an unapproved path
-dependency, every direct internal edge outside this graph, and new module-global Rust statics.
+dependency, every direct internal edge outside this graph, new module-global Rust statics,
+unbounded production channels, and drift in the reviewed `tokio::spawn`/`spawn_blocking` sites.
 Architectural restructuring therefore requires an explicit review and matching gate update instead
 of silently entering through a valid Cargo build. Its only static exceptions are four immutable
 parser-fixture caches in the feature-gated fuzzing adapter; they are not linked into normal builds or
@@ -423,6 +424,10 @@ Startup is a supervised sequence, not one best-effort callback:
 5. bind HTTP/WebSocket and expose readiness; and
 6. enqueue full library reconciliation and degradable capability probes.
 
+The root supervisor closes task admission and cancels its tree when its owning runtime is dropped.
+This applies during partial construction as well as normal shutdown, so a later startup error cannot
+detach an owner that was started by an earlier step.
+
 The server validates files referenced by live playback synchronously but does not walk the complete
 media tree before serving. It starts from the durable index and reports library status as
 `reconciling`, `current`, or `failed`. A failed scan preserves the last index and remains visible and
@@ -499,6 +504,11 @@ clients require. Range, conditional request, missing-file, traversal, content-ty
 behavior receive integration tests with generated media fixtures. Tower's file service is an
 implementation candidate, not assumed parity; its current range behavior is wrapped or replaced
 where the fixture corpus differs.
+
+HTTP-triggered path inspection, directory enumeration, cover extraction, and collision checks enter
+one shared two-slot blocking-media admission boundary. Admission is non-queueing: saturation returns
+a safe service-unavailable response before work reaches Tokio's blocking pool. Actor-owned library,
+mode, and SFX filesystem effects remain separately bounded by their single-owner mailboxes/gates.
 
 Lofty and the ASF subprocess boundary are hidden behind one metadata adapter. Concrete Lofty tag
 types are used for Vorbis, Opus, FLAC, and MP4 so unrelated fields, artwork, and MP4 integer atoms
@@ -682,6 +692,11 @@ Reqwest/Rustls transport:
 - applies connect, whole-request, and response-body deadlines;
 - streams and bounds response bytes before JSON parsing; and
 - returns stable, secret-free error codes without upstream bodies.
+
+The boundary admits at most four verification/model requests at once and returns `provider_busy`
+without starting network work when saturated. The durable provider job lane remains capacity one;
+the wider cap exists for the small interactive verification surface without allowing request fanout
+to become an implicit executor.
 
 Reqwest exposes explicit redirect policy and DNS overrides needed for this design
 ([Reqwest client builder](https://docs.rs/reqwest/latest/reqwest/struct.ClientBuilder.html)).

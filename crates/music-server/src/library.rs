@@ -35,6 +35,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
+use crate::blocking::{BlockingMediaError, BlockingMediaExecutor};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_integer,
     openapi_nullable_string, openapi_number,
@@ -51,6 +52,7 @@ pub(crate) struct RuntimeLibrary {
     pub(crate) metadata: MetadataAdapter,
     pub(crate) max_upload_files: usize,
     pub(crate) max_upload_file_bytes: u64,
+    pub(crate) media_executor: BlockingMediaExecutor,
 }
 
 pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
@@ -748,14 +750,13 @@ async fn folders(
     crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let library = library(&state)?;
     let root = library.root.clone();
-    let directories = tokio::task::spawn_blocking(move || list_library_directories(&root));
+    let directories = library
+        .media_executor
+        .execute(move || list_library_directories(&root));
     let counts = library.service.folder_track_counts();
     let (directories, counts) = tokio::join!(directories, counts);
     let directories = directories
-        .map_err(|error| {
-            tracing::error!(error = %error, "library directory worker failed");
-            ApiError::internal()
-        })?
+        .map_err(map_media_worker_error)?
         .map_err(|error| {
             tracing::error!(error = %error, "library directory enumeration failed");
             ApiError::internal()
@@ -1250,12 +1251,11 @@ async fn stream(
     let library = library(&state)?;
     let root = library.root.clone();
     let path = track.path;
-    let absolute = tokio::task::spawn_blocking(move || resolve_library_media_file(&root, &path))
+    let absolute = library
+        .media_executor
+        .execute(move || resolve_library_media_file(&root, &path))
         .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "media path worker failed");
-            ApiError::internal()
-        })?
+        .map_err(map_media_worker_error)?
         .map_err(|error| map_stream_delivery_error(raw_track_id, &error))?;
 
     let response = ServeFile::new(absolute)
@@ -1301,26 +1301,24 @@ async fn cover(
     let root = library.root.clone();
     let metadata = library.metadata.clone();
     let path = track.path;
-    let artwork =
-        tokio::task::spawn_blocking(move || read_library_cover_art(&root, &path, &metadata))
-            .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "cover art worker failed");
+    let artwork = library
+        .media_executor
+        .execute(move || read_library_cover_art(&root, &path, &metadata))
+        .await
+        .map_err(map_media_worker_error)?
+        .map_err(|error| {
+            if error.is_unavailable() {
+                ApiError::plain_not_found("no cover art")
+            } else {
+                tracing::error!(
+                    track_id = raw_track_id,
+                    error_code = error.code(),
+                    "cover art extraction failed"
+                );
                 ApiError::internal()
-            })?
-            .map_err(|error| {
-                if error.is_unavailable() {
-                    ApiError::plain_not_found("no cover art")
-                } else {
-                    tracing::error!(
-                        track_id = raw_track_id,
-                        error_code = error.code(),
-                        "cover art extraction failed"
-                    );
-                    ApiError::internal()
-                }
-            })?
-            .ok_or_else(|| ApiError::plain_not_found("no cover art"))?;
+            }
+        })?
+        .ok_or_else(|| ApiError::plain_not_found("no cover art"))?;
 
     let mut response = artwork.bytes.into_response();
     response.headers_mut().insert(
@@ -1448,27 +1446,34 @@ async fn upload_check(
     crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let root = library(&state)?.root.clone();
-    let collisions = tokio::task::spawn_blocking(move || {
-        payload
-            .items
-            .into_iter()
-            .filter(|item| {
-                let Ok(directory) = upload_directory(&item.dest) else {
-                    return false;
-                };
-                let Ok(path) = upload_destination(directory.as_ref(), &item.name) else {
-                    return false;
-                };
-                library_upload_target_exists(&root, &path).unwrap_or(false)
-            })
-            .collect::<Vec<_>>()
-    })
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "upload collision worker failed");
-        ApiError::internal()
-    })?;
+    let collisions = library(&state)?
+        .media_executor
+        .execute(move || {
+            payload
+                .items
+                .into_iter()
+                .filter(|item| {
+                    let Ok(directory) = upload_directory(&item.dest) else {
+                        return false;
+                    };
+                    let Ok(path) = upload_destination(directory.as_ref(), &item.name) else {
+                        return false;
+                    };
+                    library_upload_target_exists(&root, &path).unwrap_or(false)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(map_media_worker_error)?;
     Ok(Json(UploadCheckResponse { collisions }))
+}
+
+fn map_media_worker_error(error: BlockingMediaError) -> ApiError {
+    if error == BlockingMediaError::Busy {
+        return ApiError::service_unavailable();
+    }
+    tracing::error!(error = %error, "library media worker failed");
+    ApiError::internal()
 }
 
 #[utoipa::path(
@@ -1851,12 +1856,26 @@ fn safe_cover_mime(candidate: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_cover_mime;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    use super::{map_media_worker_error, safe_cover_mime};
+    use crate::blocking::BlockingMediaError;
 
     #[test]
     fn hostile_cover_mime_is_never_rendered_as_active_content() {
         assert_eq!(safe_cover_mime("image/png"), "image/png");
         assert_eq!(safe_cover_mime("text/html"), "application/octet-stream");
         assert_eq!(safe_cover_mime("image/svg+xml"), "application/octet-stream");
+    }
+
+    #[test]
+    fn saturated_media_admission_is_a_safe_service_unavailable_response() {
+        assert_eq!(
+            map_media_worker_error(BlockingMediaError::Busy)
+                .into_response()
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 }
