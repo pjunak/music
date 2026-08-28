@@ -27,6 +27,7 @@ pub enum RuntimeError {
     Library(music_application::library::LibraryCoordinatorError),
     Sfx(music_application::sfx::SfxCoordinatorError),
     Modes(music_application::modes::ModeCoordinatorError),
+    Jobs(music_application::jobs::JobCoordinatorError),
     ModeSource(music_application::modes::ModeSourceError),
     MediaRoot(music_media::RootedPathError),
     Io {
@@ -64,6 +65,7 @@ impl Display for RuntimeError {
             Self::Library(error) => Display::fmt(error, formatter),
             Self::Sfx(error) => Display::fmt(error, formatter),
             Self::Modes(error) => Display::fmt(error, formatter),
+            Self::Jobs(error) => Display::fmt(error, formatter),
             Self::ModeSource(error) => Display::fmt(error, formatter),
             Self::MediaRoot(error) => Display::fmt(error, formatter),
             Self::Io { operation, .. } => write!(formatter, "failed to {operation}"),
@@ -101,6 +103,7 @@ impl Error for RuntimeError {
             Self::Library(source) => Some(source),
             Self::Sfx(source) => Some(source),
             Self::Modes(source) => Some(source),
+            Self::Jobs(source) => Some(source),
             Self::ModeSource(source) => Some(source),
             Self::MediaRoot(source) => Some(source),
             Self::Io { source, .. } => Some(source),
@@ -153,6 +156,12 @@ impl From<music_application::sfx::SfxCoordinatorError> for RuntimeError {
 impl From<music_application::modes::ModeCoordinatorError> for RuntimeError {
     fn from(error: music_application::modes::ModeCoordinatorError) -> Self {
         Self::Modes(error)
+    }
+}
+
+impl From<music_application::jobs::JobCoordinatorError> for RuntimeError {
+    fn from(error: music_application::jobs::JobCoordinatorError) -> Self {
+        Self::Jobs(error)
     }
 }
 

@@ -10,6 +10,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use music_application::jobs::JobService;
 use music_application::modes::ModeCoordinatorHandle;
 use music_application::playback::PlaybackActorHandle;
 use music_application::playlists::PlaylistService;
@@ -52,6 +53,7 @@ pub(crate) struct HttpState {
     pub(crate) backup: Option<Arc<BackupService>>,
     pub(crate) devices: Option<Arc<RuntimeDevices>>,
     pub(crate) library: Option<Arc<RuntimeLibrary>>,
+    pub(crate) jobs: Option<Arc<JobService>>,
     pub(crate) modes: Option<ModeCoordinatorHandle>,
     pub(crate) playlists: Option<Arc<PlaylistService>>,
     pub(crate) sfx: Option<Arc<RuntimeSfx>>,
@@ -65,6 +67,7 @@ pub(crate) struct RuntimeServices {
     pub(crate) backup: Arc<BackupService>,
     pub(crate) devices: Arc<RuntimeDevices>,
     pub(crate) library: Arc<RuntimeLibrary>,
+    pub(crate) jobs: Arc<JobService>,
     pub(crate) modes: ModeCoordinatorHandle,
     pub(crate) playlists: Arc<PlaylistService>,
     pub(crate) sfx: Arc<RuntimeSfx>,
@@ -107,6 +110,7 @@ pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Rou
             backup: Some(services.backup),
             devices: Some(services.devices),
             library: Some(services.library),
+            jobs: Some(services.jobs),
             modes: Some(services.modes),
             playlists: Some(services.playlists),
             sfx: Some(services.sfx),
@@ -128,6 +132,7 @@ fn build_router_without_playback(
             backup: None,
             devices: None,
             library: None,
+            jobs: None,
             modes: None,
             playlists: None,
             sfx: None,
@@ -174,6 +179,7 @@ fn documented_api_router() -> OpenApiRouter<HttpState> {
         .merge(crate::devices::device_router())
         .merge(crate::diagnostics::diagnostics_router())
         .merge(crate::library::library_router())
+        .merge(crate::jobs::jobs_router())
         .merge(crate::modes::mode_router())
         .merge(crate::playlists::playlist_router())
         .merge(crate::sfx::sfx_router())

@@ -1544,6 +1544,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+ "uuid",
  "zeroize",
 ]
 

@@ -9,10 +9,11 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
+const DURABLE_JOBS_SCHEMA_SQL: &str = include_str!("../migrations/0004_durable_jobs.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 
@@ -34,6 +35,11 @@ const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("playlists", "automatic_refreshed_at"),
     ("assistant_tag_vocabularies", "seed_version"),
     ("playback_state", "storage_revision"),
+    ("background_jobs", "lane"),
+    ("background_jobs", "schema_version"),
+    ("background_jobs", "restartable"),
+    ("background_jobs", "checkpoint_policy"),
+    ("background_jobs", "execution_id"),
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
@@ -414,6 +420,9 @@ async fn expected_shape() -> Result<DatabaseShape, StorageError> {
         .await?;
     sqlx::raw_sql(BASELINE_SCHEMA_SQL).execute(&pool).await?;
     sqlx::raw_sql(LIBRARY_STATE_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(DURABLE_JOBS_SCHEMA_SQL)
         .execute(&pool)
         .await?;
     let shape = read_shape(&pool).await;

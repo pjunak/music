@@ -15,6 +15,7 @@ mod crypto;
 mod devices;
 mod error;
 mod instance_lock;
+mod jobs;
 mod library;
 mod migration;
 mod mode_import;

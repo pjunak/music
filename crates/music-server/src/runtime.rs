@@ -11,6 +11,9 @@ use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
     CleanupVerificationRepository, CleanupVerificationService,
 };
+use music_application::jobs::{
+    JobCoordinatorError, JobRepository, JobService, SpawnedJobCoordinator, start_job_coordinator,
+};
 use music_application::library::{
     LibraryCatalogSink, LibraryCoordinatorHandle, LibraryRepository, LibraryService,
     ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
@@ -73,6 +76,7 @@ pub struct AppRuntime {
     cleanup_service: Arc<CleanupService>,
     cleanup_verification_service: Arc<CleanupVerificationService>,
     playlist_service: Arc<PlaylistService>,
+    jobs: Arc<JobService>,
     sfx: Arc<RuntimeSfx>,
     library_root: LibraryRoot,
     library_metadata: MetadataAdapter,
@@ -95,6 +99,7 @@ impl AppRuntime {
         health.set_component("remembered_devices", false, ComponentStatus::Starting);
         health.set_component("library_coordinator", true, ComponentStatus::Starting);
         health.set_component("library", false, ComponentStatus::Starting);
+        health.set_component("background_jobs", true, ComponentStatus::Starting);
         health.set_component("mode_coordinator", true, ComponentStatus::Starting);
         health.set_component("modes", false, ComponentStatus::Starting);
         health.set_component("sfx", true, ComponentStatus::Starting);
@@ -234,6 +239,12 @@ impl AppRuntime {
         ));
         let playlist_repository: Arc<dyn PlaylistRepository> = storage.clone();
         let playlist_service = Arc::new(PlaylistService::new(playlist_repository));
+        let job_repository: Arc<dyn JobRepository> = storage.clone();
+        let jobs = supervise_jobs(
+            &supervisor,
+            start_job_coordinator(job_repository, Vec::new()).await?,
+        )?;
+        health.set_component("background_jobs", true, ComponentStatus::Ready);
         health.set_component("library_coordinator", true, ComponentStatus::Ready);
         apply_library_health(&health, library.status().status);
         library.request_reconciliation()?;
@@ -261,6 +272,7 @@ impl AppRuntime {
             cleanup_service,
             cleanup_verification_service,
             playlist_service,
+            jobs,
             sfx,
             library_root,
             library_metadata,
@@ -303,6 +315,7 @@ impl AppRuntime {
                 }),
                 modes: self.modes.clone(),
                 playlists: Arc::clone(&self.playlist_service),
+                jobs: Arc::clone(&self.jobs),
                 sfx: Arc::clone(&self.sfx),
             },
         )
@@ -360,6 +373,7 @@ impl AppRuntime {
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
         self.health
             .set_component("http", true, ComponentStatus::Starting);
+        self.jobs.shutdown();
         let supervisor_result = self.supervisor.shutdown(SHUTDOWN_TIMEOUT).await;
         self.storage.close().await;
         supervisor_result
@@ -472,6 +486,51 @@ fn map_mode_exit(
         Ok(Err(_)) => Err(CriticalTaskError::new("mode_owner_failed")),
         Err(_) => Err(CriticalTaskError::new("mode_owner_panicked")),
     }
+}
+
+fn supervise_jobs(
+    supervisor: &TaskSupervisor,
+    spawned: SpawnedJobCoordinator,
+) -> Result<Arc<JobService>, RuntimeError> {
+    let service = spawned.service;
+    let shutdown_service = Arc::clone(&service);
+    let cancellation = supervisor.cancellation_token();
+    let mut local_task = spawned.local_task;
+    let mut provider_task = spawned.provider_task;
+    supervisor.spawn_critical("background-job-owner", "background_jobs", async move {
+        tokio::select! {
+            local_result = &mut local_task => {
+                shutdown_service.shutdown();
+                let provider_result = provider_task.await;
+                map_job_exits(local_result, provider_result)
+            }
+            provider_result = &mut provider_task => {
+                shutdown_service.shutdown();
+                let local_result = local_task.await;
+                map_job_exits(local_result, provider_result)
+            }
+            () = cancellation.cancelled() => {
+                shutdown_service.shutdown();
+                let (local_result, provider_result) = tokio::join!(local_task, provider_task);
+                map_job_exits(local_result, provider_result)
+            }
+        }
+    })?;
+    Ok(service)
+}
+
+fn map_job_exits(
+    local: Result<Result<(), JobCoordinatorError>, tokio::task::JoinError>,
+    provider: Result<Result<(), JobCoordinatorError>, tokio::task::JoinError>,
+) -> Result<(), CriticalTaskError> {
+    for result in [local, provider] {
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => return Err(CriticalTaskError::new("background_job_owner_failed")),
+            Err(_) => return Err(CriticalTaskError::new("background_job_owner_panicked")),
+        }
+    }
+    Ok(())
 }
 
 fn supervise_library(
@@ -704,6 +763,9 @@ mod tests {
         CleanupBatchAppend, CleanupFuture, CleanupNameLookup, CleanupNameScores, CleanupRepository,
         CleanupVerificationService,
     };
+    use music_application::jobs::{
+        JobCheckpointPolicy, JobDefinition, JobFinish, JobLane, JobRepository, NewJob,
+    };
     use music_application::library::{LibraryFileMutation, ReconciliationStatus};
     use music_application::modes::{
         ModeDocument, ModeImportPlaylist, ModeMutation, ModeMutationDataEffects,
@@ -716,7 +778,7 @@ mod tests {
     };
     use music_media::FilesystemModeMutations;
     use music_storage::{SqliteStorage, SqliteStorageOptions, StorageError};
-    use serde_json::Value;
+    use serde_json::{Map, Value, json};
     use tar::Archive;
     use tempfile::tempdir;
     use tokio::sync::Mutex;
@@ -3871,6 +3933,79 @@ mod tests {
             .await?;
         assert_eq!(deleted_again.status(), StatusCode::NOT_FOUND);
 
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn jobs_http_surface_renders_history_and_enforces_operator_auth()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let config = runtime_config(directory.path())?;
+        let storage =
+            Arc::new(SqliteStorage::open(SqliteStorageOptions::new(&config.database_path)).await?);
+        JobRepository::create(
+            storage.as_ref(),
+            &NewJob {
+                id: "history-job".to_owned(),
+                definition: JobDefinition {
+                    kind: "historical.removed-handler",
+                    schema_version: 1,
+                    lane: JobLane::Local,
+                    restartable: true,
+                    checkpoint_policy: JobCheckpointPolicy::Replace,
+                },
+                parameters: Map::from_iter([("scope".to_owned(), json!("all"))]),
+                retry_of_id: None,
+            },
+        )
+        .await
+        .map_err(|_| "failed to create historical job")?;
+        let claim = JobRepository::claim_next(storage.as_ref(), JobLane::Local)
+            .await
+            .map_err(|_| "failed to claim historical job")?
+            .ok_or("missing historical claim")?;
+        JobRepository::finish(
+            storage.as_ref(),
+            &claim,
+            &JobFinish::Succeeded(Map::from_iter([("processed".to_owned(), json!(1))])),
+        )
+        .await
+        .map_err(|_| "failed to finish historical job")?;
+        storage.close().await;
+        drop(storage);
+
+        let runtime = AppRuntime::start(config).await?;
+        let (router, cookie) = operator_router(&runtime).await?;
+        let unauthorized = router
+            .clone()
+            .oneshot(Request::get("/api/jobs").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let listed = router
+            .clone()
+            .oneshot(
+                Request::get("/api/jobs?kind=historical.removed-handler")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed_json: Value =
+            serde_json::from_slice(&to_bytes(listed.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(listed_json[0]["id"], "history-job");
+        assert_eq!(listed_json[0]["status"], "succeeded");
+        assert_eq!(listed_json[0]["result"]["processed"], 1);
+
+        let retried = router
+            .oneshot(
+                Request::post("/api/jobs/history-job/retry")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(retried.status(), StatusCode::CONFLICT);
         runtime.shutdown().await?;
         Ok(())
     }

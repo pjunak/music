@@ -12,6 +12,7 @@
 pub mod auth;
 pub mod cleanup;
 pub mod devices;
+pub mod jobs;
 pub mod library;
 pub mod modes;
 pub mod playback;

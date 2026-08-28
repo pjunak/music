@@ -42,6 +42,8 @@ pub enum StorageError {
     InvalidRecoveryJournalRecord,
     InvalidRecoveryTransition,
     RecoveryJournalCapacityExceeded,
+    JobSerialization(serde_json::Error),
+    InvalidJobRecord(&'static str),
 }
 
 impl Display for StorageError {
@@ -134,6 +136,12 @@ impl Display for StorageError {
             Self::RecoveryJournalCapacityExceeded => {
                 formatter.write_str("unfinished recovery journal capacity exceeded")
             }
+            Self::JobSerialization(_) => {
+                formatter.write_str("failed to encode or decode a background job document")
+            }
+            Self::InvalidJobRecord(detail) => {
+                write!(formatter, "stored background job is invalid: {detail}")
+            }
         }
     }
 }
@@ -165,7 +173,9 @@ impl Error for StorageError {
             | Self::InvalidLibraryState(_)
             | Self::InvalidRecoveryJournalRecord
             | Self::InvalidRecoveryTransition
-            | Self::RecoveryJournalCapacityExceeded => None,
+            | Self::RecoveryJournalCapacityExceeded
+            | Self::InvalidJobRecord(_) => None,
+            Self::JobSerialization(source) => Some(source),
         }
     }
 }

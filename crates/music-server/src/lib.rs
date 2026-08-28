@@ -21,6 +21,7 @@ mod diagnostics;
 mod error;
 mod health;
 mod http;
+mod jobs;
 mod library;
 mod modes;
 mod playback_projection;
