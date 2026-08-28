@@ -17,6 +17,7 @@ mod error;
 mod instance_lock;
 mod library;
 mod migration;
+mod mode_import;
 mod playback;
 mod playlists;
 mod recovery;

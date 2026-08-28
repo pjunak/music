@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, File, OpenOptions};
@@ -5,7 +6,9 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use music_application::modes::{
-    ModeMutation, ModeMutationEffects, ModeMutationFuture, PreparedModeMutation,
+    CueDocument, ModeDocument, ModeImportPlaylist, ModeMutation, ModeMutationEffects,
+    ModeMutationError, ModeMutationFailureKind, ModeMutationFuture, PreparedModeMutation,
+    PresetDocument, SoundboardDocument,
 };
 use music_application::recovery::{
     RecoveryDomain, RecoveryJournalEntry, RecoveryJournalId, RecoveryOperation,
@@ -53,7 +56,7 @@ impl ModeMutationEffects for FilesystemModeMutations {
             tokio::task::spawn_blocking(move || prepare(&root, &journal_id, &mutation))
                 .await
                 .map_err(|_| dependency("mode staging worker did not complete"))?
-                .map_err(|error| Box::new(error) as _)
+                .map_err(mode_dependency)
         })
     }
 
@@ -64,7 +67,7 @@ impl ModeMutationEffects for FilesystemModeMutations {
             tokio::task::spawn_blocking(move || apply(&root, &journal))
                 .await
                 .map_err(|_| dependency("mode apply worker did not complete"))?
-                .map_err(|error| Box::new(error) as _)
+                .map_err(mode_dependency)
         })
     }
 
@@ -127,6 +130,23 @@ enum FilesystemMutationKind {
     DeleteFile,
     CreateMode,
     DeleteMode,
+    ImportResources,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+struct FilesystemWritePlan {
+    target: String,
+    candidate: String,
+    backup: Option<String>,
+    target_existed: bool,
+    candidate_sha256: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+struct ImportPlaylistPlan {
+    name: String,
+    category: Option<String>,
+    track_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -140,10 +160,31 @@ struct FilesystemMutationPlan {
     backup: Option<String>,
     target_existed: bool,
     candidate_sha256: Option<String>,
+    #[serde(default)]
+    writes: Vec<FilesystemWritePlan>,
+    #[serde(default)]
+    playlists: Vec<ImportPlaylistPlan>,
 }
 
 fn dependency(detail: &'static str) -> Box<dyn Error + Send + Sync> {
     Box::new(ModeFilesystemMutationError::new(detail))
+}
+
+fn mode_dependency(error: ModeFilesystemMutationError) -> Box<dyn Error + Send + Sync> {
+    if matches!(
+        error.detail,
+        "mode import target already exists"
+            | "mode document already exists"
+            | "mode create target is occupied"
+            | "mode replacement target is occupied"
+    ) {
+        Box::new(ModeMutationError::new(
+            ModeMutationFailureKind::Conflict,
+            "target resource appeared during import",
+        ))
+    } else {
+        Box::new(error)
+    }
 }
 
 fn prepare(
@@ -208,6 +249,8 @@ fn prepare_inner(
                     backup: None,
                     target_existed: false,
                     candidate_sha256: None,
+                    writes: Vec::new(),
+                    playlists: Vec::new(),
                 },
             )
         }
@@ -318,12 +361,155 @@ fn prepare_inner(
             format!("{mode_id}/presets/{preset_id}.yaml"),
             stage_relative,
         )?,
+        ModeMutation::ImportResources {
+            mode_id,
+            manifest,
+            soundboards,
+            cues,
+            presets,
+            playlists,
+            ..
+        } => prepare_import_resources(
+            root,
+            stage,
+            stage_relative,
+            journal_id,
+            mode_id,
+            manifest,
+            soundboards,
+            cues,
+            presets,
+            playlists,
+        )?,
     };
     Ok(PreparedModeMutation {
         operation: RecoveryOperation::parse(operation)
             .map_err(|_| ModeFilesystemMutationError::new("mode operation is invalid"))?,
         plan: serde_json::to_value(plan)
             .map_err(|_| ModeFilesystemMutationError::new("mode plan could not be encoded"))?,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_import_resources(
+    root: &Path,
+    stage: &Path,
+    stage_relative: &str,
+    journal_id: &RecoveryJournalId,
+    mode_id: &str,
+    manifest: &ModeDocument,
+    soundboards: &BTreeMap<String, SoundboardDocument>,
+    cues: &BTreeMap<String, CueDocument>,
+    presets: &BTreeMap<String, PresetDocument>,
+    playlists: &[ModeImportPlaylist],
+) -> Result<(&'static str, FilesystemMutationPlan), ModeFilesystemMutationError> {
+    ensure_mode_target(root, mode_id)?;
+    let mut documents = vec![(
+        format!("{mode_id}/manifest.yaml"),
+        serialize_document(manifest).map_err(|_| {
+            ModeFilesystemMutationError::new("mode manifest could not be serialized")
+        })?,
+        false,
+    )];
+    for (soundboard_id, document) in soundboards {
+        documents.push((
+            format!("{mode_id}/soundboards/{soundboard_id}.yaml"),
+            serialize_document(document).map_err(|_| {
+                ModeFilesystemMutationError::new("soundboard could not be serialized")
+            })?,
+            true,
+        ));
+    }
+    for (cue_id, document) in cues {
+        documents.push((
+            format!("{mode_id}/cues/{cue_id}.yaml"),
+            serialize_document(document)
+                .map_err(|_| ModeFilesystemMutationError::new("cue could not be serialized"))?,
+            true,
+        ));
+    }
+    for (preset_id, document) in presets {
+        documents.push((
+            format!("{mode_id}/presets/{preset_id}.yaml"),
+            serialize_document(document)
+                .map_err(|_| ModeFilesystemMutationError::new("preset could not be serialized"))?,
+            true,
+        ));
+    }
+
+    let mut writes = Vec::with_capacity(documents.len());
+    for (index, (target, content, create_only)) in documents.into_iter().enumerate() {
+        writes.push(stage_import_write(
+            root,
+            stage,
+            stage_relative,
+            index,
+            target,
+            &content,
+            create_only,
+        )?);
+    }
+    Ok((
+        "import_mode_resources",
+        FilesystemMutationPlan {
+            version: PLAN_VERSION,
+            journal_id: journal_id.as_str().to_owned(),
+            kind: FilesystemMutationKind::ImportResources,
+            target: mode_id.to_owned(),
+            stage_directory: stage_relative.to_owned(),
+            candidate: None,
+            backup: None,
+            target_existed: true,
+            candidate_sha256: None,
+            writes,
+            playlists: playlists
+                .iter()
+                .map(|playlist| ImportPlaylistPlan {
+                    name: playlist.name.clone(),
+                    category: playlist.category.clone(),
+                    track_ids: playlist
+                        .track_ids
+                        .iter()
+                        .map(|track_id| track_id.get())
+                        .collect(),
+                })
+                .collect(),
+        },
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stage_import_write(
+    root: &Path,
+    stage: &Path,
+    stage_relative: &str,
+    index: usize,
+    target: String,
+    content: &str,
+    create_only: bool,
+) -> Result<FilesystemWritePlan, ModeFilesystemMutationError> {
+    let target_path = rooted_target(root, &target)?;
+    let target_existed = regular_file_exists(&target_path)?;
+    if create_only && target_existed {
+        return Err(ModeFilesystemMutationError::new(
+            "mode import target already exists",
+        ));
+    }
+    if !create_only && !target_existed {
+        return Err(ModeFilesystemMutationError::new(
+            "mode import target does not exist",
+        ));
+    }
+    let candidate_name = format!("candidate-{index}.yaml");
+    let candidate = stage.join(&candidate_name);
+    write_synced(&candidate, content.as_bytes())?;
+    let candidate_sha256 = sha256_file(&candidate)?;
+    Ok(FilesystemWritePlan {
+        target,
+        candidate: format!("{stage_relative}/{candidate_name}"),
+        backup: target_existed.then(|| format!("{stage_relative}/backup-{index}.yaml")),
+        target_existed,
+        candidate_sha256,
     })
 }
 
@@ -365,6 +551,8 @@ fn prepare_file_write(
             backup: target_existed.then(|| format!("{stage_relative}/backup.yaml")),
             target_existed,
             candidate_sha256: Some(candidate_sha256),
+            writes: Vec::new(),
+            playlists: Vec::new(),
         },
     ))
 }
@@ -408,6 +596,8 @@ fn delete_plan(
         backup: Some(format!("{stage_relative}/backup")),
         target_existed: true,
         candidate_sha256: None,
+        writes: Vec::new(),
+        playlists: Vec::new(),
     }
 }
 
@@ -458,6 +648,13 @@ fn apply(root: &Path, journal: &RecoveryJournalEntry) -> Result<(), ModeFilesyst
                 fs::rename(&target, &backup).map_err(|_| {
                     ModeFilesystemMutationError::new("mode could not be staged for deletion")
                 })?;
+            }
+        }
+        FilesystemMutationKind::ImportResources => {
+            for write in &plan.writes {
+                let write_plan = import_write_plan(&plan, write);
+                let target = rooted_target(root, &write.target)?;
+                apply_file_write(root, &write_plan, &target)?;
             }
         }
     }
@@ -568,6 +765,13 @@ fn rollback(
             let backup = plan_backup(root, &plan, journal)?;
             restore_backup(&backup, &target)?;
         }
+        FilesystemMutationKind::ImportResources => {
+            for write in plan.writes.iter().rev() {
+                let write_plan = import_write_plan(&plan, write);
+                let target = rooted_target(root, &write.target)?;
+                rollback_file_write(root, &write_plan, &target)?;
+            }
+        }
     }
     remove_stage(root, &plan, journal.id.as_str())
 }
@@ -604,6 +808,10 @@ fn rollback_file_write(
             })?;
         }
     } else if target.exists() {
+        let candidate = plan_candidate_from_plan(root, plan)?;
+        if candidate.exists() {
+            return Ok(());
+        }
         let expected_hash = plan.candidate_sha256.as_deref().ok_or_else(|| {
             ModeFilesystemMutationError::new("mode candidate hash is missing from the plan")
         })?;
@@ -617,6 +825,38 @@ fn rollback_file_write(
         })?;
     }
     Ok(())
+}
+
+fn import_write_plan(
+    batch: &FilesystemMutationPlan,
+    write: &FilesystemWritePlan,
+) -> FilesystemMutationPlan {
+    FilesystemMutationPlan {
+        version: batch.version,
+        journal_id: batch.journal_id.clone(),
+        kind: FilesystemMutationKind::WriteFile,
+        target: write.target.clone(),
+        stage_directory: batch.stage_directory.clone(),
+        candidate: Some(write.candidate.clone()),
+        backup: write.backup.clone(),
+        target_existed: write.target_existed,
+        candidate_sha256: Some(write.candidate_sha256.clone()),
+        writes: Vec::new(),
+        playlists: Vec::new(),
+    }
+}
+
+fn plan_candidate_from_plan(
+    root: &Path,
+    plan: &FilesystemMutationPlan,
+) -> Result<PathBuf, ModeFilesystemMutationError> {
+    rooted_artifact(
+        root,
+        plan.candidate.as_deref().ok_or_else(|| {
+            ModeFilesystemMutationError::new("mode candidate is missing from the plan")
+        })?,
+        &plan.journal_id,
+    )
 }
 
 fn finish(root: &Path, journal: &RecoveryJournalEntry) -> Result<(), ModeFilesystemMutationError> {
@@ -944,7 +1184,7 @@ mod tests {
     use std::error::Error;
 
     use music_application::modes::{
-        ModeDocument, ModeMutation, ModeMutationEffects, SoundboardDocument,
+        CueDocument, ModeDocument, ModeMutation, ModeMutationEffects, SoundboardDocument,
     };
     use music_application::recovery::{
         RecoveryDomain, RecoveryJournalEntry, RecoveryJournalId, RecoveryState,
@@ -1070,6 +1310,71 @@ mod tests {
             std::fs::read_to_string(root.join("table/theme.css"))?,
             "body { color: ivory; }"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn import_batch_rolls_back_prior_writes_without_clobbering_a_late_collision()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let root = directory.path().join("modes");
+        create_mode_fixture(&root, "table", "Original")?;
+        let original = std::fs::read(root.join("table/manifest.yaml"))?;
+        let effects = FilesystemModeMutations::open(&root)?;
+        let journal_id = RecoveryJournalId::new();
+        let prepared = effects
+            .prepare(
+                &journal_id,
+                &ModeMutation::ImportResources {
+                    expected_generation: 1,
+                    mode_id: "table".to_owned(),
+                    manifest: manifest("table", "Changed"),
+                    soundboards: BTreeMap::from([(
+                        "storms".to_owned(),
+                        SoundboardDocument {
+                            id: Some("storms".to_owned()),
+                            name: Some("Storms".to_owned()),
+                            categories: Vec::new(),
+                            extra: BTreeMap::new(),
+                        },
+                    )]),
+                    cues: BTreeMap::from([(
+                        "arrival".to_owned(),
+                        CueDocument {
+                            id: Some("arrival".to_owned()),
+                            name: "Arrival".to_owned(),
+                            description: None,
+                            preset: None,
+                            playlist: None,
+                            start_index: 0,
+                            start_ms: 0,
+                            sfx: Vec::new(),
+                            loops: Vec::new(),
+                            extra: BTreeMap::new(),
+                        },
+                    )]),
+                    presets: BTreeMap::new(),
+                    playlists: Vec::new(),
+                },
+            )
+            .await?;
+        std::fs::write(
+            root.join("table/cues/arrival.yaml"),
+            "id: arrival\nname: Externally created\n",
+        )?;
+        let applying = entry(journal_id, prepared, RecoveryState::Applying);
+        assert!(effects.apply(&applying).await.is_err());
+        effects
+            .rollback(&with_state(&applying, RecoveryState::RollingBack))
+            .await?;
+
+        assert_eq!(std::fs::read(root.join("table/manifest.yaml"))?, original);
+        assert!(!root.join("table/soundboards/storms.yaml").exists());
+        assert!(
+            std::fs::read_to_string(root.join("table/cues/arrival.yaml"))?
+                .contains("Externally created")
+        );
+        assert!(!root.join(STAGING_DIRECTORY).exists());
         Ok(())
     }
 

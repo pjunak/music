@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use music_domain::TrackId;
+
 use crate::recovery::{RecoveryJournalEntry, RecoveryJournalId, RecoveryOperation};
 
 use super::{CueDocument, ModeCatalog, ModeDocument, PresetDocument, SoundboardDocument};
@@ -12,6 +14,13 @@ use super::{CueDocument, ModeCatalog, ModeDocument, PresetDocument, SoundboardDo
 pub type ModeMutationDependencyError = Box<dyn Error + Send + Sync>;
 pub type ModeMutationFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ModeMutationDependencyError>> + Send + 'a>>;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ModeImportPlaylist {
+    pub name: String,
+    pub category: Option<String>,
+    pub track_ids: Vec<TrackId>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModeMutation {
@@ -64,6 +73,15 @@ pub enum ModeMutation {
         mode_id: String,
         preset_id: String,
     },
+    ImportResources {
+        expected_generation: u64,
+        mode_id: String,
+        manifest: ModeDocument,
+        soundboards: std::collections::BTreeMap<String, SoundboardDocument>,
+        cues: std::collections::BTreeMap<String, CueDocument>,
+        presets: std::collections::BTreeMap<String, PresetDocument>,
+        playlists: Vec<ModeImportPlaylist>,
+    },
 }
 
 impl ModeMutation {
@@ -105,6 +123,10 @@ impl ModeMutation {
             | Self::DeletePreset {
                 expected_generation,
                 ..
+            }
+            | Self::ImportResources {
+                expected_generation,
+                ..
             } => *expected_generation,
         }
     }
@@ -120,7 +142,8 @@ impl ModeMutation {
             | Self::PutCue { mode_id, .. }
             | Self::DeleteCue { mode_id, .. }
             | Self::PutPreset { mode_id, .. }
-            | Self::DeletePreset { mode_id, .. } => mode_id,
+            | Self::DeletePreset { mode_id, .. }
+            | Self::ImportResources { mode_id, .. } => mode_id,
         }
     }
 
@@ -150,6 +173,45 @@ pub trait ModeMutationEffects: std::fmt::Debug + Send + Sync + 'static {
     fn finish<'a>(&'a self, journal: &'a RecoveryJournalEntry) -> ModeMutationFuture<'a, ()>;
 
     fn cleanup_orphans(&self) -> ModeMutationFuture<'_, ()>;
+}
+
+pub trait ModeMutationDataEffects: std::fmt::Debug + Send + Sync + 'static {
+    /// Apply durable non-filesystem effects and return the journal entry with
+    /// any idempotency metadata added to its progress object.
+    fn apply<'a>(
+        &'a self,
+        journal: &'a RecoveryJournalEntry,
+    ) -> ModeMutationFuture<'a, RecoveryJournalEntry>;
+
+    fn rollback<'a>(&'a self, journal: &'a RecoveryJournalEntry) -> ModeMutationFuture<'a, ()>;
+
+    fn finish<'a>(&'a self, journal: &'a RecoveryJournalEntry) -> ModeMutationFuture<'a, ()>;
+
+    fn cleanup_orphans(&self) -> ModeMutationFuture<'_, ()>;
+}
+
+#[derive(Debug, Default)]
+pub struct NoopModeMutationDataEffects;
+
+impl ModeMutationDataEffects for NoopModeMutationDataEffects {
+    fn apply<'a>(
+        &'a self,
+        journal: &'a RecoveryJournalEntry,
+    ) -> ModeMutationFuture<'a, RecoveryJournalEntry> {
+        Box::pin(async move { Ok(journal.clone()) })
+    }
+
+    fn rollback<'a>(&'a self, _journal: &'a RecoveryJournalEntry) -> ModeMutationFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn finish<'a>(&'a self, _journal: &'a RecoveryJournalEntry) -> ModeMutationFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn cleanup_orphans(&self) -> ModeMutationFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

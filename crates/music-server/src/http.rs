@@ -169,6 +169,7 @@ fn build_router_inner(config: &AppConfig, state: HttpState) -> Result<Router, Ru
 fn documented_api_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .merge(crate::auth::auth_router())
+        .merge(crate::authoring::authoring_router())
         .merge(crate::admin::admin_router())
         .merge(crate::devices::device_router())
         .merge(crate::diagnostics::diagnostics_router())

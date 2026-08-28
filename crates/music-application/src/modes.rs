@@ -21,8 +21,9 @@ use crate::recovery::{
 mod mutation;
 
 pub use mutation::{
-    ModeMutation, ModeMutationDependencyError, ModeMutationEffects, ModeMutationError,
-    ModeMutationFailureKind, ModeMutationFuture, ModeMutationReport, PreparedModeMutation,
+    ModeImportPlaylist, ModeMutation, ModeMutationDataEffects, ModeMutationDependencyError,
+    ModeMutationEffects, ModeMutationError, ModeMutationFailureKind, ModeMutationFuture,
+    ModeMutationReport, NoopModeMutationDataEffects, PreparedModeMutation,
 };
 
 const MODE_COMMAND_CAPACITY: usize = 16;
@@ -503,11 +504,32 @@ pub async fn start_mutable_mode_coordinator(
     journal: Arc<dyn RecoveryJournalRepository>,
     effects: Arc<dyn ModeMutationEffects>,
 ) -> Result<SpawnedModeCoordinator, ModeCoordinatorError> {
-    recover_mode_mutations(journal.as_ref(), effects.as_ref()).await?;
+    start_mutable_mode_coordinator_with_data(
+        source,
+        sink,
+        journal,
+        effects,
+        Arc::new(NoopModeMutationDataEffects),
+    )
+    .await
+}
+
+pub async fn start_mutable_mode_coordinator_with_data(
+    source: Arc<dyn ModeCatalogSource>,
+    sink: Arc<dyn ModeCatalogSink>,
+    journal: Arc<dyn RecoveryJournalRepository>,
+    effects: Arc<dyn ModeMutationEffects>,
+    data_effects: Arc<dyn ModeMutationDataEffects>,
+) -> Result<SpawnedModeCoordinator, ModeCoordinatorError> {
+    recover_mode_mutations(journal.as_ref(), effects.as_ref(), data_effects.as_ref()).await?;
     Ok(spawn_mode_coordinator(
         source,
         sink,
-        Some(MutationDependencies { journal, effects }),
+        Some(MutationDependencies {
+            journal,
+            effects,
+            data_effects,
+        }),
     ))
 }
 
@@ -553,6 +575,7 @@ enum ModeCommand {
 struct MutationDependencies {
     journal: Arc<dyn RecoveryJournalRepository>,
     effects: Arc<dyn ModeMutationEffects>,
+    data_effects: Arc<dyn ModeMutationDataEffects>,
 }
 
 async fn run_mode_coordinator(
@@ -773,9 +796,9 @@ async fn perform_mutation(
         .effects
         .prepare(&journal_id, &mutation)
         .await
-        .map_err(|_| {
-            ModeMutationExecutionError::Rejected(ModeMutationError::new(
-                ModeMutationFailureKind::Unavailable,
+        .map_err(|error| {
+            ModeMutationExecutionError::Rejected(dependency_mutation_error(
+                error,
                 "mode mutation could not be staged",
             ))
         })?;
@@ -811,14 +834,19 @@ async fn perform_mutation(
     .await
     .map_err(ModeMutationExecutionError::Fatal)?;
 
-    if dependencies.effects.apply(&applying).await.is_err() {
+    if let Err(error) = dependencies.effects.apply(&applying).await {
+        let error = dependency_mutation_error(error, "mode filesystem mutation failed");
         rollback_mode_mutation(dependencies, &applying).await?;
-        return Err(ModeMutationError::new(
-            ModeMutationFailureKind::Unavailable,
-            "mode filesystem mutation failed",
-        )
-        .into());
+        return Err(error.into());
     }
+    let applying = match dependencies.data_effects.apply(&applying).await {
+        Ok(applying) => applying,
+        Err(error) => {
+            let error = dependency_mutation_error(error, "mode data mutation failed");
+            rollback_mode_mutation(dependencies, &applying).await?;
+            return Err(error.into());
+        }
+    };
 
     let attempt = match source.load().await {
         Ok(attempt) => attempt,
@@ -858,13 +886,13 @@ async fn perform_mutation(
         dependencies.journal.as_ref(),
         &applying,
         RecoveryState::Committed,
-        serde_json::json!({"catalog_generation": generation}),
+        progress_with_catalog_generation(&applying, generation),
     )
     .await
     {
         Ok(committed) => committed,
         Err(error) => {
-            let _ = dependencies.effects.rollback(&applying).await;
+            let _ = rollback_mode_mutation(dependencies, &applying).await;
             return Err(ModeMutationExecutionError::Fatal(error));
         }
     };
@@ -894,8 +922,19 @@ async fn perform_mutation(
         loaded_ids: attempt.modes.keys().cloned().collect(),
         errors,
     });
+    let _ = dependencies.data_effects.finish(&committed).await;
     let _ = dependencies.effects.finish(&committed).await;
     Ok(ModeMutationReport { catalog: next })
+}
+
+fn dependency_mutation_error(
+    error: ModeMutationDependencyError,
+    fallback_code: &'static str,
+) -> ModeMutationError {
+    error.downcast::<ModeMutationError>().map_or_else(
+        |_| ModeMutationError::new(ModeMutationFailureKind::Unavailable, fallback_code),
+        |error| *error,
+    )
 }
 
 fn apply_catalog_mutation(
@@ -1050,6 +1089,51 @@ fn apply_catalog_mutation(
                 return Err(not_found("preset not found"));
             }
         }
+        ModeMutation::ImportResources {
+            mode_id,
+            manifest,
+            soundboards,
+            cues,
+            presets,
+            ..
+        } => {
+            validate_slug(mode_id)?;
+            if manifest.id != *mode_id {
+                return Err(invalid("mode manifest id does not match the mode"));
+            }
+            let mode = modes
+                .get_mut(mode_id)
+                .ok_or_else(|| not_found("mode not found"))?;
+            if soundboards
+                .keys()
+                .any(|soundboard_id| mode.soundboards.contains_key(soundboard_id))
+                || cues.keys().any(|cue_id| mode.cues.contains_key(cue_id))
+                || presets
+                    .keys()
+                    .any(|preset_id| mode.presets.contains_key(preset_id))
+            {
+                return Err(conflict("import target resource already exists"));
+            }
+            for (soundboard_id, document) in soundboards {
+                validate_slug(soundboard_id)?;
+                if document.id.as_deref() != Some(soundboard_id.as_str()) {
+                    return Err(invalid("soundboard id does not match its filename"));
+                }
+            }
+            for (cue_id, document) in cues {
+                validate_cue(cue_id, document)?;
+            }
+            for (preset_id, document) in presets {
+                validate_preset(preset_id, document)?;
+            }
+            let mut final_soundboards = mode.soundboards.clone();
+            final_soundboards.extend(soundboards.clone());
+            validate_manifest(manifest, &final_soundboards)?;
+            mode.manifest = manifest.clone();
+            mode.soundboards.extend(soundboards.clone());
+            mode.cues.extend(cues.clone());
+            mode.presets.extend(presets.clone());
+        }
     }
     Ok(modes)
 }
@@ -1178,16 +1262,18 @@ async fn rollback_mode_mutation(
         dependencies.journal.as_ref(),
         applying,
         RecoveryState::RollingBack,
-        serde_json::json!({"stage": "rolling_back"}),
+        progress_with_stage(applying, "rolling_back"),
     )
     .await
     .map_err(ModeMutationExecutionError::Fatal)?;
-    if dependencies.effects.rollback(&rolling_back).await.is_err() {
+    let data_rollback = dependencies.data_effects.rollback(&rolling_back).await;
+    let filesystem_rollback = dependencies.effects.rollback(&rolling_back).await;
+    if data_rollback.is_err() || filesystem_rollback.is_err() {
         let _ = transition_mode_journal(
             dependencies.journal.as_ref(),
             &rolling_back,
             RecoveryState::Failed,
-            serde_json::json!({"stage": "rollback_failed"}),
+            progress_with_stage(&rolling_back, "rollback_failed"),
         )
         .await;
         return Err(ModeMutationExecutionError::Fatal(
@@ -1198,7 +1284,7 @@ async fn rollback_mode_mutation(
         dependencies.journal.as_ref(),
         &rolling_back,
         RecoveryState::RolledBack,
-        serde_json::json!({"stage": "rolled_back"}),
+        progress_with_stage(&rolling_back, "rolled_back"),
     )
     .await
     .map_err(ModeMutationExecutionError::Fatal)?;
@@ -1208,6 +1294,7 @@ async fn rollback_mode_mutation(
 async fn recover_mode_mutations(
     journal: &dyn RecoveryJournalRepository,
     effects: &dyn ModeMutationEffects,
+    data_effects: &dyn ModeMutationDataEffects,
 ) -> Result<(), ModeCoordinatorError> {
     let unfinished = journal
         .unfinished_recovery_journals(RecoveryDomain::Modes)
@@ -1223,10 +1310,13 @@ async fn recover_mode_mutations(
                 journal,
                 &entry,
                 RecoveryState::RollingBack,
-                serde_json::json!({"stage": "startup_rollback"}),
+                progress_with_stage(&entry, "startup_rollback"),
             )
             .await?
         };
+        data_effects.rollback(&rolling_back).await.map_err(|_| {
+            ModeCoordinatorError::MutationRecovery("mode data startup rollback failed")
+        })?;
         effects
             .rollback(&rolling_back)
             .await
@@ -1235,15 +1325,31 @@ async fn recover_mode_mutations(
             journal,
             &rolling_back,
             RecoveryState::RolledBack,
-            serde_json::json!({"stage": "startup_rolled_back"}),
+            progress_with_stage(&rolling_back, "startup_rolled_back"),
         )
         .await?;
     }
+    data_effects
+        .cleanup_orphans()
+        .await
+        .map_err(|_| ModeCoordinatorError::MutationRecovery("mode data cleanup failed"))?;
     effects
         .cleanup_orphans()
         .await
         .map_err(|_| ModeCoordinatorError::MutationRecovery("mode staging cleanup failed"))?;
     Ok(())
+}
+
+fn progress_with_stage(entry: &RecoveryJournalEntry, stage: &str) -> Value {
+    let mut progress = entry.progress.as_object().cloned().unwrap_or_default();
+    progress.insert("stage".to_owned(), Value::String(stage.to_owned()));
+    Value::Object(progress)
+}
+
+fn progress_with_catalog_generation(entry: &RecoveryJournalEntry, generation: u64) -> Value {
+    let mut progress = entry.progress.as_object().cloned().unwrap_or_default();
+    progress.insert("catalog_generation".to_owned(), Value::from(generation));
+    Value::Object(progress)
 }
 
 fn playback_references(

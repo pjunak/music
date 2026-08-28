@@ -305,6 +305,388 @@
         ],
         "type": "object"
       },
+      "AuthoringDocumentCommitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/AuthoringImportDocumentV1"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuthoringImportSelection"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_mode_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_mode_id",
+          "document",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AuthoringDocumentPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/AuthoringImportDocumentV1"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_mode_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_mode_id",
+          "document"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportCommitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuthoringImportSelection"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          },
+          "source_mode_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_mode_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_mode_id",
+          "target_mode_id",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportDocumentV1": {
+        "additionalProperties": false,
+        "properties": {
+          "cues": {
+            "items": {
+              "$ref": "#/components/schemas/ImportCue"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "interrupts": {
+            "items": {
+              "$ref": "#/components/schemas/ImportInterrupt"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "playlists": {
+            "items": {
+              "$ref": "#/components/schemas/ImportPlaylist"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/ImportPreset"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "schema": {
+            "const": "authoring-import/v1",
+            "type": "string"
+          },
+          "soundboards": {
+            "items": {
+              "$ref": "#/components/schemas/ImportSoundboard"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "related_item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthoringImportSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ImportIssueSeverity"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportItem": {
+        "additionalProperties": false,
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/AuthoringImportIssue"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AuthoringResourceKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportItemStatus"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "resource_id",
+          "name",
+          "summary",
+          "status"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportMode": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuthoringImportItem"
+            },
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AuthoringImportSource"
+          },
+          "source_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthoringImportMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_mode": {
+            "$ref": "#/components/schemas/AuthoringImportMode"
+          }
+        },
+        "required": [
+          "source",
+          "target_mode",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source_mode_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_mode_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_mode_id",
+          "target_mode_id"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportResult": {
+        "additionalProperties": false,
+        "properties": {
+          "imported": {
+            "items": {
+              "$ref": "#/components/schemas/AuthoringImportItem"
+            },
+            "type": "array"
+          },
+          "missing_track_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/AuthoringImportItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "imported",
+          "skipped",
+          "missing_track_paths"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/AuthoringResourceKind"
+          },
+          "resource_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "resource_id"
+        ],
+        "type": "object"
+      },
+      "AuthoringImportSource": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/AuthoringSourceType"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "AuthoringResourceKind": {
+        "enum": [
+          "playlist",
+          "soundboard",
+          "interrupt",
+          "preset",
+          "cue"
+        ],
+        "type": "string"
+      },
+      "AuthoringSourceType": {
+        "enum": [
+          "mode",
+          "document"
+        ],
+        "type": "string"
+      },
       "AutomaticPlaylistApplyResult": {
         "properties": {
           "materialized_tracks": {
@@ -1550,6 +1932,10 @@
         ],
         "type": "object"
       },
+      "DocumentSchemaContract": {
+        "additionalProperties": true,
+        "type": "object"
+      },
       "EffectSpec": {
         "additionalProperties": true,
         "properties": {
@@ -1663,6 +2049,428 @@
             "type": "array"
           }
         },
+        "type": "object"
+      },
+      "ImportCue": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "loops": {
+            "items": {
+              "$ref": "#/components/schemas/ImportCueLoop"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "playlist": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sfx": {
+            "items": {
+              "$ref": "#/components/schemas/ImportCueSfx"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "start_index": {
+            "default": 0,
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start_ms": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ImportCueLoop": {
+        "additionalProperties": false,
+        "properties": {
+          "interval_s": {
+            "maximum": 3600,
+            "minimum": 1,
+            "type": "number"
+          },
+          "item": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "soundboard": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item",
+          "interval_s"
+        ],
+        "type": "object"
+      },
+      "ImportCueSfx": {
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "soundboard": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "volume": {
+            "default": 1.0,
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "soundboard",
+          "item"
+        ],
+        "type": "object"
+      },
+      "ImportEffect": {
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "ImportInterrupt": {
+        "additionalProperties": false,
+        "properties": {
+          "duck_to": {
+            "anyOf": [
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fade_in_ms": {
+            "default": 0,
+            "maximum": 60000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fade_out_ms": {
+            "default": 0,
+            "maximum": 60000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "playlist": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "return_to_ambient": {
+            "default": true,
+            "type": "boolean"
+          },
+          "soundboard_item": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ImportIssueSeverity": {
+        "enum": [
+          "warning",
+          "error"
+        ],
+        "type": "string"
+      },
+      "ImportItemStatus": {
+        "enum": [
+          "ready",
+          "conflict",
+          "invalid"
+        ],
+        "type": "string"
+      },
+      "ImportPlaylist": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ImportPreset": {
+        "additionalProperties": false,
+        "properties": {
+          "crossfade_ms": {
+            "anyOf": [
+              {
+                "maximum": 60000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effects": {
+            "items": {
+              "$ref": "#/components/schemas/ImportEffect"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ImportSoundboard": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/ImportSoundboardCategory"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "ImportSoundboardCategory": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportSoundboardItem"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ImportSoundboardItem": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          },
+          "hotkey": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "name"
+        ],
         "type": "object"
       },
       "IntegrationsSpec": {
@@ -3737,6 +4545,186 @@
         },
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/authoring/import/commit": {
+      "post": {
+        "operationId": "commit_mode_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthoringImportCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthoringImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "authoring"
+        ]
+      }
+    },
+    "/api/authoring/import/document/commit": {
+      "post": {
+        "operationId": "commit_document_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthoringDocumentCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthoringImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "authoring"
+        ]
+      }
+    },
+    "/api/authoring/import/document/preview": {
+      "post": {
+        "operationId": "preview_document_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthoringDocumentPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthoringImportPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "authoring"
+        ]
+      }
+    },
+    "/api/authoring/import/document/schema": {
+      "get": {
+        "operationId": "get_document_schema",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentSchemaContract"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "authoring"
+        ]
+      }
+    },
+    "/api/authoring/import/preview": {
+      "post": {
+        "operationId": "preview_mode_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthoringImportPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthoringImportPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "authoring"
         ]
       }
     },

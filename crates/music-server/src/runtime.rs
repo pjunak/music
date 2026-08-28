@@ -16,8 +16,8 @@ use music_application::library::{
     ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
 };
 use music_application::modes::{
-    ModeCatalogSink, ModeCoordinatorHandle, ModeLoadState, SpawnedModeCoordinator,
-    start_mutable_mode_coordinator,
+    ModeCatalogSink, ModeCoordinatorHandle, ModeLoadState, ModeMutationDataEffects,
+    SpawnedModeCoordinator, start_mutable_mode_coordinator_with_data,
 };
 use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
@@ -168,6 +168,7 @@ impl AppRuntime {
         let mode_source = Arc::new(FilesystemModeCatalogSource::open(&config.modes_dir)?);
         let mode_sink: Arc<dyn ModeCatalogSink> = Arc::new(playback.clone());
         let mode_journal: Arc<dyn RecoveryJournalRepository> = storage.clone();
+        let mode_data_effects: Arc<dyn ModeMutationDataEffects> = storage.clone();
         let mode_effects = Arc::new(FilesystemModeMutations::open(&config.modes_dir).map_err(
             |_| {
                 music_application::modes::ModeCoordinatorError::MutationRecovery(
@@ -175,9 +176,14 @@ impl AppRuntime {
                 )
             },
         )?);
-        let spawned_modes =
-            start_mutable_mode_coordinator(mode_source, mode_sink, mode_journal, mode_effects)
-                .await?;
+        let spawned_modes = start_mutable_mode_coordinator_with_data(
+            mode_source,
+            mode_sink,
+            mode_journal,
+            mode_effects,
+            mode_data_effects,
+        )
+        .await?;
         let modes = supervise_modes(&supervisor, spawned_modes, health.clone())?;
         let initial_mode_status = modes.wait_until_initialized().await?;
         health.set_component("mode_coordinator", true, ComponentStatus::Ready);
@@ -700,8 +706,10 @@ mod tests {
     };
     use music_application::library::{LibraryFileMutation, ReconciliationStatus};
     use music_application::modes::{
-        ModeDocument, ModeMutation, ModeMutationEffects, ModeMutationFailureKind,
+        ModeDocument, ModeImportPlaylist, ModeMutation, ModeMutationDataEffects,
+        ModeMutationEffects, ModeMutationFailureKind, PresetDocument,
     };
+    use music_application::playlists::{PlaylistFilter, PlaylistRepository};
     use music_application::recovery::{
         RecoveryDomain, RecoveryJournalDraft, RecoveryJournalId, RecoveryJournalRepository,
         RecoveryOperation, RecoveryState, RecoveryTransition,
@@ -2034,6 +2042,469 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn authoring_import_reviews_and_commits_all_resources_in_one_recoverable_mutation()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Album"))?;
+        fs::write(
+            directory.path().join("music/Album/track.wav"),
+            reference_wav().map_err(|error| std::io::Error::other(error.to_string()))?,
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let (router, cookie) = operator_router(&runtime).await?;
+
+        let unauthorized = router
+            .clone()
+            .oneshot(Request::get("/api/authoring/import/document/schema").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let schema = router
+            .clone()
+            .oneshot(
+                Request::get("/api/authoring/import/document/schema")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(schema.status(), StatusCode::OK);
+        let schema: Value =
+            serde_json::from_slice(&to_bytes(schema.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            schema["properties"]["schema"]["const"],
+            "authoring-import/v1"
+        );
+        assert_eq!(schema["additionalProperties"], false);
+
+        let invalid = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/document/preview")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"target_mode_id":"missing","document":{"schema":"authoring-import/v1","presets":[{"id":"plain","name":"Plain"}],"unexpected":true}}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let created = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"document-target","name":"Document Target"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(created.status(), StatusCode::CREATED);
+
+        let document = serde_json::json!({
+            "schema": "authoring-import/v1",
+            "name": "Assistant draft",
+            "playlists": [{
+                "name": "Night Walk",
+                "category": "exploration",
+                "tracks": ["Album/track.wav", "missing/not-in-library.flac"]
+            }],
+            "soundboards": [{
+                "id": "storms",
+                "name": "Storms",
+                "categories": [{
+                    "id": "weather",
+                    "name": "Weather",
+                    "items": [{"file": "dnd/door.ogg", "name": "Thunder"}]
+                }]
+            }],
+            "interrupts": [{"name": "Ambush", "playlist": "Night Walk"}],
+            "presets": [{
+                "id": "dark-hall",
+                "name": "Dark Hall",
+                "effects": [{"type": "reverb", "wet": 0.35}]
+            }],
+            "cues": [{
+                "id": "arrival",
+                "name": "Arrival",
+                "preset": "dark-hall",
+                "playlist": "Night Walk",
+                "sfx": [{
+                    "soundboard": "storms",
+                    "item": "dnd/door.ogg",
+                    "volume": 0.7
+                }]
+            }]
+        });
+        let preview_request = serde_json::json!({
+            "target_mode_id": "document-target",
+            "source_name": "authoring-draft.json",
+            "document": document
+        });
+        let preview = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/document/preview")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(preview_request.to_string()))?,
+            )
+            .await?;
+        assert_eq!(preview.status(), StatusCode::OK);
+        let preview: Value =
+            serde_json::from_slice(&to_bytes(preview.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(preview["source"]["type"], "document");
+        assert_eq!(preview["source"]["name"], "Assistant draft");
+        let items = preview["items"]
+            .as_array()
+            .ok_or("preview items are missing")?;
+        assert_eq!(items.len(), 5);
+        assert!(items.iter().all(|item| item["status"] == "ready"));
+        let playlist = items
+            .iter()
+            .find(|item| item["kind"] == "playlist")
+            .ok_or("playlist preview is missing")?;
+        assert_eq!(playlist["summary"], "2 tracks · exploration");
+        assert!(playlist["issues"].as_array().is_some_and(|issues| {
+            issues.iter().any(|issue| issue["code"] == "missing_tracks")
+        }));
+        let cue = items
+            .iter()
+            .find(|item| item["kind"] == "cue")
+            .ok_or("cue preview is missing")?;
+        assert_eq!(
+            cue["issues"]
+                .as_array()
+                .ok_or("cue issues are missing")?
+                .iter()
+                .filter(|issue| issue["code"] == "dependency_selection_required")
+                .count(),
+            3
+        );
+        assert!(
+            runtime
+                .playlist_service
+                .list(&PlaylistFilter {
+                    mode_id: Some("document-target".to_owned()),
+                    category: None,
+                })
+                .await?
+                .is_empty()
+        );
+
+        let selections = items
+            .iter()
+            .map(|item| {
+                serde_json::json!({
+                    "kind": item["kind"],
+                    "resource_id": item["resource_id"]
+                })
+            })
+            .collect::<Vec<_>>();
+        let commit_request = serde_json::json!({
+            "target_mode_id": "document-target",
+            "source_name": "authoring-draft.json",
+            "document": preview_request["document"],
+            "items": selections
+        });
+        let committed = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/document/commit")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(commit_request.to_string()))?,
+            )
+            .await?;
+        assert_eq!(committed.status(), StatusCode::OK);
+        let committed: Value =
+            serde_json::from_slice(&to_bytes(committed.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(committed["imported"].as_array().map(Vec::len), Some(5));
+        assert_eq!(committed["skipped"], serde_json::json!([]));
+        assert_eq!(
+            committed["missing_track_paths"],
+            serde_json::json!(["missing/not-in-library.flac"])
+        );
+
+        let catalog = runtime.modes.snapshot().ok_or("mode catalog disappeared")?;
+        let target = catalog
+            .modes
+            .get("document-target")
+            .ok_or("target mode disappeared")?;
+        assert_eq!(target.manifest.playlist_categories, ["exploration"]);
+        assert_eq!(target.manifest.interrupts[0].name, "Ambush");
+        assert!(target.soundboards.contains_key("storms"));
+        assert!(target.presets.contains_key("dark-hall"));
+        assert!(target.cues.contains_key("arrival"));
+        let playlists = runtime
+            .playlist_service
+            .list(&PlaylistFilter {
+                mode_id: Some("document-target".to_owned()),
+                category: None,
+            })
+            .await?;
+        assert_eq!(playlists.len(), 1);
+        let tracks = runtime.playlist_service.items(playlists[0].id).await?;
+        assert_eq!(tracks.items.len(), 1);
+        let catalog_track_ids = runtime
+            .library_service
+            .catalog_track_ids()
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        assert_eq!(tracks.items[0].track_id, catalog_track_ids[0].get());
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                runtime.storage.as_ref(),
+                RecoveryDomain::Modes,
+            )
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))?
+            .is_empty()
+        );
+
+        let second = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/document/commit")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(commit_request.to_string()))?,
+            )
+            .await?;
+        assert_eq!(second.status(), StatusCode::OK);
+        let second: Value =
+            serde_json::from_slice(&to_bytes(second.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(second["imported"], serde_json::json!([]));
+        assert_eq!(second["skipped"].as_array().map(Vec::len), Some(5));
+
+        let mode_clone = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"mode-clone","name":"Mode Clone"}"#))?,
+            )
+            .await?;
+        assert_eq!(mode_clone.status(), StatusCode::CREATED);
+        let mode_preview = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/preview")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"source_mode_id":"document-target","target_mode_id":"mode-clone"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(mode_preview.status(), StatusCode::OK);
+        let mode_preview: Value =
+            serde_json::from_slice(&to_bytes(mode_preview.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(mode_preview["source"]["type"], "mode");
+        assert_eq!(mode_preview["source_mode"]["id"], "document-target");
+        let mode_selections = mode_preview["items"]
+            .as_array()
+            .ok_or("mode import preview items are missing")?
+            .iter()
+            .map(|item| {
+                serde_json::json!({
+                    "kind": item["kind"],
+                    "resource_id": item["resource_id"]
+                })
+            })
+            .collect::<Vec<_>>();
+        let mode_commit = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/commit")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_mode_id": "document-target",
+                            "target_mode_id": "mode-clone",
+                            "items": mode_selections
+                        })
+                        .to_string(),
+                    ))?,
+            )
+            .await?;
+        assert_eq!(mode_commit.status(), StatusCode::OK);
+        let mode_commit: Value =
+            serde_json::from_slice(&to_bytes(mode_commit.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(mode_commit["imported"].as_array().map(Vec::len), Some(5));
+        assert_eq!(mode_commit["missing_track_paths"], serde_json::json!([]));
+
+        let semantic = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/document/preview")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "target_mode_id": "document-target",
+                            "document": {
+                                "schema": "authoring-import/v1",
+                                "playlists": [{"name": "Unsafe", "tracks": ["../outside.mp3"]}],
+                                "presets": [{
+                                    "id": "unsupported",
+                                    "name": "Unsupported",
+                                    "effects": [{"type": "pitch_shift"}]
+                                }],
+                                "cues": [{
+                                    "id": "orphan",
+                                    "name": "Orphan",
+                                    "playlist": "Not present"
+                                }]
+                            }
+                        })
+                        .to_string(),
+                    ))?,
+            )
+            .await?;
+        assert_eq!(semantic.status(), StatusCode::OK);
+        let semantic: Value =
+            serde_json::from_slice(&to_bytes(semantic.into_body(), 1024 * 1024).await?)?;
+        assert!(
+            semantic["items"]
+                .as_array()
+                .is_some_and(|items| { items.iter().all(|item| item["status"] == "invalid") })
+        );
+
+        let collision_target = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"collision-target","name":"Collision Target"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(collision_target.status(), StatusCode::CREATED);
+        let collision_document = serde_json::json!({
+            "schema": "authoring-import/v1",
+            "presets": [{"id": "plain", "name": "Imported name"}]
+        });
+        let collision_preview = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/document/preview")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "target_mode_id": "collision-target",
+                            "document": collision_document
+                        })
+                        .to_string(),
+                    ))?,
+            )
+            .await?;
+        assert_eq!(collision_preview.status(), StatusCode::OK);
+        fs::write(
+            directory
+                .path()
+                .join("modes/collision-target/presets/plain.yaml"),
+            "id: plain\nname: Externally created\neffects: []\n",
+        )?;
+        let collision_commit = router
+            .clone()
+            .oneshot(
+                Request::post("/api/authoring/import/document/commit")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "target_mode_id": "collision-target",
+                            "document": collision_document,
+                            "items": [{"kind": "preset", "resource_id": "plain"}]
+                        })
+                        .to_string(),
+                    ))?,
+            )
+            .await?;
+        assert_eq!(collision_commit.status(), StatusCode::CONFLICT);
+        assert!(
+            fs::read_to_string(
+                directory
+                    .path()
+                    .join("modes/collision-target/presets/plain.yaml")
+            )?
+            .contains("Externally created")
+        );
+        assert!(!directory.path().join("modes/.music-mode-journal").exists());
+
+        let dependency_target = router
+            .clone()
+            .oneshot(
+                Request::post("/api/modes")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"dependency-target","name":"Dependency Target"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(dependency_target.status(), StatusCode::CREATED);
+        let dependency_document = serde_json::json!({
+            "schema": "authoring-import/v1",
+            "playlists": [{"name": "Required", "tracks": ["Album/track.wav"]}],
+            "cues": [{"id": "dependent", "name": "Dependent", "playlist": "Required"}]
+        });
+        let dependency_commit = router
+            .oneshot(
+                Request::post("/api/authoring/import/document/commit")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "target_mode_id": "dependency-target",
+                            "document": dependency_document,
+                            "items": [{"kind": "cue", "resource_id": "dependent"}]
+                        })
+                        .to_string(),
+                    ))?,
+            )
+            .await?;
+        assert_eq!(dependency_commit.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            runtime
+                .playlist_service
+                .list(&PlaylistFilter {
+                    mode_id: Some("dependency-target".to_owned()),
+                    category: None,
+                })
+                .await?
+                .is_empty()
+        );
+        assert!(
+            runtime
+                .modes
+                .snapshot()
+                .and_then(|catalog| catalog.modes.get("dependency-target").cloned())
+                .is_some_and(|mode| mode.cues.is_empty())
+        );
+
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn startup_rolls_back_an_interrupted_mode_publication()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let directory = tempdir()?;
@@ -2091,6 +2562,130 @@ mod tests {
                 .modes_dir
                 .join(".music-mode-journal")
                 .exists()
+        );
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                runtime.storage.as_ref(),
+                RecoveryDomain::Modes,
+            )
+            .await?
+            .is_empty()
+        );
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_rolls_back_interrupted_authoring_files_and_playlists_together()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let config = runtime_config(directory.path())?;
+        fs::create_dir_all(config.modes_dir.join("table/soundboards"))?;
+        fs::create_dir(config.modes_dir.join("table/cues"))?;
+        fs::create_dir(config.modes_dir.join("table/presets"))?;
+        fs::write(
+            config.modes_dir.join("table/manifest.yaml"),
+            "id: table\nname: Original\nplaylist_categories: []\ninterrupts: []\n",
+        )?;
+        let original = fs::read(config.modes_dir.join("table/manifest.yaml"))?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(&config.database_path)).await?;
+        let effects = FilesystemModeMutations::open(&config.modes_dir)?;
+        let journal_id = RecoveryJournalId::new();
+        let prepared = effects
+            .prepare(
+                &journal_id,
+                &ModeMutation::ImportResources {
+                    expected_generation: 1,
+                    mode_id: "table".to_owned(),
+                    manifest: ModeDocument {
+                        id: "table".to_owned(),
+                        name: "Changed".to_owned(),
+                        theme: None,
+                        panels: Vec::new(),
+                        playlist_categories: vec!["exploration".to_owned()],
+                        interrupts: Vec::new(),
+                        integrations: Default::default(),
+                        default_crossfade_ms: 0,
+                        default_soundboard: None,
+                        extra: BTreeMap::new(),
+                    },
+                    soundboards: BTreeMap::new(),
+                    cues: BTreeMap::new(),
+                    presets: BTreeMap::from([(
+                        "plain".to_owned(),
+                        PresetDocument {
+                            id: Some("plain".to_owned()),
+                            name: "Plain".to_owned(),
+                            description: None,
+                            effects: Vec::new(),
+                            crossfade_ms: None,
+                            extra: BTreeMap::new(),
+                        },
+                    )]),
+                    playlists: vec![ModeImportPlaylist {
+                        name: "Night Walk".to_owned(),
+                        category: Some("exploration".to_owned()),
+                        track_ids: Vec::new(),
+                    }],
+                },
+            )
+            .await?;
+        let mut draft =
+            RecoveryJournalDraft::new(RecoveryDomain::Modes, prepared.operation, prepared.plan)?;
+        draft.id = journal_id;
+        let planned = storage.create_recovery_journal(draft).await?;
+        let applying = match storage
+            .transition_recovery_journal(
+                &planned.id,
+                RecoveryState::Planned,
+                RecoveryState::Applying,
+                serde_json::json!({"stage": "applying"}),
+            )
+            .await?
+        {
+            RecoveryTransition::Applied(entry) => entry,
+            RecoveryTransition::Conflict(_) => return Err("journal transition conflicted".into()),
+        };
+        effects.apply(&applying).await?;
+        let applied = ModeMutationDataEffects::apply(&storage, &applying).await?;
+        assert!(applied.progress.get("authoring_playlist_ids").is_some());
+        assert!(config.modes_dir.join("table/presets/plain.yaml").is_file());
+        assert_eq!(
+            PlaylistRepository::list(
+                &storage,
+                &PlaylistFilter {
+                    mode_id: Some("table".to_owned()),
+                    category: None,
+                },
+            )
+            .await?
+            .len(),
+            1
+        );
+        storage.close().await;
+        drop(storage);
+
+        let runtime = AppRuntime::start(config).await?;
+        assert_eq!(
+            fs::read(runtime.config.modes_dir.join("table/manifest.yaml"))?,
+            original
+        );
+        assert!(
+            !runtime
+                .config
+                .modes_dir
+                .join("table/presets/plain.yaml")
+                .exists()
+        );
+        assert!(
+            runtime
+                .playlist_service
+                .list(&PlaylistFilter {
+                    mode_id: Some("table".to_owned()),
+                    category: None,
+                })
+                .await?
+                .is_empty()
         );
         assert!(
             RecoveryJournalRepository::unfinished_recovery_journals(

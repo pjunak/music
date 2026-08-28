@@ -12,6 +12,7 @@
 
 mod admin;
 mod auth;
+mod authoring;
 mod cleanup;
 mod config;
 mod contracts;

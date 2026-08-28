@@ -288,6 +288,7 @@ fn openapi_primitive(kind: Type) -> RefOr<Schema> {
 enum ApiErrorPayload {
     Coded(PublicErrorDetail),
     Plain(&'static str),
+    PlainOwned(String),
     Validation,
 }
 
@@ -355,6 +356,11 @@ impl ApiError {
     }
 
     #[must_use]
+    pub fn bad_request_message(detail: impl Into<String>) -> Self {
+        Self::plain_owned(StatusCode::BAD_REQUEST, detail)
+    }
+
+    #[must_use]
     pub const fn payload_too_large(detail: &'static str) -> Self {
         Self::plain(StatusCode::PAYLOAD_TOO_LARGE, detail)
     }
@@ -365,6 +371,11 @@ impl ApiError {
     }
 
     #[must_use]
+    pub fn not_found_message(detail: impl Into<String>) -> Self {
+        Self::plain_owned(StatusCode::NOT_FOUND, detail)
+    }
+
+    #[must_use]
     pub const fn gone(detail: &'static str) -> Self {
         Self::plain(StatusCode::GONE, detail)
     }
@@ -372,6 +383,11 @@ impl ApiError {
     #[must_use]
     pub const fn conflict(detail: &'static str) -> Self {
         Self::plain(StatusCode::CONFLICT, detail)
+    }
+
+    #[must_use]
+    pub fn conflict_message(detail: impl Into<String>) -> Self {
+        Self::plain_owned(StatusCode::CONFLICT, detail)
     }
 
     #[must_use]
@@ -388,6 +404,13 @@ impl ApiError {
             payload: ApiErrorPayload::Plain(detail),
         }
     }
+
+    fn plain_owned(status: StatusCode, detail: impl Into<String>) -> Self {
+        Self {
+            status,
+            payload: ApiErrorPayload::PlainOwned(detail.into()),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -398,6 +421,9 @@ impl IntoResponse for ApiError {
             }
             ApiErrorPayload::Plain(detail) => {
                 (self.status, Json(PlainErrorBody { detail })).into_response()
+            }
+            ApiErrorPayload::PlainOwned(detail) => {
+                (self.status, Json(serde_json::json!({"detail": detail}))).into_response()
             }
             ApiErrorPayload::Validation => (
                 self.status,
