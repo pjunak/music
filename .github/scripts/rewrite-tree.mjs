@@ -131,11 +131,24 @@ export function finalTreeViolations(entries, readText) {
   const paths = entries.filter((entry) => entry.type === "blob").map((entry) => entry.path);
   const violations = [];
   if (!paths.includes("Dockerfile")) violations.push("Dockerfile: final Rust image definition is missing");
+  const backendPaths = paths.filter((path) => path.startsWith("backend/"));
+  if (backendPaths.length > 0) {
+    violations.push(`backend/: ${backendPaths.length} tracked frozen-oracle files remain`);
+  }
   for (const path of paths) {
-    if (path.startsWith("backend/")) violations.push(`${path}: frozen Python backend remains`);
-    if (isPythonArtifact(path)) violations.push(`${path}: project-owned Python artifact remains`);
-    if (TRANSITION_ONLY_PATHS.has(path)) violations.push(`${path}: transition-only rewrite artifact remains`);
-    if (isGeneratedOrSensitiveArtifact(path)) violations.push(`${path}: generated, media, database, or sensitive artifact is tracked`);
+    if (path.startsWith("backend/")) continue;
+    if (isPythonArtifact(path)) {
+      violations.push(`${path}: project-owned Python artifact remains`);
+      continue;
+    }
+    if (TRANSITION_ONLY_PATHS.has(path)) {
+      violations.push(`${path}: transition-only rewrite artifact remains`);
+      continue;
+    }
+    if (isGeneratedOrSensitiveArtifact(path)) {
+      violations.push(`${path}: generated, media, database, or sensitive artifact is tracked`);
+      continue;
+    }
     if (!isActiveSurface(path)) continue;
     const content = readText(path);
     for (const [pattern, description] of ACTIVE_REFERENCE_PATTERNS) {

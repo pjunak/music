@@ -56,7 +56,9 @@ test("final scan rejects runtime remnants, transition tools, and generated artif
     entry(".github/workflows/build.yml"),
     entry("fixtures/private.flac"),
   ], (path) => contents.get(path) ?? "");
-  assert.match(violations.join("\n"), /backend|Python artifact|transition-only|generated|container base|setup action/iu);
+  const report = violations.join("\n");
+  assert.match(report, /backend|Python artifact|transition-only|generated|container base|setup action/iu);
+  assert.equal(report.match(/backend\//gu)?.length, 1);
 });
 
 test("final scan permits compatibility history and a native active surface", () => {
