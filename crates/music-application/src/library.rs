@@ -64,6 +64,16 @@ pub struct LibraryStatus {
     pub discovered_tracks: u64,
 }
 
+/// The compact, ordered library projection needed by playback scheduling.
+/// Keeping this separate from `IndexedTrack` prevents catalog refreshes from
+/// loading metadata that the playback actor cannot use.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LibraryCatalogTrack {
+    pub id: TrackId,
+    pub path: LibraryPath,
+    pub duration: Duration,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LibrarySortKey {
     Title,
@@ -169,6 +179,8 @@ pub trait LibraryRepository: std::fmt::Debug + Send + Sync {
     fn all_tracks(&self) -> LibraryFuture<'_, Vec<IndexedTrack>>;
 
     fn catalog_track_ids(&self) -> LibraryFuture<'_, Vec<TrackId>>;
+
+    fn playback_catalog(&self) -> LibraryFuture<'_, Vec<LibraryCatalogTrack>>;
 
     fn track(&self, track_id: TrackId) -> LibraryFuture<'_, Option<IndexedTrack>>;
 
@@ -291,7 +303,7 @@ pub trait LibraryCatalogSink: std::fmt::Debug + Send + Sync {
     fn publish(
         &self,
         generation: LibraryGeneration,
-        track_ids: BTreeSet<TrackId>,
+        tracks: Vec<LibraryCatalogTrack>,
     ) -> LibraryFuture<'_, ()>;
 }
 
@@ -299,10 +311,10 @@ impl LibraryCatalogSink for PlaybackActorHandle {
     fn publish(
         &self,
         generation: LibraryGeneration,
-        track_ids: BTreeSet<TrackId>,
+        tracks: Vec<LibraryCatalogTrack>,
     ) -> LibraryFuture<'_, ()> {
         Box::pin(async move {
-            self.replace_library_catalog(generation, track_ids)
+            self.replace_library_catalog(generation, tracks)
                 .await
                 .map(|_| ())
                 .map_err(|source| -> LibraryDependencyError { Box::new(source) })
@@ -744,14 +756,12 @@ pub async fn start_library_coordinator(
         .await
         .map_err(|source| dependency("reload recovered library status", source))?;
     actor.status.send_replace(status.clone());
-    let track_ids = repository
-        .catalog_track_ids()
+    let tracks = repository
+        .playback_catalog()
         .await
-        .map_err(|source| dependency("load the durable track catalog", source))?
-        .into_iter()
-        .collect();
+        .map_err(|source| dependency("load the durable track catalog", source))?;
     catalog
-        .publish(status.generation, track_ids)
+        .publish(status.generation, tracks)
         .await
         .map_err(|source| dependency("publish the durable track catalog", source))?;
 
@@ -1052,15 +1062,13 @@ impl LibraryCoordinator {
             let generation = status.generation;
             self.status.send_replace(status);
             if publish_catalog {
-                let track_ids = self
+                let tracks = self
                     .repository
-                    .catalog_track_ids()
+                    .playback_catalog()
                     .await
-                    .map_err(|source| dependency("load the mutated track catalog", source))?
-                    .into_iter()
-                    .collect();
+                    .map_err(|source| dependency("load the mutated track catalog", source))?;
                 self.catalog
-                    .publish(generation, track_ids)
+                    .publish(generation, tracks)
                     .await
                     .map_err(|source| dependency("publish the mutated track catalog", source))?;
             }
@@ -2308,17 +2316,15 @@ impl LibraryCoordinator {
             .status()
             .await
             .map_err(|source| dependency("load the mutated library status", source))?;
-        let track_ids = self
+        let tracks = self
             .repository
-            .catalog_track_ids()
+            .playback_catalog()
             .await
-            .map_err(|source| dependency("load the mutated track catalog", source))?
-            .into_iter()
-            .collect();
+            .map_err(|source| dependency("load the mutated track catalog", source))?;
         let generation = status.generation;
         self.status.send_replace(status);
         self.catalog
-            .publish(generation, track_ids)
+            .publish(generation, tracks)
             .await
             .map_err(|source| dependency("publish the mutated track catalog", source))
     }
@@ -2365,11 +2371,15 @@ impl LibraryCoordinator {
             ReconciliationCommit::Applied {
                 status,
                 summary,
-                track_ids,
+                track_ids: _,
             } => {
                 self.status.send_replace(status.clone());
+                let tracks =
+                    self.repository.playback_catalog().await.map_err(|source| {
+                        dependency("load the reconciled track catalog", source)
+                    })?;
                 self.catalog
-                    .publish(status.generation, track_ids)
+                    .publish(status.generation, tracks)
                     .await
                     .map_err(|source| dependency("publish reconciled track catalog", source))?;
                 Ok(summary)

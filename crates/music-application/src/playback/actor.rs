@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use music_domain::{
-    ClockSample, DomainEvent, LibraryGeneration, PersistenceIntent, PlaybackCommand, PlaybackError,
-    PlaybackState, ReductionContext, ShuffleMode, TrackId, materialize_positions, reduce,
+    ClockSample, DomainEvent, LibraryGeneration, LoopMode, LoopingSfx, PersistenceIntent,
+    PlaybackCommand, PlaybackError, PlaybackState, ReductionContext, ShuffleMode, TrackId,
+    materialize_positions, reduce,
 };
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -14,12 +15,17 @@ use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
+use crate::library::LibraryCatalogTrack;
+
 use super::persistence::{
     PlaybackStateStore, StoreCompareAndSwap, decode_persisted_state, encode_persisted_state,
 };
 
 const MAX_CLIENT_ID_LENGTH: usize = 64;
 const MAX_CLIENT_NAME_LENGTH: usize = 128;
+const DEFAULT_TRACK_END_GRACE: Duration = Duration::from_millis(750);
+const DEFAULT_INTERRUPT_UNKNOWN_DURATION: Duration = Duration::from_secs(300);
+const MAX_EFFECT_SLEEP: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct CatalogGeneration {
@@ -33,12 +39,18 @@ pub struct CatalogMode {
     pub preset_ids: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct CatalogTrack {
+    pub duration_ms: Option<u64>,
+    pub follow_next_id: Option<TrackId>,
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct CatalogSnapshot {
     pub generation: CatalogGeneration,
     /// `None` means the catalog is not loaded yet. `Some(empty)` is a loaded,
     /// valid empty catalog and therefore prunes all track references.
-    pub track_ids: Option<BTreeSet<TrackId>>,
+    pub tracks: Option<BTreeMap<TrackId, CatalogTrack>>,
     pub modes: Option<BTreeMap<String, CatalogMode>>,
 }
 
@@ -115,6 +127,8 @@ pub struct PlaybackActorConfig {
     pub mailbox_capacity: usize,
     pub event_capacity: usize,
     pub position_flush_interval: Duration,
+    pub track_end_grace: Duration,
+    pub interrupt_unknown_duration: Duration,
 }
 
 impl Default for PlaybackActorConfig {
@@ -124,6 +138,8 @@ impl Default for PlaybackActorConfig {
             mailbox_capacity: 128,
             event_capacity: 128,
             position_flush_interval: Duration::from_secs(5),
+            track_end_grace: DEFAULT_TRACK_END_GRACE,
+            interrupt_unknown_duration: DEFAULT_INTERRUPT_UNKNOWN_DURATION,
         }
     }
 }
@@ -351,11 +367,12 @@ impl PlaybackActorHandle {
     pub async fn replace_library_catalog(
         &self,
         generation: LibraryGeneration,
-        track_ids: BTreeSet<TrackId>,
+        tracks: Vec<LibraryCatalogTrack>,
     ) -> Result<PlaybackCommandResult, PlaybackActorError> {
+        let tracks = playback_catalog_tracks(tracks);
         self.request(|reply| ActorMessage::ReplaceLibraryCatalog {
             generation,
-            track_ids,
+            tracks,
             reply,
         })
         .await
@@ -432,7 +449,7 @@ enum ActorMessage {
     },
     ReplaceLibraryCatalog {
         generation: LibraryGeneration,
-        track_ids: BTreeSet<TrackId>,
+        tracks: BTreeMap<TrackId, CatalogTrack>,
         reply: oneshot::Sender<Result<PlaybackCommandResult, PlaybackActorError>>,
     },
 }
@@ -445,6 +462,7 @@ struct PlaybackActor<S, C, R> {
     state: PlaybackState,
     storage_revision: i64,
     dirty_position: bool,
+    loop_deadlines_ms: BTreeMap<String, u64>,
     catalog: CatalogSnapshot,
     connections: BTreeMap<ConnectionId, ConnectionRecord>,
     next_connection_id: u64,
@@ -452,6 +470,19 @@ struct PlaybackActor<S, C, R> {
     publications: watch::Sender<PlaybackPublication>,
     events: broadcast::Sender<DomainEvent>,
     cancellation: CancellationToken,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum TrackLane {
+    Interrupt,
+    Ambient,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct TrackEffectPlan {
+    remaining_ms: i128,
+    lane: TrackLane,
+    track_id: TrackId,
 }
 
 pub async fn start_playback_actor<S, C, R>(
@@ -495,6 +526,7 @@ where
         events: event_tx.clone(),
         cancellation: cancellation.clone(),
     };
+    let loop_deadlines_ms = initial_loop_deadlines(&state.looping_sfx, sample.monotonic_ms);
     let actor = PlaybackActor {
         store,
         clock,
@@ -503,6 +535,7 @@ where
         state,
         storage_revision,
         dirty_position: false,
+        loop_deadlines_ms,
         catalog,
         connections: BTreeMap::new(),
         next_connection_id: 1,
@@ -527,18 +560,183 @@ where
         flush.tick().await;
 
         loop {
+            let effect_delay = self.next_effect_delay()?;
             tokio::select! {
-                biased;
                 _ = self.cancellation.cancelled() => break,
                 message = self.commands.recv() => {
                     let Some(message) = message else { break; };
                     self.handle_message(message).await?;
                 }
+                () = wait_for_effect(effect_delay) => self.run_due_effects().await?,
                 _ = flush.tick() => self.flush_position().await?,
             }
         }
 
         self.flush_position().await
+    }
+
+    fn next_effect_delay(&self) -> Result<Option<Duration>, PlaybackActorError> {
+        let sample = self.clock.sample()?;
+        let track_remaining = self.track_effect_plan(sample).map(|plan| plan.remaining_ms);
+        let loop_remaining = self
+            .loop_deadlines_ms
+            .values()
+            .map(|deadline| i128::from(*deadline) - i128::from(sample.monotonic_ms))
+            .min();
+        Ok(match (track_remaining, loop_remaining) {
+            (Some(track), Some(looping)) => Some(effect_delay(track.min(looping))),
+            (Some(track), None) => Some(effect_delay(track)),
+            (None, Some(looping)) => Some(effect_delay(looping)),
+            (None, None) => None,
+        })
+    }
+
+    fn track_effect_plan(&self, sample: ClockSample) -> Option<TrackEffectPlan> {
+        let materialized = materialize_positions(&self.state, sample.monotonic_ms);
+        let grace_ms = duration_ms(self.config.track_end_grace);
+        let mut candidates = Vec::with_capacity(2);
+
+        if let Some(interrupt) = materialized
+            .interrupt
+            .as_ref()
+            .filter(|interrupt| interrupt.position_anchor_ms.is_some())
+        {
+            let duration = self
+                .catalog
+                .tracks
+                .as_ref()
+                .and_then(|tracks| tracks.get(&interrupt.current_track_id))
+                .and_then(|track| track.duration_ms)
+                .filter(|duration| *duration > 0)
+                .unwrap_or_else(|| duration_ms(self.config.interrupt_unknown_duration));
+            candidates.push(TrackEffectPlan {
+                remaining_ms: remaining_track_ms(duration, grace_ms, interrupt.position_ms),
+                lane: TrackLane::Interrupt,
+                track_id: interrupt.current_track_id,
+            });
+        }
+
+        if let Some(track_id) = materialized
+            .ambient
+            .current_track_id
+            .filter(|_| materialized.ambient.position_anchor_ms.is_some())
+            && let Some(duration) = self
+                .catalog
+                .tracks
+                .as_ref()
+                .and_then(|tracks| tracks.get(&track_id))
+                .and_then(|track| track.duration_ms)
+                .filter(|duration| *duration > 0)
+        {
+            candidates.push(TrackEffectPlan {
+                remaining_ms: remaining_track_ms(
+                    duration,
+                    grace_ms,
+                    materialized.ambient.position_ms,
+                ),
+                lane: TrackLane::Ambient,
+                track_id,
+            });
+        }
+
+        candidates
+            .into_iter()
+            .min_by_key(|candidate| candidate.remaining_ms)
+    }
+
+    async fn run_due_effects(&mut self) -> Result<(), PlaybackActorError> {
+        let sample = self.clock.sample()?;
+        let due_loop_ids = self
+            .loop_deadlines_ms
+            .iter()
+            .filter(|(_, deadline)| **deadline <= sample.monotonic_ms)
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        for id in due_loop_ids {
+            let Some(looping_sfx) = self
+                .state
+                .looping_sfx
+                .iter()
+                .find(|looping_sfx| looping_sfx.id == id)
+                .cloned()
+            else {
+                self.loop_deadlines_ms.remove(&id);
+                continue;
+            };
+            self.loop_deadlines_ms.insert(
+                id,
+                sample
+                    .monotonic_ms
+                    .saturating_add(loop_interval_ms(&looping_sfx)),
+            );
+            emit_events(
+                &self.events,
+                vec![DomainEvent::SfxFired {
+                    soundboard_id: looping_sfx.soundboard_id,
+                    item_path: looping_sfx.item_path,
+                    volume: looping_sfx.volume,
+                }],
+            );
+        }
+
+        let Some(plan) = self
+            .track_effect_plan(sample)
+            .filter(|plan| plan.remaining_ms <= 0)
+        else {
+            return Ok(());
+        };
+        let command = match plan.lane {
+            TrackLane::Interrupt => {
+                ResolvedPlaybackCommand::direct(PlaybackCommand::InterruptSkipNext {
+                    expected_track_id: Some(plan.track_id),
+                })
+            }
+            TrackLane::Ambient => {
+                let follow_next_id = (self.state.ambient.loop_mode == LoopMode::Follow
+                    && self.state.ambient.queue.is_empty())
+                .then(|| {
+                    self.catalog
+                        .tracks
+                        .as_ref()?
+                        .get(&plan.track_id)?
+                        .follow_next_id
+                })
+                .flatten();
+                ResolvedPlaybackCommand::at_generation(
+                    PlaybackCommand::AmbientSkipNext {
+                        follow_next_id,
+                        expected_track_id: Some(plan.track_id),
+                    },
+                    self.catalog.generation,
+                )
+            }
+        };
+        self.execute(command).await?;
+        Ok(())
+    }
+
+    fn reconcile_loop_deadlines(
+        &mut self,
+        previous: &[LoopingSfx],
+        restarted_ids: &BTreeSet<String>,
+        now_monotonic_ms: u64,
+    ) {
+        self.loop_deadlines_ms.retain(|id, _| {
+            !restarted_ids.contains(id)
+                && self
+                    .state
+                    .looping_sfx
+                    .iter()
+                    .find(|looping_sfx| looping_sfx.id == *id)
+                    .is_some_and(|current| {
+                        previous.iter().find(|looping_sfx| looping_sfx.id == *id) == Some(current)
+                    })
+        });
+        for looping_sfx in &self.state.looping_sfx {
+            self.loop_deadlines_ms
+                .entry(looping_sfx.id.clone())
+                .or_insert_with(|| now_monotonic_ms.saturating_add(loop_interval_ms(looping_sfx)));
+        }
     }
 
     async fn handle_message(&mut self, message: ActorMessage) -> Result<(), PlaybackActorError> {
@@ -615,12 +813,12 @@ where
             }
             ActorMessage::ReplaceLibraryCatalog {
                 generation,
-                track_ids,
+                tracks,
                 reply,
             } => {
                 let mut catalog = self.catalog.clone();
                 catalog.generation.library = generation.get();
-                catalog.track_ids = Some(track_ids);
+                catalog.tracks = Some(tracks);
                 let result = self.replace_catalog(catalog, false).await;
                 let fatal = result.as_ref().err().is_some_and(is_fatal);
                 let fatal_error = result.as_ref().err().cloned();
@@ -650,6 +848,14 @@ where
                 random_queue_index,
             },
         )?;
+        let restarted_loop_ids = reduction
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                DomainEvent::LoopStarted(looping_sfx) => Some(looping_sfx.id.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
 
         match reduction.persistence {
             PersistenceIntent::None => {
@@ -679,7 +885,13 @@ where
                     sample.monotonic_ms,
                 )
                 .await?;
+                let previous_loops = self.state.looping_sfx.clone();
                 self.state = candidate;
+                self.reconcile_loop_deadlines(
+                    &previous_loops,
+                    &restarted_loop_ids,
+                    sample.monotonic_ms,
+                );
                 self.dirty_position = false;
                 if reduction.publish_state {
                     self.publish(sample);
@@ -855,8 +1067,8 @@ where
             sample.monotonic_ms,
             active_preset_content_changed,
         )?;
-        self.catalog = catalog;
         if !changed {
+            self.catalog = catalog;
             return Ok(self.result(false));
         }
         bump_publication_revision(&mut candidate, self.state.publication_revision)?;
@@ -868,7 +1080,10 @@ where
             sample.monotonic_ms,
         )
         .await?;
+        let previous_loops = self.state.looping_sfx.clone();
+        self.catalog = catalog;
         self.state = candidate;
+        self.reconcile_loop_deadlines(&previous_loops, &BTreeSet::new(), sample.monotonic_ms);
         self.dirty_position = false;
         self.publish(sample);
         Ok(self.result(true))
@@ -987,6 +1202,51 @@ where
     }
 }
 
+async fn wait_for_effect(delay: Option<Duration>) {
+    match delay {
+        Some(delay) => tokio::time::sleep(delay).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+fn effect_delay(remaining_ms: i128) -> Duration {
+    if remaining_ms <= 0 {
+        Duration::ZERO
+    } else {
+        Duration::from_millis(u64::try_from(remaining_ms).unwrap_or(u64::MAX)).min(MAX_EFFECT_SLEEP)
+    }
+}
+
+fn duration_ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn remaining_track_ms(duration_ms: u64, grace_ms: u64, position_ms: u64) -> i128 {
+    i128::from(duration_ms.saturating_add(grace_ms)) - i128::from(position_ms)
+}
+
+fn loop_interval_ms(looping_sfx: &LoopingSfx) -> u64 {
+    Duration::try_from_secs_f64(looping_sfx.interval_seconds)
+        .map(duration_ms)
+        .unwrap_or(u64::MAX)
+        .max(1)
+}
+
+fn initial_loop_deadlines(
+    looping_sfx: &[LoopingSfx],
+    now_monotonic_ms: u64,
+) -> BTreeMap<String, u64> {
+    looping_sfx
+        .iter()
+        .map(|looping_sfx| {
+            (
+                looping_sfx.id.clone(),
+                now_monotonic_ms.saturating_add(loop_interval_ms(looping_sfx)),
+            )
+        })
+        .collect()
+}
+
 fn validate_config(config: &PlaybackActorConfig) -> Result<(), PlaybackActorError> {
     if config.state_id <= 0 {
         return Err(PlaybackActorError::InvalidConfiguration(
@@ -1006,6 +1266,11 @@ fn validate_config(config: &PlaybackActorConfig) -> Result<(), PlaybackActorErro
     if config.position_flush_interval.is_zero() {
         return Err(PlaybackActorError::InvalidConfiguration(
             "position_flush_interval must be positive",
+        ));
+    }
+    if config.interrupt_unknown_duration.is_zero() {
+        return Err(PlaybackActorError::InvalidConfiguration(
+            "interrupt_unknown_duration must be positive",
         ));
     }
     Ok(())
@@ -1132,6 +1397,30 @@ fn publication(
     }
 }
 
+fn playback_catalog_tracks(
+    mut tracks: Vec<LibraryCatalogTrack>,
+) -> BTreeMap<TrackId, CatalogTrack> {
+    tracks.sort_by(|left, right| left.path.cmp(&right.path).then(left.id.cmp(&right.id)));
+    let ordered_ids = tracks.iter().map(|track| track.id).collect::<Vec<_>>();
+    let first_id = ordered_ids.first().copied();
+    tracks
+        .into_iter()
+        .enumerate()
+        .map(|(index, track)| {
+            let duration_ms = (!track.duration.is_zero())
+                .then(|| u64::try_from(track.duration.as_millis()).unwrap_or(u64::MAX));
+            let follow_next_id = ordered_ids.get(index + 1).copied().or(first_id);
+            (
+                track.id,
+                CatalogTrack {
+                    duration_ms,
+                    follow_next_id,
+                },
+            )
+        })
+        .collect()
+}
+
 fn connected_clients(
     connections: &BTreeMap<ConnectionId, ConnectionRecord>,
 ) -> Vec<ConnectedClient> {
@@ -1228,10 +1517,11 @@ fn catalog_references_valid(
 ) -> bool {
     let tracks_valid = |track_ids: &[TrackId]| {
         track_ids.is_empty()
-            || catalog
-                .track_ids
-                .as_ref()
-                .is_some_and(|known| track_ids.iter().all(|track_id| known.contains(track_id)))
+            || catalog.tracks.as_ref().is_some_and(|known| {
+                track_ids
+                    .iter()
+                    .all(|track_id| known.contains_key(track_id))
+            })
     };
     let mode = state
         .active_mode_id
@@ -1281,17 +1571,17 @@ fn prune_for_catalog(
     active_preset_content_changed: bool,
 ) -> Result<bool, PlaybackActorError> {
     let mut changed = false;
-    if let Some(track_ids) = &catalog.track_ids {
+    if let Some(tracks) = &catalog.tracks {
         let previous_queue = state.ambient.queue.len();
         let previous_history = state.ambient.history.len();
-        state.ambient.queue.retain(|id| track_ids.contains(id));
-        state.ambient.history.retain(|id| track_ids.contains(id));
+        state.ambient.queue.retain(|id| tracks.contains_key(id));
+        state.ambient.history.retain(|id| tracks.contains_key(id));
         changed |= previous_queue != state.ambient.queue.len()
             || previous_history != state.ambient.history.len();
         if state
             .ambient
             .current_track_id
-            .is_some_and(|id| !track_ids.contains(&id))
+            .is_some_and(|id| !tracks.contains_key(&id))
         {
             state.ambient.current_track_id = None;
             state.ambient.position_ms = 0;
@@ -1301,9 +1591,9 @@ fn prune_for_catalog(
         }
         if let Some(interrupt) = state.interrupt.as_mut() {
             let previous = interrupt.queue.len();
-            interrupt.queue.retain(|id| track_ids.contains(id));
+            interrupt.queue.retain(|id| tracks.contains_key(id));
             changed |= previous != interrupt.queue.len();
-            if !track_ids.contains(&interrupt.current_track_id) {
+            if !tracks.contains_key(&interrupt.current_track_id) {
                 state.interrupt = None;
                 if state.is_playing && state.ambient.current_track_id.is_some() {
                     state.ambient.position_anchor_ms = Some(now_monotonic_ms);
@@ -1387,14 +1677,17 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
     use std::time::Duration;
 
-    use music_domain::{DomainEvent, PlaybackCommand, TrackId, UnitInterval};
+    use music_domain::{
+        DomainEvent, LibraryPath, LoopMode, LoopingSfx, PlaybackCommand, TrackId, UnitInterval,
+    };
     use serde_json::Value;
 
     use super::{
-        CatalogGeneration, CatalogMode, CatalogSnapshot, ClientRegistration, PlaybackActorConfig,
-        PlaybackActorError, PlaybackClock, QueueRandom, ResolvedPlaybackCommand,
-        start_playback_actor,
+        CatalogGeneration, CatalogMode, CatalogSnapshot, CatalogTrack, ClientRegistration,
+        PlaybackActorConfig, PlaybackActorError, PlaybackClock, QueueRandom,
+        ResolvedPlaybackCommand, playback_catalog_tracks, start_playback_actor,
     };
+    use crate::library::LibraryCatalogTrack;
     use crate::playback::{
         PlaybackStateStore, StoreCompareAndSwap, StoreFuture, StoredPlaybackSnapshot,
     };
@@ -1545,6 +1838,30 @@ mod tests {
             remembered_name: None,
             is_default_output: default_output,
         }
+    }
+
+    #[test]
+    fn compact_playback_catalog_preserves_duration_and_wrap_order() -> Result<(), Box<dyn Error>> {
+        let first = TrackId::new(1)?;
+        let second = TrackId::new(2)?;
+        let catalog = playback_catalog_tracks(vec![
+            LibraryCatalogTrack {
+                id: second,
+                path: LibraryPath::parse("Zulu/second.mp3")?,
+                duration: Duration::ZERO,
+            },
+            LibraryCatalogTrack {
+                id: first,
+                path: LibraryPath::parse("Alpha/first.mp3")?,
+                duration: Duration::from_millis(1_500),
+            },
+        ]);
+
+        assert_eq!(catalog[&first].duration_ms, Some(1_500));
+        assert_eq!(catalog[&first].follow_next_id, Some(second));
+        assert_eq!(catalog[&second].duration_ms, None);
+        assert_eq!(catalog[&second].follow_next_id, Some(first));
+        Ok(())
     }
 
     #[tokio::test]
@@ -1766,7 +2083,10 @@ mod tests {
         };
         let catalog = CatalogSnapshot {
             generation,
-            track_ids: Some(BTreeSet::from([TrackId::new(1)?])),
+            tracks: Some(BTreeMap::from([(
+                TrackId::new(1)?,
+                CatalogTrack::default(),
+            )])),
             modes: Some(BTreeMap::from([(
                 "tabletop".to_owned(),
                 CatalogMode {
@@ -1830,6 +2150,275 @@ mod tests {
             events.recv().await?,
             DomainEvent::SfxFired { soundboard_id, .. } if soundboard_id == "storm"
         ));
+        spawned.handle.shutdown();
+        spawned.task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn server_advancer_moves_once_when_client_and_deadline_race() -> Result<(), Box<dyn Error>>
+    {
+        let store = Arc::new(FakeStore::default());
+        let clock = TestClock::default();
+        let generation = CatalogGeneration {
+            library: 1,
+            modes: 0,
+        };
+        let first = TrackId::new(1)?;
+        let second = TrackId::new(2)?;
+        let catalog = CatalogSnapshot {
+            generation,
+            tracks: Some(BTreeMap::from([
+                (
+                    first,
+                    CatalogTrack {
+                        duration_ms: Some(100),
+                        follow_next_id: Some(second),
+                    },
+                ),
+                (
+                    second,
+                    CatalogTrack {
+                        duration_ms: Some(100),
+                        follow_next_id: Some(first),
+                    },
+                ),
+            ])),
+            modes: None,
+        };
+        let config = PlaybackActorConfig {
+            track_end_grace: Duration::from_millis(10),
+            ..test_config()
+        };
+        let spawned =
+            start_playback_actor(store, clock.clone(), FirstRandom, config, catalog).await?;
+
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::AmbientPlaySequence {
+                    track_ids: vec![first, second],
+                    start_index: 0,
+                    source_playlist_id: None,
+                },
+                generation,
+            ))
+            .await?;
+        clock.set(111);
+        let _ = spawned.handle.snapshot().await?;
+        let raced = spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::direct(
+                PlaybackCommand::AmbientSkipNext {
+                    follow_next_id: None,
+                    expected_track_id: Some(first),
+                },
+            ))
+            .await?;
+        let snapshot = spawned.handle.snapshot().await?;
+
+        assert_eq!(snapshot.state.ambient.current_track_id, Some(second));
+        assert_eq!(snapshot.state.ambient.history, [first]);
+        assert_eq!(snapshot.state.publication_revision, 2);
+        assert_eq!(raced.publication_revision, 2);
+
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::direct(
+                PlaybackCommand::AmbientSetLoop(LoopMode::Follow),
+            ))
+            .await?;
+        let mut states = spawned.handle.subscribe_state();
+        clock.set(222);
+        let _ = spawned.handle.snapshot().await?;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                states.changed().await?;
+                if states.borrow().state.ambient.current_track_id == Some(first) {
+                    return Ok::<(), tokio::sync::watch::error::RecvError>(());
+                }
+            }
+        })
+        .await??;
+        assert!(states.borrow().state.ambient.queue.is_empty());
+        assert_eq!(states.borrow().state.ambient.history, [first, second]);
+        spawned.handle.shutdown();
+        spawned.task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unknown_ambient_waits_for_client_but_unknown_interrupt_is_bounded()
+    -> Result<(), Box<dyn Error>> {
+        let store = Arc::new(FakeStore::default());
+        let clock = TestClock::default();
+        let generation = CatalogGeneration {
+            library: 1,
+            modes: 0,
+        };
+        let track_id = TrackId::new(1)?;
+        let catalog = CatalogSnapshot {
+            generation,
+            tracks: Some(BTreeMap::from([(
+                track_id,
+                CatalogTrack {
+                    duration_ms: None,
+                    follow_next_id: Some(track_id),
+                },
+            )])),
+            modes: None,
+        };
+        let config = PlaybackActorConfig {
+            track_end_grace: Duration::from_millis(10),
+            interrupt_unknown_duration: Duration::from_millis(100),
+            ..test_config()
+        };
+        let spawned =
+            start_playback_actor(store, clock.clone(), FirstRandom, config, catalog).await?;
+
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::AmbientPlayTrack(track_id),
+                generation,
+            ))
+            .await?;
+        clock.set(10_000);
+        let _ = spawned.handle.snapshot().await?;
+        assert_eq!(
+            spawned
+                .handle
+                .snapshot()
+                .await?
+                .state
+                .ambient
+                .current_track_id,
+            Some(track_id)
+        );
+
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::FireInterruptSequence {
+                    track_ids: vec![track_id],
+                    return_to_ambient: true,
+                    fade_in_ms: 0,
+                    fade_out_ms: 0,
+                    duck_to: None,
+                },
+                generation,
+            ))
+            .await?;
+        let mut states = spawned.handle.subscribe_state();
+        clock.set(10_111);
+        let _ = spawned.handle.snapshot().await?;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                states.changed().await?;
+                if states.borrow().state.interrupt.is_none() {
+                    return Ok::<(), tokio::sync::watch::error::RecvError>(());
+                }
+            }
+        })
+        .await??;
+        assert_eq!(
+            states.borrow().state.ambient.current_track_id,
+            Some(track_id)
+        );
+        assert!(states.borrow().state.is_playing);
+        spawned.handle.shutdown();
+        spawned.task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn looping_sfx_restart_resets_deadline_and_stop_cancels_it() -> Result<(), Box<dyn Error>>
+    {
+        let store = Arc::new(FakeStore::default());
+        let clock = TestClock::default();
+        let generation = CatalogGeneration {
+            library: 0,
+            modes: 1,
+        };
+        let catalog = CatalogSnapshot {
+            generation,
+            tracks: None,
+            modes: Some(BTreeMap::from([(
+                "tabletop".to_owned(),
+                CatalogMode {
+                    soundboard_ids: BTreeSet::from(["storm".to_owned()]),
+                    preset_ids: BTreeSet::new(),
+                },
+            )])),
+        };
+        let spawned =
+            start_playback_actor(store, clock.clone(), FirstRandom, test_config(), catalog).await?;
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::SetActiveMode(Some("tabletop".to_owned())),
+                generation,
+            ))
+            .await?;
+        let looping_sfx = LoopingSfx::new(
+            "rain".to_owned(),
+            "Rain".to_owned(),
+            "storm".to_owned(),
+            "rain.mp3".to_owned(),
+            1.0,
+            UnitInterval::new(0.6)?,
+        )?;
+        let mut events = spawned.handle.subscribe_events();
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::StartLoop(looping_sfx.clone()),
+                generation,
+            ))
+            .await?;
+        assert!(matches!(events.recv().await?, DomainEvent::LoopStarted(_)));
+
+        clock.set(500);
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::StartLoop(looping_sfx),
+                generation,
+            ))
+            .await?;
+        assert!(matches!(events.recv().await?, DomainEvent::LoopStarted(_)));
+        clock.set(1_000);
+        let _ = spawned.handle.snapshot().await?;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), events.recv())
+                .await
+                .is_err()
+        );
+
+        clock.set(1_500);
+        let _ = spawned.handle.snapshot().await?;
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(1), events.recv()).await??,
+            DomainEvent::SfxFired { soundboard_id, .. } if soundboard_id == "storm"
+        ));
+        spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::direct(PlaybackCommand::StopLoop(
+                "rain".to_owned(),
+            )))
+            .await?;
+        assert!(matches!(
+            events.recv().await?,
+            DomainEvent::LoopStopped { .. }
+        ));
+        clock.set(10_000);
+        let _ = spawned.handle.snapshot().await?;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), events.recv())
+                .await
+                .is_err()
+        );
+
         spawned.handle.shutdown();
         spawned.task.await??;
         Ok(())

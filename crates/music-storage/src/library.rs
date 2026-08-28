@@ -8,11 +8,12 @@ use music_application::cleanup::{
     MAX_CLEANUP_BATCH_HISTORY, MAX_CLEANUP_SCOPE_LABEL_CHARS,
 };
 use music_application::library::{
-    DiscoveredTrack, LibraryDependencyError, LibraryFileMutation, LibraryFileMutationOutcome,
-    LibraryFuture, LibraryIndexMutationCommit, LibraryMutationRepository, LibraryRepository,
-    LibrarySearch, LibrarySearchResult, LibrarySortKey, LibraryStatus, LibraryTrackMutationCommit,
-    LibraryUploadMutationCommit, ReconciliationCommit, ReconciliationStatus, ReconciliationSummary,
-    SortOrder, TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue,
+    DiscoveredTrack, LibraryCatalogTrack, LibraryDependencyError, LibraryFileMutation,
+    LibraryFileMutationOutcome, LibraryFuture, LibraryIndexMutationCommit,
+    LibraryMutationRepository, LibraryRepository, LibrarySearch, LibrarySearchResult,
+    LibrarySortKey, LibraryStatus, LibraryTrackMutationCommit, LibraryUploadMutationCommit,
+    ReconciliationCommit, ReconciliationStatus, ReconciliationSummary, SortOrder,
+    TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue,
 };
 use music_application::recovery::RecoveryJournalId;
 use music_domain::{
@@ -93,6 +94,20 @@ impl LibraryRepository for SqliteStorage {
                         .map_err(box_storage)
                 })
                 .collect()
+        })
+    }
+
+    fn playback_catalog(&self) -> LibraryFuture<'_, Vec<LibraryCatalogTrack>> {
+        Box::pin(async move {
+            let rows = sqlx::query("SELECT id, path, length_s FROM tracks ORDER BY path, id")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(StorageError::from)
+                .map_err(box_storage)?;
+            rows.iter()
+                .map(library_catalog_track_from_row)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(box_storage)
         })
     }
 
@@ -1933,6 +1948,18 @@ fn indexed_track_from_row(row: &SqliteRow) -> Result<IndexedTrack, StorageError>
     })
 }
 
+fn library_catalog_track_from_row(row: &SqliteRow) -> Result<LibraryCatalogTrack, StorageError> {
+    let duration_seconds: f64 = row.try_get("length_s")?;
+    Ok(LibraryCatalogTrack {
+        id: TrackId::new(row.try_get("id")?)
+            .map_err(|_| StorageError::InvalidLibraryRecord("track id is invalid"))?,
+        path: LibraryPath::parse(row.try_get::<String, _>("path")?)
+            .map_err(StorageError::InvalidLibraryPath)?,
+        duration: Duration::try_from_secs_f64(duration_seconds)
+            .map_err(|_| StorageError::InvalidLibraryRecord("track duration is invalid"))?,
+    })
+}
+
 fn push_search_filter(query: &mut QueryBuilder<Sqlite>, pattern: &str) {
     query.push(" WHERE (");
     for (index, field) in [
@@ -2137,6 +2164,11 @@ mod tests {
         assert_eq!(tracks[0].id.get(), earlier_id);
         assert_eq!(tracks[0].path.as_str(), "Alpha/earlier.mp3");
         assert_eq!(tracks[1].id.get(), later_id);
+        let playback_catalog = LibraryRepository::playback_catalog(&storage).await?;
+        assert_eq!(playback_catalog.len(), 2);
+        assert_eq!(playback_catalog[0].id.get(), earlier_id);
+        assert_eq!(playback_catalog[0].path.as_str(), "Alpha/earlier.mp3");
+        assert_eq!(playback_catalog[1].id.get(), later_id);
 
         let verdicts = CleanupRepository::cleanup_name_verdicts(&storage).await?;
         assert_eq!(

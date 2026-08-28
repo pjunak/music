@@ -225,6 +225,21 @@ State watchers retain only the newest full snapshot. Skipping intermediate snaps
 because clients reconcile rather than replay deltas. SFX and loop ticks use a separate bounded
 broadcast channel because they are transient events.
 
+Track-end and looping-SFX effects are registrations owned by the actor, not detached tasks. Before
+each receive, the actor derives the earliest deadline and sleeps only until that deadline; any
+command or catalog publication wakes the receive loop and causes a fresh plan. Known track
+durations and follow successors come from a compact immutable library projection ordered by path.
+Ambient tracks without a duration remain client-advance-only, while an unknown-duration interrupt
+uses a five-minute fallback so it cannot wedge ambient playback indefinitely. The server waits
+750 ms beyond a known duration, allowing a healthy client's lower-latency `ended` message to win.
+Both paths carry the observed track ID into the reducer, so only one racing advance can commit.
+
+Loop starts replace and restart the deadline for the same loop ID. A due tick emits one transient
+SFX event and schedules the next interval from the current monotonic sample, deliberately
+coalescing missed ticks instead of producing a burst after actor or host suspension. Loop records
+and their deadlines are removed together by stop, catalog pruning, shutdown, and restart
+normalization.
+
 ### Clock representation
 
 The live actor uses a monotonic clock for elapsed playback. Persisted and wire DTOs materialize a

@@ -251,9 +251,16 @@ projection and can dispatch the implemented catalog-independent mutations; guest
 bounded self projection and cannot mutate control state. Long-lived WebSockets recheck session
 state and downgrade in place after logout, revocation, or expiry.
 
+Playback-owned effects now share that same actor instead of creating detached timer tasks. A
+deadline-driven scheduler sleeps until the earliest known track end or looping-SFX tick and is
+recomputed after every actor message. The library publishes an ordered `id`/`path`/`duration`
+projection rather than loading complete metadata rows. Ambient tracks with unknown duration retain
+the client-ended path, unknown interrupts use the compatible five-minute safety bound, and every
+automatic skip carries the observed track ID so a simultaneous client skip remains idempotent.
+
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 32 currently registered Rust operations, rather than presenting partial work as
-parity. Thirty-one operations overlap the reference and 30 are fully schema-compatible; the
+operations versus 37 currently registered Rust operations, rather than presenting partial work as
+parity. Thirty-six operations overlap the reference and 35 are fully schema-compatible; the
 remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work.
 The browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
@@ -274,10 +281,10 @@ Implement the highest-value invariant early:
 - [x] per-connection projection/send ownership, registration, guest projections, protocol v1/v2,
   session-backed auth downgrade, send deadlines, transient lag policy, and sibling-client
   disconnect behavior;
-- server advancer and loop timers as supervised actor effects;
+- [x] server advancer and loop timers as deadline-driven, supervised actor effects;
 - [x] `GET /api/sync/state` and a real guest-safe `/api/ws` transport;
-- extend the generated TypeScript bindings for any new playback DTOs without changing frontend
-  behavior.
+- [x] preserve the generated TypeScript playback bindings; the actor effects add no new wire DTOs
+  or frontend behavior.
 
 Gate: reducer property tests pass; every WebSocket fixture matches; frontend WebSocket validation,
 compat-mode tests, and Baton serialization fixtures pass; stress tests show ordered latest-state
