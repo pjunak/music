@@ -477,7 +477,7 @@ impl JobHandler for ContextAnalysisJobHandler {
                     audio_failed = audio_failed.saturating_add(1);
                     continue;
                 }
-                signal_work.push((track.clone(), signature));
+                signal_work.push((track.id, track.path.clone(), signature));
             }
             drop(state_by_track);
             drop(failure_by_track);
@@ -541,22 +541,22 @@ impl JobHandler for ContextAnalysisJobHandler {
             let mut progress_current = starting;
             let mut performance = ContextPerformanceAggregate::default();
             let mut results = stream::iter(signal_work.into_iter().map(
-                |(track, signature)| async move {
-                    let analysis = match self.root.resolve_existing(&track.path) {
+                |(track_id, track_path, signature)| async move {
+                    let analysis = match self.root.resolve_existing(&track_path) {
                         Ok(path) => self.analyze_track(context, path).await,
                         Err(_) => Ok(Err(AudioContextError::MissingFile)),
                     };
-                    (track, signature, analysis)
+                    (track_id, signature, analysis)
                 },
             ))
             .buffer_unordered(stream_concurrency);
-            while let Some((track, signature, analysis)) = results.next().await {
+            while let Some((track_id, signature, analysis)) = results.next().await {
                 match analysis? {
                     Ok(document) => {
                         performance.observe(&document.performance);
                         let write = ContextWrite {
-                            track_id: track.id,
-                            source_signature: signature.clone(),
+                            track_id,
+                            source_signature: signature,
                             completeness: document.completeness.to_owned(),
                             confidence: document.confidence.to_owned(),
                             summary: document.summary,
@@ -591,7 +591,7 @@ impl JobHandler for ContextAnalysisJobHandler {
                     }
                     Err(error) => {
                         let failure = AnalysisFailureWrite {
-                            track_id: track.id,
+                            track_id,
                             source_signature: signature,
                             error: format!("AudioContextError: {error}"),
                         };
