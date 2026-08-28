@@ -35,6 +35,7 @@ const SPECTRUM_BINS: usize = FRAME_SIZE / 2 + 1;
 const MAX_AUDIO_SECONDS: u64 = 24 * 60 * 60;
 const FRAMES_PER_CHUNK: usize = 8_192;
 const VOICE_REQUEST_CAPACITY: usize = 1;
+const VOICE_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const TRACT_RUNTIME_ID: &str = "tract-tensorflow/0.23.5+musicnn-compat/v1+preprocess/v1";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -112,6 +113,7 @@ pub enum VoiceAnalysisError {
     Decode,
     Io(io::Error),
     TooLong,
+    DeadlineExceeded,
     Cancelled,
     Inference,
     WorkerUnavailable,
@@ -125,6 +127,7 @@ impl VoiceAnalysisError {
             Self::Decode => "DecodeError",
             Self::Io(_) => "IoError",
             Self::TooLong => "TooLong",
+            Self::DeadlineExceeded => "TimeoutError",
             Self::Cancelled => "Cancelled",
             Self::Inference => "InferenceError",
             Self::WorkerUnavailable => "WorkerUnavailable",
@@ -140,6 +143,7 @@ impl Display for VoiceAnalysisError {
             Self::Decode => "voice-analysis audio could not be decoded",
             Self::Io(_) => "voice-analysis audio could not be read",
             Self::TooLong => "voice-analysis audio exceeds the 24-hour limit",
+            Self::DeadlineExceeded => "voice analysis exceeded its 30-minute deadline",
             Self::Cancelled => "voice analysis was cancelled",
             Self::Inference => "voice classifier inference failed",
             Self::WorkerUnavailable => "voice-analysis worker is unavailable",
@@ -342,6 +346,22 @@ fn decode_and_predict(
     path: &Path,
     cancelled: &AtomicBool,
 ) -> Result<PipelineOutput, VoiceAnalysisError> {
+    decode_and_predict_until(
+        model,
+        executable,
+        path,
+        cancelled,
+        Instant::now() + VOICE_ANALYSIS_TIMEOUT,
+    )
+}
+
+fn decode_and_predict_until(
+    model: &mut impl VoicePredictor,
+    executable: &Path,
+    path: &Path,
+    cancelled: &AtomicBool,
+    deadline: Instant,
+) -> Result<PipelineOutput, VoiceAnalysisError> {
     if !path.is_file() {
         return Err(VoiceAnalysisError::MissingFile);
     }
@@ -381,6 +401,9 @@ fn decode_and_predict(
         if cancelled.load(Ordering::Relaxed) {
             break Err(VoiceAnalysisError::Cancelled);
         }
+        if Instant::now() >= deadline {
+            break Err(VoiceAnalysisError::DeadlineExceeded);
+        }
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(VoiceAudioRead::End) => {
                 if !pending.is_empty() {
@@ -414,13 +437,11 @@ fn decode_and_predict(
     let status = child.wait().map_err(VoiceAnalysisError::Io)?;
     let _ = audio_thread.join();
     let _ = error_thread.join();
-    if matches!(&stream_result, Err(VoiceAnalysisError::Cancelled)) {
-        return Err(VoiceAnalysisError::Cancelled);
+    match stream_result {
+        Err(error) => Err(error),
+        Ok(output) if status.success() => Ok(output),
+        Ok(_) => Err(VoiceAnalysisError::Decode),
     }
-    if !status.success() {
-        return Err(VoiceAnalysisError::Decode);
-    }
-    stream_result
 }
 
 enum VoiceAudioRead {
@@ -1083,6 +1104,19 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let track_path = directory.path().join("voice-worker.wav");
         write_tone_wav(&track_path, 4)?;
+        let mut fixed = FixedPredictor::default();
+        let deadline = decode_and_predict_until(
+            &mut fixed,
+            &ffmpeg,
+            &track_path,
+            &AtomicBool::new(false),
+            Instant::now(),
+        )
+        .err()
+        .ok_or("an already-expired request unexpectedly completed")?;
+        assert!(matches!(deadline, VoiceAnalysisError::DeadlineExceeded));
+        assert_eq!(fixed.calls, 0);
+
         let backend = VoiceBackend::initialize(Some(&model_path), ffmpeg);
         assert_eq!(backend.status.status, "ready");
         let signature = backend
@@ -1092,6 +1126,13 @@ mod tests {
             .ok_or("ready backend has no source signature")?;
         assert!(!signature.contains(&model_path.display().to_string()));
         let worker = backend.worker.ok_or("ready backend has no worker")?;
+        let cancelled = worker
+            .analyze(track_path.clone(), Arc::new(AtomicBool::new(true)))
+            .await
+            .err()
+            .ok_or("an already-cancelled request unexpectedly completed")?;
+        assert!(matches!(cancelled, VoiceAnalysisError::Cancelled));
+        assert!(worker.is_alive());
         let document = worker
             .analyze(track_path, Arc::new(AtomicBool::new(false)))
             .await?;
@@ -1099,7 +1140,168 @@ mod tests {
         assert_eq!(document.stage["status"], "complete");
         assert!(document.prediction_windows >= 1);
         assert!(document.elapsed_seconds > 0.0);
+        let shutdown_started = Instant::now();
+        drop(worker);
+        assert!(shutdown_started.elapsed() < Duration::from_secs(5));
         Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "requires the licensed model, FFmpeg, and a three-CPU/four-GiB cgroup"]
+    async fn repeated_voice_inference_stays_inside_the_production_resource_envelope()
+    -> Result<(), Box<dyn Error>> {
+        const RESOURCE_LIMIT_BYTES: u64 = 4 * 1_024 * 1_024 * 1_024;
+        const RSS_ACCEPTANCE_BYTES: u64 = 3 * 1_024 * 1_024 * 1_024;
+        const RSS_TREND_ALLOWANCE_BYTES: u64 = 64 * 1_024 * 1_024;
+
+        let model_path = std::env::var_os("MUSIC_TEST_VOICE_MODEL")
+            .map(PathBuf::from)
+            .ok_or("MUSIC_TEST_VOICE_MODEL is required")?;
+        let ffmpeg = std::env::var_os("MUSIC_TEST_FFMPEG")
+            .map(PathBuf::from)
+            .ok_or("MUSIC_TEST_FFMPEG is required")?;
+        let iterations = std::env::var("MUSIC_TEST_VOICE_SOAK_ITERATIONS")
+            .ok()
+            .map(|value| value.parse::<usize>())
+            .transpose()?
+            .unwrap_or(24);
+        if iterations < 12 {
+            return Err("MUSIC_TEST_VOICE_SOAK_ITERATIONS must be at least 12".into());
+        }
+        let memory_limit = cgroup_memory_limit_bytes()?;
+        if memory_limit > RESOURCE_LIMIT_BYTES {
+            return Err(format!(
+                "voice soak must run in a cgroup capped at four GiB; detected {memory_limit} bytes"
+            )
+            .into());
+        }
+        let cpu_limit = cgroup_cpu_limit()?;
+        if cpu_limit > 3.0 {
+            return Err(format!(
+                "voice soak must run in a cgroup capped at three CPUs; detected {cpu_limit:.2}"
+            )
+            .into());
+        }
+
+        let directory = tempfile::tempdir()?;
+        let track_path = directory.path().join("voice-soak.wav");
+        write_tone_wav(&track_path, 4)?;
+        let backend = VoiceBackend::initialize(Some(&model_path), ffmpeg);
+        assert_eq!(backend.status.status, "ready");
+        let worker = backend.worker.ok_or("ready backend has no worker")?;
+
+        for _ in 0..3 {
+            worker
+                .analyze(track_path.clone(), Arc::new(AtomicBool::new(false)))
+                .await?;
+        }
+        let mut rss_samples = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            worker
+                .analyze(track_path.clone(), Arc::new(AtomicBool::new(false)))
+                .await?;
+            rss_samples.push(resident_set_bytes()?);
+        }
+
+        let peak_rss = rss_samples.iter().copied().max().unwrap_or_default();
+        let segment_length = (rss_samples.len() / 3).max(1);
+        let early_median = median_bytes(&rss_samples[..segment_length]);
+        let late_median = median_bytes(&rss_samples[rss_samples.len() - segment_length..]);
+        eprintln!(
+            "voice soak: iterations={iterations} peak_rss={peak_rss} early_median={early_median} late_median={late_median}"
+        );
+        assert!(
+            peak_rss <= RSS_ACCEPTANCE_BYTES,
+            "voice inference peak RSS {peak_rss} exceeded the three-GiB acceptance margin"
+        );
+        assert!(
+            late_median <= early_median.saturating_add(RSS_TREND_ALLOWANCE_BYTES),
+            "voice inference late median RSS {late_median} grew beyond early median {early_median} plus 64 MiB"
+        );
+
+        let cancellation_started = Instant::now();
+        let cancelled = worker
+            .analyze(track_path, Arc::new(AtomicBool::new(true)))
+            .await
+            .err()
+            .ok_or("an already-cancelled request unexpectedly completed")?;
+        assert!(matches!(cancelled, VoiceAnalysisError::Cancelled));
+        assert!(cancellation_started.elapsed() < Duration::from_secs(5));
+        let shutdown_started = Instant::now();
+        drop(worker);
+        assert!(shutdown_started.elapsed() < Duration::from_secs(5));
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn resident_set_bytes() -> io::Result<u64> {
+        let status = std::fs::read_to_string("/proc/self/status")?;
+        let line = status
+            .lines()
+            .find(|line| line.starts_with("VmRSS:"))
+            .ok_or_else(|| io::Error::other("/proc/self/status has no VmRSS entry"))?;
+        let kibibytes = line
+            .split_ascii_whitespace()
+            .nth(1)
+            .ok_or_else(|| io::Error::other("VmRSS has no numeric value"))?
+            .parse::<u64>()
+            .map_err(io::Error::other)?;
+        Ok(kibibytes.saturating_mul(1_024))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn cgroup_memory_limit_bytes() -> io::Result<u64> {
+        read_cgroup_limit(&[
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+        ])
+    }
+
+    #[cfg(target_os = "linux")]
+    fn cgroup_cpu_limit() -> io::Result<f64> {
+        let value = std::fs::read_to_string("/sys/fs/cgroup/cpu.max")?;
+        let mut parts = value.split_ascii_whitespace();
+        let quota = parts
+            .next()
+            .ok_or_else(|| io::Error::other("cpu.max has no quota"))?;
+        if quota == "max" {
+            return Err(io::Error::other("the CPU cgroup is unlimited"));
+        }
+        let period = parts
+            .next()
+            .ok_or_else(|| io::Error::other("cpu.max has no period"))?;
+        let quota = quota.parse::<f64>().map_err(io::Error::other)?;
+        let period = period.parse::<f64>().map_err(io::Error::other)?;
+        if period <= 0.0 {
+            return Err(io::Error::other("cpu.max period is not positive"));
+        }
+        Ok(quota / period)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn read_cgroup_limit(candidates: &[&str]) -> io::Result<u64> {
+        for candidate in candidates {
+            let Ok(value) = std::fs::read_to_string(candidate) else {
+                continue;
+            };
+            let value = value.trim();
+            if value == "max" {
+                return Err(io::Error::other("the memory cgroup is unlimited"));
+            }
+            return value.parse::<u64>().map_err(io::Error::other);
+        }
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "no supported memory cgroup limit file was found",
+        ))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn median_bytes(values: &[u64]) -> u64 {
+        let mut sorted = values.to_vec();
+        sorted.sort_unstable();
+        sorted[sorted.len() / 2]
     }
 
     fn write_tone_wav(path: &Path, seconds: u32) -> io::Result<()> {

@@ -601,7 +601,8 @@ thread. That thread creates and owns the model state, processes requests sequent
 capacity-one channel, runs overlapping windows without duplicating the graph, and exposes a
 path-free model/runtime/preprocessor identity. FFmpeg decoding, 512-sample frames, 96-band features,
 and 187-frame patches are streamed through fixed-size buffers. Cancellation is checked while
-decoding and between patches. A panic closes the response channel, marks the worker dead, and makes
+decoding and between patches; a 30-minute per-track deadline terminates the decoder and preserves a
+typed timeout failure. A panic closes the response channel, marks the worker dead, and makes
 subsequent optional work unavailable without taking down the server.
 
 The exact pinned graph is loaded directly as TF1 rather than converted to NNEF. Its checksum permits
