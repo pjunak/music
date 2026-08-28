@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use music_analysis::{AnalysisExecutor, AudioSignalAnalyzer, FfmpegSignalAnalyzer};
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
     MetadataAnalysisJobHandler,
@@ -48,6 +49,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tracing_subscriber::EnvFilter;
 
 use crate::admin::{BackupService, MaintenanceGate, pending_restore_journal};
+use crate::analysis::AudioAnalysisJobHandler;
 use crate::auth::RuntimeAuth;
 use crate::cleanup::MusicBrainzNameLookup;
 use crate::config::AppConfig;
@@ -218,7 +220,9 @@ impl AppRuntime {
         });
         health.set_component("sfx", true, ComponentStatus::Ready);
         let library_root = LibraryRoot::open(&config.music_dir)?;
-        let library_metadata = MetadataAdapter::with_ffmpeg(FfmpegTools::new("ffmpeg", "ffprobe"));
+        let ffmpeg = ffmpeg_executable();
+        let library_metadata =
+            MetadataAdapter::with_ffmpeg(FfmpegTools::new(ffmpeg.clone(), ffprobe_executable()));
         let discovery = Arc::new(FilesystemLibraryDiscovery::new(
             library_root.clone(),
             library_metadata.clone(),
@@ -253,9 +257,26 @@ impl AppRuntime {
         let playlist_repository: Arc<dyn PlaylistRepository> = storage.clone();
         let playlist_service = Arc::new(PlaylistService::new(playlist_repository));
         let job_repository: Arc<dyn JobRepository> = storage.clone();
-        let job_handlers: Vec<Arc<dyn JobHandler>> = vec![Arc::new(
-            MetadataAnalysisJobHandler::new(local_analysis_repository),
-        )];
+        let analysis_executor = AnalysisExecutor::new(config.assistant_library_context_workers)
+            .map_err(|source| {
+                RuntimeError::io(
+                    "start the fixed analysis executor",
+                    io::Error::other(source),
+                )
+            })?;
+        let signal_analyzer: Arc<dyn AudioSignalAnalyzer> =
+            Arc::new(FfmpegSignalAnalyzer::new(ffmpeg));
+        let job_handlers: Vec<Arc<dyn JobHandler>> = vec![
+            Arc::new(MetadataAnalysisJobHandler::new(Arc::clone(
+                &local_analysis_repository,
+            ))),
+            Arc::new(AudioAnalysisJobHandler::new(
+                local_analysis_repository,
+                library_root.clone(),
+                analysis_executor,
+                signal_analyzer,
+            )),
+        ];
         let jobs = supervise_jobs(
             &supervisor,
             start_job_coordinator(job_repository, job_handlers).await?,
@@ -756,6 +777,26 @@ fn copy_seed_directory(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+fn ffmpeg_executable() -> std::ffi::OsString {
+    std::env::var_os("MUSIC_TEST_FFMPEG").unwrap_or_else(|| "ffmpeg".into())
+}
+
+#[cfg(not(test))]
+fn ffmpeg_executable() -> std::ffi::OsString {
+    "ffmpeg".into()
+}
+
+#[cfg(test)]
+fn ffprobe_executable() -> std::ffi::OsString {
+    std::env::var_os("MUSIC_TEST_FFPROBE").unwrap_or_else(|| "ffprobe".into())
+}
+
+#[cfg(not(test))]
+fn ffprobe_executable() -> std::ffi::OsString {
+    "ffprobe".into()
 }
 
 #[cfg(test)]
@@ -4142,6 +4183,53 @@ mod tests {
         assert_eq!(analysis_summary_json["analyzer"], "local-metadata/v1");
         assert_eq!(analysis_summary_json["analyzed_tracks"], 1);
 
+        let audio_job = router
+            .clone()
+            .oneshot(
+                Request::post("/api/assistant/library-audio-analysis/jobs")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"force":false}"#))?,
+            )
+            .await?;
+        assert_eq!(audio_job.status(), StatusCode::ACCEPTED);
+        let audio_job_json: Value =
+            serde_json::from_slice(&to_bytes(audio_job.into_body(), 1024 * 1024).await?)?;
+        let audio_job_id = audio_job_json["id"]
+            .as_str()
+            .ok_or("audio analysis job id missing")?
+            .to_owned();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = runtime
+                    .jobs
+                    .get(&audio_job_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|job| job.status.as_str());
+                if status == Some("succeeded") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let audio_summary = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/library-audio-analysis/summary")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(audio_summary.status(), StatusCode::OK);
+        let audio_summary_json: Value =
+            serde_json::from_slice(&to_bytes(audio_summary.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(audio_summary_json["analyzer"], "local-audio/v1");
+        assert_eq!(audio_summary_json["analyzed_tracks"], 1);
+        assert_eq!(audio_summary_json["failed_tracks"], 0);
+
         let analyzed_tags = router
             .clone()
             .oneshot(
@@ -4160,6 +4248,10 @@ mod tests {
         assert_eq!(
             analyzed_tags_json["items"][0]["analysis_analyzer"],
             "local-metadata/v1"
+        );
+        assert_eq!(
+            analyzed_tags_json["items"][0]["audio_signal"]["analyzer_id"],
+            "local-audio/v1"
         );
 
         let suggestion = router

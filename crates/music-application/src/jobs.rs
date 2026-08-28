@@ -314,6 +314,16 @@ pub trait JobHandler: std::fmt::Debug + Send + Sync {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct JobHandlerError {
     detail: String,
+    kind: JobHandlerErrorKind,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum JobHandlerErrorKind {
+    Failed,
+    Cancelled,
+    Stopping,
+    LeaseLost,
+    Dependency,
 }
 
 impl JobHandlerError {
@@ -321,6 +331,21 @@ impl JobHandlerError {
     pub fn new(detail: impl Into<String>) -> Self {
         Self {
             detail: truncate_utf8(detail.into(), MAX_ERROR_BYTES),
+            kind: JobHandlerErrorKind::Failed,
+        }
+    }
+
+    #[must_use]
+    pub fn from_execution(error: JobExecutionError) -> Self {
+        let kind = match error {
+            JobExecutionError::Cancelled => JobHandlerErrorKind::Cancelled,
+            JobExecutionError::Stopping => JobHandlerErrorKind::Stopping,
+            JobExecutionError::LeaseLost => JobHandlerErrorKind::LeaseLost,
+            JobExecutionError::Dependency => JobHandlerErrorKind::Dependency,
+        };
+        Self {
+            detail: error.to_string(),
+            kind,
         }
     }
 
@@ -759,7 +784,17 @@ async fn execute_claim(
                 Err(JobExecutionError::Dependency) => return Err(JobCoordinatorError::Dependency),
             },
             Ok(_) => JobFinish::Failed("Job handler returned a non-object result.".to_owned()),
-            Err(error) => JobFinish::Failed(error.into_detail()),
+            Err(error) => match error.kind {
+                JobHandlerErrorKind::Failed => JobFinish::Failed(error.into_detail()),
+                JobHandlerErrorKind::Cancelled => JobFinish::Cancelled,
+                JobHandlerErrorKind::Stopping => JobFinish::Interrupted {
+                    restartable: definition.restartable,
+                },
+                JobHandlerErrorKind::LeaseLost => return Ok(()),
+                JobHandlerErrorKind::Dependency => {
+                    return Err(JobCoordinatorError::Dependency);
+                }
+            },
         },
         () = service.shutdown.cancelled() => JobFinish::Interrupted {
             restartable: definition.restartable,

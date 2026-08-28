@@ -5960,6 +5960,66 @@
         ]
       }
     },
+    "/api/assistant/library-audio-analysis/jobs": {
+      "post": {
+        "operationId": "start_library_audio_analysis_api_assistant_library_audio_analysis_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryAnalysisStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/library-audio-analysis/summary": {
+      "get": {
+        "operationId": "library_audio_analysis_summary_api_assistant_library_audio_analysis_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryAnalysisSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
     "/api/assistant/library-tags": {
       "get": {
         "operationId": "list_library_tags_api_assistant_library_tags_get",

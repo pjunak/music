@@ -9,7 +9,8 @@ use serde_json::{Map, Value, json};
 
 use super::planner::metadata_profile;
 use super::tags::{
-    AssistantFuture, Confidence, LOCAL_METADATA_ANALYZER_ID, metadata_source_signature,
+    AssistantFuture, Confidence, LOCAL_AUDIO_ANALYZER_ID, LOCAL_METADATA_ANALYZER_ID,
+    audio_source_signature, metadata_source_signature,
 };
 use crate::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
@@ -18,6 +19,7 @@ use crate::jobs::{
 use crate::library::LibraryRepository;
 
 pub const METADATA_ANALYSIS_JOB_KIND: &str = "assistant.library-analysis";
+pub const AUDIO_ANALYSIS_JOB_KIND: &str = "assistant.library-audio-analysis";
 const METADATA_ANALYSIS_BATCH_SIZE: usize = 50;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -26,6 +28,15 @@ pub struct AnalysisState {
     pub source_signature: String,
     pub job_id: String,
     pub confidence: String,
+    pub updated_at_unix_seconds: i64,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AnalysisFailureState {
+    pub track_id: TrackId,
+    pub source_signature: String,
+    pub job_id: String,
+    pub error: String,
     pub updated_at_unix_seconds: i64,
 }
 
@@ -38,7 +49,15 @@ pub struct AnalysisWrite {
     pub tension: f64,
     pub moods: Vec<String>,
     pub evidence: Vec<String>,
+    pub metrics: Map<String, Value>,
     pub confidence: Confidence,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AnalysisFailureWrite {
+    pub track_id: TrackId,
+    pub source_signature: String,
+    pub error: String,
 }
 
 pub trait LocalAnalysisRepository: LibraryRepository {
@@ -46,6 +65,10 @@ pub trait LocalAnalysisRepository: LibraryRepository {
         &'a self,
         analyzer_id: &'a str,
     ) -> AssistantFuture<'a, Vec<AnalysisState>>;
+    fn analysis_failures<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+    ) -> AssistantFuture<'a, Vec<AnalysisFailureState>>;
 
     /// Store a batch only while each indexed track still has the signature the
     /// analyzer consumed. This prevents a concurrent reconciliation from
@@ -56,6 +79,18 @@ pub trait LocalAnalysisRepository: LibraryRepository {
         job_id: &'a str,
         profiles: &'a [AnalysisWrite],
     ) -> AssistantFuture<'a, usize>;
+    fn store_audio_analysis<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        job_id: &'a str,
+        profile: &'a AnalysisWrite,
+    ) -> AssistantFuture<'a, bool>;
+    fn store_analysis_failure<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        job_id: &'a str,
+        failure: &'a AnalysisFailureWrite,
+    ) -> AssistantFuture<'a, bool>;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -120,6 +155,25 @@ impl LocalAnalysisService {
             .await
             .map_err(LocalAnalysisError::Dependency)?;
         summarize_analysis(&tracks, &states, LOCAL_METADATA_ANALYZER_ID)
+    }
+
+    pub async fn audio_summary(&self) -> Result<LibraryAnalysisSummary, LocalAnalysisError> {
+        let tracks = self
+            .repository
+            .all_tracks()
+            .await
+            .map_err(LocalAnalysisError::Dependency)?;
+        let states = self
+            .repository
+            .analysis_states(LOCAL_AUDIO_ANALYZER_ID)
+            .await
+            .map_err(LocalAnalysisError::Dependency)?;
+        let failures = self
+            .repository
+            .analysis_failures(LOCAL_AUDIO_ANALYZER_ID)
+            .await
+            .map_err(LocalAnalysisError::Dependency)?;
+        summarize_audio_analysis(&tracks, &states, &failures)
     }
 }
 
@@ -203,14 +257,14 @@ impl JobHandler for MetadataAnalysisJobHandler {
                     .map_err(|_| JobHandlerError::new("invalid metadata analysis progress"))?,
                 )
                 .await
-                .map_err(|error| JobHandlerError::new(error.to_string()))?;
+                .map_err(JobHandlerError::from_execution)?;
 
             let mut processed = 0_u64;
             for chunk in work.chunks(METADATA_ANALYSIS_BATCH_SIZE) {
                 context
                     .check_cancelled()
                     .await
-                    .map_err(|error| JobHandlerError::new(error.to_string()))?;
+                    .map_err(JobHandlerError::from_execution)?;
                 let profiles = chunk
                     .iter()
                     .map(|(track, signature)| analyze_metadata(track, signature.clone()))
@@ -240,7 +294,7 @@ impl JobHandler for MetadataAnalysisJobHandler {
                         .map_err(|_| JobHandlerError::new("invalid metadata analysis progress"))?,
                     )
                     .await
-                    .map_err(|error| JobHandlerError::new(error.to_string()))?;
+                    .map_err(JobHandlerError::from_execution)?;
             }
             if starting.saturating_add(processed) < total {
                 context
@@ -254,7 +308,7 @@ impl JobHandler for MetadataAnalysisJobHandler {
                         .map_err(|_| JobHandlerError::new("invalid metadata analysis progress"))?,
                     )
                     .await
-                    .map_err(|error| JobHandlerError::new(error.to_string()))?;
+                    .map_err(JobHandlerError::from_execution)?;
             }
 
             let final_states = self
@@ -315,6 +369,7 @@ fn analyze_metadata(track: &IndexedTrack, source_signature: String) -> AnalysisW
         tension: profile.tension,
         moods: profile.moods,
         evidence,
+        metrics: Map::new(),
         confidence: profile.confidence,
     }
 }
@@ -370,6 +425,75 @@ fn summarize_analysis(
         last_updated_at_unix_seconds: current
             .iter()
             .map(|state| state.updated_at_unix_seconds)
+            .max(),
+    })
+}
+
+fn summarize_audio_analysis(
+    tracks: &[IndexedTrack],
+    states: &[AnalysisState],
+    failures: &[AnalysisFailureState],
+) -> Result<LibraryAnalysisSummary, LocalAnalysisError> {
+    let by_track = states
+        .iter()
+        .map(|state| (state.track_id, state))
+        .collect::<BTreeMap<_, _>>();
+    let failures_by_track = failures
+        .iter()
+        .map(|state| (state.track_id, state))
+        .collect::<BTreeMap<_, _>>();
+    let mut current = Vec::new();
+    let mut current_failures = Vec::new();
+    let mut stale_tracks = 0_usize;
+    for track in tracks {
+        let signature = audio_source_signature(track)
+            .map_err(|_| LocalAnalysisError::InvalidSourceSignature)?;
+        if let Some(state) = by_track.get(&track.id) {
+            if state.source_signature == signature {
+                current.push(*state);
+            } else {
+                stale_tracks = stale_tracks.saturating_add(1);
+            }
+        }
+        if let Some(failure) = failures_by_track.get(&track.id)
+            && failure.source_signature == signature
+        {
+            current_failures.push(*failure);
+        }
+    }
+    let valid_confidences = current
+        .iter()
+        .filter_map(|state| Confidence::parse(&state.confidence).map(|value| (state, value)))
+        .collect::<Vec<_>>();
+    if valid_confidences.len() != current.len() {
+        return Err(LocalAnalysisError::InvalidStoredState);
+    }
+    Ok(LibraryAnalysisSummary {
+        analyzer: LOCAL_AUDIO_ANALYZER_ID.to_owned(),
+        library_tracks: tracks.len(),
+        analyzed_tracks: current.len(),
+        failed_tracks: current_failures.len(),
+        stale_tracks,
+        high_confidence: valid_confidences
+            .iter()
+            .filter(|(_, value)| *value == Confidence::High)
+            .count(),
+        medium_confidence: valid_confidences
+            .iter()
+            .filter(|(_, value)| *value == Confidence::Medium)
+            .count(),
+        low_confidence: valid_confidences
+            .iter()
+            .filter(|(_, value)| *value == Confidence::Low)
+            .count(),
+        last_updated_at_unix_seconds: current
+            .iter()
+            .map(|state| state.updated_at_unix_seconds)
+            .chain(
+                current_failures
+                    .iter()
+                    .map(|state| state.updated_at_unix_seconds),
+            )
             .max(),
     })
 }

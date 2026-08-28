@@ -11,6 +11,7 @@
 //! state.
 
 mod admin;
+mod analysis;
 mod assistant;
 mod auth;
 mod authoring;

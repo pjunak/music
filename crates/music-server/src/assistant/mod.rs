@@ -3,11 +3,11 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use music_application::assistant::{
-    AnalysisReviewDecision, AnalysisReviewTarget, AssistantService, AssistantServiceError,
-    AssistantTrackView, CleanupSelection, Confidence, EnergyCurve, LibraryAnalysisSummary,
-    LocalAnalysisError, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND, ManualTagQuery,
-    PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument, TagVocabularyEntry,
-    TagVocabularyGroup, TagVocabularySnapshot,
+    AUDIO_ANALYSIS_JOB_KIND, AnalysisReviewDecision, AnalysisReviewTarget, AssistantService,
+    AssistantServiceError, AssistantTrackView, CleanupSelection, Confidence, EnergyCurve,
+    LibraryAnalysisSummary, LocalAnalysisError, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
+    ManualTagQuery, PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument,
+    TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_domain::TrackId;
@@ -670,6 +670,8 @@ pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(start_library_analysis))
         .routes(routes!(library_analysis_summary))
+        .routes(routes!(start_library_audio_analysis))
+        .routes(routes!(library_audio_analysis_summary))
         .routes(routes!(suggest_playlist))
         .routes(routes!(tag_catalog))
         .routes(routes!(get_tag_vocabulary))
@@ -726,6 +728,53 @@ async fn library_analysis_summary(
     authorize(&state, &headers).await?;
     let summary = analysis_service(&state)?
         .metadata_summary()
+        .await
+        .map_err(map_local_analysis_error)?;
+    Ok(Json(library_analysis_summary_response(summary)?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-audio-analysis/jobs",
+    operation_id = "start_library_audio_analysis_api_assistant_library_audio_analysis_jobs_post",
+    request_body = LibraryAnalysisStartRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn start_library_audio_analysis(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<LibraryAnalysisStartRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let (job, _created) = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?
+        .enqueue_unique_active(AUDIO_ANALYSIS_JOB_KIND, json!({"force": payload.force}))
+        .await
+        .map_err(map_job_error)?;
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/assistant/library-audio-analysis/summary",
+    operation_id = "library_audio_analysis_summary_api_assistant_library_audio_analysis_summary_get",
+    responses((status = 200, description = "Successful Response", body = LibraryAnalysisSummaryResponse)),
+    tag = "assistant"
+)]
+async fn library_audio_analysis_summary(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<LibraryAnalysisSummaryResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let summary = analysis_service(&state)?
+        .audio_summary()
         .await
         .map_err(map_local_analysis_error)?;
     Ok(Json(library_analysis_summary_response(summary)?))

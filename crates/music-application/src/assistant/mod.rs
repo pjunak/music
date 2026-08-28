@@ -10,9 +10,9 @@ mod tags;
 mod vocabulary;
 
 pub use local_analysis::{
-    AnalysisState, AnalysisWrite, LibraryAnalysisSummary, LocalAnalysisError,
-    LocalAnalysisRepository, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
-    MetadataAnalysisJobHandler,
+    AUDIO_ANALYSIS_JOB_KIND, AnalysisFailureState, AnalysisFailureWrite, AnalysisState,
+    AnalysisWrite, LibraryAnalysisSummary, LocalAnalysisError, LocalAnalysisRepository,
+    LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND, MetadataAnalysisJobHandler,
 };
 pub use planner::{
     EnergyCurve, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent, PlaylistPlan,

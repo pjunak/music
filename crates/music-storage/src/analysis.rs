@@ -1,8 +1,9 @@
 use music_application::assistant::{
-    AnalysisState, AnalysisWrite, AssistantFuture, LOCAL_METADATA_ANALYZER_ID,
-    LocalAnalysisRepository, metadata_source_signature,
+    AnalysisFailureState, AnalysisFailureWrite, AnalysisState, AnalysisWrite, AssistantFuture,
+    LOCAL_AUDIO_ANALYZER_ID, LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository,
+    audio_source_signature, metadata_source_signature,
 };
-use sqlx::{AssertSqlSafe, Row};
+use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 
 use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
 use crate::{SqliteStorage, StorageError};
@@ -39,6 +40,47 @@ impl LocalAnalysisRepository for SqliteStorage {
                             .map_err(StorageError::from)?
                             .ok_or(StorageError::InvalidAssistantRecord(
                                 "analysis timestamp is invalid",
+                            ))?,
+                    })
+                })
+                .collect::<Result<Vec<_>, StorageError>>()
+                .map_err(box_storage)
+        })
+    }
+
+    fn analysis_failures<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+    ) -> AssistantFuture<'a, Vec<AnalysisFailureState>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT track_id, source_signature, job_id, error, \
+                 CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
+                 FROM track_analysis_failures WHERE analyzer_id = ? ORDER BY track_id",
+            )
+            .bind(analyzer_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(box_storage)?;
+            rows.iter()
+                .map(|row| {
+                    let raw_id: i64 = row.try_get("track_id").map_err(StorageError::from)?;
+                    Ok(AnalysisFailureState {
+                        track_id: music_domain::TrackId::new(raw_id).map_err(|_| {
+                            StorageError::InvalidAssistantRecord(
+                                "analysis failure track id is invalid",
+                            )
+                        })?,
+                        source_signature: row
+                            .try_get("source_signature")
+                            .map_err(StorageError::from)?,
+                        job_id: row.try_get("job_id").map_err(StorageError::from)?,
+                        error: row.try_get("error").map_err(StorageError::from)?,
+                        updated_at_unix_seconds: row
+                            .try_get::<Option<i64>, _>("updated_at_unix_seconds")
+                            .map_err(StorageError::from)?
+                            .ok_or(StorageError::InvalidAssistantRecord(
+                                "analysis failure timestamp is invalid",
                             ))?,
                     })
                 })
@@ -123,6 +165,129 @@ impl LocalAnalysisRepository for SqliteStorage {
             Ok(stored)
         })
     }
+
+    fn store_audio_analysis<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        job_id: &'a str,
+        profile: &'a AnalysisWrite,
+    ) -> AssistantFuture<'a, bool> {
+        Box::pin(async move {
+            if analyzer_id != LOCAL_AUDIO_ANALYZER_ID || !valid_audio_profile(profile) {
+                return Err(box_storage(StorageError::InvalidAssistantRecord(
+                    "audio analysis profile is invalid",
+                )));
+            }
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(track) = load_track(&mut transaction, profile.track_id).await? else {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            };
+            let current_signature = audio_source_signature(&track).map_err(|_| {
+                box_storage(StorageError::InvalidAssistantRecord(
+                    "track audio fingerprint is invalid",
+                ))
+            })?;
+            if current_signature != profile.source_signature {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            }
+            let evidence = serde_json::to_string(&profile.evidence)
+                .map_err(StorageError::AssistantSerialization)
+                .map_err(box_storage)?;
+            let metrics = serde_json::to_string(&profile.metrics)
+                .map_err(StorageError::AssistantSerialization)
+                .map_err(box_storage)?;
+            sqlx::query(
+                "INSERT INTO track_analyses \
+                 (track_id, analyzer_id, source_signature, job_id, energy, brightness, tension, \
+                  moods_json, evidence_json, metrics_json, confidence, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, CURRENT_TIMESTAMP) \
+                 ON CONFLICT(track_id, analyzer_id) DO UPDATE SET \
+                   source_signature = excluded.source_signature, job_id = excluded.job_id, \
+                   energy = excluded.energy, brightness = excluded.brightness, \
+                   tension = excluded.tension, moods_json = '[]', \
+                   evidence_json = excluded.evidence_json, metrics_json = excluded.metrics_json, \
+                   confidence = excluded.confidence, updated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(profile.track_id.get())
+            .bind(analyzer_id)
+            .bind(&profile.source_signature)
+            .bind(job_id)
+            .bind(profile.energy)
+            .bind(profile.brightness)
+            .bind(profile.tension)
+            .bind(evidence)
+            .bind(metrics)
+            .bind(profile.confidence.as_str())
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            sqlx::query(
+                "DELETE FROM track_analysis_failures WHERE track_id = ? AND analyzer_id = ?",
+            )
+            .bind(profile.track_id.get())
+            .bind(analyzer_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(true)
+        })
+    }
+
+    fn store_analysis_failure<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        job_id: &'a str,
+        failure: &'a AnalysisFailureWrite,
+    ) -> AssistantFuture<'a, bool> {
+        Box::pin(async move {
+            if analyzer_id != LOCAL_AUDIO_ANALYZER_ID
+                || failure.source_signature.len() != 64
+                || failure.error.is_empty()
+            {
+                return Err(box_storage(StorageError::InvalidAssistantRecord(
+                    "audio analysis failure is invalid",
+                )));
+            }
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(track) = load_track(&mut transaction, failure.track_id).await? else {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            };
+            let current_signature = audio_source_signature(&track).map_err(|_| {
+                box_storage(StorageError::InvalidAssistantRecord(
+                    "track audio fingerprint is invalid",
+                ))
+            })?;
+            if current_signature != failure.source_signature {
+                transaction.commit().await.map_err(box_storage)?;
+                return Ok(false);
+            }
+            let error = truncate_utf8(&failure.error, 2_000);
+            sqlx::query(
+                "INSERT INTO track_analysis_failures \
+                 (track_id, analyzer_id, source_signature, job_id, error, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
+                 ON CONFLICT(track_id, analyzer_id) DO UPDATE SET \
+                   source_signature = excluded.source_signature, job_id = excluded.job_id, \
+                   error = excluded.error, updated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(failure.track_id.get())
+            .bind(analyzer_id)
+            .bind(&failure.source_signature)
+            .bind(job_id)
+            .bind(error)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(true)
+        })
+    }
 }
 
 fn valid_profile(profile: &AnalysisWrite) -> bool {
@@ -131,6 +296,51 @@ fn valid_profile(profile: &AnalysisWrite) -> bool {
         .all(|value| value.is_finite() && (0.0..=1.0).contains(&value))
         && profile.source_signature.len() == 64
         && !profile.evidence.is_empty()
+}
+
+fn valid_audio_profile(profile: &AnalysisWrite) -> bool {
+    valid_profile(profile)
+        && profile.moods.is_empty()
+        && profile
+            .metrics
+            .get("schema")
+            .and_then(serde_json::Value::as_str)
+            == Some(LOCAL_AUDIO_ANALYZER_ID)
+        && profile.metrics.values().all(|value| {
+            matches!(
+                value,
+                serde_json::Value::Null
+                    | serde_json::Value::String(_)
+                    | serde_json::Value::Number(_)
+            )
+        })
+}
+
+async fn load_track(
+    transaction: &mut Transaction<'_, Sqlite>,
+    track_id: music_domain::TrackId,
+) -> Result<Option<music_domain::IndexedTrack>, Box<dyn std::error::Error + Send + Sync>> {
+    let query = format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE id = ?");
+    let row = sqlx::query(AssertSqlSafe(query))
+        .bind(track_id.get())
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(box_storage)?;
+    row.as_ref()
+        .map(indexed_track_from_row)
+        .transpose()
+        .map_err(box_storage)
+}
+
+fn truncate_utf8(value: &str, maximum_bytes: usize) -> &str {
+    if value.len() <= maximum_bytes {
+        return value;
+    }
+    let mut boundary = maximum_bytes;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &value[..boundary]
 }
 
 fn box_storage(error: impl Into<StorageError>) -> Box<dyn std::error::Error + Send + Sync> {
@@ -142,7 +352,8 @@ mod tests {
     use std::error::Error;
 
     use music_application::assistant::{
-        AnalysisWrite, Confidence, LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository,
+        AnalysisFailureWrite, AnalysisWrite, Confidence, LOCAL_AUDIO_ANALYZER_ID,
+        LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository, audio_source_signature,
         metadata_source_signature,
     };
     use music_application::library::LibraryRepository;
@@ -172,6 +383,7 @@ mod tests {
             tension: 0.7,
             moods: vec!["combat".to_owned()],
             evidence: vec!["Mood metadata: combat".to_owned()],
+            metrics: serde_json::Map::new(),
             confidence: Confidence::High,
         })
     }
@@ -211,6 +423,81 @@ mod tests {
             LocalAnalysisRepository::analysis_states(&storage, LOCAL_METADATA_ANALYZER_ID).await?;
         assert_eq!(states.len(), 1);
         assert_eq!(states[0].job_id, "job-b");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn audio_success_and_failure_check_identity_and_replace_failure_atomically()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let track = LibraryRepository::all_tracks(&storage).await?.remove(0);
+        let signature = audio_source_signature(&track)?;
+        let failure = AnalysisFailureWrite {
+            track_id: track.id,
+            source_signature: signature.clone(),
+            error: "AudioSignalError: decoder failed".to_owned(),
+        };
+        assert!(
+            LocalAnalysisRepository::store_analysis_failure(
+                &storage,
+                LOCAL_AUDIO_ANALYZER_ID,
+                "audio-job",
+                &failure,
+            )
+            .await?
+        );
+        assert_eq!(
+            LocalAnalysisRepository::analysis_failures(&storage, LOCAL_AUDIO_ANALYZER_ID)
+                .await?
+                .len(),
+            1
+        );
+        let profile = AnalysisWrite {
+            track_id: track.id,
+            source_signature: signature,
+            energy: 0.4,
+            brightness: 0.5,
+            tension: 0.6,
+            moods: Vec::new(),
+            evidence: vec!["Signal level: test".to_owned()],
+            metrics: serde_json::Map::from_iter([(
+                "schema".to_owned(),
+                serde_json::Value::String(LOCAL_AUDIO_ANALYZER_ID.to_owned()),
+            )]),
+            confidence: Confidence::Medium,
+        };
+        assert!(
+            LocalAnalysisRepository::store_audio_analysis(
+                &storage,
+                LOCAL_AUDIO_ANALYZER_ID,
+                "audio-job",
+                &profile,
+            )
+            .await?
+        );
+        assert!(
+            LocalAnalysisRepository::analysis_failures(&storage, LOCAL_AUDIO_ANALYZER_ID)
+                .await?
+                .is_empty()
+        );
+        assert_eq!(
+            LocalAnalysisRepository::analysis_states(&storage, LOCAL_AUDIO_ANALYZER_ID).await?[0]
+                .confidence,
+            "medium"
+        );
+        sqlx::query("UPDATE tracks SET mtime = 21 WHERE id = ?")
+            .bind(track.id.get())
+            .execute(&storage.pool)
+            .await?;
+        assert!(
+            !LocalAnalysisRepository::store_audio_analysis(
+                &storage,
+                LOCAL_AUDIO_ANALYZER_ID,
+                "stale-job",
+                &profile,
+            )
+            .await?
+        );
         Ok(())
     }
 }
