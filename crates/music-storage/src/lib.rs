@@ -23,6 +23,7 @@ mod migration;
 mod mode_import;
 mod playback;
 mod playlists;
+mod providers;
 mod recovery;
 mod schema;
 mod sqlite;

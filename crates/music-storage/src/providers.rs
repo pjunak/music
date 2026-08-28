@@ -1,0 +1,763 @@
+use std::collections::BTreeSet;
+
+use music_application::assistant::{
+    AssistantFuture, ModelRoleRecord, ProviderConnectionRecord, ProviderMutationOutcome,
+    ProviderRepository,
+};
+use serde_json::Value;
+use sqlx::sqlite::SqliteRow;
+use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
+
+use crate::{SqliteStorage, StorageError};
+
+const CONNECTION_SELECT: &str = "SELECT id, name, adapter_id, base_url, encrypted_api_key, \
+    api_key_nonce, api_key_hint, allow_private_network, verification_status, \
+    verification_error_code, verified_models_json, verified_capabilities_json, \
+    CAST(strftime('%s', last_verified_at) AS INTEGER) AS last_verified_at_unix_seconds, \
+    CAST(strftime('%s', created_at) AS INTEGER) AS created_at_unix_seconds, \
+    CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
+    FROM assistant_provider_connections";
+
+const ROLE_SELECT: &str = "SELECT role_id, connection_id, model_id, enabled, timeout_seconds, \
+    max_output_tokens, thinking_mode, conformance_status, conformance_error_code, \
+    conformance_fingerprint, \
+    CAST(strftime('%s', last_conformance_at) AS INTEGER) AS last_conformance_at_unix_seconds, \
+    CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
+    FROM assistant_model_roles";
+
+impl ProviderRepository for SqliteStorage {
+    fn provider_connections(&self) -> AssistantFuture<'_, Vec<ProviderConnectionRecord>> {
+        Box::pin(async move {
+            let query = format!("{CONNECTION_SELECT} ORDER BY lower(name), id");
+            let rows = sqlx::query(AssertSqlSafe(query))
+                .fetch_all(&self.pool)
+                .await
+                .map_err(box_storage)?;
+            rows.iter()
+                .map(connection_from_row)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(box_storage)
+        })
+    }
+
+    fn provider_connection<'a>(
+        &'a self,
+        connection_id: &'a str,
+    ) -> AssistantFuture<'a, Option<ProviderConnectionRecord>> {
+        Box::pin(async move {
+            let query = format!("{CONNECTION_SELECT} WHERE id = ?");
+            let row = sqlx::query(AssertSqlSafe(query))
+                .bind(connection_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(box_storage)?;
+            row.as_ref()
+                .map(connection_from_row)
+                .transpose()
+                .map_err(box_storage)
+        })
+    }
+
+    fn create_provider_connection<'a>(
+        &'a self,
+        connection: &'a ProviderConnectionRecord,
+    ) -> AssistantFuture<'a, ProviderMutationOutcome> {
+        Box::pin(async move {
+            let models = encode_string_list(&connection.verified_models).map_err(box_storage)?;
+            let capabilities =
+                encode_string_list(&connection.verified_capability_ids).map_err(box_storage)?;
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            if duplicate_name(&mut transaction, &connection.name, None)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::DuplicateName);
+            }
+            sqlx::query(
+                "INSERT INTO assistant_provider_connections \
+                 (id, name, adapter_id, base_url, encrypted_api_key, api_key_nonce, api_key_hint, \
+                  allow_private_network, verification_status, verification_error_code, \
+                  verified_models_json, verified_capabilities_json, last_verified_at, \
+                  created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), \
+                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            )
+            .bind(&connection.id)
+            .bind(&connection.name)
+            .bind(&connection.adapter_id)
+            .bind(&connection.base_url)
+            .bind(&connection.encrypted_api_key)
+            .bind(&connection.api_key_nonce)
+            .bind(&connection.api_key_hint)
+            .bind(connection.allow_private_network)
+            .bind(&connection.verification_status)
+            .bind(&connection.verification_error_code)
+            .bind(models)
+            .bind(capabilities)
+            .bind(connection.last_verified_at_unix_seconds)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderMutationOutcome::Applied)
+        })
+    }
+
+    fn replace_provider_connection<'a>(
+        &'a self,
+        expected_fingerprint: &'a str,
+        connection: &'a ProviderConnectionRecord,
+        reset_dependents: bool,
+    ) -> AssistantFuture<'a, ProviderMutationOutcome> {
+        Box::pin(async move {
+            let models = encode_string_list(&connection.verified_models).map_err(box_storage)?;
+            let capabilities =
+                encode_string_list(&connection.verified_capability_ids).map_err(box_storage)?;
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(current) = load_connection_tx(&mut transaction, &connection.id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::NotFound);
+            };
+            if current.fingerprint() != expected_fingerprint {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::Changed);
+            }
+            if duplicate_name(&mut transaction, &connection.name, Some(&connection.id))
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::DuplicateName);
+            }
+            if reset_dependents
+                && connection_has_active_model_job(&mut transaction, &connection.id)
+                    .await
+                    .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::ConnectionModelJobActive);
+            }
+            sqlx::query(
+                "UPDATE assistant_provider_connections SET name = ?, adapter_id = ?, \
+                 base_url = ?, encrypted_api_key = ?, api_key_nonce = ?, api_key_hint = ?, \
+                 allow_private_network = ?, verification_status = ?, \
+                 verification_error_code = ?, verified_models_json = ?, \
+                 verified_capabilities_json = ?, last_verified_at = datetime(?, 'unixepoch'), \
+                 updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(&connection.name)
+            .bind(&connection.adapter_id)
+            .bind(&connection.base_url)
+            .bind(&connection.encrypted_api_key)
+            .bind(&connection.api_key_nonce)
+            .bind(&connection.api_key_hint)
+            .bind(connection.allow_private_network)
+            .bind(&connection.verification_status)
+            .bind(&connection.verification_error_code)
+            .bind(models)
+            .bind(capabilities)
+            .bind(connection.last_verified_at_unix_seconds)
+            .bind(&connection.id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            if reset_dependents {
+                reset_roles_for_connection(&mut transaction, &connection.id)
+                    .await
+                    .map_err(box_storage)?;
+            }
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderMutationOutcome::Applied)
+        })
+    }
+
+    fn delete_provider_connection<'a>(
+        &'a self,
+        connection_id: &'a str,
+    ) -> AssistantFuture<'a, ProviderMutationOutcome> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM assistant_provider_connections WHERE id = ?)",
+            )
+            .bind(connection_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            if !exists {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::NotFound);
+            }
+            let assigned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM assistant_model_roles WHERE connection_id = ?)",
+            )
+            .bind(connection_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            if assigned {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::ConnectionInUse);
+            }
+            sqlx::query("DELETE FROM assistant_provider_connections WHERE id = ?")
+                .bind(connection_id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderMutationOutcome::Applied)
+        })
+    }
+
+    fn clear_provider_credential<'a>(
+        &'a self,
+        connection_id: &'a str,
+    ) -> AssistantFuture<'a, ProviderMutationOutcome> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM assistant_provider_connections WHERE id = ?)",
+            )
+            .bind(connection_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            if !exists {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::NotFound);
+            }
+            if connection_has_active_model_job(&mut transaction, connection_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::ConnectionModelJobActive);
+            }
+            sqlx::query(
+                "UPDATE assistant_provider_connections SET encrypted_api_key = '', \
+                 api_key_nonce = '', api_key_hint = '', verification_status = 'never', \
+                 verification_error_code = NULL, verified_models_json = '[]', \
+                 verified_capabilities_json = '[]', last_verified_at = NULL, \
+                 updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(connection_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            reset_roles_for_connection(&mut transaction, connection_id)
+                .await
+                .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderMutationOutcome::Applied)
+        })
+    }
+
+    fn model_roles(&self) -> AssistantFuture<'_, Vec<ModelRoleRecord>> {
+        Box::pin(async move {
+            let query = format!("{ROLE_SELECT} ORDER BY role_id");
+            let rows = sqlx::query(AssertSqlSafe(query))
+                .fetch_all(&self.pool)
+                .await
+                .map_err(box_storage)?;
+            rows.iter()
+                .map(role_from_row)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(box_storage)
+        })
+    }
+
+    fn save_model_role<'a>(
+        &'a self,
+        expected_connection_fingerprint: &'a str,
+        role: &'a ModelRoleRecord,
+        reset_evaluations: bool,
+    ) -> AssistantFuture<'a, ProviderMutationOutcome> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(connection) = load_connection_tx(&mut transaction, &role.connection_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::NotFound);
+            };
+            if connection.fingerprint() != expected_connection_fingerprint {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::Changed);
+            }
+            if role_has_active_model_job(&mut transaction, &role.role_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::RoleModelJobActive);
+            }
+            sqlx::query(
+                "INSERT INTO assistant_model_roles \
+                 (role_id, connection_id, model_id, enabled, timeout_seconds, max_output_tokens, \
+                  thinking_mode, conformance_status, conformance_error_code, \
+                  conformance_fingerprint, last_conformance_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), CURRENT_TIMESTAMP) \
+                 ON CONFLICT(role_id) DO UPDATE SET connection_id = excluded.connection_id, \
+                  model_id = excluded.model_id, enabled = excluded.enabled, \
+                  timeout_seconds = excluded.timeout_seconds, \
+                  max_output_tokens = excluded.max_output_tokens, \
+                  thinking_mode = excluded.thinking_mode, \
+                  conformance_status = excluded.conformance_status, \
+                  conformance_error_code = excluded.conformance_error_code, \
+                  conformance_fingerprint = excluded.conformance_fingerprint, \
+                  last_conformance_at = excluded.last_conformance_at, \
+                  updated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(&role.role_id)
+            .bind(&role.connection_id)
+            .bind(&role.model_id)
+            .bind(role.enabled)
+            .bind(i64::from(role.timeout_seconds))
+            .bind(i64::from(role.max_output_tokens))
+            .bind(&role.thinking_mode)
+            .bind(&role.conformance_status)
+            .bind(&role.conformance_error_code)
+            .bind(&role.conformance_fingerprint)
+            .bind(role.last_conformance_at_unix_seconds)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            if reset_evaluations {
+                sqlx::query("DELETE FROM assistant_model_evaluations WHERE role_id = ?")
+                    .bind(&role.role_id)
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(box_storage)?;
+            }
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderMutationOutcome::Applied)
+        })
+    }
+
+    fn delete_model_role<'a>(
+        &'a self,
+        role_id: &'a str,
+    ) -> AssistantFuture<'a, ProviderMutationOutcome> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM assistant_model_roles WHERE role_id = ?)",
+            )
+            .bind(role_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            if !exists {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::NotFound);
+            }
+            if role_has_active_model_job(&mut transaction, role_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::RoleModelJobActive);
+            }
+            sqlx::query("DELETE FROM assistant_model_roles WHERE role_id = ?")
+                .bind(role_id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ProviderMutationOutcome::Applied)
+        })
+    }
+}
+
+async fn load_connection_tx(
+    transaction: &mut Transaction<'_, Sqlite>,
+    connection_id: &str,
+) -> Result<Option<ProviderConnectionRecord>, StorageError> {
+    let query = format!("{CONNECTION_SELECT} WHERE id = ?");
+    let row = sqlx::query(AssertSqlSafe(query))
+        .bind(connection_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+    row.as_ref().map(connection_from_row).transpose()
+}
+
+fn connection_from_row(row: &SqliteRow) -> Result<ProviderConnectionRecord, StorageError> {
+    Ok(ProviderConnectionRecord {
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
+        adapter_id: row.try_get("adapter_id")?,
+        base_url: row.try_get("base_url")?,
+        encrypted_api_key: row.try_get("encrypted_api_key")?,
+        api_key_nonce: row.try_get("api_key_nonce")?,
+        api_key_hint: row.try_get("api_key_hint")?,
+        allow_private_network: row.try_get("allow_private_network")?,
+        verification_status: row.try_get("verification_status")?,
+        verification_error_code: row.try_get("verification_error_code")?,
+        verified_models: parse_bounded_string_list(row.try_get("verified_models_json")?, 200),
+        verified_capability_ids: parse_bounded_string_list(
+            row.try_get("verified_capabilities_json")?,
+            32,
+        ),
+        last_verified_at_unix_seconds: row.try_get("last_verified_at_unix_seconds")?,
+        created_at_unix_seconds: required_timestamp(row, "created_at_unix_seconds")?,
+        updated_at_unix_seconds: required_timestamp(row, "updated_at_unix_seconds")?,
+    })
+}
+
+fn role_from_row(row: &SqliteRow) -> Result<ModelRoleRecord, StorageError> {
+    Ok(ModelRoleRecord {
+        role_id: row.try_get("role_id")?,
+        connection_id: row.try_get("connection_id")?,
+        model_id: row.try_get("model_id")?,
+        enabled: row.try_get("enabled")?,
+        timeout_seconds: u16::try_from(row.try_get::<i64, _>("timeout_seconds")?)
+            .map_err(|_| StorageError::InvalidAssistantRecord("invalid model timeout"))?,
+        max_output_tokens: u32::try_from(row.try_get::<i64, _>("max_output_tokens")?)
+            .map_err(|_| StorageError::InvalidAssistantRecord("invalid model token limit"))?,
+        thinking_mode: row.try_get("thinking_mode")?,
+        conformance_status: row.try_get("conformance_status")?,
+        conformance_error_code: row.try_get("conformance_error_code")?,
+        conformance_fingerprint: row.try_get("conformance_fingerprint")?,
+        last_conformance_at_unix_seconds: row.try_get("last_conformance_at_unix_seconds")?,
+        updated_at_unix_seconds: required_timestamp(row, "updated_at_unix_seconds")?,
+    })
+}
+
+fn required_timestamp(row: &SqliteRow, column: &str) -> Result<i64, StorageError> {
+    row.try_get::<Option<i64>, _>(column)?
+        .ok_or(StorageError::InvalidTimestamp)
+}
+
+fn encode_string_list(values: &[String]) -> Result<String, StorageError> {
+    serde_json::to_string(values).map_err(StorageError::AssistantSerialization)
+}
+
+fn parse_bounded_string_list(raw: &str, limit: usize) -> Vec<String> {
+    let Ok(Value::Array(values)) = serde_json::from_str(raw) else {
+        return Vec::new();
+    };
+    let mut seen = BTreeSet::new();
+    values
+        .into_iter()
+        .filter_map(|value| value.as_str().map(str::to_owned))
+        .filter(|value| !value.is_empty() && value.chars().count() <= 256)
+        .filter(|value| seen.insert(value.clone()))
+        .take(limit)
+        .collect()
+}
+
+async fn duplicate_name(
+    transaction: &mut Transaction<'_, Sqlite>,
+    name: &str,
+    excluding_id: Option<&str>,
+) -> Result<bool, StorageError> {
+    let rows = sqlx::query("SELECT id, name FROM assistant_provider_connections")
+        .fetch_all(&mut **transaction)
+        .await?;
+    let folded = name.to_lowercase();
+    for row in rows {
+        let id: String = row.try_get("id")?;
+        let existing: String = row.try_get("name")?;
+        if excluding_id != Some(id.as_str()) && existing.to_lowercase() == folded {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+async fn reset_roles_for_connection(
+    transaction: &mut Transaction<'_, Sqlite>,
+    connection_id: &str,
+) -> Result<(), StorageError> {
+    sqlx::query(
+        "DELETE FROM assistant_model_evaluations WHERE role_id IN \
+         (SELECT role_id FROM assistant_model_roles WHERE connection_id = ?)",
+    )
+    .bind(connection_id)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE assistant_model_roles SET conformance_status = 'never', \
+         conformance_error_code = NULL, conformance_fingerprint = NULL, \
+         last_conformance_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE connection_id = ?",
+    )
+    .bind(connection_id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn role_has_active_model_job(
+    transaction: &mut Transaction<'_, Sqlite>,
+    role_id: &str,
+) -> Result<bool, StorageError> {
+    let rows = sqlx::query(
+        "SELECT parameters_json FROM background_jobs WHERE kind LIKE 'assistant.model%' \
+         AND status IN ('queued', 'running', 'cancel_requested')",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(rows.iter().any(|row| {
+        row.try_get::<String, _>("parameters_json")
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .and_then(|value| {
+                value
+                    .get("role_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .is_some_and(|candidate| candidate == role_id)
+    }))
+}
+
+async fn connection_has_active_model_job(
+    transaction: &mut Transaction<'_, Sqlite>,
+    connection_id: &str,
+) -> Result<bool, StorageError> {
+    let role_rows =
+        sqlx::query("SELECT role_id FROM assistant_model_roles WHERE connection_id = ?")
+            .bind(connection_id)
+            .fetch_all(&mut **transaction)
+            .await?;
+    let role_ids = role_rows
+        .iter()
+        .map(|row| row.try_get::<String, _>("role_id"))
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if role_ids.is_empty() {
+        return Ok(false);
+    }
+    let rows = sqlx::query(
+        "SELECT parameters_json FROM background_jobs WHERE kind LIKE 'assistant.model%' \
+         AND status IN ('queued', 'running', 'cancel_requested')",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(rows.iter().any(|row| {
+        row.try_get::<String, _>("parameters_json")
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .and_then(|value| {
+                value
+                    .get("role_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .is_some_and(|candidate| role_ids.contains(&candidate))
+    }))
+}
+
+type ProviderDependencyError = Box<dyn std::error::Error + Send + Sync>;
+
+fn box_storage(source: impl Into<StorageError>) -> ProviderDependencyError {
+    Box::new(source.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::sync::Arc;
+
+    use music_application::assistant::{
+        ModelRoleRecord, ProviderConnectionRecord, ProviderMutationOutcome, ProviderRepository,
+    };
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::SqliteStorageOptions;
+
+    async fn storage() -> Result<(TempDir, SqliteStorage), Box<dyn Error + Send + Sync>> {
+        let directory = tempfile::tempdir()?;
+        let storage =
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("music.db")))
+                .await?;
+        Ok((directory, storage))
+    }
+
+    fn connection(id: &str, name: &str) -> ProviderConnectionRecord {
+        ProviderConnectionRecord {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            adapter_id: "openai-compatible/v1".to_owned(),
+            base_url: "https://example.test/v1".to_owned(),
+            encrypted_api_key: "ciphertext".to_owned(),
+            api_key_nonce: "nonce".to_owned(),
+            api_key_hint: "••••test".to_owned(),
+            allow_private_network: false,
+            verification_status: "verified".to_owned(),
+            verification_error_code: None,
+            verified_models: vec!["fixture-model".to_owned()],
+            verified_capability_ids: vec!["structured-text/v1".to_owned()],
+            last_verified_at_unix_seconds: Some(1_800_000_000),
+            created_at_unix_seconds: 0,
+            updated_at_unix_seconds: 0,
+        }
+    }
+
+    fn role(connection_id: &str) -> ModelRoleRecord {
+        ModelRoleRecord {
+            role_id: "music_tagger".to_owned(),
+            connection_id: connection_id.to_owned(),
+            model_id: "fixture-model".to_owned(),
+            enabled: true,
+            timeout_seconds: 30,
+            max_output_tokens: 2_000,
+            thinking_mode: "provider_default".to_owned(),
+            conformance_status: "passed".to_owned(),
+            conformance_error_code: None,
+            conformance_fingerprint: Some("f".repeat(64)),
+            last_conformance_at_unix_seconds: Some(1_800_000_001),
+            updated_at_unix_seconds: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_mutations_reset_dependent_gates_atomically()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let original = connection("aabbccddeeff00112233445566778899", "Fixture");
+        assert_eq!(
+            storage.create_provider_connection(&original).await?,
+            ProviderMutationOutcome::Applied
+        );
+        assert_eq!(
+            storage
+                .create_provider_connection(&connection(
+                    "11223344556677889900aabbccddeeff",
+                    "fixture"
+                ))
+                .await?,
+            ProviderMutationOutcome::DuplicateName
+        );
+        let role = role(&original.id);
+        assert_eq!(
+            storage
+                .save_model_role(&original.fingerprint(), &role, false)
+                .await?,
+            ProviderMutationOutcome::Applied
+        );
+        sqlx::query(
+            "INSERT INTO background_jobs \
+             (id, kind, status, parameters_json, result_json, error, progress_current, \
+              progress_total, progress_phase, progress_message, attempts, retry_of_id, \
+              created_at, updated_at, lane, schema_version, restartable, checkpoint_policy) \
+             VALUES ('finished-job', 'assistant.model.test', 'succeeded', '{}', '{}', NULL, 1, 1, \
+                     'Done', 'Done', 1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'provider', 1, 0, 'replace')",
+        )
+        .execute(&storage.pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO assistant_model_evaluations \
+             (role_id, evaluation_id, role_fingerprint, status, suite_id, engine_id, \
+              passed_cases, total_cases, job_id, evaluated_at) \
+             VALUES ('music_tagger', 'eval', ?, 'passed', 'suite', 'engine', 1, 1, \
+                     'finished-job', CURRENT_TIMESTAMP)",
+        )
+        .bind("f".repeat(64))
+        .execute(&storage.pool)
+        .await?;
+
+        let mut replacement = original.clone();
+        replacement.base_url = "https://second.example.test/v1".to_owned();
+        replacement.verification_status = "never".to_owned();
+        replacement.verified_models.clear();
+        replacement.verified_capability_ids.clear();
+        replacement.last_verified_at_unix_seconds = None;
+        assert_eq!(
+            storage
+                .replace_provider_connection(&original.fingerprint(), &replacement, true)
+                .await?,
+            ProviderMutationOutcome::Applied
+        );
+        let stored_role = storage.model_roles().await?.pop().ok_or("missing role")?;
+        assert_eq!(stored_role.conformance_status, "never");
+        assert!(stored_role.conformance_fingerprint.is_none());
+        let evaluations: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM assistant_model_evaluations")
+                .fetch_one(&storage.pool)
+                .await?;
+        assert_eq!(evaluations, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn active_model_jobs_block_connection_and_role_mutations()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let connection = connection("aabbccddeeff00112233445566778899", "Fixture");
+        storage.create_provider_connection(&connection).await?;
+        storage
+            .save_model_role(&connection.fingerprint(), &role(&connection.id), false)
+            .await?;
+        sqlx::query(
+            "INSERT INTO background_jobs \
+             (id, kind, status, parameters_json, result_json, error, progress_current, \
+              progress_total, progress_phase, progress_message, attempts, retry_of_id, \
+              created_at, updated_at, lane, schema_version, restartable, checkpoint_policy) \
+             VALUES ('active-job', 'assistant.model.tags', 'queued', \
+                     '{\"role_id\":\"music_tagger\"}', NULL, NULL, 0, NULL, '', '', 0, NULL, \
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'provider', 1, 0, 'replace')",
+        )
+        .execute(&storage.pool)
+        .await?;
+        assert_eq!(
+            storage.clear_provider_credential(&connection.id).await?,
+            ProviderMutationOutcome::ConnectionModelJobActive
+        );
+        assert_eq!(
+            storage
+                .save_model_role(&connection.fingerprint(), &role(&connection.id), true)
+                .await?,
+            ProviderMutationOutcome::RoleModelJobActive
+        );
+        assert_eq!(
+            storage.delete_model_role("music_tagger").await?,
+            ProviderMutationOutcome::RoleModelJobActive
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn concurrent_runtime_updates_have_one_winner() -> Result<(), Box<dyn Error + Send + Sync>>
+    {
+        let (_directory, storage) = storage().await?;
+        let original = connection("aabbccddeeff00112233445566778899", "Fixture");
+        storage.create_provider_connection(&original).await?;
+        let expected = original.fingerprint();
+        let storage = Arc::new(storage);
+        let mut tasks = Vec::new();
+        for suffix in ["one", "two"] {
+            let storage = Arc::clone(&storage);
+            let mut replacement = original.clone();
+            replacement.base_url = format!("https://{suffix}.example.test/v1");
+            let expected = expected.clone();
+            tasks.push(tokio::spawn(async move {
+                storage
+                    .replace_provider_connection(&expected, &replacement, true)
+                    .await
+            }));
+        }
+        let mut applied = 0;
+        let mut changed = 0;
+        for task in tasks {
+            match task.await?? {
+                ProviderMutationOutcome::Applied => applied += 1,
+                ProviderMutationOutcome::Changed => changed += 1,
+                outcome => return Err(format!("unexpected outcome: {outcome:?}").into()),
+            }
+        }
+        assert_eq!((applied, changed), (1, 1));
+        Ok(())
+    }
+}

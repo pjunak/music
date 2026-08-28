@@ -6,6 +6,7 @@
 
 mod local_analysis;
 mod planner;
+mod providers;
 mod tags;
 mod vocabulary;
 
@@ -22,6 +23,7 @@ pub use planner::{
     EnergyCurve, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent, PlaylistPlan,
     PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
 };
+pub use providers::*;
 pub use tags::{
     AnalysisReviewBatch, AnalysisReviewDecision, AnalysisReviewFailure, AnalysisReviewFailureCode,
     AnalysisReviewOutcome, AnalysisReviewTarget, AnalysisSuggestion, AssistantDependencyError,

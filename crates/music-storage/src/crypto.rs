@@ -7,6 +7,9 @@ use argon2::password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash}
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
+use music_application::assistant::{
+    EncryptedProviderCredential, ProviderCredentialCipher, ProviderCredentialError, ProviderSecret,
+};
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -198,6 +201,49 @@ impl CredentialVault {
             nonce: URL_SAFE.encode(&nonce[..]),
             hint: credential_hint(secret),
         })
+    }
+}
+
+impl ProviderCredentialCipher for CredentialVault {
+    fn encrypt(
+        &self,
+        connection_id: &str,
+        api_key: &str,
+    ) -> Result<EncryptedProviderCredential, ProviderCredentialError> {
+        CredentialVault::encrypt(self, connection_id, api_key)
+            .map(|encrypted| EncryptedProviderCredential {
+                ciphertext: encrypted.ciphertext,
+                nonce: encrypted.nonce,
+                hint: encrypted.hint,
+            })
+            .map_err(provider_credential_error)
+    }
+
+    fn decrypt(
+        &self,
+        connection_id: &str,
+        ciphertext: &str,
+        nonce: &str,
+    ) -> Result<ProviderSecret, ProviderCredentialError> {
+        CredentialVault::decrypt(self, connection_id, ciphertext, nonce)
+            .map(|secret| ProviderSecret::new(secret.expose_secret()))
+            .map_err(provider_credential_error)
+    }
+}
+
+fn provider_credential_error(error: CryptoError) -> ProviderCredentialError {
+    let code = match error {
+        CryptoError::InvalidMasterKey => "invalid_master_key",
+        CryptoError::NonAsciiConnectionId
+        | CryptoError::EmptyCredential
+        | CryptoError::CredentialEncryptionFailed
+        | CryptoError::CredentialUnreadable
+        | CryptoError::PasswordHashFailed
+        | CryptoError::InvalidPasswordHash
+        | CryptoError::PasswordVerificationFailed => "credential_unreadable",
+    };
+    ProviderCredentialError {
+        code: code.to_owned(),
     }
 }
 
