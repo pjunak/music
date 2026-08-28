@@ -397,7 +397,10 @@ domain operations before publishing the catalog. Folder renames rewrite indexed 
 reissuing track IDs; metadata reconciliation follows the commit. Track moves refresh file-backed
 and filename/folder-derived metadata, then commit the new path and metadata without changing the
 track ID. Bulk track mutations keep per-item journals and publish one final catalog snapshot. The
-shared journal infrastructure does not pretend SQLite and a media volume are one atomic filesystem.
+singleton library state maintains the exact catalog cardinality, so individual commits update the
+generation and count in constant time instead of rescanning every track; a versioned migration
+backfills that invariant for existing Python and early Rust databases. The shared journal
+infrastructure does not pretend SQLite and a media volume are one atomic filesystem.
 
 Full scans discover and read metadata outside the mutation coordinator. Their result carries the
 library generation; final diff application is short and is rejected/reconciled when a committed
@@ -421,9 +424,13 @@ stream-copy remux; compressed-audio SHA-256, codec identity, compatible ASF dura
 fields are verified before the staged result can be committed. Raw ADTS AAC uses Lofty for tag data
 and FFprobe for duration because the corpus disproved Lofty's duration estimate; it remains readable
 and streamable but metadata-read-only because neither the old Mutagen path nor the chosen safe path
-can write it reliably. All writes operate on a new staged file and replace the original only after
-a successful reread. Unsupported or lossy formats return per-track partial failures rather than
-corrupting a batch.
+can write it reliably. All writes operate on a deterministic journal-owned sibling, reread and
+verify the staged media, rename the source to a backup, and publish the staged file before the
+database transaction commits the refreshed metadata and journal. Startup completes any interrupted
+replacement forward. WAV/AIFF container lengths are normalized after Lofty writes so repeated ID3
+updates remain authoritative without losing trailing preservation bytes. Unsupported or lossy
+formats return per-track partial failures rather than corrupting a batch; DB-only fields may still
+commit for that item, while any ambiguous post-replacement failure stops the batch for recovery.
 
 ## Modes, playlists, authoring, and cleanup
 

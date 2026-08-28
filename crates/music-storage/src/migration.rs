@@ -15,12 +15,15 @@ use crate::{SqliteStorageOptions, StorageError};
 
 const BASELINE_MIGRATION_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_MIGRATION_SQL: &str = include_str!("../migrations/0002_library_state.sql");
+const LIBRARY_CATALOG_COUNT_MIGRATION_SQL: &str =
+    include_str!("../migrations/0003_library_catalog_count.sql");
 
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
 const BACKUP_NAME_ATTEMPTS: u16 = 100;
 const BASELINE_MIGRATION_VERSION: i64 = 1;
 const LIBRARY_STATE_MIGRATION_VERSION: i64 = 2;
+const LIBRARY_CATALOG_COUNT_MIGRATION_VERSION: i64 = 3;
 
 const ADDITIVE_MIGRATIONS: &[(&str, &str, &str)] = &[
     (
@@ -195,6 +198,13 @@ fn migrator() -> Migrator {
             "library reconciliation state".into(),
             MigrationType::Simple,
             LIBRARY_STATE_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            LIBRARY_CATALOG_COUNT_MIGRATION_VERSION,
+            "library catalog count backfill".into(),
+            MigrationType::Simple,
+            LIBRARY_CATALOG_COUNT_MIGRATION_SQL.into_sql_str(),
             false,
         ),
     ])
@@ -437,7 +447,8 @@ fn file_name_text(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        BASELINE_MIGRATION_SQL, BASELINE_MIGRATION_VERSION, LIBRARY_STATE_MIGRATION_SQL,
+        BASELINE_MIGRATION_SQL, BASELINE_MIGRATION_VERSION, LIBRARY_CATALOG_COUNT_MIGRATION_SQL,
+        LIBRARY_CATALOG_COUNT_MIGRATION_VERSION, LIBRARY_STATE_MIGRATION_SQL,
         LIBRARY_STATE_MIGRATION_VERSION, migrator,
     };
 
@@ -449,5 +460,8 @@ mod tests {
         assert_eq!(LIBRARY_STATE_MIGRATION_VERSION, 2);
         assert!(!LIBRARY_STATE_MIGRATION_SQL.contains('\r'));
         assert!(migrator().version_exists(LIBRARY_STATE_MIGRATION_VERSION));
+        assert_eq!(LIBRARY_CATALOG_COUNT_MIGRATION_VERSION, 3);
+        assert!(!LIBRARY_CATALOG_COUNT_MIGRATION_SQL.contains('\r'));
+        assert!(migrator().version_exists(LIBRARY_CATALOG_COUNT_MIGRATION_VERSION));
     }
 }

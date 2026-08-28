@@ -374,6 +374,11 @@ mod tests {
                 .fetch_one(&storage.pool)
                 .await?;
         assert_eq!(storage_revision, 0);
+        let discovered_tracks: i64 =
+            sqlx::query_scalar("SELECT discovered_tracks FROM library_state WHERE id = 1")
+                .fetch_one(&storage.pool)
+                .await?;
+        assert_eq!(discovered_tracks, 1);
 
         let outcome = storage.migration_outcome();
         assert!(outcome.migration_applied);

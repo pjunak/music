@@ -252,8 +252,8 @@ bounded self projection and cannot mutate control state. Long-lived WebSockets r
 state and downgrade in place after logout, revocation, or expiry.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 26 currently registered Rust operations, rather than presenting partial work as
-parity. Twenty-five operations overlap the reference and 24 are fully schema-compatible; the
+operations versus 28 currently registered Rust operations, rather than presenting partial work as
+parity. Twenty-seven operations overlap the reference and 26 are fully schema-compatible; the
 remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work. The
 browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
@@ -323,7 +323,8 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
 - [x] Single-owner `LibraryCoordinator` for reconciliation and journaled folder mutations, with
   startup replay before catalog publication and transactional path rewrites that preserve track IDs.
 - [x] Typed catalog records and query ports, SQLite-backed literal search/stable sorting/batch and
-  directory lookup, plus durable generation/reconciliation state in schema v2.
+  directory lookup, plus durable generation/reconciliation state and catalog-count backfill in
+  schema v3.
 - [x] Durable-index startup, generation-checked full reconciliation, visible scan status,
   tree/folder/search/batch/rescan HTTP APIs, metadata fallback, and source signatures.
 - Incremental reconciliation after every committed app-managed mutation and optional watcher hints.
@@ -334,9 +335,13 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
 - Streaming uploads and explicit conflict handling.
 - [x] Shared bounded recovery-journal types and compare-and-swap persistence with explicit legal
   transitions and cross-domain ownership.
-- Staged-file mutation execution; metadata edits, uploads, SFX files, and remaining bulk actions.
-  Rooted folder and track move/delete operations, per-item bulk outcomes, metadata refresh on move,
-  stable track identities, and crash replay are complete.
+- [x] Staged metadata editing with journal replay, verified tag replacement, atomic index commits,
+  stable track identities, explicit clear/unset semantics, and compatible single/bulk HTTP routes.
+  Mixed bulk updates report per-track tag failures while still applying DB-only fields; a failure
+  after file replacement stops for forward recovery.
+- Staged-file mutation execution for uploads, SFX files, and remaining bulk actions. Rooted folder
+  and track move/delete operations, per-item bulk outcomes, metadata refresh on move, stable track
+  identities, and crash replay are complete.
 - Pure cleanup analysis, verification, domain-specific journaled apply, history, and revert.
 
 Gate: generated-format metadata corpus, path property/fuzz tests, symlink/race tests, range tests,

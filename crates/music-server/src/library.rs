@@ -13,17 +13,18 @@ use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::library::{
     FolderMutationResult, LibraryCoordinatorError, LibraryCoordinatorHandle,
     LibraryMutationFailureKind, LibrarySearch, LibraryService, LibrarySortKey, SortOrder,
+    TrackMetadataField, TrackMetadataPatch,
 };
 use music_domain::{IndexedTrack, LibraryPath, TrackId};
 use music_media::{
     LibraryRoot, MediaDeliveryError, MetadataAdapter, list_library_directories,
     read_library_cover_art, resolve_library_media_file,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 use utoipa::openapi::RefOr;
-use utoipa::openapi::schema::{ArrayBuilder, ObjectBuilder, Schema, Type};
+use utoipa::openapi::schema::{AnyOfBuilder, ArrayBuilder, ObjectBuilder, Schema, Type};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -51,9 +52,11 @@ pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(delete_folder))
         .routes(routes!(rename_folder))
         .routes(routes!(tracks_batch))
+        .routes(routes!(bulk_update_metadata))
         .routes(routes!(bulk_move_tracks))
         .routes(routes!(bulk_delete_tracks))
         .routes(routes!(track))
+        .routes(routes!(update_metadata))
         .routes(routes!(move_track))
         .routes(routes!(delete_track))
         .routes(routes!(stream))
@@ -222,6 +225,112 @@ struct BulkDeleteResponse {
     skipped: Vec<BulkActionSkipResponse>,
 }
 
+#[derive(Debug, Clone, Default)]
+enum MetadataUpdateValue<T> {
+    #[default]
+    Unset,
+    Set(Option<T>),
+}
+
+impl<'de, T> Deserialize<'de> for MetadataUpdateValue<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Self::Set)
+    }
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[schema(as = TrackMetadataUpdate)]
+struct TrackMetadataUpdateRequest {
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    title: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    artist: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    album_artist: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    album: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_integer_schema)]
+    track_no: MetadataUpdateValue<u32>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_integer_schema)]
+    disc_no: MetadataUpdateValue<u32>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_integer_schema)]
+    year: MetadataUpdateValue<u32>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_genre_schema)]
+    genre: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_integer_schema)]
+    bpm: MetadataUpdateValue<u32>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    display_title: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    origin: MetadataUpdateValue<String>,
+}
+
+impl TrackMetadataUpdateRequest {
+    fn into_patch(self) -> Result<TrackMetadataPatch, ApiError> {
+        let mut patch = TrackMetadataPatch::new();
+        insert_text_update(&mut patch, TrackMetadataField::Title, self.title)?;
+        insert_text_update(&mut patch, TrackMetadataField::Artist, self.artist)?;
+        insert_text_update(
+            &mut patch,
+            TrackMetadataField::AlbumArtist,
+            self.album_artist,
+        )?;
+        insert_text_update(&mut patch, TrackMetadataField::Album, self.album)?;
+        insert_number_update(&mut patch, TrackMetadataField::TrackNumber, self.track_no)?;
+        insert_number_update(&mut patch, TrackMetadataField::DiscNumber, self.disc_no)?;
+        insert_number_update(&mut patch, TrackMetadataField::Year, self.year)?;
+        insert_text_update(&mut patch, TrackMetadataField::Genre, self.genre)?;
+        insert_number_update(&mut patch, TrackMetadataField::Bpm, self.bpm)?;
+        insert_text_update(
+            &mut patch,
+            TrackMetadataField::DisplayTitle,
+            self.display_title,
+        )?;
+        insert_text_update(&mut patch, TrackMetadataField::Origin, self.origin)?;
+        Ok(patch)
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = BulkMetadataUpdate)]
+struct BulkMetadataUpdateRequest {
+    #[schema(schema_with = bounded_track_id_array_schema)]
+    track_ids: Vec<i64>,
+    updates: TrackMetadataUpdateRequest,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BulkMetadataSkip)]
+struct BulkMetadataSkipResponse {
+    #[schema(schema_with = openapi_integer)]
+    track_id: i64,
+    reason: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BulkMetadataResult)]
+struct BulkMetadataResponse {
+    updated: Vec<TrackResponse>,
+    skipped: Vec<BulkMetadataSkipResponse>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[schema(as = RescanResult)]
 struct RescanResponse {
@@ -372,6 +481,71 @@ fn bounded_track_id_array_schema() -> RefOr<Schema> {
             .build(),
     )
     .into()
+}
+
+fn metadata_nullable_string_schema() -> RefOr<Schema> {
+    metadata_nullable_text_schema(512)
+}
+
+fn metadata_nullable_genre_schema() -> RefOr<Schema> {
+    metadata_nullable_text_schema(128)
+}
+
+fn metadata_nullable_text_schema(maximum: usize) -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(
+                ObjectBuilder::new()
+                    .schema_type(Type::String)
+                    .max_length(Some(maximum))
+                    .build(),
+            )
+            .item(ObjectBuilder::new().schema_type(Type::Null).build())
+            .build(),
+    )
+    .into()
+}
+
+fn metadata_nullable_integer_schema() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(
+                ObjectBuilder::new()
+                    .schema_type(Type::Integer)
+                    .minimum(Some(0.0_f64))
+                    .maximum(Some(9_999.0_f64))
+                    .build(),
+            )
+            .item(ObjectBuilder::new().schema_type(Type::Null).build())
+            .build(),
+    )
+    .into()
+}
+
+fn insert_text_update(
+    patch: &mut TrackMetadataPatch,
+    field: TrackMetadataField,
+    update: MetadataUpdateValue<String>,
+) -> Result<(), ApiError> {
+    if let MetadataUpdateValue::Set(value) = update {
+        patch
+            .insert_text(field, value)
+            .map_err(|_| ApiError::validation())?;
+    }
+    Ok(())
+}
+
+fn insert_number_update(
+    patch: &mut TrackMetadataPatch,
+    field: TrackMetadataField,
+    update: MetadataUpdateValue<u32>,
+) -> Result<(), ApiError> {
+    if let MetadataUpdateValue::Set(value) = update {
+        patch
+            .insert_number(field, value)
+            .map_err(|_| ApiError::validation())?;
+    }
+    Ok(())
 }
 
 #[utoipa::path(
@@ -638,6 +812,76 @@ async fn tracks_batch(
 }
 
 #[utoipa::path(
+    patch,
+    path = "/library/tracks/bulk-metadata",
+    request_body = BulkMetadataUpdateRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = BulkMetadataResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn bulk_update_metadata(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<BulkMetadataUpdateRequest>, JsonRejection>,
+) -> Result<Json<BulkMetadataResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=1000).contains(&payload.track_ids.len()) {
+        return Err(ApiError::validation());
+    }
+    let patch = payload.updates.into_patch()?;
+    if patch.is_empty() {
+        return Err(ApiError::bad_request("no fields to update"));
+    }
+
+    let supplied_ids = payload
+        .track_ids
+        .into_iter()
+        .filter_map(|raw| TrackId::new(raw).ok())
+        .collect::<Vec<_>>();
+    let library = library(&state)?;
+    let matched = library
+        .service
+        .tracks_by_ids(&supplied_ids)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "bulk metadata track lookup failed");
+            ApiError::internal()
+        })?;
+    if matched.is_empty() {
+        return Err(ApiError::plain_not_found(
+            "no tracks matched the supplied ids",
+        ));
+    }
+    let matched_ids = matched.into_iter().map(|track| track.id).collect();
+    let results = library
+        .coordinator
+        .update_tracks_metadata(matched_ids, patch)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "bulk metadata coordinator failed");
+            ApiError::internal()
+        })?;
+
+    let mut updated = Vec::new();
+    let mut skipped = Vec::new();
+    for item in results {
+        if let Some(track) = item.track {
+            updated.push(track.try_into()?);
+        }
+        if let Some(error) = item.error {
+            skipped.push(BulkMetadataSkipResponse {
+                track_id: item.track_id.get(),
+                reason: bulk_metadata_reason(&error),
+            });
+        }
+    }
+    Ok(Json(BulkMetadataResponse { updated, skipped }))
+}
+
+#[utoipa::path(
     post,
     path = "/library/tracks/bulk-move",
     request_body = BulkMoveRequest,
@@ -785,6 +1029,36 @@ async fn track(
     let _ = crate::auth::optional_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
     let track = indexed_track(&state, raw_track_id).await?;
+    Ok(Json(track.try_into()?))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/library/tracks/{track_id}/metadata",
+    params(("track_id" = i128, Path, description = "Track identifier")),
+    request_body = TrackMetadataUpdateRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = TrackResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn update_metadata(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    track_id: Result<Path<i64>, PathRejection>,
+    payload: Result<Json<TrackMetadataUpdateRequest>, JsonRejection>,
+) -> Result<Json<TrackResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
+    let track_id =
+        TrackId::new(raw_track_id).map_err(|_| ApiError::plain_not_found("track not found"))?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let track = library(&state)?
+        .coordinator
+        .update_track_metadata(track_id, payload.into_patch()?)
+        .await
+        .map_err(map_track_metadata_error)?;
     Ok(Json(track.try_into()?))
 }
 
@@ -1054,6 +1328,47 @@ fn map_track_delete_error(error: LibraryCoordinatorError) -> ApiError {
             ApiError::internal()
         }
     }
+}
+
+fn map_track_metadata_error(error: LibraryCoordinatorError) -> ApiError {
+    match error {
+        LibraryCoordinatorError::TrackNotFound { .. } => {
+            ApiError::plain_not_found("track not found")
+        }
+        LibraryCoordinatorError::Mutation(failure) => match failure.kind() {
+            LibraryMutationFailureKind::NotFound => ApiError::gone("track file missing"),
+            LibraryMutationFailureKind::Invalid => {
+                ApiError::bad_request("unsupported metadata format")
+            }
+            LibraryMutationFailureKind::Conflict | LibraryMutationFailureKind::NotEmpty => {
+                ApiError::conflict("metadata update conflicts with another file operation")
+            }
+            LibraryMutationFailureKind::Io => {
+                tracing::error!(error = %failure, "library metadata update failed");
+                ApiError::internal()
+            }
+        },
+        other => {
+            tracing::error!(error = %other, "library metadata coordinator failed");
+            ApiError::internal()
+        }
+    }
+}
+
+fn bulk_metadata_reason(error: &LibraryCoordinatorError) -> String {
+    match error {
+        LibraryCoordinatorError::TrackNotFound { .. } => "not found",
+        LibraryCoordinatorError::Mutation(failure) => match failure.kind() {
+            LibraryMutationFailureKind::NotFound => "file missing on disk",
+            LibraryMutationFailureKind::Invalid => "unsupported format",
+            LibraryMutationFailureKind::Conflict => "metadata update conflict",
+            LibraryMutationFailureKind::NotEmpty => "metadata target is not writable",
+            LibraryMutationFailureKind::Io => "tag write failed",
+        },
+        LibraryCoordinatorError::RecoveryConflict => "batch stopped for recovery",
+        _ => "metadata update failed",
+    }
+    .to_owned()
 }
 
 fn bulk_mutation_reason(error: &LibraryCoordinatorError) -> String {

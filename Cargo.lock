@@ -1274,6 +1274,7 @@ name = "music-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "clap",
  "dotenvy",
  "futures-util",

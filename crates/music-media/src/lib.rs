@@ -24,8 +24,9 @@ pub use discovery::{
     list_library_directories,
 };
 pub use metadata::{
-    AudioMetadata, FfmpegTools, MetadataAdapter, MetadataWriteCapability, StagedTagUpdate,
-    TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata, stage_tag_update,
+    AudioMetadata, FfmpegTools, MetadataAdapter, MetadataError, MetadataWriteCapability,
+    StagedTagUpdate, TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata,
+    stage_tag_update,
 };
 pub use mutation::FilesystemLibraryMutations;
 

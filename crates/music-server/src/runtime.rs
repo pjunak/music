@@ -542,6 +542,8 @@ mod tests {
         ETAG, IF_NONE_MATCH, RANGE, SET_COOKIE, X_CONTENT_TYPE_OPTIONS,
     };
     use axum::http::{Request, StatusCode};
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
     use music_application::auth::UnixSeconds;
     use music_application::library::{LibraryFileMutation, ReconciliationStatus};
     use music_application::recovery::{
@@ -582,6 +584,22 @@ mod tests {
             ),
         ]))
         .map_err(Into::into)
+    }
+
+    fn reference_wav() -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../contracts/reference/v1/metadata.examples.json"
+        ))?;
+        let encoded = fixture["cases"]
+            .as_array()
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case["extension"].as_str() == Some(".wav"))
+            })
+            .and_then(|case| case["source_base64"].as_str())
+            .ok_or("WAV metadata fixture is missing")?;
+        Ok(STANDARD.decode(encoded)?)
     }
 
     #[tokio::test]
@@ -754,6 +772,233 @@ mod tests {
             .is_empty()
         );
         recovered.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn metadata_routes_preserve_tag_db_and_bulk_partial_failure_contracts()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Metadata"))?;
+        let wav = reference_wav()?;
+        fs::write(directory.path().join("music/Metadata/first.wav"), &wav)?;
+        fs::write(directory.path().join("music/Metadata/second.wav"), &wav)?;
+
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let indexed = runtime
+            .library_service
+            .tracks_by_ids(&runtime.library_service.catalog_track_ids().await?)
+            .await?;
+        let first_id = indexed
+            .iter()
+            .find(|track| track.path.as_str() == "Metadata/first.wav")
+            .ok_or("first metadata fixture was not indexed")?
+            .id;
+        let second_id = indexed
+            .iter()
+            .find(|track| track.path.as_str() == "Metadata/second.wav")
+            .ok_or("second metadata fixture was not indexed")?
+            .id;
+
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+        let unauthorized = router
+            .clone()
+            .oneshot(
+                Request::patch(format!("/api/library/tracks/{}/metadata", first_id.get()))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Denied"}"#))?,
+            )
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?
+            .to_owned();
+
+        let edited = router
+            .clone()
+            .oneshot(
+                Request::patch(format!("/api/library/tracks/{}/metadata", first_id.get()))
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"title":"Rust title","origin":"Game OST","display_title":null}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(edited.status(), StatusCode::OK);
+        let edited_json: Value =
+            serde_json::from_slice(&to_bytes(edited.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(edited_json["id"], first_id.get());
+        assert_eq!(edited_json["title"], "Rust title");
+        assert_eq!(edited_json["origin"], "Game OST");
+        assert_eq!(edited_json["display_title"], "");
+        let file_metadata = music_media::MetadataAdapter::native_only()
+            .read(&directory.path().join("music/Metadata/first.wav"))?;
+        assert_eq!(file_metadata.title, "Rust title");
+
+        let unchanged = router
+            .clone()
+            .oneshot(
+                Request::patch(format!("/api/library/tracks/{}/metadata", first_id.get()))
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))?,
+            )
+            .await?;
+        assert_eq!(unchanged.status(), StatusCode::OK);
+        let invalid = router
+            .clone()
+            .oneshot(
+                Request::patch(format!("/api/library/tracks/{}/metadata", first_id.get()))
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"bpm":10000}"#))?,
+            )
+            .await?;
+        assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let empty_bulk = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/library/tracks/bulk-metadata")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        "{{\"track_ids\":[{}],\"updates\":{{}}}}",
+                        first_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(empty_bulk.status(), StatusCode::BAD_REQUEST);
+        let empty_ids = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/library/tracks/bulk-metadata")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"track_ids":[],"updates":{"artist":"Nobody"}}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(empty_ids.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let no_matches = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/library/tracks/bulk-metadata")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"track_ids":[9999991,9999992],"updates":{"artist":"Nobody"}}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(no_matches.status(), StatusCode::NOT_FOUND);
+
+        fs::remove_file(directory.path().join("music/Metadata/second.wav"))?;
+        let missing_single = router
+            .clone()
+            .oneshot(
+                Request::patch(format!("/api/library/tracks/{}/metadata", second_id.get()))
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"artist":"Missing"}"#))?,
+            )
+            .await?;
+        assert_eq!(missing_single.status(), StatusCode::GONE);
+        let bulk = router
+            .clone()
+            .oneshot(
+                Request::patch("/api/library/tracks/bulk-metadata")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        "{{\"track_ids\":[{},{},999999],\"updates\":{{\"artist\":\"Rust artist\",\"origin\":\"Bulk origin\"}}}}",
+                        first_id.get(),
+                        second_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(bulk.status(), StatusCode::OK);
+        let bulk_json: Value =
+            serde_json::from_slice(&to_bytes(bulk.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(bulk_json["updated"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            bulk_json["skipped"].as_array().map(Vec::len),
+            Some(1),
+            "{bulk_json}"
+        );
+        assert_eq!(bulk_json["skipped"][0]["track_id"], second_id.get());
+        assert!(
+            bulk_json["skipped"][0]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("missing"))
+        );
+
+        let first = runtime
+            .library_service
+            .track(first_id)
+            .await?
+            .ok_or("updated first track disappeared")?;
+        let second = runtime
+            .library_service
+            .track(second_id)
+            .await?
+            .ok_or("updated second track disappeared")?;
+        assert_eq!(first.metadata.artist, "Rust artist");
+        assert_eq!(first.origin, "Bulk origin");
+        assert_ne!(second.metadata.artist, "Rust artist");
+        assert_eq!(second.origin, "Bulk origin");
+        assert_eq!(
+            music_media::MetadataAdapter::native_only()
+                .read(&directory.path().join("music/Metadata/first.wav"))?
+                .artist,
+            "Rust artist"
+        );
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                runtime.storage.as_ref(),
+                RecoveryDomain::Library,
+            )
+            .await?
+            .is_empty()
+        );
+
+        runtime.shutdown().await?;
         Ok(())
     }
 

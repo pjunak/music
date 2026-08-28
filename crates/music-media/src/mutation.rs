@@ -4,11 +4,14 @@ use std::path::Path;
 
 use music_application::library::{
     LibraryFileMutation, LibraryFileMutationOutcome, LibraryMutationEffects,
-    LibraryMutationFailure, LibraryMutationFailureKind, LibraryMutationFuture,
+    LibraryMutationFailure, LibraryMutationFailureKind, LibraryMutationFuture, TrackMetadataField,
+    TrackMetadataPatch, TrackMetadataPatchValue,
 };
+use music_application::recovery::RecoveryJournalId;
 
 use crate::{
-    FilesystemDiscoveryError, LibraryRoot, MetadataAdapter, RootedPathError, inspect_library_track,
+    FilesystemDiscoveryError, LibraryRoot, MetadataAdapter, MetadataError, RootedPathError,
+    TagField, TagPatch, inspect_library_track,
 };
 
 #[derive(Debug, Clone)]
@@ -25,6 +28,7 @@ impl FilesystemLibraryMutations {
 
     fn apply_blocking(
         &self,
+        journal_id: &RecoveryJournalId,
         mutation: LibraryFileMutation,
         replay: bool,
     ) -> Result<LibraryFileMutationOutcome, FilesystemMutationError> {
@@ -233,24 +237,251 @@ impl FilesystemLibraryMutations {
                 })?;
                 Ok(LibraryFileMutationOutcome::TrackDeleted { track_id })
             }
+            LibraryFileMutation::UpdateTrackMetadata {
+                track_id,
+                path,
+                patch,
+            } => self.apply_metadata_update(journal_id, track_id, path, &patch, replay),
         }
+    }
+
+    fn apply_metadata_update(
+        &self,
+        journal_id: &RecoveryJournalId,
+        track_id: music_domain::TrackId,
+        path: music_domain::LibraryPath,
+        patch: &TrackMetadataPatch,
+        replay: bool,
+    ) -> Result<LibraryFileMutationOutcome, FilesystemMutationError> {
+        if !patch.has_tag_changes() {
+            return Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
+                track_id,
+                discovered: None,
+            });
+        }
+        let stage_path = metadata_sibling_path(&path, journal_id, "stage")?;
+        let backup_path = metadata_sibling_path(&path, journal_id, "backup")?;
+        let stage_absolute = self
+            .root
+            .resolve_for_creation(&stage_path)
+            .map_err(FilesystemMutationError::RootedPath)?;
+        let backup_absolute = self
+            .root
+            .resolve_for_creation(&backup_path)
+            .map_err(FilesystemMutationError::RootedPath)?;
+        let stage_state = mutation_artifact_state(&stage_absolute)?;
+        let mut backup_state = mutation_artifact_state(&backup_absolute)?;
+
+        let source_absolute = match self.root.resolve_existing_file_for_mutation(&path) {
+            Ok(source) => source,
+            Err(error) if rooted_path_is_missing(&error) => {
+                if backup_state == MutationArtifactState::RegularFile
+                    && stage_state == MutationArtifactState::RegularFile
+                {
+                    let target = self
+                        .root
+                        .resolve_for_creation(&path)
+                        .map_err(FilesystemMutationError::RootedPath)?;
+                    std::fs::rename(&stage_absolute, target).map_err(|source| {
+                        FilesystemMutationError::Io {
+                            operation: "publish recovered metadata update",
+                            source,
+                        }
+                    })?;
+                    remove_regular_file_if_present(
+                        &backup_absolute,
+                        "remove recovered metadata backup",
+                    )?;
+                    let discovered = inspect_library_track(&self.root, &self.metadata, &path)
+                        .map_err(FilesystemMutationError::Discovery)?;
+                    return Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
+                        track_id,
+                        discovered: Some(discovered),
+                    });
+                }
+                if backup_state == MutationArtifactState::RegularFile {
+                    let target = self
+                        .root
+                        .resolve_for_creation(&path)
+                        .map_err(FilesystemMutationError::RootedPath)?;
+                    std::fs::rename(&backup_absolute, target).map_err(|source| {
+                        FilesystemMutationError::Io {
+                            operation: "restore interrupted metadata source",
+                            source,
+                        }
+                    })?;
+                    backup_state = MutationArtifactState::Missing;
+                    self.root
+                        .resolve_existing_file_for_mutation(&path)
+                        .map_err(FilesystemMutationError::RootedPath)?
+                } else {
+                    return Err(FilesystemMutationError::RootedPath(error));
+                }
+            }
+            Err(error) => return Err(FilesystemMutationError::RootedPath(error)),
+        };
+
+        if replay
+            && backup_state == MutationArtifactState::RegularFile
+            && stage_state == MutationArtifactState::Missing
+        {
+            remove_regular_file_if_present(&backup_absolute, "remove recovered metadata backup")?;
+            let discovered = inspect_library_track(&self.root, &self.metadata, &path)
+                .map_err(FilesystemMutationError::Discovery)?;
+            return Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
+                track_id,
+                discovered: Some(discovered),
+            });
+        }
+        remove_regular_file_if_present(&stage_absolute, "remove stale metadata stage")?;
+        if backup_state != MutationArtifactState::Missing {
+            return Err(FilesystemMutationError::UnexpectedMutationArtifact);
+        }
+
+        let tag_patch = media_tag_patch(patch)?;
+        let staged = self
+            .metadata
+            .stage_update(&source_absolute, &stage_absolute, &tag_patch)
+            .map_err(FilesystemMutationError::Metadata)?;
+        let staged_path = staged
+            .persist()
+            .map_err(FilesystemMutationError::Metadata)?;
+        std::fs::rename(&source_absolute, &backup_absolute).map_err(|source| {
+            FilesystemMutationError::Io {
+                operation: "stage metadata source backup",
+                source,
+            }
+        })?;
+        if let Err(source) = std::fs::rename(&staged_path, &source_absolute) {
+            let _ = std::fs::rename(&backup_absolute, &source_absolute);
+            return Err(FilesystemMutationError::Io {
+                operation: "publish metadata update",
+                source,
+            });
+        }
+        remove_regular_file_if_present(&backup_absolute, "remove metadata source backup")?;
+        let discovered = inspect_library_track(&self.root, &self.metadata, &path)
+            .map_err(FilesystemMutationError::Discovery)?;
+        Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
+            track_id,
+            discovered: Some(discovered),
+        })
+    }
+}
+
+fn metadata_sibling_path(
+    path: &music_domain::LibraryPath,
+    journal_id: &RecoveryJournalId,
+    role: &'static str,
+) -> Result<music_domain::LibraryPath, FilesystemMutationError> {
+    let name = format!(
+        ".{}.{}.metadata-{role}",
+        path.file_name(),
+        journal_id.as_str()
+    );
+    path.parent()
+        .map_or_else(
+            || music_domain::LibraryPath::parse(&name),
+            |parent| parent.join(&name),
+        )
+        .map_err(|_| FilesystemMutationError::InvalidMutationPath)
+}
+
+fn media_tag_patch(patch: &TrackMetadataPatch) -> Result<TagPatch, FilesystemMutationError> {
+    let mut tags = TagPatch::new();
+    for (field, value) in patch.changes() {
+        let Some(field) = media_tag_field(field) else {
+            continue;
+        };
+        match value {
+            TrackMetadataPatchValue::Text(value) => tags
+                .insert_text(field, value.clone())
+                .map_err(FilesystemMutationError::Metadata)?,
+            TrackMetadataPatchValue::Number(value) => tags
+                .insert_number(field, *value)
+                .map_err(FilesystemMutationError::Metadata)?,
+            TrackMetadataPatchValue::Cleared => tags
+                .clear(field)
+                .map_err(FilesystemMutationError::Metadata)?,
+        }
+    }
+    Ok(tags)
+}
+
+const fn media_tag_field(field: TrackMetadataField) -> Option<TagField> {
+    match field {
+        TrackMetadataField::Title => Some(TagField::Title),
+        TrackMetadataField::Artist => Some(TagField::Artist),
+        TrackMetadataField::AlbumArtist => Some(TagField::AlbumArtist),
+        TrackMetadataField::Album => Some(TagField::Album),
+        TrackMetadataField::TrackNumber => Some(TagField::TrackNumber),
+        TrackMetadataField::DiscNumber => Some(TagField::DiscNumber),
+        TrackMetadataField::Year => Some(TagField::Year),
+        TrackMetadataField::Genre => Some(TagField::Genre),
+        TrackMetadataField::Bpm => Some(TagField::Bpm),
+        TrackMetadataField::DisplayTitle | TrackMetadataField::Origin => None,
+    }
+}
+
+fn remove_regular_file_if_present(
+    path: &Path,
+    operation: &'static str,
+) -> Result<(), FilesystemMutationError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(FilesystemMutationError::UnexpectedMutationArtifact)
+        }
+        Ok(_) => std::fs::remove_file(path)
+            .map_err(|source| FilesystemMutationError::Io { operation, source }),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(FilesystemMutationError::Io { operation, source }),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum MutationArtifactState {
+    Missing,
+    RegularFile,
+}
+
+fn mutation_artifact_state(path: &Path) -> Result<MutationArtifactState, FilesystemMutationError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(FilesystemMutationError::UnexpectedMutationArtifact)
+        }
+        Ok(_) => Ok(MutationArtifactState::RegularFile),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            Ok(MutationArtifactState::Missing)
+        }
+        Err(source) => Err(FilesystemMutationError::Io {
+            operation: "inspect metadata mutation artifact",
+            source,
+        }),
     }
 }
 
 impl LibraryMutationEffects for FilesystemLibraryMutations {
-    fn apply(&self, mutation: LibraryFileMutation, replay: bool) -> LibraryMutationFuture<'_> {
+    fn apply<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        mutation: LibraryFileMutation,
+        replay: bool,
+    ) -> LibraryMutationFuture<'a> {
         let effects = self.clone();
+        let journal_id = journal_id.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || effects.apply_blocking(mutation, replay))
-                .await
-                .map_err(|source| {
-                    LibraryMutationFailure::new(
-                        LibraryMutationFailureKind::Io,
-                        "mutation_worker_failed",
-                        Box::new(source),
-                    )
-                })?
-                .map_err(map_failure)
+            tokio::task::spawn_blocking(move || {
+                effects.apply_blocking(&journal_id, mutation, replay)
+            })
+            .await
+            .map_err(|source| {
+                LibraryMutationFailure::new(
+                    LibraryMutationFailureKind::Io,
+                    "mutation_worker_failed",
+                    Box::new(source),
+                )
+            })?
+            .map_err(map_failure)
         })
     }
 }
@@ -259,6 +490,7 @@ impl LibraryMutationEffects for FilesystemLibraryMutations {
 enum FilesystemMutationError {
     RootedPath(RootedPathError),
     Discovery(FilesystemDiscoveryError),
+    Metadata(MetadataError),
     Io {
         operation: &'static str,
         source: std::io::Error,
@@ -267,6 +499,8 @@ enum FilesystemMutationError {
     DestinationExists,
     DirectoryNotEmpty,
     InvalidMove,
+    InvalidMutationPath,
+    UnexpectedMutationArtifact,
 }
 
 impl Display for FilesystemMutationError {
@@ -274,11 +508,16 @@ impl Display for FilesystemMutationError {
         match self {
             Self::RootedPath(source) => Display::fmt(source, formatter),
             Self::Discovery(source) => Display::fmt(source, formatter),
+            Self::Metadata(source) => Display::fmt(source, formatter),
             Self::Io { operation, .. } => write!(formatter, "failed to {operation}"),
             Self::NotADirectory => formatter.write_str("library folder path is not a directory"),
             Self::DestinationExists => formatter.write_str("folder destination already exists"),
             Self::DirectoryNotEmpty => formatter.write_str("library folder is not empty"),
             Self::InvalidMove => formatter.write_str("folder destination is invalid"),
+            Self::InvalidMutationPath => formatter.write_str("mutation path is invalid"),
+            Self::UnexpectedMutationArtifact => {
+                formatter.write_str("mutation staging artifact is invalid")
+            }
         }
     }
 }
@@ -288,11 +527,14 @@ impl Error for FilesystemMutationError {
         match self {
             Self::RootedPath(source) => Some(source),
             Self::Discovery(source) => Some(source),
+            Self::Metadata(source) => Some(source),
             Self::Io { source, .. } => Some(source),
             Self::NotADirectory
             | Self::DestinationExists
             | Self::DirectoryNotEmpty
-            | Self::InvalidMove => None,
+            | Self::InvalidMove
+            | Self::InvalidMutationPath
+            | Self::UnexpectedMutationArtifact => None,
         }
     }
 }
@@ -335,45 +577,82 @@ fn rooted_path_is_missing(error: &RootedPathError) -> bool {
 }
 
 fn map_failure(error: FilesystemMutationError) -> LibraryMutationFailure {
-    let (kind, code) = match &error {
-        FilesystemMutationError::RootedPath(error) if rooted_path_is_missing(error) => {
-            (LibraryMutationFailureKind::NotFound, "folder_not_found")
-        }
+    let (kind, code, recovery_required) = match &error {
+        FilesystemMutationError::RootedPath(error) if rooted_path_is_missing(error) => (
+            LibraryMutationFailureKind::NotFound,
+            "library_path_not_found",
+            false,
+        ),
         FilesystemMutationError::RootedPath(_)
         | FilesystemMutationError::NotADirectory
-        | FilesystemMutationError::InvalidMove => {
-            (LibraryMutationFailureKind::Invalid, "folder_path_invalid")
-        }
+        | FilesystemMutationError::InvalidMove => (
+            LibraryMutationFailureKind::Invalid,
+            "library_path_invalid",
+            false,
+        ),
         FilesystemMutationError::DestinationExists => (
             LibraryMutationFailureKind::Conflict,
-            "folder_destination_exists",
+            "library_destination_exists",
+            false,
         ),
-        FilesystemMutationError::DirectoryNotEmpty => {
-            (LibraryMutationFailureKind::NotEmpty, "folder_not_empty")
-        }
-        FilesystemMutationError::Io { .. } => {
-            (LibraryMutationFailureKind::Io, "library_file_io_failed")
-        }
+        FilesystemMutationError::DirectoryNotEmpty => (
+            LibraryMutationFailureKind::NotEmpty,
+            "folder_not_empty",
+            false,
+        ),
+        FilesystemMutationError::Io { .. } => (
+            LibraryMutationFailureKind::Io,
+            "library_file_io_failed",
+            true,
+        ),
         FilesystemMutationError::Discovery(_) => (
             LibraryMutationFailureKind::Io,
             "track_metadata_refresh_failed",
+            true,
+        ),
+        FilesystemMutationError::Metadata(MetadataError::UnsupportedFormat { .. }) => (
+            LibraryMutationFailureKind::Invalid,
+            "track_metadata_format_unsupported",
+            false,
+        ),
+        FilesystemMutationError::Metadata(_) => (
+            LibraryMutationFailureKind::Io,
+            "track_metadata_update_failed",
+            false,
+        ),
+        FilesystemMutationError::InvalidMutationPath => (
+            LibraryMutationFailureKind::Invalid,
+            "metadata_mutation_path_invalid",
+            false,
+        ),
+        FilesystemMutationError::UnexpectedMutationArtifact => (
+            LibraryMutationFailureKind::Conflict,
+            "metadata_mutation_artifact_conflict",
+            false,
         ),
     };
-    LibraryMutationFailure::new(kind, code, Box::new(error))
+    if recovery_required {
+        LibraryMutationFailure::new(kind, code, Box::new(error))
+    } else {
+        LibraryMutationFailure::without_recovery(kind, code, Box::new(error))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::error::Error;
 
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
     use music_application::library::{
         LibraryFileMutation, LibraryFileMutationOutcome, LibraryMutationEffects,
-        LibraryMutationFailureKind,
+        LibraryMutationFailureKind, TrackMetadataField, TrackMetadataPatch,
     };
+    use music_application::recovery::RecoveryJournalId;
     use music_domain::{LibraryPath, TrackId};
     use tempfile::tempdir;
 
-    use super::FilesystemLibraryMutations;
+    use super::{FilesystemLibraryMutations, media_tag_patch, metadata_sibling_path};
     use crate::LibraryRoot;
 
     #[tokio::test]
@@ -386,8 +665,10 @@ mod tests {
             LibraryRoot::open(&root)?,
             crate::MetadataAdapter::native_only(),
         );
+        let journal_id = RecoveryJournalId::new();
         let created = effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::CreateFolder {
                     path: LibraryPath::parse("Old/Nested")?,
                 },
@@ -397,6 +678,7 @@ mod tests {
         assert!(matches!(created, LibraryFileMutationOutcome::Folder { .. }));
         let descendant = effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::RenameFolder {
                     source: LibraryPath::parse("Old")?,
                     destination: LibraryPath::parse("Old/Nested/Moved")?,
@@ -409,6 +691,7 @@ mod tests {
         assert_eq!(descendant.kind(), LibraryMutationFailureKind::Invalid);
         effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::RenameFolder {
                     source: LibraryPath::parse("Old")?,
                     destination: LibraryPath::parse("Archive/New")?,
@@ -419,6 +702,7 @@ mod tests {
         assert!(root.join("Archive/New/Nested").is_dir());
         let replayed = effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::RenameFolder {
                     source: LibraryPath::parse("Old")?,
                     destination: LibraryPath::parse("Archive/New")?,
@@ -435,6 +719,7 @@ mod tests {
         ));
         let not_empty = effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::DeleteFolder {
                     path: LibraryPath::parse("Archive/New")?,
                     recursive: false,
@@ -447,6 +732,7 @@ mod tests {
         assert_eq!(not_empty.kind(), LibraryMutationFailureKind::NotEmpty);
         effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::DeleteFolder {
                     path: LibraryPath::parse("Archive/New")?,
                     recursive: true,
@@ -458,6 +744,7 @@ mod tests {
 
         effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::CreateFolder {
                     path: LibraryPath::parse("Case/Nested")?,
                 },
@@ -466,6 +753,7 @@ mod tests {
             .await?;
         effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::RenameFolder {
                     source: LibraryPath::parse("Case")?,
                     destination: LibraryPath::parse("case")?,
@@ -476,6 +764,7 @@ mod tests {
         assert!(root.join("case/Nested").is_dir());
         effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::RenameFolder {
                     source: LibraryPath::parse("Case")?,
                     destination: LibraryPath::parse("case")?,
@@ -497,6 +786,7 @@ mod tests {
             LibraryRoot::open(&root)?,
             crate::MetadataAdapter::native_only(),
         );
+        let journal_id = RecoveryJournalId::new();
         let track_id = TrackId::new(7)?;
         let mutation = LibraryFileMutation::MoveTrack {
             track_id,
@@ -504,18 +794,19 @@ mod tests {
             destination: LibraryPath::parse("Archive/renamed.mp3")?,
         };
         assert!(matches!(
-            effects.apply(mutation.clone(), false).await?,
+            effects.apply(&journal_id, mutation.clone(), false).await?,
             LibraryFileMutationOutcome::TrackMoved { track, .. }
                 if track.path.as_str() == "Archive/renamed.mp3"
         ));
         assert_eq!(std::fs::read(root.join("Archive/renamed.mp3"))?, b"fixture");
         assert!(matches!(
-            effects.apply(mutation, true).await?,
+            effects.apply(&journal_id, mutation, true).await?,
             LibraryFileMutationOutcome::TrackMoved { .. }
         ));
 
         effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::DeleteTrack {
                     track_id,
                     path: LibraryPath::parse("Archive/renamed.mp3")?,
@@ -527,6 +818,7 @@ mod tests {
         assert!(matches!(
             effects
                 .apply(
+                    &journal_id,
                     LibraryFileMutation::DeleteTrack {
                         track_id,
                         path: LibraryPath::parse("Archive/renamed.mp3")?,
@@ -539,6 +831,7 @@ mod tests {
 
         let missing = effects
             .apply(
+                &journal_id,
                 LibraryFileMutation::MoveTrack {
                     track_id,
                     source: LibraryPath::parse("missing.mp3")?,
@@ -550,6 +843,136 @@ mod tests {
             .err()
             .ok_or("missing track move unexpectedly succeeded")?;
         assert_eq!(missing.kind(), LibraryMutationFailureKind::NotFound);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn metadata_effects_replace_verified_media_and_replay_forward()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/reference/v1/metadata.examples.json"
+        ))?;
+        let wav = fixture["cases"]
+            .as_array()
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case["extension"].as_str() == Some(".wav"))
+            })
+            .ok_or("WAV metadata fixture is missing")?;
+        let source_bytes = STANDARD.decode(
+            wav["source_base64"]
+                .as_str()
+                .ok_or("WAV fixture payload is missing")?,
+        )?;
+
+        let directory = tempdir()?;
+        let root = directory.path().join("music");
+        std::fs::create_dir_all(root.join("Album"))?;
+        std::fs::write(root.join("Album/song.wav"), &source_bytes)?;
+        let effects = FilesystemLibraryMutations::new(
+            LibraryRoot::open(&root)?,
+            crate::MetadataAdapter::native_only(),
+        );
+        let mut patch = TrackMetadataPatch::new();
+        patch.insert_text(
+            TrackMetadataField::Title,
+            Some("Journaled title".to_owned()),
+        )?;
+        patch.insert_text(
+            TrackMetadataField::Artist,
+            Some("Journaled artist".to_owned()),
+        )?;
+        patch.insert_text(
+            TrackMetadataField::DisplayTitle,
+            Some("Database title".to_owned()),
+        )?;
+        let journal_id = RecoveryJournalId::new();
+        let mutation = LibraryFileMutation::UpdateTrackMetadata {
+            track_id: TrackId::new(9)?,
+            path: LibraryPath::parse("Album/song.wav")?,
+            patch,
+        };
+
+        let applied = effects.apply(&journal_id, mutation.clone(), false).await?;
+        assert!(matches!(
+            applied,
+            LibraryFileMutationOutcome::TrackMetadataUpdated {
+                discovered: Some(track),
+                ..
+            } if track.metadata.title == "Journaled title"
+                && track.metadata.artist == "Journaled artist"
+        ));
+        assert!(std::fs::read_dir(root.join("Album"))?.all(|entry| {
+            entry.is_ok_and(|entry| !entry.file_name().to_string_lossy().contains("metadata-"))
+        }));
+
+        let replayed = effects.apply(&journal_id, mutation, true).await?;
+        assert!(matches!(
+            replayed,
+            LibraryFileMutationOutcome::TrackMetadataUpdated {
+                discovered: Some(track),
+                ..
+            } if track.metadata.title == "Journaled title"
+        ));
+
+        let mut second_patch = TrackMetadataPatch::new();
+        second_patch.insert_text(TrackMetadataField::Artist, Some("Second artist".to_owned()))?;
+        let second = effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::UpdateTrackMetadata {
+                    track_id: TrackId::new(9)?,
+                    path: LibraryPath::parse("Album/song.wav")?,
+                    patch: second_patch,
+                },
+                false,
+            )
+            .await;
+        assert!(second.is_ok(), "{second:?}");
+
+        std::fs::write(root.join("Album/recovery.wav"), &source_bytes)?;
+        let recovery_id = RecoveryJournalId::new();
+        let recovery_path = LibraryPath::parse("Album/recovery.wav")?;
+        let recovery_stage = metadata_sibling_path(&recovery_path, &recovery_id, "stage")?;
+        let recovery_backup = metadata_sibling_path(&recovery_path, &recovery_id, "backup")?;
+        let mut recovery_patch = TrackMetadataPatch::new();
+        recovery_patch.insert_text(
+            TrackMetadataField::Title,
+            Some("Recovered title".to_owned()),
+        )?;
+        effects
+            .metadata
+            .stage_update(
+                &root.join("Album/recovery.wav"),
+                &root.join(recovery_stage.as_str()),
+                &media_tag_patch(&recovery_patch)?,
+            )?
+            .persist()?;
+        std::fs::rename(
+            root.join("Album/recovery.wav"),
+            root.join(recovery_backup.as_str()),
+        )?;
+        let recovered = effects
+            .apply(
+                &recovery_id,
+                LibraryFileMutation::UpdateTrackMetadata {
+                    track_id: TrackId::new(10)?,
+                    path: recovery_path,
+                    patch: recovery_patch,
+                },
+                true,
+            )
+            .await?;
+        assert!(matches!(
+            recovered,
+            LibraryFileMutationOutcome::TrackMetadataUpdated {
+                discovered: Some(track),
+                ..
+            } if track.metadata.title == "Recovered title"
+        ));
+        assert!(!root.join(recovery_stage.as_str()).exists());
+        assert!(!root.join(recovery_backup.as_str()).exists());
         Ok(())
     }
 }

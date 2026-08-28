@@ -6,9 +6,9 @@ use std::pin::Pin;
 use music_domain::{IndexedTrack, LibraryPath, TrackId};
 use serde_json::{Value, json};
 
-use crate::recovery::{RecoveryJournalEntry, RecoveryOperation};
+use crate::recovery::{RecoveryJournalEntry, RecoveryJournalId, RecoveryOperation};
 
-use super::{DiscoveredTrack, LibraryDependencyError, LibraryStatus};
+use super::{DiscoveredTrack, LibraryDependencyError, LibraryStatus, TrackMetadataPatch};
 
 pub type LibraryMutationFuture<'a> = Pin<
     Box<
@@ -38,6 +38,11 @@ pub enum LibraryFileMutation {
         track_id: TrackId,
         path: LibraryPath,
     },
+    UpdateTrackMetadata {
+        track_id: TrackId,
+        path: LibraryPath,
+        patch: TrackMetadataPatch,
+    },
 }
 
 impl LibraryFileMutation {
@@ -48,6 +53,7 @@ impl LibraryFileMutation {
             Self::DeleteFolder { .. } => "delete_folder",
             Self::MoveTrack { .. } => "move_track",
             Self::DeleteTrack { .. } => "delete_track",
+            Self::UpdateTrackMetadata { .. } => "update_track_metadata",
         })
         .map_err(|_| LibraryMutationValidationError::InvalidJournalOperation)
     }
@@ -78,6 +84,15 @@ impl LibraryFileMutation {
             Self::DeleteTrack { track_id, path } => {
                 json!({"track_id": track_id.get(), "path": path.as_str()})
             }
+            Self::UpdateTrackMetadata {
+                track_id,
+                path,
+                patch,
+            } => json!({
+                "track_id": track_id.get(),
+                "path": path.as_str(),
+                "updates": patch.to_json(),
+            }),
         }
     }
 
@@ -108,6 +123,17 @@ impl LibraryFileMutation {
             "delete_track" => Ok(Self::DeleteTrack {
                 track_id: parse_track_id(&entry.plan)?,
                 path: parse_path(&entry.plan, "path")?,
+            }),
+            "update_track_metadata" => Ok(Self::UpdateTrackMetadata {
+                track_id: parse_track_id(&entry.plan)?,
+                path: parse_path(&entry.plan, "path")?,
+                patch: TrackMetadataPatch::from_json(
+                    entry
+                        .plan
+                        .get("updates")
+                        .ok_or(LibraryMutationValidationError::InvalidJournalPlan)?,
+                )
+                .map_err(|_| LibraryMutationValidationError::InvalidJournalPlan)?,
             }),
             _ => Err(LibraryMutationValidationError::UnknownJournalOperation),
         }
@@ -153,11 +179,20 @@ pub enum LibraryFileMutationOutcome {
     TrackDeleted {
         track_id: TrackId,
     },
+    TrackMetadataUpdated {
+        track_id: TrackId,
+        discovered: Option<DiscoveredTrack>,
+    },
     Deleted,
 }
 
 pub trait LibraryMutationEffects: std::fmt::Debug + Send + Sync {
-    fn apply(&self, mutation: LibraryFileMutation, replay: bool) -> LibraryMutationFuture<'_>;
+    fn apply<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        mutation: LibraryFileMutation,
+        replay: bool,
+    ) -> LibraryMutationFuture<'a>;
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -173,6 +208,7 @@ pub enum LibraryMutationFailureKind {
 pub struct LibraryMutationFailure {
     kind: LibraryMutationFailureKind,
     code: &'static str,
+    recovery_required: bool,
     source: LibraryDependencyError,
 }
 
@@ -183,7 +219,26 @@ impl LibraryMutationFailure {
         code: &'static str,
         source: LibraryDependencyError,
     ) -> Self {
-        Self { kind, code, source }
+        Self {
+            kind,
+            code,
+            recovery_required: kind == LibraryMutationFailureKind::Io,
+            source,
+        }
+    }
+
+    #[must_use]
+    pub fn without_recovery(
+        kind: LibraryMutationFailureKind,
+        code: &'static str,
+        source: LibraryDependencyError,
+    ) -> Self {
+        Self {
+            kind,
+            code,
+            recovery_required: false,
+            source,
+        }
     }
 
     #[must_use]
@@ -194,6 +249,11 @@ impl LibraryMutationFailure {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         self.code
+    }
+
+    #[must_use]
+    pub const fn requires_recovery(&self) -> bool {
+        self.recovery_required
     }
 }
 
@@ -212,14 +272,12 @@ impl Error for LibraryMutationFailure {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LibraryIndexMutationCommit {
     pub status: LibraryStatus,
-    pub track_ids: std::collections::BTreeSet<TrackId>,
     pub affected_tracks: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LibraryTrackMutationCommit {
     pub status: LibraryStatus,
-    pub track_ids: std::collections::BTreeSet<TrackId>,
     pub track: IndexedTrack,
 }
 
@@ -258,6 +316,7 @@ mod tests {
     use music_domain::{LibraryPath, TrackId};
 
     use super::LibraryFileMutation;
+    use crate::library::{TrackMetadataField, TrackMetadataPatch};
     use crate::recovery::{
         RecoveryDomain, RecoveryJournalDraft, RecoveryJournalEntry, RecoveryState,
     };
@@ -278,6 +337,16 @@ mod tests {
             LibraryFileMutation::DeleteTrack {
                 track_id: TrackId::new(17)?,
                 path: LibraryPath::parse("New/track.mp3")?,
+            },
+            {
+                let mut patch = TrackMetadataPatch::new();
+                patch.insert_text(TrackMetadataField::Title, Some("Journal title".to_owned()))?;
+                patch.insert_text(TrackMetadataField::Origin, None)?;
+                LibraryFileMutation::UpdateTrackMetadata {
+                    track_id: TrackId::new(17)?,
+                    path: LibraryPath::parse("New/track.mp3")?,
+                    patch,
+                }
             },
         ];
         for mutation in mutations {

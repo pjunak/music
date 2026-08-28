@@ -415,6 +415,9 @@ fn normalize_inner(
             }
             Value::Array(normalized)
         }
+        Value::Number(number) if parent_key.is_some_and(is_numeric_constraint) => {
+            normalize_numeric_constraint(number).map_or_else(|| value.clone(), Value::Number)
+        }
         _ => value.clone(),
     }
 }
@@ -431,6 +434,32 @@ fn is_unordered_array(key: &str) -> bool {
         key,
         "required" | "enum" | "allOf" | "anyOf" | "oneOf" | "security"
     )
+}
+
+fn is_numeric_constraint(key: &str) -> bool {
+    matches!(
+        key,
+        "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" | "multipleOf"
+    )
+}
+
+fn normalize_numeric_constraint(number: &serde_json::Number) -> Option<serde_json::Number> {
+    if !number.is_f64() {
+        return Some(number.clone());
+    }
+    let value = number.as_f64()?;
+    if value.fract() != 0.0 {
+        return serde_json::Number::from_f64(value);
+    }
+    if value.is_sign_negative() {
+        #[allow(clippy::cast_possible_truncation)]
+        let integer = value as i64;
+        ((integer as f64) == value).then(|| serde_json::Number::from(integer))
+    } else {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let integer = value as u64;
+        ((integer as f64) == value).then(|| serde_json::Number::from(integer))
+    }
 }
 
 #[cfg(test)]
@@ -468,6 +497,7 @@ mod tests {
         assert!(folders.contains_key("delete"));
         assert!(paths.contains_key("/api/library/folders/rename"));
         assert!(paths.contains_key("/api/library/tracks"));
+        assert!(paths.contains_key("/api/library/tracks/bulk-metadata"));
         assert!(paths.contains_key("/api/library/tracks/bulk-move"));
         assert!(paths.contains_key("/api/library/tracks/bulk-delete"));
         let track = paths["/api/library/tracks/{track_id}"]
@@ -478,6 +508,7 @@ mod tests {
         assert!(track.contains_key("get"));
         assert!(track.contains_key("delete"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}/move"));
+        assert!(paths.contains_key("/api/library/tracks/{track_id}/metadata"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}/stream"));
         assert!(paths.contains_key("/api/library/tracks/{track_id}/cover"));
         assert!(paths.contains_key("/api/library/rescan"));
@@ -498,7 +529,9 @@ mod tests {
                 }}}
             }}},
             "components": {"schemas": {"Thing": {
-                "type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]
+                "type": "object", "properties": {"id": {
+                    "type": "integer", "minimum": 0.0, "maximum": 9999.0
+                }}, "required": ["id"]
             }}}
         });
         let candidate = json!({
@@ -507,7 +540,9 @@ mod tests {
                 "summary": "new words",
                 "responses": {"200": {"description": "different", "content": {
                     "application/json": {"schema": {
-                        "title": "Thing", "required": ["id"], "properties": {"id": {"type": "integer"}}, "type": "object"
+                        "title": "Thing", "required": ["id"], "properties": {"id": {
+                            "type": "integer", "minimum": 0, "maximum": 9999
+                        }}, "type": "object"
                     }}
                 }}}
             }}}

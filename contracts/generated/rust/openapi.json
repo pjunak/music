@@ -149,6 +149,62 @@
         ],
         "type": "object"
       },
+      "BulkMetadataResult": {
+        "properties": {
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/BulkMetadataSkip"
+            },
+            "type": "array"
+          },
+          "updated": {
+            "items": {
+              "$ref": "#/components/schemas/TrackOut"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "updated",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "BulkMetadataSkip": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "BulkMetadataUpdate": {
+        "properties": {
+          "track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "updates": {
+            "$ref": "#/components/schemas/TrackMetadataUpdate"
+          }
+        },
+        "required": [
+          "track_ids",
+          "updates"
+        ],
+        "type": "object"
+      },
       "BulkMoveRequest": {
         "properties": {
           "destination": {
@@ -756,6 +812,136 @@
           "random"
         ],
         "type": "string"
+      },
+      "TrackMetadataUpdate": {
+        "properties": {
+          "album": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "album_artist": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artist": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bpm": {
+            "anyOf": [
+              {
+                "maximum": 9999,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disc_no": {
+            "anyOf": [
+              {
+                "maximum": 9999,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "display_title": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "genre": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "track_no": {
+            "anyOf": [
+              {
+                "maximum": 9999,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "year": {
+            "anyOf": [
+              {
+                "maximum": 9999,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
       },
       "TrackMoveRequest": {
         "properties": {
@@ -1558,6 +1744,46 @@
         ]
       }
     },
+    "/api/library/tracks/bulk-metadata": {
+      "patch": {
+        "operationId": "bulk_update_metadata",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkMetadataUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkMetadataResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
     "/api/library/tracks/bulk-move": {
       "post": {
         "operationId": "bulk_move_tracks",
@@ -1690,6 +1916,57 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/tracks/{track_id}/metadata": {
+      "patch": {
+        "operationId": "update_metadata",
+        "parameters": [
+          {
+            "description": "Track identifier",
+            "in": "path",
+            "name": "track_id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackMetadataUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackOut"
+                }
               }
             },
             "description": "Successful Response"

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OpusFile, VorbisFile};
 use lofty::picture::PictureType;
 use lofty::probe::Probe;
-use lofty::tag::{Accessor, ItemKey, Tag, TagType};
+use lofty::tag::{Accessor, ItemKey, Tag, TagExt, TagType};
 
 mod asf;
 mod ffmpeg;
@@ -472,6 +472,7 @@ fn stage_tag_update_inner(
     let before = read_tagged_file(staged)?;
     let original_type = before.file_type();
     let original_duration = before.properties().duration();
+    let trailing_iff_bytes = iff_trailing_bytes(staged, original_type)?;
     match original_type {
         lofty::file::FileType::Flac => {
             drop(before);
@@ -493,10 +494,13 @@ fn stage_tag_update_inner(
             let mut tagged_file = before;
             apply_generic_patch(&mut tagged_file, patch)?;
             tagged_file
+                .primary_tag()
+                .ok_or_else(|| MetadataError::Write("primary tag was not created".to_owned()))?
                 .save_to_path(staged, write_options())
                 .map_err(|error| MetadataError::Write(error.to_string()))?;
         }
     }
+    normalize_iff_stream_length(staged, original_type, trailing_iff_bytes)?;
 
     let verified = read_tagged_file(staged)?;
     if verified.file_type() != original_type {
@@ -514,6 +518,98 @@ fn stage_tag_update_inner(
     verify_patch(&metadata, patch)?;
 
     Ok(StagedTagUpdate::new(staged.to_path_buf(), metadata))
+}
+
+fn iff_trailing_bytes(path: &Path, file_type: lofty::file::FileType) -> Result<u64, MetadataError> {
+    if !matches!(
+        file_type,
+        lofty::file::FileType::Wav | lofty::file::FileType::Aiff
+    ) {
+        return Ok(0);
+    }
+    let mut file = File::open(path).map_err(|source| MetadataError::Io {
+        action: "open IFF metadata source",
+        source,
+    })?;
+    let mut header = [0_u8; 12];
+    file.read_exact(&mut header)
+        .map_err(|source| MetadataError::Io {
+            action: "read IFF metadata header",
+            source,
+        })?;
+    let declared = match file_type {
+        lofty::file::FileType::Wav if &header[..4] == b"RIFF" && &header[8..] == b"WAVE" => {
+            u64::from(u32::from_le_bytes(header[4..8].try_into().map_err(
+                |_| MetadataError::Parse("invalid WAV size header".to_owned()),
+            )?))
+        }
+        lofty::file::FileType::Aiff if &header[..4] == b"FORM" => {
+            u64::from(u32::from_be_bytes(header[4..8].try_into().map_err(
+                |_| MetadataError::Parse("invalid AIFF size header".to_owned()),
+            )?))
+        }
+        _ => return Err(MetadataError::Parse("invalid IFF header".to_owned())),
+    }
+    .checked_add(8)
+    .ok_or_else(|| MetadataError::Parse("IFF stream size overflowed".to_owned()))?;
+    let actual = file
+        .metadata()
+        .map_err(|source| MetadataError::Io {
+            action: "inspect IFF metadata source",
+            source,
+        })?
+        .len();
+    actual
+        .checked_sub(declared)
+        .ok_or_else(|| MetadataError::Parse("IFF stream exceeds its file size".to_owned()))
+}
+
+fn normalize_iff_stream_length(
+    path: &Path,
+    file_type: lofty::file::FileType,
+    trailing_bytes: u64,
+) -> Result<(), MetadataError> {
+    if !matches!(
+        file_type,
+        lofty::file::FileType::Wav | lofty::file::FileType::Aiff
+    ) {
+        return Ok(());
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|source| MetadataError::Io {
+            action: "open staged IFF metadata",
+            source,
+        })?;
+    let stream_size = file
+        .metadata()
+        .map_err(|source| MetadataError::Io {
+            action: "inspect staged IFF metadata",
+            source,
+        })?
+        .len()
+        .checked_sub(trailing_bytes)
+        .and_then(|size| size.checked_sub(8))
+        .and_then(|size| u32::try_from(size).ok())
+        .ok_or_else(|| MetadataError::Write("IFF stream size is invalid".to_owned()))?;
+    file.seek(SeekFrom::Start(4))
+        .map_err(|source| MetadataError::Io {
+            action: "seek staged IFF metadata",
+            source,
+        })?;
+    let encoded = match file_type {
+        lofty::file::FileType::Wav => stream_size.to_le_bytes(),
+        lofty::file::FileType::Aiff => stream_size.to_be_bytes(),
+        _ => return Ok(()),
+    };
+    file.write_all(&encoded)
+        .and_then(|()| file.sync_all())
+        .map_err(|source| MetadataError::Io {
+            action: "synchronize staged IFF metadata",
+            source,
+        })
 }
 
 fn copy_new_file(source: &Path, staged: &Path) -> Result<(), MetadataError> {
