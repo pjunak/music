@@ -33,6 +33,8 @@ cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
 cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
 cargo deny --manifest-path fuzz/Cargo.toml --locked check
 cargo audit --file fuzz/Cargo.lock --deny warnings
+cargo machete .
+cargo machete fuzz
 node --test .github/scripts/voice-differential.test.mjs
 node --test .github/scripts/rewrite-tree.test.mjs
 node .github/scripts/rewrite-tree.mjs reference
@@ -42,9 +44,9 @@ The checked-in toolchain is authoritative. On Windows hosts without the Visual S
 tools, install rustup's official GNU host and add
 `+1.97.1-x86_64-pc-windows-gnu` immediately after `cargo` in the commands above. Linux CI and
 release builds use the normal host selected by `rust-toolchain.toml`.
-The Rust gates are verified with `cargo-nextest` 0.9.143, `cargo-deny` 0.20.2, and `cargo-audit`
-0.22.2; install those exact versions with `cargo install <tool> --version <version> --locked` when
-they are unavailable.
+The Rust gates are verified with `cargo-nextest` 0.9.143, `cargo-deny` 0.20.2, `cargo-audit`
+0.22.2, and `cargo-machete` 0.9.2; install those exact versions with
+`cargo install <tool> --version <version> --locked` when they are unavailable.
 
 Frontend, from `frontend/` (Node 26+):
 

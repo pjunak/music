@@ -70,6 +70,8 @@ the Python reference runner, while Docker/Linux-specific checks run in CI or on 
 - `cargo-nextest` for the main test suite; `cargo test --doc` separately because nextest does not
   run doctests.
 - `cargo-deny` and `cargo-audit` for source/license/advisory policy.
+- `cargo-machete` 0.9.2 for unused direct dependencies in both Cargo workspaces; no ignored
+  dependencies or auto-fix mode.
 - `cargo-fuzz` 0.13.2 on Linux/nightly for protocol, rooted path, bounded YAML, authoring-import,
   and Assistant structured-response parsers. The independent `fuzz/` workspace keeps libFuzzer and
   nightly-only instrumentation out of normal production builds.
@@ -143,6 +145,8 @@ reviews and moves an accepted summary into durable project records.
   readiness route is the sole Rust addition, and generated TypeScript/OpenAPI/SQLx artifacts have
   no drift.
 - Dependency policy and advisories pass with `cargo-deny` 0.20.2 and `cargo-audit` 0.22.2.
+- Pinned `cargo-machete` 0.9.2 reports no unused dependencies in the main or fuzz workspace after
+  removing the unused `music-analysis` declaration of `music-domain`.
 - Frontend lint, TypeScript checks, all 250 Vitest cases, and the production build pass; the entry
   bundle is 320.77 kB (97.73 kB gzip), below the 450 kB regression budget.
 - The unchanged Baton repository's `core-model` and `core-sync` JVM suites pass against the

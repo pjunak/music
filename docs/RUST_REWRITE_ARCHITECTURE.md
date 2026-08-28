@@ -376,7 +376,7 @@ rejects the quarantined backend and every common Python project artifact, reject
 comparison scripts and `Dockerfile.rust`, scans active workflows/operator instructions for stale
 runtime commands, and rejects tracked build output, databases, audio, environments, or key material.
 Historical ADR prose and Rust compatibility fixtures remain valid evidence and are deliberately not
-mistaken for executable Python. Image inspection, gitleaks, and unused-dependency checks remain
+mistaken for executable Python. Image inspection, gitleaks, and pinned `cargo-machete` checks remain
 separate gates because a source-tree allowlist cannot prove those properties.
 
 ### Compatibility-sensitive data
