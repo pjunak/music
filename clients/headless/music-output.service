@@ -1,5 +1,5 @@
 # systemd unit for the headless output. Install to /etc/systemd/system/,
-# adjust paths to where you put music_output.py, then:
+# adjust paths to where you installed the Rust binary, then:
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now music-output
 #
@@ -18,7 +18,7 @@ Type=simple
 #   MUSIC_OUTPUT_NAME=Living-room speaker
 #   MUSIC_CONTROL_PORT=8731
 EnvironmentFile=/etc/music-output.env
-ExecStart=/usr/bin/python3 /opt/music-output/music_output.py
+ExecStart=/opt/music-output/music-output
 Restart=always
 RestartSec=3
 # Needs audio-device access; add the service user to the audio group, or run as

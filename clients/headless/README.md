@@ -1,9 +1,9 @@
 # Headless output appliance
 
-A single Python file that turns a Linux box with a speaker into an audio output for the
-music player. Plug a Pi / old x86 stick / the dnd-table machine into a speaker, run this,
+A small Rust binary that turns a Linux box with a speaker into an audio output for the
+music player. Plug a Pi / old x86 stick / the dnd-table machine into a speaker, run it,
 and it plays whatever the DM has going — following play/pause/skip/track changes from the
-server. No login and no server changes (it connects as a guest; see
+server. No login and no server changes are needed (it connects as a guest; see
 [the protocol guide](../README.md)).
 
 It's a deliberately *dumb* player — ambient music + soundboard SFX, no crossfade/EQ/effect
@@ -13,19 +13,19 @@ leave-it-on-a-shelf speaker box.
 ## Install (Debian/Ubuntu)
 
 ```sh
-# 1. libmpv + python
-sudo apt update && sudo apt install -y python3 python3-pip mpv libmpv2   # older: libmpv1
+# 1. Install mpv. The appliance controls subprocesses over local JSON IPC;
+#    it does not link libmpv or require Python.
+sudo apt update && sudo apt install -y mpv
 
-# 2. the client + its python deps
-sudo mkdir -p /opt/music-output
-sudo cp music_output.py /opt/music-output/
-sudo pip3 install -r requirements.txt
+# 2. Build on the target (or copy a release binary built for the target architecture).
+cargo build --locked --release -p music-output
+sudo install -D -m 0755 target/release/music-output /opt/music-output/music-output
 ```
 
 ## Run it once to test
 
 ```sh
-MUSIC_SERVER_URL=http://192.168.1.50:8000 python3 /opt/music-output/music_output.py
+MUSIC_SERVER_URL=http://192.168.1.50:8000 /opt/music-output/music-output
 ```
 
 You should see it connect and register under the supplied name (default: the hostname). It
@@ -68,6 +68,7 @@ Most options also have an environment-variable equivalent (handy for the systemd
 | `--start-off` | `MUSIC_START_ON=0` | off (boots playing) | Boot muted |
 | `--respect-console` | — | off | Only play when switched on in the Console (instead of the default local on/off) |
 | `--no-sfx` | — | off (SFX on) | Ignore soundboard SFX events |
+| `--mpv PATH` | `MUSIC_MPV` | `mpv` | mpv executable to supervise for both audio lanes |
 
 ### On/off model
 
@@ -113,7 +114,9 @@ setInterval(refresh, 2000);
 
 ## Want full-fidelity effects on this box instead?
 
-This client plays plain ambient + SFX. If you specifically want crossfades and EQ-preset
+This client supervises separate ambient and SFX mpv subprocesses through bounded Unix-socket
+JSON IPC. If either subprocess dies, the appliance exits so systemd restarts the complete,
+stable-ID client cleanly. It plays plain ambient + SFX. If you specifically want crossfades and EQ-preset
 colouring on this output, run a kiosk browser pointed at the player's web app instead of
 this client (it's heavier, and not needed just to get music out of the speakers). The headless
 client is the right choice for tiny/always-on appliances.

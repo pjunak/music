@@ -253,7 +253,7 @@ websocat wss://music.example/api/ws
 # then paste:  {"type":"register","name":"cli","client_id":"cli-pick-a-stable-string","protocol_version":2}
 ```
 
-The [reference Python client](headless/) is Recipe B done properly (reconnect, seek
+The [reference Rust client](headless/) is Recipe B done properly (reconnect, seek
 handling, SFX, local on/off + volume, optional LAN control endpoint).
 
 ---
@@ -264,7 +264,7 @@ The [dnd-table](https://github.com/pjunak/dnd-table) rig's TV display is a nativ
 GStreamer/pyglet kiosk (not a browser), so the audio output there is the **headless client**
 on that same machine, and the on/off + volume control lives in the existing `control.html`:
 
-1. **Audio:** run [`headless/music_output.py`](headless/) on the dnd-table box as a systemd
+1. **Audio:** run the [`music-output` Rust appliance](headless/) on the dnd-table box as a systemd
    service (see its README), pointed at the player with `MUSIC_CONTROL_PORT` set so it exposes
    a small LAN control endpoint.
 2. **Control:** add a "Music" card to `templates/control.html` (vanilla JS) that talks to the

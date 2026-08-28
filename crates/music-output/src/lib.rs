@@ -8,3 +8,10 @@
 //!
 //! This is the replacement for the Python appliance; Baton remains a separate
 //! repository and is not implemented here.
+
+pub mod client;
+pub mod config;
+pub mod control;
+pub mod mpv;
+pub mod reconcile;
+pub mod runtime;

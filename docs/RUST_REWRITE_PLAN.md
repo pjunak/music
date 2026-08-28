@@ -509,14 +509,18 @@ the selected thread or process boundary's deadline.
 
 ## Phase 11 — CLI and Rust headless output appliance
 
-- Recreate every `music-cli` command with compatible safe defaults and add `db doctor`, migration,
+**Status:** Implemented; Linux process/real-speaker validation remains an acceptance gate.
+
+- [x] Recreate every `music-cli` command with compatible safe defaults and add `db doctor`, migration,
   healthcheck, device import/export, and contract-export commands.
   The new database, contract, healthcheck, user/password, and device-transfer commands are already
   implemented; library, provider, job, and evaluation commands follow their owning coordinators.
-- Implement `music-output` using the shared protocol, WebSocket ping/reconnect, stable ID,
+- [x] Implement `music-output` using the shared protocol, WebSocket ping/reconnect, stable ID,
   position-epoch reconciliation, server/local volume, position reports, SFX, and local control API.
-- Supervise two local mpv processes through Unix-socket JSON IPC; use no libmpv FFI.
-- Update systemd installation and client documentation; remove Python package requirements.
+- [x] Supervise two local mpv processes through Unix-socket JSON IPC; use no libmpv FFI. A dead
+  child fails the service so systemd restarts both lanes and reconnects with the persisted ID.
+- [x] Update systemd installation and client documentation for the Rust binary.
+- [ ] Remove the frozen Python appliance and requirements together with all other Python in Phase 12.
 
 Gate: reconciler fixtures match the Python appliance, mpv process restart and network reconnect are
 safe, local control auth/CORS behavior matches, and a Linux speaker-device smoke test is recorded.
