@@ -144,7 +144,7 @@ describe("LibraryContextView", () => {
     expect(screen.getByText("0:00 / 3:00")).toBeInTheDocument();
     Object.defineProperty(player, "currentTime", { configurable: true, value: 90 });
     fireEvent.timeUpdate(player);
-    expect(screen.getByText("1:30 / 3:00")).toBeInTheDocument();
+    expect(await screen.findByText("1:30 / 3:00")).toBeInTheDocument();
     expect(screen.queryByText("Campaign/Forest/Quiet Road.flac")).not.toBeInTheDocument();
     await waitFor(() => expect(assistantApi.getTrackContext).toHaveBeenCalledWith(9));
   });
