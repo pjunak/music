@@ -147,6 +147,10 @@ reviews and moves an accepted summary into durable project records.
 - Dependency policy and advisories pass with `cargo-deny` 0.20.2 and `cargo-audit` 0.22.2.
 - Pinned `cargo-machete` 0.9.2 reports no unused dependencies in the main or fuzz workspace after
   removing the unused `music-analysis` declaration of `music-domain`.
+- The permanent Cargo-metadata architecture gate proves the selected eight-crate workspace shape
+  and direct dependency direction, including rejection of aliases, registry stand-ins, and
+  unapproved local path crates. Its source audit also rejects new module-global statics; the only
+  explicit exceptions are the four feature-gated immutable parser caches used solely by fuzzing.
 - Frontend lint, TypeScript checks, all 250 Vitest cases, and the production build pass; the entry
   bundle is 320.77 kB (97.73 kB gzip), below the 450 kB regression budget.
 - The unchanged Baton repository's `core-model` and `core-sync` JVM suites pass against the

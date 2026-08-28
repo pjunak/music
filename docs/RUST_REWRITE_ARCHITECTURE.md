@@ -115,6 +115,14 @@ music-server      -> all internal crates
 music-output      -> music-protocol
 ```
 
+The permanent `rust-architecture.mjs` gate reads locked Cargo metadata and source, rejecting a ninth
+workspace crate, a moved crate manifest, an internal registry stand-in or alias, an unapproved path
+dependency, every direct internal edge outside this graph, and new module-global Rust statics.
+Architectural restructuring therefore requires an explicit review and matching gate update instead
+of silently entering through a valid Cargo build. Its only static exceptions are four immutable
+parser-fixture caches in the feature-gated fuzzing adapter; they are not linked into normal builds or
+used as runtime service state.
+
 `music-domain` contains no database, HTTP framework, filesystem, process, or async-runtime types.
 `music-protocol` is also independent of the domain: explicit edge translations stop legacy and
 compatibility fields from becoming internal invariants. `music-application` defines coarse traits

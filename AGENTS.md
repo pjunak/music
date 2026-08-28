@@ -22,6 +22,8 @@ Rust, from the repository root:
 
 ```powershell
 cargo fmt --all --check
+node --test .github/scripts/rust-architecture.test.mjs
+node .github/scripts/rust-architecture.mjs
 cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo nextest run --workspace --all-features
@@ -44,6 +46,8 @@ The checked-in toolchain is authoritative. On Windows hosts without the Visual S
 tools, install rustup's official GNU host and add
 `+1.97.1-x86_64-pc-windows-gnu` immediately after `cargo` in the commands above. Linux CI and
 release builds use the normal host selected by `rust-toolchain.toml`.
+The architecture command also accepts `--cargo <rustup-cargo-path> --toolchain
+1.97.1-x86_64-pc-windows-gnu` when Cargo is not on the Windows `PATH`.
 The Rust gates are verified with `cargo-nextest` 0.9.143, `cargo-deny` 0.20.2, `cargo-audit`
 0.22.2, and `cargo-machete` 0.9.2; install those exact versions with
 `cargo install <tool> --version <version> --locked` when they are unavailable.

@@ -30,6 +30,11 @@ jobs:
           rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
           rustup default 1.97.1
 
+      - name: Set up Node for repository gates
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
       - name: Install media test tools
         run: |
           sudo apt-get update
@@ -37,6 +42,8 @@ jobs:
 
       - name: Format, lint, test, and document
         run: |
+          node --test .github/scripts/rust-architecture.test.mjs
+          node .github/scripts/rust-architecture.mjs
           cargo fmt --all --check
           cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
           cargo check --workspace --all-targets
