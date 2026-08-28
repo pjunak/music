@@ -993,14 +993,27 @@ impl MusicBrainzNameLookup {
         query: &str,
         list_key: &'static str,
     ) -> Result<i32, MusicBrainzLookupError> {
-        self.pace().await;
         let endpoint = format!("{}/{resource}", self.base_url.trim_end_matches('/'));
+        // Hold admission through receipt of the response headers and start the
+        // next interval there. This is deliberately more conservative than
+        // spacing local request construction: network latency can otherwise
+        // make two requests arrive at MusicBrainz less than one interval apart.
+        let mut last_request_at = self.last_request_at.lock().await;
+        if let Some(previous_request) = *last_request_at {
+            let next_request_at = previous_request + self.minimum_interval;
+            if next_request_at > Instant::now() {
+                tokio::time::sleep_until(next_request_at).await;
+            }
+        }
         let response = self
             .client
             .get(endpoint)
             .query(&[("query", query), ("fmt", "json"), ("limit", "1")])
             .send()
-            .await
+            .await;
+        *last_request_at = Some(Instant::now());
+        drop(last_request_at);
+        let response = response
             .map_err(MusicBrainzLookupError::Http)?
             .error_for_status()
             .map_err(MusicBrainzLookupError::Http)?;
@@ -1027,17 +1040,6 @@ impl MusicBrainzNameLookup {
             body.extend_from_slice(&chunk);
         }
         parse_top_score(&body, list_key)
-    }
-
-    async fn pace(&self) {
-        let mut last_request_at = self.last_request_at.lock().await;
-        if let Some(last_request_at) = *last_request_at {
-            let next_request_at = last_request_at + self.minimum_interval;
-            if next_request_at > Instant::now() {
-                tokio::time::sleep_until(next_request_at).await;
-            }
-        }
-        *last_request_at = Some(Instant::now());
     }
 }
 
