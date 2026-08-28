@@ -1079,16 +1079,38 @@ fn probe_liveness(address: &str, timeout: Duration) -> io::Result<()> {
     stream.set_write_timeout(Some(timeout))?;
     stream
         .write_all(b"GET /api/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
-    let mut response = [0_u8; 512];
-    let read = stream.read(&mut response)?;
-    let status_line = String::from_utf8_lossy(&response[..read]);
-    if status_line.starts_with("HTTP/1.1 200 ") || status_line.starts_with("HTTP/1.0 200 ") {
+    if liveness_status_is_ok(&mut stream)? {
         Ok(())
     } else {
         Err(io::Error::other(
             "liveness endpoint did not return HTTP 200",
         ))
     }
+}
+
+fn liveness_status_is_ok(reader: &mut impl Read) -> io::Result<bool> {
+    let mut response = [0_u8; 512];
+    let mut response_len = 0;
+    while response_len < response.len() {
+        match reader.read(&mut response[response_len..]) {
+            Ok(0) => break,
+            Ok(read) => {
+                response_len += read;
+                if response[..response_len].contains(&b'\n') {
+                    break;
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    let status_line_end = response[..response_len]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .unwrap_or(response_len);
+    let status_line = &response[..status_line_end];
+    Ok(status_line.starts_with(b"HTTP/1.1 200 ") || status_line.starts_with(b"HTTP/1.0 200 "))
 }
 
 fn database_path(override_path: Option<PathBuf>) -> Result<PathBuf, CliError> {
@@ -1138,7 +1160,7 @@ fn print_schema_report(
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::io::{self, Read, Write};
+    use std::io::{self, Cursor, Read, Write};
     use std::net::TcpListener;
     use std::thread;
     use std::time::Duration;
@@ -1147,7 +1169,7 @@ mod tests {
 
     use super::{
         BackupCommand, Cli, Command, CredentialCommand, DeviceCommand, PlaylistEngine,
-        probe_liveness,
+        liveness_status_is_ok, probe_liveness,
     };
 
     #[test]
@@ -1258,6 +1280,30 @@ mod tests {
         assert!(probe_liveness(&unavailable.address, Duration::from_secs(1)).is_err());
         unavailable.join()?;
         Ok(())
+    }
+
+    #[test]
+    fn healthcheck_reads_a_fragmented_http_status_line() -> Result<(), Box<dyn Error>> {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        let mut reader = FragmentedReader {
+            inner: Cursor::new(response),
+            maximum_read: 1,
+        };
+
+        assert!(liveness_status_is_ok(&mut reader)?);
+        Ok(())
+    }
+
+    struct FragmentedReader<T> {
+        inner: Cursor<T>,
+        maximum_read: usize,
+    }
+
+    impl<T: AsRef<[u8]>> Read for FragmentedReader<T> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let read_len = buffer.len().min(self.maximum_read);
+            self.inner.read(&mut buffer[..read_len])
+        }
     }
 
     struct TestServer {
