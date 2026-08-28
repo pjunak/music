@@ -41,6 +41,8 @@ cargo machete fuzz
 node --test .github/scripts/voice-differential.test.mjs
 node --test .github/scripts/rewrite-tree.test.mjs
 node .github/scripts/rewrite-tree.mjs reference
+# After building the candidate image on a Docker host:
+bash .github/scripts/verify-rust-image.sh music-rust-rewrite:test
 ```
 
 The checked-in toolchain is authoritative. On Windows hosts without the Visual Studio C++ build

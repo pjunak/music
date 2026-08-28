@@ -202,7 +202,8 @@ During rewrite acceptance, `Dockerfile.rust` is the complete native candidate: i
 SPA and the Rust server/CLI, then copies only those binaries, the SPA, CA certificates, FFmpeg, and
 mode seeds into a non-root Debian runtime. It contains no Python runtime. Application data lives
 under `/data`; the optional Assistant credential master key uses a separate secrets mount so it is
-not mixed into the database/media backup.
+not mixed into the database/media backup. The runtime user can write only the data mount; application
+binaries, SPA assets, and seed modes remain root-owned and read-only to that user.
 
 ```bash
 # Build the Rust candidate image. The default Dockerfile remains the frozen

@@ -52,8 +52,9 @@ COPY --from=frontend-builder /frontend/dist /app/static
 COPY modes /seeds/modes
 COPY docs/THIRD_PARTY_NOTICES.md /usr/share/doc/music/THIRD_PARTY_NOTICES.md
 
-RUN mkdir -p /app/data /data && \
-    chown -R music:music /app /data /seeds
+RUN mkdir -p /data && \
+    chown music:music /data && \
+    chmod 0750 /data
 
 USER music
 

@@ -175,6 +175,10 @@ reviews and moves an accepted summary into durable project records.
 - The separately deployed `music-output` appliance also builds as a locked optimized binary with
   project inputs confined to `crates/`; the Linux workflow now makes that release build a permanent
   gate before physical speaker acceptance.
+- The reusable image-policy gate now checks the configured non-root user, required artifacts,
+  executable binaries, absence of Python and build tools, absence of baked data/media/keys/databases,
+  and the single writable `/data` boundary. The obsolete writable `/app/data` path is gone, while
+  `/app` and `/seeds` remain root-owned instead of mutable by the service account.
 - The complete 186-file Python oracle is content-fingerprinted and quarantined; four deterministic
   tree-policy tests pass. CI now rejects oracle drift or new Python artifacts outside that boundary,
   while the prepared final mode rejects all executable/runtime remnants after the gated deletion.

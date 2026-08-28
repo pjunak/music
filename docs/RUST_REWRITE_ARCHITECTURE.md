@@ -771,9 +771,11 @@ The production image remains a multi-stage build:
 
 The rewrite Dockerfile has its own allowlisted build context, so the frozen Python oracle and local
 workspace state are not sent to that builder. The runtime retains the checked-in third-party notice,
-and its smoke gate rejects Python executables or files in addition to asserting the notice is
-readable. Bind-mounted data and optional secrets directories are prepared for the documented
-non-root UID before startup.
+and its reusable image-policy gate rejects Python/build tools, Python source/runtime files, baked
+data, media, keys, databases, source manifests, and generated workspace directories. It also proves
+that `/data` is the only writable application boundary: `/app` and `/seeds` stay root-owned and
+immutable to the runtime user. Bind-mounted data and optional secrets directories are prepared for
+the documented non-root UID before startup.
 
 The server runs as the current non-root UID, serves the SPA and API from one origin, uses the same
 mounts and environment names where possible, and preserves the compatibility health endpoint while

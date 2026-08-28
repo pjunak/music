@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -68,11 +69,16 @@ test("final scan permits compatibility history and a native active surface", () 
     ["Dockerfile", "FROM debian:stable-slim\nCOPY music-server /usr/local/bin/music-server\n"],
     ["README.md", "The release image contains no Python runtime.\n"],
     ["AGENTS.md", "Keep legacy data fixtures compatible.\n"],
+    [
+      ".github/scripts/verify-rust-image.sh",
+      readFileSync(new URL("./verify-rust-image.sh", import.meta.url), "utf8"),
+    ],
   ]);
   const violations = finalTreeViolations([
     entry("Dockerfile"),
     entry("README.md"),
     entry("AGENTS.md"),
+    entry(".github/scripts/verify-rust-image.sh"),
     entry("docs/ADR-013-python-history.md"),
     entry("crates/music-storage/src/schema.rs"),
     entry("contracts/reference/python-oracle-tree.json"),

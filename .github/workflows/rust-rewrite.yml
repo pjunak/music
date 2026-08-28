@@ -167,13 +167,7 @@ jobs:
             fi
             sleep 1
           done
-          test "$(docker inspect --format '{{.Config.User}}' "$container_id")" = "music"
-          docker run --rm --entrypoint sh music-rust-rewrite:test -c \
-            '! command -v python && ! command -v python3 && \
-             ! find / -xdev -type f \( -name "*.py" -o -name "*.pyc" -o -name "*.pyo" \
-               -o -name "python[0-9]*" -o -name "libpython*" \) \
-               -print -quit | grep --quiet . && \
-             test -r /usr/share/doc/music/THIRD_PARTY_NOTICES.md'
+          bash .github/scripts/verify-rust-image.sh music-rust-rewrite:test
           curl --fail --silent http://127.0.0.1:18000/api/health | \
             grep --quiet '"status":"ok"'
           curl --fail --silent http://127.0.0.1:18000/ | grep --quiet '<!doctype html>'
