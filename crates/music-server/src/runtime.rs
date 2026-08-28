@@ -7,13 +7,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use music_application::assistant::{AssistantRepository, AssistantService};
+use music_application::assistant::{
+    AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
+    MetadataAnalysisJobHandler,
+};
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
     CleanupVerificationRepository, CleanupVerificationService,
 };
 use music_application::jobs::{
-    JobCoordinatorError, JobRepository, JobService, SpawnedJobCoordinator, start_job_coordinator,
+    JobCoordinatorError, JobHandler, JobRepository, JobService, SpawnedJobCoordinator,
+    start_job_coordinator,
 };
 use music_application::library::{
     LibraryCatalogSink, LibraryCoordinatorHandle, LibraryRepository, LibraryService,
@@ -70,6 +74,7 @@ pub struct AppRuntime {
     playback: PlaybackActorHandle,
     auth: Arc<RuntimeAuth>,
     assistant: Arc<AssistantService>,
+    local_analysis: Arc<LocalAnalysisService>,
     backup: Arc<BackupService>,
     devices: Arc<RuntimeDevices>,
     library: LibraryCoordinatorHandle,
@@ -148,6 +153,10 @@ impl AppRuntime {
         let auth = Arc::new(RuntimeAuth::new(Arc::clone(&storage), &config)?);
         let assistant_repository: Arc<dyn AssistantRepository> = storage.clone();
         let assistant = Arc::new(AssistantService::new(assistant_repository));
+        let local_analysis_repository: Arc<dyn LocalAnalysisRepository> = storage.clone();
+        let local_analysis = Arc::new(LocalAnalysisService::new(Arc::clone(
+            &local_analysis_repository,
+        )));
         let backup = Arc::new(BackupService::new(
             Arc::clone(&storage),
             Arc::clone(&config),
@@ -244,9 +253,12 @@ impl AppRuntime {
         let playlist_repository: Arc<dyn PlaylistRepository> = storage.clone();
         let playlist_service = Arc::new(PlaylistService::new(playlist_repository));
         let job_repository: Arc<dyn JobRepository> = storage.clone();
+        let job_handlers: Vec<Arc<dyn JobHandler>> = vec![Arc::new(
+            MetadataAnalysisJobHandler::new(local_analysis_repository),
+        )];
         let jobs = supervise_jobs(
             &supervisor,
-            start_job_coordinator(job_repository, Vec::new()).await?,
+            start_job_coordinator(job_repository, job_handlers).await?,
         )?;
         health.set_component("background_jobs", true, ComponentStatus::Ready);
         health.set_component("library_coordinator", true, ComponentStatus::Ready);
@@ -269,6 +281,7 @@ impl AppRuntime {
             playback,
             auth,
             assistant,
+            local_analysis,
             backup,
             devices,
             library,
@@ -305,6 +318,7 @@ impl AppRuntime {
             RuntimeServices {
                 health: self.health.clone(),
                 assistant: Arc::clone(&self.assistant),
+                local_analysis: Arc::clone(&self.local_analysis),
                 playback: self.playback.clone(),
                 auth: Arc::clone(&self.auth),
                 backup: Arc::clone(&self.backup),
@@ -4081,6 +4095,72 @@ mod tests {
         let tagged_json: Value =
             serde_json::from_slice(&to_bytes(tagged.into_body(), 1024 * 1024).await?)?;
         assert_eq!(tagged_json["manual_tags"], json!(["inn"]));
+
+        let analysis_job = router
+            .clone()
+            .oneshot(
+                Request::post("/api/assistant/library-analysis/jobs")
+                    .header("cookie", &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"force":false}"#))?,
+            )
+            .await?;
+        assert_eq!(analysis_job.status(), StatusCode::ACCEPTED);
+        let analysis_job_json: Value =
+            serde_json::from_slice(&to_bytes(analysis_job.into_body(), 1024 * 1024).await?)?;
+        let analysis_job_id = analysis_job_json["id"]
+            .as_str()
+            .ok_or("metadata analysis job id missing")?
+            .to_owned();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let status = runtime
+                    .jobs
+                    .get(&analysis_job_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|job| job.status.as_str());
+                if status == Some("succeeded") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let analysis_summary = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/library-analysis/summary")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(analysis_summary.status(), StatusCode::OK);
+        let analysis_summary_json: Value =
+            serde_json::from_slice(&to_bytes(analysis_summary.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(analysis_summary_json["analyzer"], "local-metadata/v1");
+        assert_eq!(analysis_summary_json["analyzed_tracks"], 1);
+
+        let analyzed_tags = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/library-tags")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(analyzed_tags.status(), StatusCode::OK);
+        let analyzed_tags_json: Value =
+            serde_json::from_slice(&to_bytes(analyzed_tags.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            analyzed_tags_json["items"][0]["manual_tags"],
+            json!(["inn"])
+        );
+        assert_eq!(
+            analyzed_tags_json["items"][0]["analysis_analyzer"],
+            "local-metadata/v1"
+        );
 
         let suggestion = router
             .clone()

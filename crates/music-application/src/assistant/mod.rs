@@ -4,10 +4,16 @@
 //! inputs to an explicit review operation; they never mutate operator-owned
 //! tags, playlists, or presets by themselves.
 
+mod local_analysis;
 mod planner;
 mod tags;
 mod vocabulary;
 
+pub use local_analysis::{
+    AnalysisState, AnalysisWrite, LibraryAnalysisSummary, LocalAnalysisError,
+    LocalAnalysisRepository, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
+    MetadataAnalysisJobHandler,
+};
 pub use planner::{
     EnergyCurve, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent, PlaylistPlan,
     PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,

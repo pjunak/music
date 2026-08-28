@@ -38,6 +38,15 @@ pub enum Confidence {
 }
 
 impl Confidence {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "high" => Some(Self::High),

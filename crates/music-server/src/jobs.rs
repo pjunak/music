@@ -59,7 +59,7 @@ impl From<JobStatusResponse> for JobStatus {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = BackgroundJobOut)]
-struct BackgroundJobResponse {
+pub(crate) struct BackgroundJobResponse {
     id: String,
     kind: String,
     #[schema(schema_with = job_status_schema)]
@@ -237,7 +237,7 @@ fn service(state: &HttpState) -> Result<&JobService, ApiError> {
         .ok_or_else(ApiError::service_unavailable)
 }
 
-fn map_job_error(error: JobServiceError) -> ApiError {
+pub(crate) fn map_job_error(error: JobServiceError) -> ApiError {
     match error {
         JobServiceError::JobNotFound => ApiError::plain_not_found("job not found"),
         JobServiceError::NotRetryable => {
@@ -252,7 +252,7 @@ fn map_job_error(error: JobServiceError) -> ApiError {
     }
 }
 
-fn job_response(job: JobRecord) -> Result<BackgroundJobResponse, ApiError> {
+pub(crate) fn job_response(job: JobRecord) -> Result<BackgroundJobResponse, ApiError> {
     Ok(BackgroundJobResponse {
         id: job.id,
         kind: job.kind,

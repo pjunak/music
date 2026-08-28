@@ -10,7 +10,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use music_application::assistant::AssistantService;
+use music_application::assistant::{AssistantService, LocalAnalysisService};
 use music_application::jobs::JobService;
 use music_application::modes::ModeCoordinatorHandle;
 use music_application::playback::PlaybackActorHandle;
@@ -50,6 +50,7 @@ const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-poli
 pub(crate) struct HttpState {
     pub(crate) health: HealthRegistry,
     pub(crate) assistant: Option<Arc<AssistantService>>,
+    pub(crate) local_analysis: Option<Arc<LocalAnalysisService>>,
     pub(crate) playback: Option<PlaybackActorHandle>,
     pub(crate) auth: Option<Arc<RuntimeAuth>>,
     pub(crate) backup: Option<Arc<BackupService>>,
@@ -65,6 +66,7 @@ pub(crate) struct HttpState {
 pub(crate) struct RuntimeServices {
     pub(crate) health: HealthRegistry,
     pub(crate) assistant: Arc<AssistantService>,
+    pub(crate) local_analysis: Arc<LocalAnalysisService>,
     pub(crate) playback: PlaybackActorHandle,
     pub(crate) auth: Arc<RuntimeAuth>,
     pub(crate) backup: Arc<BackupService>,
@@ -114,6 +116,7 @@ pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Rou
         HttpState {
             health: services.health,
             assistant: Some(services.assistant),
+            local_analysis: Some(services.local_analysis),
             playback: Some(services.playback),
             auth: Some(services.auth),
             backup: Some(services.backup),
@@ -137,6 +140,7 @@ fn build_router_without_playback(
         HttpState {
             health,
             assistant: None,
+            local_analysis: None,
             playback: None,
             auth: None,
             backup: None,

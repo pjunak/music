@@ -1,14 +1,15 @@
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use music_application::assistant::{
     AnalysisReviewDecision, AnalysisReviewTarget, AssistantService, AssistantServiceError,
-    AssistantTrackView, CleanupSelection, Confidence, EnergyCurve, ManualTagQuery,
+    AssistantTrackView, CleanupSelection, Confidence, EnergyCurve, LibraryAnalysisSummary,
+    LocalAnalysisError, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND, ManualTagQuery,
     PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument, TagVocabularyEntry,
     TagVocabularyGroup, TagVocabularySnapshot,
 };
-use music_application::auth::SessionTouch;
+use music_application::auth::{SessionTouch, UnixSeconds};
 use music_domain::TrackId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -20,9 +21,12 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::current_session;
-use crate::error::{ApiError, HttpValidationErrorBody, openapi_integer, openapi_number};
+use crate::auth::{current_session, format_rfc3339};
+use crate::error::{
+    ApiError, HttpValidationErrorBody, openapi_integer, openapi_nullable_datetime, openapi_number,
+};
 use crate::http::HttpState;
+use crate::jobs::{BackgroundJobResponse, job_response, map_job_error};
 
 const TAG_VOCABULARY_SCHEMA: &str = "assistant-tag-vocabulary/v1";
 const TAG_CLEANUP_PREVIEW_SCHEMA: &str = "assistant-tag-cleanup-preview/v2";
@@ -631,8 +635,41 @@ struct BulkAnalysisTagReviewResponse {
     failures: Vec<BulkAnalysisTagReviewFailureResponse>,
 }
 
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = LibraryAnalysisStartRequest)]
+struct LibraryAnalysisStartRequest {
+    #[schema(required = false, default = false)]
+    force: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = LibraryAnalysisSummary)]
+struct LibraryAnalysisSummaryResponse {
+    analyzer: String,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    library_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    analyzed_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    failed_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    stale_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    high_confidence: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    medium_confidence: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    low_confidence: usize,
+    #[schema(required = true, schema_with = openapi_nullable_datetime)]
+    last_updated_at: Option<String>,
+}
+
 pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
+        .routes(routes!(start_library_analysis))
+        .routes(routes!(library_analysis_summary))
         .routes(routes!(suggest_playlist))
         .routes(routes!(tag_catalog))
         .routes(routes!(get_tag_vocabulary))
@@ -645,6 +682,53 @@ pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(list_library_tags))
         .routes(routes!(patch_track_tags))
         .routes(routes!(review_analysis_tag))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-analysis/jobs",
+    operation_id = "start_library_analysis_api_assistant_library_analysis_jobs_post",
+    request_body = LibraryAnalysisStartRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn start_library_analysis(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<LibraryAnalysisStartRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let (job, _created) = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?
+        .enqueue_unique_active(METADATA_ANALYSIS_JOB_KIND, json!({"force": payload.force}))
+        .await
+        .map_err(map_job_error)?;
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/assistant/library-analysis/summary",
+    operation_id = "library_analysis_summary_api_assistant_library_analysis_summary_get",
+    responses((status = 200, description = "Successful Response", body = LibraryAnalysisSummaryResponse)),
+    tag = "assistant"
+)]
+async fn library_analysis_summary(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<LibraryAnalysisSummaryResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let summary = analysis_service(&state)?
+        .metadata_summary()
+        .await
+        .map_err(map_local_analysis_error)?;
+    Ok(Json(library_analysis_summary_response(summary)?))
 }
 
 #[utoipa::path(
@@ -1284,6 +1368,38 @@ fn service(state: &HttpState) -> Result<&AssistantService, ApiError> {
         .assistant
         .as_deref()
         .ok_or_else(ApiError::service_unavailable)
+}
+
+fn analysis_service(state: &HttpState) -> Result<&LocalAnalysisService, ApiError> {
+    state
+        .local_analysis
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)
+}
+
+fn library_analysis_summary_response(
+    summary: LibraryAnalysisSummary,
+) -> Result<LibraryAnalysisSummaryResponse, ApiError> {
+    Ok(LibraryAnalysisSummaryResponse {
+        analyzer: summary.analyzer,
+        library_tracks: summary.library_tracks,
+        analyzed_tracks: summary.analyzed_tracks,
+        failed_tracks: summary.failed_tracks,
+        stale_tracks: summary.stale_tracks,
+        high_confidence: summary.high_confidence,
+        medium_confidence: summary.medium_confidence,
+        low_confidence: summary.low_confidence,
+        last_updated_at: summary
+            .last_updated_at_unix_seconds
+            .map(UnixSeconds::new)
+            .map(format_rfc3339)
+            .transpose()?,
+    })
+}
+
+fn map_local_analysis_error(error: LocalAnalysisError) -> ApiError {
+    tracing::error!(error = %error, "Local analysis request failed");
+    ApiError::internal()
 }
 
 async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {

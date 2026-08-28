@@ -265,12 +265,12 @@ const GENRE_ENERGY: &[(&str, f64)] = &[
 ];
 
 #[derive(Debug, Clone)]
-struct MetadataProfile {
-    energy: f64,
-    brightness: f64,
-    tension: f64,
-    moods: Vec<String>,
-    confidence: Confidence,
+pub(super) struct MetadataProfile {
+    pub(super) energy: f64,
+    pub(super) brightness: f64,
+    pub(super) tension: f64,
+    pub(super) moods: Vec<String>,
+    pub(super) confidence: Confidence,
 }
 
 #[derive(Debug, Clone)]
@@ -471,7 +471,7 @@ fn current_profile(
     })
 }
 
-fn metadata_profile(track: &IndexedTrack) -> MetadataProfile {
+pub(super) fn metadata_profile(track: &IndexedTrack) -> MetadataProfile {
     let fields = track_field_tokens(track, &[]);
     let mood_tokens = fields["title"]
         .union(&fields["genre"])

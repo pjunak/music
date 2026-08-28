@@ -3270,6 +3270,75 @@
         },
         "type": "object"
       },
+      "LibraryAnalysisStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "LibraryAnalysisSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzed_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "analyzer": {
+            "type": "string"
+          },
+          "failed_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "high_confidence": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "library_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "low_confidence": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "medium_confidence": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stale_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "analyzer",
+          "library_tracks",
+          "analyzed_tracks",
+          "failed_tracks",
+          "stale_tracks",
+          "high_confidence",
+          "medium_confidence",
+          "low_confidence",
+          "last_updated_at"
+        ],
+        "type": "object"
+      },
       "LibraryTagPage": {
         "additionalProperties": false,
         "properties": {
@@ -5828,6 +5897,66 @@
         },
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/assistant/library-analysis/jobs": {
+      "post": {
+        "operationId": "start_library_analysis_api_assistant_library_analysis_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryAnalysisStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/library-analysis/summary": {
+      "get": {
+        "operationId": "library_analysis_summary_api_assistant_library_analysis_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryAnalysisSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
         ]
       }
     },
