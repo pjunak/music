@@ -24,6 +24,7 @@ readonly run_suffix="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-$$"
 readonly work_dir="$(mktemp -d)"
 readonly fixture_path="$work_dir/reference.flac"
 readonly ws_probe="$(cd "$(dirname "$0")" && pwd)/ws-startup-latency.mjs"
+readonly runtime_differential="$(cd "$(dirname "$0")" && pwd)/runtime-differential.mjs"
 
 declare -a containers=()
 declare -a volumes=()
@@ -280,6 +281,7 @@ benchmark_candidate() {
   local ws_url="ws://127.0.0.1:$port/api/ws"
   local cookie_jar="$work_dir/$label.cookies"
   local memory_samples="$work_dir/$label.memory"
+  local transcript="$work_dir/$label.runtime.json"
   local idle_memory monitor_pid
 
   start_candidate "$label" warm "$image" "$volume" "$port" "$readiness_path"
@@ -287,6 +289,9 @@ benchmark_candidate() {
   metric["$label.warm_start_ms"]="$STARTUP_MS"
 
   curl --fail --silent --show-error --output /dev/null "$base_url/api/library/tracks/1"
+  if ! node "$runtime_differential" capture "$base_url" "$fixture_path" "$transcript"; then
+    failures+=("$label live semantic transcript could not be captured")
+  fi
   login "$base_url" "$cookie_jar"
   warm_get "$base_url/api/health"
   warm_get "$base_url/api/library/tracks/1"
@@ -366,6 +371,23 @@ create_benchmark_users
 benchmark_candidate python "$python_image" "$python_volume" "$python_port" "/api/health"
 benchmark_candidate rust "$rust_image" "$rust_volume" "$rust_port" "/api/readiness"
 
+differential_report="$work_dir/runtime-differential.md"
+if [[ -f "$work_dir/python.runtime.json" && -f "$work_dir/rust.runtime.json" ]]; then
+  if ! node "$runtime_differential" compare \
+    "$work_dir/python.runtime.json" \
+    "$work_dir/rust.runtime.json" \
+    "$differential_report"; then
+    failures+=("Rust live HTTP/WebSocket transcript differs from the frozen Python runtime")
+  fi
+else
+  printf '%s\n' \
+    '## Live Python/Rust semantic differential' \
+    '' \
+    '- Status: **FAIL**' \
+    '- One or both runtime transcripts were unavailable.' \
+    >"$differential_report"
+fi
+
 metric[python.image_bytes]="$(docker image inspect --format '{{.Size}}' "$python_image")"
 metric[rust.image_bytes]="$(docker image inspect --format '{{.Size}}' "$rust_image")"
 
@@ -423,6 +445,9 @@ Comparative latency gates allow Rust at most Python + 25% plus a noise floor: 2 
 for startup. Rust peak memory must stay below 85% of the 4 GiB container limit. This synthetic gate
 does not replace the representative private-corpus signal/voice differential or physical-speaker test.
 EOF
+
+printf '\n' >>"$report_path"
+cat "$differential_report" >>"$report_path"
 
 if (( ${#failures[@]} > 0 )); then
   {

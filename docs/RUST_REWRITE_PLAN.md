@@ -47,6 +47,7 @@ resource acceptance checks pass.
 | `b93f91d` | Full library scan blocks startup | Serve the durable index, expose reconciliation state, and scan as a durable job | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#6-remove-full-scanning-from-the-critical-boot-path) | Accepted 2026-08-27 |
 | `b93f91d` | Unexpected HTTP/WS errors expose exception text | Return safe code/message/correlation ID; keep internal detail in logs | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#10-separate-public-compatibility-from-internal-correctness) | Accepted 2026-08-27 |
 | `b93f91d` | Voice isolation uses recycled Python processes | Try one model-owning Rust thread; require a Rust subprocess when the gate shows it is needed | [Reassessment](RUST_ARCHITECTURE_REASSESSMENT.md#9-re-evaluate-the-voice-process-boundary) | Accepted 2026-08-27 |
+| `b93f91d` | Presence-only broadcasts reuse the last durable playback revision | Give every Rust presence publication an ephemeral monotonic `publication_revision`; keep SQLite compare-and-swap on the separate `storage_revision` | [Architecture](RUST_REWRITE_ARCHITECTURE.md#state-actor) | Accepted through ADR-016 |
 | `b93f91d` | Essentia injects random low-level noise into fully silent analysis frames | Use deterministic zero padding so the same audio and model always produce the same evidence | `music-analysis::voice` preprocessing tests and source-signature `preprocess/v1` | Accepted 2026-08-28 |
 
 Add one row immediately for every later `main` fix or accepted deviation. Do not close a phase with
@@ -123,6 +124,10 @@ cargo test -p music-analysis \
 - The unchanged Baton repository's `core-model` and `core-sync` JVM suites pass against the
   preserved protocol assumptions; Baton has no rewrite-branch source changes.
 - The frozen Python oracle passes 705 tests with one intentionally skipped live-provider case.
+- A live synthetic Python/Rust run on separate local ports produces an identical normalized
+  22-observation semantic transcript covering health, SPA fallback/cache, auth/cookies, validation
+  status and envelope, library reads, single-range streaming, multipart conflicts, partial batch
+  failure, session revocation, and guest protocol-v1/v2 WebSocket projection.
 - Docker/WSL and a real Linux audio device are unavailable on this workstation. The rewrite-only
   workflow, Unix mpv tests, cgroup voice soak, Essentia differential, and speaker smoke therefore
   remain explicit external acceptance evidence rather than inferred success.
@@ -214,8 +219,12 @@ Capture the old system before replacing it:
 The manual `rust-rewrite` workflow now builds the frozen production image and the Rust candidate,
 launches each under the same three-CPU/four-GiB limits, and records cold/warm scan startup, API,
 WebSocket connection-to-state, authenticated upload, range streaming, container memory, and image
-size from generated media. The representative private-corpus signal/voice comparison remains a
-separate acceptance gate because committing or uploading that corpus would violate data boundaries.
+size from generated media. Before measuring, a shared Node driver also records and exactly compares
+normalized live transcripts for health, SPA fallback/cache, authentication/cookies, validation,
+library reads, single-range delivery, multipart conflict behavior, partial batch failure,
+logout/revocation, and guest protocol-v1/v2 WebSocket projection. The representative private-corpus
+signal/voice comparison remains a separate acceptance gate because committing or uploading that
+corpus would violate data boundaries.
 
 Run feasibility spikes before depending on uncertain adapters:
 
