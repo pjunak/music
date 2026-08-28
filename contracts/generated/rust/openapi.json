@@ -168,6 +168,66 @@
         ],
         "type": "object"
       },
+      "ApplyRequest": {
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ops": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupOpIn"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          },
+          "scope_label": {
+            "default": "",
+            "maxLength": 512,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ops"
+        ],
+        "type": "object"
+      },
+      "ApplyResult": {
+        "properties": {
+          "applied": {
+            "type": "integer"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupSkip"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "batch_id",
+          "applied",
+          "skipped"
+        ],
+        "type": "object"
+      },
       "BatchDetail": {
         "properties": {
           "created_at": {
@@ -450,6 +510,66 @@
         ],
         "type": "object"
       },
+      "CleanupOpIn": {
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "rename",
+              "tag",
+              "folder_rename"
+            ],
+            "type": "string"
+          },
+          "new": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "old": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "default": "",
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "kind"
+        ],
+        "type": "object"
+      },
       "CleanupOpOut": {
         "properties": {
           "confidence": {
@@ -559,6 +679,21 @@
         },
         "required": [
           "type"
+        ],
+        "type": "object"
+      },
+      "CleanupSkip": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "reason"
         ],
         "type": "object"
       },
@@ -1881,6 +2016,47 @@
           }
         },
         "summary": "Analyze",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/apply": {
+      "post": {
+        "operationId": "apply_cleanup_api_library_cleanup_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Cleanup",
         "tags": [
           "library-cleanup"
         ]

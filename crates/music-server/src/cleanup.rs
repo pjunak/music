@@ -11,10 +11,13 @@ use axum::http::HeaderMap;
 use futures_util::TryStreamExt;
 use music_application::auth::SessionTouch;
 use music_application::cleanup::{
-    CleanupAnalysis, CleanupBatchDetail, CleanupBatchSummary, CleanupError, CleanupFuture,
-    CleanupNameLookup, CleanupNameScoreError, CleanupNameScores, CleanupScope,
-    CleanupVerificationError, CleanupVerificationResult, MAX_CLEANUP_VERIFY_NAMES,
+    CleanupAnalysis, CleanupApplyOperation, CleanupApplyResult, CleanupBatchDetail,
+    CleanupBatchSummary, CleanupError, CleanupFuture, CleanupInputValue, CleanupNameLookup,
+    CleanupNameScoreError, CleanupNameScores, CleanupOperationKind, CleanupScope,
+    CleanupVerificationError, CleanupVerificationResult, MAX_CLEANUP_APPLY_OPERATIONS,
+    MAX_CLEANUP_SCOPE_LABEL_CHARS, MAX_CLEANUP_VERIFY_NAMES,
 };
+use music_application::library::LibraryCoordinatorError;
 use music_domain::{
     CleanupFolderSuggestion, CleanupRule, CleanupRuleSet, CleanupSuggestion, CleanupTrackPlan,
     CleanupValue, DEFAULT_CLEANUP_RULES, LibraryPath, TrackId,
@@ -33,7 +36,7 @@ use utoipa_axum::routes;
 
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer,
-    openapi_nullable_datetime, openapi_nullable_string,
+    openapi_nullable_datetime, openapi_nullable_integer, openapi_nullable_string,
 };
 use crate::http::HttpState;
 
@@ -48,6 +51,7 @@ pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(analyze))
         .routes(routes!(verify_names))
+        .routes(routes!(apply_cleanup))
         .routes(routes!(list_batches))
         .routes(routes!(get_batch))
 }
@@ -135,6 +139,122 @@ struct VerifyResponse {
     #[schema(schema_with = openapi_integer)]
     verified: usize,
     failed: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CleanupApplyKindRequest {
+    Rename,
+    Tag,
+    FolderRename,
+}
+
+impl From<CleanupApplyKindRequest> for CleanupOperationKind {
+    fn from(value: CleanupApplyKindRequest) -> Self {
+        match value {
+            CleanupApplyKindRequest::Rename => Self::Rename,
+            CleanupApplyKindRequest::Tag => Self::Tag,
+            CleanupApplyKindRequest::FolderRename => Self::FolderRename,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CleanupInputValueRequest {
+    Integer(i64),
+    Text(String),
+}
+
+impl From<CleanupInputValueRequest> for CleanupInputValue {
+    fn from(value: CleanupInputValueRequest) -> Self {
+        match value {
+            CleanupInputValueRequest::Integer(value) => Self::Integer(value),
+            CleanupInputValueRequest::Text(value) => Self::Text(value),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = CleanupOpIn)]
+struct CleanupApplyOperationRequest {
+    #[schema(schema_with = openapi_integer)]
+    track_id: i64,
+    #[schema(schema_with = cleanup_apply_kind_schema)]
+    kind: CleanupApplyKindRequest,
+    #[serde(default)]
+    #[schema(required = false, schema_with = openapi_nullable_string)]
+    field: Option<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = cleanup_value_schema)]
+    old: Option<CleanupInputValueRequest>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = cleanup_value_schema)]
+    new: Option<CleanupInputValueRequest>,
+    #[serde(default)]
+    #[schema(required = false, default = "")]
+    path: String,
+}
+
+impl From<CleanupApplyOperationRequest> for CleanupApplyOperation {
+    fn from(operation: CleanupApplyOperationRequest) -> Self {
+        Self {
+            track_id: operation.track_id,
+            kind: operation.kind.into(),
+            field: operation.field,
+            old: operation.old.map(Into::into),
+            new: operation.new.map(Into::into),
+            path: operation.path,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = ApplyRequest)]
+struct CleanupApplyRequest {
+    #[schema(min_items = 1, max_items = 500)]
+    ops: Vec<CleanupApplyOperationRequest>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = openapi_nullable_integer)]
+    batch_id: Option<i64>,
+    #[serde(default)]
+    #[schema(required = false, default = "", max_length = 512)]
+    scope_label: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = CleanupSkip)]
+struct CleanupSkipResponse {
+    #[schema(schema_with = openapi_integer)]
+    track_id: i64,
+    reason: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = ApplyResult)]
+struct CleanupApplyResponse {
+    #[schema(required = true, schema_with = openapi_nullable_integer)]
+    batch_id: Option<i64>,
+    #[schema(schema_with = openapi_integer)]
+    applied: usize,
+    skipped: Vec<CleanupSkipResponse>,
+}
+
+impl From<CleanupApplyResult> for CleanupApplyResponse {
+    fn from(result: CleanupApplyResult) -> Self {
+        Self {
+            batch_id: result.batch_id,
+            applied: result.applied,
+            skipped: result
+                .skipped
+                .into_iter()
+                .map(|skip| CleanupSkipResponse {
+                    track_id: skip.track_id,
+                    reason: skip.reason,
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<CleanupVerificationResult> for VerifyResponse {
@@ -414,6 +534,42 @@ async fn verify_names(
 }
 
 #[utoipa::path(
+    post,
+    path = "/library/cleanup/apply",
+    operation_id = "apply_cleanup_api_library_cleanup_apply_post",
+    summary = "Apply Cleanup",
+    request_body = CleanupApplyRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = CleanupApplyResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn apply_cleanup(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<CleanupApplyRequest>, JsonRejection>,
+) -> Result<Json<CleanupApplyResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=MAX_CLEANUP_APPLY_OPERATIONS).contains(&payload.ops.len())
+        || payload.scope_label.chars().count() > MAX_CLEANUP_SCOPE_LABEL_CHARS
+    {
+        return Err(ApiError::validation());
+    }
+    let result = crate::library::library(&state)?
+        .coordinator
+        .apply_cleanup(
+            payload.batch_id,
+            payload.scope_label,
+            payload.ops.into_iter().map(Into::into).collect(),
+        )
+        .await
+        .map_err(map_cleanup_apply_error)?;
+    Ok(Json(result.into()))
+}
+
+#[utoipa::path(
     get,
     path = "/library/cleanup/batches",
     operation_id = "list_batches_api_library_cleanup_batches_get",
@@ -529,6 +685,26 @@ fn map_cleanup_verification_error(error: CleanupVerificationError) -> ApiError {
     }
 }
 
+fn map_cleanup_apply_error(error: LibraryCoordinatorError) -> ApiError {
+    match error {
+        LibraryCoordinatorError::InvalidCleanupBatchSize
+        | LibraryCoordinatorError::InvalidCleanupScopeLabel => ApiError::validation(),
+        LibraryCoordinatorError::CleanupBatchNotFound => {
+            ApiError::plain_not_found("batch not found")
+        }
+        LibraryCoordinatorError::CleanupBatchReverted => {
+            ApiError::conflict("batch was already reverted; start a new cleanup run")
+        }
+        LibraryCoordinatorError::CommandQueueFull | LibraryCoordinatorError::Unavailable => {
+            ApiError::service_unavailable()
+        }
+        error => {
+            tracing::error!(error = %error, "library cleanup apply failed");
+            ApiError::internal()
+        }
+    }
+}
+
 const fn default_recursive() -> bool {
     true
 }
@@ -603,6 +779,13 @@ fn cleanup_operation_kind_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
         .enum_values(Some(["rename", "tag"]))
+        .into()
+}
+
+fn cleanup_apply_kind_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["rename", "tag", "folder_rename"]))
         .into()
 }
 

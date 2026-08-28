@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 
 use crate::recovery::{RecoveryJournalEntry, RecoveryJournalId, RecoveryOperation};
 
-use super::{DiscoveredTrack, LibraryDependencyError, LibraryStatus, TrackMetadataPatch};
+use super::{
+    DiscoveredTrack, LibraryDependencyError, LibraryStatus, TrackMetadataField, TrackMetadataPatch,
+};
 
 pub type LibraryMutationFuture<'a> = Pin<
     Box<
@@ -22,6 +24,20 @@ pub type LibraryUploadResolutionFuture<'a> = Pin<
 
 pub type LibraryUploadDiscardFuture<'a> =
     Pin<Box<dyn Future<Output = Result<(), LibraryMutationFailure>> + Send + 'a>>;
+
+pub type LibraryFileTagReadFuture<'a> = Pin<
+    Box<
+        dyn Future<Output = Result<Option<LibraryFileTagValue>, LibraryMutationFailure>>
+            + Send
+            + 'a,
+    >,
+>;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum LibraryFileTagValue {
+    Text(String),
+    Number(u32),
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum UploadConflictPolicy {
@@ -238,6 +254,12 @@ pub enum LibraryFileMutationOutcome {
 }
 
 pub trait LibraryMutationEffects: std::fmt::Debug + Send + Sync {
+    fn read_file_tag<'a>(
+        &'a self,
+        path: &'a LibraryPath,
+        field: TrackMetadataField,
+    ) -> LibraryFileTagReadFuture<'a>;
+
     fn resolve_upload<'a>(
         &'a self,
         requested: &'a LibraryPath,

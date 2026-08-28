@@ -457,6 +457,13 @@ commit for that item, while any ambiguous post-replacement failure stops the bat
   bodies, and may write only successful score verdicts to the dedicated cache. Lookup failures are
   not cached, so a later explicit attempt can retry them
   ([MusicBrainz rate-limit policy](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)).
+  Accepted cleanup operations return to `LibraryCoordinator`, so cleanup never becomes a second
+  file/catalog writer. Each accepted item has a `cleanup` recovery journal before its rooted file
+  effect; the refreshed catalog row or folder paths, compatible `cleanup_batches` append, and
+  terminal journal state then commit in one SQLite transaction. Tag journals retain the actual
+  pre-write file value rather than a filename-derived display fallback. A process restart replays
+  unfinished cleanup effects forward before publishing the catalog. Batch revert uses the same
+  serialized boundary and is implemented in the next Phase 5 slice.
 
 ## Durable jobs
 

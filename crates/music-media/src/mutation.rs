@@ -3,10 +3,11 @@ use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 
 use music_application::library::{
-    LibraryFileMutation, LibraryFileMutationOutcome, LibraryMutationEffects,
-    LibraryMutationFailure, LibraryMutationFailureKind, LibraryMutationFuture,
-    LibraryUploadDiscardFuture, LibraryUploadResolution, LibraryUploadResolutionFuture,
-    TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue, UploadConflictPolicy,
+    LibraryFileMutation, LibraryFileMutationOutcome, LibraryFileTagReadFuture, LibraryFileTagValue,
+    LibraryMutationEffects, LibraryMutationFailure, LibraryMutationFailureKind,
+    LibraryMutationFuture, LibraryUploadDiscardFuture, LibraryUploadResolution,
+    LibraryUploadResolutionFuture, TrackMetadataField, TrackMetadataPatch, TrackMetadataPatchValue,
+    UploadConflictPolicy,
 };
 use music_application::recovery::RecoveryJournalId;
 
@@ -780,6 +781,36 @@ fn mutation_artifact_state(path: &Path) -> Result<MutationArtifactState, Filesys
 }
 
 impl LibraryMutationEffects for FilesystemLibraryMutations {
+    fn read_file_tag<'a>(
+        &'a self,
+        path: &'a music_domain::LibraryPath,
+        field: TrackMetadataField,
+    ) -> LibraryFileTagReadFuture<'a> {
+        let root = self.root.clone();
+        let metadata = self.metadata.clone();
+        let path = path.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let absolute = root
+                    .resolve_existing_file_for_mutation(&path)
+                    .map_err(FilesystemMutationError::RootedPath)?;
+                let metadata = metadata
+                    .read(&absolute)
+                    .map_err(FilesystemMutationError::Metadata)?;
+                file_tag_value(&metadata, field)
+            })
+            .await
+            .map_err(|source| {
+                LibraryMutationFailure::without_recovery(
+                    LibraryMutationFailureKind::Io,
+                    "tag_read_worker_failed",
+                    Box::new(source),
+                )
+            })?
+            .map_err(map_failure)
+        })
+    }
+
     fn resolve_upload<'a>(
         &'a self,
         requested: &'a music_domain::LibraryPath,
@@ -850,6 +881,28 @@ impl LibraryMutationEffects for FilesystemLibraryMutations {
             })?
             .map_err(map_failure)
         })
+    }
+}
+
+fn file_tag_value(
+    metadata: &crate::AudioMetadata,
+    field: TrackMetadataField,
+) -> Result<Option<LibraryFileTagValue>, FilesystemMutationError> {
+    let text =
+        |value: &str| (!value.is_empty()).then(|| LibraryFileTagValue::Text(value.to_owned()));
+    match field {
+        TrackMetadataField::Title => Ok(text(&metadata.title)),
+        TrackMetadataField::Artist => Ok(text(&metadata.artist)),
+        TrackMetadataField::AlbumArtist => Ok(text(&metadata.album_artist)),
+        TrackMetadataField::Album => Ok(text(&metadata.album)),
+        TrackMetadataField::TrackNumber => Ok(metadata.track_no.map(LibraryFileTagValue::Number)),
+        TrackMetadataField::DiscNumber => Ok(metadata.disc_no.map(LibraryFileTagValue::Number)),
+        TrackMetadataField::Year => Ok(metadata.year.map(LibraryFileTagValue::Number)),
+        TrackMetadataField::Genre => Ok(text(&metadata.genre)),
+        TrackMetadataField::Bpm => Ok(metadata.bpm.map(LibraryFileTagValue::Number)),
+        TrackMetadataField::DisplayTitle | TrackMetadataField::Origin => {
+            Err(FilesystemMutationError::InvalidMutationPath)
+        }
     }
 }
 

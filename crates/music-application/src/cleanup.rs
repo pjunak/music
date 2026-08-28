@@ -6,12 +6,17 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use music_domain::{
-    CleanupFolderSuggestion, CleanupRuleSet, CleanupTrackPlan, LibraryPath, NameVerdicts, TrackId,
-    analyze_cleanup, analyze_cleanup_folders, pending_cleanup_lookups,
+    CleanupFolderSuggestion, CleanupRuleSet, CleanupTrackPlan, IndexedTrack, LibraryPath,
+    NameVerdicts, TrackId, analyze_cleanup, analyze_cleanup_folders, pending_cleanup_lookups,
 };
+use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
-use crate::library::{LibraryDependencyError, LibraryRepository};
+use crate::library::{
+    LibraryDependencyError, LibraryFileMutation, LibraryFileMutationOutcome,
+    LibraryMutationRepository, LibraryRepository, LibraryStatus,
+};
+use crate::recovery::{RecoveryJournalEntry, RecoveryJournalId};
 
 pub type CleanupDependencyError = Box<dyn Error + Send + Sync>;
 pub type CleanupFuture<'a, T> =
@@ -23,6 +28,189 @@ pub trait CleanupRepository: LibraryRepository {
     fn cleanup_batches(&self) -> CleanupFuture<'_, Vec<CleanupBatchSummary>>;
 
     fn cleanup_batch(&self, batch_id: i64) -> CleanupFuture<'_, Option<CleanupBatchDetail>>;
+}
+
+pub const MAX_CLEANUP_APPLY_OPERATIONS: usize = 500;
+pub const MAX_CLEANUP_SCOPE_LABEL_CHARS: usize = 512;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CleanupOperationKind {
+    Rename,
+    Tag,
+    FolderRename,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum CleanupInputValue {
+    Integer(i64),
+    Text(String),
+}
+
+impl CleanupInputValue {
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        match self {
+            Self::Integer(value) => Value::from(*value),
+            Self::Text(value) => Value::String(value.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CleanupApplyOperation {
+    pub track_id: i64,
+    pub kind: CleanupOperationKind,
+    pub field: Option<String>,
+    pub old: Option<CleanupInputValue>,
+    pub new: Option<CleanupInputValue>,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CleanupSkip {
+    pub track_id: i64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CleanupApplyResult {
+    pub batch_id: Option<i64>,
+    pub applied: usize,
+    pub skipped: Vec<CleanupSkip>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CleanupBatchAppend {
+    batch_id: Option<i64>,
+    scope_label: String,
+    item: Map<String, Value>,
+}
+
+impl CleanupBatchAppend {
+    pub fn new(
+        batch_id: Option<i64>,
+        scope_label: String,
+        item: Map<String, Value>,
+    ) -> Result<Self, CleanupMutationValidationError> {
+        if batch_id.is_some_and(|id| id <= 0) {
+            return Err(CleanupMutationValidationError::InvalidBatchId);
+        }
+        if scope_label.chars().count() > MAX_CLEANUP_SCOPE_LABEL_CHARS {
+            return Err(CleanupMutationValidationError::ScopeLabelTooLong);
+        }
+        if item.is_empty() {
+            return Err(CleanupMutationValidationError::InvalidJournalPlan);
+        }
+        Ok(Self {
+            batch_id,
+            scope_label,
+            item,
+        })
+    }
+
+    pub fn from_journal(
+        entry: &RecoveryJournalEntry,
+    ) -> Result<Self, CleanupMutationValidationError> {
+        let cleanup = entry
+            .plan
+            .get("cleanup_batch")
+            .and_then(Value::as_object)
+            .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?;
+        if cleanup.len() != 3 {
+            return Err(CleanupMutationValidationError::InvalidJournalPlan);
+        }
+        let batch_id = match cleanup.get("batch_id") {
+            Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_i64()
+                    .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?,
+            ),
+            None => return Err(CleanupMutationValidationError::InvalidJournalPlan),
+        };
+        let scope_label = cleanup
+            .get("scope_label")
+            .and_then(Value::as_str)
+            .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?
+            .to_owned();
+        let item = cleanup
+            .get("item")
+            .and_then(Value::as_object)
+            .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?
+            .clone();
+        Self::new(batch_id, scope_label, item)
+    }
+
+    #[must_use]
+    pub const fn batch_id(&self) -> Option<i64> {
+        self.batch_id
+    }
+
+    #[must_use]
+    pub fn scope_label(&self) -> &str {
+        &self.scope_label
+    }
+
+    #[must_use]
+    pub const fn item(&self) -> &Map<String, Value> {
+        &self.item
+    }
+
+    pub fn journal_plan(
+        &self,
+        mutation: &LibraryFileMutation,
+    ) -> Result<Value, CleanupMutationValidationError> {
+        let mut plan = mutation.plan();
+        let object = plan
+            .as_object_mut()
+            .ok_or(CleanupMutationValidationError::InvalidJournalPlan)?;
+        object.insert(
+            "cleanup_batch".to_owned(),
+            json!({
+                "batch_id": self.batch_id,
+                "scope_label": self.scope_label,
+                "item": self.item,
+            }),
+        );
+        Ok(plan)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CleanupMutationValidationError {
+    InvalidBatchId,
+    ScopeLabelTooLong,
+    InvalidJournalPlan,
+}
+
+impl Display for CleanupMutationValidationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidBatchId => "cleanup batch id is invalid",
+            Self::ScopeLabelTooLong => "cleanup scope label is too long",
+            Self::InvalidJournalPlan => "cleanup mutation journal is invalid",
+        })
+    }
+}
+
+impl Error for CleanupMutationValidationError {}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CleanupMutationCommit {
+    pub status: LibraryStatus,
+    pub affected_tracks: u64,
+    pub track: Option<IndexedTrack>,
+    pub batch_id: i64,
+}
+
+pub trait CleanupMutationRepository: LibraryMutationRepository + CleanupRepository {
+    fn commit_cleanup_mutation<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        mutation: &'a LibraryFileMutation,
+        outcome: LibraryFileMutationOutcome,
+        append: &'a CleanupBatchAppend,
+    ) -> CleanupFuture<'a, CleanupMutationCommit>;
 }
 
 pub const MAX_CLEANUP_BATCH_HISTORY: usize = 100;
@@ -390,9 +578,14 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::{
-        CleanupFuture, CleanupNameLookup, CleanupNameScores, CleanupNameVerdict,
-        CleanupVerificationRepository, CleanupVerificationService,
+        CleanupBatchAppend, CleanupFuture, CleanupNameLookup, CleanupNameScores,
+        CleanupNameVerdict, CleanupVerificationRepository, CleanupVerificationService,
     };
+    use crate::library::LibraryFileMutation;
+    use crate::recovery::{
+        RecoveryDomain, RecoveryJournalDraft, RecoveryJournalEntry, RecoveryState,
+    };
+    use music_domain::{LibraryPath, TrackId};
 
     #[derive(Debug, Default)]
     struct MemoryVerdicts {
@@ -511,5 +704,41 @@ mod tests {
         assert!(CleanupNameScores::new(0, 100).is_ok());
         assert!(CleanupNameScores::new(-1, 50).is_err());
         assert!(CleanupNameScores::new(50, 101).is_err());
+    }
+
+    #[test]
+    fn cleanup_batch_append_round_trips_with_its_library_mutation() -> Result<(), Box<dyn Error>> {
+        let mutation = LibraryFileMutation::MoveTrack {
+            track_id: TrackId::new(17)?,
+            source: LibraryPath::parse("Album/01 - Song.wav")?,
+            destination: LibraryPath::parse("Album/Song.wav")?,
+        };
+        let append = CleanupBatchAppend::new(
+            Some(9),
+            "Album".to_owned(),
+            serde_json::Map::from_iter([
+                ("kind".to_owned(), serde_json::json!("rename")),
+                ("track_id".to_owned(), serde_json::json!(17)),
+            ]),
+        )?;
+        let draft = RecoveryJournalDraft::new(
+            RecoveryDomain::Cleanup,
+            mutation.operation()?,
+            append.journal_plan(&mutation)?,
+        )?;
+        let entry = RecoveryJournalEntry {
+            id: draft.id,
+            domain: draft.domain,
+            operation: draft.operation,
+            state: RecoveryState::Applying,
+            plan: draft.plan,
+            progress: draft.progress,
+            created_at_unix_seconds: 1,
+            updated_at_unix_seconds: 1,
+            completed_at_unix_seconds: None,
+        };
+        assert_eq!(CleanupBatchAppend::from_journal(&entry)?, append);
+        assert_eq!(LibraryFileMutation::from_journal(&entry)?, mutation);
+        Ok(())
     }
 }

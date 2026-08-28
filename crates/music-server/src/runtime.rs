@@ -8,12 +8,12 @@ use std::time::Duration;
 
 use axum::Router;
 use music_application::cleanup::{
-    CleanupNameLookup, CleanupRepository, CleanupService, CleanupVerificationRepository,
-    CleanupVerificationService,
+    CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
+    CleanupVerificationRepository, CleanupVerificationService,
 };
 use music_application::library::{
-    LibraryCatalogSink, LibraryCoordinatorHandle, LibraryMutationRepository, LibraryRepository,
-    LibraryService, ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
+    LibraryCatalogSink, LibraryCoordinatorHandle, LibraryRepository, LibraryService,
+    ReconciliationStatus, SpawnedLibraryCoordinator, start_library_coordinator,
 };
 use music_application::playback::{
     CatalogSnapshot, PlaybackActorConfig, PlaybackActorHandle, SpawnedPlaybackActor,
@@ -146,7 +146,7 @@ impl AppRuntime {
             library_root.clone(),
             library_metadata.clone(),
         ));
-        let mutation_repository: Arc<dyn LibraryMutationRepository> = storage.clone();
+        let mutation_repository: Arc<dyn CleanupMutationRepository> = storage.clone();
         let read_repository: Arc<dyn LibraryRepository> = storage.clone();
         let cleanup_repository: Arc<dyn CleanupRepository> = storage.clone();
         let cleanup_verification_repository: Arc<dyn CleanupVerificationRepository> =
@@ -575,14 +575,15 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
     use music_application::auth::UnixSeconds;
     use music_application::cleanup::{
-        CleanupFuture, CleanupNameLookup, CleanupNameScores, CleanupVerificationService,
+        CleanupBatchAppend, CleanupFuture, CleanupNameLookup, CleanupNameScores, CleanupRepository,
+        CleanupVerificationService,
     };
     use music_application::library::{LibraryFileMutation, ReconciliationStatus};
     use music_application::recovery::{
         RecoveryDomain, RecoveryJournalDraft, RecoveryJournalRepository, RecoveryState,
         RecoveryTransition,
     };
-    use music_storage::StorageError;
+    use music_storage::{SqliteStorage, SqliteStorageOptions, StorageError};
     use serde_json::Value;
     use tempfile::tempdir;
     use tokio::sync::Mutex;
@@ -657,6 +658,328 @@ mod tests {
             .and_then(|case| case["source_base64"].as_str())
             .ok_or("WAV metadata fixture is missing")?;
         Ok(STANDARD.decode(encoded)?)
+    }
+
+    #[tokio::test]
+    async fn cleanup_apply_serializes_file_catalog_and_batch_history()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Cleanup/Disc_1"))?;
+        fs::write(
+            directory.path().join("music/Cleanup/Disc_1/03 - Gamma.wav"),
+            reference_wav()?,
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let track_id = runtime
+            .library_service
+            .catalog_track_ids()
+            .await?
+            .into_iter()
+            .next()
+            .ok_or("cleanup fixture was not indexed")?;
+        let hash = music_storage::hash_password("correct horse battery staple")?;
+        runtime
+            .storage
+            .create_user("operator", &hash, UnixSeconds::new(1_800_000_000))
+            .await?;
+        let router = runtime.router()?;
+
+        let unauthorized = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/apply")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        "{{\"ops\":[{{\"track_id\":{},\"kind\":\"rename\",\"old\":\"03 - Gamma\",\"new\":\"Gamma\"}}]}}",
+                        track_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct horse battery staple"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = login
+            .headers()
+            .get(SET_COOKIE)
+            .ok_or("login did not set a session cookie")?
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("session cookie was empty")?
+            .to_owned();
+
+        let apply = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/apply")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(format!(
+                        concat!(
+                            "{{\"scope_label\":\"roundtrip\",\"ops\":[",
+                            "{{\"track_id\":{},\"kind\":\"tag\",\"field\":\"title\",\"old\":\"Round Trip\",\"new\":\"Gamma\"}},",
+                            "{{\"track_id\":{},\"kind\":\"tag\",\"field\":\"track_no\",\"old\":7,\"new\":3}},",
+                            "{{\"track_id\":{},\"kind\":\"rename\",\"old\":\"03 - Gamma\",\"new\":\"Gamma\"}}]}}"
+                        ),
+                        track_id.get(),
+                        track_id.get(),
+                        track_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(apply.status(), StatusCode::OK);
+        let apply_json: Value =
+            serde_json::from_slice(&to_bytes(apply.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(apply_json["applied"], 3);
+        assert_eq!(apply_json["skipped"], serde_json::json!([]));
+        let batch_id = apply_json["batch_id"]
+            .as_i64()
+            .ok_or("cleanup apply did not create a batch")?;
+        assert!(
+            directory
+                .path()
+                .join("music/Cleanup/Disc_1/Gamma.wav")
+                .is_file()
+        );
+        let track = runtime
+            .library_service
+            .track(track_id)
+            .await?
+            .ok_or("cleanup track lost its catalog row")?;
+        assert_eq!(track.path.as_str(), "Cleanup/Disc_1/Gamma.wav");
+        assert_eq!(track.metadata.title, "Gamma");
+        assert_eq!(track.metadata.track_no, Some(3));
+
+        let detail = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/library/cleanup/batches/{batch_id}"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(detail.status(), StatusCode::OK);
+        let detail_json: Value =
+            serde_json::from_slice(&to_bytes(detail.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(detail_json["item_count"], 3);
+        assert_eq!(detail_json["items"][0]["kind"], "tag");
+        assert_eq!(detail_json["items"][0]["file_old"], "Round Trip");
+        assert_eq!(detail_json["items"][1]["file_old"], 7);
+        assert_eq!(detail_json["items"][2]["kind"], "rename");
+
+        let append = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/apply")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(format!(
+                        "{{\"batch_id\":{batch_id},\"ops\":[{{\"track_id\":{},\"kind\":\"rename\",\"old\":\"Gamma\",\"new\":\"Final\"}}]}}",
+                        track_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(append.status(), StatusCode::OK);
+        let append_json: Value =
+            serde_json::from_slice(&to_bytes(append.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(append_json["batch_id"], batch_id);
+        assert_eq!(append_json["applied"], 1);
+        assert!(
+            directory
+                .path()
+                .join("music/Cleanup/Disc_1/Final.wav")
+                .is_file()
+        );
+
+        let folders = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/apply")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"ops":[{"track_id":0,"kind":"folder_rename","old":"Cleanup","new":"Cleaned","path":"Cleanup"},{"track_id":0,"kind":"folder_rename","old":"Disc_1","new":"Disc 1","path":"Cleanup/Disc_1"}]}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(folders.status(), StatusCode::OK);
+        let folders_json: Value =
+            serde_json::from_slice(&to_bytes(folders.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(folders_json["applied"], 2);
+        assert_eq!(folders_json["skipped"], serde_json::json!([]));
+        assert!(
+            directory
+                .path()
+                .join("music/Cleaned/Disc 1/Final.wav")
+                .is_file()
+        );
+        assert_eq!(
+            runtime
+                .library_service
+                .track(track_id)
+                .await?
+                .ok_or("folder cleanup lost its catalog row")?
+                .path
+                .as_str(),
+            "Cleaned/Disc 1/Final.wav"
+        );
+
+        let stale = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/apply")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(format!(
+                        "{{\"ops\":[{{\"track_id\":{},\"kind\":\"rename\",\"old\":\"Gamma\",\"new\":\"Ignored\"}}]}}",
+                        track_id.get()
+                    )))?,
+            )
+            .await?;
+        let stale_json: Value =
+            serde_json::from_slice(&to_bytes(stale.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(stale_json["batch_id"], Value::Null);
+        assert_eq!(stale_json["applied"], 0);
+        assert_eq!(
+            stale_json["skipped"][0]["reason"],
+            "filename changed since analysis"
+        );
+
+        let missing_batch = router
+            .oneshot(
+                Request::post("/api/library/cleanup/apply")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(format!(
+                        "{{\"batch_id\":999999,\"ops\":[{{\"track_id\":{},\"kind\":\"rename\",\"old\":\"Final\",\"new\":\"Ignored\"}}]}}",
+                        track_id.get()
+                    )))?,
+            )
+            .await?;
+        assert_eq!(missing_batch.status(), StatusCode::NOT_FOUND);
+
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_recovers_cleanup_disk_effect_into_catalog_and_history()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("music/Recovery"))?;
+        fs::write(
+            directory.path().join("music/Recovery/01 - Song.wav"),
+            reference_wav()?,
+        )?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = runtime.library_status();
+                if status.status == ReconciliationStatus::Current {
+                    break;
+                }
+                assert_ne!(status.status, ReconciliationStatus::Failed);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        let track_id = runtime
+            .library_service
+            .catalog_track_ids()
+            .await?
+            .into_iter()
+            .next()
+            .ok_or("recovery fixture was not indexed")?;
+        runtime.shutdown().await?;
+        drop(runtime);
+
+        let source = music_domain::LibraryPath::parse("Recovery/01 - Song.wav")?;
+        let destination = music_domain::LibraryPath::parse("Recovery/Song.wav")?;
+        let mutation = LibraryFileMutation::MoveTrack {
+            track_id,
+            source: source.clone(),
+            destination: destination.clone(),
+        };
+        let append = CleanupBatchAppend::new(
+            None,
+            "recovered cleanup".to_owned(),
+            serde_json::Map::from_iter([
+                ("kind".to_owned(), serde_json::json!("rename")),
+                ("track_id".to_owned(), serde_json::json!(track_id.get())),
+                ("path_before".to_owned(), serde_json::json!(source.as_str())),
+                (
+                    "path_after".to_owned(),
+                    serde_json::json!(destination.as_str()),
+                ),
+            ]),
+        )?;
+        let draft = RecoveryJournalDraft::new(
+            RecoveryDomain::Cleanup,
+            mutation.operation()?,
+            append.journal_plan(&mutation)?,
+        )?;
+        let journal_id = draft.id.clone();
+        let storage =
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?;
+        RecoveryJournalRepository::create_recovery_journal(&storage, draft).await?;
+        let transition = RecoveryJournalRepository::transition_recovery_journal(
+            &storage,
+            &journal_id,
+            RecoveryState::Planned,
+            RecoveryState::Applying,
+            serde_json::json!({"simulated_crash": true}),
+        )
+        .await?;
+        assert!(matches!(transition, RecoveryTransition::Applied(_)));
+        storage.close().await;
+        drop(storage);
+        fs::rename(
+            directory.path().join("music/Recovery/01 - Song.wav"),
+            directory.path().join("music/Recovery/Song.wav"),
+        )?;
+
+        let recovered = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let track = recovered
+            .library_service
+            .track(track_id)
+            .await?
+            .ok_or("recovered cleanup lost its catalog row")?;
+        assert_eq!(track.path, destination);
+        let batches = CleanupRepository::cleanup_batches(recovered.storage.as_ref()).await?;
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].scope_label, "recovered cleanup");
+        assert_eq!(batches[0].item_count, 1);
+        assert!(
+            RecoveryJournalRepository::unfinished_recovery_journals(
+                recovered.storage.as_ref(),
+                RecoveryDomain::Cleanup,
+            )
+            .await?
+            .is_empty()
+        );
+        recovered.shutdown().await?;
+        Ok(())
     }
 
     fn multipart_upload(files: &[(&str, &[u8])]) -> (String, Vec<u8>) {

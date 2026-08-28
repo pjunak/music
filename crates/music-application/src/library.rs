@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +13,11 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::cleanup::{
+    CleanupApplyOperation, CleanupApplyResult, CleanupBatchAppend, CleanupInputValue,
+    CleanupMutationRepository, CleanupMutationValidationError, CleanupOperationKind, CleanupSkip,
+    MAX_CLEANUP_APPLY_OPERATIONS, MAX_CLEANUP_SCOPE_LABEL_CHARS,
+};
 use crate::playback::PlaybackActorHandle;
 use crate::recovery::{
     RecoveryDomain, RecoveryJournalDraft, RecoveryJournalEntry, RecoveryJournalRepository,
@@ -26,10 +32,11 @@ pub use metadata_patch::{
 };
 pub use mutation::{
     FolderDeletionResult, FolderMutationResult, LibraryFileMutation, LibraryFileMutationOutcome,
-    LibraryIndexMutationCommit, LibraryMutationEffects, LibraryMutationFailure,
-    LibraryMutationFailureKind, LibraryMutationFuture, LibraryMutationValidationError,
-    LibraryTrackMutationCommit, LibraryUploadDiscardFuture, LibraryUploadMutationCommit,
-    LibraryUploadResolution, LibraryUploadResolutionFuture, UploadConflictPolicy,
+    LibraryFileTagReadFuture, LibraryFileTagValue, LibraryIndexMutationCommit,
+    LibraryMutationEffects, LibraryMutationFailure, LibraryMutationFailureKind,
+    LibraryMutationFuture, LibraryMutationValidationError, LibraryTrackMutationCommit,
+    LibraryUploadDiscardFuture, LibraryUploadMutationCommit, LibraryUploadResolution,
+    LibraryUploadResolutionFuture, UploadConflictPolicy,
 };
 
 const LIBRARY_COMMAND_CAPACITY: usize = 4;
@@ -315,6 +322,11 @@ pub enum LibraryCoordinatorError {
     TrackNotFound {
         track_id: TrackId,
     },
+    InvalidCleanupBatchSize,
+    InvalidCleanupScopeLabel,
+    CleanupBatchNotFound,
+    CleanupBatchReverted,
+    InvalidCleanupMutation(CleanupMutationValidationError),
     CommandQueueFull,
     Unavailable,
 }
@@ -343,6 +355,16 @@ impl Display for LibraryCoordinatorError {
             Self::TrackNotFound { track_id } => {
                 write!(formatter, "library track {} was not found", track_id.get())
             }
+            Self::InvalidCleanupBatchSize => write!(
+                formatter,
+                "cleanup apply requires between 1 and {MAX_CLEANUP_APPLY_OPERATIONS} operations"
+            ),
+            Self::InvalidCleanupScopeLabel => {
+                formatter.write_str("cleanup scope label is too long")
+            }
+            Self::CleanupBatchNotFound => formatter.write_str("cleanup batch was not found"),
+            Self::CleanupBatchReverted => formatter.write_str("cleanup batch was already reverted"),
+            Self::InvalidCleanupMutation(error) => Display::fmt(error, formatter),
             Self::CommandQueueFull => formatter.write_str("library command queue is full"),
             Self::Unavailable => formatter.write_str("library coordinator is unavailable"),
         }
@@ -356,10 +378,15 @@ impl Error for LibraryCoordinatorError {
             Self::Discovery(failure) => Some(failure),
             Self::Mutation(failure) => Some(failure),
             Self::InvalidMutation(failure) => Some(failure),
+            Self::InvalidCleanupMutation(failure) => Some(failure),
             Self::GenerationConflict { .. }
             | Self::RecoveryConflict
             | Self::InvalidMutationOutcome
             | Self::TrackNotFound { .. }
+            | Self::InvalidCleanupBatchSize
+            | Self::InvalidCleanupScopeLabel
+            | Self::CleanupBatchNotFound
+            | Self::CleanupBatchReverted
             | Self::CommandQueueFull
             | Self::Unavailable => None,
         }
@@ -598,6 +625,27 @@ impl LibraryCoordinatorHandle {
             .map_err(|_| LibraryCoordinatorError::Unavailable)?
     }
 
+    pub async fn apply_cleanup(
+        &self,
+        batch_id: Option<i64>,
+        scope_label: String,
+        operations: Vec<CleanupApplyOperation>,
+    ) -> Result<CleanupApplyResult, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::ApplyCleanup {
+                batch_id,
+                scope_label,
+                operations,
+                reply,
+            })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
     async fn mutate(
         &self,
         mutation: LibraryFileMutation,
@@ -624,7 +672,7 @@ pub struct SpawnedLibraryCoordinator {
 }
 
 pub async fn start_library_coordinator(
-    repository: Arc<dyn LibraryMutationRepository>,
+    repository: Arc<dyn CleanupMutationRepository>,
     discovery: Arc<dyn LibraryDiscovery>,
     catalog: Arc<dyn LibraryCatalogSink>,
     effects: Arc<dyn LibraryMutationEffects>,
@@ -640,6 +688,22 @@ pub async fn start_library_coordinator(
             .await
             .map_err(|source| dependency("recover an interrupted reconciliation", source))?;
     }
+    let (status_sender, status_receiver) = watch::channel(status.clone());
+    let (commands, receiver) = mpsc::channel(LIBRARY_COMMAND_CAPACITY);
+    let cancellation = CancellationToken::new();
+    let actor = LibraryCoordinator {
+        repository: repository.clone(),
+        discovery,
+        catalog: catalog.clone(),
+        effects: effects.clone(),
+        status: status_sender,
+    };
+    actor.recover_cleanup_mutations().await?;
+    status = repository
+        .status()
+        .await
+        .map_err(|source| dependency("reload recovered library status", source))?;
+    actor.status.send_replace(status.clone());
     let track_ids = repository
         .catalog_track_ids()
         .await
@@ -651,16 +715,6 @@ pub async fn start_library_coordinator(
         .await
         .map_err(|source| dependency("publish the durable track catalog", source))?;
 
-    let (status_sender, status_receiver) = watch::channel(status);
-    let (commands, receiver) = mpsc::channel(LIBRARY_COMMAND_CAPACITY);
-    let cancellation = CancellationToken::new();
-    let actor = LibraryCoordinator {
-        repository,
-        discovery,
-        catalog,
-        effects,
-        status: status_sender,
-    };
     let task_cancellation = cancellation.clone();
     let task = tokio::spawn(actor.run(receiver, task_cancellation));
     Ok(SpawnedLibraryCoordinator {
@@ -714,6 +768,12 @@ enum LibraryCommand {
         policy: UploadConflictPolicy,
         reply: oneshot::Sender<Result<Vec<LibraryUploadBatchItem>, LibraryCoordinatorError>>,
     },
+    ApplyCleanup {
+        batch_id: Option<i64>,
+        scope_label: String,
+        operations: Vec<CleanupApplyOperation>,
+        reply: oneshot::Sender<Result<CleanupApplyResult, LibraryCoordinatorError>>,
+    },
 }
 
 #[derive(Debug)]
@@ -724,8 +784,41 @@ struct AppliedLibraryMutation {
 }
 
 #[derive(Debug)]
+struct PreparedCleanupMutation {
+    track_id: i64,
+    kind: PreparedCleanupKind,
+    mutation: LibraryFileMutation,
+    append: CleanupBatchAppend,
+}
+
+#[derive(Debug)]
+enum PreparedCleanupKind {
+    Rename { target_name: String },
+    Tag,
+    FolderRename { target_name: String },
+}
+
+#[derive(Debug)]
+struct AppliedCleanupMutation {
+    affected_tracks: u64,
+    batch_id: i64,
+}
+
+#[derive(Debug)]
+enum CleanupPreparationError {
+    Skip(CleanupSkip),
+    Fatal(LibraryCoordinatorError),
+}
+
+impl From<CleanupSkip> for CleanupPreparationError {
+    fn from(skip: CleanupSkip) -> Self {
+        Self::Skip(skip)
+    }
+}
+
+#[derive(Debug)]
 struct LibraryCoordinator {
-    repository: Arc<dyn LibraryMutationRepository>,
+    repository: Arc<dyn CleanupMutationRepository>,
     discovery: Arc<dyn LibraryDiscovery>,
     catalog: Arc<dyn LibraryCatalogSink>,
     effects: Arc<dyn LibraryMutationEffects>,
@@ -805,6 +898,17 @@ impl LibraryCoordinator {
                             reply,
                         } => {
                             let result = self.publish_uploads_once(uploads, policy).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::ApplyCleanup {
+                            batch_id,
+                            scope_label,
+                            operations,
+                            reply,
+                        } => {
+                            let result = self
+                                .apply_cleanup_once(batch_id, scope_label, operations)
+                                .await;
                             let _ = reply.send(result);
                         }
                     }
@@ -891,6 +995,461 @@ impl LibraryCoordinator {
             }
         }
         Ok(applied)
+    }
+
+    async fn apply_cleanup_once(
+        &self,
+        batch_id: Option<i64>,
+        scope_label: String,
+        operations: Vec<CleanupApplyOperation>,
+    ) -> Result<CleanupApplyResult, LibraryCoordinatorError> {
+        if !(1..=MAX_CLEANUP_APPLY_OPERATIONS).contains(&operations.len()) {
+            return Err(LibraryCoordinatorError::InvalidCleanupBatchSize);
+        }
+        if scope_label.chars().count() > MAX_CLEANUP_SCOPE_LABEL_CHARS {
+            return Err(LibraryCoordinatorError::InvalidCleanupScopeLabel);
+        }
+        if let Some(batch_id) = batch_id {
+            if batch_id <= 0 {
+                return Err(LibraryCoordinatorError::CleanupBatchNotFound);
+            }
+            let batch = self
+                .repository
+                .cleanup_batch(batch_id)
+                .await
+                .map_err(|source| dependency("load the cleanup append target", source))?
+                .ok_or(LibraryCoordinatorError::CleanupBatchNotFound)?;
+            if batch.reverted_at_unix_seconds.is_some() {
+                return Err(LibraryCoordinatorError::CleanupBatchReverted);
+            }
+        }
+
+        let (mut regular, mut folders): (Vec<_>, Vec<_>) = operations
+            .into_iter()
+            .partition(|operation| operation.kind != CleanupOperationKind::FolderRename);
+        folders.sort_by(|left, right| {
+            cleanup_path_depth(&right.path).cmp(&cleanup_path_depth(&left.path))
+        });
+        regular.extend(folders);
+
+        let mut current_batch_id = batch_id;
+        let mut applied = 0_usize;
+        let mut catalog_changed = false;
+        let mut skipped = Vec::new();
+        for operation in regular {
+            let prepared = match self
+                .prepare_cleanup_mutation(current_batch_id, &scope_label, operation)
+                .await
+            {
+                Ok(prepared) => prepared,
+                Err(CleanupPreparationError::Skip(skip)) => {
+                    skipped.push(skip);
+                    continue;
+                }
+                Err(CleanupPreparationError::Fatal(error)) => return Err(error),
+            };
+            match self.apply_cleanup_mutation(&prepared).await {
+                Ok(commit) => {
+                    current_batch_id = Some(commit.batch_id);
+                    applied += 1;
+                    catalog_changed |= commit.affected_tracks > 0;
+                }
+                Err(LibraryCoordinatorError::Mutation(failure)) if !failure.requires_recovery() => {
+                    skipped.push(CleanupSkip {
+                        track_id: prepared.track_id,
+                        reason: cleanup_mutation_failure_reason(&prepared.kind, &failure),
+                    });
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if catalog_changed {
+            self.publish_current_catalog().await?;
+        }
+        Ok(CleanupApplyResult {
+            batch_id: current_batch_id,
+            applied,
+            skipped,
+        })
+    }
+
+    async fn prepare_cleanup_mutation(
+        &self,
+        batch_id: Option<i64>,
+        scope_label: &str,
+        operation: CleanupApplyOperation,
+    ) -> Result<PreparedCleanupMutation, CleanupPreparationError> {
+        match operation.kind {
+            CleanupOperationKind::Rename => {
+                self.prepare_cleanup_track_rename(batch_id, scope_label, operation)
+                    .await
+            }
+            CleanupOperationKind::Tag => {
+                self.prepare_cleanup_tag(batch_id, scope_label, operation)
+                    .await
+            }
+            CleanupOperationKind::FolderRename => {
+                self.prepare_cleanup_folder_rename(batch_id, scope_label, operation)
+            }
+        }
+    }
+
+    async fn prepare_cleanup_track_rename(
+        &self,
+        batch_id: Option<i64>,
+        scope_label: &str,
+        operation: CleanupApplyOperation,
+    ) -> Result<PreparedCleanupMutation, CleanupPreparationError> {
+        let track_id = TrackId::new(operation.track_id)
+            .map_err(|_| cleanup_skip(operation.track_id, "track not found"))?;
+        let track = self
+            .repository
+            .track(track_id)
+            .await
+            .map_err(|source| {
+                CleanupPreparationError::Fatal(dependency(
+                    "load a track for cleanup renaming",
+                    source,
+                ))
+            })?
+            .ok_or_else(|| cleanup_skip(operation.track_id, "track not found"))?;
+        let current_stem = Path::new(track.path.file_name())
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if !cleanup_expected_text_matches(current_stem, operation.old.as_ref()) {
+            return Err(cleanup_skip(operation.track_id, "filename changed since analysis").into());
+        }
+        let new_stem = cleanup_input_text(operation.new.as_ref());
+        if !valid_cleanup_leaf(&new_stem, 255) {
+            return Err(cleanup_skip(
+                operation.track_id,
+                format!("invalid target name: {new_stem:?}"),
+            )
+            .into());
+        }
+        let extension = Path::new(track.path.file_name())
+            .extension()
+            .and_then(|value| value.to_str());
+        let file_name = extension.map_or_else(
+            || new_stem.clone(),
+            |extension| format!("{new_stem}.{extension}"),
+        );
+        let destination = track.path.parent().map_or_else(
+            || LibraryPath::parse(&file_name),
+            |parent| parent.join(&file_name),
+        );
+        let destination = destination.map_err(|error| {
+            cleanup_skip(operation.track_id, format!("invalid target name: {error}"))
+        })?;
+        if destination == track.path {
+            return Err(cleanup_skip(operation.track_id, "no change").into());
+        }
+        let item = serde_json::Map::from_iter([
+            ("kind".to_owned(), json!("rename")),
+            ("track_id".to_owned(), json!(operation.track_id)),
+            ("path_before".to_owned(), json!(track.path.as_str())),
+            ("path_after".to_owned(), json!(destination.as_str())),
+        ]);
+        let mutation = LibraryFileMutation::MoveTrack {
+            track_id,
+            source: track.path,
+            destination,
+        };
+        let append =
+            CleanupBatchAppend::new(batch_id, scope_label.to_owned(), item).map_err(|error| {
+                CleanupPreparationError::Fatal(LibraryCoordinatorError::InvalidCleanupMutation(
+                    error,
+                ))
+            })?;
+        Ok(PreparedCleanupMutation {
+            track_id: operation.track_id,
+            kind: PreparedCleanupKind::Rename {
+                target_name: file_name,
+            },
+            mutation,
+            append,
+        })
+    }
+
+    async fn prepare_cleanup_tag(
+        &self,
+        batch_id: Option<i64>,
+        scope_label: &str,
+        operation: CleanupApplyOperation,
+    ) -> Result<PreparedCleanupMutation, CleanupPreparationError> {
+        let track_id = TrackId::new(operation.track_id)
+            .map_err(|_| cleanup_skip(operation.track_id, "track not found"))?;
+        let track = self
+            .repository
+            .track(track_id)
+            .await
+            .map_err(|source| {
+                CleanupPreparationError::Fatal(dependency(
+                    "load a track for cleanup tagging",
+                    source,
+                ))
+            })?
+            .ok_or_else(|| cleanup_skip(operation.track_id, "track not found"))?;
+        let field_name = operation.field.as_deref().unwrap_or_default();
+        let field = cleanup_tag_field(field_name).ok_or_else(|| {
+            cleanup_skip(
+                operation.track_id,
+                format!("unsupported tag field: {field_name:?}"),
+            )
+        })?;
+        let current = cleanup_track_value(&track, field);
+        if !cleanup_values_match(current.as_ref(), operation.old.as_ref()) {
+            return Err(cleanup_skip(
+                operation.track_id,
+                format!("{} changed since analysis", field.as_str()),
+            )
+            .into());
+        }
+        let patch = cleanup_tag_patch(field, operation.new.as_ref()).map_err(|reason| {
+            cleanup_skip(
+                operation.track_id,
+                format!("invalid {} value: {reason}", field.as_str()),
+            )
+        })?;
+        let file_old = self
+            .effects
+            .read_file_tag(&track.path, field)
+            .await
+            .map_err(|failure| {
+                let reason = if failure.kind() == LibraryMutationFailureKind::NotFound {
+                    "source file missing on disk".to_owned()
+                } else {
+                    format!("tag read failed: {}", failure.code())
+                };
+                cleanup_skip(operation.track_id, reason)
+            })?;
+        let item = serde_json::Map::from_iter([
+            ("kind".to_owned(), json!("tag")),
+            ("track_id".to_owned(), json!(operation.track_id)),
+            ("field".to_owned(), json!(field.as_str())),
+            ("old".to_owned(), cleanup_input_json(operation.old.as_ref())),
+            (
+                "file_old".to_owned(),
+                library_file_tag_json(file_old.as_ref()),
+            ),
+            ("new".to_owned(), cleanup_input_json(operation.new.as_ref())),
+            ("path".to_owned(), json!(track.path.as_str())),
+        ]);
+        let mutation = LibraryFileMutation::UpdateTrackMetadata {
+            track_id,
+            path: track.path,
+            patch,
+        };
+        let append =
+            CleanupBatchAppend::new(batch_id, scope_label.to_owned(), item).map_err(|error| {
+                CleanupPreparationError::Fatal(LibraryCoordinatorError::InvalidCleanupMutation(
+                    error,
+                ))
+            })?;
+        Ok(PreparedCleanupMutation {
+            track_id: operation.track_id,
+            kind: PreparedCleanupKind::Tag,
+            mutation,
+            append,
+        })
+    }
+
+    fn prepare_cleanup_folder_rename(
+        &self,
+        batch_id: Option<i64>,
+        scope_label: &str,
+        operation: CleanupApplyOperation,
+    ) -> Result<PreparedCleanupMutation, CleanupPreparationError> {
+        let normalized = operation.path.trim_matches('/').replace('\\', "/");
+        let normalized = normalized.trim_matches('/');
+        if normalized.is_empty() {
+            return Err(
+                cleanup_skip(operation.track_id, "refusing to rename the music root").into(),
+            );
+        }
+        let source = LibraryPath::parse(normalized).map_err(|error| {
+            cleanup_skip(operation.track_id, format!("invalid folder name: {error}"))
+        })?;
+        if !cleanup_expected_text_matches(source.file_name(), operation.old.as_ref()) {
+            return Err(cleanup_skip(operation.track_id, "folder changed since analysis").into());
+        }
+        let new_leaf = cleanup_input_text(operation.new.as_ref());
+        if !valid_cleanup_leaf(&new_leaf, 200) {
+            return Err(cleanup_skip(
+                operation.track_id,
+                format!("invalid folder name: {new_leaf:?}"),
+            )
+            .into());
+        }
+        let destination = source.parent().map_or_else(
+            || LibraryPath::parse(&new_leaf),
+            |parent| parent.join(&new_leaf),
+        );
+        let destination = destination.map_err(|error| {
+            cleanup_skip(operation.track_id, format!("invalid folder name: {error}"))
+        })?;
+        if destination == source {
+            return Err(cleanup_skip(operation.track_id, "no change").into());
+        }
+        let item = serde_json::Map::from_iter([
+            ("kind".to_owned(), json!("folder_rename")),
+            ("path_before".to_owned(), json!(source.as_str())),
+            ("path_after".to_owned(), json!(destination.as_str())),
+        ]);
+        let mutation = LibraryFileMutation::RenameFolder {
+            source,
+            destination,
+        };
+        let append =
+            CleanupBatchAppend::new(batch_id, scope_label.to_owned(), item).map_err(|error| {
+                CleanupPreparationError::Fatal(LibraryCoordinatorError::InvalidCleanupMutation(
+                    error,
+                ))
+            })?;
+        Ok(PreparedCleanupMutation {
+            track_id: operation.track_id,
+            kind: PreparedCleanupKind::FolderRename {
+                target_name: new_leaf,
+            },
+            mutation,
+            append,
+        })
+    }
+
+    async fn apply_cleanup_mutation(
+        &self,
+        prepared: &PreparedCleanupMutation,
+    ) -> Result<AppliedCleanupMutation, LibraryCoordinatorError> {
+        let operation = prepared
+            .mutation
+            .operation()
+            .map_err(LibraryCoordinatorError::InvalidMutation)?;
+        let plan = prepared
+            .append
+            .journal_plan(&prepared.mutation)
+            .map_err(LibraryCoordinatorError::InvalidCleanupMutation)?;
+        let draft = RecoveryJournalDraft::new(RecoveryDomain::Cleanup, operation, plan).map_err(
+            |source| dependency("validate a cleanup mutation journal", Box::new(source)),
+        )?;
+        let planned = self
+            .repository
+            .create_recovery_journal(draft)
+            .await
+            .map_err(|source| dependency("create a cleanup mutation journal", source))?;
+        let applying = transition_applied(
+            self.repository
+                .transition_recovery_journal(
+                    &planned.id,
+                    RecoveryState::Planned,
+                    RecoveryState::Applying,
+                    json!({}),
+                )
+                .await
+                .map_err(|source| dependency("start a cleanup mutation journal", source))?,
+        )?;
+        let outcome = match self
+            .effects
+            .apply(&applying.id, prepared.mutation.clone(), false)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                if !failure.requires_recovery() {
+                    transition_applied(
+                        self.repository
+                            .transition_recovery_journal(
+                                &applying.id,
+                                RecoveryState::Applying,
+                                RecoveryState::Failed,
+                                json!({"error_code": failure.code()}),
+                            )
+                            .await
+                            .map_err(|source| {
+                                dependency("record a failed cleanup mutation", source)
+                            })?,
+                    )?;
+                }
+                return Err(LibraryCoordinatorError::Mutation(failure));
+            }
+        };
+        let commit = self
+            .repository
+            .commit_cleanup_mutation(&applying.id, &prepared.mutation, outcome, &prepared.append)
+            .await
+            .map_err(|source| dependency("commit a cleanup mutation", source))?;
+        self.status.send_replace(commit.status);
+        Ok(AppliedCleanupMutation {
+            affected_tracks: commit.affected_tracks,
+            batch_id: commit.batch_id,
+        })
+    }
+
+    async fn recover_cleanup_mutations(&self) -> Result<(), LibraryCoordinatorError> {
+        let entries = self
+            .repository
+            .unfinished_recovery_journals(RecoveryDomain::Cleanup)
+            .await
+            .map_err(|source| dependency("load unfinished cleanup mutations", source))?;
+        for entry in entries {
+            let mutation = LibraryFileMutation::from_journal(&entry)
+                .map_err(LibraryCoordinatorError::InvalidMutation)?;
+            let append = CleanupBatchAppend::from_journal(&entry)
+                .map_err(LibraryCoordinatorError::InvalidCleanupMutation)?;
+            let applying = match entry.state {
+                RecoveryState::Planned => transition_applied(
+                    self.repository
+                        .transition_recovery_journal(
+                            &entry.id,
+                            RecoveryState::Planned,
+                            RecoveryState::Applying,
+                            json!({"recovered": true}),
+                        )
+                        .await
+                        .map_err(|source| {
+                            dependency("resume a planned cleanup mutation", source)
+                        })?,
+                )?,
+                RecoveryState::Applying => entry,
+                RecoveryState::Committed
+                | RecoveryState::RollingBack
+                | RecoveryState::RolledBack
+                | RecoveryState::Failed => {
+                    return Err(LibraryCoordinatorError::RecoveryConflict);
+                }
+            };
+            let outcome = match self
+                .effects
+                .apply(&applying.id, mutation.clone(), true)
+                .await
+            {
+                Ok(outcome) => outcome,
+                Err(failure) if !failure.requires_recovery() => {
+                    transition_applied(
+                        self.repository
+                            .transition_recovery_journal(
+                                &applying.id,
+                                RecoveryState::Applying,
+                                RecoveryState::Failed,
+                                json!({"error_code": failure.code(), "recovered": true}),
+                            )
+                            .await
+                            .map_err(|source| {
+                                dependency("record a failed recovered cleanup mutation", source)
+                            })?,
+                    )?;
+                    continue;
+                }
+                Err(failure) => return Err(LibraryCoordinatorError::Mutation(failure)),
+            };
+            let commit = self
+                .repository
+                .commit_cleanup_mutation(&applying.id, &mutation, outcome, &append)
+                .await
+                .map_err(|source| dependency("commit a recovered cleanup mutation", source))?;
+            self.status.send_replace(commit.status);
+        }
+        Ok(())
     }
 
     async fn move_track_once(
@@ -1304,10 +1863,175 @@ fn mutation_error_requires_recovery(error: &LibraryCoordinatorError) -> bool {
     }
 }
 
-async fn recover_library_mutations(
-    repository: &dyn LibraryMutationRepository,
+fn cleanup_path_depth(path: &str) -> usize {
+    path.bytes()
+        .filter(|byte| matches!(*byte, b'/' | b'\\'))
+        .count()
+}
+
+fn cleanup_skip(track_id: i64, reason: impl Into<String>) -> CleanupSkip {
+    CleanupSkip {
+        track_id,
+        reason: reason.into(),
+    }
+}
+
+fn cleanup_expected_text_matches(current: &str, expected: Option<&CleanupInputValue>) -> bool {
+    match expected {
+        Some(CleanupInputValue::Text(expected)) => current == expected,
+        None => current.is_empty(),
+        Some(CleanupInputValue::Integer(_)) => false,
+    }
+}
+
+fn cleanup_input_text(value: Option<&CleanupInputValue>) -> String {
+    match value {
+        Some(CleanupInputValue::Text(value)) => value.clone(),
+        Some(CleanupInputValue::Integer(value)) => value.to_string(),
+        None => String::new(),
+    }
+}
+
+fn valid_cleanup_leaf(name: &str, maximum: usize) -> bool {
+    !name.is_empty()
+        && name.trim() == name
+        && !name.contains(['/', '\\'])
+        && !name.starts_with('.')
+        && name.chars().count() <= maximum
+}
+
+const fn cleanup_tag_field(field: &str) -> Option<TrackMetadataField> {
+    match field.as_bytes() {
+        b"title" => Some(TrackMetadataField::Title),
+        b"artist" => Some(TrackMetadataField::Artist),
+        b"album_artist" => Some(TrackMetadataField::AlbumArtist),
+        b"album" => Some(TrackMetadataField::Album),
+        b"track_no" => Some(TrackMetadataField::TrackNumber),
+        b"disc_no" => Some(TrackMetadataField::DiscNumber),
+        b"year" => Some(TrackMetadataField::Year),
+        _ => None,
+    }
+}
+
+fn cleanup_track_value(
+    track: &IndexedTrack,
+    field: TrackMetadataField,
+) -> Option<CleanupInputValue> {
+    match field {
+        TrackMetadataField::Title => Some(CleanupInputValue::Text(track.metadata.title.clone())),
+        TrackMetadataField::Artist => Some(CleanupInputValue::Text(track.metadata.artist.clone())),
+        TrackMetadataField::AlbumArtist => {
+            Some(CleanupInputValue::Text(track.metadata.album_artist.clone()))
+        }
+        TrackMetadataField::Album => Some(CleanupInputValue::Text(track.metadata.album.clone())),
+        TrackMetadataField::TrackNumber => track
+            .metadata
+            .track_no
+            .map(|value| CleanupInputValue::Integer(i64::from(value))),
+        TrackMetadataField::DiscNumber => track
+            .metadata
+            .disc_no
+            .map(|value| CleanupInputValue::Integer(i64::from(value))),
+        TrackMetadataField::Year => track
+            .metadata
+            .year
+            .map(|value| CleanupInputValue::Integer(i64::from(value))),
+        TrackMetadataField::Genre
+        | TrackMetadataField::Bpm
+        | TrackMetadataField::DisplayTitle
+        | TrackMetadataField::Origin => None,
+    }
+}
+
+fn cleanup_values_match(
+    current: Option<&CleanupInputValue>,
+    expected: Option<&CleanupInputValue>,
+) -> bool {
+    current == expected || (cleanup_value_absent(current) && cleanup_value_absent(expected))
+}
+
+fn cleanup_value_absent(value: Option<&CleanupInputValue>) -> bool {
+    value.is_none_or(|value| matches!(value, CleanupInputValue::Text(text) if text.is_empty()))
+}
+
+fn cleanup_tag_patch(
+    field: TrackMetadataField,
+    value: Option<&CleanupInputValue>,
+) -> Result<TrackMetadataPatch, TrackMetadataPatchError> {
+    let mut patch = TrackMetadataPatch::new();
+    if field.is_numeric() {
+        let value = match value {
+            None => None,
+            Some(CleanupInputValue::Text(value)) if value.is_empty() => None,
+            Some(CleanupInputValue::Integer(value)) => Some(
+                u32::try_from(*value)
+                    .map_err(|_| TrackMetadataPatchError::NumberOutOfRange { field })?,
+            ),
+            Some(CleanupInputValue::Text(value)) => Some(
+                value
+                    .parse::<u32>()
+                    .map_err(|_| TrackMetadataPatchError::WrongValueType { field })?,
+            ),
+        };
+        patch.insert_number(field, value)?;
+    } else {
+        let value = cleanup_input_text(value);
+        patch.insert_text(field, (!value.is_empty()).then_some(value))?;
+    }
+    Ok(patch)
+}
+
+fn cleanup_input_json(value: Option<&CleanupInputValue>) -> serde_json::Value {
+    value.map_or(serde_json::Value::Null, CleanupInputValue::to_json)
+}
+
+fn library_file_tag_json(value: Option<&LibraryFileTagValue>) -> serde_json::Value {
+    match value {
+        Some(LibraryFileTagValue::Text(value)) => json!(value),
+        Some(LibraryFileTagValue::Number(value)) => json!(value),
+        None => serde_json::Value::Null,
+    }
+}
+
+fn cleanup_mutation_failure_reason(
+    kind: &PreparedCleanupKind,
+    failure: &LibraryMutationFailure,
+) -> String {
+    match (kind, failure.kind()) {
+        (PreparedCleanupKind::Rename { .. }, LibraryMutationFailureKind::NotFound)
+        | (PreparedCleanupKind::Tag, LibraryMutationFailureKind::NotFound) => {
+            "source file missing on disk".to_owned()
+        }
+        (PreparedCleanupKind::Rename { target_name }, LibraryMutationFailureKind::Conflict) => {
+            format!("a file named {target_name} already exists")
+        }
+        (PreparedCleanupKind::FolderRename { .. }, LibraryMutationFailureKind::NotFound) => {
+            "folder missing on disk".to_owned()
+        }
+        (
+            PreparedCleanupKind::FolderRename { target_name },
+            LibraryMutationFailureKind::Conflict,
+        ) => format!("a folder named {target_name} already exists"),
+        (PreparedCleanupKind::Tag, LibraryMutationFailureKind::Invalid) => {
+            format!("unsupported format: {}", failure.code())
+        }
+        (PreparedCleanupKind::Tag, _) => format!("tag write failed: {}", failure.code()),
+        (PreparedCleanupKind::Rename { .. }, _) => {
+            format!("file rename failed: {}", failure.code())
+        }
+        (PreparedCleanupKind::FolderRename { .. }, _) => {
+            format!("folder rename failed: {}", failure.code())
+        }
+    }
+}
+
+async fn recover_library_mutations<R>(
+    repository: &R,
     effects: &dyn LibraryMutationEffects,
-) -> Result<(), LibraryCoordinatorError> {
+) -> Result<(), LibraryCoordinatorError>
+where
+    R: LibraryMutationRepository + ?Sized,
+{
     let entries = repository
         .unfinished_recovery_journals(RecoveryDomain::Library)
         .await
@@ -1358,12 +2082,15 @@ async fn recover_library_mutations(
     Ok(())
 }
 
-async fn commit_applied_library_mutation(
-    repository: &dyn LibraryMutationRepository,
+async fn commit_applied_library_mutation<R>(
+    repository: &R,
     journal: &RecoveryJournalEntry,
     mutation: &LibraryFileMutation,
     outcome: LibraryFileMutationOutcome,
-) -> Result<(AppliedLibraryMutation, Option<LibraryStatus>), LibraryCoordinatorError> {
+) -> Result<(AppliedLibraryMutation, Option<LibraryStatus>), LibraryCoordinatorError>
+where
+    R: LibraryMutationRepository + ?Sized,
+{
     match (mutation, outcome) {
         (
             LibraryFileMutation::CreateFolder { path: expected },
