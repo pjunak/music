@@ -13,6 +13,7 @@ use unicode_casefold::UnicodeCaseFold;
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
+use super::local_analysis::ContextScope;
 use super::planner::{PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist};
 use super::vocabulary::{
     CleanupApplyOutcome, CleanupMutation, CleanupPreview, CleanupSelection, TagVocabularyDocument,
@@ -24,6 +25,7 @@ pub const MAX_TAGS_PER_TRACK: usize = 32;
 pub const MAX_TAG_LENGTH: usize = 64;
 pub const LOCAL_METADATA_ANALYZER_ID: &str = "local-metadata/v1";
 pub const LOCAL_AUDIO_ANALYZER_ID: &str = "local-audio/v1";
+pub const MODEL_TAG_ANALYZER_ID: &str = "model-context-tagger/v6";
 
 pub type AssistantDependencyError = Box<dyn Error + Send + Sync>;
 pub type AssistantFuture<'a, T> =
@@ -241,6 +243,7 @@ pub struct ManualTagQuery {
     pub offset: usize,
     pub limit: usize,
     pub analyzer_ids: Option<Vec<String>>,
+    pub scope: Option<ContextScope>,
 }
 
 impl Default for ManualTagQuery {
@@ -252,6 +255,7 @@ impl Default for ManualTagQuery {
             offset: 0,
             limit: 50,
             analyzer_ids: None,
+            scope: None,
         }
     }
 }
@@ -431,6 +435,12 @@ impl AssistantService {
             .tracks()
             .await?
             .into_iter()
+            .filter(|track| {
+                query
+                    .scope
+                    .as_ref()
+                    .is_none_or(|scope| scope.contains(&track.track))
+            })
             .map(|track| view_for_track(&track, query.analyzer_ids.as_deref()))
             .filter(|view| {
                 query

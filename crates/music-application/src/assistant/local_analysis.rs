@@ -121,32 +121,35 @@ pub enum ContextScope {
 
 impl ContextScope {
     #[must_use]
-    pub fn select<'a>(&self, tracks: &'a [IndexedTrack]) -> Vec<&'a IndexedTrack> {
+    pub fn contains(&self, track: &IndexedTrack) -> bool {
         match self {
-            Self::All => tracks.iter().collect(),
-            Self::Tracks(track_ids) => {
-                let by_id = tracks
-                    .iter()
-                    .map(|track| (track.id, track))
-                    .collect::<BTreeMap<_, _>>();
-                track_ids
-                    .iter()
-                    .filter_map(|track_id| by_id.get(track_id).copied())
-                    .collect()
-            }
-            Self::Folder { path, recursive } => tracks
-                .iter()
-                .filter(|track| match path {
-                    None if *recursive => true,
-                    None => track.path.parent().is_none(),
-                    Some(path) if *recursive => {
-                        let prefix = format!("{}/", path.as_str());
-                        track.path.as_str().starts_with(&prefix)
-                    }
-                    Some(path) => track.path.parent().as_ref() == Some(path),
-                })
-                .collect(),
+            Self::All => true,
+            Self::Tracks(track_ids) => track_ids.contains(&track.id),
+            Self::Folder { path, recursive } => match path {
+                None if *recursive => true,
+                None => track.path.parent().is_none(),
+                Some(path) if *recursive => {
+                    let prefix = format!("{}/", path.as_str());
+                    track.path.as_str().starts_with(&prefix)
+                }
+                Some(path) => track.path.parent().as_ref() == Some(path),
+            },
         }
+    }
+
+    #[must_use]
+    pub fn select<'a>(&self, tracks: &'a [IndexedTrack]) -> Vec<&'a IndexedTrack> {
+        if let Self::Tracks(track_ids) = self {
+            let by_id = tracks
+                .iter()
+                .map(|track| (track.id, track))
+                .collect::<BTreeMap<_, _>>();
+            return track_ids
+                .iter()
+                .filter_map(|track_id| by_id.get(track_id).copied())
+                .collect();
+        }
+        tracks.iter().filter(|track| self.contains(track)).collect()
     }
 }
 

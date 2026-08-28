@@ -9,9 +9,9 @@ use music_application::assistant::{
     AssistantServiceError, AssistantTrackView, CleanupSelection, Confidence, EnergyCurve,
     LIBRARY_CONTEXT_JOB_KIND, LibraryAnalysisSummary, LibraryContextPassSummary,
     LibraryContextSummary, LocalAnalysisError, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
-    ManualTagQuery, PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument,
-    TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail,
-    VoiceAnalyzerStatus,
+    MODEL_TAG_ANALYZER_ID, ManualTagQuery, PlaylistSuggestion, PlaylistSuggestionRequest,
+    TagVocabularyDocument, TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot,
+    TrackContextDetail, VoiceAnalyzerStatus,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_domain::TrackId;
@@ -55,9 +55,10 @@ impl From<Confidence> for ConfidenceWire {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 enum ReviewStatusWire {
+    #[default]
     Pending,
     Accepted,
     Rejected,
@@ -537,6 +538,21 @@ struct LibraryTagListQuery {
     limit: usize,
 }
 
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ModelTaggingReviewQuery)]
+struct ModelTaggingReviewQueryRequest {
+    #[schema(required = false, schema_with = model_tagging_scope_ref)]
+    scope: ModelTaggingScopeWire,
+    #[schema(required = false, schema_with = review_status_default_pending_schema)]
+    review: ReviewStatusWire,
+    #[schema(required = false, minimum = 0, default = 0)]
+    offset: usize,
+    #[serde(default = "default_page_limit")]
+    #[schema(required = false, minimum = 1, maximum = 100, default = 50)]
+    limit: usize,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = AnalysisTagReviewRequest)]
@@ -887,6 +903,7 @@ pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(rename_tag))
         .routes(routes!(patch_tags_bulk))
         .routes(routes!(review_analysis_tags_bulk))
+        .routes(routes!(query_model_library_tags))
         .routes(routes!(list_library_tags))
         .routes(routes!(patch_track_tags))
         .routes(routes!(review_analysis_tag))
@@ -1419,6 +1436,53 @@ async fn list_library_tags(
             offset: query.offset,
             limit: query.limit,
             analyzer_ids: None,
+            scope: None,
+        })
+        .await
+        .map_err(map_assistant_error)?;
+    Ok(Json(LibraryTagPageResponse {
+        items: page.items.into_iter().map(track_response).collect(),
+        total: page.total,
+        offset: page.offset,
+        limit: page.limit,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-tags/query",
+    operation_id = "query_model_library_tags_api_assistant_library_tags_query_post",
+    request_body = ModelTaggingReviewQueryRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = LibraryTagPageResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant-tags"
+)]
+async fn query_model_library_tags(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<ModelTaggingReviewQueryRequest>, JsonRejection>,
+) -> Result<Json<LibraryTagPageResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=100).contains(&payload.limit) {
+        return Err(ApiError::validation());
+    }
+    let scope = payload
+        .scope
+        .into_parameters()?
+        .to_scope()
+        .map_err(|()| ApiError::validation())?;
+    let page = service(&state)?
+        .tag_page(ManualTagQuery {
+            search: String::new(),
+            tag: None,
+            review: Some(payload.review.into()),
+            offset: payload.offset,
+            limit: payload.limit,
+            analyzer_ids: Some(vec![MODEL_TAG_ANALYZER_ID.to_owned()]),
+            scope: Some(scope),
         })
         .await
         .map_err(map_assistant_error)?;
@@ -2031,6 +2095,14 @@ fn review_status_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
         .enum_values(Some(["pending", "accepted", "rejected"]))
+        .into()
+}
+
+fn review_status_default_pending_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["pending", "accepted", "rejected"]))
+        .default(Some(json!("pending")))
         .into()
 }
 

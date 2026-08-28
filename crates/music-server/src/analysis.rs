@@ -600,7 +600,7 @@ pub(crate) enum ContextScopeKind {
 }
 
 impl ContextScopeParameters {
-    fn to_scope(&self) -> Result<ContextScope, ()> {
+    pub(crate) fn to_scope(&self) -> Result<ContextScope, ()> {
         if self.path.len() > 1_024 || self.track_ids.len() > 5_000 {
             return Err(());
         }

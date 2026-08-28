@@ -4015,6 +4015,75 @@
         ],
         "type": "object"
       },
+      "ModelQualityEvaluationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "evaluation_id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_evaluated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passed_cases": {
+            "type": "integer"
+          },
+          "role_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "never",
+              "passed",
+              "failed",
+              "stale"
+            ],
+            "type": "string"
+          },
+          "suite_id": {
+            "type": "string"
+          },
+          "total_cases": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evaluation_id",
+          "role_id",
+          "label",
+          "description",
+          "status",
+          "suite_id",
+          "passed_cases",
+          "total_cases",
+          "last_job_id",
+          "last_evaluated_at"
+        ],
+        "type": "object"
+      },
       "ModelRoleDefinitionOut": {
         "additionalProperties": false,
         "properties": {
@@ -4231,6 +4300,35 @@
           "connection_id",
           "model_id"
         ],
+        "type": "object"
+      },
+      "ModelTaggingReviewQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 50,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "review": {
+            "default": "pending",
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ModelTaggingScope"
+          }
+        },
         "type": "object"
       },
       "ModelTaggingScope": {
@@ -7509,6 +7607,46 @@
         ]
       }
     },
+    "/api/assistant/library-tags/query": {
+      "post": {
+        "operationId": "query_model_library_tags_api_assistant_library_tags_query_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelTaggingReviewQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTagPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
     "/api/assistant/library-tags/vocabulary": {
       "get": {
         "operationId": "get_tag_vocabulary_api_assistant_library_tags_vocabulary_get",
@@ -8078,6 +8216,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModelRoleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/roles/{role_id}/evaluations": {
+      "get": {
+        "operationId": "get_role_evaluations_api_assistant_providers_roles__role_id__evaluations_get",
+        "parameters": [
+          {
+            "description": "Role Id",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelQualityEvaluationOut"
+                  },
+                  "type": "array"
                 }
               }
             },

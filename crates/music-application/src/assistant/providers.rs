@@ -1517,6 +1517,36 @@ impl ProviderService {
             .ok_or_else(role_not_found)
     }
 
+    pub async fn current_role_runtime_fingerprint(
+        &self,
+        role_id: &str,
+    ) -> Result<Option<String>, ProviderServiceError> {
+        if model_role(role_id).is_none() {
+            return Err(role_not_found());
+        }
+        let role = self
+            .repository
+            .model_roles()
+            .await
+            .map_err(ProviderServiceError::dependency)?
+            .into_iter()
+            .find(|role| role.role_id == role_id);
+        let Some(role) = role else {
+            return Ok(None);
+        };
+        let connection = self
+            .repository
+            .provider_connection(&role.connection_id)
+            .await
+            .map_err(ProviderServiceError::dependency)?;
+        Ok(connection.map(|connection| self.role_runtime_fingerprint(&role, &connection)))
+    }
+
+    #[must_use]
+    pub fn role_not_found_error(&self) -> ProviderServiceError {
+        role_not_found()
+    }
+
     fn role_view(
         &self,
         definition: &ModelRoleDefinition,

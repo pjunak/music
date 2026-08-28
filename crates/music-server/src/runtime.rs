@@ -13,7 +13,7 @@ use music_analysis::{
 };
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
-    MetadataAnalysisJobHandler, ProviderRepository, VoiceAnalyzerStatus,
+    MetadataAnalysisJobHandler, ModelEvaluationRepository, ProviderRepository, VoiceAnalyzerStatus,
 };
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
@@ -163,10 +163,12 @@ impl AppRuntime {
         let assistant_repository: Arc<dyn AssistantRepository> = storage.clone();
         let assistant = Arc::new(AssistantService::new(assistant_repository));
         let provider_repository: Arc<dyn ProviderRepository> = storage.clone();
+        let evaluation_repository: Arc<dyn ModelEvaluationRepository> = storage.clone();
         let provider_credentials = Arc::new(RuntimeCredentialStore::new(&config));
         let provider_network = Arc::new(ProviderNetworkBoundary::new());
         let providers = Arc::new(RuntimeProviders::new(
             provider_repository,
+            evaluation_repository,
             provider_credentials,
             provider_network,
             provider_runtime_contract_digest(),

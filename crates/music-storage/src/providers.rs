@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 
 use music_application::assistant::{
-    AssistantFuture, ModelRoleRecord, ProviderConformanceWrite, ProviderConformanceWriteOutcome,
-    ProviderConnectionPreparation, ProviderConnectionRecord, ProviderCredentialResetOutcome,
-    ProviderMutationOutcome, ProviderRepository, ProviderRolePreparation,
-    ProviderRoleRuntimeRecord, ProviderVerificationWrite, ProviderVerificationWriteOutcome,
+    AssistantFuture, ModelEvaluationRecord, ModelEvaluationRepository, ModelRoleRecord,
+    ProviderConformanceWrite, ProviderConformanceWriteOutcome, ProviderConnectionPreparation,
+    ProviderConnectionRecord, ProviderCredentialResetOutcome, ProviderMutationOutcome,
+    ProviderRepository, ProviderRolePreparation, ProviderRoleRuntimeRecord,
+    ProviderVerificationWrite, ProviderVerificationWriteOutcome,
 };
 use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
@@ -26,6 +27,30 @@ const ROLE_SELECT: &str = "SELECT role_id, connection_id, model_id, enabled, tim
     CAST(strftime('%s', last_conformance_at) AS INTEGER) AS last_conformance_at_unix_seconds, \
     CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
     FROM assistant_model_roles";
+
+impl ModelEvaluationRepository for SqliteStorage {
+    fn model_evaluations<'a>(
+        &'a self,
+        role_id: &'a str,
+    ) -> AssistantFuture<'a, Vec<ModelEvaluationRecord>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT role_id, evaluation_id, role_fingerprint, status, suite_id, engine_id, \
+                 passed_cases, total_cases, job_id, \
+                 CAST(strftime('%s', evaluated_at) AS INTEGER) AS evaluated_at_unix_seconds \
+                 FROM assistant_model_evaluations WHERE role_id = ? ORDER BY evaluation_id",
+            )
+            .bind(role_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(box_storage)?;
+            rows.iter()
+                .map(evaluation_from_row)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(box_storage)
+        })
+    }
+}
 
 impl ProviderRepository for SqliteStorage {
     fn saved_provider_credentials_exist(&self) -> AssistantFuture<'_, bool> {
@@ -711,6 +736,23 @@ fn role_from_row(row: &SqliteRow) -> Result<ModelRoleRecord, StorageError> {
         conformance_fingerprint: row.try_get("conformance_fingerprint")?,
         last_conformance_at_unix_seconds: row.try_get("last_conformance_at_unix_seconds")?,
         updated_at_unix_seconds: required_timestamp(row, "updated_at_unix_seconds")?,
+    })
+}
+
+fn evaluation_from_row(row: &SqliteRow) -> Result<ModelEvaluationRecord, StorageError> {
+    Ok(ModelEvaluationRecord {
+        role_id: row.try_get("role_id")?,
+        evaluation_id: row.try_get("evaluation_id")?,
+        role_fingerprint: row.try_get("role_fingerprint")?,
+        status: row.try_get("status")?,
+        suite_id: row.try_get("suite_id")?,
+        engine_id: row.try_get("engine_id")?,
+        passed_cases: u32::try_from(row.try_get::<i64, _>("passed_cases")?)
+            .map_err(|_| StorageError::InvalidAssistantRecord("invalid passed case count"))?,
+        total_cases: u32::try_from(row.try_get::<i64, _>("total_cases")?)
+            .map_err(|_| StorageError::InvalidAssistantRecord("invalid total case count"))?,
+        job_id: row.try_get("job_id")?,
+        evaluated_at_unix_seconds: required_timestamp(row, "evaluated_at_unix_seconds")?,
     })
 }
 

@@ -5,6 +5,7 @@
 //! tags, playlists, or presets by themselves.
 
 mod local_analysis;
+mod model_quality;
 mod planner;
 mod providers;
 mod tags;
@@ -19,6 +20,7 @@ pub use local_analysis::{
     MetadataAnalysisJobHandler, TrackContextDetail, VOICE_ANALYZER_ID, VOICE_MODEL_FILENAME,
     VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature, parse_context_state,
 };
+pub use model_quality::*;
 pub use planner::{
     EnergyCurve, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent, PlaylistPlan,
     PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
@@ -30,8 +32,9 @@ pub use tags::{
     AssistantFuture, AssistantRepository, AssistantService, AssistantServiceError,
     AssistantTrackEvidence, AssistantTrackView, AudioSignalProfile, BulkTagFailure, BulkTagOutcome,
     Confidence, LOCAL_AUDIO_ANALYZER_ID, LOCAL_METADATA_ANALYZER_ID, MAX_TAGS_PER_TRACK,
-    ManualTagQuery, RenameTagOutcome, StoredAnalysis, StoredAnalysisReview, TagPage, TagUsage,
-    audio_source_signature, metadata_source_signature, normalize_manual_tag, normalize_manual_tags,
+    MODEL_TAG_ANALYZER_ID, ManualTagQuery, RenameTagOutcome, StoredAnalysis, StoredAnalysisReview,
+    TagPage, TagUsage, audio_source_signature, metadata_source_signature, normalize_manual_tag,
+    normalize_manual_tags,
 };
 pub use vocabulary::{
     CleanupApplyOutcome, CleanupMutation, CleanupPreview, CleanupSelection, CleanupSuggestion,

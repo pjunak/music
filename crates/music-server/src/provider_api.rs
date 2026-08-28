@@ -8,11 +8,12 @@ use axum::extract::{ConnectInfo, Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use music_application::assistant::{
-    MODEL_ROLES, ModelConformanceStatus, ModelRoleUpdate, ModelRoleView, PROVIDER_ADAPTERS,
-    PROVIDER_CAPABILITIES, PROVIDER_CONFORMANCE_CONTRACT, ProviderConformanceView,
-    ProviderConnectionCreate, ProviderConnectionPatch, ProviderConnectionView,
-    ProviderCredentialSource, ProviderRepository, ProviderSecret, ProviderService,
-    ProviderServiceError, ProviderServiceErrorKind, ProviderVerificationStatus,
+    MODEL_ROLES, ModelConformanceStatus, ModelEvaluationRepository, ModelEvaluationStatus,
+    ModelEvaluationView, ModelQualityError, ModelQualityService, ModelRoleUpdate, ModelRoleView,
+    PROVIDER_ADAPTERS, PROVIDER_CAPABILITIES, PROVIDER_CONFORMANCE_CONTRACT,
+    ProviderConformanceView, ProviderConnectionCreate, ProviderConnectionPatch,
+    ProviderConnectionView, ProviderCredentialSource, ProviderRepository, ProviderSecret,
+    ProviderService, ProviderServiceError, ProviderServiceErrorKind, ProviderVerificationStatus,
     ProviderVerificationView, ThinkingMode,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
@@ -37,7 +38,8 @@ use crate::provider_transport::ProviderNetworkBoundary;
 
 #[derive(Debug)]
 pub(crate) struct RuntimeProviders {
-    service: ProviderService,
+    service: Arc<ProviderService>,
+    quality: ModelQualityService,
     repository: Arc<dyn ProviderRepository>,
     credentials: Arc<RuntimeCredentialStore>,
     network: Arc<ProviderNetworkBoundary>,
@@ -46,6 +48,7 @@ pub(crate) struct RuntimeProviders {
 impl RuntimeProviders {
     pub(crate) fn new(
         repository: Arc<dyn ProviderRepository>,
+        evaluation_repository: Arc<dyn ModelEvaluationRepository>,
         credentials: Arc<RuntimeCredentialStore>,
         network: Arc<ProviderNetworkBoundary>,
         executable_contract_digest: String,
@@ -53,13 +56,16 @@ impl RuntimeProviders {
         let credential_source: Arc<dyn ProviderCredentialSource> = credentials.clone();
         let policy: Arc<dyn music_application::assistant::ProviderConnectionPolicy> =
             network.clone();
+        let service = Arc::new(ProviderService::new(
+            Arc::clone(&repository),
+            credential_source,
+            policy,
+            executable_contract_digest,
+        ));
+        let quality = ModelQualityService::new(evaluation_repository, Arc::clone(&service));
         Self {
-            service: ProviderService::new(
-                Arc::clone(&repository),
-                credential_source,
-                policy,
-                executable_contract_digest,
-            ),
+            service,
+            quality,
             repository,
             credentials,
             network,
@@ -507,6 +513,70 @@ enum ModelConformanceStatusResponse {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+enum ModelEvaluationStatusResponse {
+    Never,
+    Passed,
+    Failed,
+    Stale,
+}
+
+impl From<ModelEvaluationStatus> for ModelEvaluationStatusResponse {
+    fn from(value: ModelEvaluationStatus) -> Self {
+        match value {
+            ModelEvaluationStatus::Never => Self::Never,
+            ModelEvaluationStatus::Passed => Self::Passed,
+            ModelEvaluationStatus::Failed => Self::Failed,
+            ModelEvaluationStatus::Stale => Self::Stale,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelQualityEvaluationOut)]
+struct ModelQualityEvaluationResponse {
+    evaluation_id: String,
+    role_id: String,
+    label: String,
+    description: String,
+    #[schema(schema_with = model_evaluation_status_schema)]
+    status: ModelEvaluationStatusResponse,
+    suite_id: String,
+    #[schema(schema_with = integer_schema)]
+    passed_cases: i64,
+    #[schema(schema_with = integer_schema)]
+    total_cases: i64,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    last_job_id: Option<String>,
+    #[schema(required = true, schema_with = nullable_datetime_schema)]
+    last_evaluated_at: Option<String>,
+}
+
+impl TryFrom<ModelEvaluationView> for ModelQualityEvaluationResponse {
+    type Error = ApiError;
+
+    fn try_from(value: ModelEvaluationView) -> Result<Self, Self::Error> {
+        Ok(Self {
+            evaluation_id: value.evaluation_id,
+            role_id: value.role_id,
+            label: value.label,
+            description: value.description,
+            status: value.status.into(),
+            suite_id: value.suite_id,
+            passed_cases: i64::from(value.passed_cases),
+            total_cases: i64::from(value.total_cases),
+            last_job_id: value.last_job_id,
+            last_evaluated_at: value
+                .last_evaluated_at_unix_seconds
+                .map(UnixSeconds::new)
+                .map(format_rfc3339)
+                .transpose()?,
+        })
+    }
+}
+
 impl From<ModelConformanceStatus> for ModelConformanceStatusResponse {
     fn from(value: ModelConformanceStatus) -> Self {
         match value {
@@ -596,6 +666,7 @@ pub(crate) fn provider_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(delete_connection_credential))
         .routes(routes!(verify_connection))
         .routes(routes!(list_roles))
+        .routes(routes!(list_role_evaluations))
         .routes(routes!(test_role_model))
         .routes(routes!(update_role, delete_role))
 }
@@ -881,6 +952,37 @@ async fn list_roles(
 }
 
 #[utoipa::path(
+    get,
+    path = "/assistant/providers/roles/{role_id}/evaluations",
+    operation_id = "get_role_evaluations_api_assistant_providers_roles__role_id__evaluations_get",
+    params(("role_id" = String, Path, description = "Role Id")),
+    responses(
+        (status = 200, description = "Successful Response", body = [ModelQualityEvaluationResponse]),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn list_role_evaluations(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    role_id: Result<Path<String>, PathRejection>,
+) -> Result<Json<Vec<ModelQualityEvaluationResponse>>, ApiError> {
+    authorize(&state, &headers).await?;
+    let Path(role_id) = role_id.map_err(|_| ApiError::validation())?;
+    let values = providers(&state)?
+        .quality
+        .list_role_evaluations(&role_id)
+        .await
+        .map_err(map_model_quality_error)?;
+    Ok(Json(
+        values
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?,
+    ))
+}
+
+#[utoipa::path(
     post,
     path = "/assistant/providers/roles/{role_id}/test",
     operation_id = "test_role_model_api_assistant_providers_roles__role_id__test_post",
@@ -1004,6 +1106,21 @@ async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiErro
 fn map_provider_error(error: ProviderServiceError) -> ApiError {
     if error.kind() == ProviderServiceErrorKind::Dependency {
         tracing::error!(error = %error, "provider request failed");
+        return ApiError::internal();
+    }
+    let status = match error.kind() {
+        ProviderServiceErrorKind::Invalid => StatusCode::UNPROCESSABLE_ENTITY,
+        ProviderServiceErrorKind::NotFound => StatusCode::NOT_FOUND,
+        ProviderServiceErrorKind::Conflict => StatusCode::CONFLICT,
+        ProviderServiceErrorKind::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ProviderServiceErrorKind::Dependency => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    ApiError::coded(status, error.code(), error.message())
+}
+
+fn map_model_quality_error(error: ModelQualityError) -> ApiError {
+    if error.kind() == ProviderServiceErrorKind::Dependency {
+        tracing::error!(error = %error, "model quality request failed");
         return ApiError::internal();
     }
     let status = match error.kind() {
@@ -1178,6 +1295,13 @@ fn conformance_status_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
         .enum_values(Some(["never", "passed", "failed"]))
+        .into()
+}
+
+fn model_evaluation_status_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["never", "passed", "failed", "stale"]))
         .into()
 }
 
@@ -1537,6 +1661,22 @@ mod tests {
         assert_eq!(conformance["output_tokens"], 11);
         assert_eq!(conformance["role"]["conformance_status"], "passed");
         assert!(!conformance.to_string().contains("provider-secret-value"));
+
+        let evaluations = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/providers/roles/music_tagger/evaluations")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(evaluations.status(), StatusCode::OK);
+        let evaluations = body_json(evaluations).await?;
+        assert_eq!(evaluations.as_array().map(Vec::len), Some(1));
+        assert_eq!(evaluations[0]["evaluation_id"], "music-tagging-quality-v1");
+        assert_eq!(evaluations[0]["status"], "never");
+        assert_eq!(evaluations[0]["passed_cases"], 0);
+        assert_eq!(evaluations[0]["last_job_id"], Value::Null);
 
         let in_use = router
             .clone()
