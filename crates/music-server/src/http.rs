@@ -17,6 +17,7 @@ use music_application::playback::PlaybackActorHandle;
 use music_application::playlists::PlaylistService;
 use music_protocol::PlayerState;
 use serde::Deserialize;
+use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::{AllowHeaders, CorsLayer};
@@ -50,6 +51,7 @@ const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-poli
 #[derive(Debug, Clone)]
 pub(crate) struct HttpState {
     pub(crate) health: HealthRegistry,
+    pub(crate) shutdown: CancellationToken,
     pub(crate) assistant: Option<Arc<AssistantService>>,
     pub(crate) local_analysis: Option<Arc<LocalAnalysisService>>,
     pub(crate) playback: Option<PlaybackActorHandle>,
@@ -67,6 +69,7 @@ pub(crate) struct HttpState {
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeServices {
     pub(crate) health: HealthRegistry,
+    pub(crate) shutdown: CancellationToken,
     pub(crate) assistant: Arc<AssistantService>,
     pub(crate) local_analysis: Arc<LocalAnalysisService>,
     pub(crate) playback: PlaybackActorHandle,
@@ -124,6 +127,7 @@ pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Rou
         config,
         HttpState {
             health: services.health,
+            shutdown: services.shutdown,
             assistant: Some(services.assistant),
             local_analysis: Some(services.local_analysis),
             playback: Some(services.playback),
@@ -149,6 +153,7 @@ fn build_router_without_playback(
         config,
         HttpState {
             health,
+            shutdown: CancellationToken::new(),
             assistant: None,
             local_analysis: None,
             playback: None,

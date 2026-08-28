@@ -396,6 +396,7 @@ impl AppRuntime {
             &self.config,
             RuntimeServices {
                 health: self.health.clone(),
+                shutdown: self.supervisor.cancellation_token(),
                 assistant: Arc::clone(&self.assistant),
                 local_analysis: Arc::clone(&self.local_analysis),
                 playback: self.playback.clone(),

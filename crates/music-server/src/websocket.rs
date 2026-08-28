@@ -81,6 +81,7 @@ struct ReaderContext {
 
 struct WebsocketServices {
     playback: PlaybackActorHandle,
+    shutdown: CancellationToken,
     auth: Option<Arc<RuntimeAuth>>,
     devices: Option<Arc<RuntimeDevices>>,
     library: Option<Arc<RuntimeLibrary>>,
@@ -125,6 +126,7 @@ pub async fn websocket_upgrade(
         };
     let services = WebsocketServices {
         playback,
+        shutdown: state.shutdown.clone(),
         auth: state.auth.clone(),
         devices: state.devices.clone(),
         library: state.library.clone(),
@@ -158,6 +160,7 @@ async fn websocket_session(
 ) {
     let WebsocketServices {
         playback,
+        shutdown,
         auth,
         devices,
         library,
@@ -187,7 +190,7 @@ async fn websocket_session(
         ..SessionProjection::default()
     });
     let (writer_tx, writer_rx) = mpsc::channel(WRITER_COMMAND_CAPACITY);
-    let cancellation = CancellationToken::new();
+    let cancellation = shutdown.child_token();
     let writer_cancellation = cancellation.clone();
     let (sink, stream) = socket.split();
     let mut writer = tokio::spawn(async move {
@@ -1951,6 +1954,38 @@ mod tests {
         socket.close(None).await?;
         let _ = shutdown_tx.send(());
         server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runtime_shutdown_closes_an_open_websocket_without_client_cooperation()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(runtime.run(listener, async move {
+            let _ = shutdown_rx.await;
+            Ok(())
+        }));
+        let (mut socket, _) = connect_async(format!("ws://{address}/api/ws")).await?;
+        let _initial = next_protocol_message(&mut socket).await?;
+
+        let _ = shutdown_tx.send(());
+        tokio::time::timeout(Duration::from_secs(5), server).await???;
+
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(message) = socket.next().await {
+                match message {
+                    Ok(TungsteniteMessage::Close(_)) | Err(_) => return true,
+                    Ok(_) => {}
+                }
+            }
+            true
+        })
+        .await?;
+        assert!(closed);
         Ok(())
     }
 

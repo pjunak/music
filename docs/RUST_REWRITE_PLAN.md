@@ -648,6 +648,8 @@ must finish before the reference implementation is deleted.
 - [x] Re-audit runtime ownership and concurrency: partial startup now cancels its task tree, direct
   HTTP media work and provider I/O load-shed at fixed admission caps, and the architecture gate
   rejects unbounded channels or unreviewed `tokio::spawn`/`spawn_blocking` drift.
+- [x] Link every WebSocket session to the root cancellation tree and fold context/voice performance
+  into running aggregates instead of retaining library-sized timing and status collections.
 - [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
 - [ ] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report.
 - [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.

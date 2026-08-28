@@ -427,6 +427,9 @@ Startup is a supervised sequence, not one best-effort callback:
 The root supervisor closes task admission and cancels its tree when its owning runtime is dropped.
 This applies during partial construction as well as normal shutdown, so a later startup error cannot
 detach an owner that was started by an earlier step.
+The same root token is injected into HTTP state; each WebSocket session uses a child token so server
+shutdown closes its reader/writer pair without allowing a socket-local cancellation to stop the
+application.
 
 The server validates files referenced by live playback synchronously but does not walk the complete
 media tree before serving. It starts from the durable index and reports library status as
@@ -613,7 +616,9 @@ Independent tracks run on a dedicated fixed CPU pool rather than Tokio's general
 FFmpeg is constrained to one thread per track. Results return to the coordinator, which alone writes
 SQLite checkpoints. Concurrency is configuration-bounded and benchmarked under the three-CPU cgroup
 rather than inferred from host CPU count. Cancellation is cooperative in Rust loops and actively
-terminates the owned FFmpeg child.
+terminates the owned FFmpeg child. Per-track timing documents are folded into constant-size running
+stage/voice aggregates as results arrive; job summaries do not retain a second library-sized timing
+collection.
 
 The Rust analyzer is calibrated against the synthetic probes that defined `local-context/v2` and a
 private representative corpus. Numeric tolerances are field-specific; no semantic tags are added.
