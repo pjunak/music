@@ -139,7 +139,7 @@ reviews and moves an accepted summary into durable project records.
 ### Current verification record — 2026-08-28
 
 - Windows GNU Rust host: formatting, all-target check, strict all-target/all-feature Clippy,
-  285/285 nextest cases, and all workspace doctests pass. The run included the exact
+  291/291 nextest cases, and all workspace doctests pass. The current run included the exact
   checksum-pinned voice graph and end-to-end FFmpeg/worker inference.
 - Contract generation is clean: all 144 frozen Python HTTP operations remain compatible, the
   readiness route is the sole Rust addition, and generated TypeScript/OpenAPI/SQLx artifacts have
@@ -149,8 +149,9 @@ reviews and moves an accepted summary into durable project records.
   removing the unused `music-analysis` declaration of `music-domain`.
 - The permanent Cargo-metadata architecture gate proves the selected eight-crate workspace shape
   and direct dependency direction, including rejection of aliases, registry stand-ins, and
-  unapproved local path crates. Its source audit also rejects new module-global statics; the only
-  explicit exceptions are the four feature-gated immutable parser caches used solely by fuzzing.
+  unapproved local path crates. Its source audit also rejects new module-global statics, unbounded
+  production channels, and unreviewed `tokio::spawn` or `spawn_blocking` sites; the only static
+  exceptions are the four feature-gated immutable parser caches used solely by fuzzing.
 - Frontend lint, TypeScript checks, all 250 Vitest cases, and the production build pass; the entry
   bundle is 320.77 kB (97.73 kB gzip), below the 450 kB regression budget.
 - The unchanged Baton repository's `core-model` and `core-sync` JVM suites pass against the
@@ -182,6 +183,10 @@ reviews and moves an accepted summary into durable project records.
 - The complete 186-file Python oracle is content-fingerprinted and quarantined; four deterministic
   tree-policy tests pass. CI now rejects oracle drift or new Python artifacts outside that boundary,
   while the prepared final mode rejects all executable/runtime remnants after the gated deletion.
+- Runtime fault boundaries now have direct regression evidence: dropping a partially constructed
+  runtime cancels its accepted tasks, root shutdown closes an uncooperative WebSocket, media and
+  provider admission reject saturation without hidden queues, and context/voice timing summaries
+  use constant-size running aggregates rather than retaining per-track reports.
 - Docker/WSL and a real Linux audio device are unavailable on this workstation. The rewrite-only
   workflow, Unix mpv tests, cgroup voice soak, Essentia differential, and speaker smoke therefore
   remain explicit external acceptance evidence rather than inferred success.
