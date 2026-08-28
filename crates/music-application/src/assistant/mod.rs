@@ -5,9 +5,17 @@
 //! tags, playlists, or presets by themselves.
 
 mod local_analysis;
+mod model_eq;
+mod model_playlist;
 mod model_quality;
+mod model_tag_cleanup;
+mod model_tagger;
 mod planner;
+mod playlist_evaluation;
+mod provider_usage;
 mod providers;
+mod runtime_contract;
+mod structured_harness;
 mod tags;
 mod vocabulary;
 
@@ -17,15 +25,24 @@ pub use local_analysis::{
     LIBRARY_CONTEXT_JOB_KIND, LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID,
     LibraryAnalysisSummary, LibraryContextPassSummary, LibraryContextSummary, LocalAnalysisError,
     LocalAnalysisRepository, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
-    MetadataAnalysisJobHandler, TrackContextDetail, VOICE_ANALYZER_ID, VOICE_MODEL_FILENAME,
-    VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature, parse_context_state,
+    MetadataAnalysisJobHandler, ModelAnalysisWrite, TrackContextDetail, VOICE_ANALYZER_ID,
+    VOICE_MODEL_FILENAME, VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature,
+    parse_context_state,
 };
+pub use model_eq::*;
+pub use model_playlist::*;
 pub use model_quality::*;
+pub use model_tag_cleanup::*;
+pub use model_tagger::*;
 pub use planner::{
     EnergyCurve, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent, PlaylistPlan,
     PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
 };
+pub use playlist_evaluation::*;
+pub use provider_usage::*;
 pub use providers::*;
+pub use runtime_contract::{ASSISTANT_RUNTIME_CONTRACT_VERSION, assistant_runtime_contract_digest};
+pub use structured_harness::ModelTaskError;
 pub use tags::{
     AnalysisReviewBatch, AnalysisReviewDecision, AnalysisReviewFailure, AnalysisReviewFailureCode,
     AnalysisReviewOutcome, AnalysisReviewTarget, AnalysisSuggestion, AssistantDependencyError,

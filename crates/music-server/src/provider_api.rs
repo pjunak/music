@@ -14,9 +14,11 @@ use music_application::assistant::{
     ProviderConformanceView, ProviderConnectionCreate, ProviderConnectionPatch,
     ProviderConnectionView, ProviderCredentialSource, ProviderRepository, ProviderSecret,
     ProviderService, ProviderServiceError, ProviderServiceErrorKind, ProviderVerificationStatus,
-    ProviderVerificationView, ThinkingMode,
+    ProviderVerificationView, TAGGING_QUALITY_EVALUATION_ID, ThinkingMode,
+    assistant_runtime_contract_digest, tag_quality_suite,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
+use music_application::jobs::JobStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -30,6 +32,7 @@ use zeroize::Zeroizing;
 use crate::auth::{PasswordConfirmationError, current_session, format_rfc3339};
 use crate::error::{ApiError, HttpValidationErrorBody, openapi_datetime};
 use crate::http::HttpState;
+use crate::jobs::{BackgroundJobResponse, job_response, map_job_error};
 use crate::provider_credentials::{
     CredentialStorageReset, CredentialStorageSource, CredentialStorageStatus, CredentialStoreError,
     RuntimeCredentialStore,
@@ -39,7 +42,7 @@ use crate::provider_transport::ProviderNetworkBoundary;
 #[derive(Debug)]
 pub(crate) struct RuntimeProviders {
     service: Arc<ProviderService>,
-    quality: ModelQualityService,
+    quality: Arc<ModelQualityService>,
     repository: Arc<dyn ProviderRepository>,
     credentials: Arc<RuntimeCredentialStore>,
     network: Arc<ProviderNetworkBoundary>,
@@ -62,7 +65,10 @@ impl RuntimeProviders {
             policy,
             executable_contract_digest,
         ));
-        let quality = ModelQualityService::new(evaluation_repository, Arc::clone(&service));
+        let quality = Arc::new(ModelQualityService::new(
+            evaluation_repository,
+            Arc::clone(&service),
+        ));
         Self {
             service,
             quality,
@@ -70,6 +76,18 @@ impl RuntimeProviders {
             credentials,
             network,
         }
+    }
+
+    pub(crate) fn quality_service(&self) -> Arc<ModelQualityService> {
+        Arc::clone(&self.quality)
+    }
+
+    pub(crate) fn provider_service(&self) -> Arc<ProviderService> {
+        Arc::clone(&self.service)
+    }
+
+    pub(crate) fn network_boundary(&self) -> Arc<ProviderNetworkBoundary> {
+        Arc::clone(&self.network)
     }
 
     async fn storage_status(&self) -> Result<CredentialStorageStatus, ApiError> {
@@ -108,10 +126,45 @@ impl RuntimeProviders {
 }
 
 pub(crate) fn provider_runtime_contract_digest() -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(b"music-rust-provider-runtime/pending-v1")
-    )
+    const PROVIDER_RUNTIME_CONTRACT_VERSION: &str = "music-rust-provider-runtime/v1";
+    const SERVER_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
+        (
+            "music-server/provider_transport.rs",
+            include_str!("provider_transport.rs"),
+        ),
+        ("music-server/model_jobs.rs", include_str!("model_jobs.rs")),
+        (
+            "music-server/provider_credentials.rs",
+            include_str!("provider_credentials.rs"),
+        ),
+    ];
+
+    let mut digest = Sha256::new();
+    update_runtime_digest(
+        &mut digest,
+        "contract-version",
+        PROVIDER_RUNTIME_CONTRACT_VERSION,
+    );
+    update_runtime_digest(
+        &mut digest,
+        "application-contract",
+        &assistant_runtime_contract_digest(),
+    );
+    for (name, contents) in SERVER_RUNTIME_ARTIFACTS {
+        update_runtime_digest(&mut digest, name, contents);
+    }
+    format!("{:x}", digest.finalize())
+}
+
+fn update_runtime_digest(digest: &mut Sha256, name: &str, contents: &str) {
+    digest.update(u64::try_from(name.len()).unwrap_or(u64::MAX).to_le_bytes());
+    digest.update(name.as_bytes());
+    digest.update(
+        u64::try_from(contents.len())
+            .unwrap_or(u64::MAX)
+            .to_le_bytes(),
+    );
+    digest.update(contents.as_bytes());
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -667,6 +720,8 @@ pub(crate) fn provider_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(verify_connection))
         .routes(routes!(list_roles))
         .routes(routes!(list_role_evaluations))
+        .routes(routes!(start_role_evaluation))
+        .routes(routes!(start_failed_scenario_evaluation))
         .routes(routes!(test_role_model))
         .routes(routes!(update_role, delete_role))
 }
@@ -984,6 +1039,222 @@ async fn list_role_evaluations(
 
 #[utoipa::path(
     post,
+    path = "/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs",
+    operation_id = "start_role_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__jobs_post",
+    params(
+        ("role_id" = String, Path, description = "Role Id"),
+        ("evaluation_id" = String, Path, description = "Evaluation Id")
+    ),
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn start_role_evaluation(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    identifiers: Result<Path<(String, String)>, PathRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Path((role_id, evaluation_id)) = identifiers.map_err(|_| ApiError::validation())?;
+    let execution = providers(&state)?
+        .quality
+        .prepare_evaluation_execution(&role_id, &evaluation_id)
+        .await
+        .map_err(map_model_quality_error)?;
+    let jobs = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let (job, _) = jobs
+        .enqueue_unique_active(
+            execution.definition.job_kind,
+            json!({
+                "role_id": execution.definition.role_id,
+                "evaluation_id": execution.definition.id,
+                "role_fingerprint": execution.role.fingerprint,
+                "case_ids": [],
+                "baseline_job_id": null,
+            }),
+        )
+        .await
+        .map_err(map_job_error)?;
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs",
+    operation_id = "start_failed_scenario_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__failed_scenarios_jobs_post",
+    params(
+        ("role_id" = String, Path, description = "Role Id"),
+        ("evaluation_id" = String, Path, description = "Evaluation Id")
+    ),
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn start_failed_scenario_evaluation(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    identifiers: Result<Path<(String, String)>, PathRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Path((role_id, evaluation_id)) = identifiers.map_err(|_| ApiError::validation())?;
+    let (execution, record) = providers(&state)?
+        .quality
+        .prepare_failed_scenario_retest(&role_id, &evaluation_id)
+        .await
+        .map_err(map_model_quality_error)?;
+    if evaluation_id != TAGGING_QUALITY_EVALUATION_ID {
+        return Err(ApiError::coded_conflict(
+            "evaluation_partial_retest_unavailable",
+            "Failed-scenario retesting is currently available for mood tagging.",
+        ));
+    }
+    let jobs = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let baseline = jobs
+        .get(&record.job_id)
+        .await
+        .map_err(map_job_error)?
+        .filter(|job| job.status == JobStatus::Succeeded)
+        .ok_or_else(retest_baseline_unavailable)?;
+    let failed_case_ids = failed_case_ids_from_baseline(
+        &baseline.kind,
+        &baseline.parameters,
+        baseline.result.as_ref(),
+        &execution,
+    )?;
+    if failed_case_ids.is_empty() {
+        return Err(ApiError::coded_conflict(
+            "evaluation_retest_not_needed",
+            "The current quality result has no failed scenarios to recheck.",
+        ));
+    }
+    let (job, _) = jobs
+        .enqueue_unique_active(
+            execution.definition.job_kind,
+            json!({
+                "role_id": execution.definition.role_id,
+                "evaluation_id": execution.definition.id,
+                "role_fingerprint": execution.role.fingerprint,
+                "case_ids": failed_case_ids,
+                "baseline_job_id": record.job_id,
+            }),
+        )
+        .await
+        .map_err(map_job_error)?;
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+fn failed_case_ids_from_baseline(
+    job_kind: &str,
+    parameters: &serde_json::Map<String, serde_json::Value>,
+    result: Option<&serde_json::Map<String, serde_json::Value>>,
+    execution: &music_application::assistant::ModelEvaluationExecution,
+) -> Result<Vec<String>, ApiError> {
+    let result = result.ok_or_else(retest_baseline_unavailable)?;
+    let parameters_valid = job_kind == execution.definition.job_kind
+        && parameters
+            .get("role_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(execution.definition.role_id)
+        && parameters
+            .get("evaluation_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(execution.definition.id)
+        && parameters
+            .get("role_fingerprint")
+            .and_then(serde_json::Value::as_str)
+            == Some(execution.role.fingerprint.as_str())
+        && parameters
+            .get("case_ids")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && parameters
+            .get("baseline_job_id")
+            .is_none_or(serde_json::Value::is_null);
+    let identity_valid = result
+        .get("schema_version")
+        .and_then(serde_json::Value::as_str)
+        == Some("assistant-model-quality-result/v1")
+        && result
+            .get("execution_scope")
+            .and_then(serde_json::Value::as_str)
+            == Some("full_suite")
+        && result.get("role_id").and_then(serde_json::Value::as_str)
+            == Some(execution.definition.role_id)
+        && result
+            .get("evaluation_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(execution.definition.id)
+        && result
+            .get("role_fingerprint")
+            .and_then(serde_json::Value::as_str)
+            == Some(execution.role.fingerprint.as_str());
+    if !parameters_valid || !identity_valid {
+        return Err(ApiError::coded_conflict(
+            "evaluation_retest_baseline_stale",
+            "The saved quality result belongs to different model settings.",
+        ));
+    }
+    let evaluation = result
+        .get("evaluation")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(retest_baseline_unavailable)?;
+    if evaluation
+        .get("suite_id")
+        .and_then(serde_json::Value::as_str)
+        != Some(execution.definition.suite_id)
+    {
+        return Err(ApiError::coded_conflict(
+            "evaluation_retest_baseline_stale",
+            "The saved quality result belongs to different model settings.",
+        ));
+    }
+    let cases = evaluation
+        .get("cases")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(retest_baseline_unavailable)?;
+    let suite = tag_quality_suite().map_err(|_| retest_baseline_unavailable())?;
+    if cases.len() != suite.cases.len() {
+        return Err(retest_baseline_unavailable());
+    }
+    let mut failed = Vec::new();
+    for (value, expected) in cases.iter().zip(&suite.cases) {
+        let item = value.as_object().ok_or_else(retest_baseline_unavailable)?;
+        if item.get("id").and_then(serde_json::Value::as_str) != Some(expected.id.as_str()) {
+            return Err(ApiError::coded_conflict(
+                "evaluation_retest_baseline_stale",
+                "The saved quality result belongs to different model settings.",
+            ));
+        }
+        let passed = item
+            .get("passed")
+            .and_then(serde_json::Value::as_bool)
+            .ok_or_else(retest_baseline_unavailable)?;
+        if !passed {
+            failed.push(expected.id.clone());
+        }
+    }
+    Ok(failed)
+}
+
+fn retest_baseline_unavailable() -> ApiError {
+    ApiError::coded_conflict(
+        "evaluation_retest_baseline_unavailable",
+        "The saved complete quality result is not available.",
+    )
+}
+
+#[utoipa::path(
+    post,
     path = "/assistant/providers/roles/{role_id}/test",
     operation_id = "test_role_model_api_assistant_providers_roles__role_id__test_post",
     params(("role_id" = String, Path, description = "Role Id")),
@@ -1103,7 +1374,7 @@ async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiErro
         .map(|_| ())
 }
 
-fn map_provider_error(error: ProviderServiceError) -> ApiError {
+pub(crate) fn map_provider_error(error: ProviderServiceError) -> ApiError {
     if error.kind() == ProviderServiceErrorKind::Dependency {
         tracing::error!(error = %error, "provider request failed");
         return ApiError::internal();
@@ -1118,7 +1389,7 @@ fn map_provider_error(error: ProviderServiceError) -> ApiError {
     ApiError::coded(status, error.code(), error.message())
 }
 
-fn map_model_quality_error(error: ModelQualityError) -> ApiError {
+pub(crate) fn map_model_quality_error(error: ModelQualityError) -> ApiError {
     if error.kind() == ProviderServiceErrorKind::Dependency {
         tracing::error!(error = %error, "model quality request failed");
         return ApiError::internal();
@@ -1413,10 +1684,12 @@ mod tests {
     use music_application::auth::UnixSeconds;
     use music_storage::{SqliteStorage, SqliteStorageOptions, hash_password};
     use serde_json::Value;
+    use sha2::Digest;
     use tempfile::tempdir;
     use tokio::net::TcpListener;
     use tower::ServiceExt;
 
+    use super::provider_runtime_contract_digest;
     use crate::{AppConfig, AppRuntime};
 
     fn runtime_config(root: &Path) -> Result<AppConfig, crate::ConfigError> {
@@ -1459,6 +1732,21 @@ mod tests {
     ) -> Result<Value, Box<dyn Error + Send + Sync>> {
         let body = to_bytes(response.into_body(), 1024 * 1024).await?;
         Ok(serde_json::from_slice(&body)?)
+    }
+
+    #[test]
+    fn provider_runtime_contract_is_content_addressed() {
+        let digest = provider_runtime_contract_digest();
+        assert_eq!(digest.len(), 64);
+        assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(digest, provider_runtime_contract_digest());
+        assert_ne!(
+            digest,
+            format!(
+                "{:x}",
+                sha2::Sha256::digest(b"music-rust-provider-runtime/pending-v1")
+            )
+        );
     }
 
     #[tokio::test]

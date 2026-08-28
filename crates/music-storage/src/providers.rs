@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 
 use music_application::assistant::{
-    AssistantFuture, ModelEvaluationRecord, ModelEvaluationRepository, ModelRoleRecord,
-    ProviderConformanceWrite, ProviderConformanceWriteOutcome, ProviderConnectionPreparation,
-    ProviderConnectionRecord, ProviderCredentialResetOutcome, ProviderMutationOutcome,
-    ProviderRepository, ProviderRolePreparation, ProviderRoleRuntimeRecord,
-    ProviderVerificationWrite, ProviderVerificationWriteOutcome,
+    AssistantFuture, ModelEvaluationRecord, ModelEvaluationRepository, ModelEvaluationWrite,
+    ModelEvaluationWriteOutcome, ModelRoleRecord, ProviderConformanceWrite,
+    ProviderConformanceWriteOutcome, ProviderConnectionPreparation, ProviderConnectionRecord,
+    ProviderCredentialResetOutcome, ProviderMutationOutcome, ProviderRepository,
+    ProviderRolePreparation, ProviderRoleRuntimeRecord, ProviderVerificationWrite,
+    ProviderVerificationWriteOutcome,
 };
 use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
@@ -48,6 +49,93 @@ impl ModelEvaluationRepository for SqliteStorage {
                 .map(evaluation_from_row)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(box_storage)
+        })
+    }
+
+    fn save_model_evaluation<'a>(
+        &'a self,
+        evaluation: &'a ModelEvaluationWrite,
+    ) -> AssistantFuture<'a, ModelEvaluationWriteOutcome> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let Some(role) = load_role_tx(&mut transaction, &evaluation.role_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ModelEvaluationWriteOutcome::RoleChanged);
+            };
+            if role.configuration_fingerprint()
+                != evaluation.expected_role_configuration_fingerprint
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ModelEvaluationWriteOutcome::RoleChanged);
+            }
+            let Some(connection) = load_connection_tx(&mut transaction, &role.connection_id)
+                .await
+                .map_err(box_storage)?
+            else {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ModelEvaluationWriteOutcome::RoleChanged);
+            };
+            if connection.fingerprint() != evaluation.expected_connection_fingerprint {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ModelEvaluationWriteOutcome::RoleChanged);
+            }
+            let job = sqlx::query(
+                "SELECT kind, status, parameters_json FROM background_jobs WHERE id = ?",
+            )
+            .bind(&evaluation.job_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            let job_is_current = job.is_some_and(|row| {
+                row.try_get::<String, _>("kind").ok().as_deref()
+                    == Some(evaluation.job_kind.as_str())
+                    && row.try_get::<String, _>("status").ok().as_deref() == Some("running")
+                    && row
+                        .try_get::<String, _>("parameters_json")
+                        .ok()
+                        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+                        .is_some_and(|parameters| {
+                            parameters.get("role_id").and_then(Value::as_str)
+                                == Some(evaluation.role_id.as_str())
+                                && parameters.get("evaluation_id").and_then(Value::as_str)
+                                    == Some(evaluation.evaluation_id.as_str())
+                                && parameters.get("role_fingerprint").and_then(Value::as_str)
+                                    == Some(evaluation.role_fingerprint.as_str())
+                        })
+            });
+            if !job_is_current {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ModelEvaluationWriteOutcome::JobInactive);
+            }
+            sqlx::query(
+                "INSERT INTO assistant_model_evaluations \
+                 (role_id, evaluation_id, role_fingerprint, status, suite_id, engine_id, \
+                  passed_cases, total_cases, job_id, evaluated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
+                 ON CONFLICT(role_id, evaluation_id) DO UPDATE SET \
+                  role_fingerprint = excluded.role_fingerprint, status = excluded.status, \
+                  suite_id = excluded.suite_id, engine_id = excluded.engine_id, \
+                  passed_cases = excluded.passed_cases, total_cases = excluded.total_cases, \
+                  job_id = excluded.job_id, evaluated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(&evaluation.role_id)
+            .bind(&evaluation.evaluation_id)
+            .bind(&evaluation.role_fingerprint)
+            .bind(&evaluation.status)
+            .bind(&evaluation.suite_id)
+            .bind(&evaluation.engine_id)
+            .bind(i64::from(evaluation.passed_cases))
+            .bind(i64::from(evaluation.total_cases))
+            .bind(&evaluation.job_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(ModelEvaluationWriteOutcome::Applied)
         })
     }
 }
@@ -1119,6 +1207,95 @@ mod tests {
         assert_eq!(
             storage.finish_role_conformance(&conformance).await?,
             ProviderConformanceWriteOutcome::RoleChanged
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn model_evaluation_publish_rechecks_job_role_and_connection_atomically()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let connection = connection("aabbccddeeff00112233445566778899", "Fixture");
+        storage.create_provider_connection(&connection).await?;
+        let role = role(&connection.id);
+        storage
+            .save_model_role(&connection.fingerprint(), &role, false)
+            .await?;
+
+        let runtime_fingerprint = "9".repeat(64);
+        sqlx::query(
+            "INSERT INTO background_jobs \
+             (id, kind, status, parameters_json, result_json, error, progress_current, \
+              progress_total, progress_phase, progress_message, attempts, retry_of_id, \
+              created_at, updated_at, lane, schema_version, restartable, checkpoint_policy) \
+             VALUES ('evaluation-job', 'assistant.model-evaluation.music-tagging-quality-v1', \
+                     'running', ?, NULL, NULL, 0, NULL, '', '', 1, NULL, CURRENT_TIMESTAMP, \
+                     CURRENT_TIMESTAMP, 'provider', 1, 0, 'replace')",
+        )
+        .bind(
+            serde_json::json!({
+                "role_id": role.role_id,
+                "evaluation_id": "music-tagging-quality-v1",
+                "role_fingerprint": runtime_fingerprint,
+            })
+            .to_string(),
+        )
+        .execute(&storage.pool)
+        .await?;
+        let evaluation = ModelEvaluationWrite {
+            role_id: role.role_id.clone(),
+            evaluation_id: "music-tagging-quality-v1".to_owned(),
+            expected_role_configuration_fingerprint: role.configuration_fingerprint(),
+            expected_connection_fingerprint: connection.fingerprint(),
+            role_fingerprint: runtime_fingerprint,
+            status: "passed".to_owned(),
+            suite_id: "controlled-vocabulary-tagging-baseline-v17".to_owned(),
+            engine_id: "model-context-tagger/v6".to_owned(),
+            passed_cases: 4,
+            total_cases: 4,
+            job_id: "evaluation-job".to_owned(),
+            job_kind: "assistant.model-evaluation.music-tagging-quality-v1".to_owned(),
+        };
+        assert_eq!(
+            storage.save_model_evaluation(&evaluation).await?,
+            ModelEvaluationWriteOutcome::Applied
+        );
+        let stored = storage.model_evaluations(&role.role_id).await?;
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].status, "passed");
+        assert_eq!(stored[0].passed_cases, 4);
+
+        sqlx::query("UPDATE background_jobs SET status = 'succeeded' WHERE id = 'evaluation-job'")
+            .execute(&storage.pool)
+            .await?;
+        let mut replacement = evaluation.clone();
+        replacement.status = "failed".to_owned();
+        replacement.passed_cases = 0;
+        assert_eq!(
+            storage.save_model_evaluation(&replacement).await?,
+            ModelEvaluationWriteOutcome::JobInactive
+        );
+        assert_eq!(
+            storage.model_evaluations(&role.role_id).await?[0].status,
+            "passed"
+        );
+
+        sqlx::query("UPDATE background_jobs SET status = 'running' WHERE id = 'evaluation-job'")
+            .execute(&storage.pool)
+            .await?;
+        sqlx::query(
+            "UPDATE assistant_model_roles SET model_id = 'changed-model' WHERE role_id = ?",
+        )
+        .bind(&role.role_id)
+        .execute(&storage.pool)
+        .await?;
+        assert_eq!(
+            storage.save_model_evaluation(&replacement).await?,
+            ModelEvaluationWriteOutcome::RoleChanged
+        );
+        assert_eq!(
+            storage.model_evaluations(&role.role_id).await?[0].status,
+            "passed"
         );
         Ok(())
     }

@@ -25,6 +25,7 @@ mod health;
 mod http;
 mod jobs;
 mod library;
+mod model_jobs;
 mod modes;
 mod playback_projection;
 mod playlists;

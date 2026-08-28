@@ -1,31 +1,16 @@
 {
   "schema_version": "openapi-compatibility/v1",
-  "verdict": "incomplete",
+  "verdict": "compatible",
   "reference_operation_count": 144,
-  "candidate_operation_count": 133,
-  "matched_operation_count": 132,
-  "fully_compatible_operation_count": 131,
-  "missing_operations": [
-    "GET /api/assistant/eq/model-status",
-    "GET /api/assistant/library-tags/catalog/model-cleanup-status",
-    "GET /api/assistant/library-tags/model-status",
-    "GET /api/assistant/playlists/model-status",
-    "POST /api/assistant/eq/drafts/jobs",
-    "POST /api/assistant/library-tags/catalog/model-cleanup-apply",
-    "POST /api/assistant/library-tags/catalog/model-cleanup-jobs",
-    "POST /api/assistant/library-tags/model-jobs",
-    "POST /api/assistant/library-tags/model-plan",
-    "POST /api/assistant/playlists/model-suggestions/jobs",
-    "POST /api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs",
-    "POST /api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs"
-  ],
+  "candidate_operation_count": 145,
+  "matched_operation_count": 144,
+  "fully_compatible_operation_count": 144,
+  "missing_operations": [],
   "candidate_only_operations": [
     "GET /api/readiness"
   ],
   "parameter_mismatches": [],
   "request_body_mismatches": [],
-  "response_mismatches": [
-    "GET /api/sync/state"
-  ],
+  "response_mismatches": [],
   "security_mismatches": []
 }

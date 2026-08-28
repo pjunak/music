@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::{
     AssistantDependencyError, AssistantFuture, ProviderService, ProviderServiceError,
-    ProviderServiceErrorKind, model_role,
+    ProviderServiceErrorKind, ResolvedRoleExecution, model_role,
 };
 
 pub const PLAYLIST_QUALITY_EVALUATION_ID: &str = "playlist-quality-v1";
@@ -75,6 +75,33 @@ pub trait ModelEvaluationRepository: std::fmt::Debug + Send + Sync {
         &'a self,
         role_id: &'a str,
     ) -> AssistantFuture<'a, Vec<ModelEvaluationRecord>>;
+    fn save_model_evaluation<'a>(
+        &'a self,
+        evaluation: &'a ModelEvaluationWrite,
+    ) -> AssistantFuture<'a, ModelEvaluationWriteOutcome>;
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ModelEvaluationWrite {
+    pub role_id: String,
+    pub evaluation_id: String,
+    pub expected_role_configuration_fingerprint: String,
+    pub expected_connection_fingerprint: String,
+    pub role_fingerprint: String,
+    pub status: String,
+    pub suite_id: String,
+    pub engine_id: String,
+    pub passed_cases: u32,
+    pub total_cases: u32,
+    pub job_id: String,
+    pub job_kind: String,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ModelEvaluationWriteOutcome {
+    Applied,
+    RoleChanged,
+    JobInactive,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -158,6 +185,12 @@ pub struct ModelQualityService {
     providers: Arc<ProviderService>,
 }
 
+#[derive(Debug)]
+pub struct ModelEvaluationExecution {
+    pub definition: ModelEvaluationDefinition,
+    pub role: ResolvedRoleExecution,
+}
+
 impl ModelQualityService {
     #[must_use]
     pub fn new(
@@ -202,6 +235,157 @@ impl ModelQualityService {
                 evaluation_view(definition, record, current_fingerprint.as_deref())
             })
             .collect())
+    }
+
+    pub fn evaluation_definition(
+        &self,
+        role_id: &str,
+        evaluation_id: &str,
+    ) -> Result<ModelEvaluationDefinition, ModelQualityError> {
+        if model_role(role_id).is_none() {
+            return Err(self.providers.role_not_found_error().into());
+        }
+        MODEL_EVALUATIONS
+            .iter()
+            .copied()
+            .find(|definition| definition.role_id == role_id && definition.id == evaluation_id)
+            .ok_or_else(|| {
+                ProviderServiceError::public(
+                    ProviderServiceErrorKind::NotFound,
+                    "evaluation_not_found",
+                    "Model quality evaluation not found for this role.",
+                )
+                .into()
+            })
+    }
+
+    pub async fn prepare_evaluation_execution(
+        &self,
+        role_id: &str,
+        evaluation_id: &str,
+    ) -> Result<ModelEvaluationExecution, ModelQualityError> {
+        let definition = self.evaluation_definition(role_id, evaluation_id)?;
+        let role = self.providers.prepare_role_execution(role_id).await?;
+        Ok(ModelEvaluationExecution { definition, role })
+    }
+
+    pub async fn prepare_quality_gated_role_execution(
+        &self,
+        role_id: &str,
+        evaluation_id: &str,
+    ) -> Result<ResolvedRoleExecution, ModelQualityError> {
+        let execution = self
+            .prepare_evaluation_execution(role_id, evaluation_id)
+            .await?;
+        let records = self
+            .repository
+            .model_evaluations(role_id)
+            .await
+            .map_err(ModelQualityError::Dependency)?;
+        let passed = records.iter().any(|record| {
+            record.evaluation_id == evaluation_id
+                && record.status == "passed"
+                && record.suite_id == execution.definition.suite_id
+                && record.role_fingerprint == execution.role.fingerprint
+        });
+        if !passed {
+            return Err(ProviderServiceError::public(
+                ProviderServiceErrorKind::Conflict,
+                "model_quality_not_passed",
+                "Run and pass the current model quality check before using live library data.",
+            )
+            .into());
+        }
+        Ok(execution.role)
+    }
+
+    pub async fn prepare_failed_scenario_retest(
+        &self,
+        role_id: &str,
+        evaluation_id: &str,
+    ) -> Result<(ModelEvaluationExecution, ModelEvaluationRecord), ModelQualityError> {
+        if evaluation_id != TAGGING_QUALITY_EVALUATION_ID {
+            return Err(ProviderServiceError::public(
+                ProviderServiceErrorKind::Conflict,
+                "evaluation_partial_retest_unavailable",
+                "Failed-scenario retesting is currently available for mood tagging.",
+            )
+            .into());
+        }
+        let execution = self
+            .prepare_evaluation_execution(role_id, evaluation_id)
+            .await?;
+        let record = self
+            .repository
+            .model_evaluations(role_id)
+            .await
+            .map_err(ModelQualityError::Dependency)?
+            .into_iter()
+            .find(|record| {
+                record.evaluation_id == evaluation_id
+                    && record.suite_id == execution.definition.suite_id
+                    && record.role_fingerprint == execution.role.fingerprint
+                    && !record.job_id.is_empty()
+            })
+            .ok_or_else(|| {
+                ProviderServiceError::public(
+                    ProviderServiceErrorKind::Conflict,
+                    "evaluation_retest_baseline_unavailable",
+                    "Run the complete current quality suite before rechecking failures.",
+                )
+            })?;
+        Ok((execution, record))
+    }
+
+    pub async fn record_evaluation(
+        &self,
+        execution: &ModelEvaluationExecution,
+        job_id: &str,
+        engine_id: &str,
+        passed: bool,
+        passed_cases: u32,
+        total_cases: u32,
+    ) -> Result<(), ModelQualityError> {
+        let outcome = self
+            .repository
+            .save_model_evaluation(&ModelEvaluationWrite {
+                role_id: execution.role.role_id.clone(),
+                evaluation_id: execution.definition.id.to_owned(),
+                expected_role_configuration_fingerprint: execution
+                    .role
+                    .role_configuration_fingerprint
+                    .clone(),
+                expected_connection_fingerprint: execution.role.connection_fingerprint.clone(),
+                role_fingerprint: execution.role.fingerprint.clone(),
+                status: if passed {
+                    "passed".to_owned()
+                } else {
+                    "failed".to_owned()
+                },
+                suite_id: execution.definition.suite_id.to_owned(),
+                engine_id: engine_id.to_owned(),
+                passed_cases,
+                total_cases,
+                job_id: job_id.to_owned(),
+                job_kind: execution.definition.job_kind.to_owned(),
+            })
+            .await
+            .map_err(ModelQualityError::Dependency)?;
+        match outcome {
+            ModelEvaluationWriteOutcome::Applied => Ok(()),
+            ModelEvaluationWriteOutcome::RoleChanged => Err(ProviderServiceError::public(
+                ProviderServiceErrorKind::Conflict,
+                "role_changed",
+                "The model role changed during evaluation. Run it again.",
+            )
+            .into()),
+            ModelEvaluationWriteOutcome::JobInactive => Err(ProviderServiceError::public(
+                ProviderServiceErrorKind::Conflict,
+                "evaluation_job_inactive",
+                "The quality job is no longer active and cannot certify this result.",
+            )
+            .into()),
+        }
     }
 }
 

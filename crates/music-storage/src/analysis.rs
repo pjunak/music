@@ -2,8 +2,11 @@ use music_application::assistant::{
     AnalysisFailureState, AnalysisFailureWrite, AnalysisState, AnalysisWrite, AssistantFuture,
     ContextState, ContextWrite, LOCAL_AUDIO_ANALYZER_ID, LOCAL_CONTEXT_ANALYZER_ID,
     LOCAL_CONTEXT_IMPLEMENTATION_ID, LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository,
+    MAX_MODEL_EVIDENCE_ITEMS, MAX_MODEL_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ModelAnalysisWrite,
     audio_source_signature, context_source_signature, metadata_source_signature,
+    model_tag_source_signature, parse_context_state,
 };
+use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 
 use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
@@ -235,6 +238,122 @@ impl LocalAnalysisRepository for SqliteStorage {
             .map_err(box_storage)?;
             transaction.commit().await.map_err(box_storage)?;
             Ok(true)
+        })
+    }
+
+    fn store_model_analysis<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        job_id: &'a str,
+        role_fingerprint: &'a str,
+        vocabulary_fingerprint: &'a str,
+        voice_signature: Option<&'a str>,
+        profiles: &'a [ModelAnalysisWrite],
+    ) -> AssistantFuture<'a, usize> {
+        Box::pin(async move {
+            if analyzer_id != MODEL_TAG_ANALYZER_ID
+                || !valid_hex_digest(role_fingerprint)
+                || !valid_hex_digest(vocabulary_fingerprint)
+            {
+                return Err(box_storage(StorageError::InvalidAssistantRecord(
+                    "model analysis contract is invalid",
+                )));
+            }
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut stored = 0_usize;
+            for document in profiles {
+                let profile = &document.profile;
+                if !valid_model_profile(profile) {
+                    return Err(box_storage(StorageError::InvalidAssistantRecord(
+                        "model analysis profile is invalid",
+                    )));
+                }
+                let Some(track) = load_track(&mut transaction, profile.track_id).await? else {
+                    continue;
+                };
+                let expected_context_signature = context_source_signature(
+                    &track,
+                    LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                    voice_signature,
+                )
+                .map_err(|_| {
+                    box_storage(StorageError::InvalidAssistantRecord(
+                        "track context fingerprint is invalid",
+                    ))
+                })?;
+                let context_row = sqlx::query(
+                    "SELECT source_signature, job_id, completeness, confidence, summary_json, \
+                     timeline_json, sections_json, technical_json, stages_json, \
+                     CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
+                     FROM track_contexts WHERE track_id = ? AND analyzer_id = ?",
+                )
+                .bind(track.id.get())
+                .bind(LOCAL_CONTEXT_ANALYZER_ID)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+                let current_context = context_row
+                    .as_ref()
+                    .filter(|row| {
+                        row.try_get::<String, _>("source_signature")
+                            .is_ok_and(|signature| signature == expected_context_signature)
+                    })
+                    .and_then(|row| context_state_from_row(track.id, row).ok())
+                    .and_then(|state| parse_context_state(&state));
+                let current_signature = model_tag_source_signature(
+                    &track,
+                    role_fingerprint,
+                    vocabulary_fingerprint,
+                    current_context.as_ref(),
+                )
+                .map_err(|_| {
+                    box_storage(StorageError::InvalidAssistantRecord(
+                        "model tag fingerprint is invalid",
+                    ))
+                })?;
+                if current_signature != profile.source_signature {
+                    continue;
+                }
+                let moods = serde_json::to_string(&profile.moods)
+                    .map_err(StorageError::AssistantSerialization)
+                    .map_err(box_storage)?;
+                let evidence = serde_json::to_string(&profile.evidence)
+                    .map_err(StorageError::AssistantSerialization)
+                    .map_err(box_storage)?;
+                let metrics = serde_json::to_string(&profile.metrics)
+                    .map_err(StorageError::AssistantSerialization)
+                    .map_err(box_storage)?;
+                sqlx::query(
+                    "INSERT INTO track_analyses \
+                     (track_id, analyzer_id, source_signature, job_id, energy, brightness, \
+                      tension, moods_json, evidence_json, metrics_json, confidence, updated_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
+                     ON CONFLICT(track_id, analyzer_id) DO UPDATE SET \
+                       source_signature = excluded.source_signature, job_id = excluded.job_id, \
+                       energy = excluded.energy, brightness = excluded.brightness, \
+                       tension = excluded.tension, moods_json = excluded.moods_json, \
+                       evidence_json = excluded.evidence_json, metrics_json = excluded.metrics_json, \
+                       confidence = excluded.confidence, updated_at = CURRENT_TIMESTAMP",
+                )
+                .bind(profile.track_id.get())
+                .bind(analyzer_id)
+                .bind(&profile.source_signature)
+                .bind(job_id)
+                .bind(profile.energy)
+                .bind(profile.brightness)
+                .bind(profile.tension)
+                .bind(moods)
+                .bind(evidence)
+                .bind(metrics)
+                .bind(profile.confidence.as_str())
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+                stored = stored.saturating_add(1);
+            }
+            transaction.commit().await.map_err(box_storage)?;
+            Ok(stored)
         })
     }
 
@@ -489,6 +608,50 @@ fn valid_profile(profile: &AnalysisWrite) -> bool {
         && !profile.evidence.is_empty()
 }
 
+fn valid_model_profile(profile: &AnalysisWrite) -> bool {
+    [profile.energy, profile.brightness, profile.tension]
+        .into_iter()
+        .all(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+        && valid_hex_digest(&profile.source_signature)
+        && profile.moods.len() <= MAX_MODEL_TAGS_PER_TRACK
+        && profile.evidence.len() <= MAX_MODEL_EVIDENCE_ITEMS
+        && profile
+            .metrics
+            .get("contract")
+            .and_then(serde_json::Value::as_str)
+            == Some("assistant-music-tagger-output/v3")
+}
+
+fn valid_hex_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn context_state_from_row(
+    track_id: music_domain::TrackId,
+    row: &SqliteRow,
+) -> Result<ContextState, StorageError> {
+    Ok(ContextState {
+        track_id,
+        source_signature: row.try_get("source_signature")?,
+        job_id: row.try_get("job_id")?,
+        completeness: row.try_get("completeness")?,
+        confidence: row.try_get("confidence")?,
+        summary_json: row.try_get("summary_json")?,
+        timeline_json: row.try_get("timeline_json")?,
+        sections_json: row.try_get("sections_json")?,
+        technical_json: row.try_get("technical_json")?,
+        stages_json: row.try_get("stages_json")?,
+        updated_at_unix_seconds: row
+            .try_get::<Option<i64>, _>("updated_at_unix_seconds")?
+            .ok_or(StorageError::InvalidAssistantRecord(
+                "context timestamp is invalid",
+            ))?,
+    })
+}
+
 fn valid_audio_profile(profile: &AnalysisWrite) -> bool {
     valid_profile(profile)
         && profile.moods.is_empty()
@@ -577,8 +740,9 @@ mod tests {
     use music_application::assistant::{
         AnalysisFailureWrite, AnalysisWrite, Confidence, ContextWrite, LOCAL_AUDIO_ANALYZER_ID,
         LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LOCAL_METADATA_ANALYZER_ID,
-        LocalAnalysisRepository, audio_source_signature, context_source_signature,
-        metadata_source_signature,
+        LocalAnalysisRepository, MODEL_TAG_ANALYZER_ID, ModelAnalysisWrite, audio_source_signature,
+        context_source_signature, metadata_source_signature, model_tag_source_signature,
+        parse_context_state,
     };
     use music_application::library::LibraryRepository;
     use tempfile::TempDir;
@@ -813,6 +977,113 @@ mod tests {
                 &document,
             )
             .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn model_analysis_rechecks_metadata_context_role_and_vocabulary_in_one_transaction()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let track = LibraryRepository::all_tracks(&storage).await?.remove(0);
+        let context_signature =
+            context_source_signature(&track, LOCAL_CONTEXT_IMPLEMENTATION_ID, None)?;
+        let context = ContextWrite {
+            track_id: track.id,
+            source_signature: context_signature,
+            completeness: "full".to_owned(),
+            confidence: "medium".to_owned(),
+            summary: serde_json::Map::from_iter([(
+                "schema_version".to_owned(),
+                serde_json::json!(LOCAL_CONTEXT_ANALYZER_ID),
+            )]),
+            timeline: vec![serde_json::Map::from_iter([(
+                "intensity".to_owned(),
+                serde_json::json!(0.5),
+            )])],
+            sections: vec![serde_json::Map::from_iter([(
+                "id".to_owned(),
+                serde_json::json!("s1"),
+            )])],
+            technical: serde_json::Map::new(),
+            stages: serde_json::Map::new(),
+        };
+        assert!(
+            LocalAnalysisRepository::store_context(
+                &storage,
+                LOCAL_CONTEXT_ANALYZER_ID,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                None,
+                "context-job",
+                &context,
+            )
+            .await?
+        );
+        let context_state =
+            LocalAnalysisRepository::context_states(&storage, LOCAL_CONTEXT_ANALYZER_ID)
+                .await?
+                .remove(0);
+        let current_context = parse_context_state(&context_state).ok_or("context did not parse")?;
+        let role_fingerprint = "a".repeat(64);
+        let vocabulary_fingerprint = "b".repeat(64);
+        let source_signature = model_tag_source_signature(
+            &track,
+            &role_fingerprint,
+            &vocabulary_fingerprint,
+            Some(&current_context),
+        )?;
+        let document = ModelAnalysisWrite {
+            profile: AnalysisWrite {
+                track_id: track.id,
+                source_signature,
+                energy: 0.6,
+                brightness: 0.5,
+                tension: 0.7,
+                moods: vec!["tense".to_owned()],
+                evidence: vec!["context section s1".to_owned()],
+                metrics: serde_json::json!({
+                    "contract": "assistant-music-tagger-output/v3",
+                    "input_contract": "assistant-music-tagger-input/v17",
+                })
+                .as_object()
+                .cloned()
+                .ok_or("metrics were not an object")?,
+                confidence: Confidence::Medium,
+            },
+        };
+        assert_eq!(
+            LocalAnalysisRepository::store_model_analysis(
+                &storage,
+                MODEL_TAG_ANALYZER_ID,
+                "model-job",
+                &role_fingerprint,
+                &vocabulary_fingerprint,
+                None,
+                std::slice::from_ref(&document),
+            )
+            .await?,
+            1
+        );
+        sqlx::query(
+            "UPDATE track_contexts SET source_signature = ? WHERE track_id = ? AND analyzer_id = ?",
+        )
+        .bind("c".repeat(64))
+        .bind(track.id.get())
+        .bind(LOCAL_CONTEXT_ANALYZER_ID)
+        .execute(&storage.pool)
+        .await?;
+        assert_eq!(
+            LocalAnalysisRepository::store_model_analysis(
+                &storage,
+                MODEL_TAG_ANALYZER_ID,
+                "stale-model-job",
+                &role_fingerprint,
+                &vocabulary_fingerprint,
+                None,
+                &[document],
+            )
+            .await?,
+            0
         );
         Ok(())
     }

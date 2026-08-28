@@ -258,13 +258,11 @@ projection rather than loading complete metadata rows. Ambient tracks with unkno
 the client-ended path, unknown interrupts use the compatible five-minute safety bound, and every
 automatic skip carries the observed track ID so a simultaneous client skip remains idempotent.
 
-The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 90 currently registered Rust operations, rather than presenting partial work as
-parity. Eighty-nine operations overlap the reference and 88 are fully schema-compatible; the
-remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work.
-The browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
-omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
-validate untrusted frames at runtime.
+The semantic HTTP report now records 144 frozen Python operations and 145 Rust operations. All 144
+reference operations overlap and are fully schema-compatible; the only Rust-only operation is the
+explicit readiness endpoint. The browser imports generated Rust WebSocket DTOs; a generated
+compatibility layer models accepted omitted defaults and the deliberate cached-client window, while
+`wsValidate.ts` continues to validate untrusted frames at runtime.
 
 Gate: all standard Rust/frontend/security gates pass; forbidden global state/unsafe/panic fixtures
 are enforced; a copied existing database passes read-only doctor; a second writer is refused; and
@@ -390,10 +388,10 @@ committed or logged.
 
 ## Phase 6 — modes, presets, playlists, cues, and authoring
 
-**Status:** In progress — Rust now owns the bounded mode catalog, all existing mode, soundboard,
-interrupt, cue, and preset CRUD, the complete playlist HTTP surface, resolved playlist/cue playback,
-exact-item SFX/loop dispatch, and all catalog-scoped WebSocket playback actions. Import authoring
-remains.
+**Status:** Complete — Rust owns the bounded mode catalog, all mode, soundboard, interrupt, cue, and
+preset CRUD, the complete playlist HTTP surface, resolved playlist/cue playback, exact-item SFX/loop
+dispatch, all catalog-scoped WebSocket playback actions, and recoverable create-only authoring
+imports.
 
 - [x] `ModeCoordinator`, typed immutable catalog snapshots, generations, last-good reload behavior,
   health/diagnostic status, and authenticated plus guest-compatible read routes.
@@ -416,8 +414,8 @@ remains.
   soundboard, preset, and single-track interrupt WebSocket actions. Queue validation is all-or-none,
   preset crossfade remains last-active-wins, output selection rejects newly added disconnected IDs,
   and manual follow-mode advance resolves inside the playback actor.
-- Authoring document schema, source adapters, preview/dependency validation, journaled commit, and
-  create-only conflict behavior.
+- [x] Authoring document schema, source adapters, preview/dependency validation, journaled commit,
+  create-only conflict behavior, and startup rollback across mode files and imported playlists.
 
 Gate: all current modes load; YAML round-trip diffs are understood; authoring v1 fixtures remain
 compatible; playback integration covers cue and preset effects; failed multi-file commits recover
@@ -425,25 +423,33 @@ without half-authored state.
 
 ## Phase 7 — durable job framework
 
-- Typed job registry with persisted lane/schema/restart/checkpoint policy, per-claim execution IDs,
+**Status:** In progress — the production job framework and HTTP surface are implemented and used by
+library analysis and provider work. Phase closure still requires the planned explicit fault-injection
+matrix at each external-effect boundary.
+
+- [x] Typed job registry with persisted lane/schema/restart/checkpoint policy, per-claim execution IDs,
   transactional claim, checkpoints, cancellation, retry, recovery, and shutdown behavior.
-- Async coordinator handlers with CPU work restricted to the fixed analysis executor, filesystem
+- [x] Async coordinator handlers with CPU work restricted to the fixed analysis executor, filesystem
   work restricted to bounded media workers, and provider calls restricted to bounded async I/O.
-- Historical unknown-job rendering.
-- Jobs HTTP API and generated frontend types.
-- Test-only fault injection at claim, external effect, checkpoint, completion, and shutdown points.
+- [x] Historical unknown-job rendering.
+- [x] Jobs HTTP API and generated frontend types.
+- [ ] Test-only fault injection at claim, external effect, checkpoint, completion, and shutdown points.
 
 Gate: restartable work resumes only from safe checkpoints; provider work never repeats silently;
 lane isolation, cancellation, refresh restoration, and SQLite contention tests pass.
 
 ## Phase 8 — deterministic Assistant and human-owned review flows
 
-- Local playlist planner, automatic playlist evidence, audio-analysis record handling, and
+**Status:** Complete — deterministic planning, review, vocabulary, cleanup, strict model-task
+contracts, and fixed synthetic quality suites are implemented with local evidence remaining
+authoritative.
+
+- [x] Local playlist planner, automatic playlist evidence, audio-analysis record handling, and
   evaluation suites.
-- Mood vocabulary, manual tags, analysis review decisions, cleanup rules, and atomic bulk changes.
-- Structured task definitions, strict result types/schemas/examples, fingerprints, and local
+- [x] Mood vocabulary, manual tags, analysis review decisions, cleanup rules, and atomic bulk changes.
+- [x] Structured task definitions, strict result types/schemas/examples, fingerprints, and local
   identity/bounds checks.
-- EQ baseline/envelope and Authoring draft integration.
+- [x] EQ baseline/envelope and Authoring draft integration.
 
 Gate: every checked-in synthetic suite produces equivalent or intentionally rebaselined results;
 generated output cannot mutate manual tags/playlists/presets without the existing explicit review
@@ -451,26 +457,41 @@ transaction; malformed/stale data fails safely.
 
 ## Phase 9 — provider connections and model jobs
 
-- AES-GCM vault and offline audit/rotation workflows.
-- Hardened pinned-DNS transport and versioned transport-free adapter handlers.
-- Verification, role assignment, conformance, runtime fingerprints, certification reset, and
+**Status:** Complete — provider configuration, encrypted credentials, transport isolation,
+conformance/quality gates, all four model feature workflows, and usage accounting are implemented.
+Conformance fingerprints now include a digest of the embedded Rust task code, validators, suites,
+vocabulary/evidence logic, adapter transport, credential handling, and job execution, so an
+executable contract change invalidates prior certification.
+
+- [x] AES-GCM vault and offline audit/rotation workflows.
+- [x] Hardened pinned-DNS transport and versioned transport-free adapter handlers.
+- [x] Verification, role assignment, conformance, runtime fingerprints, certification reset, and
   capability gates.
-- Playlist, EQ, tagging, cleanup, and quality jobs with exact disclosures, request bounds,
+- [x] Playlist, EQ, tagging, cleanup, and quality jobs with exact disclosures, request bounds,
   correction budget, usage checkpoints, and review-only results.
 
 Gate: crypto compatibility, SSRF/DNS rebinding, redirect, proxy, timeout, size, secret-leak, schema,
 identity, retry, fingerprint, quality, and configured-provider conformance tests pass. Live provider
 tests require explicit consent and never become routine CI.
 
+The automated gate uses local transport fixtures and fixed suites rather than an external provider.
+The full Rust workspace, strict Clippy, 144/144 frozen HTTP compatibility comparison, and frontend
+lint/typecheck/250-test/build gates pass on the Windows rewrite host; an external live-provider smoke
+remains an explicitly authorized acceptance check, not a parity dependency.
+
 ## Phase 10 — local context and voice analysis
 
-- Streaming FFmpeg PCM adapter, cancellation, deadlines, and bounded stderr.
-- Reused signal buffers, RustFFT/Mel features, trajectories, tempo, structure, reliability, and
+**Status:** In progress — the bounded FFmpeg/RustFFT context pass, EBU R128 integration, durable
+checkpoints, and UI/API contracts are implemented. The exact checksum-pinned local voice model,
+selected isolation boundary, and production-shaped resource soak remain.
+
+- [x] Streaming FFmpeg PCM adapter, cancellation, deadlines, and bounded stderr.
+- [x] Reused signal buffers, RustFFT/Mel features, trajectories, tempo, structure, reliability, and
   source signatures.
-- Single-pass EBU R128 integration after corpus parity.
-- Bounded track pool, serialized SQLite checkpoints, partial/failure rows, profiling, and UI job
+- [x] Single-pass EBU R128 integration after corpus parity.
+- [x] Bounded track pool, serialized SQLite checkpoints, partial/failure rows, profiling, and UI job
   progress compatibility.
-- Supervised single-model inference thread and retryable second phase; exercise the Rust subprocess
+- [ ] Supervised single-model inference thread and retryable second phase; exercise the Rust subprocess
   implementation when Phase 1 selected hard isolation.
 
 Gate: controlled probes pass; representative numeric output is within field tolerances or carries a

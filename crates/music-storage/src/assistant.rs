@@ -301,6 +301,7 @@ impl AssistantRepository for SqliteStorage {
         expected_catalog_signature: &'a str,
         expected_vocabulary_fingerprint: &'a str,
         selections: &'a [CleanupSelection],
+        allowed_pairs: Option<&'a [CleanupSelection]>,
     ) -> AssistantFuture<'a, CleanupMutation> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
@@ -320,31 +321,42 @@ impl AssistantRepository for SqliteStorage {
                 transaction.commit().await.map_err(box_storage)?;
                 return Ok(CleanupMutation::StaleVocabulary);
             }
-            let preview = build_cleanup_preview(
-                &usage,
-                &TagVocabularySnapshot {
-                    revision: vocabulary_record.revision,
-                    fingerprint,
-                    document,
-                },
-            )
-            .map_err(|_| {
+            let current_catalog_signature = catalog_signature(&usage).map_err(|_| {
                 box_storage(StorageError::InvalidAssistantRecord(
-                    "invalid cleanup preview",
+                    "invalid catalog signature",
                 ))
             })?;
-            if preview.catalog_signature != expected_catalog_signature {
+            if current_catalog_signature != expected_catalog_signature {
                 transaction.commit().await.map_err(box_storage)?;
                 return Ok(CleanupMutation::StaleCatalog);
             }
-            let allowed = preview
+            let allowed = if let Some(allowed_pairs) = allowed_pairs {
+                allowed_pairs
+                    .iter()
+                    .map(|item| (item.source.clone(), item.target.clone()))
+                    .collect::<BTreeSet<_>>()
+            } else {
+                build_cleanup_preview(
+                    &usage,
+                    &TagVocabularySnapshot {
+                        revision: vocabulary_record.revision,
+                        fingerprint,
+                        document,
+                    },
+                )
+                .map_err(|_| {
+                    box_storage(StorageError::InvalidAssistantRecord(
+                        "invalid cleanup preview",
+                    ))
+                })?
                 .suggestions
-                .iter()
-                .map(|item| (item.source.as_str(), item.target.as_str()))
-                .collect::<BTreeSet<_>>();
+                .into_iter()
+                .map(|item| (item.source, item.target))
+                .collect::<BTreeSet<_>>()
+            };
             if selections
                 .iter()
-                .any(|item| !allowed.contains(&(item.source.as_str(), item.target.as_str())))
+                .any(|item| !allowed.contains(&(item.source.clone(), item.target.clone())))
             {
                 transaction.commit().await.map_err(box_storage)?;
                 return Ok(CleanupMutation::InvalidSelection);
@@ -832,6 +844,48 @@ mod tests {
                 .await
                 .is_err()
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reviewed_cleanup_accepts_only_pairs_from_the_immutable_model_proposal()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        sqlx::query(
+            "INSERT INTO track_user_tags (track_id, tag, created_at) VALUES (1, 'clue hunting', CURRENT_TIMESTAMP)",
+        )
+        .execute(&storage.pool)
+        .await?;
+        let service = AssistantService::new(std::sync::Arc::new(storage));
+        let preview = service.cleanup_preview().await?;
+        let allowed = [CleanupSelection {
+            source: "clue hunting".to_owned(),
+            target: "investigation".to_owned(),
+        }];
+        assert!(
+            service
+                .apply_reviewed_cleanup(
+                    &preview.catalog_signature,
+                    &preview.vocabulary_fingerprint,
+                    &[CleanupSelection {
+                        source: "clue hunting".to_owned(),
+                        target: "calm".to_owned(),
+                    }],
+                    &allowed,
+                )
+                .await
+                .is_err()
+        );
+        let applied = service
+            .apply_reviewed_cleanup(
+                &preview.catalog_signature,
+                &preview.vocabulary_fingerprint,
+                &allowed,
+                &allowed,
+            )
+            .await?;
+        assert_eq!(applied.applied.len(), 1);
+        assert_eq!(applied.applied[0].target, "investigation");
         Ok(())
     }
 }

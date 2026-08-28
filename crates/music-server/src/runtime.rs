@@ -61,6 +61,7 @@ use crate::error::RuntimeError;
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::http::{RuntimeServices, build_router};
 use crate::library::RuntimeLibrary;
+use crate::model_jobs::{model_evaluation_job_handlers, model_feature_job_handlers};
 use crate::provider_api::{RuntimeProviders, provider_runtime_contract_digest};
 use crate::provider_credentials::RuntimeCredentialStore;
 use crate::provider_transport::ProviderNetworkBoundary;
@@ -288,7 +289,7 @@ impl AppRuntime {
             Arc::new(FfmpegSignalAnalyzer::new(ffmpeg.clone()));
         let context_analyzer: Arc<dyn AudioContextAnalyzer> =
             Arc::new(FfmpegContextAnalyzer::new(ffmpeg, ffprobe_executable()));
-        let job_handlers: Vec<Arc<dyn JobHandler>> = vec![
+        let mut job_handlers: Vec<Arc<dyn JobHandler>> = vec![
             Arc::new(MetadataAnalysisJobHandler::new(Arc::clone(
                 &local_analysis_repository,
             ))),
@@ -299,13 +300,24 @@ impl AppRuntime {
                 signal_analyzer,
             )),
             Arc::new(ContextAnalysisJobHandler::new(
-                local_analysis_repository,
+                Arc::clone(&local_analysis_repository),
                 library_root.clone(),
                 analysis_executor,
                 context_analyzer,
                 voice_analyzer,
             )),
         ];
+        job_handlers.extend(model_evaluation_job_handlers(
+            providers.quality_service(),
+            providers.network_boundary(),
+        ));
+        job_handlers.extend(model_feature_job_handlers(
+            providers.quality_service(),
+            providers.network_boundary(),
+            Arc::clone(&assistant),
+            Arc::clone(&local_analysis),
+            local_analysis_repository,
+        ));
         let jobs = supervise_jobs(
             &supervisor,
             start_job_coordinator(job_repository, job_handlers).await?,

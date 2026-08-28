@@ -111,64 +111,67 @@
       "AmbientState": {
         "properties": {
           "current_track_id": {
-            "default": null,
-            "format": "int64",
-            "type": [
-              "integer",
-              "null"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "history": {
-            "default": [],
             "items": {
-              "format": "int64",
               "type": "integer"
             },
             "type": "array"
           },
           "loop": {
             "default": "off",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/LoopMode"
-              }
-            ]
+            "enum": [
+              "off",
+              "follow",
+              "queue",
+              "track"
+            ],
+            "type": "string"
           },
           "position_anchored_at": {
-            "default": null,
-            "format": "double",
-            "type": [
-              "number",
-              "null"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "position_ms": {
             "default": 0,
-            "format": "int64",
             "type": "integer"
           },
           "queue": {
-            "default": [],
             "items": {
-              "format": "int64",
               "type": "integer"
             },
             "type": "array"
           },
           "shuffle": {
             "default": "off",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ShuffleMode"
-              }
-            ]
+            "enum": [
+              "off",
+              "random"
+            ],
+            "type": "string"
           },
           "source_playlist_id": {
-            "default": null,
-            "format": "int64",
-            "type": [
-              "integer",
-              "null"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -2110,14 +2113,6 @@
         ],
         "type": "object"
       },
-      "CrossfadeType": {
-        "enum": [
-          "linear",
-          "equal_power",
-          "cut"
-        ],
-        "type": "string"
-      },
       "CueBody": {
         "properties": {
           "description": {
@@ -2365,6 +2360,7 @@
             "type": "string"
           },
           "is_output": {
+            "default": false,
             "type": "boolean"
           },
           "name": {
@@ -2488,6 +2484,26 @@
         },
         "required": [
           "type"
+        ],
+        "type": "object"
+      },
+      "EqDraftRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "goal": {
+            "maxLength": 1000,
+            "minLength": 2,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "goal"
         ],
         "type": "object"
       },
@@ -3077,43 +3093,50 @@
       "InterruptState": {
         "properties": {
           "current_track_id": {
-            "format": "int64",
             "type": "integer"
           },
           "duck_to": {
-            "format": "double",
-            "type": [
-              "number",
-              "null"
+            "anyOf": [
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "fade_in_ms": {
-            "format": "int64",
+            "default": 0,
             "type": "integer"
           },
           "fade_out_ms": {
-            "format": "int64",
+            "default": 0,
             "type": "integer"
           },
           "position_anchored_at": {
-            "format": "double",
-            "type": [
-              "number",
-              "null"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "position_ms": {
-            "format": "int64",
+            "default": 0,
             "type": "integer"
           },
           "queue": {
             "items": {
-              "format": "int64",
               "type": "integer"
             },
             "type": "array"
           },
           "return_to_ambient": {
+            "default": true,
             "type": "boolean"
           }
         },
@@ -3661,22 +3684,14 @@
         ],
         "type": "object"
       },
-      "LoopMode": {
-        "enum": [
-          "off",
-          "follow",
-          "queue",
-          "track"
-        ],
-        "type": "string"
-      },
       "LoopingSfx": {
         "properties": {
           "id": {
             "type": "string"
           },
           "interval_s": {
-            "format": "double",
+            "maximum": 3600,
+            "minimum": 1,
             "type": "number"
           },
           "item_path": {
@@ -3689,7 +3704,9 @@
             "type": "string"
           },
           "volume": {
-            "format": "double",
+            "default": 1.0,
+            "maximum": 1,
+            "minimum": 0,
             "type": "number"
           }
         },
@@ -4015,6 +4032,244 @@
         ],
         "type": "object"
       },
+      "ModelEqAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "connection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disclosure": {
+            "$ref": "#/components/schemas/ModelEqDisclosure"
+          },
+          "job_kind": {
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quality_evaluation_id": {
+            "const": "eq-quality-v1",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role_id": {
+            "const": "eq_assistant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "reason_code",
+          "role_id",
+          "connection_name",
+          "model_id",
+          "quality_evaluation_id",
+          "job_kind",
+          "disclosure"
+        ],
+        "type": "object"
+      },
+      "ModelEqDisclosure": {
+        "additionalProperties": false,
+        "properties": {
+          "may_incur_cost": {
+            "type": "boolean"
+          },
+          "never_shared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "shared_with_provider": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "const": "assistant-eq-draft-disclosure/v2",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "shared_with_provider",
+          "never_shared",
+          "may_incur_cost"
+        ],
+        "type": "object"
+      },
+      "ModelEqDraftStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "const": true,
+            "type": "boolean"
+          },
+          "disclosure_version": {
+            "const": "assistant-eq-draft-disclosure/v2",
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/EqDraftRequest"
+          }
+        },
+        "required": [
+          "request",
+          "disclosure_version",
+          "consent"
+        ],
+        "type": "object"
+      },
+      "ModelPlaylistAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "connection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disclosure": {
+            "$ref": "#/components/schemas/ModelPlaylistDisclosure"
+          },
+          "job_kind": {
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quality_evaluation_id": {
+            "const": "playlist-quality-v1",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role_id": {
+            "const": "playlist_planner",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "reason_code",
+          "role_id",
+          "connection_name",
+          "model_id",
+          "quality_evaluation_id",
+          "job_kind",
+          "disclosure"
+        ],
+        "type": "object"
+      },
+      "ModelPlaylistDisclosure": {
+        "additionalProperties": false,
+        "properties": {
+          "maximum_candidates": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "may_incur_cost": {
+            "type": "boolean"
+          },
+          "never_shared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "shared_with_provider": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "const": "assistant-playlist-model-disclosure/v2",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "shared_with_provider",
+          "never_shared",
+          "maximum_candidates",
+          "may_incur_cost"
+        ],
+        "type": "object"
+      },
+      "ModelPlaylistSuggestionStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "const": true,
+            "type": "boolean"
+          },
+          "disclosure_version": {
+            "const": "assistant-playlist-model-disclosure/v2",
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/PlaylistSuggestionRequest"
+          }
+        },
+        "required": [
+          "request",
+          "disclosure_version",
+          "consent"
+        ],
+        "type": "object"
+      },
       "ModelQualityEvaluationOut": {
         "additionalProperties": false,
         "properties": {
@@ -4302,6 +4557,353 @@
         ],
         "type": "object"
       },
+      "ModelTagCleanupApplyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_signature": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagCleanupSelectionIn"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "job_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "vocabulary_fingerprint": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "catalog_signature",
+          "vocabulary_fingerprint",
+          "items",
+          "job_id"
+        ],
+        "type": "object"
+      },
+      "ModelTagCleanupAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "catalog_signature": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "connection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disclosure": {
+            "$ref": "#/components/schemas/ModelTagCleanupDisclosure"
+          },
+          "estimated_provider_requests": {
+            "maximum": 25,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "job_kind": {
+            "type": "string"
+          },
+          "manual_tags": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quality_evaluation_id": {
+            "const": "tag-cleanup-quality-v1",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role_id": {
+            "const": "tag_cleanup",
+            "type": "string"
+          },
+          "vocabulary_fingerprint": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "reason_code",
+          "role_id",
+          "connection_name",
+          "model_id",
+          "quality_evaluation_id",
+          "job_kind",
+          "catalog_signature",
+          "vocabulary_fingerprint",
+          "manual_tags",
+          "estimated_provider_requests",
+          "disclosure"
+        ],
+        "type": "object"
+      },
+      "ModelTagCleanupDisclosure": {
+        "additionalProperties": false,
+        "properties": {
+          "maximum_tags": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "may_incur_cost": {
+            "type": "boolean"
+          },
+          "never_shared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "shared_with_provider": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "const": "assistant-model-tag-cleanup-disclosure/v3",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "shared_with_provider",
+          "never_shared",
+          "maximum_tags",
+          "may_incur_cost"
+        ],
+        "type": "object"
+      },
+      "ModelTagCleanupStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "const": true,
+            "type": "boolean"
+          },
+          "disclosure_version": {
+            "const": "assistant-model-tag-cleanup-disclosure/v3",
+            "type": "string"
+          }
+        },
+        "required": [
+          "disclosure_version",
+          "consent"
+        ],
+        "type": "object"
+      },
+      "ModelTaggingAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "connection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_profiles": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "disclosure": {
+            "$ref": "#/components/schemas/ModelTaggingDisclosure"
+          },
+          "estimated_provider_requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "job_kind": {
+            "type": "string"
+          },
+          "library_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planned_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quality_evaluation_id": {
+            "const": "music-tagging-quality-v1",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role_id": {
+            "const": "music_tagger",
+            "type": "string"
+          },
+          "scope_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tracks_missing_context": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tracks_needing_tags": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tracks_with_full_context": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tracks_with_partial_context": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available",
+          "reason_code",
+          "role_id",
+          "connection_name",
+          "model_id",
+          "quality_evaluation_id",
+          "job_kind",
+          "library_tracks",
+          "scope_tracks",
+          "planned_tracks",
+          "tracks_with_full_context",
+          "tracks_with_partial_context",
+          "tracks_missing_context",
+          "current_profiles",
+          "tracks_needing_tags",
+          "estimated_provider_requests",
+          "disclosure"
+        ],
+        "type": "object"
+      },
+      "ModelTaggingDisclosure": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "invalid_response_retry_limit": {
+            "maximum": 5,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "may_incur_cost": {
+            "type": "boolean"
+          },
+          "never_shared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "shared_with_provider": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tracks_per_request": {
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "const": "assistant-model-music-tagging-disclosure/v10",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "shared_with_provider",
+          "never_shared",
+          "allowed_tags",
+          "tracks_per_request",
+          "invalid_response_retry_limit",
+          "may_incur_cost"
+        ],
+        "type": "object"
+      },
+      "ModelTaggingPlanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "context_policy": {
+            "default": "include",
+            "enum": [
+              "include",
+              "skip"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ModelTaggingScope"
+          }
+        },
+        "type": "object"
+      },
       "ModelTaggingReviewQuery": {
         "additionalProperties": false,
         "properties": {
@@ -4362,55 +4964,77 @@
         },
         "type": "object"
       },
+      "ModelTaggingStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "const": true,
+            "type": "boolean"
+          },
+          "context_policy": {
+            "default": "include",
+            "enum": [
+              "include",
+              "skip"
+            ],
+            "type": "string"
+          },
+          "disclosure_version": {
+            "const": "assistant-model-music-tagging-disclosure/v10",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "type": "boolean"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ModelTaggingScope"
+          }
+        },
+        "required": [
+          "disclosure_version",
+          "consent"
+        ],
+        "type": "object"
+      },
       "PlayerState": {
         "properties": {
           "active_mode_id": {
-            "default": null,
-            "type": [
-              "string",
-              "null"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "active_output_device_ids": {
-            "default": [],
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "active_preset_ids": {
-            "default": [],
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "active_soundboard_id": {
-            "default": null,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "ambient": {
-            "default": {
-              "current_track_id": null,
-              "history": [],
-              "loop": "off",
-              "position_anchored_at": null,
-              "position_ms": 0,
-              "queue": [],
-              "shuffle": "off",
-              "source_playlist_id": null
-            },
-            "oneOf": [
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/AmbientState"
+                "type": "string"
+              },
+              {
+                "type": "null"
               }
             ]
           },
+          "ambient": {
+            "$ref": "#/components/schemas/AmbientState"
+          },
           "connected_devices": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/DeviceInfo"
             },
@@ -4418,41 +5042,34 @@
           },
           "crossfade_ms": {
             "default": 0,
-            "format": "int64",
             "type": "integer"
           },
           "crossfade_type": {
             "default": "linear",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CrossfadeType"
-              }
-            ]
+            "enum": [
+              "linear",
+              "equal_power",
+              "cut"
+            ],
+            "type": "string"
           },
           "default_device_volume": {
             "default": 1.0,
-            "format": "double",
             "type": "number"
           },
           "device_volumes": {
             "additionalProperties": {
-              "format": "double",
               "type": "number"
-            },
-            "default": {},
-            "propertyNames": {
-              "type": "string"
             },
             "type": "object"
           },
           "interrupt": {
-            "default": null,
-            "oneOf": [
-              {
-                "type": "null"
-              },
+            "anyOf": [
               {
                 "$ref": "#/components/schemas/InterruptState"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -4461,18 +5078,16 @@
             "type": "boolean"
           },
           "last_position_report": {
-            "default": null,
-            "oneOf": [
-              {
-                "type": "null"
-              },
+            "anyOf": [
               {
                 "$ref": "#/components/schemas/PositionReport"
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "looping_sfx": {
-            "default": [],
             "items": {
               "$ref": "#/components/schemas/LoopingSfx"
             },
@@ -4480,22 +5095,18 @@
           },
           "position_epoch": {
             "default": 0,
-            "format": "int64",
             "type": "integer"
           },
           "preset_revision": {
             "default": 0,
-            "format": "int64",
             "type": "integer"
           },
           "revision": {
             "default": 0,
-            "format": "int64",
             "type": "integer"
           },
           "volume": {
             "default": 1.0,
-            "format": "double",
             "type": "number"
           }
         },
@@ -5021,11 +5632,9 @@
             "type": "string"
           },
           "position_ms": {
-            "format": "int64",
             "type": "integer"
           },
           "reported_at": {
-            "format": "double",
             "type": "number"
           }
         },
@@ -5889,13 +6498,6 @@
           "destination"
         ],
         "type": "object"
-      },
-      "ShuffleMode": {
-        "enum": [
-          "off",
-          "random"
-        ],
-        "type": "string"
       },
       "SoundboardCategory": {
         "properties": {
@@ -7087,6 +7689,66 @@
         ]
       }
     },
+    "/api/assistant/eq/drafts/jobs": {
+      "post": {
+        "operationId": "start_model_eq_draft_api_assistant_eq_drafts_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelEqDraftStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/eq/model-status": {
+      "get": {
+        "operationId": "model_eq_status_api_assistant_eq_model_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelEqAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
     "/api/assistant/library-analysis/jobs": {
       "post": {
         "operationId": "start_library_analysis_api_assistant_library_analysis_jobs_post",
@@ -7567,6 +8229,106 @@
         ]
       }
     },
+    "/api/assistant/library-tags/catalog/model-cleanup-apply": {
+      "post": {
+        "operationId": "apply_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelTagCleanupApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagCleanupApplyResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/catalog/model-cleanup-jobs": {
+      "post": {
+        "operationId": "start_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelTagCleanupStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/catalog/model-cleanup-status": {
+      "get": {
+        "operationId": "model_library_tag_cleanup_status_api_assistant_library_tags_catalog_model_cleanup_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelTagCleanupAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
     "/api/assistant/library-tags/catalog/rename": {
       "post": {
         "operationId": "rename_library_tag_api_assistant_library_tags_catalog_rename_post",
@@ -7600,6 +8362,106 @@
               }
             },
             "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/model-jobs": {
+      "post": {
+        "operationId": "start_model_music_tagging_api_assistant_library_tags_model_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelTaggingStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/model-plan": {
+      "post": {
+        "operationId": "plan_model_music_tagging_api_assistant_library_tags_model_plan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelTaggingPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelTaggingAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/model-status": {
+      "get": {
+        "operationId": "model_music_tagging_status_api_assistant_library_tags_model_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelTaggingAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
           }
         },
         "tags": [
@@ -7802,6 +8664,66 @@
         },
         "tags": [
           "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/playlists/model-status": {
+      "get": {
+        "operationId": "model_playlist_status_api_assistant_playlists_model_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPlaylistAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/playlists/model-suggestions/jobs": {
+      "post": {
+        "operationId": "start_model_playlist_suggestion_api_assistant_playlists_model_suggestions_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelPlaylistSuggestionStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
         ]
       }
     },
@@ -8260,6 +9182,106 @@
                     "$ref": "#/components/schemas/ModelQualityEvaluationOut"
                   },
                   "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs": {
+      "post": {
+        "operationId": "start_failed_scenario_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__failed_scenarios_jobs_post",
+        "parameters": [
+          {
+            "description": "Role Id",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Evaluation Id",
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs": {
+      "post": {
+        "operationId": "start_role_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__jobs_post",
+        "parameters": [
+          {
+            "description": "Role Id",
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Evaluation Id",
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
                 }
               }
             },

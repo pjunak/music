@@ -638,6 +638,13 @@ impl JobExecutionContext {
         )
     }
 
+    pub async fn related_job(&self, id: &str) -> Result<Option<JobRecord>, JobExecutionError> {
+        self.repository
+            .get(id)
+            .await
+            .map_err(|_| JobExecutionError::Dependency)
+    }
+
     fn ensure_active(&self, state: JobLeaseState) -> Result<(), JobExecutionError> {
         if self.shutdown.is_cancelled() {
             return Err(JobExecutionError::Stopping);

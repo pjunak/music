@@ -296,6 +296,7 @@ pub trait AssistantRepository: std::fmt::Debug + Send + Sync {
         expected_catalog_signature: &'a str,
         expected_vocabulary_fingerprint: &'a str,
         selections: &'a [CleanupSelection],
+        allowed_pairs: Option<&'a [CleanupSelection]>,
     ) -> AssistantFuture<'a, CleanupMutation>;
     fn review_analysis<'a>(
         &'a self,
@@ -555,6 +556,43 @@ impl AssistantService {
         expected_vocabulary_fingerprint: &str,
         selections: &[CleanupSelection],
     ) -> Result<CleanupApplyOutcome, AssistantServiceError> {
+        self.apply_cleanup_internal(
+            expected_catalog_signature,
+            expected_vocabulary_fingerprint,
+            selections,
+            None,
+        )
+        .await
+    }
+
+    pub async fn apply_reviewed_cleanup(
+        &self,
+        expected_catalog_signature: &str,
+        expected_vocabulary_fingerprint: &str,
+        selections: &[CleanupSelection],
+        allowed_pairs: &[CleanupSelection],
+    ) -> Result<CleanupApplyOutcome, AssistantServiceError> {
+        if allowed_pairs.is_empty() || allowed_pairs.len() > 100 {
+            return Err(AssistantServiceError::InvalidCleanupSelection(
+                "stored cleanup proposal is invalid".to_owned(),
+            ));
+        }
+        self.apply_cleanup_internal(
+            expected_catalog_signature,
+            expected_vocabulary_fingerprint,
+            selections,
+            Some(allowed_pairs),
+        )
+        .await
+    }
+
+    async fn apply_cleanup_internal(
+        &self,
+        expected_catalog_signature: &str,
+        expected_vocabulary_fingerprint: &str,
+        selections: &[CleanupSelection],
+        allowed_pairs: Option<&[CleanupSelection]>,
+    ) -> Result<CleanupApplyOutcome, AssistantServiceError> {
         if selections.is_empty() || selections.len() > 100 {
             return Err(AssistantServiceError::Validation(
                 "cleanup must contain between 1 and 100 selections".to_owned(),
@@ -587,6 +625,7 @@ impl AssistantService {
                 expected_catalog_signature,
                 expected_vocabulary_fingerprint,
                 &normalized,
+                allowed_pairs,
             )
             .await
             .map_err(AssistantServiceError::Dependency)?

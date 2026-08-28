@@ -1,0 +1,165 @@
+{
+  "schema_version": "playlist-evaluation/v1",
+  "id": "model-dnd-playlist-quality-v5",
+  "description": "The local safety baseline plus semantic-uplift and production-shape checks for a configured playlist model.",
+  "include_cases_from": "playlist-local-v1.json",
+  "cases": [
+    {
+      "id": "semantic-burglary-uplift",
+      "description": "The model must connect a natural-language burglary scene to stealth music instead of echoing an unrelated local tie order.",
+      "request": {
+        "prompt": "clandestine burglary under moonlight",
+        "target_minutes": 5,
+        "candidate_limit": 5,
+        "energy_curve": "steady"
+      },
+      "tracks": [
+        {
+          "id": 1101,
+          "path": "Castle/Royal Parade.flac",
+          "title": "Royal Parade",
+          "artist": "Silver Heralds",
+          "genre": "orchestral",
+          "length_s": 300,
+          "manual_tags": ["castle", "heroic"]
+        },
+        {
+          "id": 1102,
+          "path": "Tavern/Common Chorus.flac",
+          "title": "Common Chorus",
+          "artist": "Copper Minstrels",
+          "genre": "folk",
+          "length_s": 300,
+          "manual_tags": ["tavern", "festive"]
+        },
+        {
+          "id": 1103,
+          "path": "Road/Open Miles.flac",
+          "title": "Open Miles",
+          "artist": "Wayfarer's Reel",
+          "genre": "folk",
+          "length_s": 300,
+          "manual_tags": ["travel", "exploration"]
+        },
+        {
+          "id": 1104,
+          "path": "Temple/First Light.flac",
+          "title": "First Light",
+          "artist": "Chapel Voices",
+          "genre": "choral",
+          "length_s": 300,
+          "manual_tags": ["temple", "hopeful"]
+        },
+        {
+          "id": 1105,
+          "path": "Sea/Heavy Weather.flac",
+          "title": "Heavy Weather",
+          "artist": "Iron Galleon",
+          "genre": "cinematic",
+          "length_s": 300,
+          "manual_tags": ["seafaring", "combat"]
+        },
+        {
+          "id": 1106,
+          "path": "City/Silent Entry.flac",
+          "title": "Silent Entry",
+          "artist": "Night Archivist",
+          "genre": "dark ambient",
+          "length_s": 300,
+          "manual_tags": ["stealth", "city", "night"]
+        }
+      ],
+      "expectations": {
+        "top_k": 1,
+        "relevant_track_ids": [1106],
+        "required_default_track_ids": [1106]
+      },
+      "thresholds": {
+        "min_precision_at_k": 1.0,
+        "min_recall_at_k": 1.0,
+        "min_reciprocal_rank": 1.0,
+        "min_required_selected_recall": 1.0,
+        "min_reason_coverage": 1.0,
+        "max_duration_error_ratio": 0.0
+      }
+    },
+    {
+      "id": "production-candidate-boundary",
+      "description": "A full 100-candidate request must preserve the four strong matches, a close target duration, and artist diversity.",
+      "request": {
+        "prompt": "heroic castle ceremony",
+        "target_minutes": 20,
+        "candidate_limit": 100,
+        "energy_curve": "rising"
+      },
+      "tracks": [
+        {
+          "id": 1201,
+          "path": "Scale/Procession.flac",
+          "title": "Procession",
+          "artist": "Silver Heralds",
+          "genre": "ceremonial orchestral",
+          "length_s": 300,
+          "manual_tags": ["heroic", "castle", "ceremony"],
+          "analysis": {"energy": 0.2, "brightness": 0.5, "tension": 0.2, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+        },
+        {
+          "id": 1202,
+          "path": "Scale/Vows.flac",
+          "title": "Vows",
+          "artist": "Chapel Voices",
+          "genre": "ceremonial choral",
+          "length_s": 300,
+          "manual_tags": ["heroic", "castle", "ceremony"],
+          "analysis": {"energy": 0.4, "brightness": 0.55, "tension": 0.3, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+        },
+        {
+          "id": 1203,
+          "path": "Scale/Crowning.flac",
+          "title": "Crowning",
+          "artist": "Royal Brass",
+          "genre": "ceremonial orchestral",
+          "length_s": 300,
+          "manual_tags": ["heroic", "castle", "ceremony"],
+          "analysis": {"energy": 0.7, "brightness": 0.65, "tension": 0.5, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+        },
+        {
+          "id": 1204,
+          "path": "Scale/Finale.flac",
+          "title": "Finale",
+          "artist": "Last Cantor",
+          "genre": "ceremonial ambient",
+          "length_s": 300,
+          "manual_tags": ["heroic", "castle", "ceremony"],
+          "analysis": {"energy": 0.9, "brightness": 0.7, "tension": 0.6, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+        }
+      ],
+      "generated_tracks": {
+        "count": 96,
+        "id_start": 1300,
+        "path_prefix": "Scale/Distractors",
+        "title_prefix": "Neutral ambience",
+        "artist": "Synthetic Scale Fixture",
+        "genre": "ambient",
+        "length_s": 180,
+        "manual_tags": ["forest", "calm"]
+      },
+      "expectations": {
+        "top_k": 4,
+        "relevant_track_ids": [1201, 1202, 1203, 1204],
+        "required_default_track_ids": [1201, 1202, 1203, 1204],
+        "order_pairs": [[1201, 1202], [1202, 1203], [1203, 1204]]
+      },
+      "thresholds": {
+        "min_precision_at_k": 1.0,
+        "min_recall_at_k": 1.0,
+        "min_reciprocal_rank": 1.0,
+        "min_required_selected_recall": 1.0,
+        "min_order_pair_accuracy": 1.0,
+        "min_reason_coverage": 1.0,
+        "min_selected_artist_diversity": 1.0,
+        "max_duration_error_ratio": 0.0
+      }
+    }
+  ]
+}

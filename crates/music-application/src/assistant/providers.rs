@@ -623,6 +623,16 @@ pub struct ProviderExecutionTarget {
     pub thinking_mode: ThinkingMode,
 }
 
+#[derive(Debug)]
+pub struct ResolvedRoleExecution {
+    pub role_id: String,
+    pub execution: ProviderExecutionTarget,
+    pub fingerprint: String,
+    pub role_configuration_fingerprint: String,
+    pub connection_fingerprint: String,
+    pub connection_name: String,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StructuredModelRequest {
     pub system_prompt: String,
@@ -854,7 +864,11 @@ impl ProviderServiceError {
         self.message
     }
 
-    fn public(kind: ProviderServiceErrorKind, code: &'static str, message: &'static str) -> Self {
+    pub(super) fn public(
+        kind: ProviderServiceErrorKind,
+        code: &'static str,
+        message: &'static str,
+    ) -> Self {
         Self {
             kind,
             code,
@@ -1542,6 +1556,62 @@ impl ProviderService {
         Ok(connection.map(|connection| self.role_runtime_fingerprint(&role, &connection)))
     }
 
+    pub async fn prepare_role_execution(
+        &self,
+        role_id: &str,
+    ) -> Result<ResolvedRoleExecution, ProviderServiceError> {
+        let definition = configurable_role(role_id)?;
+        let role = self
+            .repository
+            .model_roles()
+            .await
+            .map_err(ProviderServiceError::dependency)?
+            .into_iter()
+            .find(|role| role.role_id == role_id)
+            .ok_or_else(role_not_enabled)?;
+        if !role.enabled {
+            return Err(role_not_enabled());
+        }
+        let connection = self
+            .repository
+            .provider_connection(&role.connection_id)
+            .await
+            .map_err(ProviderServiceError::dependency)?
+            .ok_or_else(connection_not_found)?;
+        if ProviderVerificationStatus::parse(&connection.verification_status)
+            != ProviderVerificationStatus::Verified
+        {
+            return Err(connection_not_verified());
+        }
+        if !capabilities_satisfy(
+            &verified_capabilities(&connection),
+            definition.required_capability_ids,
+        ) {
+            return Err(incompatible_connection());
+        }
+        if self.current_conformance_status(&role, &connection) != ModelConformanceStatus::Passed {
+            return Err(model_not_tested());
+        }
+        let api_key = self.decrypt_credential(&connection).await?;
+        Ok(ResolvedRoleExecution {
+            role_id: role_id.to_owned(),
+            execution: ProviderExecutionTarget {
+                adapter_id: connection.adapter_id.clone(),
+                base_url: connection.base_url.clone(),
+                api_key,
+                allow_private_network: connection.allow_private_network,
+                model_id: role.model_id.clone(),
+                timeout_seconds: role.timeout_seconds,
+                max_output_tokens: role.max_output_tokens,
+                thinking_mode: ThinkingMode::parse(&role.thinking_mode),
+            },
+            fingerprint: self.role_runtime_fingerprint(&role, &connection),
+            role_configuration_fingerprint: role.configuration_fingerprint(),
+            connection_fingerprint: connection.fingerprint(),
+            connection_name: connection.name,
+        })
+    }
+
     #[must_use]
     pub fn role_not_found_error(&self) -> ProviderServiceError {
         role_not_found()
@@ -1851,6 +1921,30 @@ fn role_not_configured() -> ProviderServiceError {
         ProviderServiceErrorKind::Conflict,
         "role_not_configured",
         "Save a model configuration before testing it.",
+    )
+}
+
+fn role_not_enabled() -> ProviderServiceError {
+    ProviderServiceError::public(
+        ProviderServiceErrorKind::Conflict,
+        "role_not_enabled",
+        "This model role is not enabled.",
+    )
+}
+
+fn connection_not_verified() -> ProviderServiceError {
+    ProviderServiceError::public(
+        ProviderServiceErrorKind::Conflict,
+        "connection_not_verified",
+        "Verify this provider connection before using the role.",
+    )
+}
+
+fn model_not_tested() -> ProviderServiceError {
+    ProviderServiceError::public(
+        ProviderServiceErrorKind::Conflict,
+        "model_not_tested",
+        "Test this model configuration before using the role.",
     )
 }
 

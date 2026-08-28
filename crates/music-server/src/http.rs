@@ -93,6 +93,11 @@ impl CorrelationId {
 
 #[derive(utoipa::OpenApi)]
 #[openapi(components(schemas(
+    music_protocol::AmbientState,
+    music_protocol::DeviceInfo,
+    music_protocol::InterruptState,
+    music_protocol::LoopingSfx,
+    music_protocol::PositionReport,
     crate::modes::SoundboardManifest,
     crate::modes::CueSpec,
     crate::assistant::ModelTaggingScopeWire,

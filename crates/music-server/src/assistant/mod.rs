@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
@@ -8,12 +8,16 @@ use music_application::assistant::{
     AUDIO_ANALYSIS_JOB_KIND, AnalysisReviewDecision, AnalysisReviewTarget, AssistantService,
     AssistantServiceError, AssistantTrackView, CleanupSelection, Confidence, EnergyCurve,
     LIBRARY_CONTEXT_JOB_KIND, LibraryAnalysisSummary, LibraryContextPassSummary,
-    LibraryContextSummary, LocalAnalysisError, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
-    MODEL_TAG_ANALYZER_ID, ManualTagQuery, PlaylistSuggestion, PlaylistSuggestionRequest,
-    TagVocabularyDocument, TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot,
-    TrackContextDetail, VoiceAnalyzerStatus,
+    LibraryContextSummary, LocalAnalysisError, LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS,
+    METADATA_ANALYSIS_JOB_KIND, MODEL_TAG_ANALYZER_ID, MODEL_TAG_BATCH_SIZE,
+    MODEL_TAG_CLEANUP_BATCH_SIZE, MODEL_TAG_CLEANUP_ENGINE_ID,
+    MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ManualTagQuery, ModelTagCleanupTask,
+    PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument, TagVocabularyEntry,
+    TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail, VoiceAnalyzerStatus,
+    catalog_signature, model_tag_source_signature,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
+use music_application::jobs::JobStatus;
 use music_domain::TrackId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -32,6 +36,11 @@ use crate::error::{
 };
 use crate::http::HttpState;
 use crate::jobs::{BackgroundJobResponse, job_response, map_job_error};
+use crate::model_jobs::{
+    MODEL_EQ_DRAFT_JOB_KIND, MODEL_PLAYLIST_SUGGESTION_JOB_KIND, MODEL_TAG_CLEANUP_JOB_KIND,
+    MODEL_TAGGING_JOB_KIND,
+};
+use crate::provider_api::{map_model_quality_error, map_provider_error};
 
 const TAG_VOCABULARY_SCHEMA: &str = "assistant-tag-vocabulary/v1";
 const TAG_CLEANUP_PREVIEW_SCHEMA: &str = "assistant-tag-cleanup-preview/v2";
@@ -116,7 +125,7 @@ impl From<EnergyCurve> for EnergyCurveWire {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = PlaylistSuggestionRequest)]
 struct PlaylistSuggestionRequestWire {
@@ -143,6 +152,100 @@ struct PlaylistSuggestionRequestWire {
     #[serde(default)]
     #[schema(required = false, schema_with = energy_curve_default_schema)]
     energy_curve: EnergyCurveWire,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelPlaylistDisclosure)]
+struct ModelPlaylistDisclosureResponse {
+    #[schema(schema_with = playlist_disclosure_version_schema)]
+    version: &'static str,
+    shared_with_provider: Vec<&'static str>,
+    never_shared: Vec<&'static str>,
+    #[schema(schema_with = model_playlist_maximum_candidates_schema)]
+    maximum_candidates: u16,
+    may_incur_cost: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelPlaylistAvailability)]
+struct ModelPlaylistAvailabilityResponse {
+    available: bool,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    reason_code: Option<String>,
+    #[schema(schema_with = playlist_role_id_schema)]
+    role_id: &'static str,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    connection_name: Option<String>,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    model_id: Option<String>,
+    #[schema(schema_with = playlist_quality_id_schema)]
+    quality_evaluation_id: &'static str,
+    job_kind: &'static str,
+    disclosure: ModelPlaylistDisclosureResponse,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelPlaylistSuggestionStartRequest)]
+struct ModelPlaylistSuggestionStartRequest {
+    request: PlaylistSuggestionRequestWire,
+    #[schema(schema_with = playlist_disclosure_version_schema)]
+    disclosure_version: String,
+    #[schema(schema_with = true_schema)]
+    consent: bool,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = EqDraftRequest)]
+struct EqDraftRequestWire {
+    #[schema(min_length = 1, max_length = 128)]
+    name: String,
+    #[schema(min_length = 2, max_length = 1000)]
+    goal: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelEqDisclosure)]
+struct ModelEqDisclosureResponse {
+    #[schema(schema_with = eq_disclosure_version_schema)]
+    version: &'static str,
+    shared_with_provider: Vec<&'static str>,
+    never_shared: Vec<&'static str>,
+    may_incur_cost: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelEqAvailability)]
+struct ModelEqAvailabilityResponse {
+    available: bool,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    reason_code: Option<String>,
+    #[schema(schema_with = eq_role_id_schema)]
+    role_id: &'static str,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    connection_name: Option<String>,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    model_id: Option<String>,
+    #[schema(schema_with = eq_quality_id_schema)]
+    quality_evaluation_id: &'static str,
+    job_kind: &'static str,
+    disclosure: ModelEqDisclosureResponse,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelEqDraftStartRequest)]
+struct ModelEqDraftStartRequest {
+    request: EqDraftRequestWire,
+    #[schema(schema_with = eq_disclosure_version_schema)]
+    disclosure_version: String,
+    #[schema(schema_with = true_schema)]
+    consent: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -457,6 +560,99 @@ struct TagCleanupApplyResponse {
     applied: Vec<ManualTagRenameResponse>,
     #[schema(pattern = "^[a-f0-9]{64}$")]
     catalog_signature: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelTagCleanupDisclosure)]
+struct ModelTagCleanupDisclosureResponse {
+    #[schema(schema_with = model_tag_cleanup_disclosure_version_schema)]
+    version: &'static str,
+    shared_with_provider: Vec<&'static str>,
+    never_shared: Vec<&'static str>,
+    #[schema(schema_with = model_tag_cleanup_maximum_tags_schema)]
+    maximum_tags: usize,
+    may_incur_cost: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelTagCleanupAvailability)]
+struct ModelTagCleanupAvailabilityResponse {
+    available: bool,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    reason_code: Option<String>,
+    #[schema(schema_with = model_tag_cleanup_role_schema)]
+    role_id: &'static str,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    connection_name: Option<String>,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    model_id: Option<String>,
+    #[schema(schema_with = model_tag_cleanup_quality_schema)]
+    quality_evaluation_id: &'static str,
+    job_kind: &'static str,
+    #[schema(pattern = "^[a-f0-9]{64}$")]
+    catalog_signature: String,
+    #[schema(pattern = "^[a-f0-9]{64}$")]
+    vocabulary_fingerprint: String,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    manual_tags: usize,
+    #[schema(schema_with = model_tag_cleanup_request_count_schema)]
+    estimated_provider_requests: usize,
+    disclosure: ModelTagCleanupDisclosureResponse,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelTagCleanupStartRequest)]
+struct ModelTagCleanupStartRequest {
+    #[schema(schema_with = model_tag_cleanup_disclosure_version_schema)]
+    disclosure_version: String,
+    #[schema(schema_with = true_schema)]
+    consent: bool,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelTagCleanupApplyRequest)]
+struct ModelTagCleanupApplyRequest {
+    #[schema(pattern = "^[a-f0-9]{64}$")]
+    catalog_signature: String,
+    #[schema(pattern = "^[a-f0-9]{64}$")]
+    vocabulary_fingerprint: String,
+    #[schema(min_items = 1, max_items = 100)]
+    items: Vec<TagCleanupSelectionRequest>,
+    #[schema(min_length = 1, max_length = 32)]
+    job_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredModelTagCleanupResult {
+    schema_version: String,
+    disclosure_version: String,
+    role_id: String,
+    role_fingerprint: String,
+    engine_id: String,
+    catalog_signature: String,
+    vocabulary_fingerprint: String,
+    catalog_tags: usize,
+    suggestions: Vec<StoredModelTagCleanupSuggestion>,
+    usage: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredModelTagCleanupSuggestion {
+    id: String,
+    source: String,
+    target: String,
+    origin: String,
+    confidence: String,
+    reason: String,
+    source_track_count: u64,
+    target_track_count: u64,
+    merged: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -785,6 +981,96 @@ impl ModelTaggingScopeWire {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ModelTaggingContextPolicyWire {
+    #[default]
+    Include,
+    Skip,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ModelTaggingPlanRequest)]
+struct ModelTaggingPlanRequest {
+    #[schema(required = false, schema_with = model_tagging_scope_ref)]
+    scope: ModelTaggingScopeWire,
+    #[schema(required = false, schema_with = model_tagging_context_policy_schema)]
+    context_policy: ModelTaggingContextPolicyWire,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelTaggingStartRequest)]
+struct ModelTaggingStartRequest {
+    #[serde(default)]
+    #[schema(required = false, default = false)]
+    force: bool,
+    #[serde(default)]
+    #[schema(required = false, schema_with = model_tagging_scope_ref)]
+    scope: ModelTaggingScopeWire,
+    #[serde(default)]
+    #[schema(required = false, schema_with = model_tagging_context_policy_schema)]
+    context_policy: ModelTaggingContextPolicyWire,
+    #[schema(schema_with = model_tagging_disclosure_version_schema)]
+    disclosure_version: String,
+    #[schema(schema_with = true_schema)]
+    consent: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelTaggingDisclosure)]
+struct ModelTaggingDisclosureResponse {
+    #[schema(schema_with = model_tagging_disclosure_version_schema)]
+    version: &'static str,
+    shared_with_provider: Vec<&'static str>,
+    never_shared: Vec<&'static str>,
+    allowed_tags: Vec<String>,
+    #[schema(schema_with = model_tagging_tracks_per_request_schema)]
+    tracks_per_request: usize,
+    #[schema(schema_with = model_tagging_retry_limit_schema)]
+    invalid_response_retry_limit: u8,
+    may_incur_cost: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = ModelTaggingAvailability)]
+struct ModelTaggingAvailabilityResponse {
+    available: bool,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    reason_code: Option<String>,
+    #[schema(schema_with = model_tagging_role_schema)]
+    role_id: &'static str,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    connection_name: Option<String>,
+    #[schema(required = true, schema_with = nullable_string_schema)]
+    model_id: Option<String>,
+    #[schema(schema_with = model_tagging_quality_schema)]
+    quality_evaluation_id: &'static str,
+    job_kind: &'static str,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    library_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    scope_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    planned_tracks: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    tracks_with_full_context: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    tracks_with_partial_context: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    tracks_missing_context: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    current_profiles: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    tracks_needing_tags: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    estimated_provider_requests: usize,
+    disclosure: ModelTaggingDisclosureResponse,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = VoiceAnalyzerStatus)]
@@ -895,11 +1181,21 @@ pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(library_context_summary))
         .routes(routes!(library_track_context))
         .routes(routes!(suggest_playlist))
+        .routes(routes!(model_playlist_status))
+        .routes(routes!(start_model_playlist_suggestion))
+        .routes(routes!(model_eq_status))
+        .routes(routes!(start_model_eq_draft))
         .routes(routes!(tag_catalog))
         .routes(routes!(get_tag_vocabulary))
         .routes(routes!(update_tag_vocabulary))
+        .routes(routes!(model_tag_cleanup_status))
+        .routes(routes!(start_model_tag_cleanup))
+        .routes(routes!(apply_model_tag_cleanup))
         .routes(routes!(preview_tag_cleanup))
         .routes(routes!(apply_tag_cleanup))
+        .routes(routes!(model_tagging_status))
+        .routes(routes!(plan_model_tagging))
+        .routes(routes!(start_model_tagging))
         .routes(routes!(rename_tag))
         .routes(routes!(patch_tags_bulk))
         .routes(routes!(review_analysis_tags_bulk))
@@ -1118,6 +1414,497 @@ async fn suggest_playlist(
 
 #[utoipa::path(
     get,
+    path = "/assistant/playlists/model-status",
+    operation_id = "model_playlist_status_api_assistant_playlists_model_status_get",
+    responses((status = 200, description = "Successful Response", body = ModelPlaylistAvailabilityResponse)),
+    tag = "assistant"
+)]
+async fn model_playlist_status(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<ModelPlaylistAvailabilityResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let role = model_role_availability(&state, "playlist_planner", "playlist-quality-v1").await?;
+    Ok(Json(ModelPlaylistAvailabilityResponse {
+        available: role.reason_code.is_none(),
+        reason_code: role.reason_code,
+        role_id: "playlist_planner",
+        connection_name: role.connection_name,
+        model_id: role.model_id,
+        quality_evaluation_id: "playlist-quality-v1",
+        job_kind: MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
+        disclosure: playlist_disclosure(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/playlists/model-suggestions/jobs",
+    operation_id = "start_model_playlist_suggestion_api_assistant_playlists_model_suggestions_jobs_post",
+    request_body = ModelPlaylistSuggestionStartRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn start_model_playlist_suggestion(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<ModelPlaylistSuggestionStartRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if payload.disclosure_version != "assistant-playlist-model-disclosure/v2" || !payload.consent {
+        return Err(ApiError::validation());
+    }
+    let request_value =
+        serde_json::to_value(&payload.request).map_err(|_| ApiError::validation())?;
+    let request = playlist_request(payload.request)?;
+    request.validate().map_err(|_| ApiError::validation())?;
+    let providers = state
+        .providers
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let role = providers
+        .quality_service()
+        .prepare_quality_gated_role_execution("playlist_planner", "playlist-quality-v1")
+        .await
+        .map_err(map_model_quality_error)?;
+    let parameters = json!({
+        "role_id": "playlist_planner",
+        "quality_evaluation_id": "playlist-quality-v1",
+        "disclosure_version": payload.disclosure_version,
+        "consent": true,
+        "role_fingerprint": role.fingerprint,
+        "request": request_value,
+    });
+    enqueue_model_feature(
+        &state,
+        MODEL_PLAYLIST_SUGGESTION_JOB_KIND,
+        parameters,
+        "model_suggestion_in_progress",
+        "Another model playlist suggestion is already running. Wait for it to finish or cancel it first.",
+    )
+    .await
+}
+
+#[utoipa::path(
+    get,
+    path = "/assistant/eq/model-status",
+    operation_id = "model_eq_status_api_assistant_eq_model_status_get",
+    responses((status = 200, description = "Successful Response", body = ModelEqAvailabilityResponse)),
+    tag = "assistant"
+)]
+async fn model_eq_status(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<ModelEqAvailabilityResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let role = model_role_availability(&state, "eq_assistant", "eq-quality-v1").await?;
+    Ok(Json(ModelEqAvailabilityResponse {
+        available: role.reason_code.is_none(),
+        reason_code: role.reason_code,
+        role_id: "eq_assistant",
+        connection_name: role.connection_name,
+        model_id: role.model_id,
+        quality_evaluation_id: "eq-quality-v1",
+        job_kind: MODEL_EQ_DRAFT_JOB_KIND,
+        disclosure: eq_disclosure(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/eq/drafts/jobs",
+    operation_id = "start_model_eq_draft_api_assistant_eq_drafts_jobs_post",
+    request_body = ModelEqDraftStartRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant"
+)]
+async fn start_model_eq_draft(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<ModelEqDraftStartRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(mut payload) = payload.map_err(|_| ApiError::validation())?;
+    payload.request.name = payload.request.name.trim().to_owned();
+    payload.request.goal = payload.request.goal.trim().to_owned();
+    if payload.disclosure_version != "assistant-eq-draft-disclosure/v2"
+        || !payload.consent
+        || payload.request.name.is_empty()
+        || payload.request.name.chars().count() > 128
+        || !(2..=1_000).contains(&payload.request.goal.chars().count())
+    {
+        return Err(ApiError::validation());
+    }
+    let providers = state
+        .providers
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let role = providers
+        .quality_service()
+        .prepare_quality_gated_role_execution("eq_assistant", "eq-quality-v1")
+        .await
+        .map_err(map_model_quality_error)?;
+    let parameters = json!({
+        "role_id": "eq_assistant",
+        "quality_evaluation_id": "eq-quality-v1",
+        "disclosure_version": payload.disclosure_version,
+        "consent": true,
+        "role_fingerprint": role.fingerprint,
+        "request": {"name": payload.request.name, "goal": payload.request.goal},
+    });
+    enqueue_model_feature(
+        &state,
+        MODEL_EQ_DRAFT_JOB_KIND,
+        parameters,
+        "eq_draft_in_progress",
+        "Another EQ draft is already running. Wait for it to finish or cancel it first.",
+    )
+    .await
+}
+
+struct ModelRoleAvailability {
+    reason_code: Option<String>,
+    connection_name: Option<String>,
+    model_id: Option<String>,
+    runtime_fingerprint: Option<String>,
+}
+
+async fn model_role_availability(
+    state: &HttpState,
+    role_id: &str,
+    evaluation_id: &str,
+) -> Result<ModelRoleAvailability, ApiError> {
+    let providers = state
+        .providers
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let role = providers
+        .provider_service()
+        .list_model_roles()
+        .await
+        .map_err(map_provider_error)?
+        .into_iter()
+        .find(|role| role.role_id == role_id);
+    let (reason_code, runtime_fingerprint) = match providers
+        .quality_service()
+        .prepare_quality_gated_role_execution(role_id, evaluation_id)
+        .await
+    {
+        Ok(execution) => (None, Some(execution.fingerprint)),
+        Err(error)
+            if error.kind()
+                == music_application::assistant::ProviderServiceErrorKind::Dependency =>
+        {
+            return Err(map_model_quality_error(error));
+        }
+        Err(error) => {
+            let fingerprint = providers
+                .provider_service()
+                .current_role_runtime_fingerprint(role_id)
+                .await
+                .map_err(map_provider_error)?;
+            (Some(error.code().to_owned()), fingerprint)
+        }
+    };
+    Ok(ModelRoleAvailability {
+        connection_name: role.as_ref().and_then(|role| role.connection_name.clone()),
+        model_id: role
+            .filter(|role| role.configuration_available)
+            .map(|role| role.model_id),
+        reason_code,
+        runtime_fingerprint,
+    })
+}
+
+async fn enqueue_model_feature(
+    state: &HttpState,
+    job_kind: &'static str,
+    parameters: Value,
+    conflict_code: &'static str,
+    conflict_message: &'static str,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    let expected = parameters
+        .as_object()
+        .cloned()
+        .ok_or_else(ApiError::validation)?;
+    let jobs = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let (job, created) = jobs
+        .enqueue_unique_active(job_kind, Value::Object(expected.clone()))
+        .await
+        .map_err(map_job_error)?;
+    if !created && job.parameters != expected {
+        return Err(ApiError::coded_conflict(conflict_code, conflict_message));
+    }
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+fn playlist_disclosure() -> ModelPlaylistDisclosureResponse {
+    ModelPlaylistDisclosureResponse {
+        version: "assistant-playlist-model-disclosure/v2",
+        shared_with_provider: vec![
+            "Your mood prompt, duration, tempo filters, and requested energy flow",
+            "Up to 100 locally prefiltered candidate IDs and descriptive metadata",
+            "Candidate titles, artists, albums, origins, genres, durations, and BPM values",
+            "Your database mood tags, generated analysis tags, and numeric audio-signal summaries",
+            "The deterministic local ranking, default selection, sequence, and duration plan",
+        ],
+        never_shared: vec![
+            "Audio files or cover artwork",
+            "Filesystem or library-relative paths",
+            "Songs removed by local eligibility, exclusion, and candidate-limit checks",
+            "Provider credentials",
+        ],
+        maximum_candidates: 100,
+        may_incur_cost: true,
+    }
+}
+
+fn eq_disclosure() -> ModelEqDisclosureResponse {
+    ModelEqDisclosureResponse {
+        version: "assistant-eq-draft-disclosure/v2",
+        shared_with_provider: vec![
+            "The preset goal you type",
+            "The fixed ten EQ band frequencies and supported gain limits",
+            "A deterministic local baseline and per-band safety envelope derived from the goal",
+        ],
+        never_shared: vec![
+            "Songs, audio, waveforms, or library metadata",
+            "Filesystem paths, playlists, existing presets, or provider credentials",
+        ],
+        may_incur_cost: true,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/assistant/library-tags/model-status",
+    operation_id = "model_music_tagging_status_api_assistant_library_tags_model_status_get",
+    responses((status = 200, description = "Successful Response", body = ModelTaggingAvailabilityResponse)),
+    tag = "assistant-tags"
+)]
+async fn model_tagging_status(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<ModelTaggingAvailabilityResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    Ok(Json(
+        model_tagging_availability(
+            &state,
+            ContextScopeParameters::default(),
+            ModelTaggingContextPolicyWire::Include,
+        )
+        .await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-tags/model-plan",
+    operation_id = "plan_model_music_tagging_api_assistant_library_tags_model_plan_post",
+    request_body = ModelTaggingPlanRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = ModelTaggingAvailabilityResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant-tags"
+)]
+async fn plan_model_tagging(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<ModelTaggingPlanRequest>, JsonRejection>,
+) -> Result<Json<ModelTaggingAvailabilityResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let scope = payload.scope.into_parameters()?;
+    Ok(Json(
+        model_tagging_availability(&state, scope, payload.context_policy).await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-tags/model-jobs",
+    operation_id = "start_model_music_tagging_api_assistant_library_tags_model_jobs_post",
+    request_body = ModelTaggingStartRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant-tags"
+)]
+async fn start_model_tagging(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<ModelTaggingStartRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v10"
+        || !payload.consent
+    {
+        return Err(ApiError::validation());
+    }
+    let scope = payload.scope.into_parameters()?;
+    scope.to_scope().map_err(|_| ApiError::validation())?;
+    let providers = state
+        .providers
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let role = providers
+        .quality_service()
+        .prepare_quality_gated_role_execution("music_tagger", "music-tagging-quality-v1")
+        .await
+        .map_err(map_model_quality_error)?;
+    let vocabulary = service(&state)?
+        .vocabulary()
+        .await
+        .map_err(map_assistant_error)?;
+    let parameters = json!({
+        "role_id": "music_tagger",
+        "quality_evaluation_id": "music-tagging-quality-v1",
+        "disclosure_version": payload.disclosure_version,
+        "consent": true,
+        "role_fingerprint": role.fingerprint,
+        "vocabulary_fingerprint": vocabulary.fingerprint,
+        "scope": scope,
+        "context_policy": payload.context_policy,
+        "force": payload.force,
+    });
+    enqueue_model_feature(
+        &state,
+        MODEL_TAGGING_JOB_KIND,
+        parameters,
+        "model_tagging_in_progress",
+        "Another model music-tagging job is already running. Wait for it to finish or cancel it first.",
+    )
+    .await
+}
+
+async fn model_tagging_availability(
+    state: &HttpState,
+    scope: ContextScopeParameters,
+    context_policy: ModelTaggingContextPolicyWire,
+) -> Result<ModelTaggingAvailabilityResponse, ApiError> {
+    let scope_filter = scope.to_scope().map_err(|_| ApiError::validation())?;
+    let role = model_role_availability(state, "music_tagger", "music-tagging-quality-v1").await?;
+    let assistant = service(state)?;
+    let tracks = assistant.tracks().await.map_err(map_assistant_error)?;
+    let library_tracks = tracks.len();
+    let scoped = tracks
+        .iter()
+        .filter(|track| scope_filter.contains(&track.track))
+        .collect::<Vec<_>>();
+    let indexed = scoped
+        .iter()
+        .map(|track| track.track.clone())
+        .collect::<Vec<_>>();
+    let contexts = analysis_service(state)?
+        .current_contexts(&indexed)
+        .await
+        .map_err(map_local_analysis_error)?;
+    let tracks_with_full_context = contexts
+        .values()
+        .filter(|context| context.completeness == "full")
+        .count();
+    let tracks_with_partial_context = contexts
+        .values()
+        .filter(|context| context.completeness == "partial")
+        .count();
+    let planned = scoped
+        .iter()
+        .copied()
+        .filter(|track| {
+            context_policy == ModelTaggingContextPolicyWire::Include
+                || contexts
+                    .get(&track.track.id)
+                    .is_some_and(|context| context.completeness == "full")
+        })
+        .collect::<Vec<_>>();
+    let vocabulary = assistant.vocabulary().await.map_err(map_assistant_error)?;
+    let current_profiles = if let Some(fingerprint) = role.runtime_fingerprint.as_deref() {
+        let mut current = 0_usize;
+        for track in &planned {
+            let signature = model_tag_source_signature(
+                &track.track,
+                fingerprint,
+                &vocabulary.fingerprint,
+                contexts.get(&track.track.id),
+            )
+            .map_err(|_| ApiError::internal())?;
+            if track.analyses.iter().any(|analysis| {
+                analysis.analyzer_id == MODEL_TAG_ANALYZER_ID
+                    && analysis.source_signature == signature
+            }) {
+                current = current.saturating_add(1);
+            }
+        }
+        current
+    } else {
+        0
+    };
+    let tracks_needing_tags = planned.len().saturating_sub(current_profiles);
+    Ok(ModelTaggingAvailabilityResponse {
+        available: role.reason_code.is_none(),
+        reason_code: role.reason_code,
+        role_id: "music_tagger",
+        connection_name: role.connection_name,
+        model_id: role.model_id,
+        quality_evaluation_id: "music-tagging-quality-v1",
+        job_kind: MODEL_TAGGING_JOB_KIND,
+        library_tracks,
+        scope_tracks: scoped.len(),
+        planned_tracks: planned.len(),
+        tracks_with_full_context,
+        tracks_with_partial_context,
+        tracks_missing_context: scoped.len().saturating_sub(contexts.len()),
+        current_profiles,
+        tracks_needing_tags,
+        estimated_provider_requests: tracks_needing_tags.div_ceil(MODEL_TAG_BATCH_SIZE),
+        disclosure: model_tagging_disclosure(&vocabulary),
+    })
+}
+
+fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingDisclosureResponse {
+    ModelTaggingDisclosureResponse {
+        version: "assistant-model-music-tagging-disclosure/v10",
+        shared_with_provider: vec![
+            "Indexed titles, display titles, artists, albums, origins, and genres",
+            "Canonical library-relative paths, including folder and file names, treated as untrusted descriptive context",
+            "Track durations and BPM values when available",
+            "Current bounded local track context when available: intensity, loudness, rhythmic drive, brightness, density and spectral-change trajectories; tempo development; major acoustic sections and transitions; structural repetition; analyzer confidence; and optional local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status)",
+            "A server-assigned numeric track ID used only to match the response",
+            "The full operator-managed canonical tag ID, name, group, definition, exact-alias, and bounded semantic context cue index; the model may return only IDs from this index",
+        ],
+        never_shared: vec![
+            "Audio files, waveforms, full-resolution timelines, spectrograms, or cover artwork",
+            "The absolute media root or filesystem paths outside the indexed library",
+            "Your database mood tags, generated-tag review decisions, or accepted/rejected state",
+            "Playlists, review decisions, and provider credentials",
+        ],
+        allowed_tags: vocabulary
+            .document
+            .groups
+            .iter()
+            .flat_map(|group| group.tags.iter().map(|tag| tag.name.clone()))
+            .collect(),
+        tracks_per_request: MODEL_TAG_BATCH_SIZE,
+        invalid_response_retry_limit: MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT,
+        may_incur_cost: true,
+    }
+}
+
+#[utoipa::path(
+    get,
     path = "/assistant/library-tags/catalog",
     operation_id = "tag_catalog_api_assistant_library_tags_catalog_get",
     responses((status = 200, description = "Successful Response", body = ManualTagCatalogResponse)),
@@ -1199,6 +1986,308 @@ async fn update_tag_vocabulary(
         .await
         .map_err(map_assistant_error)?;
     Ok(Json(vocabulary_response(snapshot)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/assistant/library-tags/catalog/model-cleanup-status",
+    operation_id = "model_library_tag_cleanup_status_api_assistant_library_tags_catalog_model_cleanup_status_get",
+    responses((status = 200, description = "Successful Response", body = ModelTagCleanupAvailabilityResponse)),
+    tag = "assistant-tags"
+)]
+async fn model_tag_cleanup_status(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<ModelTagCleanupAvailabilityResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let role = model_role_availability(&state, "tag_cleanup", "tag-cleanup-quality-v1").await?;
+    let assistant = service(&state)?;
+    let usage = assistant.tag_usage().await.map_err(map_assistant_error)?;
+    let vocabulary = assistant.vocabulary().await.map_err(map_assistant_error)?;
+    let signature = catalog_signature(&usage).map_err(|_| ApiError::internal())?;
+    let mut reason_code = role.reason_code;
+    if reason_code.is_none() && usage.is_empty() {
+        reason_code = Some("tag_catalog_empty".to_owned());
+    }
+    if reason_code.is_none() && usage.len() > MAX_MODEL_CLEANUP_TAGS {
+        reason_code = Some("tag_catalog_too_large".to_owned());
+    }
+    let estimated_provider_requests = if usage.len() <= MAX_MODEL_CLEANUP_TAGS {
+        ModelTagCleanupTask::new(&usage, vocabulary.clone())
+            .map_err(|_| ApiError::internal())?
+            .total_model_batches()
+    } else {
+        usage.len().div_ceil(MODEL_TAG_CLEANUP_BATCH_SIZE).min(25)
+    };
+    Ok(Json(ModelTagCleanupAvailabilityResponse {
+        available: reason_code.is_none(),
+        reason_code,
+        role_id: "tag_cleanup",
+        connection_name: role.connection_name,
+        model_id: role.model_id,
+        quality_evaluation_id: "tag-cleanup-quality-v1",
+        job_kind: MODEL_TAG_CLEANUP_JOB_KIND,
+        catalog_signature: signature,
+        vocabulary_fingerprint: vocabulary.fingerprint,
+        manual_tags: usage.len(),
+        estimated_provider_requests,
+        disclosure: model_tag_cleanup_disclosure(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-tags/catalog/model-cleanup-jobs",
+    operation_id = "start_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_jobs_post",
+    request_body = ModelTagCleanupStartRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant-tags"
+)]
+async fn start_model_tag_cleanup(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<ModelTagCleanupStartRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if payload.disclosure_version != "assistant-model-tag-cleanup-disclosure/v3" || !payload.consent
+    {
+        return Err(ApiError::validation());
+    }
+    let providers = state
+        .providers
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let role = providers
+        .quality_service()
+        .prepare_quality_gated_role_execution("tag_cleanup", "tag-cleanup-quality-v1")
+        .await
+        .map_err(map_model_quality_error)?;
+    let assistant = service(&state)?;
+    let usage = assistant.tag_usage().await.map_err(map_assistant_error)?;
+    if usage.is_empty() {
+        return Err(ApiError::coded_conflict(
+            "tag_catalog_empty",
+            "Add at least one mood-library tag before requesting model cleanup.",
+        ));
+    }
+    if usage.len() > MAX_MODEL_CLEANUP_TAGS {
+        return Err(ApiError::coded_conflict(
+            "tag_catalog_too_large",
+            "Model cleanup currently supports at most 500 tags.",
+        ));
+    }
+    let vocabulary = assistant.vocabulary().await.map_err(map_assistant_error)?;
+    let parameters = json!({
+        "role_id": "tag_cleanup",
+        "quality_evaluation_id": "tag-cleanup-quality-v1",
+        "disclosure_version": payload.disclosure_version,
+        "consent": true,
+        "role_fingerprint": role.fingerprint,
+        "catalog_signature": catalog_signature(&usage).map_err(|_| ApiError::internal())?,
+        "vocabulary_fingerprint": vocabulary.fingerprint,
+    });
+    enqueue_model_feature(
+        &state,
+        MODEL_TAG_CLEANUP_JOB_KIND,
+        parameters,
+        "model_tag_cleanup_in_progress",
+        "Another model tag-cleanup job is already running. Wait for it to finish or cancel it first.",
+    )
+    .await
+}
+
+#[utoipa::path(
+    post,
+    path = "/assistant/library-tags/catalog/model-cleanup-apply",
+    operation_id = "apply_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_apply_post",
+    request_body = ModelTagCleanupApplyRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = TagCleanupApplyResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "assistant-tags"
+)]
+async fn apply_model_tag_cleanup(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<ModelTagCleanupApplyRequest>, JsonRejection>,
+) -> Result<Json<TagCleanupApplyResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !valid_sha256(&payload.catalog_signature)
+        || !valid_sha256(&payload.vocabulary_fingerprint)
+        || payload.job_id.is_empty()
+        || payload.job_id.len() > 32
+        || payload.items.is_empty()
+        || payload.items.len() > 100
+    {
+        return Err(ApiError::validation());
+    }
+    let job = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?
+        .get(&payload.job_id)
+        .await
+        .map_err(map_job_error)?
+        .filter(|job| job.kind == MODEL_TAG_CLEANUP_JOB_KIND)
+        .ok_or_else(|| {
+            ApiError::coded(
+                StatusCode::NOT_FOUND,
+                "model_tag_cleanup_job_not_found",
+                "Model tag-cleanup proposal not found.",
+            )
+        })?;
+    if job.status != JobStatus::Succeeded || job.result.is_none() {
+        return Err(ApiError::coded_conflict(
+            "model_tag_cleanup_job_incomplete",
+            "Model tag-cleanup proposal is not complete.",
+        ));
+    }
+    let result = serde_json::from_value::<StoredModelTagCleanupResult>(Value::Object(
+        job.result.unwrap_or_default(),
+    ))
+    .ok()
+    .filter(valid_stored_model_tag_cleanup_result)
+    .ok_or_else(|| {
+        ApiError::coded_conflict(
+            "model_tag_cleanup_result_invalid",
+            "Stored model tag-cleanup proposal is invalid.",
+        )
+    })?;
+    if payload.catalog_signature != result.catalog_signature {
+        return Err(ApiError::coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "model_tag_cleanup_signature_mismatch",
+            "The selected proposal signature does not match its job.",
+        ));
+    }
+    if payload.vocabulary_fingerprint != result.vocabulary_fingerprint {
+        return Err(ApiError::coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "model_tag_cleanup_vocabulary_mismatch",
+            "The selected vocabulary fingerprint does not match its job.",
+        ));
+    }
+    let assistant = service(&state)?;
+    if assistant
+        .vocabulary()
+        .await
+        .map_err(map_assistant_error)?
+        .fingerprint
+        != result.vocabulary_fingerprint
+    {
+        return Err(ApiError::coded_conflict(
+            "tag_cleanup_stale",
+            "The tag vocabulary changed after this proposal was created. Run cleanup again.",
+        ));
+    }
+    let allowed_pairs = result
+        .suggestions
+        .iter()
+        .map(|item| CleanupSelection {
+            source: item.source.clone(),
+            target: item.target.clone(),
+        })
+        .collect::<Vec<_>>();
+    let selections = payload
+        .items
+        .iter()
+        .map(|item| CleanupSelection {
+            source: item.source.clone(),
+            target: item.target.clone(),
+        })
+        .collect::<Vec<_>>();
+    let outcome = assistant
+        .apply_reviewed_cleanup(
+            &result.catalog_signature,
+            &result.vocabulary_fingerprint,
+            &selections,
+            &allowed_pairs,
+        )
+        .await
+        .map_err(map_model_cleanup_apply_error)?;
+    Ok(Json(TagCleanupApplyResponse {
+        schema_version: TAG_CLEANUP_APPLY_SCHEMA,
+        requested_items: selections.len(),
+        applied: outcome
+            .applied
+            .into_iter()
+            .map(|item| ManualTagRenameResponse {
+                source: item.source,
+                target: item.target,
+                affected_tracks: item.affected_tracks,
+                merged: item.merged,
+            })
+            .collect(),
+        catalog_signature: outcome.catalog_signature,
+    }))
+}
+
+fn model_tag_cleanup_disclosure() -> ModelTagCleanupDisclosureResponse {
+    ModelTagCleanupDisclosureResponse {
+        version: "assistant-model-tag-cleanup-disclosure/v3",
+        shared_with_provider: vec![
+            "Manual source tags not already resolved by deterministic cleanup rules",
+            "The number of tracks using each shared source tag",
+            "The operator-managed canonical tag IDs, names, groups, and definitions; the model may return only those IDs or no match",
+        ],
+        never_shared: vec![
+            "Audio or media files",
+            "Track titles, artists, albums, metadata, or filesystem paths",
+            "Playlists, generated tags, review history, or provider credentials",
+        ],
+        maximum_tags: MAX_MODEL_CLEANUP_TAGS,
+        may_incur_cost: true,
+    }
+}
+
+fn valid_stored_model_tag_cleanup_result(result: &StoredModelTagCleanupResult) -> bool {
+    let mut ids = BTreeSet::new();
+    let mut sources = BTreeSet::new();
+    result.schema_version == "assistant-model-tag-cleanup-job-result/v3"
+        && result.disclosure_version == "assistant-model-tag-cleanup-disclosure/v3"
+        && result.role_id == "tag_cleanup"
+        && valid_sha256(&result.role_fingerprint)
+        && result.engine_id == MODEL_TAG_CLEANUP_ENGINE_ID
+        && valid_sha256(&result.catalog_signature)
+        && valid_sha256(&result.vocabulary_fingerprint)
+        && (1..=MAX_MODEL_CLEANUP_TAGS).contains(&result.catalog_tags)
+        && result.suggestions.len() <= 100
+        && result.usage.is_object()
+        && result.suggestions.iter().all(|item| {
+            valid_sha256(&item.id)
+                && !item.source.is_empty()
+                && !item.target.is_empty()
+                && ids.insert(item.id.as_str())
+                && sources.insert(item.source.as_str())
+                && matches!(item.origin.as_str(), "local-rule" | "model")
+                && matches!(item.confidence.as_str(), "high" | "medium" | "low")
+                && (1..=512).contains(&item.reason.chars().count())
+                && item.source_track_count > 0
+                && ((!item.merged && item.target_track_count == 0)
+                    || (item.merged && item.target_track_count > 0))
+        })
+}
+
+fn map_model_cleanup_apply_error(error: AssistantServiceError) -> ApiError {
+    match error {
+        AssistantServiceError::Stale(_) => ApiError::coded_conflict(
+            "tag_cleanup_stale",
+            "Mood-library tags changed after this proposal was created. Run cleanup again.",
+        ),
+        AssistantServiceError::InvalidCleanupSelection(_)
+        | AssistantServiceError::Validation(_) => ApiError::coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "tag_cleanup_invalid_selection",
+            "A selected cleanup item is not part of the current proposal.",
+        ),
+        other => map_assistant_error(other),
+    }
 }
 
 #[utoipa::path(
@@ -2179,12 +3268,104 @@ fn cleanup_preview_version_schema() -> RefOr<Schema> {
 fn cleanup_apply_version_schema() -> RefOr<Schema> {
     const_string_schema(TAG_CLEANUP_APPLY_SCHEMA)
 }
+fn playlist_disclosure_version_schema() -> RefOr<Schema> {
+    const_string_schema("assistant-playlist-model-disclosure/v2")
+}
+fn playlist_role_id_schema() -> RefOr<Schema> {
+    const_string_schema("playlist_planner")
+}
+fn playlist_quality_id_schema() -> RefOr<Schema> {
+    const_string_schema("playlist-quality-v1")
+}
+fn model_playlist_maximum_candidates_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Integer)
+        .minimum(Some(1))
+        .maximum(Some(100))
+        .into()
+}
+fn model_tag_cleanup_disclosure_version_schema() -> RefOr<Schema> {
+    const_string_schema("assistant-model-tag-cleanup-disclosure/v3")
+}
+fn model_tag_cleanup_role_schema() -> RefOr<Schema> {
+    const_string_schema("tag_cleanup")
+}
+fn model_tag_cleanup_quality_schema() -> RefOr<Schema> {
+    const_string_schema("tag-cleanup-quality-v1")
+}
+fn model_tag_cleanup_maximum_tags_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Integer)
+        .minimum(Some(1))
+        .maximum(Some(500))
+        .into()
+}
+fn model_tag_cleanup_request_count_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Integer)
+        .minimum(Some(0))
+        .maximum(Some(25))
+        .into()
+}
+fn model_tagging_disclosure_version_schema() -> RefOr<Schema> {
+    const_string_schema("assistant-model-music-tagging-disclosure/v10")
+}
+fn model_tagging_role_schema() -> RefOr<Schema> {
+    const_string_schema("music_tagger")
+}
+fn model_tagging_quality_schema() -> RefOr<Schema> {
+    const_string_schema("music-tagging-quality-v1")
+}
+fn model_tagging_context_policy_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["include", "skip"]))
+        .default(Some(json!("include")))
+        .into()
+}
+fn model_tagging_tracks_per_request_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Integer)
+        .minimum(Some(1))
+        .maximum(Some(20))
+        .into()
+}
+fn model_tagging_retry_limit_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Integer)
+        .minimum(Some(0))
+        .maximum(Some(5))
+        .into()
+}
+fn eq_disclosure_version_schema() -> RefOr<Schema> {
+    const_string_schema("assistant-eq-draft-disclosure/v2")
+}
+fn eq_role_id_schema() -> RefOr<Schema> {
+    const_string_schema("eq_assistant")
+}
+fn eq_quality_id_schema() -> RefOr<Schema> {
+    const_string_schema("eq-quality-v1")
+}
+
+fn true_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Boolean)
+        .extensions(Some([("const", json!(true))].into_iter().collect()))
+        .into()
+}
 
 fn const_string_schema(value: &'static str) -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
         .extensions(Some([("const", json!(value))].into_iter().collect()))
         .into()
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn nullable_playlist_audio_signal_schema() -> RefOr<Schema> {

@@ -61,6 +61,11 @@ pub struct AnalysisWrite {
     pub confidence: Confidence,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelAnalysisWrite {
+    pub profile: AnalysisWrite,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AnalysisFailureWrite {
     pub track_id: TrackId,
@@ -252,6 +257,19 @@ pub trait LocalAnalysisRepository: LibraryRepository {
         job_id: &'a str,
         profile: &'a AnalysisWrite,
     ) -> AssistantFuture<'a, bool>;
+    /// Store generated model profiles only while their complete source
+    /// signatures still match the current metadata, local context, provider
+    /// role, and vocabulary. Implementations must perform the comparison and
+    /// write in the same transaction.
+    fn store_model_analysis<'a>(
+        &'a self,
+        analyzer_id: &'a str,
+        job_id: &'a str,
+        role_fingerprint: &'a str,
+        vocabulary_fingerprint: &'a str,
+        voice_signature: Option<&'a str>,
+        profiles: &'a [ModelAnalysisWrite],
+    ) -> AssistantFuture<'a, usize>;
     fn store_analysis_failure<'a>(
         &'a self,
         analyzer_id: &'a str,
@@ -407,6 +425,39 @@ impl LocalAnalysisService {
             failure,
             self.voice_analyzer.source_signature.as_deref(),
         )?))
+    }
+
+    pub async fn current_contexts(
+        &self,
+        tracks: &[IndexedTrack],
+    ) -> Result<BTreeMap<TrackId, CurrentTrackContext>, LocalAnalysisError> {
+        let states = self
+            .repository
+            .context_states(LOCAL_CONTEXT_ANALYZER_ID)
+            .await
+            .map_err(LocalAnalysisError::Dependency)?
+            .into_iter()
+            .map(|state| (state.track_id, state))
+            .collect::<BTreeMap<_, _>>();
+        let mut current = BTreeMap::new();
+        for track in tracks {
+            let expected = context_source_signature(
+                track,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                self.voice_analyzer.source_signature.as_deref(),
+            )
+            .map_err(|_| LocalAnalysisError::InvalidSourceSignature)?;
+            let Some(state) = states
+                .get(&track.id)
+                .filter(|state| state.source_signature == expected)
+            else {
+                continue;
+            };
+            if let Some(context) = parse_context_state(state) {
+                current.insert(track.id, context);
+            }
+        }
+        Ok(current)
     }
 
     #[must_use]
