@@ -117,6 +117,9 @@ jobs:
         with:
           node-version: "26"
 
+      - name: Test acceptance-report tooling
+        run: node --test .github/scripts/voice-differential.test.mjs
+
       - name: Lint, typecheck, test, and build
         working-directory: frontend
         run: |

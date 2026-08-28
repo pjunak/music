@@ -66,6 +66,8 @@ dmypy.json
 *.profraw
 /fuzz/artifacts/
 /fuzz/coverage/
+/voice-differential.md
+/voice-differential-*.md
 
 # Env / secrets
 .env

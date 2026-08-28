@@ -124,3 +124,27 @@ stable-ID client cleanly. It plays plain ambient + SFX. If you specifically want
 colouring on this output, run a kiosk browser pointed at the player's web app instead of
 this client (it's heavier, and not needed just to get music out of the speakers). The headless
 client is the right choice for tiny/always-on appliances.
+
+## Rust cutover acceptance on the intended speaker
+
+Run this final check on the actual Linux output device, not through a development-machine audio
+substitute. Record the rewrite commit, OS, mpv version, sound device, and pass/fail result without
+copying credentials or private media paths into the repository.
+
+1. Install the Rust binary and service, preserving the existing stable client ID, name, output
+   designation, server URL, and local-control token.
+2. Confirm the device appears once in the web UI, remains selected across an appliance restart, and
+   reconnects after a temporary network interruption without creating a duplicate remembered device.
+3. Play one normal track and exercise pause/resume, seek, skip, server master volume, per-device
+   volume, local mute/unmute, and a server-side output enable/disable transition. Confirm position
+   reports remain monotonic and an epoch-changing seek/restart is heard at the new position.
+4. Trigger overlapping SFX while ambient audio is playing. Confirm the lanes remain independent and
+   both respect their effective volume controls.
+5. Terminate either owned mpv child. The appliance must exit, systemd must restart the complete
+   service, the same stable client must reconnect, and playback must recover without an orphan mpv
+   process.
+6. Leave playback running for at least thirty minutes. Pass only if there are no repeated reconnects,
+   unbounded log growth, audible stalls, or device-state divergence between the web UI and appliance.
+
+This physical check is the final headless-output acceptance gate; the Unix fake-mpv suite proves
+process and IPC semantics but cannot prove the selected ALSA/PipeWire route or speaker hardware.

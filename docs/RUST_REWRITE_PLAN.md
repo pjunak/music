@@ -112,10 +112,32 @@ cargo test -p music-analysis \
   -- --ignored --exact
 ```
 
+The private-corpus Essentia/Rust comparison is local-only and produces a path-free report. On the
+same Linux host, install the frozen oracle's voice extra and run:
+
+```text
+cd backend && uv sync --locked --extra dev --extra voice && cd ..
+node .github/scripts/voice-differential.mjs \
+  --python backend/.venv/bin/python \
+  --model /models/voice_instrumental-musicnn-msd-2.pb \
+  --ffmpeg /usr/bin/ffmpeg \
+  --corpus /private/representative-audio \
+  --report voice-differential.md
+```
+
+The corpus must deliberately include vocal, instrumental, and mixed/uncertain material. The harness
+warms both single-model implementations, requires the pinned checksum, exact prediction-window
+counts and unchanged qualitative evidence buckets, and bounds absolute score drift to 0.05 and
+coverage drift to 0.10. Those defaults are half or less of the nearest qualitative decision gap and
+may be tightened but not widened at runtime. It requires at least six tracks, caps the corpus at 512,
+ignores symlinks, never writes paths or filenames to the report, requires a clean Git worktree, and
+refuses to overwrite prior evidence. The report is ignored by Git until the operator explicitly
+reviews and moves an accepted summary into durable project records.
+
 ### Current verification record — 2026-08-28
 
 - Windows GNU Rust host: formatting, all-target check, strict all-target/all-feature Clippy,
-  283/283 nextest cases, and all workspace doctests pass. The run included the exact
+  285/285 nextest cases, and all workspace doctests pass. The run included the exact
   checksum-pinned voice graph and end-to-end FFmpeg/worker inference.
 - Contract generation is clean: all 144 frozen Python HTTP operations remain compatible, the
   readiness route is the sole Rust addition, and generated TypeScript/OpenAPI/SQLx artifacts have
@@ -135,6 +157,8 @@ cargo test -p music-analysis \
   production support compiles under the strict all-feature Clippy gate, and every target type-checks
   locally with libFuzzer linking disabled; sanitizer execution remains part of the manual Linux
   workflow because libFuzzer is not supported on this Windows host.
+- The path-free voice-probe binary classifies generated audio end to end with the exact pinned graph,
+  and all five deterministic report/tool-policy tests pass. The Essentia side remains Linux-only.
 - Docker/WSL and a real Linux audio device are unavailable on this workstation. The rewrite-only
   workflow, Unix mpv tests, cgroup voice soak, Essentia differential, and speaker smoke therefore
   remain explicit external acceptance evidence rather than inferred success.
@@ -594,6 +618,8 @@ must finish before the reference implementation is deleted.
 - [x] Add a manual, non-publishing dual-image performance harness using only generated media.
 - [x] Add a separate seeded `cargo-fuzz` workspace and bounded manual Linux/nightly smoke job for
   protocol, path/root, YAML, import, and model-output attack surfaces.
+- [x] Add a local-only, path-free private-corpus Essentia/Rust voice differential harness and an
+  explicit intended-speaker acceptance procedure.
 - [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
 - [ ] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report.
 - [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.

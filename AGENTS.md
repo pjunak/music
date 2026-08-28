@@ -29,6 +29,11 @@ cargo test --workspace --all-features --doc
 cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 cargo deny check
 cargo audit --deny warnings
+cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
+cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
+cargo deny --manifest-path fuzz/Cargo.toml --locked check
+cargo audit --file fuzz/Cargo.lock --deny warnings
+node --test .github/scripts/voice-differential.test.mjs
 ```
 
 The checked-in toolchain is authoritative. On Windows hosts without the Visual Studio C++ build
@@ -394,6 +399,9 @@ Runtime data lives outside the image.
 - The rewrite workflow validates Rust, the frontend, the frozen compatibility oracle, and the
   non-root candidate image without publishing. The existing `main` workflow remains the only
   image-publish/infrastructure-dispatch path until cutover is explicitly authorized.
+- Run the private-corpus voice differential only on an explicitly selected local Linux corpus with
+  the pinned model and frozen Essentia oracle. Keep its report path-free, do not widen the checked-in
+  tolerances at runtime, and do not delete the oracle until that evidence and the cgroup soak pass.
 - This repository does not SSH to production. Deployment rollout, reverse
   proxy, bind mounts, and production `.env` live in `junak.eu`.
 
