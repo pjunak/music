@@ -259,8 +259,8 @@ the client-ended path, unknown interrupts use the compatible five-minute safety 
 automatic skip carries the observed track ID so a simultaneous client skip remains idempotent.
 
 The semantic HTTP report intentionally remains `incomplete`: it records 144 frozen Python
-operations versus 79 currently registered Rust operations, rather than presenting partial work as
-parity. Seventy-eight operations overlap the reference and 77 are fully schema-compatible; the
+operations versus 90 currently registered Rust operations, rather than presenting partial work as
+parity. Eighty-nine operations overlap the reference and 88 are fully schema-compatible; the
 remaining implemented mismatch is the deliberately visible Rust `PlayerState` OpenAPI schema work.
 The browser imports generated Rust WebSocket DTOs; a generated compatibility layer models accepted
 omitted defaults and the deliberate cached-client window, while `wsValidate.ts` continues to
@@ -362,9 +362,11 @@ backup checks, symlink/permission tests, and long-lived WebSocket downgrade test
   stable track identities, explicit clear/unset semantics, and compatible single/bulk HTTP routes.
   Mixed bulk updates report per-track tag failures while still applying DB-only fields; a failure
   after file replacement stops for forward recovery.
-- Staged-file mutation execution for SFX files. Rooted library folder and track
-  move/delete/upload operations, cleanup apply, per-item bulk outcomes, metadata refresh on move,
-  stable track identities, and crash replay are complete.
+- [x] Separate `SfxCoordinator` with coherent bounded inventories and journaled folder/file
+  create/rename/move/delete plus serialized `rename`/`overwrite`/`skip` upload publication.
+  Typed-root effects skip symlinks, replay interrupted operations forward, clean only exact
+  internal upload artifacts, and expose all 10 frozen reference-gated playback and authenticated
+  management operations with compatible OpenAPI contracts.
 - [x] Pure deterministic cleanup analysis with no write-capable dependency, cached-verdict reads,
   bounded all/folder/track scopes, conservative collision handling, and a schema-compatible
   `/api/library/cleanup/analyze` route.
@@ -389,8 +391,8 @@ committed or logged.
 ## Phase 6 — modes, presets, playlists, cues, and authoring
 
 **Status:** In progress — Rust now owns the bounded mode catalog, all existing mode, soundboard,
-interrupt, cue, and preset CRUD, and the complete playlist HTTP and playback boundary. SFX dispatch
-and import authoring remain.
+interrupt, cue, and preset CRUD, the complete playlist HTTP and playback boundary, and exact-item
+SFX/loop dispatch. Cue execution and import authoring remain.
 
 - [x] `ModeCoordinator`, typed immutable catalog snapshots, generations, last-good reload behavior,
   health/diagnostic status, and authenticated plus guest-compatible read routes.
@@ -402,7 +404,10 @@ and import authoring remain.
   materialization, current manual/local-analysis tag sources, last-good damaged-rule behavior,
   M3U/JSON export, and generation-checked playback resolution through the playback actor. All 14
   frozen playlist operations are OpenAPI-compatible.
-- SFX/loop/cue dispatch through the playback actor.
+- [x] Generation-checked SFX and looping-SFX dispatch through the playback actor. Compact mode
+  publications carry exact soundboard item paths, invalid items are rejected before broadcast,
+  and a mode edit prunes loops whose item disappeared even when the soundboard still exists.
+- Cue dispatch through the playback actor.
 - Authoring document schema, source adapters, preview/dependency validation, journaled commit, and
   create-only conflict behavior.
 

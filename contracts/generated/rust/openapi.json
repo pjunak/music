@@ -608,6 +608,21 @@
         ],
         "type": "object"
       },
+      "Body_upload_api_sfx_upload_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "type": "object"
+      },
       "BulkActionSkip": {
         "properties": {
           "reason": {
@@ -2740,6 +2755,142 @@
         ],
         "type": "object"
       },
+      "SfxFileOut": {
+        "properties": {
+          "modified_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "referenced": {
+            "description": "True iff some loaded soundboard has an item with this file path.",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "size_bytes",
+          "modified_at",
+          "referenced"
+        ],
+        "type": "object"
+      },
+      "SfxFolderOut": {
+        "properties": {
+          "file_count": {
+            "type": "integer"
+          },
+          "has_children": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "file_count",
+          "has_children"
+        ],
+        "type": "object"
+      },
+      "SfxFoldersResponse": {
+        "properties": {
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/SfxFolderOut"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "folders"
+        ],
+        "type": "object"
+      },
+      "SfxMoveRequest": {
+        "properties": {
+          "dst_folder": {
+            "description": "Destination folder; '' for root.",
+            "type": "string"
+          },
+          "new_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "src": {
+            "description": "Source path relative to SFX_LIBRARY_DIR.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "src",
+          "dst_folder"
+        ],
+        "type": "object"
+      },
+      "SfxTreeResponse": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SfxFileOut"
+            },
+            "type": "array"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "files"
+        ],
+        "type": "object"
+      },
+      "SfxUploadResult": {
+        "properties": {
+          "destination": {
+            "type": "string"
+          },
+          "saved": {
+            "items": {
+              "$ref": "#/components/schemas/SfxFileOut"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "saved",
+          "destination"
+        ],
+        "type": "object"
+      },
       "ShuffleMode": {
         "enum": [
           "off",
@@ -3381,6 +3532,47 @@
         },
         "required": [
           "to_position"
+        ],
+        "type": "object"
+      },
+      "app__api__sfx__FolderCreateRequest": {
+        "properties": {
+          "path": {
+            "description": "Folder path relative to SFX_LIBRARY_DIR.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "app__api__sfx__FolderDeleteResult": {
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "type": "object"
+      },
+      "app__api__sfx__FolderRenameRequest": {
+        "properties": {
+          "dst": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "src": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "src",
+          "dst"
         ],
         "type": "object"
       }
@@ -6650,6 +6842,440 @@
             "description": "A critical component is still starting or unavailable"
           }
         }
+      }
+    },
+    "/api/sfx/file": {
+      "get": {
+        "description": "1. Path must normalise without traversal segments.\n2. Path must resolve inside SFX_LIBRARY_DIR.\n3. Path must be referenced by at least one loaded mode's soundboards.",
+        "operationId": "get_sfx_file_api_sfx_file_get",
+        "parameters": [
+          {
+            "description": "Path relative to SFX_LIBRARY_DIR.",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream a single SFX asset.",
+        "tags": [
+          "sfx"
+        ]
+      }
+    },
+    "/api/sfx/files": {
+      "delete": {
+        "operationId": "delete_file_api_sfx_files_delete",
+        "parameters": [
+          {
+            "description": "Path relative to SFX_LIBRARY_DIR.",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "sfx"
+        ]
+      },
+      "get": {
+        "operationId": "list_all_files_api_sfx_files_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SfxFileOut"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Flat list of every SFX file, recursive. Used by the soundboard editor\nto populate the file picker without round-tripping per folder.",
+        "tags": [
+          "sfx"
+        ]
+      }
+    },
+    "/api/sfx/folders": {
+      "delete": {
+        "operationId": "delete_folder_api_sfx_folders_delete",
+        "parameters": [
+          {
+            "description": "Folder path relative to SFX_LIBRARY_DIR.",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recursive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/app__api__sfx__FolderDeleteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "sfx"
+        ]
+      },
+      "get": {
+        "operationId": "list_all_folders_api_sfx_folders_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SfxFoldersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Whole folder hierarchy in one response — same contract as the music\nlibrary's GET /api/library/folders, for the client-side tree.",
+        "tags": [
+          "sfx"
+        ]
+      },
+      "post": {
+        "operationId": "create_folder_api_sfx_folders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__sfx__FolderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SfxFolderOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "sfx"
+        ]
+      }
+    },
+    "/api/sfx/folders/rename": {
+      "post": {
+        "operationId": "rename_folder_api_sfx_folders_rename_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/app__api__sfx__FolderRenameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SfxFolderOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "sfx"
+        ]
+      }
+    },
+    "/api/sfx/move": {
+      "post": {
+        "operationId": "move_file_api_sfx_move_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SfxMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SfxFileOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "sfx"
+        ]
+      }
+    },
+    "/api/sfx/tree": {
+      "get": {
+        "operationId": "list_tree_api_sfx_tree_get",
+        "parameters": [
+          {
+            "description": "Folder path relative to SFX_LIBRARY_DIR.",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SfxTreeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The SFX files immediately in this folder. The folder hierarchy comes\nfrom `/folders` (one whole-tree response) — the client builds the tree\nfrom that, so this endpoint returns only the file list.",
+        "tags": [
+          "sfx"
+        ]
+      }
+    },
+    "/api/sfx/upload": {
+      "post": {
+        "operationId": "upload_api_sfx_upload_post",
+        "parameters": [
+          {
+            "description": "Destination folder under SFX_LIBRARY_DIR.",
+            "in": "query",
+            "name": "dest",
+            "required": false,
+            "schema": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "conflict",
+            "required": false,
+            "schema": {
+              "default": "rename",
+              "enum": [
+                "rename",
+                "overwrite",
+                "skip"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_api_sfx_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SfxUploadResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "sfx"
+        ]
+      }
+    },
+    "/api/sfx/upload/check": {
+      "post": {
+        "operationId": "upload_check_api_sfx_upload_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report which proposed (dest, name) targets already exist under the SFX\nroot, so the client can ask about duplicates before sending bytes.",
+        "tags": [
+          "sfx"
+        ]
       }
     },
     "/api/sync/state": {

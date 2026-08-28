@@ -36,7 +36,7 @@ pub struct CatalogGeneration {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct CatalogMode {
-    pub soundboard_ids: BTreeSet<String>,
+    pub soundboard_items: BTreeMap<String, BTreeSet<String>>,
     pub preset_ids: BTreeSet<String>,
 }
 
@@ -861,7 +861,7 @@ where
                             (
                                 mode_id,
                                 CatalogMode {
-                                    soundboard_ids: mode.soundboard_ids,
+                                    soundboard_items: mode.soundboard_items,
                                     preset_ids: mode.preset_ids,
                                 },
                             )
@@ -1584,10 +1584,18 @@ fn catalog_references_valid(
             .modes
             .as_ref()
             .is_some_and(|modes| modes.contains_key(mode_id)),
-        PlaybackCommand::SetActiveSoundboard(Some(soundboard_id))
-        | PlaybackCommand::FireSfx { soundboard_id, .. } => {
-            mode.is_some_and(|mode| mode.soundboard_ids.contains(soundboard_id))
+        PlaybackCommand::SetActiveSoundboard(Some(soundboard_id)) => {
+            mode.is_some_and(|mode| mode.soundboard_items.contains_key(soundboard_id))
         }
+        PlaybackCommand::FireSfx {
+            soundboard_id,
+            item_path,
+            ..
+        } => mode.is_some_and(|mode| {
+            mode.soundboard_items
+                .get(soundboard_id)
+                .is_some_and(|items| items.contains(item_path))
+        }),
         PlaybackCommand::SetActivePresets { preset_ids, .. } => {
             preset_ids.is_empty()
                 || mode.is_some_and(|mode| preset_ids.iter().all(|id| mode.preset_ids.contains(id)))
@@ -1608,9 +1616,11 @@ fn catalog_references_valid(
             follow_next_id: Some(track_id),
             ..
         } => tracks_valid(&[*track_id]),
-        PlaybackCommand::StartLoop(looping_sfx) => {
-            mode.is_some_and(|mode| mode.soundboard_ids.contains(&looping_sfx.soundboard_id))
-        }
+        PlaybackCommand::StartLoop(looping_sfx) => mode.is_some_and(|mode| {
+            mode.soundboard_items
+                .get(&looping_sfx.soundboard_id)
+                .is_some_and(|items| items.contains(&looping_sfx.item_path))
+        }),
         _ => true,
     }
 }
@@ -1674,7 +1684,7 @@ fn prune_for_catalog(
             .active_soundboard_id
             .as_ref()
             .is_some_and(|soundboard_id| {
-                active_mode.is_none_or(|mode| !mode.soundboard_ids.contains(soundboard_id))
+                active_mode.is_none_or(|mode| !mode.soundboard_items.contains_key(soundboard_id))
             })
         {
             state.active_soundboard_id = None;
@@ -1687,7 +1697,11 @@ fn prune_for_catalog(
         changed |= previous_presets != state.active_preset_ids.len();
         let previous_loops = state.looping_sfx.len();
         state.looping_sfx.retain(|looping_sfx| {
-            active_mode.is_some_and(|mode| mode.soundboard_ids.contains(&looping_sfx.soundboard_id))
+            active_mode.is_some_and(|mode| {
+                mode.soundboard_items
+                    .get(&looping_sfx.soundboard_id)
+                    .is_some_and(|items| items.contains(&looping_sfx.item_path))
+            })
         });
         changed |= previous_loops != state.looping_sfx.len();
     }
@@ -2142,7 +2156,10 @@ mod tests {
             modes: Some(BTreeMap::from([(
                 "tabletop".to_owned(),
                 CatalogMode {
-                    soundboard_ids: BTreeSet::from(["storm".to_owned()]),
+                    soundboard_items: BTreeMap::from([(
+                        "storm".to_owned(),
+                        BTreeSet::from(["thunder.mp3".to_owned()]),
+                    )]),
                     preset_ids: BTreeSet::new(),
                 },
             )])),
@@ -2186,6 +2203,21 @@ mod tests {
                 generation,
             ))
             .await?;
+        let unknown_item = spawned
+            .handle
+            .execute(ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::FireSfx {
+                    soundboard_id: "storm".to_owned(),
+                    item_path: "missing.mp3".to_owned(),
+                    volume: UnitInterval::new(0.75)?,
+                },
+                generation,
+            ))
+            .await;
+        assert!(matches!(
+            unknown_item,
+            Err(PlaybackActorError::InvalidCatalogReference)
+        ));
         let mut events = spawned.handle.subscribe_events();
         spawned
             .handle
@@ -2216,7 +2248,7 @@ mod tests {
             modes: 1,
         };
         let mode = || ModePlaybackReferences {
-            soundboard_ids: BTreeSet::new(),
+            soundboard_items: BTreeMap::new(),
             preset_ids: BTreeSet::from(["calm".to_owned()]),
         };
         let catalog = CatalogSnapshot {
@@ -2225,7 +2257,7 @@ mod tests {
             modes: Some(BTreeMap::from([(
                 "tabletop".to_owned(),
                 CatalogMode {
-                    soundboard_ids: BTreeSet::new(),
+                    soundboard_items: BTreeMap::new(),
                     preset_ids: BTreeSet::from(["calm".to_owned()]),
                 },
             )])),
@@ -2480,7 +2512,10 @@ mod tests {
             modes: Some(BTreeMap::from([(
                 "tabletop".to_owned(),
                 CatalogMode {
-                    soundboard_ids: BTreeSet::from(["storm".to_owned()]),
+                    soundboard_items: BTreeMap::from([(
+                        "storm".to_owned(),
+                        BTreeSet::from(["rain.mp3".to_owned()]),
+                    )]),
                     preset_ids: BTreeSet::new(),
                 },
             )])),

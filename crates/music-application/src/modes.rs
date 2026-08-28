@@ -194,6 +194,49 @@ pub struct ModeCatalog {
     pub modes: BTreeMap<String, ModeBundle>,
 }
 
+impl ModeBundle {
+    #[must_use]
+    pub fn soundboard_item(
+        &self,
+        soundboard_id: &str,
+        item_path: &str,
+    ) -> Option<&SoundboardItemDocument> {
+        self.soundboards
+            .get(soundboard_id)?
+            .categories
+            .iter()
+            .flat_map(|category| &category.items)
+            .find(|item| item.file == item_path)
+    }
+}
+
+impl ModeCatalog {
+    #[must_use]
+    pub fn soundboard_item(
+        &self,
+        mode_id: &str,
+        soundboard_id: &str,
+        item_path: &str,
+    ) -> Option<&SoundboardItemDocument> {
+        self.modes
+            .get(mode_id)?
+            .soundboard_item(soundboard_id, item_path)
+    }
+
+    #[must_use]
+    pub fn references_sfx_path(&self, item_path: &str) -> bool {
+        self.modes.values().any(|mode| {
+            mode.soundboards.values().any(|soundboard| {
+                soundboard
+                    .categories
+                    .iter()
+                    .flat_map(|category| &category.items)
+                    .any(|item| item.file == item_path)
+            })
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModeLoadAttempt {
     pub modes: BTreeMap<String, ModeBundle>,
@@ -235,7 +278,7 @@ pub struct ModePresetKey {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct ModePlaybackReferences {
-    pub soundboard_ids: BTreeSet<String>,
+    pub soundboard_items: BTreeMap<String, BTreeSet<String>>,
     pub preset_ids: BTreeSet<String>,
 }
 
@@ -1211,7 +1254,21 @@ fn playback_references(
             (
                 mode_id.clone(),
                 ModePlaybackReferences {
-                    soundboard_ids: mode.soundboards.keys().cloned().collect(),
+                    soundboard_items: mode
+                        .soundboards
+                        .iter()
+                        .map(|(soundboard_id, soundboard)| {
+                            (
+                                soundboard_id.clone(),
+                                soundboard
+                                    .categories
+                                    .iter()
+                                    .flat_map(|category| &category.items)
+                                    .map(|item| item.file.clone())
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
                     preset_ids: mode.presets.keys().cloned().collect(),
                 },
             )

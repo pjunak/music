@@ -25,6 +25,7 @@ pub enum RuntimeError {
     Storage(music_storage::StorageError),
     Playback(music_application::playback::PlaybackActorError),
     Library(music_application::library::LibraryCoordinatorError),
+    Sfx(music_application::sfx::SfxCoordinatorError),
     Modes(music_application::modes::ModeCoordinatorError),
     ModeSource(music_application::modes::ModeSourceError),
     MediaRoot(music_media::RootedPathError),
@@ -61,6 +62,7 @@ impl Display for RuntimeError {
             Self::Storage(error) => Display::fmt(error, formatter),
             Self::Playback(error) => Display::fmt(error, formatter),
             Self::Library(error) => Display::fmt(error, formatter),
+            Self::Sfx(error) => Display::fmt(error, formatter),
             Self::Modes(error) => Display::fmt(error, formatter),
             Self::ModeSource(error) => Display::fmt(error, formatter),
             Self::MediaRoot(error) => Display::fmt(error, formatter),
@@ -97,6 +99,7 @@ impl Error for RuntimeError {
             Self::Storage(source) => Some(source),
             Self::Playback(source) => Some(source),
             Self::Library(source) => Some(source),
+            Self::Sfx(source) => Some(source),
             Self::Modes(source) => Some(source),
             Self::ModeSource(source) => Some(source),
             Self::MediaRoot(source) => Some(source),
@@ -138,6 +141,12 @@ impl From<music_application::playback::PlaybackActorError> for RuntimeError {
 impl From<music_application::library::LibraryCoordinatorError> for RuntimeError {
     fn from(error: music_application::library::LibraryCoordinatorError) -> Self {
         Self::Library(error)
+    }
+}
+
+impl From<music_application::sfx::SfxCoordinatorError> for RuntimeError {
+    fn from(error: music_application::sfx::SfxCoordinatorError) -> Self {
+        Self::Sfx(error)
     }
 }
 

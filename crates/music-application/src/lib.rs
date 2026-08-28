@@ -17,3 +17,4 @@ pub mod modes;
 pub mod playback;
 pub mod playlists;
 pub mod recovery;
+pub mod sfx;

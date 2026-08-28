@@ -25,9 +25,11 @@ use music_application::playback::{
 };
 use music_application::playlists::{PlaylistRepository, PlaylistService};
 use music_application::recovery::RecoveryJournalRepository;
+use music_application::sfx::SfxCoordinator;
 use music_media::{
     FfmpegTools, FilesystemLibraryDiscovery, FilesystemLibraryMutations,
-    FilesystemModeCatalogSource, FilesystemModeMutations, LibraryRoot, MetadataAdapter,
+    FilesystemModeCatalogSource, FilesystemModeMutations, FilesystemSfxEffects, LibraryRoot,
+    MetadataAdapter, SfxRoot,
 };
 use music_storage::{
     LegacyDeviceImportOutcome, LegacyDeviceImportStatus, SqliteStorage, SqliteStorageOptions,
@@ -46,6 +48,7 @@ use crate::error::RuntimeError;
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::http::{RuntimeServices, build_router};
 use crate::library::RuntimeLibrary;
+use crate::sfx::RuntimeSfx;
 use crate::supervisor::{CriticalTaskError, TaskSupervisor};
 
 const DATABASE_HEALTH_INTERVAL: Duration = Duration::from_secs(30);
@@ -70,6 +73,7 @@ pub struct AppRuntime {
     cleanup_service: Arc<CleanupService>,
     cleanup_verification_service: Arc<CleanupVerificationService>,
     playlist_service: Arc<PlaylistService>,
+    sfx: Arc<RuntimeSfx>,
     library_root: LibraryRoot,
     library_metadata: MetadataAdapter,
 }
@@ -93,6 +97,7 @@ impl AppRuntime {
         health.set_component("library", false, ComponentStatus::Starting);
         health.set_component("mode_coordinator", true, ComponentStatus::Starting);
         health.set_component("modes", false, ComponentStatus::Starting);
+        health.set_component("sfx", true, ComponentStatus::Starting);
         health.set_component("runtime", true, ComponentStatus::Starting);
 
         initialize_directories(&config, &health)?;
@@ -177,6 +182,17 @@ impl AppRuntime {
         let initial_mode_status = modes.wait_until_initialized().await?;
         health.set_component("mode_coordinator", true, ComponentStatus::Ready);
         apply_mode_health(&health, initial_mode_status.state);
+        let sfx_root = SfxRoot::open(&config.sfx_library_dir)?;
+        let sfx_journal: Arc<dyn RecoveryJournalRepository> = storage.clone();
+        let sfx_effects = Arc::new(FilesystemSfxEffects::new(sfx_root.clone()));
+        let sfx_coordinator = Arc::new(SfxCoordinator::start(sfx_journal, sfx_effects).await?);
+        let sfx = Arc::new(RuntimeSfx {
+            coordinator: sfx_coordinator,
+            root: sfx_root,
+            max_upload_files: config.max_upload_files,
+            max_upload_file_bytes: config.max_upload_file_bytes,
+        });
+        health.set_component("sfx", true, ComponentStatus::Ready);
         let library_root = LibraryRoot::open(&config.music_dir)?;
         let library_metadata = MetadataAdapter::with_ffmpeg(FfmpegTools::new("ffmpeg", "ffprobe"));
         let discovery = Arc::new(FilesystemLibraryDiscovery::new(
@@ -239,6 +255,7 @@ impl AppRuntime {
             cleanup_service,
             cleanup_verification_service,
             playlist_service,
+            sfx,
             library_root,
             library_metadata,
         })
@@ -280,6 +297,7 @@ impl AppRuntime {
                 }),
                 modes: self.modes.clone(),
                 playlists: Arc::clone(&self.playlist_service),
+                sfx: Arc::clone(&self.sfx),
             },
         )
     }

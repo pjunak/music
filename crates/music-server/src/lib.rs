@@ -25,6 +25,7 @@ mod modes;
 mod playback_projection;
 mod playlists;
 mod runtime;
+mod sfx;
 mod supervisor;
 mod websocket;
 

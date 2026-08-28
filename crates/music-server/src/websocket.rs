@@ -14,8 +14,8 @@ use music_application::playback::{
 };
 use music_application::playlists::{PlaylistService, PlaylistServiceError};
 use music_domain::{
-    CrossfadeType as DomainCrossfadeType, DomainEvent, LoopMode as DomainLoopMode, PlaybackCommand,
-    ShuffleMode as DomainShuffleMode, UnitInterval as DomainUnitInterval,
+    CrossfadeType as DomainCrossfadeType, DomainEvent, LoopMode as DomainLoopMode, LoopingSfx,
+    PlaybackCommand, ShuffleMode as DomainShuffleMode, UnitInterval as DomainUnitInterval,
 };
 use music_protocol::{ClientAction, ErrorCode, ServerMessage};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -50,7 +50,7 @@ struct SessionProjection {
 #[derive(Debug)]
 enum WriterCommand {
     Error {
-        detail: &'static str,
+        detail: String,
         code: Option<ErrorCode>,
     },
     Pong(axum::body::Bytes),
@@ -262,7 +262,7 @@ async fn reader_loop(mut stream: SplitStream<WebSocket>, mut context: ReaderCont
                     queue_writer(
                         &context.writer,
                         WriterCommand::Error {
-                            detail: "invalid action",
+                            detail: "invalid action".to_owned(),
                             code: None,
                         },
                         &context.cancellation,
@@ -277,7 +277,7 @@ async fn reader_loop(mut stream: SplitStream<WebSocket>, mut context: ReaderCont
                     queue_writer(
                         &context.writer,
                         WriterCommand::Error {
-                            detail: "invalid action",
+                            detail: "invalid action".to_owned(),
                             code: None,
                         },
                         &context.cancellation,
@@ -483,6 +483,92 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                 queue_error(writer, detail, None, cancellation).await;
             }
         }
+        ClientAction::FireSfx {
+            soundboard_id,
+            item_path,
+            volume,
+        } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let soundboard_id = soundboard_id.into_inner();
+            let item_path = item_path.into_inner();
+            let volume = match domain_volume(volume.get()) {
+                Ok(volume) => volume,
+                Err(detail) => {
+                    queue_error(writer, detail, None, cancellation).await;
+                    return;
+                }
+            };
+            let result =
+                execute_sfx_command(playback, dependencies, &soundboard_id, &item_path, || {
+                    PlaybackCommand::FireSfx {
+                        soundboard_id: soundboard_id.clone(),
+                        item_path: item_path.clone(),
+                        volume,
+                    }
+                })
+                .await;
+            if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
+        ClientAction::StartLoop {
+            id,
+            name,
+            soundboard_id,
+            item_path,
+            interval_s,
+            volume,
+        } => {
+            let Some(dependencies) = catalog_dependencies(library, modes) else {
+                queue_error(
+                    writer,
+                    "the required library or mode catalog is not ready",
+                    None,
+                    cancellation,
+                )
+                .await;
+                return;
+            };
+            let soundboard_id = soundboard_id.into_inner();
+            let item_path = item_path.into_inner();
+            let looping_sfx = match LoopingSfx::new(
+                id.into_inner(),
+                name.into_inner(),
+                soundboard_id.clone(),
+                item_path.clone(),
+                interval_s.get(),
+                match domain_volume(volume.get()) {
+                    Ok(volume) => volume,
+                    Err(detail) => {
+                        queue_error(writer, detail, None, cancellation).await;
+                        return;
+                    }
+                },
+            ) {
+                Ok(looping_sfx) => looping_sfx,
+                Err(_) => {
+                    queue_error(writer, "loop parameters are invalid", None, cancellation).await;
+                    return;
+                }
+            };
+            let result =
+                execute_sfx_command(playback, dependencies, &soundboard_id, &item_path, || {
+                    PlaybackCommand::StartLoop(looping_sfx.clone())
+                })
+                .await;
+            if let Err(detail) = result {
+                queue_error(writer, detail, None, cancellation).await;
+            }
+        }
         action => match direct_command(action) {
             Ok(Some(command)) => {
                 if let Err(error) = playback
@@ -511,6 +597,22 @@ struct PlaylistDependencies<'a> {
     library: &'a RuntimeLibrary,
     modes: &'a music_application::modes::ModeCoordinatorHandle,
     playlists: &'a PlaylistService,
+}
+
+#[derive(Clone, Copy)]
+struct CatalogDependencies<'a> {
+    library: &'a RuntimeLibrary,
+    modes: &'a music_application::modes::ModeCoordinatorHandle,
+}
+
+fn catalog_dependencies<'a>(
+    library: &'a Option<Arc<RuntimeLibrary>>,
+    modes: &'a Option<music_application::modes::ModeCoordinatorHandle>,
+) -> Option<CatalogDependencies<'a>> {
+    Some(CatalogDependencies {
+        library: library.as_deref()?,
+        modes: modes.as_ref()?,
+    })
 }
 
 fn playlist_dependencies<'a>(
@@ -567,6 +669,64 @@ async fn execute_playlist_command(
     Err("catalog changed; retry the request")
 }
 
+async fn execute_sfx_command(
+    playback: &PlaybackActorHandle,
+    dependencies: CatalogDependencies<'_>,
+    soundboard_id: &str,
+    item_path: &str,
+    command: impl Fn() -> PlaybackCommand,
+) -> Result<(), String> {
+    for _ in 0..2 {
+        let active_mode_id = playback
+            .snapshot()
+            .await
+            .map_err(|_| "playback action failed".to_owned())?
+            .state
+            .active_mode_id
+            .clone()
+            .ok_or_else(|| "no active mode".to_owned())?;
+        let catalog = dependencies
+            .modes
+            .snapshot()
+            .ok_or_else(|| "the required library or mode catalog is not ready".to_owned())?;
+        let mode = catalog.modes.get(&active_mode_id).ok_or_else(|| {
+            format!("unknown soundboard '{soundboard_id}' in mode '{active_mode_id}'")
+        })?;
+        let soundboard = mode.soundboards.get(soundboard_id).ok_or_else(|| {
+            format!("unknown soundboard '{soundboard_id}' in mode '{active_mode_id}'")
+        })?;
+        let item_exists = soundboard
+            .categories
+            .iter()
+            .flat_map(|category| &category.items)
+            .any(|item| item.file == item_path);
+        if !item_exists {
+            return Err(format!(
+                "item '{item_path}' not in soundboard '{soundboard_id}'"
+            ));
+        }
+        let generation = CatalogGeneration {
+            library: dependencies.library.coordinator.status().generation.get(),
+            modes: catalog.generation,
+        };
+        match playback
+            .execute(ResolvedPlaybackCommand::at_generation(
+                command(),
+                generation,
+            ))
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(PlaybackActorError::StaleCatalog { .. }) => tokio::task::yield_now().await,
+            Err(PlaybackActorError::InvalidCatalogReference) => {
+                return Err("soundboard item changed; retry the request".to_owned());
+            }
+            Err(_) => return Err("playback action failed".to_owned()),
+        }
+    }
+    Err("catalog changed; retry the request".to_owned())
+}
+
 fn map_playlist_resolution_error(error: PlaylistServiceError) -> &'static str {
     match error {
         PlaylistServiceError::NotFound => "playlist not found",
@@ -592,7 +752,7 @@ async fn refresh_session_projection(context: &mut ReaderContext) {
         queue_writer(
             writer,
             WriterCommand::Error {
-                detail,
+                detail: detail.to_owned(),
                 code: Some(code),
             },
             cancellation,
@@ -791,7 +951,7 @@ async fn writer_loop(
                     WriterCommand::Error { detail, code } => {
                         send_server_message(
                             &mut sink,
-                            &ServerMessage::Error { detail: detail.to_owned(), code },
+                            &ServerMessage::Error { detail, code },
                             true,
                         ).await?;
                     }
@@ -916,11 +1076,19 @@ async fn queue_writer(
 
 async fn queue_error(
     writer: &mpsc::Sender<WriterCommand>,
-    detail: &'static str,
+    detail: impl Into<String>,
     code: Option<ErrorCode>,
     cancellation: &CancellationToken,
 ) {
-    queue_writer(writer, WriterCommand::Error { detail, code }, cancellation).await;
+    queue_writer(
+        writer,
+        WriterCommand::Error {
+            detail: detail.into(),
+            code,
+        },
+        cancellation,
+    )
+    .await;
 }
 
 async fn finish_writer(writer: &mut JoinHandle<Result<(), ()>>) {
@@ -1233,6 +1401,157 @@ mod tests {
             }
         }
         assert!(saw_guest_rejection);
+
+        socket.close(None).await?;
+        let _ = shutdown_tx.send(());
+        server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn soundboard_actions_validate_exact_items_and_catalog_updates_prune_loops()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        fs::create_dir_all(directory.path().join("modes/table/soundboards"))?;
+        fs::write(
+            directory.path().join("modes/table/manifest.yaml"),
+            "id: table\nname: Table\npanels: [soundboard]\nplaylist_categories: []\ndefault_crossfade_ms: 0\ndefault_soundboard: main\n",
+        )?;
+        fs::write(
+            directory.path().join("modes/table/soundboards/main.yaml"),
+            "id: main\nname: Main\ncategories:\n  - id: doors\n    name: Doors\n    items:\n      - file: dnd/door.ogg\n        name: Door\n",
+        )?;
+        let token = "soundboard-test-session-token";
+        seed_session(directory.path(), token).await?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let control_router = runtime.router()?;
+        let cookie = format!("music_session={token}");
+        let active = control_router
+            .clone()
+            .oneshot(
+                Request::put("/api/modes/active")
+                    .header(COOKIE, &cookie)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"mode_id":"table"}"#))?,
+            )
+            .await?;
+        assert_eq!(active.status(), StatusCode::OK);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(runtime.run(listener, async move {
+            let _ = shutdown_rx.await;
+            Ok(())
+        }));
+        let mut request = format!("ws://{address}/api/ws").into_client_request()?;
+        request
+            .headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie)?);
+        let (mut socket, _) = connect_async(request).await?;
+        assert!(matches!(
+            next_protocol_message(&mut socket).await?,
+            ServerMessage::StateSnapshot { state, .. }
+                if state.active_mode_id.as_deref() == Some("table")
+        ));
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"fire_sfx",
+                    "soundboard_id":"main",
+                    "item_path":"dnd/missing.ogg",
+                    "volume":0.5
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let mut saw_item_rejection = false;
+        for _ in 0..4 {
+            if matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::Error { detail, .. }
+                    if detail == "item 'dnd/missing.ogg' not in soundboard 'main'"
+            ) {
+                saw_item_rejection = true;
+                break;
+            }
+        }
+        assert!(saw_item_rejection);
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"fire_sfx",
+                    "soundboard_id":"main",
+                    "item_path":"dnd/door.ogg",
+                    "volume":0.5
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let mut saw_sfx = false;
+        for _ in 0..4 {
+            if matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::SfxFired { soundboard_id, item_path, .. }
+                    if soundboard_id == "main" && item_path == "dnd/door.ogg"
+            ) {
+                saw_sfx = true;
+                break;
+            }
+        }
+        assert!(saw_sfx);
+
+        socket
+            .send(TungsteniteMessage::Text(
+                serde_json::json!({
+                    "type":"start_loop",
+                    "id":"rain-loop",
+                    "name":"Rain",
+                    "soundboard_id":"main",
+                    "item_path":"dnd/door.ogg",
+                    "interval_s":30.0,
+                    "volume":0.4
+                })
+                .to_string()
+                .into(),
+            ))
+            .await?;
+        let mut saw_loop = false;
+        for _ in 0..4 {
+            if matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::StateChanged { state }
+                    if state.looping_sfx.iter().any(|looping| looping.id == "rain-loop")
+            ) {
+                saw_loop = true;
+                break;
+            }
+        }
+        assert!(saw_loop);
+
+        let deleted = control_router
+            .oneshot(
+                Request::delete("/api/modes/table/soundboards/main/categories/doors/items/0")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(deleted.status(), StatusCode::OK);
+        let mut saw_pruned_loop = false;
+        for _ in 0..5 {
+            if matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::StateChanged { state } if state.looping_sfx.is_empty()
+            ) {
+                saw_pruned_loop = true;
+                break;
+            }
+        }
+        assert!(saw_pruned_loop);
 
         socket.close(None).await?;
         let _ = shutdown_tx.send(());

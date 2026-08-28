@@ -423,6 +423,15 @@ generation and count in constant time instead of rescanning every track; a versi
 backfills that invariant for existing Python and early Rust databases. The shared journal
 infrastructure does not pretend SQLite and a media volume are one atomic filesystem.
 
+`SfxCoordinator` is the corresponding single writer for the separate SFX root. It serializes
+inventory reads with folder, file, and upload mutations; records each effect in the shared recovery
+journal before touching the filesystem; and replays unfinished effects before HTTP traffic starts.
+The SFX catalog is intentionally filesystem-owned rather than duplicated in SQLite. Mode catalog
+publications carry a compact soundboard-to-exact-item-path map, which the playback actor uses both
+to reject stale fires/loop starts and to prune loops after a soundboard item edit. Playback file
+delivery checks the full immutable mode catalog before resolving the typed `SfxPath`; management
+remains authenticated and may operate on unreferenced files.
+
 Full scans discover and read metadata outside the mutation coordinator. Their result carries the
 library generation; final diff application is short and is rejected/reconciled when a committed
 mutation changed that generation. External filesystem edits remain eventually reconciled and media

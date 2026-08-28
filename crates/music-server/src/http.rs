@@ -36,6 +36,7 @@ use crate::error::{ApiError, HttpValidationErrorBody, RuntimeError};
 use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::library::RuntimeLibrary;
 use crate::playback_projection::{canonical_state, guest_state};
+use crate::sfx::RuntimeSfx;
 
 const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 const X_CONTENT_TYPE_OPTIONS: HeaderName = HeaderName::from_static("x-content-type-options");
@@ -53,6 +54,7 @@ pub(crate) struct HttpState {
     pub(crate) library: Option<Arc<RuntimeLibrary>>,
     pub(crate) modes: Option<ModeCoordinatorHandle>,
     pub(crate) playlists: Option<Arc<PlaylistService>>,
+    pub(crate) sfx: Option<Arc<RuntimeSfx>>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +67,7 @@ pub(crate) struct RuntimeServices {
     pub(crate) library: Arc<RuntimeLibrary>,
     pub(crate) modes: ModeCoordinatorHandle,
     pub(crate) playlists: Arc<PlaylistService>,
+    pub(crate) sfx: Arc<RuntimeSfx>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -106,6 +109,7 @@ pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Rou
             library: Some(services.library),
             modes: Some(services.modes),
             playlists: Some(services.playlists),
+            sfx: Some(services.sfx),
         },
     )
 }
@@ -126,6 +130,7 @@ fn build_router_without_playback(
             library: None,
             modes: None,
             playlists: None,
+            sfx: None,
         },
     )
 }
@@ -170,6 +175,7 @@ fn documented_api_router() -> OpenApiRouter<HttpState> {
         .merge(crate::library::library_router())
         .merge(crate::modes::mode_router())
         .merge(crate::playlists::playlist_router())
+        .merge(crate::sfx::sfx_router())
         .merge(crate::cleanup::cleanup_router())
         .routes(routes!(liveness))
         .routes(routes!(readiness))

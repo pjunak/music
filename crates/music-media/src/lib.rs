@@ -16,6 +16,7 @@ mod mode_mutation;
 mod modes;
 mod mutation;
 mod path;
+mod sfx;
 mod yaml;
 
 pub use delivery::{
@@ -35,6 +36,7 @@ pub use modes::FilesystemModeCatalogSource;
 pub use mutation::{FilesystemLibraryMutations, library_upload_target_exists};
 
 pub use path::{LibraryRoot, MediaRoot, RootedPathError, SfxRoot};
+pub use sfx::{FilesystemSfxEffects, is_supported_sfx_path, sfx_upload_target_exists};
 
 pub use music_application::modes::{CueDocument, ModeDocument, PresetDocument, SoundboardDocument};
 pub use yaml::{
