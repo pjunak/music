@@ -20,6 +20,8 @@ const LIBRARY_CATALOG_COUNT_MIGRATION_SQL: &str =
 const DURABLE_JOBS_MIGRATION_SQL: &str = include_str!("../migrations/0004_durable_jobs.sql");
 const LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL: &str =
     include_str!("../migrations/0005_remove_legacy_alembic_ledger.sql");
+const LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL: &str =
+    include_str!("../migrations/0006_remove_legacy_known_devices.sql");
 
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
@@ -29,6 +31,7 @@ const LIBRARY_STATE_MIGRATION_VERSION: i64 = 2;
 const LIBRARY_CATALOG_COUNT_MIGRATION_VERSION: i64 = 3;
 const DURABLE_JOBS_MIGRATION_VERSION: i64 = 4;
 const LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION: i64 = 5;
+const LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION: i64 = 6;
 
 const ADDITIVE_MIGRATIONS: &[(&str, &str, &str)] = &[
     (
@@ -224,6 +227,13 @@ fn migrator() -> Migrator {
             "remove legacy alembic ledger".into(),
             MigrationType::Simple,
             LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION,
+            "remove legacy known devices table".into(),
+            MigrationType::Simple,
+            LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL.into_sql_str(),
             false,
         ),
     ])
@@ -468,7 +478,8 @@ mod tests {
     use super::{
         BASELINE_MIGRATION_SQL, BASELINE_MIGRATION_VERSION, DURABLE_JOBS_MIGRATION_SQL,
         DURABLE_JOBS_MIGRATION_VERSION, LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL,
-        LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION, LIBRARY_CATALOG_COUNT_MIGRATION_SQL,
+        LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION, LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL,
+        LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION, LIBRARY_CATALOG_COUNT_MIGRATION_SQL,
         LIBRARY_CATALOG_COUNT_MIGRATION_VERSION, LIBRARY_STATE_MIGRATION_SQL,
         LIBRARY_STATE_MIGRATION_VERSION, migrator,
     };
@@ -490,5 +501,8 @@ mod tests {
         assert_eq!(LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION, 5);
         assert!(!LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL.contains('\r'));
         assert!(migrator().version_exists(LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION));
+        assert_eq!(LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION, 6);
+        assert!(!LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL.contains('\r'));
+        assert!(migrator().version_exists(LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION));
     }
 }

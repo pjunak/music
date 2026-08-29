@@ -9,16 +9,19 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 5;
+pub const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
 const DURABLE_JOBS_SCHEMA_SQL: &str = include_str!("../migrations/0004_durable_jobs.sql");
 const LEGACY_ALEMBIC_CLEANUP_SCHEMA_SQL: &str =
     include_str!("../migrations/0005_remove_legacy_alembic_ledger.sql");
+const LEGACY_KNOWN_DEVICES_CLEANUP_SCHEMA_SQL: &str =
+    include_str!("../migrations/0006_remove_legacy_known_devices.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
+const LEGACY_KNOWN_DEVICES_TABLE: &str = "known_devices";
 
 #[cfg(test)]
 pub(crate) const LEGACY_ALEMBIC_FIXTURE_SQL: &str = "\
@@ -27,6 +30,21 @@ pub(crate) const LEGACY_ALEMBIC_FIXTURE_SQL: &str = "\
         CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)\
     );\
     INSERT INTO alembic_version (version_num) VALUES ('legacy-python-head');";
+
+#[cfg(test)]
+pub(crate) const LEGACY_KNOWN_DEVICES_FIXTURE_SQL: &str = "\
+    CREATE TABLE known_devices (\
+        client_id VARCHAR(64) NOT NULL,\
+        name VARCHAR(128) NOT NULL,\
+        is_output BOOLEAN NOT NULL,\
+        created_at DATETIME NOT NULL,\
+        last_seen DATETIME NOT NULL,\
+        PRIMARY KEY (client_id)\
+    );\
+    INSERT INTO known_devices \
+        (client_id, name, is_output, created_at, last_seen) \
+    VALUES \
+        ('legacy-tv', 'Legacy TV', 1, '2026-01-01 12:00:00', '2026-01-02 12:00:00');";
 
 const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("tracks", "display_title"),
@@ -249,6 +267,25 @@ pub(crate) async fn inspect_pool(
             }
             continue;
         }
+        if table == LEGACY_KNOWN_DEVICES_TABLE {
+            requires_migration = true;
+            if is_legacy_known_devices_table(actual_table) {
+                issue(
+                    &mut issues,
+                    SchemaIssueLevel::Warning,
+                    "legacy_known_devices_table",
+                    "migration will remove the obsolete Python known-devices table",
+                );
+            } else {
+                issue(
+                    &mut issues,
+                    SchemaIssueLevel::Error,
+                    "invalid_legacy_known_devices_table",
+                    "legacy known-devices table has an incompatible shape",
+                );
+            }
+            continue;
+        }
         if !expected.tables.contains_key(table) {
             issue(
                 &mut issues,
@@ -390,7 +427,7 @@ pub(crate) async fn inspect_pool(
         .filter(|table| {
             !matches!(
                 table.as_str(),
-                SQLX_MIGRATION_TABLE | LEGACY_ALEMBIC_MIGRATION_TABLE
+                SQLX_MIGRATION_TABLE | LEGACY_ALEMBIC_MIGRATION_TABLE | LEGACY_KNOWN_DEVICES_TABLE
             )
         })
         .count();
@@ -464,6 +501,9 @@ async fn expected_shape() -> Result<DatabaseShape, StorageError> {
         .execute(&pool)
         .await?;
     sqlx::raw_sql(LEGACY_ALEMBIC_CLEANUP_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(LEGACY_KNOWN_DEVICES_CLEANUP_SCHEMA_SQL)
         .execute(&pool)
         .await?;
     let shape = read_shape(&pool).await;
@@ -676,6 +716,40 @@ fn is_legacy_alembic_ledger(table: &TableShape) -> bool {
         && table.unique_constraints.is_empty()
 }
 
+fn is_legacy_known_devices_table(table: &TableShape) -> bool {
+    const CREATE_SQL: &str = "\
+        CREATE TABLE known_devices (\
+            client_id VARCHAR(64) NOT NULL,\
+            name VARCHAR(128) NOT NULL,\
+            is_output BOOLEAN NOT NULL,\
+            created_at DATETIME NOT NULL,\
+            last_seen DATETIME NOT NULL,\
+            PRIMARY KEY (client_id)\
+        )";
+    table.columns.len() == 5
+        && table.columns.get("client_id").is_some_and(|column| {
+            column.data_type == "VARCHAR(64)" && column.not_null && column.primary_key_position == 1
+        })
+        && table.columns.get("name").is_some_and(|column| {
+            column.data_type == "VARCHAR(128)"
+                && column.not_null
+                && column.primary_key_position == 0
+        })
+        && table.columns.get("is_output").is_some_and(|column| {
+            column.data_type == "BOOLEAN" && column.not_null && column.primary_key_position == 0
+        })
+        && ["created_at", "last_seen"].iter().all(|name| {
+            table.columns.get(*name).is_some_and(|column| {
+                column.data_type == "DATETIME"
+                    && column.not_null
+                    && column.primary_key_position == 0
+            })
+        })
+        && table.foreign_keys.is_empty()
+        && table.unique_constraints.is_empty()
+        && table.normalized_create_sql == normalize_sql(CREATE_SQL)
+}
+
 fn issue(
     issues: &mut Vec<SchemaIssue>,
     level: SchemaIssueLevel,
@@ -696,7 +770,10 @@ mod tests {
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use tempfile::tempdir;
 
-    use super::{LEGACY_ALEMBIC_FIXTURE_SQL, SchemaCompatibility, inspect_database, inspect_pool};
+    use super::{
+        LEGACY_ALEMBIC_FIXTURE_SQL, LEGACY_KNOWN_DEVICES_FIXTURE_SQL, SchemaCompatibility,
+        inspect_database, inspect_pool,
+    };
 
     const PYTHON_SQLITE_FIXTURE: &str =
         include_str!("../../../contracts/reference/v1/sqlite-fixture.sql");
@@ -728,6 +805,9 @@ mod tests {
         sqlx::raw_sql(LEGACY_ALEMBIC_FIXTURE_SQL)
             .execute(&pool)
             .await?;
+        sqlx::raw_sql(LEGACY_KNOWN_DEVICES_FIXTURE_SQL)
+            .execute(&pool)
+            .await?;
 
         let report = inspect_pool(&pool, true).await?;
 
@@ -737,6 +817,10 @@ mod tests {
         assert!(report.issues.iter().any(|issue| {
             issue.code == "legacy_migration_ledger"
                 && issue.detail.contains("remove the legacy Python Alembic")
+        }));
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "legacy_known_devices_table"
+                && issue.detail.contains("obsolete Python known-devices")
         }));
         assert!(report.issues.iter().any(|issue| {
             issue.code == "missing_additive_column"
@@ -763,6 +847,28 @@ mod tests {
             report
                 .errors()
                 .any(|issue| issue.code == "invalid_legacy_migration_ledger")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_malformed_legacy_known_devices_table() -> Result<(), Box<dyn Error>> {
+        let options = SqliteConnectOptions::new().in_memory(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        sqlx::query("CREATE TABLE known_devices (client_id TEXT PRIMARY KEY)")
+            .execute(&pool)
+            .await?;
+
+        let report = inspect_pool(&pool, true).await?;
+
+        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
+        assert!(
+            report
+                .errors()
+                .any(|issue| issue.code == "invalid_legacy_known_devices_table")
         );
         Ok(())
     }

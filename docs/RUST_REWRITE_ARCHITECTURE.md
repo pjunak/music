@@ -343,23 +343,25 @@ the manifest records only its one-way fingerprint for pairing checks.
 
 ### Migration bootstrap
 
-The existing database may contain Alembic's standard bookkeeping table, but the Python runtime did
-not provide the general application migration path required for this cutover. Rust bootstrap
-therefore:
+The existing database may contain Alembic's standard bookkeeping table and the obsolete SQL-backed
+`known_devices` table that Python later replaced with `devices.json`. The Python runtime did not
+provide the general application migration path required for this cutover. Rust bootstrap therefore:
 
 1. opens the database read-write only after an automatic backup succeeds;
 2. inspects tables, columns, indexes, foreign keys, and SQLite version;
-3. accepts the legacy Alembic ledger only in its exact expected shape and refuses every other
-   unknown or incompatible shape with a precise `music-cli db doctor` report;
+3. accepts both legacy tables only in their exact historical shapes and refuses every other unknown
+   or incompatible shape with a precise `music-cli db doctor` report;
 4. creates the SQLx migration ledger and any missing structures, including remembered-device and
    recovery-journal tables, with idempotent statements;
 5. imports legacy `devices.json` only when the target table is empty and records its fingerprint;
    and
 6. records the compatibility baseline only after validation succeeds.
 
-Application tables and columns used by Python are not dropped or renamed. The final-cutover cleanup
-removes only the validated Alembic bookkeeping table after a verified backup; rollback restores the
-complete pre-cutover database. A pre-cutover database copy remains mandatory.
+Application tables and columns used by the final Python runtime are not dropped or renamed. The
+final-cutover cleanup removes only the validated Alembic bookkeeping table and the obsolete
+`known_devices` table after a verified backup; rollback restores the complete pre-cutover database.
+The current `devices.json` stays untouched for Rust's one-time import. A pre-cutover database copy
+remains mandatory.
 
 Baseline v1 implements that bootstrap without first touching the source database: the doctor opens
 the existing file read-only, runs SQLite quick/foreign-key checks, and compares tables, columns,
@@ -369,8 +371,9 @@ unknown tables/columns or damaged constraints fail closed. For a compatible exis
 `VACUUM INTO` creates a consistent sibling snapshot that is reopened read-only, verified, fsynced,
 SHA-256 hashed, and paired with a non-secret JSON manifest before the first read-write pool opens.
 The ordered migrations add the internal playback storage revision, create `remembered_devices`,
-`legacy_device_imports`, and `recovery_journal`, and remove the validated Alembic ledger at schema
-version 5. Missing databases are created directly because there is no prior state to back up.
+`legacy_device_imports`, and `recovery_journal`, remove the validated Alembic ledger at schema
+version 5, and remove the validated obsolete known-device table at version 6. Missing databases are
+created directly because there is no prior state to back up.
 `music-cli db doctor` is read-only; `music-cli db migrate` takes the same lifetime lock as the
 server and follows this identical path.
 

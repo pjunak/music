@@ -354,8 +354,10 @@ SQLite `VACUUM INTO`, reopened read-only for integrity/shape verification, hashe
 paired with a non-secret manifest before normalization or SQLx migration begins. Migration v1 adds
 `playback_state.storage_revision`, the SQLite-owned remembered-device/import tables, and the shared
 recovery journal. Migration v5 accepts only the exact standard Python Alembic bookkeeping shape and
-removes that obsolete ledger after the backup. Representative Python rows remain intact and later
-boots make no backup or schema change.
+removes that obsolete ledger after the backup. Migration v6 likewise validates and removes the
+orphaned SQL-backed `known_devices` table, which Python had already replaced with the separately
+preserved `devices.json`. Representative Python rows remain intact and later boots make no backup or
+schema change.
 
 The Phase-3 playback owner now starts under runtime supervision, so the `playback` readiness
 component becomes `ready` only after the persisted aggregate is loaded, restart-normalized, and
