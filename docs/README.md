@@ -13,10 +13,11 @@ not a second description of the implementation.
 - Versioned Authoring import document: [authoring import v1](../clients/authoring-import-v1.md)
 - Active work deliberately left for later: [backlog](../TODO.md)
 - Assistant/Authoring interaction rules: [Assistant UX philosophy](assistant-ux-philosophy.md)
-- Rust rewrite target architecture: [Rust rewrite architecture](RUST_REWRITE_ARCHITECTURE.md)
-- Python-era architecture reassessment:
+- Current production architecture: [Rust architecture](RUST_REWRITE_ARCHITECTURE.md)
+- Completed rewrite phases, gates, and cutover evidence:
+  [Rust rewrite execution record](RUST_REWRITE_PLAN.md)
+- Historical Python-era boundary review:
   [Rust architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md)
-- Rust rewrite phases, gates, and cutover: [Rust rewrite execution plan](RUST_REWRITE_PLAN.md)
 - Rust runtime license obligations: [third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Architecture decisions
@@ -37,7 +38,7 @@ decision when it was accepted unless an amendment says otherwise.
 - [ADR-010: Parallel library context analysis](ADR-010-parallel-library-context-analysis.md)
 - [ADR-011: In-process provider adapter handlers](ADR-011-in-process-provider-adapter-handlers.md)
 - [ADR-012: Native context analysis and workload profiling](ADR-012-native-context-analysis-and-profiling.md)
-- [ADR-013: Python 3.14 runtime and concurrency](ADR-013-python-314-runtime-and-concurrency.md)
+- [ADR-013: Python 3.14 runtime and concurrency (superseded)](ADR-013-python-314-runtime-and-concurrency.md)
 - [ADR-014: Perceptual local-context measurements](ADR-014-perceptual-context-measurements.md)
 - [ADR-015: Complete Rust modular-monolith rewrite](ADR-015-complete-rust-rewrite.md)
 - [ADR-016: Rust-native runtime and ownership boundaries](ADR-016-rust-native-runtime-boundaries.md)
@@ -50,7 +51,11 @@ decision when it was accepted unless an amendment says otherwise.
    without reversing its decision; do not rewrite history silently.
 3. Keep operator steps in `ASSISTANT.md`, current code ownership and version inventory in
    `ASSISTANT_ARCHITECTURE.md`, and postponed work in `TODO.md` or `FUTURE.md`.
-4. The backend documentation tests verify local Markdown links, this index, and the Assistant
-   contract inventory. A contract-version change is incomplete until those tests pass.
-5. Delete completed working plans from source control. Private ignored notes are not maintained
-   project documentation and must not be treated as current contracts.
+4. Keep relative Markdown links resolvable in the current tree. Completed migration records may
+   use commit-pinned GitHub links for source that exists only on the frozen legacy revision. A
+   contract-version change is incomplete until its generated-contract and owning subsystem tests
+   pass.
+5. Delete completed ordinary working plans from source control. Retain a completed migration plan
+   only when it is the indexed acceptance and cutover record, and label it historical. Private
+   ignored notes are not maintained project documentation and must not be treated as current
+   contracts.

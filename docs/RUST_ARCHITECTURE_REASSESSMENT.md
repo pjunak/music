@@ -1,33 +1,36 @@
 # Rust rewrite architecture reassessment
 
-**Status:** Accepted for implementation
+**Status:** Historical input, accepted and implemented
 
 **Date:** 2026-08-27
 
 **Related decisions:** [ADR-015](ADR-015-complete-rust-rewrite.md),
 [ADR-016](ADR-016-rust-native-runtime-boundaries.md)
 
-This review challenges the first Rust blueprint against the current Python implementation. Its
-purpose is to preserve product intent while removing boundaries that exist only because of Python,
-the GIL, synchronous SQLAlchemy, module-level singletons, native-extension behavior, or the former
-"wipe the database" migration policy.
+This review challenged the first Rust blueprint against the final Python implementation. It is
+retained as design history; current code ownership lives in
+[the production architecture](RUST_REWRITE_ARCHITECTURE.md). Python source links below point to the
+frozen `b93f91d` legacy revision.
 
 The project owner accepted ADR-016 and the explicit compatibility differences on 2026-08-27. The
-recommendations below are now implementation constraints; Phase 1 must capture the displaced
-Python behavior as executable evidence before dependent Rust paths replace it.
+recommendations below became implementation constraints, and Phase 1 captured the displaced Python
+behavior as executable evidence before dependent Rust paths replaced it.
 
 ## Evidence reviewed
 
-- Startup and composition in [`main.py`](../backend/app/main.py).
+- Startup and composition in [`main.py`](https://github.com/pjunak/music/blob/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/main.py).
 - Playback mutation, persistence, connection projection, and WebSocket dispatch in
-  [`sync/state.py`](../backend/app/sync/state.py),
-  [`sync/connection.py`](../backend/app/sync/connection.py), and
-  [`sync/router.py`](../backend/app/sync/router.py).
+  [`sync/state.py`](https://github.com/pjunak/music/blob/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/sync/state.py),
+  [`sync/connection.py`](https://github.com/pjunak/music/blob/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/sync/connection.py), and
+  [`sync/router.py`](https://github.com/pjunak/music/blob/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/sync/router.py).
 - SQLite setup, the ad-hoc additive schema path, and the 18 current tables under
-  [`core/db.py`](../backend/app/core/db.py) and [`models/`](../backend/app/models/).
-- Filesystem indexing and mutation in [`library/index.py`](../backend/app/library/index.py), mode
+  [`core/db.py`](https://github.com/pjunak/music/blob/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/core/db.py) and
+  [`models/`](https://github.com/pjunak/music/tree/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/models).
+- Filesystem indexing and mutation in
+  [`library/index.py`](https://github.com/pjunak/music/blob/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/library/index.py), mode
   loading/writes, Authoring commits, and cleanup journals.
-- Durable job recovery and execution in [`jobs/`](../backend/app/jobs/), plus the staged context and
+- Durable job recovery and execution in
+  [`jobs/`](https://github.com/pjunak/music/tree/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/app/jobs), plus the staged context and
   voice workers.
 - Assistant provider, disclosure, fingerprint, quality, and review contracts in
   [the Assistant architecture map](ASSISTANT_ARCHITECTURE.md).

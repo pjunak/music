@@ -403,6 +403,17 @@ The maintained documentation index is [`docs/README.md`](docs/README.md). In par
 [Assistant architecture and contract map](docs/ASSISTANT_ARCHITECTURE.md) before changing model
 inputs, outputs, disclosures, fingerprints, provider transport, or review behavior.
 
+### Repository lifecycle
+
+- `main` is the only active development and production branch. It contains the complete Rust
+  server, CLI, analysis pipeline, and headless output appliance together with the retained React
+  frontend and compatibility client.
+- `legacy/python` is a frozen copy of the final Python implementation at `b93f91d`; the matching
+  `legacy-python-2026-08-29` tag is the durable rollback source. Do not backport features or publish
+  normal releases from it.
+- `archive/*` tags retain superseded, unmerged snapshots discovered during branch cleanup. They are
+  historical recovery points, not supported release lines.
+
 ```
 crates/music-domain/       pure playback, paths, playlists, and cleanup rules
 crates/music-application/  use-case contracts, actors/coordinators, jobs, Assistant logic

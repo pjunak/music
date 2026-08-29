@@ -1,14 +1,14 @@
 # Rust rewrite architecture
 
-**Status:** Accepted for implementation
+**Status:** Implemented in production
 
 **Owning decisions:** [ADR-015](ADR-015-complete-rust-rewrite.md),
 [ADR-016](ADR-016-rust-native-runtime-boundaries.md)
-**Target branch:** `rewrite/rust`
+**Canonical branch:** `main` (`rewrite/rust` was the temporary implementation branch)
 
-This is the target architecture, not a map of Python files to Rust files. Existing behavior is an
-important compatibility oracle, but the new module boundaries follow data ownership, side effects,
-and failure domains.
+This is the production architecture, not a map of Python files to Rust files. Python behavior was
+used as a compatibility oracle during the rewrite; the implemented module boundaries follow data
+ownership, side effects, and failure domains.
 
 The [architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md) records which current boundaries
 are enduring product intent and which are Python-era implementation compromises.

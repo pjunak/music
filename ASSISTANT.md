@@ -31,12 +31,16 @@ Specialized models that receive audio and model-assisted file cleanup are not re
 Their role names are visible in AI Setup but deliberately locked until they have a
 provider adapter, data limit, disclosure, quality suite, and review contract.
 
-## 1. Prepare the deployment
+## 1. Prepare or recover a deployment
 
-1. Before the first Rust deployment, back up the complete persistence set described in
-   [`docs/RUST_REWRITE_PLAN.md`](docs/RUST_REWRITE_PLAN.md#phase-13--cutover-and-rollback-window):
-   `app.db`, legacy `devices.json` when present, modes, and the separately held Assistant key.
-   Keep that restore set isolated from the live container.
+The one-time Python-to-Rust cutover completed on 2026-08-29. `main` is the production Rust line;
+`legacy/python` and `legacy-python-2026-08-29` preserve the final Python source for disaster
+recovery only. The following procedure applies to a new deployment, a schema-changing upgrade, or
+an isolated restore test:
+
+1. Back up `app.db`, legacy `devices.json` when present, authored modes, and the separately held
+   Assistant key. Keep that restore set isolated from the live container. Music and SFX remain
+   under the deployment's filesystem backup policy.
 2. Run `music-cli db doctor` against the copy before migration. Unknown or damaged schema shapes
    are a stop condition; `music-cli db migrate` creates and verifies its own pre-migration database
    backup before applying the ordered SQLx migrations.

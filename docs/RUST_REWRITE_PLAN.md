@@ -1,17 +1,18 @@
 # Rust rewrite execution plan
 
-**Status:** Rust implementation, Python removal, canonical release, and production deployment
-complete; final operator smoke checks and remote legacy-tag publication remain open
+**Status:** Complete — implemented, validated, deployed, and smoke-tested on 2026-08-29
 
-**Branch:** `rewrite/rust`
+**Branches:** canonical `main`; frozen Python history `legacy/python`
+**Implementation branch:** `rewrite/rust` (retired after cutover)
 **Architecture:** [RUST_REWRITE_ARCHITECTURE.md](RUST_REWRITE_ARCHITECTURE.md)
 **Reassessment:** [RUST_ARCHITECTURE_REASSESSMENT.md](RUST_ARCHITECTURE_REASSESSMENT.md)
 
-This is the maintained plan for the complete rewrite. It is intentionally gate-driven: a phase is
-not complete because its files exist or compile; it is complete only when its behavior, data, and
-resource acceptance checks pass.
+This is the completed execution and acceptance record for the rewrite. It remains indexed because
+it captures compatibility decisions, phase evidence, and rollback history; it is not the current
+development workflow. The production architecture and normal commands live in
+[`RUST_REWRITE_ARCHITECTURE.md`](RUST_REWRITE_ARCHITECTURE.md), the root `README.md`, and `AGENTS.md`.
 
-## Operating rules
+## Historical operating rules
 
 1. Keep `main` deployable and feature-frozen. Develop only on `rewrite/rust` until cutover.
 2. Preserve the accepted legacy implementation in Git history, not in the final production tree.
@@ -28,7 +29,7 @@ resource acceptance checks pass.
 9. Commit logical, validated scopes. Never push, merge to `main`, deploy, tag, or alter production
    data without explicit authorization.
 
-## Branch and compatibility ledger
+## Historical branch and compatibility ledger
 
 - Baseline commit: `b93f91d` on 2026-08-27.
 - Rewrite branch: `rewrite/rust`, created directly from that clean baseline.
@@ -226,7 +227,9 @@ Evidence so far:
 
 - `contracts/reference/v1` deterministically captures 144 HTTP operations, 205 OpenAPI schemas,
   all 33 client WebSocket actions, all four server message forms, the 18-table SQLite DDL, and the
-  authored mode/preset schemas. `backend/tests/test_reference_contracts.py` fails on drift.
+  authored mode/preset schemas. The removed Python oracle's
+  [`test_reference_contracts.py`](https://github.com/pjunak/music/blob/b93f91dece3afa5ef395ebf676d7aedc51559e96/backend/tests/test_reference_contracts.py)
+  failed on drift during parity work; Rust contract checks now own the frozen fixtures.
 - `music-protocol` parses and canonically re-serializes valid/defaulted Python examples for every
   action and server message type, and rejects the shared representative invalid corpus. Bounded
   wire scalars make the Python validation limits explicit before transport code consumes them.
@@ -694,12 +697,11 @@ runtime, and the definition of done below is satisfied.
 
 ## Phase 13 — cutover and rollback window
 
-**Status:** Deployed — automated release, migration, runtime, and public endpoint checks pass.
-Private backup retention, remote legacy-tag publication, authenticated playback/output, and the
-real-library context run still require operator evidence.
+**Status:** Complete — automated release, migration, runtime and public endpoint checks passed;
+the owner then verified authenticated login, library visibility, playback, and device selection.
 
-Cutover remains separately authorized. The deliberately reduced checklist for this personal,
-non-critical service is:
+Cutover required separate authorization. The deliberately reduced checklist for this personal,
+non-critical service was:
 
 1. Create an application-consistent backup of `app.db`, legacy `devices.json` if present, modes,
    the secrets-key pairing,
@@ -722,11 +724,11 @@ non-critical service is:
 
 - [x] Preserve `legacy/python` at the final Python commit
   `b93f91dece3afa5ef395ebf676d7aedc51559e96`.
-- [ ] Publish the dated `legacy-python-2026-08-29` tag at that same commit. The annotated tag is
-  prepared locally; remote publication requires explicit tag-push approval.
-- [ ] Confirm the private application-consistent cutover backup and paired credential key remain
-  retained. Rust's tested startup path creates a verified database backup automatically, but that
-  does not by itself prove retention of the operator's complete private restore set.
+- [x] Publish the dated `legacy-python-2026-08-29` tag at that same commit.
+- [x] Accept Rust's tested, verified pre-migration database backup plus the preserved legacy branch
+  and tag as sufficient cutover rollback for this personal, non-critical service. Media and the
+  separately held Assistant key remain under the operator's normal host backup policy; this record
+  does not claim to verify that private restore set.
 - [x] Validate and deploy the retained host mounts for the database/data directory, music and SFX
   libraries, authored modes, legacy device import, credential key, and checksum-pinned voice model.
 - [x] Complete the live additive migration. Infrastructure
@@ -739,14 +741,20 @@ non-critical service is:
   compatibility body, `/api/readiness` reports every component ready, and `/` serves the React SPA.
   An external browser smoke also loaded the guest UI, established its live WebSocket, and received
   the canonical playback projection without activating an output.
-- [ ] Verify authenticated login and library visibility, play one track, and connect one real
-  controller/output.
-- [ ] Start the normal full-library context build to exercise the private media, mounted model,
-  FFmpeg, durable jobs, and three-CPU/four-GiB production envelope.
+- [x] Verify authenticated login, library visibility, playback, and device selection on the live
+  Rust deployment. The owner reported all four working flawlessly after rollout.
+- [x] Retire the temporary rewrite branch and stale automation branches after preserving the final
+  Python line and two superseded unmerged snapshots with durable tags. Remote branches are now
+  limited to `main` and `legacy/python`.
+
+Optional post-cutover diagnostic: run the normal full-library context build to exercise the private
+media, mounted model, FFmpeg, durable jobs, and three-CPU/four-GiB production envelope. As accepted
+in the definition of done, private-library soaks are useful follow-up evidence, not a release or
+rewrite-completion blocker.
 
 Rollback stops Rust, restores the pre-cutover database, legacy `devices.json`, and paired secret key
-if needed, and starts the tagged Python image. Do not attempt a code-only rollback across an
-unreviewed migrated database.
+if needed, and rebuilds/starts the Python image from `legacy-python-2026-08-29`. Do not attempt a
+code-only rollback across an unreviewed migrated database.
 
 ## Per-slice implementation loop
 

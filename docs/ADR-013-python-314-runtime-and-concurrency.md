@@ -1,10 +1,13 @@
 # ADR-013: Python 3.14 runtime and concurrency
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-015](ADR-015-complete-rust-rewrite.md)
 
 **Date:** 2026-08-25
 
 **Deciders:** Project maintainer
+
+**Superseded:** 2026-08-29, when the complete Rust application became the canonical production
+runtime. This ADR remains as Python-era history and is not current operational guidance.
 
 ## Context
 

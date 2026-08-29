@@ -1,10 +1,13 @@
 # ADR-015: Replace the Python application with a Rust modular monolith
 
-**Status:** Accepted
+**Status:** Accepted and implemented
 
 **Date:** 2026-08-27
 
 **Decider:** Project owner
+
+**Implemented:** 2026-08-29. `main` is the canonical Rust application; the final Python source is
+frozen on `legacy/python` and tagged `legacy-python-2026-08-29`.
 
 **Accepted refinement:** [ADR-016](ADR-016-rust-native-runtime-boundaries.md) refines the
 application layer, device persistence, startup scan, and voice isolation choices for
