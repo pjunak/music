@@ -1,6 +1,7 @@
 # Rust rewrite execution plan
 
-**Status:** Rust implementation complete; final Rust-only tree and deployment cutover in progress
+**Status:** Rust implementation, Python removal, canonical release, and production deployment
+complete; final operator smoke checks and remote legacy-tag publication remain open
 
 **Branch:** `rewrite/rust`
 **Architecture:** [RUST_REWRITE_ARCHITECTURE.md](RUST_REWRITE_ARCHITECTURE.md)
@@ -59,8 +60,10 @@ The current Windows workstation has Node 26 and rustup-managed Rust 1.97.1. Endp
 repeatedly removed Rust 1.98's bundled `ld.lld.exe`, and the Visual Studio Build Tools elevation path
 did not complete, so local verification uses rustup's official `x86_64-pc-windows-gnu` host
 explicitly. The pinned repository toolchain remains host-neutral for Linux CI and release builds.
-FFmpeg, uv, and Docker are not exposed on `PATH`; the existing backend virtual environment remains
-the Python reference runner, while Docker/Linux-specific checks run in CI or on a capable host.
+FFmpeg and Docker are not exposed on the Windows development `PATH`. During parity work, the frozen
+backend virtual environment supplied the Python reference runner; it was removed with the rest of
+the Python oracle after the accepted replacement evidence passed. Docker/Linux-specific checks run
+in CI or on a capable host.
 
 ### Required development tools
 
@@ -139,7 +142,7 @@ reviews and moves an accepted summary into durable project records.
 ### Current verification record — 2026-08-29
 
 - Windows GNU Rust host: formatting, all-target check, strict all-target/all-feature Clippy,
-  291/291 nextest cases, and all workspace doctests pass. The current run included the exact
+  296/296 workspace cases, and all workspace doctests pass. The current run included the exact
   checksum-pinned voice graph and end-to-end FFmpeg/worker inference.
 - Contract generation is clean: all 144 frozen Python HTTP operations remain compatible, the
   readiness route is the sole Rust addition, and generated TypeScript/OpenAPI/SQLx artifacts have
@@ -216,7 +219,8 @@ Gate: no application implementation begins until the unchecked owner decision is
 
 ## Phase 1 — executable reference and feasibility gates
 
-**Status:** Candidate implementation complete; final Linux differential and resource evidence pending
+**Status:** Complete — the accepted Linux differential/resource evidence is recorded below; the
+private-library voice comparison and long resource soak remain optional post-cutover diagnostics
 
 Evidence so far:
 
@@ -262,8 +266,8 @@ Evidence so far:
   duplicate families remain visible as review warnings (four at the SQLx/RustCrypto generation
   boundary, plus `hashbrown` and `syn`).
 - The complete eight-crate candidate compiles with the accepted dependency direction and workspace
-  safe-Rust/panic lints. The production workflow still routes only `main` to the frozen Python image;
-  the rewrite branch is exercised by its non-publishing Rust workflow.
+  safe-Rust/panic lints. During development, only the rewrite branch exercised the non-publishing
+  Rust workflow; the owner-authorized cutover later moved the canonical `main` workflow to Rust.
 
 Capture the old system before replacing it:
 
@@ -343,8 +347,8 @@ Create the eight-crate workspace and establish rules before feature code:
 - [x] Route-integrated OpenAPI, semantic parity report, and generated TypeScript WebSocket
   bindings, with `music-cli contracts export/check` drift enforcement.
 - [x] CI verification on pull requests and `rewrite/rust` without image publishing or deployment.
-- [x] Main-only build/publish/dispatch remains unchanged and still targets the Python image until
-  cutover.
+- [x] Main-only build/publish/dispatch remained on the Python image until the owner-authorized
+  cutover, then switched to the fully verified Rust image.
 
 Schema baseline v1 derives its expected tables, columns, unique constraints, check constraints,
 indexes, and foreign keys from the frozen Python contract. It accepts only documented additive
@@ -639,15 +643,15 @@ optional post-cutover diagnostic.
 - [x] Supervise two local mpv processes through Unix-socket JSON IPC; use no libmpv FFI. A dead
   child fails the service so systemd restarts both lanes and reconnects with the persisted ID.
 - [x] Update systemd installation and client documentation for the Rust binary.
-- [ ] Remove the frozen Python appliance and requirements together with all other Python in Phase 12.
+- [x] Remove the frozen Python appliance and requirements together with all other Python in Phase 12.
 
 Gate: reconciler fixtures match the Python appliance, mpv process restart and network reconnect are
 safe, local control auth/CORS behavior matches, and a Linux speaker-device smoke test is recorded.
 
 ## Phase 12 — full parity, hardening, and Python removal
 
-**Status:** In progress — implementation and external Linux acceptance pass; final clean-tree and
-canonical release/deployment gates are being completed.
+**Status:** Complete — implementation, external Linux acceptance, final clean-tree inspection,
+canonical release-image verification, and the owner-authorized deployment all pass.
 
 - [x] Compare all 144 frozen HTTP operations and the complete WebSocket/action corpus; the only
   additive route is authenticated component readiness.
@@ -680,12 +684,19 @@ canonical release/deployment gates are being completed.
   after the accepted Linux replacement evidence passed.
 - [x] Scan the staged final source tree for accidental Python/runtime remnants, secrets, generated
   media, stale active references, mutable service globals, and unused dependencies.
-- [ ] Rebuild and inspect the canonical final image on Linux CI after this deletion commit is pushed.
+- [x] Rebuild and inspect the canonical final image on Linux CI after deletion. Branch verification
+  [run 33261398081](https://github.com/pjunak/music/actions/runs/33261398081) and canonical main
+  [run 33262410858](https://github.com/pjunak/music/actions/runs/33262410858) both passed; the latter
+  published commit `a05d6360d5d7875aa99bdcf584381a3731693f65` and dispatched production.
 
 Gate: the final branch builds and tests from a clean clone, the release image contains no Python
 runtime, and the definition of done below is satisfied.
 
 ## Phase 13 — cutover and rollback window
+
+**Status:** Deployed — automated release, migration, runtime, and public endpoint checks pass.
+Private backup retention, remote legacy-tag publication, authenticated playback/output, and the
+real-library context run still require operator evidence.
 
 Cutover remains separately authorized. The deliberately reduced checklist for this personal,
 non-critical service is:
@@ -706,6 +717,32 @@ non-critical service is:
    exercise FFmpeg, the existing model mount, durable jobs, and real-library analysis; it may finish
    after the service is already in use.
 7. Keep the legacy image/branch and pre-migration backup until the Rust deployment is satisfactory.
+
+### Cutover record — 2026-08-29
+
+- [x] Preserve `legacy/python` at the final Python commit
+  `b93f91dece3afa5ef395ebf676d7aedc51559e96`.
+- [ ] Publish the dated `legacy-python-2026-08-29` tag at that same commit. The annotated tag is
+  prepared locally; remote publication requires explicit tag-push approval.
+- [ ] Confirm the private application-consistent cutover backup and paired credential key remain
+  retained. Rust's tested startup path creates a verified database backup automatically, but that
+  does not by itself prove retention of the operator's complete private restore set.
+- [x] Validate and deploy the retained host mounts for the database/data directory, music and SFX
+  libraries, authored modes, legacy device import, credential key, and checksum-pinned voice model.
+- [x] Complete the live additive migration. Infrastructure
+  [run 33264033294](https://github.com/pjunak/junak.eu/actions/runs/33264033294) pulled the exact
+  dispatched image and reported `music-server` healthy; public readiness reports the database and
+  database schema as `ready`.
+- [x] Fast-forward `main` to the verified rewrite without rewriting history, with explicit owner
+  authorization, and deploy the resulting image.
+- [x] Verify public liveness, component readiness, and SPA delivery. `/api/health` returns the exact
+  compatibility body, `/api/readiness` reports every component ready, and `/` serves the React SPA.
+  An external browser smoke also loaded the guest UI, established its live WebSocket, and received
+  the canonical playback projection without activating an output.
+- [ ] Verify authenticated login and library visibility, play one track, and connect one real
+  controller/output.
+- [ ] Start the normal full-library context build to exercise the private media, mounted model,
+  FFmpeg, durable jobs, and three-CPU/four-GiB production envelope.
 
 Rollback stops Rust, restores the pre-cutover database, legacy `devices.json`, and paired secret key
 if needed, and starts the tagged Python image. Do not attempt a code-only rollback across an
