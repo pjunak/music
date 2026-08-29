@@ -111,13 +111,14 @@ export function SettingsView() {
           window.
         </p>
         <div>
-          <a
-            href="/diagnostics"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() =>
+              window.open("/diagnostics", "_blank", "noopener,noreferrer")
+            }
           >
             🔧 Open diagnostics in new tab
-          </a>
+          </button>
         </div>
       </section>
     </div>

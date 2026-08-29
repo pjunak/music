@@ -1718,16 +1718,8 @@ kbd,
   flex: 0 0 auto;
 }
 
-/* --- controls footer + diagnostics view (full-page) --- */
+/* --- diagnostics view (full-page) --- */
 
-.controls-footer {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0.4rem 0 0;
-}
-.controls-footer a {
-  text-decoration: none;
-}
 .diagnostics-view {
   flex: 1;
   padding: 1rem 1.5rem;
@@ -2719,6 +2711,7 @@ input.volume-slider::-moz-range-thumb {
   .app-header {
     flex-wrap: wrap;
     padding: 0.5rem 0.7rem;
+    gap: 0.5rem;
   }
   .device-name-field {
     width: 10em;
@@ -2729,6 +2722,13 @@ input.volume-slider::-moz-range-thumb {
     width: 100%;
     justify-content: flex-start;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Bigger tap targets + don't shrink so the strip stays scrollable. */
+  .tab {
+    padding: 0.55rem 0.85rem;
+    font-size: 0.95rem;
+    flex-shrink: 0;
   }
   .app-header-right {
     margin-left: auto;
@@ -2760,23 +2760,89 @@ input.volume-slider::-moz-range-thumb {
 
   .controls-view {
     padding: 0.7rem;
+    gap: 0.5rem;
+  }
+  .controls-strip {
+    padding: 0.5rem 0.7rem;
+  }
+
+  /* Now-playing bar: row 1 = track meta + transport, row 2 = output toggle +
+   * volume across the full width. The grid-column rule has to live on
+   * `.now-playing-right` (the actual grid child) — putting it on
+   * `.now-playing-volume` is a no-op since it's nested one level deeper. */
+  .now-playing {
+    padding: 0.5rem 0.7rem 0.7rem;
   }
   .now-playing-top {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto auto;
-    row-gap: 0.4rem;
+    row-gap: 0.5rem;
+  }
+  .now-playing-right {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    gap: 0.6rem;
   }
   .now-playing-volume {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
+    flex: 1 1 auto;
+    justify-content: flex-end;
   }
   .volume-row input[type="range"] {
-    width: 100%;
+    width: auto;
     flex: 1 1 auto;
+  }
+  /* Bigger transport buttons for finger taps (>= 44px touch target). */
+  .now-playing-controls {
+    gap: 0.5rem;
+  }
+  .now-playing-controls button {
+    width: 2.8rem;
+    height: 2.8rem;
+    font-size: 1.2rem;
+  }
+  .now-playing-controls .now-playing-play {
+    width: 3.3rem;
+    height: 3.3rem;
+    font-size: 1.55rem;
+  }
+  .output-toggle {
+    padding: 0.45rem 0.8rem;
+    font-size: 0.88rem;
   }
 
   .player-title {
     font-size: 1.5rem;
+  }
+  .player-view {
+    padding: 1.25rem 1rem;
+  }
+
+  /* Soundboard editor row: 4-col grid is too tight on phones — let the
+   * name span the full width and keep file/hotkey/actions on row 2. */
+  .soundboard-item,
+  .soundboard-add-item {
+    grid-template-columns: 1fr 4ch auto;
+    grid-template-rows: auto auto;
+    row-gap: 0.3rem;
+  }
+  .soundboard-item .soundboard-item-name,
+  .soundboard-add-item > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  /* Track table: tighter cells so more columns fit before horizontal scroll
+   * kicks in. */
+  .track-table th,
+  .track-table td {
+    padding: 0.3rem 0.4rem;
+  }
+
+  .two-pane-view {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+  .settings-view {
+    padding: 0.9rem;
   }
 
   .toaster {
@@ -2784,5 +2850,100 @@ input.volume-slider::-moz-range-thumb {
     right: 0.5rem;
     bottom: 7rem;
     max-width: none;
+  }
+}
+
+/* Phone portrait — tight space, ~360-430px. */
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0.4rem 0.5rem;
+    gap: 0.4rem;
+  }
+  .device-name-field {
+    width: 7.5em;
+    font-size: 0.8rem;
+    padding: 0.2rem 0.4rem;
+  }
+  /* Reduce ws-status to a coloured dot — the word "connected" eats header
+   * width on phones and the colour already says everything important. */
+  .ws-status {
+    font-size: 0;
+    width: 0.65rem;
+    height: 0.65rem;
+    padding: 0;
+    border-radius: 999px;
+    border-width: 1px;
+  }
+  .ws-status-connected {
+    background: var(--ok);
+  }
+  .ws-status-connecting {
+    background: var(--warn);
+  }
+  .ws-status-disconnected {
+    background: var(--error);
+  }
+  .context-badge {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.45rem;
+  }
+
+  .player-view {
+    padding: 1rem 0.7rem;
+  }
+  .player-title {
+    font-size: 1.3rem;
+  }
+  .player-artist {
+    font-size: 1rem;
+  }
+  .player-art {
+    max-width: min(80vw, 280px);
+  }
+
+  /* Stack the now-playing bar vertically on phones — three short rows is
+   * easier to scan and tap than a cramped 2-row grid where transport
+   * fights the track meta for width. */
+  .now-playing {
+    padding: 0.5rem 0.6rem 0.6rem;
+    gap: 0.45rem;
+  }
+  .now-playing-top {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    row-gap: 0.5rem;
+  }
+  .now-playing-track {
+    text-align: center;
+    align-items: center;
+  }
+  .now-playing-controls {
+    justify-content: center;
+  }
+  .now-playing-right {
+    grid-column: auto;
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .controls-view {
+    padding: 0.5rem;
+  }
+  .surface-card {
+    padding: 0.6rem 0.7rem;
+  }
+
+  .library-view,
+  .metadata-view {
+    padding: 0.5rem;
+  }
+  .settings-view {
+    padding: 0.7rem;
+  }
+
+  /* Modal: full-bleed at phone widths so forms aren't cramped. */
+  .modal-backdrop {
+    padding: 0.5rem;
   }
 }
