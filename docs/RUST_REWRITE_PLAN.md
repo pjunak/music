@@ -1,6 +1,6 @@
 # Rust rewrite execution plan
 
-**Status:** Rust implementation complete; final Linux acceptance and Python removal in progress
+**Status:** Rust implementation complete; private voice/device acceptance and Python removal in progress
 
 **Branch:** `rewrite/rust`
 **Architecture:** [RUST_REWRITE_ARCHITECTURE.md](RUST_REWRITE_ARCHITECTURE.md)
@@ -136,7 +136,7 @@ ignores symlinks, never writes paths or filenames to the report, requires a clea
 refuses to overwrite prior evidence. The report is ignored by Git until the operator explicitly
 reviews and moves an accepted summary into durable project records.
 
-### Current verification record — 2026-08-28
+### Current verification record — 2026-08-29
 
 - Windows GNU Rust host: formatting, all-target check, strict all-target/all-feature Clippy,
   291/291 nextest cases, and all workspace doctests pass. The current run included the exact
@@ -161,11 +161,18 @@ reviews and moves an accepted summary into durable project records.
   22-observation semantic transcript covering health, SPA fallback/cache, auth/cookies, validation
   status and envelope, library reads, single-range streaming, multipart conflicts, partial batch
   failure, session revocation, and guest protocol-v1/v2 WebSocket projection.
+- Manual Linux [rewrite workflow run 8](https://github.com/pjunak/music/actions/runs/33227703012)
+  passes at `37a7434`: the Rust workspace and Unix process tests, frozen Python oracle, frontend,
+  parser fuzz smoke, dual-image comparison, and non-root/no-Python candidate-image inspection are
+  all green. The image served readiness, health, and the SPA under the three-CPU/four-GiB limit.
+- That run's accepted Python/Rust comparison kept the normalized live semantic transcript identical
+  while reducing cold startup from 1849 ms to 199 ms, warm startup from 1611 ms to 236 ms, API p95
+  latency by 42-75%, WebSocket connect-to-state p95 from 10.799 ms to 2.009 ms, peak container
+  memory from 102.4 MiB to 15.1 MiB, and runtime image size from 1628.7 MiB to 584.2 MiB.
 - Five seeded libFuzzer targets now call the real protocol, rooted-path, bounded-YAML,
   authoring-import, and all four Assistant structured-output validators. Their feature-gated
-  production support compiles under the strict all-feature Clippy gate, and every target type-checks
-  locally with libFuzzer linking disabled; sanitizer execution remains part of the manual Linux
-  workflow because libFuzzer is not supported on this Windows host.
+  production support compiles under the strict all-feature Clippy gate; the manual Linux/nightly
+  workflow completed 2,000 sanitizer-driven executions for each target without a crash.
 - The path-free voice-probe binary classifies generated audio end to end with the exact pinned graph,
   and all five deterministic report/tool-policy tests pass. The Essentia side remains Linux-only.
 - The Rust-specific Docker context is an explicit allowlist that excludes the Python oracle and
@@ -187,9 +194,10 @@ reviews and moves an accepted summary into durable project records.
   runtime cancels its accepted tasks, root shutdown closes an uncooperative WebSocket, media and
   provider admission reject saturation without hidden queues, and context/voice timing summaries
   use constant-size running aggregates rather than retaining per-track reports.
-- Docker/WSL and a real Linux audio device are unavailable on this workstation. The rewrite-only
-  workflow, Unix mpv tests, cgroup voice soak, Essentia differential, and speaker smoke therefore
-  remain explicit external acceptance evidence rather than inferred success.
+- Docker/WSL and a real Linux audio device are unavailable on this workstation. The GitHub Linux
+  workflow now supplies the workspace, Unix-mpv, fuzz, dual-image, and non-root container evidence;
+  the model-licensed cgroup voice soak, private-corpus Essentia differential, and physical speaker
+  smoke remain explicit external acceptance gates rather than inferred success.
 
 ## Phase 0 — architecture and baseline
 
@@ -631,8 +639,8 @@ safe, local control auth/CORS behavior matches, and a Linux speaker-device smoke
 
 ## Phase 12 — full parity, hardening, and Python removal
 
-**Status:** In progress — all locally executable gates pass; Linux/container/device acceptance
-must finish before the reference implementation is deleted.
+**Status:** In progress — Linux workflow, fuzz, dual-image, and container acceptance pass; private
+voice and physical-device acceptance must finish before the reference implementation is deleted.
 
 - [x] Compare all 144 frozen HTTP operations and the complete WebSocket/action corpus; the only
   additive route is authenticated component readiness.
@@ -655,8 +663,10 @@ must finish before the reference implementation is deleted.
   rejects unbounded channels or unreviewed `tokio::spawn`/`spawn_blocking` drift.
 - [x] Link every WebSocket session to the root cancellation tree and fold context/voice performance
   into running aggregates instead of retaining library-sized timing and status collections.
-- [ ] Execute the rewrite workflow on Linux and record its container and Unix-process results.
-- [ ] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report.
+- [x] Execute the rewrite workflow on Linux and record its container and Unix-process results in
+  [run 8](https://github.com/pjunak/music/actions/runs/33227703012) at `37a7434`.
+- [x] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report
+  from that same three-CPU/four-GiB run; the measurements are summarized above.
 - [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.
 - [ ] Run the Rust output appliance against the intended Linux speaker device.
 - [ ] Delete Python source, tests, lockfiles, virtual-environment instructions, and image stages only
