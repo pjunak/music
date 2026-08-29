@@ -9,13 +9,24 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
 const DURABLE_JOBS_SCHEMA_SQL: &str = include_str!("../migrations/0004_durable_jobs.sql");
+const LEGACY_ALEMBIC_CLEANUP_SCHEMA_SQL: &str =
+    include_str!("../migrations/0005_remove_legacy_alembic_ledger.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
+const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
+
+#[cfg(test)]
+pub(crate) const LEGACY_ALEMBIC_FIXTURE_SQL: &str = "\
+    CREATE TABLE alembic_version (\
+        version_num VARCHAR(32) NOT NULL,\
+        CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)\
+    );\
+    INSERT INTO alembic_version (version_num) VALUES ('legacy-python-head');";
 
 const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("tracks", "display_title"),
@@ -215,8 +226,30 @@ pub(crate) async fn inspect_pool(
         );
     }
 
-    for table in actual.tables.keys() {
-        if table != SQLX_MIGRATION_TABLE && !expected.tables.contains_key(table) {
+    for (table, actual_table) in &actual.tables {
+        if table == SQLX_MIGRATION_TABLE {
+            continue;
+        }
+        if table == LEGACY_ALEMBIC_MIGRATION_TABLE {
+            requires_migration = true;
+            if is_legacy_alembic_ledger(actual_table) {
+                issue(
+                    &mut issues,
+                    SchemaIssueLevel::Warning,
+                    "legacy_migration_ledger",
+                    "migration will remove the legacy Python Alembic migration ledger",
+                );
+            } else {
+                issue(
+                    &mut issues,
+                    SchemaIssueLevel::Error,
+                    "invalid_legacy_migration_ledger",
+                    "legacy Alembic migration ledger has an incompatible shape",
+                );
+            }
+            continue;
+        }
+        if !expected.tables.contains_key(table) {
             issue(
                 &mut issues,
                 SchemaIssueLevel::Error,
@@ -354,7 +387,12 @@ pub(crate) async fn inspect_pool(
     let table_count = actual
         .tables
         .keys()
-        .filter(|table| table.as_str() != SQLX_MIGRATION_TABLE)
+        .filter(|table| {
+            !matches!(
+                table.as_str(),
+                SQLX_MIGRATION_TABLE | LEGACY_ALEMBIC_MIGRATION_TABLE
+            )
+        })
         .count();
     let has_errors = issues
         .iter()
@@ -423,6 +461,9 @@ async fn expected_shape() -> Result<DatabaseShape, StorageError> {
         .execute(&pool)
         .await?;
     sqlx::raw_sql(DURABLE_JOBS_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(LEGACY_ALEMBIC_CLEANUP_SCHEMA_SQL)
         .execute(&pool)
         .await?;
     let shape = read_shape(&pool).await;
@@ -623,6 +664,18 @@ fn is_additive_column(table: &str, column: &str) -> bool {
     ADDITIVE_COLUMNS.contains(&(table, column))
 }
 
+fn is_legacy_alembic_ledger(table: &TableShape) -> bool {
+    let Some(version_column) = table.columns.get("version_num") else {
+        return false;
+    };
+    table.columns.len() == 1
+        && version_column.data_type == "VARCHAR(32)"
+        && version_column.not_null
+        && version_column.primary_key_position == 1
+        && table.foreign_keys.is_empty()
+        && table.unique_constraints.is_empty()
+}
+
 fn issue(
     issues: &mut Vec<SchemaIssue>,
     level: SchemaIssueLevel,
@@ -643,7 +696,7 @@ mod tests {
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use tempfile::tempdir;
 
-    use super::{SchemaCompatibility, inspect_database, inspect_pool};
+    use super::{LEGACY_ALEMBIC_FIXTURE_SQL, SchemaCompatibility, inspect_database, inspect_pool};
 
     const PYTHON_SQLITE_FIXTURE: &str =
         include_str!("../../../contracts/reference/v1/sqlite-fixture.sql");
@@ -672,6 +725,9 @@ mod tests {
             .connect_with(options)
             .await?;
         sqlx::raw_sql(PYTHON_SQLITE_FIXTURE).execute(&pool).await?;
+        sqlx::raw_sql(LEGACY_ALEMBIC_FIXTURE_SQL)
+            .execute(&pool)
+            .await?;
 
         let report = inspect_pool(&pool, true).await?;
 
@@ -679,9 +735,35 @@ mod tests {
         assert!(report.migration_required);
         assert!(report.errors().next().is_none());
         assert!(report.issues.iter().any(|issue| {
+            issue.code == "legacy_migration_ledger"
+                && issue.detail.contains("remove the legacy Python Alembic")
+        }));
+        assert!(report.issues.iter().any(|issue| {
             issue.code == "missing_additive_column"
                 && issue.detail.contains("playback_state.storage_revision")
         }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_malformed_legacy_alembic_ledger() -> Result<(), Box<dyn Error>> {
+        let options = SqliteConnectOptions::new().in_memory(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        sqlx::query("CREATE TABLE alembic_version (version_num TEXT)")
+            .execute(&pool)
+            .await?;
+
+        let report = inspect_pool(&pool, true).await?;
+
+        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
+        assert!(
+            report
+                .errors()
+                .any(|issue| issue.code == "invalid_legacy_migration_ledger")
+        );
         Ok(())
     }
 

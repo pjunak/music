@@ -217,6 +217,7 @@ mod tests {
 
     use super::{CompareAndSwap, SqliteStorage, SqliteStorageOptions};
     use crate::StorageError;
+    use crate::schema::LEGACY_ALEMBIC_FIXTURE_SQL;
 
     const PYTHON_SQLITE_FIXTURE: &str =
         include_str!("../../../contracts/reference/v1/sqlite-fixture.sql");
@@ -242,6 +243,9 @@ mod tests {
             .connect_with(options)
             .await?;
         sqlx::raw_sql(PYTHON_SQLITE_FIXTURE).execute(&pool).await?;
+        sqlx::raw_sql(LEGACY_ALEMBIC_FIXTURE_SQL)
+            .execute(&pool)
+            .await?;
         pool.close().await;
         Ok(())
     }
@@ -350,11 +354,18 @@ mod tests {
         let table_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master \
              WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
-               AND name != '_sqlx_migrations'",
+               AND name NOT IN ('_sqlx_migrations', 'alembic_version')",
         )
         .fetch_one(&storage.pool)
         .await?;
         assert_eq!(table_count, 22);
+        let legacy_ledger_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type = 'table' AND name = 'alembic_version'",
+        )
+        .fetch_one(&storage.pool)
+        .await?;
+        assert_eq!(legacy_ledger_count, 0);
 
         let foreign_key_failures = sqlx::query("PRAGMA foreign_key_check")
             .fetch_all(&storage.pool)
@@ -416,6 +427,13 @@ mod tests {
         .fetch_one(&backup_pool)
         .await?;
         assert_eq!(migrated_column_count, 0);
+        let backup_legacy_ledger_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type = 'table' AND name = 'alembic_version'",
+        )
+        .fetch_one(&backup_pool)
+        .await?;
+        assert_eq!(backup_legacy_ledger_count, 1);
         backup_pool.close().await;
 
         storage.close().await;

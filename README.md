@@ -353,7 +353,9 @@ quality checks, live-data acceptance, and isolated backup restore—is in
 Rust owns an ordered SQLx migration ledger and refuses unknown or incompatible database shapes
 before opening them for writes. `music-cli db doctor` is read-only; `music-cli db migrate` creates
 and verifies a pre-migration backup before applying compatible migrations. The track index remains
-regenerable from the filesystem, while authored and human-owned state is preserved.
+regenerable from the filesystem, while authored and human-owned state is preserved. A legacy
+Python database's standard Alembic bookkeeping table is accepted only in its exact expected shape
+and is removed by an explicit SQLx migration after that backup succeeds.
 
 ## Development
 
