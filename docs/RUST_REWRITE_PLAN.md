@@ -357,7 +357,9 @@ recovery journal. Migration v5 accepts only the exact standard Python Alembic bo
 removes that obsolete ledger after the backup. Migration v6 likewise validates and removes the
 orphaned SQL-backed `known_devices` table, which Python had already replaced with the separately
 preserved `devices.json`. Representative Python rows remain intact and later boots make no backup or
-schema change.
+schema change. Production's redundant table-level `UNIQUE(tracks.path)` is preserved as compatible
+because it exactly duplicates the canonical unique path index; unrelated additional constraints
+continue to fail closed.
 
 The Phase-3 playback owner now starts under runtime supervision, so the `playback` readiness
 component becomes `ready` only after the persisted aggregate is loaded, restart-normalized, and

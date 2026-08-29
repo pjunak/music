@@ -46,6 +46,22 @@ pub(crate) const LEGACY_KNOWN_DEVICES_FIXTURE_SQL: &str = "\
     VALUES \
         ('legacy-tv', 'Legacy TV', 1, '2026-01-01 12:00:00', '2026-01-02 12:00:00');";
 
+#[cfg(test)]
+pub(crate) fn python_fixture_with_track_unique_constraint(fixture: &str, column: &str) -> String {
+    const MARKER: &str = "\
+        \tadded_at DATETIME NOT NULL,\n\
+        \tPRIMARY KEY (id)\n\
+        );\n\
+        INSERT INTO \"tracks\"";
+    let normalized = fixture.replace("\r\n", "\n");
+    let replacement = format!(
+        "\tadded_at DATETIME NOT NULL,\n\tPRIMARY KEY (id),\n\tUNIQUE ({column})\n);\nINSERT INTO \"tracks\""
+    );
+    let production = normalized.replacen(MARKER, &replacement, 1);
+    assert_ne!(production, normalized, "tracks fixture marker is stale");
+    production
+}
+
 const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("tracks", "display_title"),
     ("tracks", "origin"),
@@ -357,13 +373,39 @@ pub(crate) async fn inspect_pool(
                 format!("table {table_name} has incompatible foreign keys"),
             );
         }
-        if actual_table.unique_constraints != expected_table.unique_constraints {
+        if !expected_table
+            .unique_constraints
+            .is_subset(&actual_table.unique_constraints)
+        {
             issue(
                 &mut issues,
                 SchemaIssueLevel::Error,
                 "unique_constraint_mismatch",
                 format!("table {table_name} has incompatible unique constraints"),
             );
+        }
+        for columns in actual_table
+            .unique_constraints
+            .difference(&expected_table.unique_constraints)
+        {
+            if is_redundant_unique_constraint(&expected, table_name, columns) {
+                issue(
+                    &mut issues,
+                    SchemaIssueLevel::Warning,
+                    "redundant_unique_constraint",
+                    format!(
+                        "table {table_name} preserves a redundant unique constraint on {}",
+                        columns.join(", ")
+                    ),
+                );
+            } else {
+                issue(
+                    &mut issues,
+                    SchemaIssueLevel::Error,
+                    "unique_constraint_mismatch",
+                    format!("table {table_name} has incompatible unique constraints"),
+                );
+            }
         }
         for required_check in required_check_fragments(table_name) {
             if !actual_table.normalized_create_sql.contains(required_check) {
@@ -704,6 +746,17 @@ fn is_additive_column(table: &str, column: &str) -> bool {
     ADDITIVE_COLUMNS.contains(&(table, column))
 }
 
+fn is_redundant_unique_constraint(
+    expected: &DatabaseShape,
+    table: &str,
+    columns: &[String],
+) -> bool {
+    expected
+        .indexes
+        .values()
+        .any(|index| index.table == table && index.unique && index.columns.as_slice() == columns)
+}
+
 fn is_legacy_alembic_ledger(table: &TableShape) -> bool {
     let Some(version_column) = table.columns.get("version_num") else {
         return false;
@@ -772,7 +825,7 @@ mod tests {
 
     use super::{
         LEGACY_ALEMBIC_FIXTURE_SQL, LEGACY_KNOWN_DEVICES_FIXTURE_SQL, SchemaCompatibility,
-        inspect_database, inspect_pool,
+        inspect_database, inspect_pool, python_fixture_with_track_unique_constraint,
     };
 
     const PYTHON_SQLITE_FIXTURE: &str =
@@ -801,7 +854,11 @@ mod tests {
             .max_connections(1)
             .connect_with(options)
             .await?;
-        sqlx::raw_sql(PYTHON_SQLITE_FIXTURE).execute(&pool).await?;
+        let production_fixture =
+            python_fixture_with_track_unique_constraint(PYTHON_SQLITE_FIXTURE, "path");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(production_fixture.as_str()))
+            .execute(&pool)
+            .await?;
         sqlx::raw_sql(LEGACY_ALEMBIC_FIXTURE_SQL)
             .execute(&pool)
             .await?;
@@ -821,6 +878,11 @@ mod tests {
         assert!(report.issues.iter().any(|issue| {
             issue.code == "legacy_known_devices_table"
                 && issue.detail.contains("obsolete Python known-devices")
+        }));
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "redundant_unique_constraint"
+                && issue.detail.contains("tracks")
+                && issue.detail.contains("path")
         }));
         assert!(report.issues.iter().any(|issue| {
             issue.code == "missing_additive_column"
@@ -870,6 +932,28 @@ mod tests {
                 .errors()
                 .any(|issue| issue.code == "invalid_legacy_known_devices_table")
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_nonredundant_additional_unique_constraint() -> Result<(), Box<dyn Error>> {
+        let options = SqliteConnectOptions::new().in_memory(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        let incompatible_fixture =
+            python_fixture_with_track_unique_constraint(PYTHON_SQLITE_FIXTURE, "title");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(incompatible_fixture.as_str()))
+            .execute(&pool)
+            .await?;
+
+        let report = inspect_pool(&pool, true).await?;
+
+        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
+        assert!(report.errors().any(|issue| {
+            issue.code == "unique_constraint_mismatch" && issue.detail.contains("tracks")
+        }));
         Ok(())
     }
 

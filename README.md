@@ -357,6 +357,8 @@ regenerable from the filesystem, while authored and human-owned state is preserv
 Python database's standard Alembic bookkeeping table and obsolete `known_devices` table are accepted
 only in their exact historical shapes and removed by explicit SQLx migrations after that backup
 succeeds. The separately preserved `devices.json` remains the authoritative one-time device import.
+Equivalent historical uniqueness constraints are preserved when they duplicate the same canonical
+unique index; no uniqueness invariant is relaxed during migration.
 
 ## Development
 

@@ -350,7 +350,8 @@ provide the general application migration path required for this cutover. Rust b
 1. opens the database read-write only after an automatic backup succeeds;
 2. inspects tables, columns, indexes, foreign keys, and SQLite version;
 3. accepts both legacy tables only in their exact historical shapes and refuses every other unknown
-   or incompatible shape with a precise `music-cli db doctor` report;
+   or incompatible shape with a precise `music-cli db doctor` report; an older table-level unique
+   constraint is accepted only when it exactly duplicates a canonical Rust unique index;
 4. creates the SQLx migration ledger and any missing structures, including remembered-device and
    recovery-journal tables, with idempotent statements;
 5. imports legacy `devices.json` only when the target table is empty and records its fingerprint;
@@ -361,7 +362,8 @@ Application tables and columns used by the final Python runtime are not dropped 
 final-cutover cleanup removes only the validated Alembic bookkeeping table and the obsolete
 `known_devices` table after a verified backup; rollback restores the complete pre-cutover database.
 The current `devices.json` stays untouched for Rust's one-time import. A pre-cutover database copy
-remains mandatory.
+remains mandatory. Redundant historical uniqueness constraints stay in place because they enforce
+the same or stronger invariant and do not require a risky SQLite table rebuild.
 
 Baseline v1 implements that bootstrap without first touching the source database: the doctor opens
 the existing file read-only, runs SQLite quick/foreign-key checks, and compares tables, columns,
