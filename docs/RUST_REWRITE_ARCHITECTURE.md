@@ -350,8 +350,9 @@ provide the general application migration path required for this cutover. Rust b
 1. opens the database read-write only after an automatic backup succeeds;
 2. inspects tables, columns, indexes, foreign keys, and SQLite version;
 3. accepts both legacy tables only in their exact historical shapes and refuses every other unknown
-   or incompatible shape with a precise `music-cli db doctor` report; an older table-level unique
-   constraint is accepted only when it exactly duplicates a canonical Rust unique index;
+   or incompatible shape with a precise `music-cli db doctor` report; the older table-level unique
+   constraint plus non-unique named index is accepted only when their table and columns exactly
+   reproduce a canonical Rust unique index;
 4. creates the SQLx migration ledger and any missing structures, including remembered-device and
    recovery-journal tables, with idempotent statements;
 5. imports legacy `devices.json` only when the target table is empty and records its fingerprint;

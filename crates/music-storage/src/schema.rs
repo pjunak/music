@@ -62,6 +62,21 @@ pub(crate) fn python_fixture_with_track_unique_constraint(fixture: &str, column:
     production
 }
 
+#[cfg(test)]
+pub(crate) fn python_fixture_with_non_unique_track_index(fixture: &str) -> String {
+    const UNIQUE_INDEX: &str = "CREATE UNIQUE INDEX ix_tracks_path ON tracks (path);";
+    const NON_UNIQUE_INDEX: &str = "CREATE INDEX ix_tracks_path ON tracks (path);";
+    let production = fixture.replacen(UNIQUE_INDEX, NON_UNIQUE_INDEX, 1);
+    assert_ne!(production, fixture, "tracks index fixture marker is stale");
+    production
+}
+
+#[cfg(test)]
+pub(crate) fn python_fixture_with_legacy_track_uniqueness(fixture: &str) -> String {
+    let production = python_fixture_with_track_unique_constraint(fixture, "path");
+    python_fixture_with_non_unique_track_index(&production)
+}
+
 const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("tracks", "display_title"),
     ("tracks", "origin"),
@@ -422,6 +437,22 @@ pub(crate) async fn inspect_pool(
     for (index_name, expected_index) in &expected.indexes {
         match actual.indexes.get(index_name) {
             Some(actual_index) if actual_index == expected_index => {}
+            Some(actual_index)
+                if is_index_uniqueness_backed_by_constraint(
+                    &actual,
+                    expected_index,
+                    actual_index,
+                ) =>
+            {
+                issue(
+                    &mut issues,
+                    SchemaIssueLevel::Warning,
+                    "index_uniqueness_backed_by_constraint",
+                    format!(
+                        "index {index_name} is non-unique but its exact columns are protected by a table unique constraint"
+                    ),
+                );
+            }
             Some(_) => issue(
                 &mut issues,
                 SchemaIssueLevel::Error,
@@ -757,6 +788,21 @@ fn is_redundant_unique_constraint(
         .any(|index| index.table == table && index.unique && index.columns.as_slice() == columns)
 }
 
+fn is_index_uniqueness_backed_by_constraint(
+    actual: &DatabaseShape,
+    expected_index: &IndexShape,
+    actual_index: &IndexShape,
+) -> bool {
+    expected_index.unique
+        && !actual_index.unique
+        && actual_index.table == expected_index.table
+        && actual_index.columns == expected_index.columns
+        && actual
+            .tables
+            .get(&actual_index.table)
+            .is_some_and(|table| table.unique_constraints.contains(&actual_index.columns))
+}
+
 fn is_legacy_alembic_ledger(table: &TableShape) -> bool {
     let Some(version_column) = table.columns.get("version_num") else {
         return false;
@@ -825,7 +871,8 @@ mod tests {
 
     use super::{
         LEGACY_ALEMBIC_FIXTURE_SQL, LEGACY_KNOWN_DEVICES_FIXTURE_SQL, SchemaCompatibility,
-        inspect_database, inspect_pool, python_fixture_with_track_unique_constraint,
+        inspect_database, inspect_pool, python_fixture_with_legacy_track_uniqueness,
+        python_fixture_with_non_unique_track_index, python_fixture_with_track_unique_constraint,
     };
 
     const PYTHON_SQLITE_FIXTURE: &str =
@@ -854,8 +901,7 @@ mod tests {
             .max_connections(1)
             .connect_with(options)
             .await?;
-        let production_fixture =
-            python_fixture_with_track_unique_constraint(PYTHON_SQLITE_FIXTURE, "path");
+        let production_fixture = python_fixture_with_legacy_track_uniqueness(PYTHON_SQLITE_FIXTURE);
         sqlx::raw_sql(sqlx::AssertSqlSafe(production_fixture.as_str()))
             .execute(&pool)
             .await?;
@@ -883,6 +929,10 @@ mod tests {
             issue.code == "redundant_unique_constraint"
                 && issue.detail.contains("tracks")
                 && issue.detail.contains("path")
+        }));
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "index_uniqueness_backed_by_constraint"
+                && issue.detail.contains("ix_tracks_path")
         }));
         assert!(report.issues.iter().any(|issue| {
             issue.code == "missing_additive_column"
@@ -953,6 +1003,29 @@ mod tests {
         assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
         assert!(report.errors().any(|issue| {
             issue.code == "unique_constraint_mismatch" && issue.detail.contains("tracks")
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_non_unique_required_index_without_matching_constraint()
+    -> Result<(), Box<dyn Error>> {
+        let options = SqliteConnectOptions::new().in_memory(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        let incompatible_fixture =
+            python_fixture_with_non_unique_track_index(PYTHON_SQLITE_FIXTURE);
+        sqlx::raw_sql(sqlx::AssertSqlSafe(incompatible_fixture.as_str()))
+            .execute(&pool)
+            .await?;
+
+        let report = inspect_pool(&pool, true).await?;
+
+        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
+        assert!(report.errors().any(|issue| {
+            issue.code == "index_shape_mismatch" && issue.detail.contains("ix_tracks_path")
         }));
         Ok(())
     }

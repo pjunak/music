@@ -219,7 +219,7 @@ mod tests {
     use crate::StorageError;
     use crate::schema::{
         LEGACY_ALEMBIC_FIXTURE_SQL, LEGACY_KNOWN_DEVICES_FIXTURE_SQL,
-        python_fixture_with_track_unique_constraint,
+        python_fixture_with_legacy_track_uniqueness,
     };
 
     const PYTHON_SQLITE_FIXTURE: &str =
@@ -245,8 +245,7 @@ mod tests {
             .max_connections(1)
             .connect_with(options)
             .await?;
-        let production_fixture =
-            python_fixture_with_track_unique_constraint(PYTHON_SQLITE_FIXTURE, "path");
+        let production_fixture = python_fixture_with_legacy_track_uniqueness(PYTHON_SQLITE_FIXTURE);
         sqlx::raw_sql(sqlx::AssertSqlSafe(production_fixture.as_str()))
             .execute(&pool)
             .await?;
