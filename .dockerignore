@@ -1,66 +1,34 @@
-# Keep the build context lean. Excludes here apply to every COPY in the
-# Dockerfile; the file is read from the same dir as the Dockerfile.
+# The release image needs only these build inputs. This allowlist keeps local
+# tools, runtime state, generated output, and unrelated workspace files out of
+# the Docker build context.
+**
 
-# VCS / CI / editor metadata — not needed in the image, may leak refs
-.git
-.gitignore
-.gitattributes
-.github
-.vscode
-.idea
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
 
-# AI tooling working files
-AGENTS.md
-.aider*
-.cursorrules
-.cursor
-.continue
+!crates/
+!crates/**
 
-# Python build / runtime artefacts (huge .venv especially)
-**/__pycache__
-**/*.pyc
-**/*.pyo
-**/.pytest_cache
-**/.venv
-**/.mypy_cache
-**/.ruff_cache
-**/*.egg-info
+!frontend/
+!frontend/index.html
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.app.json
+!frontend/tsconfig.json
+!frontend/tsconfig.node.json
+!frontend/vite.config.ts
+!frontend/public/
+!frontend/public/**
+!frontend/scripts/
+!frontend/scripts/**
+!frontend/src/
+!frontend/src/**
 
-# Node — npm ci re-installs inside the build stage
-**/node_modules
-**/dist
-**/build
-**/.vite
+!modes/
+!modes/**
+modes/*/cache/
+modes/*/cache/**
 
-# Rust build output — BuildKit caches compilation inside the builder stage.
-target
-
-# Environment files — secrets never go in images
-.env
-.env.*
-!.env.example
-**/.env
-**/.env.*
-!**/.env.example
-
-# OS noise
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Logs / temp
-*.log
-*.tmp
-*.bak
-
-# Runtime state / media — never build-context material. `COPY modes` would
-# otherwise pull a local modes/*/cache/ into the seed baked in the image.
-music
-sfx
-backend/music
-backend/sfx
-modes/*/cache
-**/*.db
-**/*.db-wal
-**/*.db-shm
-devices.json
+!docs/
+!docs/THIRD_PARTY_NOTICES.md

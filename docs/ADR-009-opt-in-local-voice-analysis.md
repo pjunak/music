@@ -24,11 +24,12 @@ checkpoints every signal result as a partial row, closes that process pool, then
 voice-only pool and promotes each completed row to full. This keeps native TensorFlow memory out of
 the signal-analysis workers and makes an interrupted voice pass resumable without another decode.
 
-**Rust rewrite update (2026-08-28):** The Rust candidate preserves the two-pass document and job
+**Rust rewrite update (2026-08-29):** The Rust implementation preserves the two-pass document and job
 contract without Essentia or Python at runtime. A capacity-one, model-owning Rust thread runs the
 checksum-pinned graph directly through tract with independently implemented streaming MusiCNN
-preprocessing. Exact-model graph and end-to-end worker tests pass on Windows. Linux differential and
-resource-soak evidence remain required before this backend is accepted for cutover.
+preprocessing. Exact-model graph and end-to-end worker tests pass, and Linux container acceptance is
+green. The owner accepts private-library comparison and long resource-soak evidence as post-cutover
+operational checks for this personal deployment rather than release blockers.
 
 ## Context
 

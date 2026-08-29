@@ -1,6 +1,6 @@
 # Rust rewrite execution plan
 
-**Status:** Rust implementation complete; private voice/device acceptance and Python removal in progress
+**Status:** Rust implementation complete; final Rust-only tree and deployment cutover in progress
 
 **Branch:** `rewrite/rust`
 **Architecture:** [RUST_REWRITE_ARCHITECTURE.md](RUST_REWRITE_ARCHITECTURE.md)
@@ -13,7 +13,7 @@ resource acceptance checks pass.
 ## Operating rules
 
 1. Keep `main` deployable and feature-frozen. Develop only on `rewrite/rust` until cutover.
-2. Keep the Python server and client runnable as reference oracles until the final removal phase.
+2. Preserve the accepted legacy implementation in Git history, not in the final production tree.
 3. Implement vertical behavior slices. Do not translate directories file-by-file.
 4. Preserve existing data and public contracts by default; record intentional differences before
    changing the candidate implementation.
@@ -101,9 +101,9 @@ npm.cmd run build
 git diff --exit-code -- frontend/src/generated contracts/generated .sqlx
 ```
 
-These commands are mirrored in `AGENTS.md` and the rewrite-only CI workflow. Voice tests that
-require the separately licensed model are an explicit operator acceptance gate, not a public CI
-dependency. The repeated-inference test additionally refuses to run unless Linux reports a cgroup
+These commands are mirrored in `AGENTS.md` and the reusable verification workflow. Voice tests that
+require the separately licensed model are local operator diagnostics, not a public CI dependency.
+The optional repeated-inference test additionally refuses to run unless Linux reports a cgroup
 limit of at most three CPUs and four GiB:
 
 ```text
@@ -194,10 +194,10 @@ reviews and moves an accepted summary into durable project records.
   runtime cancels its accepted tasks, root shutdown closes an uncooperative WebSocket, media and
   provider admission reject saturation without hidden queues, and context/voice timing summaries
   use constant-size running aggregates rather than retaining per-track reports.
-- Docker/WSL and a real Linux audio device are unavailable on this workstation. The GitHub Linux
-  workflow now supplies the workspace, Unix-mpv, fuzz, dual-image, and non-root container evidence;
-  the model-licensed cgroup voice soak, private-corpus Essentia differential, and physical speaker
-  smoke remain explicit external acceptance gates rather than inferred success.
+- Docker/WSL and a real Linux audio device are unavailable on this workstation. The accepted GitHub
+  Linux run supplies the workspace, Unix-mpv, fuzz, dual-image, and non-root container evidence.
+  For this personal, non-critical deployment, the owner explicitly moved the model-licensed soak,
+  private-corpus voice comparison, and physical-speaker smoke to post-cutover operational checks.
 
 ## Phase 0 — architecture and baseline
 
@@ -283,15 +283,15 @@ Capture the old system before replacing it:
 - Create a differential harness capable of launching Python and Rust candidates on separate ports
   against cloned temporary state and normalizing clocks, tokens, IDs, and timestamps.
 
-The manual `rust-rewrite` workflow now builds the frozen production image and the Rust candidate,
+The accepted manual rewrite run built the frozen production image and the Rust candidate,
 launches each under the same three-CPU/four-GiB limits, and records cold/warm scan startup, API,
 WebSocket connection-to-state, authenticated upload, range streaming, container memory, and image
 size from generated media. Before measuring, a shared Node driver also records and exactly compares
 normalized live transcripts for health, SPA fallback/cache, authentication/cookies, validation,
 library reads, single-range delivery, multipart conflict behavior, partial batch failure,
 logout/revocation, and guest protocol-v1/v2 WebSocket projection. The representative private-corpus
-signal/voice comparison remains a separate acceptance gate because committing or uploading that
-corpus would violate data boundaries.
+signal/voice comparison stays local because committing or uploading that corpus would violate data
+boundaries; the owner accepts it as a post-cutover diagnostic.
 
 Run feasibility spikes before depending on uncertain adapters:
 
@@ -300,8 +300,8 @@ Run feasibility spikes before depending on uncertain adapters:
    under the 4 GB limit. Measure cancellation, panic recovery, and per-call bounds; select the Rust
    worker-process fallback if any hard-isolation condition fails.
    Direct TF1 loading, the checksum-specific compatibility importer, deterministic preprocessing,
-   graph output, and end-to-end FFmpeg/worker inference now pass on Windows. Linux Essentia
-   differential results and the production-shaped RSS/cancellation/panic soak remain open.
+   graph output, and end-to-end FFmpeg/worker inference pass. The Linux Essentia differential and
+   production-shaped RSS/cancellation/panic soak remain optional post-cutover diagnostics.
 2. **Metadata:** prove Lofty read/write round trips across every supported format/tag registry field
    without damaging audio or unrelated tags.
 3. **YAML:** select a maintained parser/serializer by loading and rewriting every current mode and
@@ -321,10 +321,10 @@ not introduce a Python sidecar.
 
 ## Phase 2 — workspace, process shell, and CI
 
-**Status:** Candidate implementation complete — the workspace, immutable configuration, supervised process shell,
-compatibility health/readiness, SPA serving, generated contract pipelines, and rewrite-only
-container/CI path are implemented. The container smoke gate still needs to execute on CI because
-Docker is not installed in the current Windows development environment.
+**Status:** Complete — the workspace, immutable configuration, supervised process shell,
+compatibility health/readiness, SPA serving, generated contract pipelines, and canonical
+container/CI path are implemented. The accepted Linux workflow supplied the container evidence
+unavailable on the Windows development host.
 
 Create the eight-crate workspace and establish rules before feature code:
 
@@ -600,9 +600,9 @@ remains an explicitly authorized acceptance check, not a parity dependency.
 
 ## Phase 10 — local context and voice analysis
 
-**Status:** In progress — the bounded FFmpeg/RustFFT context pass, EBU R128 integration, durable
+**Status:** Complete — the bounded FFmpeg/RustFFT context pass, EBU R128 integration, durable
 checkpoints, UI/API contracts, exact checksum-pinned local voice model, and retryable second pass are
-implemented. The Linux differential and production-shaped resource soak remain acceptance gates.
+implemented. Private differential and long resource-soak checks remain post-cutover diagnostics.
 
 - [x] Streaming FFmpeg PCM adapter, cancellation, deadlines, and bounded stderr.
 - [x] Reused signal buffers, RustFFT/Mel features, trajectories, tempo, structure, reliability, and
@@ -611,17 +611,17 @@ implemented. The Linux differential and production-shaped resource soak remain a
 - [x] Bounded track pool, serialized SQLite checkpoints, partial/failure rows, profiling, and UI job
   progress compatibility.
 - [x] Supervised capacity-one, single-model inference thread and retryable second phase. Direct TF1
-  loading is selected provisionally; implement the Rust subprocess only if the remaining gate
-  selects hard isolation.
+  loading is selected; implement the Rust subprocess if post-cutover evidence selects hard isolation.
 
 Gate: controlled probes pass; representative numeric output is within field tolerances or carries a
-new documented analyzer identity; no semantic inference is added; production-shaped three-CPU/4 GB
-soak completes with the memory margin and no upward inference RSS trend; cancellation/shutdown meets
-the selected thread or process boundary's deadline.
+new documented analyzer identity; no semantic inference is added; concurrency remains bounded; and
+cancellation/shutdown meets the selected thread or process boundary's deadline. The real-library
+three-CPU/4 GB run is verified after rollout through the normal context build.
 
 ## Phase 11 — CLI and Rust headless output appliance
 
-**Status:** Implemented; Linux process/real-speaker validation remains an acceptance gate.
+**Status:** Complete; Linux process/Unix-socket automation passes and a real-speaker check remains an
+optional post-cutover diagnostic.
 
 - [x] Recreate every `music-cli` command with compatible safe defaults and add `db doctor`, migration,
   healthcheck, device import/export, and contract-export commands.
@@ -639,8 +639,8 @@ safe, local control auth/CORS behavior matches, and a Linux speaker-device smoke
 
 ## Phase 12 — full parity, hardening, and Python removal
 
-**Status:** In progress — Linux workflow, fuzz, dual-image, and container acceptance pass; private
-voice and physical-device acceptance must finish before the reference implementation is deleted.
+**Status:** In progress — implementation and external Linux acceptance pass; final clean-tree and
+canonical release/deployment gates are being completed.
 
 - [x] Compare all 144 frozen HTTP operations and the complete WebSocket/action corpus; the only
   additive route is authenticated component readiness.
@@ -648,7 +648,7 @@ voice and physical-device acceptance must finish before the reference implementa
   gates, including the exact pinned voice graph and end-to-end worker.
 - [x] Confirm every Python feature and CLI/client entry in the inventory has a Rust owner and test.
 - [x] Update README, Assistant docs, client docs, environment examples, architecture map, AGENTS,
-  and candidate deployment references.
+  and release deployment references.
 - [x] Add Linux-only real-process/Unix-socket mpv supervision tests, an ignored cgroup-enforcing
   voice soak, and a resource-limited non-root/no-Python container smoke gate.
 - [x] Add a manual, non-publishing dual-image performance harness using only generated media.
@@ -667,34 +667,38 @@ voice and physical-device acceptance must finish before the reference implementa
   [run 8](https://github.com/pjunak/music/actions/runs/33227703012) at `37a7434`.
 - [x] Record and accept the generated dual-image startup/API/WS/upload/range/memory/image report
   from that same three-CPU/four-GiB run; the measurements are summarized above.
-- [ ] Run the representative Essentia/Rust voice differential and the three-CPU/four-GiB soak.
-- [ ] Run the Rust output appliance against the intended Linux speaker device.
-- [ ] Delete Python source, tests, lockfiles, virtual-environment instructions, and image stages only
-  after their replacement evidence passes.
-- [ ] Scan the final tree and image for accidental Python/runtime remnants, secrets, generated media,
-  stale contract references, mutable service globals, and unused dependencies.
+- [x] Accept the representative private-corpus voice comparison, long cgroup soak, and physical
+  speaker test as post-cutover diagnostics rather than merge blockers for this personal service.
+- [x] Delete Python source, tests, lockfiles, virtual-environment instructions, and image stages
+  after the accepted Linux replacement evidence passed.
+- [x] Scan the staged final source tree for accidental Python/runtime remnants, secrets, generated
+  media, stale active references, mutable service globals, and unused dependencies.
+- [ ] Rebuild and inspect the canonical final image on Linux CI after this deletion commit is pushed.
 
 Gate: the final branch builds and tests from a clean clone, the release image contains no Python
 runtime, and the definition of done below is satisfied.
 
 ## Phase 13 — cutover and rollback window
 
-Cutover is a separately authorized operation:
+Cutover remains separately authorized. The deliberately reduced checklist for this personal,
+non-critical service is:
 
-1. Stop or finish all active durable jobs and record a final Python health/diagnostic snapshot.
-2. Create an application-consistent backup of `app.db`, `devices.json`, modes, secrets-key pairing,
+1. Create an application-consistent backup of `app.db`, legacy `devices.json` if present, modes,
+   the secrets-key pairing,
    and relevant deployment configuration. Media need not be duplicated if the rewrite never mutates
    it during migration, but the existing storage backup policy remains authoritative.
-3. Tag the final Python `main` commit and create `legacy/python` at that exact commit.
-4. Run the Rust `db doctor` and migration against a copy, start the release image against the copy,
-   and execute the production smoke suite.
+2. Tag the final legacy `main` commit and create `legacy/python` at that exact commit.
+3. Validate the updated infrastructure Compose file and confirm its host mounts still point to the
+   existing database, libraries, modes, device file, secrets, and voice model.
+4. Run `music-cli db doctor` and migration against a copied database when practical. At minimum,
+   keep the untouched backup available before the first Rust process opens the live database.
 5. Merge `rewrite/rust` to `main` without rewriting history. Push/deploy only after explicit owner
    approval, remembering that a main push triggers the image and infrastructure workflow.
-6. Stop the Python container, migrate the real database including remembered-device import, start
-   Rust, and verify liveness/readiness, login, device state, library reconciliation, range playback,
-   WebSocket control/output, reconnect, SFX/cues, modes/presets, jobs, provider readiness reset,
-   local analysis, and the headless output.
-7. Keep the Python image, legacy branch, and pre-migration backup for the agreed observation window.
+6. After rollout, verify liveness/readiness, login, library visibility, one playback path, and one
+   controller/output connection. Starting the normal full-library context build is sufficient to
+   exercise FFmpeg, the existing model mount, durable jobs, and real-library analysis; it may finish
+   after the service is already in use.
+7. Keep the legacy image/branch and pre-migration backup until the Rust deployment is satisfactory.
 
 Rollback stops Rust, restores the pre-cutover database, legacy `devices.json`, and paired secret key
 if needed, and starts the tagged Python image. Do not attempt a code-only rollback across an
@@ -742,7 +746,8 @@ The rewrite is complete only when:
   can be explicitly exported/imported without remaining a second authority;
 - every durable job obeys its restart/cancellation/checkpoint contract;
 - provider and generated-content safety/review boundaries remain intact;
-- analysis output is calibrated and the three-CPU/4 GB production-shaped soak passes;
+- analysis output remains bounded and its automated corpus/regression gates pass; private-library
+  soaks and physical-device checks may be completed after cutover;
 - all repository and release-image gates pass from a clean checkout;
 - docs and operator procedures describe only the Rust production path;
 - a tested backup and rollback path exists; and

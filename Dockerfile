@@ -1,154 +1,77 @@
 # syntax=docker/dockerfile:1.7
 #
-# Multi-stage build for the music app (FastAPI backend + React/Vite SPA).
-#   Stage 1 — frontend-builder: build the React/Vite frontend → dist/
-#   Stage 2 — backend-builder:  compile any cffi/native wheels into /wheels
-#   Stage 3 — runtime:          slim image, no compilers, just installs
-#                               from the wheelhouse + copies static assets
-# The backend serves both /api/* (FastAPI routers) and / (the SPA via
-# SpaStaticFiles) at the same origin, so VITE_API_BASE_URL is empty.
+# Canonical release image: React SPA + Rust server/CLI in one non-root
+# container. Runtime state is kept under /data; the image itself is immutable.
 
 # ============================================================================
-# Stage 1: frontend builder
+# Stage 1: browser application
 # ============================================================================
 FROM node:26.7.0-alpine AS frontend-builder
 
 WORKDIR /frontend
-
-# Cache the npm install layer separately so source changes don't reinstall.
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY frontend/ ./
-
-# Same-origin in production: backend hosts the SPA at /, so the frontend
-# uses relative URLs.
 ENV VITE_API_BASE_URL=""
-
 RUN npm run build
-# Output: /frontend/dist
 
 # ============================================================================
-# Stage 2: backend wheel builder
+# Stage 2: Rust application
 # ============================================================================
-# Has the C toolchain + libffi-dev needed to compile argon2-cffi (and any
-# future cffi-backed wheel that doesn't ship a manylinux build for slim).
-# Output is just the wheels; the runtime stage stays compiler-free.
-FROM python:3.14.7-slim AS backend-builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        libffi-dev \
-        && rm -rf /var/lib/apt/lists/*
+FROM rust:1.97.1-trixie AS rust-builder
 
 WORKDIR /build
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
 
-# The purpose-trained voice classifier is deliberately opt-in because its
-# runtime and model carry stronger licenses than the base application.
-ARG INSTALL_VOICE_ANALYZER=false
-
-COPY backend/pyproject.toml backend/uv.lock ./
-COPY backend/app ./app
-
-# Build wheels for the exact dependency set in uv.lock (direct deps are
-# pinned == in pyproject, but transitives would otherwise float to whatever
-# pip resolves at build time) plus the project itself, into /wheels. The
-# runtime stage installs from this directory only — no network, no compiler.
-# --locked errors out if pyproject drifted from the lockfile instead of
-# silently building an unlocked graph.
-RUN pip install --no-cache-dir --upgrade \
-        pip==26.2.1 \
-        wheel==0.48.0 \
-        uv==0.12.6 && \
-    if [ "$INSTALL_VOICE_ANALYZER" = "true" ]; then voice_extra="--extra voice"; else voice_extra=""; fi && \
-    uv export --locked --no-dev $voice_extra --no-hashes --no-emit-project -o /tmp/requirements.txt && \
-    pip wheel --no-cache-dir --wheel-dir /wheels -r /tmp/requirements.txt . && \
-    rm /tmp/requirements.txt
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/build/target,sharing=locked \
+    cargo build --locked --release -p music-server --bins && \
+    mkdir -p /out && \
+    cp target/release/music-server target/release/music-cli /out/
 
 # ============================================================================
-# Stage 3: python runtime
+# Stage 3: minimal non-root runtime
 # ============================================================================
-FROM python:3.14.7-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
-ARG INSTALL_VOICE_ANALYZER=false
-
-# Runtime deps. FFmpeg decodes the library's supported audio formats for the
-# optional server-side signal analyzer. It runs as one bounded subprocess per
-# track; playback remains browser/client-owned.
-# (build-essential + libffi-dev are in the builder stage above; they
-# don't ship in this image.)
+# FFmpeg's libstdc++ dependency includes unused GDB Python pretty-printers.
+# GDB is absent from the runtime image, so discard that debugger-only payload.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
-        && rm -rf /var/lib/apt/lists/*
+        && rm -rf /var/lib/apt/lists/* /usr/share/gcc/python /usr/share/gdb && \
+    groupadd --system music && \
+    useradd --system --gid music --uid 1000 --home-dir /app --shell /usr/sbin/nologin music
 
 WORKDIR /app
 
-# Install from the pre-built wheelhouse — no compiler, no network access
-# needed. The wheelhouse contains every transitive dep + the music-backend
-# wheel itself.
-COPY --from=backend-builder /wheels /wheels
-RUN pip install --no-cache-dir --upgrade pip==26.2.1 && \
-    if [ "$INSTALL_VOICE_ANALYZER" = "true" ]; then project="music-backend[voice]"; else project="music-backend"; fi && \
-    pip install --no-cache-dir --no-index --find-links=/wheels "$project" && \
-    rm -rf /wheels
-
-# Fail the image build if a packaging change drops any of the read-only model
-# quality suites. These files are loaded from the installed package at runtime.
-RUN python -c "from app.assistant.model_evaluation import bundled_evaluation_suite_paths; missing = [str(path) for path in bundled_evaluation_suite_paths() if not path.is_file()]; assert not missing, f'Missing bundled evaluation suites: {missing}'"
-
-# Modes ship as a read-only seed at /seeds/modes (EQ presets ride along inside
-# each mode). On boot the backend copies it into MODES_DIR only when that
-# directory is empty, so user edits made in a bind-mounted volume survive
-# image rebuilds.
-COPY modes /seeds/modes
-
-# Built frontend SPA from stage 1.
+COPY --from=rust-builder /out/music-server /usr/local/bin/music-server
+COPY --from=rust-builder /out/music-cli /usr/local/bin/music-cli
 COPY --from=frontend-builder /frontend/dist /app/static
+COPY modes /seeds/modes
+COPY docs/THIRD_PARTY_NOTICES.md /usr/share/doc/music/THIRD_PARTY_NOTICES.md
 
-# Non-root runtime user. UID 1000 lines up with the typical first-user UID
-# on the host so bind-mounted dirs can be chown'd to match.
-#
-# `/data` is the recommended mount point: bind-mount it from the host to
-# persist music/, sfx/, modes/, and app.db across image rebuilds.
-# Subdirs are created by the app on first boot if missing — see lifespan.
-RUN groupadd -r music && \
-    useradd -r -g music -u 1000 -d /app -s /sbin/nologin music && \
-    mkdir -p /app/data /app/incoming /app/library /data && \
-    chown -R music:music /app /data /seeds
+RUN mkdir -p /data && \
+    chown music:music /data && \
+    chmod 0750 /data
 
 USER music
 
-# Default storage paths under /data so a single bind-mount persists every
-# stateful directory the app uses. Operators can override per-dir if they
-# need separate volumes (e.g. NAS-backed music, fast-disk DB).
 ENV MUSIC_DIR=/data/music \
     SFX_LIBRARY_DIR=/data/sfx \
     MODES_DIR=/data/modes \
     MODES_SEED_DIR=/seeds/modes \
     DEVICES_FILE=/data/devices.json \
     DATABASE_URL=sqlite:////data/app.db \
+    STATIC_DIR=/app/static \
     ASSISTANT_CREDENTIAL_KEY_FILE=/run/music-secrets/assistant-credential.key
 
 EXPOSE 8000
 
-# The slim image has no curl, so probe with Python's stdlib. start-period
-# covers scan_full on a large library before the container is judged healthy.
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD ["python","-c","import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+  CMD ["music-cli", "healthcheck", "--address", "127.0.0.1:8000", "--timeout-ms", "2000"]
 
-# Schema is created (idempotently) by the FastAPI lifespan — no migrations
-# step. exec'ing uvicorn directly keeps signal handling clean (graceful
-# shutdown on SIGTERM from `docker stop`).
-#
-# MUST stay a single worker: the sync layer (state machine, device registry,
-# connection manager, track advancer) is process-local by design — a second
-# worker would split the playback universe. See app/sync/.
-#
-# --proxy-headers: the documented deploy sits behind a reverse proxy, so
-# without X-Forwarded-For handling every client shares the proxy's address —
-# which turns the per-client login throttle into one global bucket (a
-# brute-forcer locks out the operator). Trusting any forwarder is fine when
-# port 8000 is only reachable via the proxy; a spoofed XFF on a directly
-# exposed port is backstopped by the global throttle bucket in api/auth.py.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["music-server"]

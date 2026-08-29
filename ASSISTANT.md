@@ -33,10 +33,10 @@ provider adapter, data limit, disclosure, quality suite, and review contract.
 
 ## 1. Prepare the deployment
 
-1. For rewrite acceptance, clone the complete persistence set described in
+1. Before the first Rust deployment, back up the complete persistence set described in
    [`docs/RUST_REWRITE_PLAN.md`](docs/RUST_REWRITE_PLAN.md#phase-13--cutover-and-rollback-window):
    `app.db`, legacy `devices.json` when present, modes, and the separately held Assistant key.
-   Point the Rust candidate only at this isolated copy.
+   Keep that restore set isolated from the live container.
 2. Run `music-cli db doctor` against the copy before migration. Unknown or damaged schema shapes
    are a stop condition; `music-cli db migrate` creates and verifies its own pre-migration database
    backup before applying the ordered SQLx migrations.
@@ -47,9 +47,9 @@ provider adapter, data limit, disclosure, quality suite, and review contract.
    their intended locations. Database migration does not rewrite media or mode documents;
    `devices.json` is imported once without modifying the source and SQLite is authoritative after
    that. Keep the normal long-term backup for media and authored modes.
-5. Build and deploy only an accepted release revision through the normal CI and
-   infrastructure workflow. During rewrite validation, use `Dockerfile.rust` against a copied
-   data set; do not copy a development database over production.
+5. Build and deploy only an accepted release revision through the normal CI and infrastructure
+   workflow. The canonical `Dockerfile` is the Rust release image; do not copy a development
+   database over production.
 6. After startup, sign in and confirm that normal playback, output-device selection,
    Authoring, and the Library still work before enabling optional models.
 
@@ -107,7 +107,7 @@ The Rust image includes the native inference code but never downloads or embeds 
 licensed model. Point it at a checksum-verified, read-only model mount:
 
 ```bash
-docker build -f Dockerfile.rust -t music-rust .
+docker build -t music-rust .
 docker run -d --name music \
   -p 8000:8000 \
   -v /srv/music-data:/data \

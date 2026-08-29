@@ -38,11 +38,10 @@ cargo deny --manifest-path fuzz/Cargo.toml --locked check
 cargo audit --file fuzz/Cargo.lock --deny warnings
 cargo machete .
 cargo machete fuzz
-node --test .github/scripts/voice-differential.test.mjs
 node --test .github/scripts/rewrite-tree.test.mjs
-node .github/scripts/rewrite-tree.mjs reference
-# After building the candidate image on a Docker host:
-bash .github/scripts/verify-rust-image.sh music-rust-rewrite:test
+node .github/scripts/rewrite-tree.mjs final
+# After building the release image on a Docker host:
+bash .github/scripts/verify-rust-image.sh music:test
 ```
 
 The checked-in toolchain is authoritative. On Windows hosts without the Visual Studio C++ build
@@ -407,15 +406,13 @@ Runtime data lives outside the image.
 - Runtime persistence is `app.db`, media directories, mode data, and the separately held Assistant
   key. A legacy `devices.json` may be imported but is never a second authority. Seed modes copy
   only when the target is empty.
-- The rewrite workflow validates Rust, the frontend, the frozen compatibility oracle, and the
-  non-root candidate image without publishing. The existing `main` workflow remains the only
-  image-publish/infrastructure-dispatch path until cutover is explicitly authorized.
-- Run the private-corpus voice differential only on an explicitly selected local Linux corpus with
-  the pinned model and frozen Essentia oracle. Keep its report path-free, do not widen the checked-in
-  tolerances at runtime, and do not delete the oracle until that evidence and the cgroup soak pass.
-- Before Python removal, `rewrite-tree.mjs reference` must keep the complete oracle fingerprint
-  unchanged and reject Python artifacts outside its quarantine. After accepted external evidence and
-  the deletion commit, replace that gate with `rewrite-tree.mjs final`; do not weaken its allowlist to
+- The reusable verification workflow validates Rust, the frontend, architecture boundaries,
+  dependencies, the final Rust-only tree, and the non-root release image. The `main` workflow calls
+  it before publishing an image or dispatching infrastructure deployment.
+- Private-library context/voice runs, long resource soaks, and physical-speaker checks are useful
+  post-cutover operational checks for this personal deployment, not merge blockers. Keep failures
+  visible and fix them normally; never weaken model or protocol contracts merely to make a check pass.
+- `rewrite-tree.mjs final` protects the completed language boundary. Do not weaken its allowlist to
   make a stale runtime, workflow, generated artifact, or transition tool pass.
 - This repository does not SSH to production. Deployment rollout, reverse
   proxy, bind mounts, and production `.env` live in `junak.eu`.

@@ -198,17 +198,16 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
 
 ## Quick start (Docker)
 
-During rewrite acceptance, `Dockerfile.rust` is the complete native candidate: it builds the React
-SPA and the Rust server/CLI, then copies only those binaries, the SPA, CA certificates, FFmpeg, and
-mode seeds into a non-root Debian runtime. It contains no Python runtime. Application data lives
+The canonical `Dockerfile` builds the React SPA and Rust server/CLI, then copies only those
+binaries, the SPA, CA certificates, FFmpeg, and mode seeds into a non-root Debian runtime. It
+contains no Python runtime. Application data lives
 under `/data`; the optional Assistant credential master key uses a separate secrets mount so it is
 not mixed into the database/media backup. The runtime user can write only the data mount; application
 binaries, SPA assets, and seed modes remain root-owned and read-only to that user.
 
 ```bash
-# Build the Rust candidate image. The default Dockerfile remains the frozen
-# Python release until the separately authorized main-branch cutover.
-docker build -f Dockerfile.rust -t music-rust .
+# Build the release image.
+docker build -t music-rust .
 
 # Prepare persistent data for the image's non-root UID.
 sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-data
@@ -231,9 +230,9 @@ docker exec -it music music-cli create-user admin
 Then open `http://localhost:8000` and sign in. A fresh install boots fine with **zero** audio
 files — drop music in through the Library tab (or straight into `/srv/music-data/music`).
 
-The rewrite workflow builds and smoke-tests this image without publishing it. The existing `main`
-workflow remains the only GHCR/deployment trigger until the owner explicitly authorizes cutover;
-production rollout itself belongs to the separate infrastructure repository.
+Pull requests and branch pushes run the Rust, frontend, architecture, security, and non-root
+container gates without publishing. A successful `main` workflow publishes the GHCR image and
+dispatches production rollout to the separate infrastructure repository.
 
 ## Configuration
 
@@ -433,6 +432,6 @@ clients/                   guest output protocol and appliance installation mate
 ## Tech stack
 
 Rust 1.97.1 · Tokio · Axum · SQLx/SQLite · Serde · Lofty · RustFFT · tract · argon2 · AES-GCM —
-React · TypeScript 7 · Vite · Zustand · Oxlint · Web Audio API. The candidate is packaged as a
+React · TypeScript 7 · Vite · Zustand · Oxlint · Web Audio API. The release is packaged as a
 multi-stage image (`node:26.7.0-alpine` + `rust:1.97.1-trixie` builders → non-root
 `debian:trixie-slim` runtime).

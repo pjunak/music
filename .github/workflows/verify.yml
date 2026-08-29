@@ -1,0 +1,163 @@
+name: Verify
+
+on:
+  workflow_call:
+    inputs:
+      run_fuzz:
+        description: Exercise every parser fuzz target
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      run_fuzz:
+        description: Exercise every parser fuzz target
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches-ignore: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MUSIC_TEST_FFMPEG: /usr/bin/ffmpeg
+      MUSIC_TEST_FFPROBE: /usr/bin/ffprobe
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+          rustup default 1.97.1
+
+      - name: Set up Node for repository gates
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
+      - name: Install media test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
+      - name: Check architecture and final repository tree
+        run: |
+          node --test .github/scripts/rust-architecture.test.mjs
+          node .github/scripts/rust-architecture.mjs
+          node --test .github/scripts/rewrite-tree.test.mjs
+          node .github/scripts/rewrite-tree.mjs final
+
+      - name: Format, lint, test, and document
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
+          cargo test --workspace --all-features
+          cargo test --workspace --all-features --doc
+          cargo build --locked --release -p music-output --bin music-output
+          cargo run --locked -p music-server --bin music-cli -- contracts check --root .
+
+      - name: Install pinned dependency auditors
+        run: |
+          cargo install cargo-deny --version 0.20.2 --locked
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo install cargo-machete --version 0.9.2 --locked
+
+      - name: Audit dependencies
+        run: |
+          cargo deny check
+          cargo deny --manifest-path fuzz/Cargo.toml --locked check
+          cargo audit --deny warnings
+          cargo audit --file fuzz/Cargo.lock --deny warnings
+          cargo machete .
+          cargo machete fuzz
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
+      - name: Lint, typecheck, test, and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build
+
+  container:
+    name: Non-root release container
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [rust, frontend]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the release image
+        run: docker build --tag music:test .
+
+      - name: Boot under production resource limits and serve the SPA
+        run: |
+          container_id=$(docker run --detach --cpus 3 --memory 4g --publish 18000:8000 music:test)
+          trap 'docker logs "$container_id"; docker rm --force "$container_id"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18000/api/readiness >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              exit 1
+            fi
+            sleep 1
+          done
+          bash .github/scripts/verify-rust-image.sh music:test
+          curl --fail --silent http://127.0.0.1:18000/api/health | \
+            grep --quiet '"status":"ok"'
+          curl --fail --silent http://127.0.0.1:18000/ | grep --quiet '<!doctype html>'
+
+  fuzz-smoke:
+    name: Parser fuzz smoke
+    if: ${{ inputs.run_fuzz }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install nightly Rust and pinned cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Build and exercise every fuzz target
+        run: |
+          cargo +nightly fuzz build
+          for target in protocol_json media_path authored_yaml authoring_import assistant_output; do
+            cargo +nightly fuzz run "$target" -- \
+              -runs=2000 \
+              -max_len=65536 \
+              -timeout=10 \
+              -rss_limit_mb=2048 \
+              -print_final_stats=1
+          done

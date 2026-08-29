@@ -370,23 +370,20 @@ creates `remembered_devices`, `legacy_device_imports`, and `recovery_journal`. M
 created directly because there is no prior state to back up. `music-cli db doctor` is read-only;
 `music-cli db migrate` takes the same lifetime lock as the server and follows this identical path.
 
-### Frozen reference and final-tree boundary
+### Final-tree boundary
 
-The Python implementation is an immutable compatibility oracle during rewrite acceptance, not a
-second implementation that may continue evolving. `contracts/reference/python-oracle-tree.json`
-fingerprints the ordered Git blob set for the complete backend, its production Dockerfile and
-legacy headless appliance. The rewrite workflow runs
-`.github/scripts/rewrite-tree.mjs reference`, which requires a clean checkout, rejects Python files
-outside that explicit quarantine, and fails on any added, removed, or changed oracle blob.
+During rewrite acceptance, the Python implementation was frozen and content-fingerprinted as an
+immutable compatibility oracle. After the accepted Linux semantic, performance, fuzz, Unix-process,
+and container run—and the owner's decision to move private-library and physical-device checks after
+cutover—the oracle and transition harness were removed from the production branch.
 
-After the external Linux, performance, voice, and speaker gates are accepted, the deletion commit
-switches that command to `rewrite-tree.mjs final`. Final mode requires the canonical `Dockerfile`,
-rejects the quarantined backend and every common Python project artifact, rejects transition-only
-comparison scripts and `Dockerfile.rust`, scans active workflows/operator instructions for stale
-runtime commands, and rejects tracked build output, databases, audio, environments, or key material.
-Historical ADR prose and Rust compatibility fixtures remain valid evidence and are deliberately not
-mistaken for executable Python. Image inspection, gitleaks, and pinned `cargo-machete` checks remain
-separate gates because a source-tree allowlist cannot prove those properties.
+`.github/scripts/rewrite-tree.mjs final` is now a permanent clean-checkout gate. It requires the
+canonical `Dockerfile`, rejects backend and common Python project artifacts, rejects former
+transition-only paths, scans active workflows/operator instructions for stale runtime commands, and
+rejects tracked build output, databases, audio, environments, or key material. Historical ADR prose
+and Rust compatibility fixtures remain valid evidence and are deliberately not mistaken for
+executable Python. Image inspection, gitleaks, and pinned `cargo-machete` checks remain separate
+gates because a source-tree allowlist cannot prove those properties.
 
 ### Compatibility-sensitive data
 
@@ -665,11 +662,11 @@ code, leaks, wedges, cannot bound an inference call, or cannot meet shutdown dea
 `VoiceBackend` runs in a supervised Rust subprocess using versioned length-prefixed IPC. Process
 isolation is therefore a tested fallback, not a Python-era default.
 
-The Windows implementation gate verifies the official model checksum, exact graph output shape and
+The implementation gate verifies the official model checksum, exact graph output shape and
 fixed zero-input output, end-to-end FFmpeg-to-worker inference, bounded score aggregation, frame and
-patch counts, and cancellation-aware streaming. Final acceptance still requires a Linux runner to
-compare representative preprocessing and outputs against Essentia and to record repeated-run RSS,
-shutdown, cancellation, and panic behavior under the three-CPU/4 GB envelope. If that evidence
+patch counts, and cancellation-aware streaming. A normal full-library context build after rollout
+exercises the actual media, model mount, and durable job path. Private Essentia comparison and a
+long repeated-run RSS/cancellation soak remain useful post-cutover diagnostics. If that evidence
 fails, the same interface moves to the documented Rust subprocess. There is no Python fallback.
 
 ## Assistant and provider boundary
@@ -773,10 +770,10 @@ Performance is accepted against measured baselines, not language expectations:
 - API and WebSocket latency must not regress materially under the representative local load.
 - Full signal-context output must stay within field tolerances and be no slower than the Python
   baseline; target at least 25% lower elapsed time or peak memory on the representative corpus.
-- The production analysis run must remain below the 4 GB cgroup limit with three CPUs; target a
-  15% memory safety margin.
-- Voice inference loads one model instance and completes repeated-corpus soak tests without upward
-  unbounded resident-memory growth.
+- The production deployment remains capped at 4 GB and three CPUs; the normal full-library context
+  build is the practical post-cutover test of that real workload.
+- Voice inference loads one model instance; repeated-corpus soak testing is retained as an optional
+  diagnostic for upward resident-memory growth.
 - Idle memory, startup scan, upload, range streaming, and image size are recorded before/after even
   where no hard improvement is required.
 
@@ -789,8 +786,8 @@ The production image remains a multi-stage build:
 3. A slim Debian runtime receives `music-server`, `music-cli`, the static frontend, seed modes,
    CA certificates, FFmpeg/ffprobe, and no compiler or Python runtime.
 
-The rewrite Dockerfile has its own allowlisted build context, so the frozen Python oracle and local
-workspace state are not sent to that builder. The runtime retains the checked-in third-party notice,
+The canonical Dockerfile has an allowlisted build context, so local tools, generated output, runtime
+state, and unrelated workspace files are not sent to the builder. The runtime retains the checked-in third-party notice,
 and its reusable image-policy gate rejects Python/build tools, Python source/runtime files, baked
 data, media, keys, databases, source manifests, and generated workspace directories. It also proves
 that `/data` is the only writable application boundary: `/app` and `/seeds` stay root-owned and

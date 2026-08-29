@@ -6,12 +6,13 @@
 
 **Decider:** Project owner
 
-**Implementation update (2026-08-28):** The checksum-pinned MusiCNN TensorFlow graph runs directly
+**Implementation update (2026-08-29):** The checksum-pinned MusiCNN TensorFlow graph runs directly
 through tract 0.23.5 after a checksum-specific, in-memory compatibility normalization for four fixed
 padding operators and `FusedBatchNormV3`. One dedicated Rust thread owns the compiled graph and a
-capacity-one request queue. This confirms the thread as the implementation candidate; the Linux
-Essentia differential and production-shaped RSS/cancellation soak still gate final acceptance over
-the subprocess fallback.
+capacity-one request queue. This confirms the thread as the production implementation. For the
+personal deployment, the owner accepts the private Essentia comparison and production-shaped
+RSS/cancellation soak as post-cutover diagnostics rather than blockers; the subprocess fallback
+remains available if that evidence later exposes a real fault.
 
 ## Context
 
@@ -133,8 +134,8 @@ the Rust subprocess remains the required fallback when bounded shutdown cannot b
    [architecture reassessment](RUST_ARCHITECTURE_REASSESSMENT.md).
 2. [x] Phase 1 captures current startup, error, device-store, job, protocol, and model behavior as
    executable reference evidence.
-3. [ ] Phase 1 proves SQLite import/lock/write-gate and in-process voice feasibility on copied data.
-   Storage is proven; voice graph loading and end-to-end inference are proven, while differential
-   output and resource-soak evidence remain.
+3. [x] Phase 1 proves SQLite import/lock/write-gate and in-process voice feasibility on copied data.
+   Storage, graph loading, and end-to-end inference are proven; private differential output and the
+   long resource soak remain optional post-cutover diagnostics.
 4. [x] Phase 2 creates the eight-crate skeleton and supervised runtime before feature porting.
 5. [x] The compatibility ledger records every accepted difference and its frontend/operator effect.

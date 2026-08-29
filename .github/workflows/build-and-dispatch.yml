@@ -1,7 +1,7 @@
 name: Build and dispatch
 
-# Builds the music image (FastAPI backend + bundled React SPA) and
-# fires repository_dispatch at the infra repo to trigger a deploy.
+# Verifies and publishes the canonical Rust server + React SPA image, then
+# asks the infrastructure repository to deploy the exact source revision.
 #
 # Required secret  : INFRA_DISPATCH_TOKEN  (fine-grained PAT on the infra repo)
 # Required variable: INFRA_REPO            (e.g. pjunak/junak.eu)
@@ -12,7 +12,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Job-level minimum: only `build` needs to push packages (declared there).
 permissions:
   contents: read
 
@@ -21,45 +20,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Gate production deploys on the backend + frontend test/lint suites: the
-  # build/push and infra dispatch only run if these pass.
   verify:
-    name: Lint and test
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-
-      # uv sync --locked installs the exact transitive graph from uv.lock
-      # (and fails on pyproject/lock drift) — a plain `pip install -e .`
-      # would re-resolve transitives to whatever is newest at run time,
-      # testing a dependency set that was never locked.
-      - name: Backend lint and tests
-        run: |
-          cd backend
-          pip install uv
-          uv sync --locked --extra dev
-          uv run ruff check app tests
-          uv run mypy app tests
-          uv run pytest
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "26"
-
-      - name: Frontend lint, typecheck, and tests
-        run: |
-          cd frontend
-          npm ci
-          npm run lint
-          npm run typecheck
-          npm run test
+    name: Verify release
+    uses: ./.github/workflows/verify.yml
+    with:
+      run_fuzz: false
 
   build:
     name: Build and push image
@@ -92,8 +57,6 @@ jobs:
         with:
           context: .
           push: true
-          build-args: |
-            INSTALL_VOICE_ANALYZER=true
           tags: |
             ${{ steps.img.outputs.name }}:latest
             ${{ steps.img.outputs.name }}:sha-${{ github.sha }}

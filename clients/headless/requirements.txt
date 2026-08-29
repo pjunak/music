@@ -1,6 +1,0 @@
-# Headless output client deps.
-# This appliance installs directly from this file, so exact pins keep rebuilds reproducible.
-# python-mpv also needs the libmpv shared library at the OS level:
-#   Debian/Ubuntu:  sudo apt install mpv libmpv2   (older releases: libmpv1)
-websocket-client==1.9.0
-python-mpv==1.0.8

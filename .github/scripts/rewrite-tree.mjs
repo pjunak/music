@@ -1,17 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "..", "..");
-const MANIFEST_PATH = "contracts/reference/python-oracle-tree.json";
-const REFERENCE_EXACT_PATHS = new Set([
-  "Dockerfile",
-  "clients/headless/music_output.py",
-  "clients/headless/requirements.txt",
-]);
 const TRANSITION_ONLY_PATHS = new Set([
   ".github/scripts/compare-runtime.sh",
   ".github/scripts/runtime-differential.mjs",
@@ -19,6 +12,7 @@ const TRANSITION_ONLY_PATHS = new Set([
   ".github/scripts/voice-differential.test.mjs",
   "Dockerfile.rust",
   "Dockerfile.rust.dockerignore",
+  "contracts/reference/python-oracle-tree.json",
 ]);
 const PYTHON_BASENAMES = new Set([
   ".python-version",
@@ -39,19 +33,8 @@ const ACTIVE_REFERENCE_PATTERNS = [
   [/^\s*FROM\s+python(?::|\s)/imu, "Python container base"],
   [/(?:^|[\s"'`])(?:python3?|pip3?|uv)\s+(?:-m|install|sync|run|export|wheel|test|check)\b/imu, "Python package/runtime command"],
   [/backend\/(?:app|tests|pyproject\.toml|uv\.lock|\.venv)/iu, "removed backend path"],
-  [/Dockerfile\.rust|music_output\.py|requirements\.txt/iu, "transition-only path"],
+  [/Dockerfile\.rust|music_output\.py|requirements\.txt/iu, "removed transition path"],
 ];
-
-function usage() {
-  return [
-    "usage: node .github/scripts/rewrite-tree.mjs <mode>",
-    "",
-    "modes:",
-    "  fingerprint  print the current frozen-oracle fingerprint",
-    "  reference    verify the clean pre-cutover tree and frozen oracle",
-    "  final        verify a clean post-acceptance Rust-only tree",
-  ].join("\n");
-}
 
 function runGit(arguments_) {
   const result = spawnSync("git", arguments_, {
@@ -85,28 +68,12 @@ function trackedEntries() {
     });
 }
 
-export function isReferenceArtifact(path) {
-  return path.startsWith("backend/") || REFERENCE_EXACT_PATHS.has(path);
-}
-
 export function isPythonArtifact(path) {
   const name = basename(path);
   return path.toLowerCase().endsWith(".py")
     || path.toLowerCase().endsWith(".pyi")
     || /^requirements(?:[-_.].*)?\.txt$/iu.test(name)
     || PYTHON_BASENAMES.has(name);
-}
-
-export function referenceFingerprint(entries) {
-  const selected = entries
-    .filter((entry) => entry.type === "blob" && isReferenceArtifact(entry.path))
-    .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
-  const digest = createHash("sha256");
-  for (const entry of selected) digest.update(`${entry.path}\0${entry.oid}\n`, "utf8");
-  return {
-    tracked_files: selected.length,
-    git_blob_manifest_sha256: digest.digest("hex"),
-  };
 }
 
 function isActiveSurface(path) {
@@ -134,7 +101,7 @@ export function finalTreeViolations(entries, readText) {
   if (!paths.includes("Dockerfile")) violations.push("Dockerfile: final Rust image definition is missing");
   const backendPaths = paths.filter((path) => path.startsWith("backend/"));
   if (backendPaths.length > 0) {
-    violations.push(`backend/: ${backendPaths.length} tracked frozen-oracle files remain`);
+    violations.push(`backend/: ${backendPaths.length} tracked legacy files remain`);
   }
   for (const path of paths) {
     if (path.startsWith("backend/")) continue;
@@ -159,27 +126,6 @@ export function finalTreeViolations(entries, readText) {
   return [...new Set(violations)].sort();
 }
 
-function checkReference(entries) {
-  assertCleanWorktree();
-  const paths = entries.filter((entry) => entry.type === "blob").map((entry) => entry.path);
-  const unexpected = paths.filter((path) => isPythonArtifact(path) && !isReferenceArtifact(path));
-  if (unexpected.length > 0) {
-    throw new Error(`Python artifacts escaped the frozen reference boundary:\n${unexpected.join("\n")}`);
-  }
-  const manifest = JSON.parse(readFileSync(resolve(REPOSITORY_ROOT, MANIFEST_PATH), "utf8"));
-  const actual = referenceFingerprint(entries);
-  if (manifest.schema_version !== "python-oracle-tree/v1"
-      || manifest.tracked_files !== actual.tracked_files
-      || manifest.git_blob_manifest_sha256 !== actual.git_blob_manifest_sha256) {
-    throw new Error([
-      "frozen Python oracle drifted from its checked-in manifest",
-      `expected ${manifest.tracked_files} files / ${manifest.git_blob_manifest_sha256}`,
-      `actual   ${actual.tracked_files} files / ${actual.git_blob_manifest_sha256}`,
-    ].join("\n"));
-  }
-  process.stdout.write(`frozen Python oracle is unchanged (${actual.tracked_files} tracked files)\n`);
-}
-
 function checkFinal(entries) {
   assertCleanWorktree();
   const violations = finalTreeViolations(
@@ -193,24 +139,11 @@ function checkFinal(entries) {
 }
 
 function main() {
-  const [mode, ...extra] = process.argv.slice(2);
-  if (extra.length > 0 || !mode || mode === "--help" || mode === "-h") {
-    if (!mode || mode === "--help" || mode === "-h") {
-      process.stdout.write(`${usage()}\n`);
-      return;
-    }
-    throw new Error(usage());
+  const arguments_ = process.argv.slice(2);
+  if (arguments_.length > 1 || (arguments_.length === 1 && arguments_[0] !== "final")) {
+    throw new Error("usage: node .github/scripts/rewrite-tree.mjs [final]");
   }
-  const entries = trackedEntries();
-  if (mode === "fingerprint") {
-    process.stdout.write(`${JSON.stringify(referenceFingerprint(entries), null, 2)}\n`);
-  } else if (mode === "reference") {
-    checkReference(entries);
-  } else if (mode === "final") {
-    checkFinal(entries);
-  } else {
-    throw new Error(usage());
-  }
+  checkFinal(trackedEntries());
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : "";
