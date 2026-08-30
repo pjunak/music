@@ -129,7 +129,7 @@ beforeEach(() => {
 
 describe("LibraryContextView", () => {
   it("mirrors the library and shows time-aware context with playback", async () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <LibraryContextView />
       </MemoryRouter>,
@@ -138,15 +138,61 @@ describe("LibraryContextView", () => {
     expect(await screen.findByRole("heading", { name: "Quiet Road" })).toBeInTheDocument();
     expect(screen.queryByText("Development across the track")).not.toBeInTheDocument();
     expect(screen.getAllByText("gradual rise · 20%–80%")).toHaveLength(6);
-    expect(screen.getByLabelText(/Intensity, rhythmic drive/)).toBeInTheDocument();
-    const player = screen.getByLabelText("Play Quiet Road");
+    const graph = screen.getByLabelText(/Intensity, rhythmic drive/);
+    expect(graph).toHaveAttribute("preserveAspectRatio", "none");
+    const player = container.querySelector("audio");
+    expect(player).not.toBeNull();
+    if (player === null) throw new Error("expected the track preview audio element");
     expect(player).toHaveAttribute("src", "/api/library/tracks/9/stream");
+    expect(player).not.toHaveAttribute("controls");
+    const heading = screen.getByRole("heading", { name: "Quiet Road" });
+    expect(heading.parentElement).toHaveTextContent("Quiet RoadTabletop Ensemble");
+    expect(
+      container.querySelector(".assistant-context-detail-heading > .assistant-context-status"),
+    ).toHaveTextContent("full · high confidence");
     expect(screen.getByText("0:00 / 3:00")).toBeInTheDocument();
-    Object.defineProperty(player, "currentTime", { configurable: true, value: 90 });
+    Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 90 });
     fireEvent.timeUpdate(player);
     expect(await screen.findByText("1:30 / 3:00")).toBeInTheDocument();
     expect(screen.queryByText("Campaign/Forest/Quiet Road.flac")).not.toBeInTheDocument();
     await waitFor(() => expect(assistantApi.getTrackContext).toHaveBeenCalledWith(9));
+  });
+
+  it("uses the graph scrubber and custom preview controls", async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <LibraryContextView />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Quiet Road" })).toBeInTheDocument();
+    const player = container.querySelector("audio");
+    if (player === null) throw new Error("expected the track preview audio element");
+    Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
+    const play = vi.fn().mockResolvedValue(undefined);
+    const pause = vi.fn();
+    Object.defineProperty(player, "play", { configurable: true, value: play });
+    Object.defineProperty(player, "pause", { configurable: true, value: pause });
+
+    const scrubber = screen.getByRole("slider", { name: "Seek Quiet Road" });
+    fireEvent.change(scrubber, { target: { value: "45" } });
+    expect(player.currentTime).toBe(45);
+    expect(screen.getByText("0:45 / 3:00")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Play Quiet Road" }));
+    expect(play).toHaveBeenCalledOnce();
+    fireEvent.play(player);
+    expect(screen.getByRole("button", { name: "Pause Quiet Road" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("slider", { name: "Quiet Road preview volume" }), {
+      target: { value: "0.35" },
+    });
+    expect(player.volume).toBe(0.35);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop Quiet Road" }));
+    expect(pause).toHaveBeenCalledOnce();
+    expect(player.currentTime).toBe(0);
+    expect(screen.getByText("0:00 / 3:00")).toBeInTheDocument();
   });
 
   it("shows bounded classifier score and coverage when voice analysis is configured", async () => {

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { FolderTree } from "@/components/FolderTree";
+import { IconButton } from "@/components/IconButton";
 import { LibrarySidebarRail } from "@/components/LibrarySidebarRail";
+import { PauseIcon, PlayIcon, StopIcon } from "@/components/icons";
+import { VolumeControl } from "@/components/VolumeControl";
 import type { TrackContextDetail } from "@/core/api";
 import { assistantApi, libraryApi } from "@/core/api";
 import type { Track } from "@/core/types";
@@ -42,6 +45,15 @@ function seconds(value: unknown): string {
   return `${minutes}:${String(Math.round(number % 60)).padStart(2, "0")}`;
 }
 
+function timelineDuration(detail: TrackContextDetail): number {
+  return Math.max(
+    1,
+    ...detail.timeline.map(
+      (point) => (point.start_s ?? 0) + (point.duration_s ?? 0),
+    ),
+  );
+}
+
 function voiceLabel(
   status: string | null,
   voiceScore: number | null,
@@ -59,79 +71,97 @@ function voiceLabel(
 function Timeline({
   detail,
   playbackTime,
+  onSeek,
 }: {
   detail: TrackContextDetail;
   playbackTime: number;
+  onSeek: (next: number) => void;
 }) {
   if (detail.timeline.length < 2) {
     return <p className="muted">No condensed timeline is available.</p>;
   }
   const width = 720;
   const height = 180;
-  const duration = Math.max(
-    1,
-    ...detail.timeline.map(
-      (point) => (point.start_s ?? 0) + (point.duration_s ?? 0),
-    ),
-  );
+  const plotInsetX = 6;
+  const plotInsetY = 10;
+  const plotWidth = width - plotInsetX * 2;
+  const plotHeight = height - plotInsetY * 2;
+  const duration = timelineDuration(detail);
   const series = [
     ["intensity", "#f5a65b"],
     ["rhythmic_drive", "#57d3c8"],
     ["loudness", "#8ca8ff"],
   ] as const;
-  const cursorX = Math.max(0, Math.min(width, (playbackTime / duration) * width));
+  const boundedPlaybackTime = Math.max(0, Math.min(duration, playbackTime));
+  const cursorX = plotInsetX + (boundedPlaybackTime / duration) * plotWidth;
   return (
     <div className="assistant-context-chart">
-      <svg
-        role="img"
-        aria-label="Intensity, rhythmic drive, and loudness across the track"
-        viewBox={`0 0 ${width} ${height}`}
-      >
-        {[0.25, 0.5, 0.75].map((fraction) => (
-          <line
-            key={fraction}
-            x1="0"
-            x2={width}
-            y1={height * (1 - fraction)}
-            y2={height * (1 - fraction)}
-            className="assistant-context-grid-line"
-          />
-        ))}
-        {series.map(([key, color]) => {
-          const points = detail.timeline
-            .map((point) => {
-              const x = ((point.start_s ?? 0) / duration) * width;
-              const y = height - Math.max(0, Math.min(1, point[key] ?? 0)) * height;
-              return `${x.toFixed(2)},${y.toFixed(2)}`;
-            })
-            .join(" ");
-          return (
-            <polyline
-              key={key}
-              points={points}
-              fill="none"
-              stroke={color}
-              strokeWidth="3"
-              vectorEffect="non-scaling-stroke"
+      <div className="assistant-context-chart-timeline">
+        <svg
+          role="img"
+          aria-label="Intensity, rhythmic drive, and loudness across the track"
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="none"
+        >
+          {[0.25, 0.5, 0.75].map((fraction) => (
+            <line
+              key={fraction}
+              x1={plotInsetX}
+              x2={width - plotInsetX}
+              y1={plotInsetY + plotHeight * (1 - fraction)}
+              y2={plotInsetY + plotHeight * (1 - fraction)}
+              className="assistant-context-grid-line"
             />
-          );
-        })}
-        <line
-          className="assistant-context-playback-cursor"
-          x1={cursorX}
-          x2={cursorX}
-          y1="0"
-          y2={height}
-          vectorEffect="non-scaling-stroke"
+          ))}
+          {series.map(([key, color]) => {
+            const points = detail.timeline
+              .map((point) => {
+                const x = plotInsetX + ((point.start_s ?? 0) / duration) * plotWidth;
+                const value = Math.max(0, Math.min(1, point[key] ?? 0));
+                const y = plotInsetY + (1 - value) * plotHeight;
+                return `${x.toFixed(2)},${y.toFixed(2)}`;
+              })
+              .join(" ");
+            return (
+              <polyline
+                key={key}
+                points={points}
+                fill="none"
+                stroke={color}
+                strokeWidth="3"
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })}
+          <line
+            className="assistant-context-playback-cursor"
+            x1={cursorX}
+            x2={cursorX}
+            y1={plotInsetY}
+            y2={height - plotInsetY}
+            vectorEffect="non-scaling-stroke"
+          />
+          <circle
+            className="assistant-context-playback-marker"
+            cx={cursorX}
+            cy={plotInsetY}
+            r="5"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+        <input
+          className="assistant-context-timeline-scrubber"
+          type="range"
+          min={0}
+          max={duration}
+          step={0.1}
+          value={boundedPlaybackTime}
+          onChange={(event) => onSeek(Number(event.currentTarget.value))}
+          aria-label={`Seek ${detail.title}`}
+          aria-valuetext={`${seconds(boundedPlaybackTime)} of ${seconds(duration)}`}
+          title="Drag to seek through the track"
         />
-        <circle
-          className="assistant-context-playback-marker"
-          cx={cursorX}
-          cy="8"
-          r="5"
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
+      </div>
       <div className="assistant-context-chart-footer">
         <div className="assistant-context-chart-legend">
           <span className="is-intensity">Intensity</span>
@@ -147,7 +177,11 @@ function Timeline({
 }
 
 function ContextDetail({ detail }: { detail: TrackContextDetail }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const summary = detail.summary;
   const trajectories = objectValue(summary?.trajectories);
   const tempo = objectValue(summary?.tempo);
@@ -160,10 +194,54 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
   // score rather than a calibrated probability.
   const voiceScore = numberValue(voice?.voice_probability);
   const vocalCoverage = numberValue(voice?.vocal_coverage);
+  const duration = timelineDuration(detail);
 
   useEffect(() => {
     setPlaybackTime(0);
+    setIsPlaying(false);
+    setPlaybackError(null);
   }, [detail.track_id]);
+
+  useEffect(() => {
+    if (audioRef.current !== null) audioRef.current.volume = volume;
+  }, [detail.track_id, volume]);
+
+  function seekTo(next: number) {
+    const bounded = Math.max(0, Math.min(duration, next));
+    if (audioRef.current !== null) audioRef.current.currentTime = bounded;
+    setPlaybackTime(bounded);
+  }
+
+  function togglePlayback() {
+    const audio = audioRef.current;
+    if (audio === null) return;
+    setPlaybackError(null);
+    if (isPlaying) {
+      audio.pause();
+      return;
+    }
+    if (audio.ended || audio.currentTime >= duration) seekTo(0);
+    void audio.play().catch(() => {
+      setIsPlaying(false);
+      setPlaybackError("Playback could not be started. Try again or check the audio file.");
+    });
+  }
+
+  function stopPlayback() {
+    const audio = audioRef.current;
+    if (audio !== null) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setIsPlaying(false);
+    setPlaybackTime(0);
+    setPlaybackError(null);
+  }
+
+  function changeVolume(next: number) {
+    setVolume(next);
+    if (audioRef.current !== null) audioRef.current.volume = next;
+  }
 
   if (summary === null) {
     return (
@@ -187,25 +265,64 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
     <div className="assistant-context-detail">
       <section className="assistant-context-development">
         <div className="assistant-context-detail-heading">
-          <div>
-            <span className={`assistant-job-status is-${detail.status === "full" ? "succeeded" : "queued"}`}>
-              {detail.status} · {detail.confidence ?? "unknown"} confidence
-            </span>
+          <div className="assistant-context-title">
             <h2>{detail.title}</h2>
-            <p>{detail.artist || "Unknown artist"}</p>
+            <span>{detail.artist || "Unknown artist"}</span>
           </div>
-          <audio
-            aria-label={`Play ${detail.title}`}
-            controls
-            preload="none"
-            src={libraryApi.streamUrl(detail.track_id)}
-            onTimeUpdate={(event) => setPlaybackTime(event.currentTarget.currentTime)}
-            onSeeked={(event) => setPlaybackTime(event.currentTarget.currentTime)}
+          <span
+            className={`assistant-job-status assistant-context-status is-${detail.status === "full" ? "succeeded" : "queued"}`}
           >
-            <track kind="captions" />
-          </audio>
+            {detail.status} · {detail.confidence ?? "unknown"} confidence
+          </span>
         </div>
-        <Timeline detail={detail} playbackTime={playbackTime} />
+        <audio
+          ref={audioRef}
+          className="assistant-context-audio"
+          aria-label={`Audio preview for ${detail.title}`}
+          preload="none"
+          src={libraryApi.streamUrl(detail.track_id)}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+          onTimeUpdate={(event) => setPlaybackTime(event.currentTarget.currentTime)}
+          onSeeked={(event) => setPlaybackTime(event.currentTarget.currentTime)}
+        >
+          <track kind="captions" />
+        </audio>
+        <Timeline detail={detail} playbackTime={playbackTime} onSeek={seekTo} />
+        <div
+          className="assistant-context-preview-controls"
+          role="group"
+          aria-label={`${detail.title} preview controls`}
+        >
+          <div className="assistant-context-preview-transport">
+            <IconButton
+              label={`${isPlaying ? "Pause" : "Play"} ${detail.title}`}
+              icon={isPlaying ? <PauseIcon /> : <PlayIcon />}
+              onClick={togglePlayback}
+              variant="primary"
+            >
+              {isPlaying ? "Pause" : "Play"}
+            </IconButton>
+            <IconButton
+              label={`Stop ${detail.title}`}
+              icon={<StopIcon />}
+              onClick={stopPlayback}
+              disabled={!isPlaying && playbackTime <= 0}
+            >
+              Stop
+            </IconButton>
+          </div>
+          <VolumeControl
+            className="assistant-context-preview-volume"
+            value={volume}
+            onChange={changeVolume}
+            label={`${detail.title} preview volume`}
+          />
+        </div>
+        {playbackError !== null ? (
+          <p className="error assistant-context-playback-error" role="alert">{playbackError}</p>
+        ) : null}
         <div className="assistant-context-trajectories">
           {TRAJECTORIES.map(([key, label]) => {
             const trajectory = objectValue(trajectories?.[key]);

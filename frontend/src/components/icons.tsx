@@ -54,6 +54,14 @@ export function PauseIcon(props: IconProps) {
   );
 }
 
+export function StopIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <rect x="5" y="5" width="14" height="14" rx="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function SkipPrevIcon(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
