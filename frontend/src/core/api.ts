@@ -379,7 +379,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v10" as const;
+  "assistant-model-music-tagging-disclosure/v11" as const;
 
 export type ModelTaggingScope =
   | { type: "all" }

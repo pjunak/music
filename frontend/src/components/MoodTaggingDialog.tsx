@@ -265,7 +265,7 @@ export function MoodTaggingDialog({
       title: "Create mood-library suggestions?",
       body:
         `${workTracks} track${workTracks === 1 ? "" : "s"} in ${scopeLabel} will use about ` +
-        `${requests} provider request${requests === 1 ? "" : "s"}. Titles, file and folder names from the library-relative path, descriptive metadata, and bounded time-aware local context may be sent. Audio, waveforms, full-resolution timelines, the absolute media root, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
+        `${requests} provider request${requests === 1 ? "" : "s"}. Artist, album, origin, and genre metadata plus bounded time-aware local context may be sent. Track titles, display titles, file and folder names, library paths, audio, waveforms, full-resolution timelines, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
       confirmLabel: workTracks === 0 ? "Check current suggestions" : "Create suggestions",
       tone: "primary",
     });

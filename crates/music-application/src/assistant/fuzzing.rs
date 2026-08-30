@@ -56,8 +56,6 @@ fn tagger_fixture() -> Option<ModelTaggerBatch> {
     ModelTaggerBatch::new(
         vec![json!({
             "track_id": 1,
-            "title": "Fuzz track",
-            "display_title": "Fuzz track",
             "artist": "Fixture artist",
             "album": "Fixture album",
             "origin": "fixture",

@@ -52,7 +52,7 @@ tagging scope has current context.
   vocabulary IDs, confidence, and at most four bounded evidence strings. Store validated names in
   `model-context-tagger/v6` and keep the existing explicit review/promotion transaction.
 - Before every planned run, report full, partial, and missing/stale context coverage. The operator
-  may either include incomplete tracks, using metadata/path alone where context is absent, or skip
+  may either include incomplete tracks, using metadata alone where context is absent, or skip
   all tracks without full current context. Skipped tracks make no provider call and are reported in
   the durable job result.
 - Invalidate model conformance and quality certification for the new role contract. Expand the

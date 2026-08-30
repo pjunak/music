@@ -65,8 +65,8 @@ const availability: ModelTaggingAvailability = {
   estimated_provider_requests: 2,
   disclosure: {
     version: MODEL_TAGGING_DISCLOSURE_VERSION,
-    shared_with_provider: ["Indexed titles, artists, albums, origins, and genres"],
-    never_shared: ["Audio files", "Filesystem paths", "Your manual tags"],
+    shared_with_provider: ["Indexed artist, album, origin, and genre metadata"],
+    never_shared: ["Track titles and library paths", "Audio files", "Your manual tags"],
     allowed_tags: ["medieval", "tavern", "dancing"],
     tracks_per_request: 20,
     invalid_response_retry_limit: 2,
@@ -134,7 +134,7 @@ describe("ModelTaggingPanel", () => {
         name: "Optional model suggestions",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Filesystem paths")).toBeInTheDocument();
+    expect(screen.getByText("Track titles and library paths")).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "Suggest tags for 40 tracks" }),
     );

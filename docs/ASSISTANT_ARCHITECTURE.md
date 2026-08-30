@@ -118,7 +118,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v2+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v2` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v17+output/v3+local-context/v2` | `assistant-model-music-tagging-disclosure/v10` | `model-context-tagger/v6` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v18+output/v3+local-context/v2` | `assistant-model-music-tagging-disclosure/v11` | `model-context-tagger/v6` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 
@@ -144,7 +144,7 @@ configurable.
 | Workflow | Sent | Kept local |
 |---|---|---|
 | Playlist | operator request and at most 100 locally eligible, path-free candidates with bounded evidence and the local plan | library paths, excluded tracks, credentials, playlists, review history, final public reconstruction |
-| Mood tagging | at most 20 tracks per request; bounded indexed metadata, canonical library-relative path as untrusted data, complete controlled vocabulary, optional bounded current context | absolute media root, paths outside the index, audio, waveforms, spectrograms, full timelines, database mood tags, generated suggestions, reviews, credentials |
+| Mood tagging | at most 20 tracks per request; bounded artist, album, origin, and genre metadata, complete controlled vocabulary, optional bounded current context | track and display titles, file and folder names, every library path, audio, waveforms, spectrograms, full timelines, database mood tags, generated suggestions, reviews, credentials |
 | Mood-tag cleanup | unresolved source IDs/names and usage counts, canonical vocabulary IDs/names/groups/definitions | track metadata, paths, audio, playlists, generated tags, review history, credentials |
 | EQ | operator goal, fixed ten-band frequencies, deterministic baseline guidance, per-band limits | songs, audio, library metadata, paths, playlists, existing presets, credentials, final preset document |
 

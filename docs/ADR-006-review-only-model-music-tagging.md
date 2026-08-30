@@ -35,6 +35,13 @@ general high-recall rule and the categorical `Period feel` group. A track may re
 period tag. For an explicit intentional blend, `cross era` is the single result and replaces the
 named component eras even when terms such as medieval or futuristic are literal metadata evidence.
 
+**Implementation update (2026-08-30):** Input contract v18 removes indexed titles, display titles,
+file names, folder names, and library-relative paths from both live and synthetic provider input.
+Only the remaining disclosed metadata and bounded local context may influence classification.
+Suggestion source identity follows that exact evidence, so a title-only rename or folder move does
+not stale an otherwise unchanged suggestion. Disclosure v11 and baseline v18 supersede the earlier
+path-aware contract.
+
 ## Context
 
 Manual D&D playlist tags are operator-owned, while local metadata analysis
@@ -50,14 +57,12 @@ observable after the browser closes without silently repeating uncertain calls.
 
 - Reuse `track_analyses` and `track_analysis_tag_reviews` with the versioned
   analyzer ID `model-context-tagger/v6`. Do not create a parallel AI-tag store.
-- Limit model input to numeric track ID, indexed title, display title, artist,
-  album, origin, genre, canonical library-relative path, duration, BPM, and an optional bounded
+- Limit model input to numeric track ID, artist, album, origin, genre, duration, BPM, and an optional bounded
   projection of current `local-context/v1`: whole-track trajectories, tempo development,
   major sections and transitions, repetition, confidence, and optional local
-  voice/instrumental classification. Send no locally inferred candidate tag IDs. A non-empty
-  display title is canonical for title interpretation. Treat every
-  relative path and metadata string as untrusted data. Do not send the absolute media
-  root, paths outside the indexed library, audio, waveforms, full-resolution timelines,
+  voice/instrumental classification. Send no locally inferred candidate tag IDs. Treat every
+  metadata string as untrusted data. Do not send indexed titles, display titles, file names,
+  folder names, any library path, audio, waveforms, full-resolution timelines,
   spectrograms, database mood tags, stored generated tags, playlists, or review history.
   Bounded factual context may refine generic mood and activity judgments but is
   never proof of an instrument, genre, setting, period, scene, or D&D context.
@@ -88,9 +93,10 @@ observable after the browser closes without silently repeating uncertain calls.
   90% scored pass floor. The operator may recheck only failed cases from the exact
   current complete report; the server merges them with that report for diagnosis,
   but only a subsequent complete suite may change certification.
-- Bind each profile source signature to the consumed track metadata, current local-context
+- Bind each profile source signature to the consumed artist, album, origin, genre, duration, BPM,
+  current local-context
   signature (or its explicit absence), vocabulary fingerprint, input-contract version, and
-  exact model-role runtime fingerprint. Changed metadata, audio evidence, vocabulary,
+  exact model-role runtime fingerprint. Changed disclosed metadata, audio evidence, vocabulary,
   or model settings make old suggestions stale rather than silently current. Adding a
   first current context row also invalidates a metadata-only model result.
 - Run the library pass as a durable, non-restartable job. Commit completed

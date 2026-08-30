@@ -1043,7 +1043,7 @@ mod tests {
                 evidence: vec!["context section s1".to_owned()],
                 metrics: serde_json::json!({
                     "contract": "assistant-music-tagger-output/v3",
-                    "input_contract": "assistant-music-tagger-input/v17",
+                    "input_contract": "assistant-music-tagger-input/v18",
                 })
                 .as_object()
                 .cloned()

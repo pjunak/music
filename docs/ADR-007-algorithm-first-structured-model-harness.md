@@ -77,9 +77,10 @@ indexed metadata / local audio / operator request
   semantic-free. It supplies bounded whole-track trajectories, tempo development, major acoustic
   sections/transitions, repetition, confidence, and optional local voice/instrumental classifier
   evidence or an explicit unknown/unavailable status when current.
-  Metadata and canonical library-relative paths are labelled untrusted; the absolute media root,
-  audio, waveforms, spectrograms, full timelines, database mood tags, and review state never cross
-  the provider boundary. The model receives the full revisioned controlled vocabulary with stable
+  Artist, album, origin, and genre metadata are labelled untrusted; track titles, display titles,
+  file and folder names, every library path, audio, waveforms, spectrograms, full timelines,
+  database mood tags, and review state never cross the provider boundary. The model receives the
+  full revisioned controlled vocabulary with stable
   IDs, names, groups, definitions, exact aliases, and bounded semantic context cues. The cues are
   global vocabulary guidance that must be confirmed against complete metadata phrases; no local
   per-track candidate-tag hypothesis is sent and the model does not return signal axes. It must
@@ -88,7 +89,7 @@ indexed metadata / local audio / operator request
   not imply an era, release date is not period evidence, and unknown period evidence produces no
   period tag. Period feel is a zero-or-one categorical choice; `cross era` replaces rather than
   accompanies its component period tags. It may return only exact IDs, confidence, and bounded
-  evidence; names are restored locally. Missing context falls back to conservative metadata/path
+  evidence; names are restored locally. Missing context falls back to conservative metadata-only
   interpretation only when the operator chooses “run anyway”; “skip incomplete” prevents those
   tracks from reaching the provider.
 - **Manual-tag cleanup:** declared aliases plus deterministic spelling and plural rules

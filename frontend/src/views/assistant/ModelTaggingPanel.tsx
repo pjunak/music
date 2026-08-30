@@ -142,9 +142,9 @@ export function ModelTaggingPanel() {
         `${requestPlan.tracks} track${requestPlan.tracks === 1 ? "" : "s"} will be ` +
         `processed in about ${requestPlan.requests} provider request${
           requestPlan.requests === 1 ? "" : "s"
-        }. Indexed titles, artists, albums, origins, genres, durations, BPM, ` +
-        "and library-relative paths may be sent with a numeric matching ID and your current controlled vocabulary. When current local context exists, bounded trajectories, tempo development, major sections, repetition, and analyzer confidence may also be sent. " +
-        "Audio files, waveforms, full-resolution timelines, spectrograms, the absolute media root, database mood tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
+        }. Artist, album, origin, and genre metadata plus durations and BPM may be sent ` +
+        "with a numeric matching ID and your current controlled vocabulary. When current local context exists, bounded trajectories, tempo development, major sections, repetition, and analyzer confidence may also be sent. " +
+        "Track titles, display titles, file and folder names, library paths, audio files, waveforms, full-resolution timelines, spectrograms, database mood tags, local tag suggestions, and review decisions stay on this server. Provider usage may incur cost.",
       confirmLabel: requestPlan.tracks === 0 ? "Check current tags" : "Suggest tags",
       tone: "primary",
     });

@@ -265,17 +265,16 @@ Use a small, representative sample before running across the whole library.
 2. Start with a small representative folder or selection if provider cost or output
    quality is uncertain.
 3. If the selected scope contains partial, stale, failed, or unanalyzed tracks, choose explicitly
-   between running them with metadata/path context or skipping every track without full context.
+   between running them with metadata-only context or skipping every track without full context.
 4. Confirm model output appears as generated `model-context-tagger/v6` suggestions,
    separate from local analysis and database mood tags.
-5. Inspect the disclosure: the model receives descriptive metadata, the current full canonical
+5. Inspect the disclosure: the model receives artist, album, origin, and genre metadata, the current full canonical
    ID/name/definition/alias list, and—when available—a bounded projection of locally measured
    whole-track trajectories, tempo development, major acoustic sections, repetition, confidence,
    and optional local voice/instrumental classifier evidence or explicit unknown/unavailable voice
    status. It does not receive a local tag hypothesis or model-owned
-   signal axes. The path is canonical and
-   library-relative, is treated as untrusted data, and may reveal useful folder context;
-   the absolute media root, audio, waveforms, full timelines, and spectrograms are never sent.
+   signal axes. Track titles, display titles, file and folder names, library paths, audio,
+   waveforms, full timelines, and spectrograms are never sent.
 6. Audition several tracks inside the review dialog, then accept, reject, and reopen
    suggestions. Only explicit acceptance may add a database mood tag; the audio file and
    its embedded artist, album, year, genre, and similar tags remain unchanged.

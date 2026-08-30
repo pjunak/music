@@ -24,6 +24,9 @@ Introduce `local-context/v2` and make every v1 row non-current until the operato
 mood-tagging input advances to `assistant-music-tagger-input/v17`; existing conformance and quality
 records therefore become stale before v2 evidence can be sent to a provider.
 
+Input v18 later removes titles and library paths without changing this v2 context projection; see
+[ADR-006](ADR-006-review-only-model-music-tagging.md).
+
 V2 keeps the bounded public field names needed by existing consumers, with these definitions:
 
 - **Signal level (`loudness`)** maps each 0.5-second RMS level from -50 to -10 dBFS. Integrated

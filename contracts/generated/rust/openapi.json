@@ -4872,7 +4872,7 @@
             "type": "integer"
           },
           "version": {
-            "const": "assistant-model-music-tagging-disclosure/v10",
+            "const": "assistant-model-music-tagging-disclosure/v11",
             "type": "string"
           }
         },
@@ -4980,7 +4980,7 @@
             "type": "string"
           },
           "disclosure_version": {
-            "const": "assistant-model-music-tagging-disclosure/v10",
+            "const": "assistant-model-music-tagging-disclosure/v11",
             "type": "string"
           },
           "force": {

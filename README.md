@@ -92,7 +92,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   optional model tasks.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates, constrains the response to those exact track
-  IDs, and returns a draft. Mood tagging sends metadata and canonical library-relative paths in
+  IDs, and returns a draft. Mood tagging sends bounded artist, album, origin, and genre metadata in
   batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
   stores suggestions under `model-context-tagger/v6` for explicit per-tag review.
   The pre-run plan shows the normal batch estimate and a maximum that includes up to two
@@ -105,10 +105,9 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   repetition, analyzer confidence, and optional local voice/instrumental classifier evidence (or an
   explicit unknown/unavailable status). It does not send locally
   generated tag hypotheses or ask the provider to recreate energy/brightness/tension axes. Audio
-  files, waveforms, full timelines, spectrograms, the absolute media root, paths outside the indexed
-  library, database mood tags, and detailed measurements remain on the server. Library-relative
-  paths are treated as untrusted descriptive evidence and never as model instructions. Neither
-  path can write a playlist or
+  files, waveforms, full timelines, spectrograms, track titles, display titles, file and folder
+  names, library paths, database mood tags, and detailed measurements remain on the server. Neither
+  workflow can write a playlist or
   manual tag directly. Tag cleanup resolves declared aliases and unambiguous spelling/plural cases
   locally first, then sends only unresolved source IDs/names and usage counts plus canonical ID
   definitions in batches of at most 20. The model returns exactly one canonical-ID-or-null decision
@@ -170,10 +169,10 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   An optional quality-certified context-aware tagging model can populate the same review surface through
   a durable server job for the whole library, the current folder (recursive or direct children), or
   explicitly selected tracks. Its Library dialog previews counts, provider calls, and full/partial/
-  missing context coverage; the operator may run with metadata/path fallback or skip tracks without
+  missing context coverage; the operator may run with metadata-only fallback or skip tracks without
   full current context. It restores durable progress, lets the operator audition each song, and
-  preselects only high/medium-confidence suggestions for explicit acceptance. It receives canonical library-relative paths but never the
-  absolute media root, audio, existing database mood tags, or review decisions; it skips unchanged
+  preselects only high/medium-confidence suggestions for explicit acceptance. It never receives
+  track titles, display titles, library paths, audio, existing database mood tags, or review decisions; it skips unchanged
   model profiles and cannot promote its output without acceptance.
   A separately assigned, quality-certified cleanup model can review only the database mood-tag catalog and
   usage counts. It proposes renames in a durable server job, selects nothing by default, and can

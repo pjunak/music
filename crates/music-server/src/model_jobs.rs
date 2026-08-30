@@ -1146,7 +1146,7 @@ impl ModelFeatureJobHandler {
             &parameters.quality_evaluation_id,
             TAGGING_QUALITY_EVALUATION_ID,
             &parameters.disclosure_version,
-            "assistant-model-music-tagging-disclosure/v10",
+            "assistant-model-music-tagging-disclosure/v11",
             parameters.consent,
             &parameters.role_fingerprint,
         )?;

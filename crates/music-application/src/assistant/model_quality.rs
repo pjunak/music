@@ -35,7 +35,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         role_id: "music_tagger",
         label: "Mood tagging quality",
         description: "Runs fixed synthetic metadata and signal-evidence cases against the server-owned tag vocabulary. No songs or live library data are sent.",
-        suite_id: "controlled-vocabulary-tagging-baseline-v17",
+        suite_id: "controlled-vocabulary-tagging-baseline-v18",
         job_kind: "assistant.model-evaluation.music-tagging-quality-v1",
     },
     ModelEvaluationDefinition {

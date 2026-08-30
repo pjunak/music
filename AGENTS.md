@@ -255,14 +255,14 @@ Runtime data lives outside the image.
   exact current `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks
   per provider request, and keep jobs non-restartable. Resolve whole-library, folder
   (recursive/direct), or explicit-track scope locally. Provider input is limited to indexed
-  descriptive metadata, canonical library-relative paths treated as untrusted data, duration,
-  BPM, numeric track IDs, the full revisioned operator vocabulary's IDs/names/groups/definitions/
+  artist, album, origin, and genre metadata, duration, BPM, numeric track IDs, the full revisioned
+  operator vocabulary's IDs/names/groups/definitions/
   exact aliases and bounded semantic context cues, and an optional bounded projection of current
   `local-context/v2` evidence:
   loudness, intensity, rhythmic-drive, brightness, density and spectral-change trajectories;
   tempo development; major acoustic sections/transitions; repetition; confidence; and optional
   local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status).
-  Never send the absolute media root, paths outside the indexed library,
+  Never send track titles, display titles, file or folder names, library-relative paths, the absolute media root, paths outside the indexed library,
   audio, waveforms, spectrograms, full-resolution timelines, database mood tags, stored
   suggestions, playlists, review history, or credentials. Local context analysis must remain
   factual and may never propose setting, period, scene, mood, genre, or instrument tags.
@@ -285,7 +285,7 @@ Runtime data lives outside the image.
   `track_analyses` and bind its source signature to metadata, current context signature (or its
   absence), vocabulary fingerprint, contract version, and role fingerprint.
   Before a live run, report full, partial, missing/stale, and failed context coverage. Let the
-  operator either include incomplete tracks using metadata/path alone or skip every track without
+  operator either include incomplete tracks using metadata alone or skip every track without
   full current context. The model may never write `track_user_tags`; accepted suggestions become
   database mood tags only through explicit single or bulk review.
 - Optional model-assisted manual-tag cleanup may run only through

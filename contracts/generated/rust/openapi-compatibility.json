@@ -1,16 +1,21 @@
 {
   "schema_version": "openapi-compatibility/v1",
-  "verdict": "compatible",
+  "verdict": "incomplete",
   "reference_operation_count": 144,
   "candidate_operation_count": 145,
   "matched_operation_count": 144,
-  "fully_compatible_operation_count": 144,
+  "fully_compatible_operation_count": 141,
   "missing_operations": [],
   "candidate_only_operations": [
     "GET /api/readiness"
   ],
   "parameter_mismatches": [],
-  "request_body_mismatches": [],
-  "response_mismatches": [],
+  "request_body_mismatches": [
+    "POST /api/assistant/library-tags/model-jobs"
+  ],
+  "response_mismatches": [
+    "GET /api/assistant/library-tags/model-status",
+    "POST /api/assistant/library-tags/model-plan"
+  ],
   "security_mismatches": []
 }

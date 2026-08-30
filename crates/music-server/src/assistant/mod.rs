@@ -1749,7 +1749,7 @@ async fn start_model_tagging(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v10"
+    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v11"
         || !payload.consent
     {
         return Err(ApiError::validation());
@@ -1876,16 +1876,16 @@ async fn model_tagging_availability(
 
 fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingDisclosureResponse {
     ModelTaggingDisclosureResponse {
-        version: "assistant-model-music-tagging-disclosure/v10",
+        version: "assistant-model-music-tagging-disclosure/v11",
         shared_with_provider: vec![
-            "Indexed titles, display titles, artists, albums, origins, and genres",
-            "Canonical library-relative paths, including folder and file names, treated as untrusted descriptive context",
+            "Indexed artist, album, origin, and genre metadata",
             "Track durations and BPM values when available",
             "Current bounded local track context when available: intensity, loudness, rhythmic drive, brightness, density and spectral-change trajectories; tempo development; major acoustic sections and transitions; structural repetition; analyzer confidence; and optional local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status)",
             "A server-assigned numeric track ID used only to match the response",
             "The full operator-managed canonical tag ID, name, group, definition, exact-alias, and bounded semantic context cue index; the model may return only IDs from this index",
         ],
         never_shared: vec![
+            "Track titles, display titles, file names, folder names, or library-relative paths",
             "Audio files, waveforms, full-resolution timelines, spectrograms, or cover artwork",
             "The absolute media root or filesystem paths outside the indexed library",
             "Your database mood tags, generated-tag review decisions, or accepted/rejected state",
@@ -3308,7 +3308,7 @@ fn model_tag_cleanup_request_count_schema() -> RefOr<Schema> {
         .into()
 }
 fn model_tagging_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-model-music-tagging-disclosure/v10")
+    const_string_schema("assistant-model-music-tagging-disclosure/v11")
 }
 fn model_tagging_role_schema() -> RefOr<Schema> {
     const_string_schema("music_tagger")

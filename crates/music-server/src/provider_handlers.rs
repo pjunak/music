@@ -628,8 +628,6 @@ mod tests {
             .map(|track_id| {
                 json!({
                     "track_id": track_id,
-                    "title": format!("Synthetic track {track_id}"),
-                    "display_title": "",
                     "artist": "",
                     "album": "",
                     "origin": "",
