@@ -9509,7 +9509,7 @@ input.volume-slider::-moz-range-thumb {
 }
 .assistant-context-chart-timeline {
   position: relative;
-  height: 13rem;
+  height: 11rem;
   border-radius: var(--radius-sm);
 }
 .assistant-context-chart-timeline:focus-within {
@@ -9544,9 +9544,11 @@ input.volume-slider::-moz-range-thumb {
 }
 .assistant-context-chart-footer {
   display: flex;
+  min-height: 1.5rem;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
+  padding-top: var(--space-2);
 }
 .assistant-context-preview-controls {
   display: flex;
@@ -9727,17 +9729,25 @@ input.volume-slider::-moz-range-thumb {
 .assistant-context-empty-detail {
   min-height: 0;
   overflow: auto;
-  padding: var(--space-4);
 }
 .assistant-context-detail {
   flex: 1;
   gap: var(--space-5);
+  padding: 0 var(--space-4) var(--space-4);
+}
+.assistant-context-empty-detail {
+  padding: var(--space-4);
 }
 .assistant-context-development {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-2);
+  box-shadow: var(--shadow-md);
 }
 .assistant-context-detail-heading {
   position: static;
@@ -9748,7 +9758,7 @@ input.volume-slider::-moz-range-thumb {
 .assistant-context-trajectories {
   grid-template-columns: repeat(6, minmax(7rem, 1fr));
   margin: 0;
-  padding: 0 var(--space-3) var(--space-3);
+  padding: 0;
 }
 .assistant-context-facts {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -9832,6 +9842,10 @@ input.volume-slider::-moz-range-thumb {
   }
   .assistant-context-preview-volume {
     width: 100%;
+  }
+  .assistant-context-development {
+    position: static;
+    box-shadow: none;
   }
   .assistant-context-trajectories,
   .assistant-context-facts {

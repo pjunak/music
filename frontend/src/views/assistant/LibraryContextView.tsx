@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { FolderTree } from "@/components/FolderTree";
@@ -178,6 +178,7 @@ function Timeline({
 
 function ContextDetail({ detail }: { detail: TrackContextDetail }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const detailRef = useRef<HTMLDivElement | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -196,7 +197,8 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
   const vocalCoverage = numberValue(voice?.vocal_coverage);
   const duration = timelineDuration(detail);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (detailRef.current !== null) detailRef.current.scrollTop = 0;
     setPlaybackTime(0);
     setIsPlaying(false);
     setPlaybackError(null);
@@ -262,7 +264,7 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
   }
 
   return (
-    <div className="assistant-context-detail">
+    <div ref={detailRef} className="assistant-context-detail">
       <section className="assistant-context-development">
         <div className="assistant-context-detail-heading">
           <div className="assistant-context-title">
@@ -323,21 +325,22 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
         {playbackError !== null ? (
           <p className="error assistant-context-playback-error" role="alert">{playbackError}</p>
         ) : null}
-        <div className="assistant-context-trajectories">
-          {TRAJECTORIES.map(([key, label]) => {
-            const trajectory = objectValue(trajectories?.[key]);
-            return (
-              <div key={key}>
-                <span>{label}</span>
-                <strong>{percent(trajectory?.typical)}</strong>
-                <small>
-                  {(stringValue(trajectory?.shape) ?? "unknown shape").replaceAll("_", " ")} ·{" "}
-                  {percent(trajectory?.low)}–{percent(trajectory?.high)}
-                </small>
-              </div>
-            );
-          })}
-        </div>
+      </section>
+
+      <section className="assistant-context-trajectories" aria-label="Track development summary">
+        {TRAJECTORIES.map(([key, label]) => {
+          const trajectory = objectValue(trajectories?.[key]);
+          return (
+            <div key={key}>
+              <span>{label}</span>
+              <strong>{percent(trajectory?.typical)}</strong>
+              <small>
+                {(stringValue(trajectory?.shape) ?? "unknown shape").replaceAll("_", " ")} ·{" "}
+                {percent(trajectory?.low)}–{percent(trajectory?.high)}
+              </small>
+            </div>
+          );
+        })}
       </section>
 
       <section className="assistant-context-facts">

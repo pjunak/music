@@ -43,6 +43,13 @@ const track: Track = {
   origin: "",
 };
 
+const secondTrack: Track = {
+  ...track,
+  id: 10,
+  path: "Campaign/Forest/Second Watch.flac",
+  title: "Second Watch",
+};
+
 const trajectory = {
   typical: 0.5,
   low: 0.2,
@@ -193,6 +200,36 @@ describe("LibraryContextView", () => {
     expect(pause).toHaveBeenCalledOnce();
     expect(player.currentTime).toBe(0);
     expect(screen.getByText("0:00 / 3:00")).toBeInTheDocument();
+  });
+
+  it("keeps the playback panel compact and resets detail scrolling for a new track", async () => {
+    vi.mocked(libraryApi.tree).mockResolvedValue({ path: "", tracks: [track, secondTrack] });
+    vi.mocked(assistantApi.getTrackContext).mockImplementation(async (trackId) =>
+      trackId === secondTrack.id
+        ? { ...detail, track_id: secondTrack.id, title: secondTrack.title }
+        : detail,
+    );
+    const { container } = render(
+      <MemoryRouter>
+        <LibraryContextView />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Quiet Road" })).toBeInTheDocument();
+    const playbackPanel = container.querySelector(".assistant-context-development");
+    const trajectorySummary = screen.getByRole("region", { name: "Track development summary" });
+    expect(playbackPanel).not.toContainElement(trajectorySummary);
+    expect(playbackPanel?.nextElementSibling).toBe(trajectorySummary);
+
+    const firstScroller = container.querySelector<HTMLElement>(".assistant-context-detail");
+    if (firstScroller === null) throw new Error("expected the track detail scroller");
+    firstScroller.scrollTop = 480;
+    fireEvent.click(screen.getByText("Second Watch"));
+
+    expect(await screen.findByRole("heading", { name: "Second Watch" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(container.querySelector<HTMLElement>(".assistant-context-detail")?.scrollTop).toBe(0);
+    });
   });
 
   it("shows bounded classifier score and coverage when voice analysis is configured", async () => {
