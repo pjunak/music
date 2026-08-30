@@ -1411,6 +1411,88 @@ describe("AssistantAiSetupView", () => {
     );
   });
 
+  it("groups a suite-wide provider rejection instead of presenting semantic failures", async () => {
+    const completed = qualityJob({
+      id: "tagging-provider-rejection",
+      kind: "assistant.model-evaluation.music-tagging-quality-v1",
+      status: "succeeded",
+      parameters: {
+        role_id: "music_tagger",
+        evaluation_id: "music-tagging-quality-v1",
+      },
+      result: {
+        evaluation: {
+          passed: false,
+          passed_cases: 0,
+          total_cases: 2,
+          safety_passed_cases: 0,
+          safety_total_cases: 1,
+          quality_passed_cases: 0,
+          quality_total_cases: 2,
+          minimum_quality_pass_rate: 0.9,
+          cases: [
+            {
+              id: "tavern-dance",
+              description: "Tavern dancing",
+              passed: false,
+              blocking: true,
+              failures: [
+                "Tagger error: model_execution_invalid_request",
+              ],
+            },
+            {
+              id: "stormy-sea-battle",
+              description: "Stormy sea battle",
+              passed: false,
+              blocking: true,
+              failures: [
+                "Tagger error: model_execution_invalid_request",
+                "Safety repeat: Tagger error: model_execution_invalid_request",
+              ],
+            },
+          ],
+        },
+        usage: {
+          attempted_requests: 1,
+          input_tokens: 0,
+          output_tokens: 0,
+          input_tokens_reported_requests: 0,
+          output_tokens_reported_requests: 0,
+          provider_model_ids: [],
+          provider_model_ids_truncated: false,
+        },
+      },
+      finished_at: "2026-08-23T12:05:00Z",
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
+      musicTaggingRole,
+    ]);
+    vi.mocked(assistantProvidersApi.listRoleEvaluations).mockResolvedValue([
+      {
+        ...musicTaggingEvaluation,
+        status: "failed",
+        passed_cases: 0,
+        total_cases: 2,
+        last_job_id: completed.id,
+        last_evaluated_at: completed.finished_at,
+      },
+    ]);
+    vi.mocked(jobsApi.list).mockResolvedValue([completed]);
+    render(<AssistantAiSetupView />);
+
+    expect(
+      await screen.findByText(/suite could not execute model requests/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 scenario failures share one provider execution cause/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Tavern dancing:/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Recheck 2 failed scenarios/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a completed failed report without treating the job as broken", async () => {
     const completed = qualityJob({
       status: "succeeded",

@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-25
 
-**Amended:** 2026-08-26
+**Amended:** 2026-08-30
 
 **Decider:** Project owner
 
@@ -22,28 +22,34 @@ alias: its preferred Responses API uses `/responses`, `instructions` plus `input
 `max_output_tokens`, nested `reasoning.effort`, `text.format`, and an `output` item list rather than
 Chat Completions' messages, `max_tokens`, `response_format`, and `choices` response.
 
-Mature provider libraries such as Pydantic AI and LiteLLM already translate many provider APIs.
-They are valuable when they are allowed to own the HTTP client, retries, response models, and model
-catalog. Music has a narrower and stricter boundary: user-configured destinations are resolved and
-pinned, private destinations are opt-in, redirects are refused, request and response bytes are
-bounded, provider work is not retried implicitly, and raw upstream bodies never enter diagnostics.
-The feature layer also owns exact prompts, Pydantic validation, identity checks, quality gates, and
-review-only results.
+Mature provider libraries such as Pydantic AI, LiteLLM, Rig, and `rust-genai` already translate many
+provider APIs. They are valuable when they are allowed to own the HTTP client, retries, response
+models, and model catalog. Music has a narrower and stricter boundary: user-configured destinations
+are resolved and pinned, private destinations are opt-in, redirects are refused, request and
+response bytes are bounded, provider work is not retried implicitly, and raw upstream bodies never
+enter diagnostics. The feature layer also owns exact prompts, strict Rust validation, identity
+checks, quality gates, and review-only results.
 
 ## Decision
 
 - Keep network I/O in Music's existing `providers.transport` implementation.
-- Add a small registry of versioned, transport-free adapter handlers. A handler may select endpoint
-  paths, normalize provider-reported model IDs, choose JSON-object versus strict JSON-Schema response
-  mode, and translate the operator's provider-default/on/off choice into documented request fields.
+- Add a small registry of versioned, transport-free adapter handlers in
+  `provider_handlers.rs`. The registry provides one internal contract for model-list parsing,
+  endpoint paths, provider-reported model-ID normalization, request construction, JSON-object versus
+  strict JSON-Schema response mode, thinking controls, and successful response parsing. The shared
+  transport remains responsible only for destination policy, authentication headers, bounded HTTP,
+  and allowlisted failure reduction.
 - Select handlers only from the saved adapter ID. Never infer a provider from its connection name,
   URL, or model name.
 - Keep the two existing OpenAI-compatible adapter IDs and their behavior stable. They remain the
   broad compatibility path for third-party OpenAI-shaped services.
 - Add `openai-responses/v1` for OpenAI itself. Pin `https://api.openai.com/v1`, use the native
-  Responses request and response contracts, require the exact task JSON Schema, disable provider
-  storage for these stateless task calls, and map Thinking On/Off to nested
-  `reasoning.effort=high/none`; Provider default sends no override.
+  Responses request and response contracts, disable provider storage for these stateless task
+  calls, and map Thinking On/Off to nested `reasoning.effort=high/none`; Provider default sends no
+  override. Project the canonical task schema to OpenAI's documented Structured Outputs subset at
+  the wire boundary by removing `uniqueItems`, which OpenAI does not list among supported array
+  constraints. Keep supported constraints such as `minItems`, `maxItems`, and string patterns.
+  Preserve the complete canonical schema in the task prompt and enforce uniqueness locally.
 - Add explicit Google Gemini profiles. They pin the documented Google AI Studio base URL,
   canonicalize the `models/` resource prefix, and map thinking On/Off to
   `reasoning_effort=high/none`; Provider default sends no override. Both saved adapter IDs send a
@@ -57,6 +63,8 @@ review-only results.
   integration-identification header.
 - Include handler source in every model-role runtime fingerprint. A handler change invalidates old
   conformance and quality records even when the saved connection and model are unchanged.
+- Make the fixed conformance challenge exercise a bounded, unique array as well as exact scalar
+  identity. This catches schema-dialect regressions before a full task-quality suite incurs calls.
 - Continue reducing upstream failures to bounded machine-readable codes. Read error JSON within the
   existing byte limit and map only an explicit allowlist of provider code/type/status values; raw
   provider messages, prompts, responses, and credentials remain private. Provider, network,
@@ -80,6 +88,16 @@ clients. Adopting its model execution would duplicate Music's existing schema ha
 request/response handling into another abstraction. A custom client alone does not automatically
 preserve the current DNS-address pinning and byte-bound response reader. Rejected for direct
 execution while the present safety contract remains.
+
+### Rust provider frameworks and SDKs
+
+Rig and `rust-genai` both provide maintained multi-provider registries and useful extension
+patterns. Their normal client abstractions also execute HTTP, while Music must retain its pinned
+resolver, private-network decision, no-redirect policy, explicit no-retry policy, response byte
+reader, and durable per-attempt accounting. `async-openai` is configurable and supports the
+Responses API, but is OpenAI-focused and advertises automatic rate-limit retries, which conflicts
+with Music's explicit cost boundary. Their handler and extension organization is a design
+reference; adding any of them as an execution dependency was rejected for the current scope.
 
 ### External multi-provider gateway
 
@@ -120,3 +138,7 @@ validation, disclosure, and review boundary. Selected.
 - [Google Gemini API errors](https://ai.google.dev/gemini-api/docs/api-errors)
 - [OpenAI latest-model migration guidance](https://developers.openai.com/api/docs/guides/latest-model)
 - [OpenAI Responses API reference](https://developers.openai.com/api/reference/resources/responses/methods/create)
+- [OpenAI Structured Outputs schema subset](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas)
+- [Rig provider architecture](https://github.com/0xPlaygrounds/rig)
+- [`rust-genai` provider adapter API](https://github.com/jeremychone/rust-genai)
+- [`async-openai` request behavior](https://github.com/64bit/async-openai)

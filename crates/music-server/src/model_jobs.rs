@@ -409,6 +409,7 @@ impl ModelEvaluationJobHandler {
         let mut usage = ProviderUsageAccumulator::default();
         let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
         let mut completed = 0_usize;
+        let mut deterministic_execution_failure = None;
         let results = self
             .evaluate_tagging_cases(
                 context,
@@ -419,6 +420,8 @@ impl ModelEvaluationJobHandler {
                 &mut retry_budget,
                 &mut completed,
                 total_attempts,
+                execution_cases.len(),
+                &mut deterministic_execution_failure,
             )
             .await?;
         let safety_cases = execution_cases
@@ -436,6 +439,8 @@ impl ModelEvaluationJobHandler {
                 &mut retry_budget,
                 &mut completed,
                 total_attempts,
+                execution_cases.len(),
+                &mut deterministic_execution_failure,
             )
             .await?;
         let evaluated = merge_safety_repeats(results, repeats).map_err(model_task_failure)?;
@@ -485,6 +490,8 @@ impl ModelEvaluationJobHandler {
         retry_budget: &mut u8,
         completed: &mut usize,
         total_attempts: usize,
+        scenario_count: usize,
+        deterministic_execution_failure: &mut Option<ModelTaskError>,
     ) -> Result<Vec<TagQualityCaseResult>, JobHandlerError> {
         let mut results = Vec::with_capacity(cases.len());
         for chunk in cases.chunks(MODEL_TAG_BATCH_SIZE) {
@@ -493,20 +500,29 @@ impl ModelEvaluationJobHandler {
                 vocabulary.clone(),
             )
             .map_err(model_task_failure)?;
-            let mut correction = false;
-            let profiles = loop {
-                let model_result = self
-                    .execute_model(context, role, &batch.request(correction), usage)
-                    .await?;
-                match batch.finish(model_result) {
-                    Ok(profiles) => break Ok(profiles),
-                    Err(error) if retryable_tagger_error(&error) && *retry_budget > 0 => {
-                        *retry_budget = retry_budget.saturating_sub(1);
-                        correction = true;
+            let profiles = if let Some(error) = deterministic_execution_failure.clone() {
+                Err(error)
+            } else {
+                let mut correction = false;
+                loop {
+                    let model_result = self
+                        .execute_model(context, role, &batch.request(correction), usage)
+                        .await?;
+                    match batch.finish(model_result) {
+                        Ok(profiles) => break Ok(profiles),
+                        Err(error) if retryable_tagger_error(&error) && *retry_budget > 0 => {
+                            *retry_budget = retry_budget.saturating_sub(1);
+                            correction = true;
+                        }
+                        Err(error) => break Err(error),
                     }
-                    Err(error) => break Err(error),
                 }
             };
+            if let Err(error) = &profiles
+                && deterministic_tagger_execution_failure(error)
+            {
+                *deterministic_execution_failure = Some(error.clone());
+            }
             for case in chunk {
                 let result = match &profiles {
                     Ok(profiles) => {
@@ -534,9 +550,7 @@ impl ModelEvaluationJobHandler {
                     "Evaluating tagging model",
                     format!(
                         "Completed {} of {} scored attempts across {} scenarios",
-                        *completed,
-                        total_attempts,
-                        cases.len(),
+                        *completed, total_attempts, scenario_count,
                     ),
                 )
                 .await?;
@@ -544,6 +558,26 @@ impl ModelEvaluationJobHandler {
         }
         Ok(results)
     }
+}
+
+fn deterministic_tagger_execution_failure(error: &ModelTaskError) -> bool {
+    matches!(
+        error.code.as_str(),
+        "model_execution_completion_endpoint_not_found"
+            | "model_execution_destination_blocked"
+            | "model_execution_failed_precondition"
+            | "model_execution_forbidden"
+            | "model_execution_invalid_request"
+            | "model_execution_invalid_request_headers"
+            | "model_execution_model_not_found"
+            | "model_execution_output_schema_required"
+            | "model_execution_parameter_unknown"
+            | "model_execution_redirect_blocked"
+            | "model_execution_request_too_large"
+            | "model_execution_unauthorized"
+            | "model_execution_unsupported_adapter"
+            | "model_execution_unsupported_provider_feature"
+    )
 }
 
 impl JobHandler for ModelEvaluationJobHandler {
@@ -1723,7 +1757,11 @@ fn model_task_failure(error: ModelTaskError) -> JobHandlerError {
 
 #[cfg(test)]
 mod tests {
-    use super::{EvaluationKind, FeatureKind, evaluation_job_definition, feature_job_definition};
+    use super::{
+        EvaluationKind, FeatureKind, deterministic_tagger_execution_failure,
+        evaluation_job_definition, feature_job_definition,
+    };
+    use music_application::assistant::ModelTaskError;
     use music_application::jobs::JobLane;
 
     #[test]
@@ -1738,6 +1776,22 @@ mod tests {
             assert_eq!(definition.lane, JobLane::Provider);
             assert!(!definition.restartable);
         }
+    }
+
+    #[test]
+    fn tagging_quality_stops_repeating_deterministic_provider_request_failures() {
+        assert!(deterministic_tagger_execution_failure(
+            &ModelTaskError::new("model_execution_invalid_request")
+        ));
+        assert!(deterministic_tagger_execution_failure(
+            &ModelTaskError::new("model_execution_parameter_unknown")
+        ));
+        assert!(!deterministic_tagger_execution_failure(
+            &ModelTaskError::new("model_execution_timeout")
+        ));
+        assert!(!deterministic_tagger_execution_failure(
+            &ModelTaskError::new("model_output_schema_invalid")
+        ));
     }
 
     #[test]

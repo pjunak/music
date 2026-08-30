@@ -16,6 +16,7 @@ import {
   qualityStatusLabel,
   qualityTone,
   taskNameForRole,
+  type FailedScenario,
   type TestTone,
 } from "./modelQualityUi";
 import { providerUsageFromJob } from "./modelUsage";
@@ -105,6 +106,51 @@ function structuredOutputTroubleshooting(
   );
 }
 
+function commonQualityExecutionFailure(
+  scenarios: FailedScenario[],
+  evaluation: ModelQualityEvaluation | undefined,
+): string | null {
+  if (
+    scenarios.length === 0 ||
+    evaluation?.passed_cases !== 0 ||
+    scenarios.length !== evaluation.total_cases
+  ) {
+    return null;
+  }
+  let common: string | null = null;
+  for (const scenario of scenarios) {
+    if (scenario.failures.length === 0) return null;
+    const codes = scenario.failures.map((failure) =>
+      failure.match(/\bTagger error: (model_execution_[a-z0-9_]+)\b/)?.[1] ??
+      null,
+    );
+    if (codes.some((code) => code === null)) return null;
+    const uniqueCodes = new Set(codes);
+    if (uniqueCodes.size !== 1) return null;
+    const [code] = uniqueCodes;
+    if (code === undefined || (common !== null && common !== code)) return null;
+    common = code;
+  }
+  return common;
+}
+
+function qualityExecutionFailureMessage(code: string): string {
+  const providerCode = code.replace(/^model_execution_/, "");
+  if (providerCode === "invalid_request") {
+    return (
+      "The provider rejected the production task schema or request settings before inference. " +
+      "No per-scenario quality diagnosis is available; run the complete suite again after updating the adapter or request configuration."
+    );
+  }
+  if (providerCode === "parameter_unknown") {
+    return (
+      "The provider does not support a request parameter used by this adapter, so the suite stopped before inference. " +
+      "No per-scenario quality diagnosis is available."
+    );
+  }
+  return `The provider request failed before the suite could score model behavior (${providerCode}). No per-scenario quality diagnosis is available.`;
+}
+
 function currentModelTestResult(
   role: ModelRole,
   result: ModelConformance | undefined,
@@ -129,6 +175,10 @@ function buildLogEntries(
   const entries: LogEntry[] = [];
   const quality = modelQualityView(evaluation, role, jobs);
   const gateSummary = qualityGateSummary(quality.reportJob);
+  const executionFailure = commonQualityExecutionFailure(
+    quality.failures,
+    evaluation,
+  );
   entries.push({
     id: "configuration",
     time: role.updated_at,
@@ -267,7 +317,9 @@ function buildLogEntries(
       time: evaluation.last_evaluated_at,
       tone: "failure",
       message:
-        gateSummary === null
+        executionFailure !== null
+          ? `Quality certification failed because the suite could not execute model requests. ${qualityExecutionFailureMessage(executionFailure)}`
+          : gateSummary === null
           ? `Task quality passed ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios. Review the failures below.`
           : `Quality gate failed after ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios: ${gateSummary.safetyPassedCases} of ${gateSummary.safetyTotalCases} safety checks and ${gateSummary.qualityPassedCases} of ${gateSummary.qualityTotalCases} scored checks (minimum ${Math.round(gateSummary.minimumQualityPassRate * 100)}%).`,
     });
@@ -307,24 +359,33 @@ function buildLogEntries(
     });
   }
 
-  for (const scenario of quality.failures) {
+  if (executionFailure !== null) {
     entries.push({
-      id: `scenario-${scenario.id}`,
+      id: "quality-execution-failure",
       time: evaluation?.last_evaluated_at ?? null,
-      tone: scenario.blocking ? "failure" : "warning",
-      message: `${scenario.description}: ${scenario.failures.join("; ") || "Scenario failed."}`,
+      tone: "failure",
+      message: `${quality.failures.length} scenario failures share one provider execution cause: ${executionFailure}. Individual rows are grouped because the model did not produce scenario results.`,
     });
-    const troubleshooting = structuredOutputTroubleshooting(
-      role,
-      scenario.failures,
-    );
-    if (troubleshooting !== null) {
+  } else {
+    for (const scenario of quality.failures) {
       entries.push({
-        id: `scenario-${scenario.id}-troubleshooting`,
+        id: `scenario-${scenario.id}`,
         time: evaluation?.last_evaluated_at ?? null,
-        tone: "warning",
-        message: troubleshooting,
+        tone: scenario.blocking ? "failure" : "warning",
+        message: `${scenario.description}: ${scenario.failures.join("; ") || "Scenario failed."}`,
       });
+      const troubleshooting = structuredOutputTroubleshooting(
+        role,
+        scenario.failures,
+      );
+      if (troubleshooting !== null) {
+        entries.push({
+          id: `scenario-${scenario.id}-troubleshooting`,
+          time: evaluation?.last_evaluated_at ?? null,
+          tone: "warning",
+          message: troubleshooting,
+        });
+      }
     }
   }
 
@@ -404,6 +465,10 @@ export function ModelTestConsole({
       )
     : [];
   const quality = modelQualityView(evaluation, role, jobs);
+  const executionFailure = commonQualityExecutionFailure(
+    quality.failures,
+    evaluation,
+  );
   const connection = connections.find((item) => item.id === role?.connection_id);
   const adapter = adapters.find((item) => item.id === connection?.adapter_id);
   const modelResult = role
@@ -521,6 +586,7 @@ export function ModelTestConsole({
           {role?.role_id === "music_tagger" &&
           evaluation !== undefined &&
           quality.failures.length > 0 &&
+          executionFailure === null &&
           quality.activeJob === undefined ? (
             <button
               type="button"

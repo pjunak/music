@@ -129,6 +129,10 @@ pub(crate) fn provider_runtime_contract_digest() -> String {
     const PROVIDER_RUNTIME_CONTRACT_VERSION: &str = "music-rust-provider-runtime/v1";
     const SERVER_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
         (
+            "music-server/provider_handlers.rs",
+            include_str!("provider_handlers.rs"),
+        ),
+        (
             "music-server/provider_transport.rs",
             include_str!("provider_transport.rs"),
         ),
@@ -1820,6 +1824,7 @@ mod tests {
                             let content = serde_json::json!({
                                 "contract": contract,
                                 "challenge": challenge,
+                                "checks": ["schema", "identity"],
                                 "accepted": true,
                             })
                             .to_string();

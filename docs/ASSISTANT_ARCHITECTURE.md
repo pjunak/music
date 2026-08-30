@@ -1,7 +1,7 @@
 # Assistant architecture and contract map
 
 **Status:** Living documentation
-**Last audited:** 2026-08-28
+**Last audited:** 2026-08-30
 
 This is the current map for the local-first Assistant and its optional model workflows. Use it to
 find ownership, privacy boundaries, contract versions, evaluation gates, and regression tests.
@@ -76,8 +76,8 @@ operator request / indexed library / local audio
 |---|---|---|---|
 | Task prompt, example, schema, untrusted-data labels | [`structured_harness.rs`](../crates/music-application/src/assistant/structured_harness.rs) | colocated strict-shape and bounds tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
 | Adapter/capability/role inventory and runtime fingerprints | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`runtime_contract.rs`](../crates/music-application/src/assistant/runtime_contract.rs) | colocated inventory and digest tests | [ADR-001](ADR-001-assistant-provider-connections.md), [ADR-002](ADR-002-assistant-model-execution.md) |
-| Provider-specific model IDs and inference parameters | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | transport-free adapter and request-shape tests in the same module | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
-| Request execution and response parsing | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs), task types under [`assistant/`](../crates/music-application/src/assistant) | local fixture-server, strict parsing, and bounds tests | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
+| Provider-specific model IDs, request schemas, inference parameters, and response shapes | [`provider_handlers.rs`](../crates/music-server/src/provider_handlers.rs) | transport-free production-shaped request and parser tests | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
+| Bounded request execution | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs), task types under [`assistant/`](../crates/music-application/src/assistant) | local fixture-server, strict parsing, and bounds tests | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
 | URL validation, SSRF boundary, redirect refusal, byte/time limits | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | pinned-DNS, special-range, redirect, timeout, and response-limit tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Credential encryption, initialization, reset, and offline rotation | [`crypto.rs`](../crates/music-storage/src/crypto.rs), [`provider_credentials.rs`](../crates/music-server/src/provider_credentials.rs), [`providers.rs`](../crates/music-storage/src/providers.rs) | Python-compatibility fixture plus reset/rotation transaction tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Role preparation and stale-gate enforcement | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`provider_api.rs`](../crates/music-server/src/provider_api.rs) | role fingerprint, conformance, quality, and active-job tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
@@ -93,7 +93,8 @@ the owning code, this table, its evaluation suite, disclosure copy, and tests to
 Shared contracts:
 
 - harness: `assistant-structured-harness/v3`
-- provider conformance: `assistant-provider-conformance/v3`
+- provider conformance result: `assistant-provider-conformance/v3`
+- provider conformance challenge: `assistant-provider-conformance-challenge/v4`
 - OpenAI Responses adapter: `openai-responses/v1`
 - standard adapter: `openai-compatible/v1`
 - strict-schema adapter: `openai-compatible-json-schema/v1`
@@ -102,7 +103,9 @@ Shared contracts:
 
 Use `openai-responses/v1` with the exact base URL `https://api.openai.com/v1` for OpenAI. It sends
 native Responses requests with `max_output_tokens`, `reasoning.effort`, and the task schema under
-`text.format`; the generic adapters are reserved for third-party OpenAI-compatible services.
+`text.format`; its wire projection removes only unsupported `uniqueItems` while keeping OpenAI's
+supported array and string constraints. The generic adapters are reserved for third-party
+OpenAI-compatible services.
 Both Gemini adapter IDs use the exact base URL
 `https://generativelanguage.googleapis.com/v1beta/openai`, canonicalize `models/` resource IDs,
 send Google's integration-identification header, and constrain results with a Gemini-compatible
@@ -172,9 +175,9 @@ prior consent.
 4. Update the fixed task example, request-specific schema closure, synthetic suite, negative cases,
    and privacy assertions. Never use private library data as a checked-in fixture.
 5. Update the task disclosure when any sent/retained data category or retry/cost boundary changes.
-6. Put provider-specific model-ID, endpoint, or inference-parameter differences in a versioned
-   handler. Keep network I/O in the shared transport, update the handler fingerprint coverage, and
-   never select behavior from a connection name, URL, or model-name guess.
+6. Put provider-specific model-ID, endpoint, schema-dialect, inference-parameter, or response-shape
+   differences in a versioned handler. Keep network I/O in the shared transport, update the handler
+   fingerprint coverage, and never select behavior from a connection name, URL, or model-name guess.
 7. Update this inventory and amend the relevant ADR when the reasoning or trade-off changed.
 8. Run the narrow task tests, documentation checks, full Rust workspace gates, frontend gates, and a real
    provider conformance/quality run before enabling the changed configuration in production.

@@ -25,6 +25,7 @@ pub const STRUCTURED_TEXT_CAPABILITY: &str = "structured-text/v1";
 pub const STRICT_JSON_SCHEMA_CAPABILITY: &str = "strict-json-schema/v1";
 pub const AUDIO_INPUT_CAPABILITY: &str = "audio-input/v1";
 pub const PROVIDER_CONFORMANCE_CONTRACT: &str = "assistant-provider-conformance/v3";
+const PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT: &str = "assistant-provider-conformance-challenge/v4";
 pub const STRUCTURED_HARNESS_CONTRACT: &str = "assistant-structured-harness/v3";
 const CONFORMANCE_CHALLENGE_BYTES: usize = 24;
 
@@ -677,10 +678,11 @@ impl ProviderConformanceTarget {
     #[must_use]
     pub fn request(&self) -> StructuredModelRequest {
         StructuredModelRequest {
-            system_prompt: "This is a connection conformance test. Return only one JSON object with exactly these keys: contract, challenge, accepted. Copy the supplied contract and challenge exactly and set accepted to true. Do not use a Markdown code fence or add any other text.".to_owned(),
+            system_prompt: "This is a connection conformance test. Return only one JSON object with exactly these keys: contract, challenge, checks, accepted. Copy the supplied contract and challenge exactly, copy checks in the supplied order without duplicates, and set accepted to true. Do not use a Markdown code fence or add any other text.".to_owned(),
             user_prompt: json!({
-                "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
                 "challenge": self.challenge,
+                "checks": ["schema", "identity"],
             })
             .to_string(),
             max_output_tokens: 256,
@@ -688,13 +690,20 @@ impl ProviderConformanceTarget {
             output_schema: Some(json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["contract", "challenge", "accepted"],
+                "required": ["contract", "challenge", "checks", "accepted"],
                 "properties": {
                     "contract": {
                         "type": "string",
-                        "const": PROVIDER_CONFORMANCE_CONTRACT,
+                        "const": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
                     },
                     "challenge": {"type": "string", "const": self.challenge},
+                    "checks": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "uniqueItems": true,
+                        "items": {"type": "string", "enum": ["schema", "identity"]},
+                    },
                     "accepted": {"type": "boolean", "const": true},
                 },
             })),
@@ -706,8 +715,9 @@ impl ProviderConformanceTarget {
         let passed = result.succeeded
             && result.payload.as_ref()
                 == Some(&json!({
-                    "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                    "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
                     "challenge": self.challenge,
+                    "checks": ["schema", "identity"],
                     "accepted": true,
                 }));
         ProviderConformanceResult {
@@ -1699,7 +1709,7 @@ impl ProviderService {
         let timeout_seconds = role.timeout_seconds.to_string();
         let max_output_tokens = role.max_output_tokens.to_string();
         let value = [
-            PROVIDER_CONFORMANCE_CONTRACT,
+            PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
             STRUCTURED_HARNESS_CONTRACT,
             connection_fingerprint.as_str(),
             role.role_id.as_str(),
@@ -1983,9 +1993,10 @@ fn unexpected_mutation() -> ProviderServiceError {
 #[cfg(test)]
 mod tests {
     use super::{
-        MODEL_ROLES, OPENAI_COMPATIBLE_ADAPTER, PROVIDER_ADAPTERS, PROVIDER_CONFORMANCE_CONTRACT,
-        ProviderConformanceTarget, ProviderConnectionRecord, ProviderExecutionTarget,
-        ProviderSecret, StructuredModelResult, ThinkingMode,
+        MODEL_ROLES, OPENAI_COMPATIBLE_ADAPTER, PROVIDER_ADAPTERS,
+        PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT, ProviderConformanceTarget,
+        ProviderConnectionRecord, ProviderExecutionTarget, ProviderSecret, StructuredModelResult,
+        ThinkingMode,
     };
 
     #[test]
@@ -2060,12 +2071,21 @@ mod tests {
             }),
             Some("one-time-challenge")
         );
+        assert_eq!(
+            request.output_schema.as_ref().and_then(|schema| {
+                schema
+                    .pointer("/properties/checks/uniqueItems")
+                    .and_then(serde_json::Value::as_bool)
+            }),
+            Some(true)
+        );
         let passed = target.evaluate(StructuredModelResult {
             succeeded: true,
             error_code: None,
             payload: Some(serde_json::json!({
-                "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
                 "challenge": "one-time-challenge",
+                "checks": ["schema", "identity"],
                 "accepted": true,
             })),
             provider_model_id: Some("fixture-model".to_owned()),
@@ -2079,8 +2099,9 @@ mod tests {
             succeeded: true,
             error_code: None,
             payload: Some(serde_json::json!({
-                "contract": PROVIDER_CONFORMANCE_CONTRACT,
+                "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
                 "challenge": "different",
+                "checks": ["schema", "identity"],
                 "accepted": true,
             })),
             provider_model_id: None,

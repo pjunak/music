@@ -896,6 +896,64 @@ mod tests {
     }
 
     #[test]
+    fn tagger_keeps_canonical_uniqueness_and_rejects_duplicate_ids()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let vocabulary = default_vocabulary_snapshot()?;
+        let tag_id = vocabulary
+            .entries()
+            .next()
+            .map(|entry| entry.id.clone())
+            .ok_or("vocabulary is empty")?;
+        let batch = ModelTaggerBatch::new(
+            vec![json!({
+                "track_id": 1,
+                "title": "Tavern Jig",
+                "display_title": "",
+                "artist": "",
+                "album": "",
+                "origin": "",
+                "genre": "folk",
+                "length_s": 120.0
+            })],
+            vocabulary,
+        )?;
+        assert_eq!(
+            batch
+                .request(false)
+                .output_schema
+                .as_ref()
+                .and_then(|schema| {
+                    schema
+                        .pointer("/properties/tracks/items/properties/tag_ids/uniqueItems")
+                        .and_then(serde_json::Value::as_bool)
+                }),
+            Some(true)
+        );
+        let error = batch
+            .finish(StructuredModelResult {
+                succeeded: true,
+                error_code: None,
+                payload: Some(json!({
+                    "schema_version": "assistant-music-tagger-output/v3",
+                    "tracks": [{
+                        "track_id": 1,
+                        "tag_ids": [tag_id.clone(), tag_id],
+                        "confidence": "high",
+                        "evidence": ["title"]
+                    }]
+                })),
+                provider_model_id: None,
+                finish_reason: Some("stop".to_owned()),
+                input_tokens: None,
+                output_tokens: None,
+            })
+            .err()
+            .ok_or("duplicate IDs must fail closed")?;
+        assert_eq!(error.code, "model_output_schema_invalid");
+        Ok(())
+    }
+
+    #[test]
     fn bundled_tagging_suite_keeps_quality_and_safety_coverage()
     -> Result<(), Box<dyn std::error::Error>> {
         let suite = tag_quality_suite()?;

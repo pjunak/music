@@ -33,6 +33,7 @@ mod playlist_evaluation_admin;
 mod playlists;
 mod provider_api;
 mod provider_credentials;
+mod provider_handlers;
 mod provider_transport;
 mod runtime;
 mod sfx;
