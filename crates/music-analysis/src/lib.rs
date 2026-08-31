@@ -23,4 +23,6 @@ pub use signal::{
     AudioSignalAnalyzer, AudioSignalError, AudioSignalMeasurements, AudioSignalProfile,
     FfmpegSignalAnalyzer,
 };
-pub use voice::{VoiceAnalysisDocument, VoiceAnalysisError, VoiceBackend, VoiceWorker};
+pub use voice::{
+    VoiceAnalysisDocument, VoiceAnalysisError, VoiceBackend, VoiceWorker, VoiceWorkerFactory,
+};

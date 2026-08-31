@@ -179,7 +179,7 @@ impl AppRuntime {
         let voice_backend =
             VoiceBackend::initialize(config.assistant_voice_model_path.as_deref(), ffmpeg.clone());
         let voice_analyzer = voice_backend.status;
-        let voice_worker = voice_backend.worker;
+        let voice_worker_factory = voice_backend.worker_factory;
         health.set_component(
             "voice_analysis",
             false,
@@ -319,7 +319,7 @@ impl AppRuntime {
                 analysis_executor,
                 context_analyzer,
                 voice_analyzer,
-                voice_worker,
+                voice_worker_factory,
             )),
         ];
         job_handlers.extend(model_evaluation_job_handlers(

@@ -55,7 +55,10 @@ async fn run(arguments: Arguments) -> Result<(), ProbeError> {
         )
         .into());
     }
-    let worker = backend.worker.ok_or("ready voice backend has no worker")?;
+    let worker = backend
+        .worker_factory
+        .ok_or("ready voice backend has no worker factory")?
+        .start()?;
 
     if arguments.warmup {
         worker

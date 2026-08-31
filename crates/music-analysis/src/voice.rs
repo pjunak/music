@@ -163,7 +163,7 @@ impl Error for VoiceAnalysisError {
 #[derive(Debug)]
 pub struct VoiceBackend {
     pub status: VoiceAnalyzerStatus,
-    pub worker: Option<VoiceWorker>,
+    pub worker_factory: Option<VoiceWorkerFactory>,
 }
 
 impl VoiceBackend {
@@ -172,7 +172,7 @@ impl VoiceBackend {
         let Some(model_path) = model_path else {
             return Self {
                 status: VoiceAnalyzerStatus::not_configured(),
-                worker: None,
+                worker_factory: None,
             };
         };
         if !model_path.is_file() {
@@ -184,13 +184,17 @@ impl VoiceBackend {
         if model_hash != VOICE_MODEL_SHA256 {
             return unavailable_backend("unsupported_model", &model_hash);
         }
-        let Ok(worker) = VoiceWorker::start(model_path.to_owned(), ffmpeg.into()) else {
-            return unavailable_backend("runtime_missing", &model_hash);
+        let worker_factory = VoiceWorkerFactory {
+            model_path: model_path.to_owned(),
+            ffmpeg: ffmpeg.into(),
         };
+        if worker_factory.start().is_err() {
+            return unavailable_backend("runtime_missing", &model_hash);
+        }
         let signature = format!("{VOICE_ANALYZER_ID}:{model_hash}:{TRACT_RUNTIME_ID}");
         Self {
             status: VoiceAnalyzerStatus::ready(signature),
-            worker: Some(worker),
+            worker_factory: Some(worker_factory),
         }
     }
 }
@@ -199,7 +203,24 @@ fn unavailable_backend(reason: &'static str, model_identity: &str) -> VoiceBacke
     let signature = format!("{VOICE_ANALYZER_ID}:{model_identity}:{TRACT_RUNTIME_ID}:{reason}");
     VoiceBackend {
         status: VoiceAnalyzerStatus::unavailable_with_signature(reason, signature),
-        worker: None,
+        worker_factory: None,
+    }
+}
+
+#[derive(Debug, Clone)]
+/// Creates job-scoped voice workers after startup readiness has been verified.
+pub struct VoiceWorkerFactory {
+    model_path: PathBuf,
+    ffmpeg: PathBuf,
+}
+
+impl VoiceWorkerFactory {
+    /// Start one model-owning worker for a bounded voice-analysis pass.
+    /// Dropping the returned worker joins its thread and releases the compiled
+    /// graph instead of retaining model memory for the server's lifetime.
+    pub fn start(&self) -> Result<VoiceWorker, VoiceAnalysisError> {
+        VoiceWorker::start(self.model_path.clone(), self.ffmpeg.clone())
+            .map_err(|()| VoiceAnalysisError::WorkerUnavailable)
     }
 }
 
@@ -964,7 +985,7 @@ mod tests {
         let disabled = VoiceBackend::initialize(None, "ffmpeg");
         assert_eq!(disabled.status.status, "not_configured");
         assert_eq!(disabled.status.reason, None);
-        assert!(disabled.worker.is_none());
+        assert!(disabled.worker_factory.is_none());
 
         let directory = tempfile::tempdir()?;
         let missing_path = directory.path().join(VOICE_MODEL_FILENAME);
@@ -1125,7 +1146,10 @@ mod tests {
             .as_deref()
             .ok_or("ready backend has no source signature")?;
         assert!(!signature.contains(&model_path.display().to_string()));
-        let worker = backend.worker.ok_or("ready backend has no worker")?;
+        let worker = backend
+            .worker_factory
+            .ok_or("ready backend has no worker factory")?
+            .start()?;
         let cancelled = worker
             .analyze(track_path.clone(), Arc::new(AtomicBool::new(true)))
             .await
@@ -1154,6 +1178,7 @@ mod tests {
         const RESOURCE_LIMIT_BYTES: u64 = 4 * 1_024 * 1_024 * 1_024;
         const RSS_ACCEPTANCE_BYTES: u64 = 3 * 1_024 * 1_024 * 1_024;
         const RSS_TREND_ALLOWANCE_BYTES: u64 = 64 * 1_024 * 1_024;
+        const IDLE_RSS_ALLOWANCE_BYTES: u64 = 512 * 1_024 * 1_024;
 
         let model_path = std::env::var_os("MUSIC_TEST_VOICE_MODEL")
             .map(PathBuf::from)
@@ -1184,12 +1209,21 @@ mod tests {
             .into());
         }
 
+        let baseline_rss = resident_set_bytes()?;
         let directory = tempfile::tempdir()?;
         let track_path = directory.path().join("voice-soak.wav");
         write_tone_wav(&track_path, 4)?;
         let backend = VoiceBackend::initialize(Some(&model_path), ffmpeg);
         assert_eq!(backend.status.status, "ready");
-        let worker = backend.worker.ok_or("ready backend has no worker")?;
+        let idle_after_preflight = resident_set_bytes()?;
+        assert!(
+            idle_after_preflight <= baseline_rss.saturating_add(IDLE_RSS_ALLOWANCE_BYTES),
+            "startup voice preflight retained {idle_after_preflight} bytes from a {baseline_rss}-byte baseline"
+        );
+        let worker = backend
+            .worker_factory
+            .ok_or("ready backend has no worker factory")?
+            .start()?;
 
         for _ in 0..3 {
             worker
@@ -1231,6 +1265,14 @@ mod tests {
         let shutdown_started = Instant::now();
         drop(worker);
         assert!(shutdown_started.elapsed() < Duration::from_secs(5));
+        let idle_after_pass = resident_set_bytes()?;
+        eprintln!(
+            "voice idle RSS: baseline={baseline_rss} after_preflight={idle_after_preflight} after_pass={idle_after_pass}"
+        );
+        assert!(
+            idle_after_pass <= baseline_rss.saturating_add(IDLE_RSS_ALLOWANCE_BYTES),
+            "completed voice pass retained {idle_after_pass} bytes from a {baseline_rss}-byte baseline"
+        );
         Ok(())
     }
 

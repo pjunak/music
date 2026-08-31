@@ -134,8 +134,10 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   review, creation, and manual-tuning interaction contract.
 - **Durable library context analysis** — one restartable `local-context/v2` job runs two sequential
   library passes. The first decodes every new or changed track into factual whole-track context;
-  only after those rows are checkpointed does the capacity-one model-owning thread perform
-  optional voice detection. The factual context includes signal-level and intensity development, rhythmic
+  only after those rows are checkpointed does a capacity-one, job-scoped model-owning thread perform
+  optional voice detection. The thread and compiled graph are dropped when the voice pass completes or
+  is cancelled, so the several-gigabyte inference working set is not retained while the service is idle.
+  The factual context includes signal-level and intensity development, rhythmic
   drive, perceptual brightness, spectral fullness, spectral change, local tempo behavior, major acoustic sections,
   repetition, technical details, explicit analysis-stage status, and bounded performance timings.
   Native RustFFT frame/spectrum math uses gain-invariant Mel spectral profiles, logarithmic brightness,

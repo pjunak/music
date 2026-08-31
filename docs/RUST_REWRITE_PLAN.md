@@ -303,8 +303,9 @@ boundaries; the owner accepts it as a post-cutover diagnostic.
 Run feasibility spikes before depending on uncertain adapters:
 
 1. **Voice:** load the exact pinned TF1 model with tract, decide direct TF1 versus checksum-bound
-   NNEF preparation, reproduce Essentia preprocessing/outputs, and soak one model-owning Rust thread
-   under the 4 GB limit. Measure cancellation, panic recovery, and per-call bounds; select the Rust
+   NNEF preparation, reproduce Essentia preprocessing/outputs, and soak one job-scoped model-owning
+   Rust thread under the 4 GB limit. Measure cancellation, post-pass idle RSS, panic recovery, and
+   per-call bounds; select the Rust
    worker-process fallback if any hard-isolation condition fails.
    Direct TF1 loading, the checksum-specific compatibility importer, deterministic preprocessing,
    graph output, and end-to-end FFmpeg/worker inference pass. The Linux Essentia differential and
@@ -624,8 +625,9 @@ implemented. Private differential and long resource-soak checks remain post-cuto
 - [x] Single-pass EBU R128 integration after corpus parity.
 - [x] Bounded track pool, serialized SQLite checkpoints, partial/failure rows, profiling, and UI job
   progress compatibility.
-- [x] Supervised capacity-one, single-model inference thread and retryable second phase. Direct TF1
-  loading is selected; implement the Rust subprocess if post-cutover evidence selects hard isolation.
+- [x] Supervised capacity-one, job-scoped single-model inference thread and retryable second phase.
+  Direct TF1 loading is selected; the compiled graph is dropped after each voice pass. Implement the
+  Rust subprocess if post-pass RSS or other post-cutover evidence selects hard isolation.
 
 Gate: controlled probes pass; representative numeric output is within field tolerances or carries a
 new documented analyzer identity; no semantic inference is added; concurrency remains bounded; and

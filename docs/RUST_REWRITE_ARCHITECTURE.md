@@ -646,7 +646,10 @@ Essentia runtime does not change the model's license or permit copying implement
 incompatible source.
 
 The implemented candidate gives the model to exactly one dedicated, supervised Rust inference
-thread. That thread creates and owns the model state, processes requests sequentially through a
+thread per active voice pass. Startup verifies the exact graph in a short-lived worker; a pass with
+eligible tracks then creates one worker and joins and drops it on completion or cancellation. Idle
+service state retains only the path-free readiness identity, not the compiled graph or inference
+working set. The active thread creates and owns the model state, processes requests sequentially through a
 capacity-one channel, runs overlapping windows without duplicating the graph, and exposes a
 path-free model/runtime/preprocessor identity. FFmpeg decoding, 512-sample frames, 96-band features,
 and 187-frame patches are streamed through fixed-size buffers. Cancellation is checked while
@@ -782,8 +785,9 @@ Performance is accepted against measured baselines, not language expectations:
   baseline; target at least 25% lower elapsed time or peak memory on the representative corpus.
 - The production deployment remains capped at 4 GB and three CPUs; the normal full-library context
   build is the practical post-cutover test of that real workload.
-- Voice inference loads one model instance; repeated-corpus soak testing is retained as an optional
-  diagnostic for upward resident-memory growth.
+- An active voice pass loads one model instance. Startup preflight and completed or cancelled passes
+  must return within 512 MiB of the pre-model RSS baseline; repeated-corpus soak testing also checks
+  for upward resident-memory growth while the pass is active.
 - Idle memory, startup scan, upload, range streaming, and image size are recorded before/after even
   where no hard improvement is required.
 
@@ -814,8 +818,8 @@ need curl or Python.
 
 - Replace FFmpeg decoding with Symphonia only after every supported format, metadata behavior, and
   performance characteristic passes the corpus gate.
-- Promote voice inference to a Rust subprocess when repeat-run memory, panic, native-code,
-  cancellation, or deadline measurements show the in-process thread is not safely bounded.
+- Promote voice inference to a Rust subprocess when post-pass idle RSS, repeat-run memory, panic,
+  native-code, cancellation, or deadline measurements show the job-scoped thread is not safely bounded.
 - Add more analysis workers only after cgroup CPU/RSS measurements show headroom.
 - Add a filesystem watcher only as a reconciliation accelerator after bind-mount behavior is
   measured; it never replaces explicit scans or current-file checks.

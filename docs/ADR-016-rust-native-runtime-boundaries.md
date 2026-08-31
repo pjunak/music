@@ -12,7 +12,11 @@ architecture and enforced by `.github/scripts/rust-architecture.mjs`.
 **Implementation update (2026-08-29):** The checksum-pinned MusiCNN TensorFlow graph runs directly
 through tract 0.23.5 after a checksum-specific, in-memory compatibility normalization for four fixed
 padding operators and `FusedBatchNormV3`. One dedicated Rust thread owns the compiled graph and a
-capacity-one request queue. This confirms the thread as the production implementation. For the
+capacity-one request queue. Production monitoring on 2026-08-31 showed that retaining that thread in
+the durable handler registry also retained almost the full four-GiB container allowance while idle.
+The thread remains the production execution boundary, but it is now job-scoped: startup uses a
+short-lived readiness preflight, and each non-empty voice pass creates one worker that is joined and
+dropped when the pass completes or is cancelled. For the
 personal deployment, the owner accepts the private Essentia comparison and production-shaped
 RSS/cancellation soak as post-cutover diagnostics rather than blockers; the subprocess fallback
 remains available if that evidence later exposes a real fault.
@@ -127,7 +131,8 @@ the Rust subprocess remains the required fallback when bounded shutdown cannot b
 - Runtime backups have one fewer mutable side file; legacy device JSON remains a migration input and
   rollback artifact only.
 - SQLite writes are predictably serialized in-process, matching SQLite's one-writer reality.
-- Optional voice execution uses the cheapest safe boundary proven by measurements.
+- Optional voice execution uses the cheapest safe boundary proven by measurements and releases its
+  compiled model when no voice pass is active.
 - Several intentional compatibility differences require owner approval and fixture updates before
   Phase 1 can close.
 

@@ -31,6 +31,12 @@ preprocessing. Exact-model graph and end-to-end worker tests pass, and Linux con
 green. The owner accepts private-library comparison and long resource-soak evidence as post-cutover
 operational checks for this personal deployment rather than release blockers.
 
+**Memory-lifetime update (2026-08-31):** Production monitoring showed the compiled tract graph and
+inference allocations retaining almost the full four-GiB container allowance after a voice pass. The
+server still performs a short-lived startup preflight so `ready` remains an execution-backed status,
+but the model-owning thread is now created only for a voice pass with eligible tracks and is joined and
+dropped on completion or cancellation. Idle service memory must not include the voice model working set.
+
 ## Context
 
 `local-context/v1` deliberately reported voice as unknown because loudness, spectral shape, and

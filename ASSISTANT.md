@@ -122,8 +122,10 @@ docker run -d --name music \
 
 After restarting, existing context built without that exact classifier is shown as stale. Run the
 normal comprehensive context job. It first checkpoints signal, structure, tempo, and loudness for
-every eligible track, then sends voice-only work to one capacity-one model-owning Rust thread. The Library Context page shows
-one progress bar for each pass. If native voice inference is interrupted, retrying the job resumes
+every eligible track, then sends voice-only work to one capacity-one, job-scoped model-owning Rust
+thread. The thread is joined and the compiled graph is dropped when the voice pass completes or is
+cancelled, so idle service memory returns to its non-inference working set. The Library Context page
+shows one progress bar for each pass. If native voice inference is interrupted, retrying the job resumes
 the remaining voice rows from the saved first-pass context instead of decoding the library again.
 Then inspect several known vocal, instrumental, and intermittent-vocal tracks in
 **Assistant -> Track Context**. The UI reports the normalized two-class score and

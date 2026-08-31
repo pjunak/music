@@ -8,7 +8,7 @@ use futures_util::{StreamExt, stream};
 use music_analysis::{
     AnalysisExecutor, AudioContextAnalyzer, AudioContextDocument, AudioContextError,
     AudioContextPerformance, AudioSignalAnalyzer, AudioSignalError, VoiceAnalysisDocument,
-    VoiceAnalysisError, VoiceContextPreparation, VoiceWorker,
+    VoiceAnalysisError, VoiceContextPreparation, VoiceWorker, VoiceWorkerFactory,
 };
 use music_application::assistant::{
     AUDIO_ANALYSIS_JOB_KIND, AnalysisFailureState, AnalysisFailureWrite, AnalysisState,
@@ -282,7 +282,7 @@ pub(crate) struct ContextAnalysisJobHandler {
     executor: AnalysisExecutor,
     analyzer: Arc<dyn AudioContextAnalyzer>,
     voice_analyzer: VoiceAnalyzerStatus,
-    voice_worker: Option<VoiceWorker>,
+    voice_worker_factory: Option<VoiceWorkerFactory>,
 }
 
 impl ContextAnalysisJobHandler {
@@ -292,7 +292,7 @@ impl ContextAnalysisJobHandler {
         executor: AnalysisExecutor,
         analyzer: Arc<dyn AudioContextAnalyzer>,
         voice_analyzer: VoiceAnalyzerStatus,
-        voice_worker: Option<VoiceWorker>,
+        voice_worker_factory: Option<VoiceWorkerFactory>,
     ) -> Self {
         Self {
             repository,
@@ -300,7 +300,7 @@ impl ContextAnalysisJobHandler {
             executor,
             analyzer,
             voice_analyzer,
-            voice_worker,
+            voice_worker_factory,
         }
     }
 
@@ -312,7 +312,7 @@ impl ContextAnalysisJobHandler {
         let cancellation = Arc::new(AtomicBool::new(false));
         let guard = CancelAnalysisOnDrop(Arc::clone(&cancellation));
         let analyzer = Arc::clone(&self.analyzer);
-        let voice = if self.voice_analyzer.is_ready() && self.voice_worker.is_some() {
+        let voice = if self.voice_analyzer.is_ready() && self.voice_worker_factory.is_some() {
             VoiceContextPreparation::Deferred
         } else if self.voice_analyzer.status == "unavailable" || self.voice_analyzer.is_ready() {
             VoiceContextPreparation::Unavailable {
@@ -350,11 +350,9 @@ impl ContextAnalysisJobHandler {
     async fn analyze_voice_track(
         &self,
         context: &JobExecutionContext,
+        worker: &VoiceWorker,
         path: std::path::PathBuf,
     ) -> Result<Result<VoiceAnalysisDocument, VoiceAnalysisError>, JobHandlerError> {
-        let Some(worker) = self.voice_worker.as_ref().cloned() else {
-            return Ok(Err(VoiceAnalysisError::WorkerUnavailable));
-        };
         let cancellation = Arc::new(AtomicBool::new(false));
         let guard = CancelAnalysisOnDrop(Arc::clone(&cancellation));
         let task = worker.analyze(path, cancellation);
@@ -374,6 +372,19 @@ impl ContextAnalysisJobHandler {
                 }
             }
         }
+    }
+
+    async fn start_voice_worker(&self) -> Option<VoiceWorker> {
+        let factory = self.voice_worker_factory.as_ref()?.clone();
+        self.executor
+            .execute(move || factory.start())
+            .await
+            .ok()
+            .and_then(Result::ok)
+    }
+
+    async fn stop_voice_worker(&self, worker: VoiceWorker) {
+        let _ = self.executor.execute(move || drop(worker)).await;
     }
 }
 
@@ -426,7 +437,8 @@ impl JobHandler for ContextAnalysisJobHandler {
             let state_by_track = context_by_track(&states);
             let failure_by_track = failures_by_track(&failures);
             let voice_signature = self.voice_analyzer.source_signature.as_deref();
-            let voice_enabled = self.voice_analyzer.is_ready() && self.voice_worker.is_some();
+            let voice_enabled =
+                self.voice_analyzer.is_ready() && self.voice_worker_factory.is_some();
             let mut signal_work = Vec::new();
             let mut audio_completed = 0_usize;
             let mut audio_failed = 0_usize;
@@ -721,7 +733,12 @@ impl JobHandler for ContextAnalysisJobHandler {
                 total: tracks.len(),
             };
 
-            let active_voice_workers = usize::from(voice_enabled && !voice_work.is_empty());
+            let voice_worker = if voice_enabled && !voice_work.is_empty() {
+                self.start_voice_worker().await
+            } else {
+                None
+            };
+            let active_voice_workers = usize::from(voice_worker.is_some());
             let voice_total = progress_current.saturating_add(
                 u64::try_from(voice_work.len())
                     .map_err(|_| JobHandlerError::new("context analysis is too large"))?,
@@ -778,7 +795,10 @@ impl JobHandler for ContextAnalysisJobHandler {
                     .map_err(JobHandlerError::from_execution)?;
                 let attempt_started = Instant::now();
                 let analysis = match self.root.resolve_existing(&track_path) {
-                    Ok(path) => self.analyze_voice_track(context, path).await?,
+                    Ok(path) => match voice_worker.as_ref() {
+                        Some(worker) => self.analyze_voice_track(context, worker, path).await?,
+                        None => Err(VoiceAnalysisError::WorkerUnavailable),
+                    },
                     Err(_) => Err(VoiceAnalysisError::MissingFile),
                 };
                 let document = match analysis {
@@ -847,6 +867,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                     )
                     .await
                     .map_err(JobHandlerError::from_execution)?;
+            }
+            if let Some(worker) = voice_worker {
+                self.stop_voice_worker(worker).await;
             }
             let voice_wall_seconds = voice_started.elapsed().as_secs_f64();
             if voice_enabled {
