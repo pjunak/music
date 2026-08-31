@@ -23,6 +23,10 @@ vi.mock("@/core/api", async (importActual) => {
       reviewAnalysisTag: vi.fn(),
       reviewAnalysisTagsBulk: vi.fn(),
     },
+    libraryApi: {
+      ...actual.libraryApi,
+      allFolders: vi.fn(),
+    },
   };
 });
 
@@ -37,7 +41,7 @@ vi.mock("@/core/toast", () => ({
   },
 }));
 
-import { assistantApi } from "@/core/api";
+import { assistantApi, libraryApi } from "@/core/api";
 import { toast } from "@/core/toast";
 import { confirmDialog } from "@/components/confirmDialog";
 
@@ -109,6 +113,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(assistantApi.getManualTagCatalog).mockResolvedValue(catalog);
   vi.mocked(assistantApi.listLibraryTags).mockResolvedValue(page);
+  vi.mocked(libraryApi.allFolders).mockResolvedValue({
+    folders: [
+      { name: "DND", path: "DND", track_count: 1, has_children: false },
+    ],
+  });
   vi.mocked(confirmDialog).mockResolvedValue(true);
 });
 
@@ -170,6 +179,7 @@ describe("LibraryTagEditor", () => {
 
     await screen.findByRole("heading", { name: "Tavern Dance" });
     await screen.findByRole("button", { name: "Remove tag medieval" });
+    await user.click(screen.getByText("Browse the mood vocabulary"));
     await user.click(screen.getByRole("button", { name: "tavern" }));
     await user.type(screen.getByLabelText("Create custom tags"), "Boss Room");
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -202,6 +212,38 @@ describe("LibraryTagEditor", () => {
       expect(assistantApi.patchManualTags).toHaveBeenCalledWith(7, [], ["medieval"]),
     );
     expect(screen.getByText("festive")).toBeInTheDocument();
+  });
+
+  it("protects unsaved single-track edits before entering batch mode", async () => {
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(await screen.findByRole("button", { name: "Remove tag medieval" }));
+    expect(screen.getByLabelText("Search tracks to tag")).toBeDisabled();
+    expect(screen.getByLabelText("Filter by your tag")).toBeDisabled();
+    expect(screen.getByLabelText("Filter analysis review")).toBeDisabled();
+
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await user.click(
+      screen.getByRole("checkbox", { name: "Select Tavern Dance for bulk tagging" }),
+    );
+    await waitFor(() =>
+      expect(confirmDialog).toHaveBeenCalledWith({
+        title: "Discard unsaved mood tags?",
+        body: "The changes on this track have not been saved.",
+        confirmLabel: "Discard changes",
+      }),
+    );
+    expect(screen.queryByRole("region", { name: "Bulk tag editor" })).not.toBeInTheDocument();
+
+    vi.mocked(confirmDialog).mockResolvedValueOnce(true);
+    await user.click(
+      screen.getByRole("checkbox", { name: "Select Tavern Dance for bulk tagging" }),
+    );
+    expect(await screen.findByRole("region", { name: "Bulk tag editor" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close batch" }));
+    expect(await screen.findByRole("button", { name: "Remove tag medieval" })).toBeInTheDocument();
   });
 
   it("accepts one generated suggestion into manual tags", async () => {
@@ -281,10 +323,31 @@ describe("LibraryTagEditor", () => {
     await waitFor(() =>
       expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
         review: "pending",
+        folder: "",
+        recursive: false,
         offset: 0,
         limit: 50,
       }),
     );
+  });
+
+  it("uses the library folder rail to browse mood tags", async () => {
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(await screen.findByTitle("DND"));
+
+    await waitFor(() =>
+      expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
+        folder: "DND",
+        recursive: false,
+        offset: 0,
+        limit: 50,
+      }),
+    );
+    expect(screen.getByText("DND", { selector: ".assistant-context-folder-header > span" }))
+      .toBeInTheDocument();
   });
 
   it("applies an explicit bulk decision to selected suggestions", async () => {
@@ -422,6 +485,7 @@ describe("LibraryTagEditor", () => {
       screen.getByRole("checkbox", { name: "Select Tavern Dance for bulk tagging" }),
     );
     const bulkEditor = screen.getByRole("region", { name: "Bulk tag editor" });
+    await user.click(within(bulkEditor).getByText("Choose from the mood vocabulary"));
     await user.click(within(bulkEditor).getByRole("button", { name: "dancing" }));
     await user.click(within(bulkEditor).getByRole("button", { name: "Add to selected" }));
 

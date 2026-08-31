@@ -806,6 +806,8 @@ export const assistantApi = {
       search?: string;
       tag?: string;
       review?: AnalysisTagReviewDecision;
+      folder?: string;
+      recursive?: boolean;
       offset?: number;
       limit?: number;
     } = {},
@@ -814,6 +816,8 @@ export const assistantApi = {
     if (params.search) query.set("search", params.search);
     if (params.tag) query.set("tag", params.tag);
     if (params.review) query.set("review", params.review);
+    if (params.folder !== undefined) query.set("folder", params.folder);
+    if (params.recursive !== undefined) query.set("recursive", String(params.recursive));
     if (params.offset !== undefined) query.set("offset", String(params.offset));
     if (params.limit !== undefined) query.set("limit", String(params.limit));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";

@@ -7,16 +7,14 @@ const LibraryTagEditor = lazy(async () => {
 
 export function LibraryTagsView() {
   return (
-    <div className="assistant-analysis-view assistant-tags-view">
-      <Suspense
-        fallback={
-          <section className="surface-card assistant-tag-workspace">
-            <p className="muted">Loading mood tags…</p>
-          </section>
-        }
-      >
-        <LibraryTagEditor />
-      </Suspense>
-    </div>
+    <Suspense
+      fallback={
+        <div className="library-view assistant-context-view assistant-tags-view">
+          <p className="muted">Loading mood tags…</p>
+        </div>
+      }
+    >
+      <LibraryTagEditor />
+    </Suspense>
   );
 }

@@ -726,6 +726,11 @@ struct LibraryTagListQuery {
     tag: Option<String>,
     #[param(schema_with = nullable_review_status_schema)]
     review: Option<ReviewStatusWire>,
+    #[param(max_length = 1024, schema_with = nullable_string_schema)]
+    folder: Option<String>,
+    #[serde(default)]
+    #[param(default = false)]
+    recursive: bool,
     #[serde(default)]
     #[param(minimum = 0, default = 0)]
     offset: usize,
@@ -2517,6 +2522,18 @@ async fn list_library_tags(
 ) -> Result<Json<LibraryTagPageResponse>, ApiError> {
     authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
+    let scope = query
+        .folder
+        .map(|path| ModelTaggingScopeWire {
+            kind: ContextScopeKindWire::Folder,
+            path,
+            recursive: query.recursive,
+            track_ids: Vec::new(),
+        })
+        .map(ModelTaggingScopeWire::into_parameters)
+        .transpose()?
+        .map(|parameters| parameters.to_scope().map_err(|()| ApiError::validation()))
+        .transpose()?;
     let page = service(&state)?
         .tag_page(ManualTagQuery {
             search: query.search,
@@ -2525,7 +2542,7 @@ async fn list_library_tags(
             offset: query.offset,
             limit: query.limit,
             analyzer_ids: None,
-            scope: None,
+            scope,
         })
         .await
         .map_err(map_assistant_error)?;

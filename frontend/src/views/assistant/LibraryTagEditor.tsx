@@ -1,7 +1,9 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
 import { EmptyState } from "@/components/EmptyState";
+import { FolderTree } from "@/components/FolderTree";
+import { LibrarySidebarRail } from "@/components/LibrarySidebarRail";
 import {
   type AnalysisTagReviewDecision,
   type AnalysisTagReviewResult,
@@ -12,6 +14,7 @@ import {
   type LibraryTagTrack,
   type ManualTagCatalog,
   assistantApi,
+  libraryApi,
 } from "@/core/api";
 import { toast } from "@/core/toast";
 
@@ -60,6 +63,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
   });
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
+  const [path, setPath] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [reviewFilter, setReviewFilter] = useState<
     "" | AnalysisTagReviewDecision
@@ -81,6 +85,14 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
+  const loadFolders = useCallback(async () => {
+    const response = await libraryApi.allFolders();
+    return response.folders.map((folder) => ({
+      ...folder,
+      badge: folder.track_count > 0 ? String(folder.track_count) : null,
+    }));
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -112,6 +124,8 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
         ...(search ? { search } : {}),
         ...(tagFilter ? { tag: tagFilter } : {}),
         ...(reviewFilter ? { review: reviewFilter } : {}),
+        folder: path,
+        recursive: false,
         offset,
         limit: PAGE_SIZE,
       })
@@ -138,7 +152,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     return () => {
       disposed = true;
     };
-  }, [offset, refreshKey, reloadKey, reviewFilter, search, tagFilter]);
+  }, [offset, path, refreshKey, reloadKey, reviewFilter, search, tagFilter]);
 
   const selected = useMemo(
     () => page.items.find((track) => track.track_id === selectedId),
@@ -170,6 +184,29 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     setSearch(searchDraft.trim());
     setSelectedTrackIds(new Set());
     setSelectedReviewItems(new Map());
+  }
+
+  async function canLeaveDraft(): Promise<boolean> {
+    if (!dirty) return true;
+    return confirmDialog({
+      title: "Discard unsaved mood tags?",
+      body: "The changes on this track have not been saved.",
+      confirmLabel: "Discard changes",
+    });
+  }
+
+  async function selectFolder(nextPath: string) {
+    if (nextPath === path || !(await canLeaveDraft())) return;
+    setPath(nextPath);
+    setOffset(0);
+    setSelectedId(null);
+    setSelectedTrackIds(new Set());
+    setSelectedReviewItems(new Map());
+  }
+
+  async function selectTrack(trackId: number) {
+    if (trackId === selectedId || !(await canLeaveDraft())) return;
+    setSelectedId(trackId);
   }
 
   function toggleTag(tag: string) {
@@ -226,7 +263,10 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     setBulkCustomTag("");
   }
 
-  function toggleTrackSelection(trackId: number) {
+  async function toggleTrackSelection(trackId: number) {
+    if (!(await canLeaveDraft())) return;
+    if (dirty) setDraftTags(originalTags);
+    setSelectedReviewItems(new Map());
     setSelectedTrackIds((current) => {
       const next = new Set(current);
       if (next.has(trackId)) next.delete(trackId);
@@ -235,10 +275,17 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     });
   }
 
-  function selectCurrentPage() {
+  async function toggleCurrentPageSelection() {
+    if (!(await canLeaveDraft())) return;
+    if (dirty) setDraftTags(originalTags);
+    setSelectedReviewItems(new Map());
     setSelectedTrackIds((current) => {
       const next = new Set(current);
-      for (const track of page.items) next.add(track.track_id);
+      const allSelected = page.items.every((track) => next.has(track.track_id));
+      for (const track of page.items) {
+        if (allSelected) next.delete(track.track_id);
+        else next.add(track.track_id);
+      }
       return next;
     });
   }
@@ -248,6 +295,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     suggestion: AnalysisTagSuggestion,
     isSelected: boolean,
   ) {
+    if (isSelected) setSelectedTrackIds(new Set());
     const key = analysisTagSuggestionKey(trackId, suggestion);
     setSelectedReviewItems((current) => {
       if (
@@ -458,245 +506,168 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
   }
 
   return (
-    <section className="surface-card assistant-tag-workspace">
-      <div className="assistant-section-heading">
-        <div>
-          <h1>Mood tags</h1>
-          <p>
-            Review suggestions or edit your own database-only tags.
-          </p>
-        </div>
-        <span>{page.total} tracks</span>
-      </div>
-
-      <div className="assistant-tag-toolbar">
-        <form onSubmit={submitSearch} role="search">
-          <input
-            value={searchDraft}
-            onChange={(event) => setSearchDraft(event.target.value)}
-            aria-label="Search tracks to tag"
-            placeholder="Search title, artist, album, or path"
+    <div className="library-view assistant-context-view assistant-tags-view">
+      <h1 className="sr-only">Mood tags</h1>
+      <div className="music-workspace assistant-context-workspace assistant-tag-library-workspace">
+        <LibrarySidebarRail>
+          <FolderTree
+            selectedPath={path}
+            onSelect={(nextPath) => void selectFolder(nextPath)}
+            loadAll={loadFolders}
           />
-          <button type="submit">Search</button>
-        </form>
-        <label>
-          <span>Filter by your tag</span>
-          <select
-            value={tagFilter}
-            onChange={(event) => {
-              setTagFilter(event.target.value);
-              setOffset(0);
-              setSelectedTrackIds(new Set());
-              setSelectedReviewItems(new Map());
-            }}
-          >
-            <option value="">All mood-library tags</option>
-            {filterTags.map((tag) => (
-              <option key={tag} value={tag}>
-                {tag}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Filter analysis review</span>
-          <select
-            value={reviewFilter}
-            onChange={(event) => {
-              setReviewFilter(event.target.value as "" | AnalysisTagReviewDecision);
-              setOffset(0);
-              setSelectedTrackIds(new Set());
-              setSelectedReviewItems(new Map());
-            }}
-          >
-            <option value="">All review states</option>
-            <option value="pending">Needs review</option>
-            <option value="accepted">Accepted suggestions</option>
-            <option value="rejected">Rejected suggestions</option>
-          </select>
-        </label>
-      </div>
+        </LibrarySidebarRail>
 
-      {loadError !== null ? (
-        <div className="assistant-analysis-error" role="alert">
-          <span>{loadError}</span>
-          <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
-            Retry
-          </button>
-        </div>
-      ) : null}
-
-      {selectedReviewItems.size > 0 ? (
-        <div
-          className="assistant-bulk-reviews"
-          role="region"
-          aria-label="Bulk analysis review"
+        <section
+          className={`library-main assistant-context-tracks assistant-tag-tracks${selectedTrackIds.size > 0 ? " has-selection" : ""}`}
+          aria-label="Tracks and mood tags in selected folder"
         >
-          <div>
-            <strong>{selectedReviewItems.size} suggestions selected</strong>
-            <span>
-              Apply one explicit decision to this selection. Invalid or stale items
-              will be reported without blocking valid ones.
-            </span>
+          <div className="folder-header assistant-context-folder-header">
+            <button type="button" className="btn-ghost" onClick={() => void selectFolder("")}>
+              Music
+            </button>
+            <span>{path || "Library root"}</span>
+            <small>{page.total} track{page.total === 1 ? "" : "s"}</small>
           </div>
-          {dirty ? (
-            <p className="assistant-review-note">
-              Save or discard the open mood-tag edits before applying this batch.
-            </p>
-          ) : null}
-          <div className="assistant-bulk-actions">
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={bulkReviewSaving}
-              onClick={() => setSelectedReviewItems(new Map())}
-            >
-              Clear selection
-            </button>
-            <button
-              type="button"
-              disabled={dirty || bulkReviewSaving}
-              onClick={() => void applyBulkReview("rejected")}
-            >
-              Reject selected
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={dirty || bulkReviewSaving}
-              onClick={() => void applyBulkReview("accepted")}
-            >
-              {bulkReviewSaving ? "Applying…" : "Add selected to my tags"}
-            </button>
-          </div>
-        </div>
-      ) : null}
 
-      {selectedTrackIds.size > 0 ? (
-        <div className="assistant-bulk-tags" role="region" aria-label="Bulk tag editor">
-          <div className="assistant-bulk-tags-heading">
-            <div>
-              <strong>{selectedTrackIds.size} tracks selected</strong>
-              <span>Choose tags, then add or remove them across the selection.</span>
+          <div className="assistant-tag-toolbar">
+            <form onSubmit={submitSearch} role="search">
+              <input
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
+                disabled={dirty}
+                aria-label="Search tracks to tag"
+                placeholder="Search this folder"
+              />
+              <button type="submit" disabled={dirty}>Search</button>
+            </form>
+            <div className="assistant-tag-filters">
+              <label>
+                <span>Your tag</span>
+                <select
+                  aria-label="Filter by your tag"
+                  value={tagFilter}
+                  disabled={dirty}
+                  onChange={(event) => {
+                    setTagFilter(event.target.value);
+                    setOffset(0);
+                    setSelectedTrackIds(new Set());
+                    setSelectedReviewItems(new Map());
+                  }}
+                >
+                  <option value="">All tags</option>
+                  {filterTags.map((tag) => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Review</span>
+                <select
+                  aria-label="Filter analysis review"
+                  value={reviewFilter}
+                  disabled={dirty}
+                  onChange={(event) => {
+                    setReviewFilter(event.target.value as "" | AnalysisTagReviewDecision);
+                    setOffset(0);
+                    setSelectedTrackIds(new Set());
+                    setSelectedReviewItems(new Map());
+                  }}
+                >
+                  <option value="">All states</option>
+                  <option value="pending">Needs review</option>
+                  <option value="accepted">Accepted suggestions</option>
+                  <option value="rejected">Rejected suggestions</option>
+                </select>
+              </label>
             </div>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => setSelectedTrackIds(new Set())}
-            >
-              Clear selection
-            </button>
           </div>
-          <div className="assistant-editable-tags">
-            {bulkTags.length === 0 ? (
-              <span className="muted small">No bulk tags chosen yet.</span>
-            ) : (
-              bulkTags.map((tag) => (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setBulkTags((current) => current.filter((item) => item !== tag))
-                  }
-                  aria-label={`Remove bulk tag ${tag}`}
-                  key={tag}
-                >
-                  {tag} <span aria-hidden="true">×</span>
-                </button>
-              ))
-            )}
-          </div>
-          <form className="assistant-custom-tag" onSubmit={addBulkCustomTags}>
-            <input
-              value={bulkCustomTag}
-              onChange={(event) => setBulkCustomTag(event.target.value)}
-              aria-label="Choose custom bulk tags"
-              placeholder="Tags for this batch, separated by commas"
-              maxLength={256}
-            />
-            <button type="submit">Choose tags</button>
-          </form>
-          <div className="assistant-bulk-starters">
-            {catalog?.starter_groups.flatMap((group) => group.tags).map((tag) => (
-              <button
-                type="button"
-                className="btn-toggle"
-                aria-pressed={bulkTags.includes(tag)}
-                onClick={() =>
-                  setBulkTags((current) =>
-                    current.includes(tag)
-                      ? current.filter((item) => item !== tag)
-                      : sortedUnique([...current, tag]),
-                  )
-                }
-                key={tag}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-          <div className="assistant-bulk-actions">
-            <button
-              type="button"
-              disabled={bulkTags.length === 0 || bulkSaving}
-              onClick={() => void applyBulk("remove")}
-            >
-              Remove from selected
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={bulkTags.length === 0 || bulkSaving}
-              onClick={() => void applyBulk("add")}
-            >
-              {bulkSaving ? "Applying…" : "Add to selected"}
-            </button>
-          </div>
-        </div>
-      ) : null}
 
-      <div className="assistant-tag-layout">
-        <div className="assistant-tag-track-panel">
+          {loadError !== null ? (
+            <div className="assistant-analysis-error" role="alert">
+              <span>{loadError}</span>
+              <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
+                Retry
+              </button>
+            </div>
+          ) : null}
+
           {loading ? (
-            <p className="muted">Loading tracks…</p>
+            <p className="muted assistant-tag-list-message">Loading tracks…</p>
           ) : page.items.length === 0 ? (
-            <EmptyState title="No matching tracks">
-              Clear the search or tag filter to see more of the library.
-            </EmptyState>
+            <div className="assistant-tag-list-message">
+              <EmptyState title="No matching tracks">
+                Choose another folder or clear the track filters.
+              </EmptyState>
+            </div>
           ) : (
-            <div className="assistant-tag-track-list" role="list" aria-label="Tracks">
-              {page.items.map((track) => (
-                <div
-                  className={`assistant-tag-track-row${track.track_id === selectedId ? " is-focused" : ""}`}
-                  key={track.track_id}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedTrackIds.has(track.track_id)}
-                    onChange={() => toggleTrackSelection(track.track_id)}
-                    aria-label={`Select ${displayName(track)} for bulk tagging`}
-                  />
-                  <button
-                    type="button"
-                    className="assistant-tag-track-main"
-                    onClick={() => setSelectedId(track.track_id)}
-                  >
-                    <strong>{displayName(track)}</strong>
-                    <span>{track.artist || track.album || track.path}</span>
-                    <span className="assistant-track-tag-preview">
-                      {track.manual_tags.length > 0
-                        ? track.manual_tags.join(" · ")
-                        : "No mood tags"}
-                    </span>
-                    {pendingSuggestionCount(track) > 0 ? (
-                      <span className="assistant-track-review-count">
-                        {pendingSuggestionCount(track)} to review
-                      </span>
-                    ) : null}
-                  </button>
-                </div>
-              ))}
+            <div className="track-table-wrap assistant-context-track-table-wrap">
+              <table className="track-table assistant-context-track-table assistant-tag-track-table">
+                <thead>
+                  <tr>
+                    <th className="col-check">
+                      <input
+                        type="checkbox"
+                        checked={page.items.length > 0 && page.items.every((track) => selectedTrackIds.has(track.track_id))}
+                        onChange={() => void toggleCurrentPageSelection()}
+                        aria-label="Select this page for bulk tagging"
+                      />
+                    </th>
+                    <th>Track</th>
+                    <th>Mood tags</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {page.items.map((track) => {
+                    const focused = track.track_id === selectedId;
+                    const checked = selectedTrackIds.has(track.track_id);
+                    const pending = pendingSuggestionCount(track);
+                    return (
+                      <tr
+                        key={track.track_id}
+                        className={`track-row${focused ? " focused" : ""}${checked ? " checked" : ""}`}
+                        aria-selected={focused}
+                        tabIndex={0}
+                        onClick={() => void selectTrack(track.track_id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            void selectTrack(track.track_id);
+                          }
+                        }}
+                      >
+                        <td className="col-check">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={() => void toggleTrackSelection(track.track_id)}
+                            aria-label={`Select ${displayName(track)} for bulk tagging`}
+                          />
+                        </td>
+                        <td>
+                          <strong>{displayName(track)}</strong>
+                          <span className="assistant-tag-track-artist">
+                            {track.artist || track.album || "Unknown artist"}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`assistant-track-tag-preview${track.manual_tags.length === 0 ? " is-empty" : ""}`}>
+                            {track.manual_tags.length > 0 ? track.manual_tags.join(" · ") : "No mood tags"}
+                          </span>
+                          {pending > 0 ? (
+                            <span className="assistant-track-review-count">
+                              {pending} to review
+                            </span>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
+
           <div className="assistant-tag-pagination">
             <button
               type="button"
@@ -717,129 +688,209 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
               Next
             </button>
           </div>
-          {page.items.length > 0 ? (
-            <button
-              type="button"
-              className="btn-ghost assistant-select-page"
-              onClick={selectCurrentPage}
-            >
-              Select this page
-            </button>
-          ) : null}
-        </div>
+        </section>
 
-        <div className="assistant-tag-editor">
-          {selected === undefined ? (
-            <EmptyState title="Select a track to tag">
-              Manual and generated labels will be shown in separate sections.
-            </EmptyState>
-          ) : (
-            <>
-              <div className="assistant-tag-editor-heading">
-                <div>
-                  <h3>{displayName(selected)}</h3>
-                  <span>{selected.path}</span>
+        <aside className="library-inspector assistant-context-main">
+          <div className="tag-inspector assistant-context-inspector assistant-tag-inspector">
+            {selectedTrackIds.size > 0 ? (
+              <div className="assistant-tag-editor" role="region" aria-label="Bulk tag editor">
+                <div className="assistant-tag-editor-heading">
+                  <div>
+                    <h2>Edit {selectedTrackIds.size} selected track{selectedTrackIds.size === 1 ? "" : "s"}</h2>
+                    <span>Add or remove only the tags you choose below.</span>
+                  </div>
+                  <button type="button" className="btn-ghost" onClick={() => setSelectedTrackIds(new Set())}>
+                    Close batch
+                  </button>
                 </div>
-                {dirty ? <span className="assistant-unsaved">Unsaved changes</span> : null}
-              </div>
-
-              <div className="assistant-tag-source is-manual">
-                <div>
-                  <strong>Your tags</strong>
-                  <span>Editable and always preferred as explicit human context.</span>
+                <div className="assistant-tag-source is-manual">
+                  <div>
+                    <strong>Batch mood tags</strong>
+                    <span>These choices do not replace the other tags on each track.</span>
+                  </div>
+                  <div className="assistant-editable-tags">
+                    {bulkTags.length === 0 ? (
+                      <span className="muted small">Choose one or more tags.</span>
+                    ) : (
+                      bulkTags.map((tag) => (
+                        <button
+                          type="button"
+                          onClick={() => setBulkTags((current) => current.filter((item) => item !== tag))}
+                          aria-label={`Remove bulk tag ${tag}`}
+                          key={tag}
+                        >
+                          {tag} <span aria-hidden="true">×</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <form className="assistant-custom-tag" onSubmit={addBulkCustomTags}>
+                    <input
+                      value={bulkCustomTag}
+                      onChange={(event) => setBulkCustomTag(event.target.value)}
+                      aria-label="Choose custom bulk tags"
+                      placeholder="Custom tags, separated by commas"
+                      maxLength={256}
+                    />
+                    <button type="submit">Choose tags</button>
+                  </form>
                 </div>
-                <div className="assistant-editable-tags">
-                  {draftTags.length === 0 ? (
-                    <span className="muted small">No mood-library tags yet.</span>
-                  ) : (
-                    draftTags.map((tag) => (
+                <details className="assistant-bulk-starters">
+                  <summary>Choose from the mood vocabulary</summary>
+                  <div>
+                    {catalog?.starter_groups.flatMap((group) => group.tags).map((tag) => (
                       <button
                         type="button"
-                        onClick={() => toggleTag(tag)}
-                        aria-label={`Remove tag ${tag}`}
+                        className="btn-toggle"
+                        aria-pressed={bulkTags.includes(tag)}
+                        onClick={() =>
+                          setBulkTags((current) =>
+                            current.includes(tag)
+                              ? current.filter((item) => item !== tag)
+                              : sortedUnique([...current, tag]),
+                          )
+                        }
                         key={tag}
                       >
-                        {tag} <span aria-hidden="true">×</span>
+                        {tag}
                       </button>
-                    ))
-                  )}
+                    ))}
+                  </div>
+                </details>
+                <div className="assistant-bulk-actions">
+                  <button
+                    type="button"
+                    disabled={bulkTags.length === 0 || bulkSaving}
+                    onClick={() => void applyBulk("remove")}
+                  >
+                    Remove from selected
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={bulkTags.length === 0 || bulkSaving}
+                    onClick={() => void applyBulk("add")}
+                  >
+                    {bulkSaving ? "Applying…" : "Add to selected"}
+                  </button>
                 </div>
-                <form className="assistant-custom-tag" onSubmit={addCustomTags}>
-                  <input
-                    value={customTag}
-                    onChange={(event) => setCustomTag(event.target.value)}
-                    aria-label="Create custom tags"
-                    placeholder="Custom tag, or several separated by commas"
-                    maxLength={256}
-                  />
-                  <button type="submit">Add</button>
-                </form>
               </div>
+            ) : selected === undefined ? (
+              <div className="assistant-context-empty-detail">
+                <EmptyState title="Select a track to tag">
+                  Its mood tags will open here for editing.
+                </EmptyState>
+              </div>
+            ) : (
+              <div className="assistant-tag-editor">
+                <div className="assistant-tag-editor-heading">
+                  <div>
+                    <h2>{displayName(selected)}</h2>
+                    <span>{selected.artist || "Unknown artist"}{selected.album ? ` · ${selected.album}` : ""}</span>
+                  </div>
+                  <div className="assistant-tag-editor-actions">
+                    {dirty ? <span className="assistant-unsaved">Unsaved changes</span> : null}
+                    <button type="button" className="btn-ghost" disabled={!dirty || saving} onClick={() => setDraftTags(originalTags)}>
+                      Discard
+                    </button>
+                    <button type="button" className="btn-primary" disabled={!dirty || saving} onClick={() => void save()}>
+                      {saving ? "Saving…" : "Save mood tags"}
+                    </button>
+                  </div>
+                </div>
 
-              <div className="assistant-starter-tags">
-                {catalog?.starter_groups.map((group) => (
-                  <div key={group.key}>
-                    <strong>{group.label}</strong>
+                {selectedReviewItems.size > 0 ? (
+                  <div className="assistant-bulk-reviews" role="region" aria-label="Bulk analysis review">
                     <div>
-                      {group.tags.map((tag) => {
-                        const selectedTag = draftTags.includes(tag);
-                        return (
-                          <button
-                            type="button"
-                            className="btn-toggle"
-                            aria-pressed={selectedTag}
-                            onClick={() => toggleTag(tag)}
-                            key={tag}
-                          >
-                            {tag}
-                          </button>
-                        );
-                      })}
+                      <strong>{selectedReviewItems.size} suggestion{selectedReviewItems.size === 1 ? "" : "s"} selected</strong>
+                      <span>Apply one review decision to this explicit selection.</span>
+                    </div>
+                    {dirty ? (
+                      <p className="assistant-review-note">Save or discard the open mood-tag edits first.</p>
+                    ) : null}
+                    <div className="assistant-bulk-actions">
+                      <button type="button" className="btn-ghost" disabled={bulkReviewSaving} onClick={() => setSelectedReviewItems(new Map())}>
+                        Clear
+                      </button>
+                      <button type="button" disabled={dirty || bulkReviewSaving} onClick={() => void applyBulkReview("rejected")}>
+                        Reject selected
+                      </button>
+                      <button type="button" className="btn-primary" disabled={dirty || bulkReviewSaving} onClick={() => void applyBulkReview("accepted")}>
+                        {bulkReviewSaving ? "Applying…" : "Add selected to my tags"}
+                      </button>
                     </div>
                   </div>
-                ))}
+                ) : null}
+
+                <div className="assistant-tag-source is-manual">
+                  <div>
+                    <strong>Your tags</strong>
+                    <span>Editable, human-owned labels used by playlist suggestions.</span>
+                  </div>
+                  <div className="assistant-editable-tags">
+                    {draftTags.length === 0 ? (
+                      <span className="muted small">No mood tags yet.</span>
+                    ) : (
+                      draftTags.map((tag) => (
+                        <button type="button" onClick={() => toggleTag(tag)} aria-label={`Remove tag ${tag}`} key={tag}>
+                          {tag} <span aria-hidden="true">×</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <form className="assistant-custom-tag" onSubmit={addCustomTags}>
+                    <input
+                      value={customTag}
+                      onChange={(event) => setCustomTag(event.target.value)}
+                      aria-label="Create custom tags"
+                      placeholder="Custom tags, separated by commas"
+                      maxLength={256}
+                    />
+                    <button type="submit">Add</button>
+                  </form>
+                </div>
+
+                <details className="assistant-starter-tags">
+                  <summary>Browse the mood vocabulary</summary>
+                  <div className="assistant-starter-tag-groups">
+                    {catalog?.starter_groups.map((group) => (
+                      <div key={group.key}>
+                        <strong>{group.label}</strong>
+                        <div>
+                          {group.tags.map((tag) => (
+                            <button
+                              type="button"
+                              className="btn-toggle"
+                              aria-pressed={draftTags.includes(tag)}
+                              onClick={() => toggleTag(tag)}
+                              key={tag}
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+
+                <AnalysisTagReview
+                  trackId={selected.track_id}
+                  suggestions={selected.analysis_suggestions}
+                  selectedSuggestionKeys={selectedReviewKeys}
+                  disabled={dirty || saving}
+                  onReviewed={handleAnalysisReviewed}
+                  onSelectionChange={(suggestion, isSelected) =>
+                    selectAnalysisSuggestion(selected.track_id, suggestion, isSelected)
+                  }
+                />
+
+                <AudioSignalEvidence profile={selected.audio_signal} />
               </div>
-
-              <AnalysisTagReview
-                trackId={selected.track_id}
-                suggestions={selected.analysis_suggestions}
-                selectedSuggestionKeys={selectedReviewKeys}
-                disabled={dirty || saving}
-                onReviewed={handleAnalysisReviewed}
-                onSelectionChange={(suggestion, isSelected) =>
-                  selectAnalysisSuggestion(
-                    selected.track_id,
-                    suggestion,
-                    isSelected,
-                  )
-                }
-              />
-
-              <AudioSignalEvidence profile={selected.audio_signal} />
-
-              <div className="assistant-tag-save-row">
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={!dirty || saving}
-                  onClick={() => setDraftTags(originalTags)}
-                >
-                  Discard
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={!dirty || saving}
-                  onClick={() => void save()}
-                >
-                  {saving ? "Saving…" : "Save mood tags"}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        </aside>
       </div>
-
-    </section>
+    </div>
   );
 }
