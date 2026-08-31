@@ -48,6 +48,13 @@ Each scenario now states that concept in allowed embedded metadata, so the suite
 classification recall rather than asking the model to infer undisclosed title evidence. The live
 input and disclosure contracts remain v18 and v11 respectively.
 
+**Implementation update (2026-08-31):** Input contract v19 makes the final coverage audit explicit:
+one fact may support several non-exclusive tags, every supported entry must be considered even after
+a related tag is selected, and corroborated artist evidence is distinct from an isolated misleading
+name. Album, origin, and genre remain untrusted but equally available evidence. Baseline v20 also
+repairs four remaining scenarios whose intended secondary concept was too weakly stated after title
+removal. The disclosed data classes remain unchanged, so disclosure v11 still applies.
+
 ## Context
 
 Manual D&D playlist tags are operator-owned, while local metadata analysis

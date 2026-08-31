@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v7",
-  "id": "controlled-vocabulary-tagging-baseline-v19",
+  "id": "controlled-vocabulary-tagging-baseline-v20",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -270,9 +270,9 @@
       "track": {
         "track_id": 15,
         "artist": "Bog Lanterns",
-        "album": "Swamp Survival",
+        "album": "Stranded in the Swamp",
         "origin": "",
-        "genre": "dark ambient",
+        "genre": "dark survival ambient",
         "length_s": 312.0,
         "bpm": 58
       },
@@ -372,7 +372,7 @@
       "track": {
         "track_id": 21,
         "artist": "The Court Spies",
-        "album": "Secrets and Conspiracies",
+        "album": "Royal City Secrets and Conspiracies",
         "origin": "Royal City",
         "genre": "mysterious chamber music",
         "length_s": 264.0,
@@ -459,7 +459,7 @@
         "artist": "The Departing Crew",
         "album": "Farewell to Home",
         "origin": "",
-        "genre": "bittersweet strings",
+        "genre": "melancholy bittersweet strings",
         "length_s": 271.0,
         "bpm": 62
       },
@@ -682,8 +682,8 @@
       "track": {
         "track_id": 39,
         "artist": "Roadside Storytellers",
-        "album": "Night Camp Rest",
-        "origin": "Warm Campfire",
+        "album": "Campfire Story and Rest",
+        "origin": "Warm Night Camp",
         "genre": "calm acoustic",
         "length_s": 267.0,
         "bpm": 60
