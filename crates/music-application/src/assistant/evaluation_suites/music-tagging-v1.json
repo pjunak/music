@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v7",
-  "id": "controlled-vocabulary-tagging-baseline-v18",
+  "id": "controlled-vocabulary-tagging-baseline-v19",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -287,7 +287,7 @@
       "track": {
         "track_id": 16,
         "artist": "Icebound Company",
-        "album": "Arctic Flight",
+        "album": "Arctic Escape",
         "origin": "",
         "genre": "urgent orchestral",
         "length_s": 221.0,
@@ -408,7 +408,7 @@
         "artist": "The Mourning Choir",
         "album": "Cemetery Farewells",
         "origin": "",
-        "genre": "melancholic choral",
+        "genre": "solemn melancholic choral",
         "length_s": 346.0,
         "bpm": 48
       },
@@ -665,7 +665,7 @@
       "track": {
         "track_id": 38,
         "artist": "Temple of Sound",
-        "album": "City Escape",
+        "album": "City Chase and Escape",
         "origin": "",
         "genre": "urgent electronic",
         "length_s": 201.0,
@@ -701,7 +701,7 @@
         "artist": "The Last Traveller",
         "album": "Tundra Survival",
         "origin": "",
-        "genre": "cold ambient",
+        "genre": "cold lonely ambient",
         "length_s": 318.0,
         "bpm": 52
       },
@@ -842,9 +842,9 @@
       "track": {
         "track_id": 45,
         "artist": "The Baroque Chamber Players",
-        "album": "Age of Sail Court Dances",
+        "album": "Festivities at the Renaissance Court",
         "origin": "",
-        "genre": "festive renaissance chamber dance",
+        "genre": "early modern chamber dance",
         "length_s": 207.0,
         "bpm": 116
       },
@@ -876,7 +876,7 @@
       "track": {
         "track_id": 47,
         "artist": "Neon Colony Choir",
-        "album": "Space Colony Rites",
+        "album": "Space Colony Ceremony",
         "origin": "",
         "genre": "futuristic solemn electronic choral",
         "length_s": 281.0,

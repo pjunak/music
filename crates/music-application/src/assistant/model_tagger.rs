@@ -17,7 +17,7 @@ use super::{
 pub const MODEL_TAGGER_INPUT_CONTRACT: &str = "assistant-music-tagger-input/v18";
 pub const MODEL_TAGGER_OUTPUT_CONTRACT: &str = "assistant-music-tagger-output/v3";
 pub const MODEL_TAGGING_EVALUATION_CONTRACT: &str = "assistant-music-tagger-evaluation/v7";
-pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v18";
+pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v19";
 pub const MODEL_TAG_BATCH_SIZE: usize = 20;
 pub const MAX_MODEL_TAGS_PER_TRACK: usize = 8;
 pub const MAX_MODEL_EVIDENCE_ITEMS: usize = 4;
@@ -975,6 +975,30 @@ mod tests {
                 .iter()
                 .all(|field| case.track.get(*field).is_none())
         }));
+        for (case_id, cue) in [
+            ("arctic-escape", "escape"),
+            ("graveyard-requiem", "solemn"),
+            ("temple-band-name-ambiguity", "chase"),
+            ("cold-tundra-survival", "lonely"),
+            ("early-modern-court-masquerade", "court"),
+            ("futuristic-starship-ceremony", "ceremony"),
+        ] {
+            let case = suite
+                .cases
+                .iter()
+                .find(|case| case.id == case_id)
+                .ok_or("expected title-removal regression case")?;
+            let supplied_metadata = ["artist", "album", "origin", "genre"]
+                .into_iter()
+                .filter_map(|field| case.track.get(field).and_then(|value| value.as_str()))
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            assert!(
+                supplied_metadata.contains(cue),
+                "case {case_id} must retain explicit {cue} evidence outside excluded identity fields"
+            );
+        }
         Ok(())
     }
 

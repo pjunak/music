@@ -1433,7 +1433,7 @@ mod tests {
             expected_connection_fingerprint: connection.fingerprint(),
             role_fingerprint: runtime_fingerprint,
             status: "passed".to_owned(),
-            suite_id: "controlled-vocabulary-tagging-baseline-v18".to_owned(),
+            suite_id: "controlled-vocabulary-tagging-baseline-v19".to_owned(),
             engine_id: "model-context-tagger/v6".to_owned(),
             passed_cases: 4,
             total_cases: 4,

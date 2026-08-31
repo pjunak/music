@@ -42,6 +42,12 @@ Suggestion source identity follows that exact evidence, so a title-only rename o
 not stale an otherwise unchanged suggestion. Disclosure v11 and baseline v18 supersede the earlier
 path-aware contract.
 
+**Implementation update (2026-08-31):** Baseline v19 repairs six synthetic scenarios whose required
+concept had been carried by the title removed in v18 or was left too weakly evidenced without it.
+Each scenario now states that concept in allowed embedded metadata, so the suite measures
+classification recall rather than asking the model to infer undisclosed title evidence. The live
+input and disclosure contracts remain v18 and v11 respectively.
+
 ## Context
 
 Manual D&D playlist tags are operator-owned, while local metadata analysis
