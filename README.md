@@ -231,9 +231,10 @@ docker exec -it music music-cli create-user admin
 Then open `http://localhost:8000` and sign in. A fresh install boots fine with **zero** audio
 files — drop music in through the Library tab (or straight into `/srv/music-data/music`).
 
-Pull requests and branch pushes run the Rust, frontend, architecture, security, and non-root
-container gates without publishing. A successful `main` workflow publishes the GHCR image and
-dispatches production rollout to the separate infrastructure repository.
+Pull requests run the Rust, frontend, architecture, security, and non-root container gates without
+publishing. A successful `main` workflow reuses those checks, compiles and smoke-tests the release
+image once, publishes the warm cached result to GHCR, and dispatches its immutable digest to the
+separate infrastructure repository for rollout.
 
 ## Configuration
 

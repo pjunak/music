@@ -152,20 +152,43 @@ mod platform {
                 std::process::id(),
                 Uuid::new_v4()
             ));
-            let mut child = Command::new(executable)
-                .arg("--idle=yes")
-                .arg("--no-video")
-                .arg("--audio-display=no")
-                .arg("--ytdl=no")
-                .arg("--no-terminal")
-                .arg("--really-quiet")
-                .arg(format!("--input-ipc-server={}", socket_path.display()))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::inherit())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|error| MpvError(format!("could not start mpv {lane} lane: {error}")))?;
+            let mut child = None;
+            for attempt in 1..=3 {
+                let result = Command::new(executable)
+                    .arg("--idle=yes")
+                    .arg("--no-video")
+                    .arg("--audio-display=no")
+                    .arg("--ytdl=no")
+                    .arg("--no-terminal")
+                    .arg("--really-quiet")
+                    .arg(format!("--input-ipc-server={}", socket_path.display()))
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::inherit())
+                    .kill_on_drop(true)
+                    .spawn();
+                match result {
+                    Ok(process) => {
+                        child = Some(process);
+                        break;
+                    }
+                    // Linux and other Unix hosts may briefly return ETXTBSY
+                    // while a freshly-written executable is still being
+                    // released by the filesystem. Retry only that transient
+                    // condition; every other spawn error remains immediate.
+                    Err(error) if error.raw_os_error() == Some(26) && attempt < 3 => {
+                        tokio::time::sleep(Duration::from_millis(25 * attempt)).await;
+                    }
+                    Err(error) => {
+                        return Err(MpvError(format!(
+                            "could not start mpv {lane} lane: {error}"
+                        )));
+                    }
+                }
+            }
+            let mut child = child.ok_or_else(|| {
+                MpvError(format!("could not start mpv {lane} lane after retrying"))
+            })?;
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 match UnixStream::connect(&socket_path).await {

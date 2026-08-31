@@ -17,23 +17,41 @@ ENV VITE_API_BASE_URL=""
 RUN npm run build
 
 # ============================================================================
-# Stage 2: Rust application
+# Stage 2: Rust dependency recipe
 # ============================================================================
-FROM rust:1.97.1-trixie AS rust-builder
+FROM rust:1.97.1-trixie AS chef
+
+RUN cargo install cargo-chef --version 0.1.78 --locked
 
 WORKDIR /build
+
+FROM chef AS planner
+
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ============================================================================
+# Stage 3: Rust application
+# ============================================================================
+FROM chef AS rust-builder
+
+COPY --from=planner /build/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    cargo chef cook --locked --release --package music-server --recipe-path recipe.json
+
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/build/target,sharing=locked \
     cargo build --locked --release -p music-server --bins && \
     mkdir -p /out && \
     cp target/release/music-server target/release/music-cli /out/
 
 # ============================================================================
-# Stage 3: minimal non-root runtime
+# Stage 4: minimal non-root runtime
 # ============================================================================
 FROM debian:trixie-slim AS runtime
 

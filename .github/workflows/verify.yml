@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_container:
+        description: Build and smoke-test the release image
+        required: false
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       run_fuzz:
@@ -15,8 +20,6 @@ on:
         required: false
         type: boolean
         default: false
-  push:
-    branches-ignore: [main]
   pull_request:
     branches: [main]
 
@@ -43,6 +46,18 @@ jobs:
           rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
           rustup default 1.97.1
 
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+          shared-key: verify
+
+      - name: Install pinned test runner
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        with:
+          tool: cargo-nextest@0.9.143
+          fallback: none
+
       - name: Set up Node for repository gates
         uses: actions/setup-node@v7
         with:
@@ -60,23 +75,38 @@ jobs:
           node --test .github/scripts/rewrite-tree.test.mjs
           node .github/scripts/rewrite-tree.mjs final
 
-      - name: Format, lint, test, and document
+      - name: Check formatting and generated contracts
         run: |
           cargo fmt --all --check
           cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
+          cargo run --locked -p music-server --bin music-cli -- contracts check --root .
+
+      - name: Compile, lint, test, and document
+        run: |
           cargo check --workspace --all-targets
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
-          cargo test --workspace --all-features
+          cargo nextest run --workspace --all-features
           cargo test --workspace --all-features --doc
           cargo build --locked --release -p music-output --bin music-output
-          cargo run --locked -p music-server --bin music-cli -- contracts check --root .
+
+  dependency-audit:
+    name: Dependency policy and advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pinned Rust metadata toolchain
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
 
       - name: Install pinned dependency auditors
-        run: |
-          cargo install cargo-deny --version 0.20.2 --locked
-          cargo install cargo-audit --version 0.22.2 --locked
-          cargo install cargo-machete --version 0.9.2 --locked
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        with:
+          tool: cargo-deny@0.20.2,cargo-audit@0.22.2,cargo-machete@0.9.2
+          fallback: none
 
       - name: Audit dependencies
         run: |
@@ -110,14 +140,23 @@ jobs:
 
   container:
     name: Non-root release container
+    if: ${{ github.event_name != 'workflow_call' || inputs.run_container }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [rust, frontend]
+    needs: [rust, frontend, dependency-audit]
     steps:
       - uses: actions/checkout@v7
 
+      - uses: docker/setup-buildx-action@v4
+
       - name: Build the release image
-        run: docker build --tag music:test .
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: music:test
+          cache-from: type=gha,scope=music-release-image
+          cache-to: type=gha,mode=max,scope=music-release-image,ignore-error=true
 
       - name: Boot under production resource limits and serve the SPA
         run: |
