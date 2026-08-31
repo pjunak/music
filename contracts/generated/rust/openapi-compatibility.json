@@ -4,12 +4,14 @@
   "reference_operation_count": 144,
   "candidate_operation_count": 145,
   "matched_operation_count": 144,
-  "fully_compatible_operation_count": 141,
+  "fully_compatible_operation_count": 140,
   "missing_operations": [],
   "candidate_only_operations": [
     "GET /api/readiness"
   ],
-  "parameter_mismatches": [],
+  "parameter_mismatches": [
+    "GET /api/assistant/library-tags"
+  ],
   "request_body_mismatches": [
     "POST /api/assistant/library-tags/model-jobs"
   ],
