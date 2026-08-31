@@ -1770,7 +1770,7 @@ mod tests {
     use music_application::auth::{AuthRepository, UnixSeconds};
     use music_application::library::ReconciliationStatus;
     use music_protocol::{ErrorCode, ServerMessage};
-    use music_storage::{SqliteStorage, SqliteStorageOptions, hash_password};
+    use music_storage::{SqliteStorage, SqliteStorageOptions};
     use tempfile::tempdir;
     use tokio::net::TcpStream;
     use tokio::sync::oneshot;
@@ -1779,7 +1779,7 @@ mod tests {
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
     use tower::ServiceExt;
 
-    use crate::{AppConfig, AppRuntime, RuntimeError};
+    use crate::{AppConfig, AppRuntime, RuntimeError, TEST_PASSWORD_HASH};
 
     fn runtime_config(root: &Path) -> Result<AppConfig, RuntimeError> {
         AppConfig::from_values(&BTreeMap::from([
@@ -1814,9 +1814,12 @@ mod tests {
 
     async fn seed_session(root: &Path, token: &str) -> Result<(), Box<dyn Error>> {
         let storage = SqliteStorage::open(SqliteStorageOptions::new(root.join("app.db"))).await?;
-        let password_hash = hash_password("test-password")?;
         let user_id = storage
-            .create_user("operator", &password_hash, UnixSeconds::new(1_800_000_000))
+            .create_user(
+                "operator",
+                TEST_PASSWORD_HASH,
+                UnixSeconds::new(1_800_000_000),
+            )
             .await?;
         AuthRepository::create_session(
             &storage,
@@ -1835,7 +1838,14 @@ mod tests {
         socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> Result<ServerMessage, Box<dyn Error>> {
         loop {
-            let incoming = tokio::time::timeout(Duration::from_secs(5), socket.next()).await?;
+            let incoming = tokio::time::timeout(Duration::from_secs(5), socket.next())
+                .await
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "WebSocket did not publish the next protocol message within five seconds",
+                    )
+                })?;
             let Some(incoming) = incoming else {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,

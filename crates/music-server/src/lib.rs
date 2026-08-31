@@ -63,6 +63,11 @@ pub use runtime::{AppRuntime, initialize_tracing};
 pub use storage_admin::{ModeSeedOutcome, StorageInitializationOutcome, initialize_storage};
 pub use supervisor::{CriticalFailure, CriticalTaskError, TaskSupervisor};
 
+// Direct-session tests need a structurally valid user row, not fresh Argon2 work.
+// Password hashing and verification stay covered by the storage and auth tests.
+#[cfg(test)]
+const TEST_PASSWORD_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=4$cmV3cml0ZS1maXh0dXJlLXNhbHQ$tgdYDN8ijOk+7HZgF2oUm50+O8nOMKGggRmynxNu4ko";
+
 /// Exercises the public authoring-import JSON shapes and semantic validators.
 /// This is compiled only for the separate fuzzing workspace.
 #[cfg(feature = "fuzzing")]

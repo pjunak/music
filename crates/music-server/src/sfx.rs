@@ -1006,13 +1006,13 @@ mod tests {
     use music_application::recovery::{RecoveryJournalDraft, RecoveryJournalRepository};
     use music_application::sfx::SfxMutation;
     use music_domain::SfxPath;
-    use music_storage::{SqliteStorage, SqliteStorageOptions, hash_password};
+    use music_storage::{SqliteStorage, SqliteStorageOptions};
     use serde_json::Value;
     use tempfile::tempdir;
     use tower::ServiceExt;
     use uuid::Uuid;
 
-    use crate::{AppConfig, AppRuntime, RuntimeError};
+    use crate::{AppConfig, AppRuntime, RuntimeError, TEST_PASSWORD_HASH};
 
     fn runtime_config(root: &Path) -> Result<AppConfig, RuntimeError> {
         AppConfig::from_values(&BTreeMap::from([
@@ -1049,9 +1049,12 @@ mod tests {
 
     async fn seed_session(root: &Path, token: &str) -> Result<(), Box<dyn Error>> {
         let storage = SqliteStorage::open(SqliteStorageOptions::new(root.join("app.db"))).await?;
-        let password_hash = hash_password("test-password")?;
         let user_id = storage
-            .create_user("operator", &password_hash, UnixSeconds::new(1_800_000_000))
+            .create_user(
+                "operator",
+                TEST_PASSWORD_HASH,
+                UnixSeconds::new(1_800_000_000),
+            )
             .await?;
         AuthRepository::create_session(
             &storage,
