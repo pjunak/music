@@ -1,14 +1,11 @@
 import { useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
 
-import { confirmDialog } from "@/components/confirmDialog";
-import { EmptyState } from "@/components/EmptyState";
+import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
 import { WarnIcon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
 import { cleanupApi } from "@/core/api";
 import type {
   CleanupAnalyzeResult,
-  CleanupBatchSummary,
   CleanupFolderSuggestion,
   CleanupOp,
   CleanupOpIn,
@@ -20,12 +17,13 @@ import { toast } from "@/core/toast";
 
 /** Library cleanup — "find and fix common rip/download residue".
  *
- *  Four-step flow inside one modal: configure (scope + rules) → review
+ *  One reusable flow, rendered by the Assistant workspace and retained as a
+ *  modal-compatible wrapper: configure (scope + rules) → review
  *  (every proposed change as an old → new diff with its own checkbox;
  *  low-confidence guesses start unticked) → apply (chunked, real progress
  *  bar, every applied change journaled server-side) → done (counts, skips,
- *  journal download). A History view lists past runs with one-click revert,
- *  plus revert-from-file for a downloaded journal. Nothing is written
+ *  journal download). The shared History panel lists past runs with one-click
+ *  revert plus revert-from-file for a downloaded journal. Nothing is written
  *  without an explicit Apply on the reviewed diff.
  */
 
@@ -177,12 +175,7 @@ function basename(path: string): string {
   return path.split("/").pop() || path;
 }
 
-export function CleanupDialog({
-  path,
-  checkedIds,
-  onClose,
-  onApplied,
-}: {
+export interface CleanupWorkflowProps {
   /** Currently-browsed folder ("" = music root). */
   path: string;
   /** Ticked track ids from the Library list — offered as a scope. */
@@ -191,7 +184,20 @@ export function CleanupDialog({
   /** Called whenever anything was written (apply or revert) so the host
    *  view refreshes its tree + track list. */
   onApplied: () => void;
-}) {
+  presentation?: "modal" | "workspace";
+  /** Workspace mount sends history to its dedicated route. The modal keeps
+   *  the same reusable panel inline so older entry points remain complete. */
+  onOpenHistory?: () => void;
+}
+
+export function CleanupWorkflow({
+  path,
+  checkedIds,
+  onClose,
+  onApplied,
+  presentation = "workspace",
+  onOpenHistory,
+}: CleanupWorkflowProps) {
   const [step, setStep] = useState<Step>("configure");
   const [scopeType, setScopeType] = useState<ScopeType>(
     checkedIds.length > 0 ? "tracks" : path ? "folder" : "all",
@@ -211,7 +217,6 @@ export function CleanupDialog({
     skipped: { track_id: number; reason: string }[];
     batchId: number | null;
   } | null>(null);
-  const [batches, setBatches] = useState<CleanupBatchSummary[] | null>(null);
 
   const scope: CleanupScope =
     scopeType === "tracks"
@@ -462,90 +467,6 @@ export function CleanupDialog({
     } catch (e) {
       toast.error("Download failed", e instanceof Error ? e.message : undefined);
     }
-  }
-
-  async function openHistory() {
-    setStep("history");
-    setBatches(null);
-    try {
-      setBatches(await cleanupApi.batches());
-    } catch (e) {
-      toast.error("Couldn't load history", e instanceof Error ? e.message : undefined);
-      setBatches([]);
-    }
-  }
-
-  function reportRevert(reverted: number, skipped: { reason: string }[]) {
-    if (skipped.length === 0) {
-      toast.success(`Reverted ${reverted} change${reverted === 1 ? "" : "s"}`);
-      return;
-    }
-    const sample = skipped
-      .slice(0, 3)
-      .map((s) => s.reason)
-      .join("\n");
-    toast.warn(
-      `Reverted ${reverted}, skipped ${skipped.length}`,
-      `${sample}${skipped.length > 3 ? `\n…and ${skipped.length - 3} more` : ""}`,
-    );
-  }
-
-  async function revertBatch(b: CleanupBatchSummary) {
-    const ok = await confirmDialog({
-      title: `Revert cleanup run #${b.id}?`,
-      body:
-        `${b.item_count} change${b.item_count === 1 ? "" : "s"} (${b.scope_label || "no label"}) ` +
-        "will be undone — renames restored, tags set back. Files changed again since are skipped, not clobbered.",
-      tone: "danger",
-      confirmLabel: "Revert",
-    });
-    if (!ok) return;
-    try {
-      const r = await cleanupApi.revertBatch(b.id);
-      reportRevert(r.reverted, r.skipped);
-      onApplied();
-      setBatches(await cleanupApi.batches());
-    } catch (e) {
-      toast.error("Revert failed", e instanceof Error ? e.message : undefined);
-    }
-  }
-
-  function onJournalFilePick(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    void (async () => {
-      let items: unknown[];
-      try {
-        const parsed: unknown = JSON.parse(await file.text());
-        const maybe =
-          Array.isArray(parsed) ? parsed : (parsed as { items?: unknown[] })?.items;
-        if (!Array.isArray(maybe) || maybe.length === 0) {
-          throw new Error("no journal items found in the file");
-        }
-        items = maybe;
-      } catch (err) {
-        toast.error(
-          "Not a cleanup journal",
-          err instanceof Error ? err.message : undefined,
-        );
-        return;
-      }
-      const ok = await confirmDialog({
-        title: "Revert from journal file?",
-        body: `${items.length} recorded change${items.length === 1 ? "" : "s"} from “${file.name}” will be undone where the files still match.`,
-        tone: "danger",
-        confirmLabel: "Revert",
-      });
-      if (!ok) return;
-      try {
-        const r = await cleanupApi.revertJournal(items);
-        reportRevert(r.reverted, r.skipped);
-        onApplied();
-      } catch (err) {
-        toast.error("Revert failed", err instanceof Error ? err.message : undefined);
-      }
-    })();
   }
 
   // --- step bodies ---------------------------------------------------------
@@ -847,57 +768,18 @@ export function CleanupDialog({
     </div>
   ) : null;
 
-  const historyBody = (
-    <div className="cleanup-history">
-      {batches === null ? (
-        <p className="muted small">Loading…</p>
-      ) : batches.length === 0 ? (
-        <EmptyState title="No cleanup runs yet">
-          Applied cleanup runs appear here with their full change journal —
-          each can be downloaded as JSON or reverted.
-        </EmptyState>
-      ) : (
-        batches.map((b) => (
-          <div key={b.id} className="cleanup-batch-row">
-            <div className="cleanup-batch-main">
-              <span>
-                <strong>#{b.id}</strong> · {new Date(b.created_at).toLocaleString()}
-              </span>
-              <span className="muted small">
-                {b.item_count} change{b.item_count === 1 ? "" : "s"}
-                {b.scope_label ? ` · ${b.scope_label}` : ""}
-              </span>
-            </div>
-            {b.reverted_at !== null ? (
-              <span className="badge">reverted</span>
-            ) : (
-              <button type="button" onClick={() => void revertBatch(b)}>
-                Revert
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => void downloadJournal(b.id)}
-            >
-              Download
-            </button>
-          </div>
-        ))
-      )}
-      <label className="cleanup-journal-upload">
-        <input type="file" accept="application/json,.json" hidden onChange={onJournalFilePick} />
-        <span className="btn-link">Revert from a downloaded journal file…</span>
-      </label>
-    </div>
-  );
+  const historyBody = <CleanupHistoryPanel onApplied={onApplied} />;
 
   // --- footers ---------------------------------------------------------------
 
   const footer =
     step === "configure" ? (
       <>
-        <button type="button" className="btn-ghost" onClick={() => void openHistory()}>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => (onOpenHistory ? onOpenHistory() : setStep("history"))}
+        >
           History
         </button>
         <button type="button" onClick={onClose}>
@@ -976,26 +858,53 @@ export function CleanupDialog({
     onClose();
   }
 
+  const body =
+    step === "configure"
+      ? configureBody
+      : step === "checking"
+        ? checkingBody
+        : step === "review"
+          ? reviewBody
+          : step === "applying"
+            ? applyingBody
+            : step === "done"
+              ? doneBody
+              : historyBody;
+
+  if (presentation === "modal") {
+    return (
+      <Modal
+        title={titles[step]}
+        ariaLabel="Library cleanup"
+        className="modal-cleanup"
+        onClose={step === "applying" ? () => undefined : closeDialog}
+        footer={footer}
+        closeButton={step !== "applying"}
+      >
+        {body}
+      </Modal>
+    );
+  }
+
   return (
-    <Modal
-      title={titles[step]}
-      ariaLabel="Library cleanup"
-      className="modal-cleanup"
-      onClose={step === "applying" ? () => undefined : closeDialog}
-      footer={footer}
-      closeButton={step !== "applying"}
-    >
-      {step === "configure"
-        ? configureBody
-        : step === "checking"
-          ? checkingBody
-          : step === "review"
-            ? reviewBody
-            : step === "applying"
-              ? applyingBody
-              : step === "done"
-                ? doneBody
-                : historyBody}
-    </Modal>
+    <section className="cleanup-workspace" aria-labelledby="cleanup-workspace-title">
+      <header className="cleanup-workspace-heading">
+        <div>
+          <p className="assistant-eyebrow">Review-first repair</p>
+          <h2 id="cleanup-workspace-title">{titles[step]}</h2>
+        </div>
+        {step !== "applying" ? (
+          <button type="button" className="btn-ghost" onClick={closeDialog}>
+            Return to Library
+          </button>
+        ) : null}
+      </header>
+      <div className="cleanup-workspace-body">{body}</div>
+      {footer !== undefined ? <footer className="cleanup-workspace-footer">{footer}</footer> : null}
+    </section>
   );
+}
+
+export function CleanupDialog(props: Omit<CleanupWorkflowProps, "presentation">) {
+  return <CleanupWorkflow {...props} presentation="modal" />;
 }

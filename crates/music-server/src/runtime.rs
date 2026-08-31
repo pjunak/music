@@ -18,6 +18,7 @@ use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
     CleanupVerificationRepository, CleanupVerificationService,
 };
+use music_application::cleanup_sources::{CleanupSourceRepository, CleanupSourceService};
 use music_application::jobs::{
     JobCoordinatorError, JobHandler, JobRepository, JobService, SpawnedJobCoordinator,
     start_job_coordinator,
@@ -89,6 +90,7 @@ pub struct AppRuntime {
     library_service: Arc<LibraryService>,
     cleanup_service: Arc<CleanupService>,
     cleanup_verification_service: Arc<CleanupVerificationService>,
+    cleanup_source_service: Arc<CleanupSourceService>,
     playlist_service: Arc<PlaylistService>,
     providers: Arc<RuntimeProviders>,
     jobs: Arc<JobService>,
@@ -267,6 +269,7 @@ impl AppRuntime {
         let cleanup_repository: Arc<dyn CleanupRepository> = storage.clone();
         let cleanup_verification_repository: Arc<dyn CleanupVerificationRepository> =
             storage.clone();
+        let cleanup_source_repository: Arc<dyn CleanupSourceRepository> = storage.clone();
         let cleanup_lookup: Arc<dyn CleanupNameLookup> =
             Arc::new(MusicBrainzNameLookup::new().map_err(|source| {
                 RuntimeError::io(
@@ -289,6 +292,7 @@ impl AppRuntime {
             cleanup_verification_repository,
             cleanup_lookup,
         ));
+        let cleanup_source_service = Arc::new(CleanupSourceService::new(cleanup_source_repository));
         let playlist_repository: Arc<dyn PlaylistRepository> = storage.clone();
         let playlist_service = Arc::new(PlaylistService::new(playlist_repository));
         let job_repository: Arc<dyn JobRepository> = storage.clone();
@@ -366,6 +370,7 @@ impl AppRuntime {
             library_service,
             cleanup_service,
             cleanup_verification_service,
+            cleanup_source_service,
             playlist_service,
             providers,
             jobs,
@@ -407,6 +412,7 @@ impl AppRuntime {
                     service: Arc::clone(&self.library_service),
                     cleanup: Arc::clone(&self.cleanup_service),
                     cleanup_verification: Arc::clone(&self.cleanup_verification_service),
+                    cleanup_sources: Arc::clone(&self.cleanup_source_service),
                     coordinator: self.library.clone(),
                     root: self.library_root.clone(),
                     metadata: self.library_metadata.clone(),
@@ -3444,6 +3450,11 @@ mod tests {
             .oneshot(Request::get("/api/library/cleanup/batches").body(Body::empty())?)
             .await?;
         assert_eq!(unauthorized_batches.status(), StatusCode::UNAUTHORIZED);
+        let unauthorized_sources = router
+            .clone()
+            .oneshot(Request::get("/api/library/cleanup/sources").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauthorized_sources.status(), StatusCode::UNAUTHORIZED);
 
         let login = router
             .clone()
@@ -3513,6 +3524,61 @@ mod tests {
             )
             .await?;
         assert_eq!(empty_verify.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let sources = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/cleanup/sources")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(sources.status(), StatusCode::OK);
+        let sources_json: Value =
+            serde_json::from_slice(&to_bytes(sources.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(sources_json[0]["id"], "musicbrainz");
+        assert_eq!(sources_json[0]["enabled"], true);
+        assert_eq!(sources_json[0]["credential_kind"], Value::Null);
+
+        let disable_source = router
+            .clone()
+            .oneshot(
+                Request::put("/api/library/cleanup/sources/musicbrainz")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"enabled":false}"#))?,
+            )
+            .await?;
+        assert_eq!(disable_source.status(), StatusCode::OK);
+
+        let disabled_verify = router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/cleanup/verify")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"names":["Disabled lookup"]}"#))?,
+            )
+            .await?;
+        assert_eq!(disabled_verify.status(), StatusCode::OK);
+        let disabled_verify_json: Value =
+            serde_json::from_slice(&to_bytes(disabled_verify.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            disabled_verify_json,
+            serde_json::json!({"verified": 0, "failed": ["Disabled lookup"]})
+        );
+        assert!(cleanup_lookup.calls.lock().await.is_empty());
+
+        let enable_source = router
+            .clone()
+            .oneshot(
+                Request::put("/api/library/cleanup/sources/musicbrainz")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"enabled":true}"#))?,
+            )
+            .await?;
+        assert_eq!(enable_source.status(), StatusCode::OK);
 
         let verify = router
             .clone()

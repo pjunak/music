@@ -2,12 +2,14 @@
   "schema_version": "openapi-compatibility/v1",
   "verdict": "incomplete",
   "reference_operation_count": 144,
-  "candidate_operation_count": 145,
+  "candidate_operation_count": 147,
   "matched_operation_count": 144,
   "fully_compatible_operation_count": 140,
   "missing_operations": [],
   "candidate_only_operations": [
-    "GET /api/readiness"
+    "GET /api/library/cleanup/sources",
+    "GET /api/readiness",
+    "PUT /api/library/cleanup/sources/{source_id}"
   ],
   "parameter_mismatches": [
     "GET /api/assistant/library-tags"

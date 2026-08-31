@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   AssistantSettingsShell,
   AssistantShell,
+  LibraryCleanupShell,
   MoodLibraryShell,
 } from "./AssistantShell";
 
@@ -20,15 +21,35 @@ describe("AssistantShell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByRole("link")).toHaveLength(4);
+    expect(screen.getAllByRole("link")).toHaveLength(5);
     expect(screen.getByRole("link", { name: "Playlist builder" })).toHaveClass(
       "is-active",
     );
     expect(screen.getByRole("link", { name: "EQ drafts" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Mood library" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Library cleanup" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Assistant setup" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Cleanup" })).not.toBeInTheDocument();
+  });
+
+  it("keeps cleanup execution, sources, model help, and rollback together", () => {
+    render(
+      <MemoryRouter initialEntries={["/assistant/cleanup/history"]}>
+        <Routes>
+          <Route path="/assistant/cleanup" element={<LibraryCleanupShell />}>
+            <Route path="history" element={<div>Run journals</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Clean up" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sources" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "AI assistance" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "History & rollback" })).toHaveClass(
+      "section-nav-tab-active",
+    );
+    expect(screen.getByText("Run journals")).toBeVisible();
   });
 
   it("keeps Assistant setup distinct from the app-wide Settings destination", () => {

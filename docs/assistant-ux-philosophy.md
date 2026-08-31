@@ -20,17 +20,26 @@ the standalone Assistant page; it is not a second implementation.
 
 ## Information architecture
 
-The Assistant navigation is organized around four operator goals:
+The Assistant navigation is organized around five operator goals:
 
 - **Playlist Builder** for local or model-refined playlist drafts.
 - **EQ Assistant** for bounded graphic-EQ starting points.
-- **Mood Library** for analysis, factual context, tagging, cleanup, and review.
+- **Mood Library** for analysis, factual context, mood tagging, and review.
+- **Library cleanup** for filename, folder, and embedded-metadata repair, catalog
+  source policy, optional task-specific model assistance, and rollback history.
 - **Settings** for model/provider routing and the controlled mood vocabulary.
 
-Infrequent configuration belongs under Settings. Analysis and tagging belong
+Reusable provider connections belong under Settings; task-specific routing and
+source policy belong beside the task that consumes them. Analysis and tagging belong
 together because they share one evidence and review pipeline. Playlist and EQ
 remain distinct because their inputs, output editors, and listening workflows
 are materially different.
+
+Library cleanup uses one canonical workspace with four tabs: **Clean up**,
+**Sources**, **AI assistance**, and **History & rollback**. The Library toolbar is
+a scoped shortcut into that same workspace, carrying the current folder or selected
+tracks. Cleanup history is not general Assistant activity: it owns downloadable
+change journals and executable rollback, so it stays with the cleanup tool.
 
 ## Placement and width
 
@@ -65,6 +74,9 @@ algorithm versions remain available as supporting information.
   resource behaves exactly like one created manually.
 - Mood suggestions remain database-only and require explicit review. They do
   not become embedded file metadata.
+- Cleanup may change paths, filenames, and embedded metadata only after one
+  grouped review. Applied changes use the server journal and remain downloadable
+  and rollback-safe from the cleanup workspace.
 - Do not create a second frontend store for lasting authored or playback state.
   Server responses remain authoritative.
 

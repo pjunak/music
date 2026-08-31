@@ -597,23 +597,42 @@ impl CleanupService {
         scope: CleanupScope,
         rules: CleanupRuleSet,
     ) -> Result<CleanupAnalysis, CleanupError> {
+        self.analyze_with_online_evidence(scope, rules, true).await
+    }
+
+    pub async fn analyze_with_online_evidence(
+        &self,
+        scope: CleanupScope,
+        rules: CleanupRuleSet,
+        use_online_evidence: bool,
+    ) -> Result<CleanupAnalysis, CleanupError> {
         if matches!(&scope, CleanupScope::Tracks(track_ids) if track_ids.is_empty()) {
             return Err(CleanupError::EmptyTrackScope);
         }
-        let (all_tracks, verdicts) = tokio::try_join!(
-            async {
-                self.repository
-                    .all_tracks()
-                    .await
-                    .map_err(|source| dependency("load the cleanup library catalog", source))
-            },
-            async {
-                self.repository
-                    .cleanup_name_verdicts()
-                    .await
-                    .map_err(|source| dependency("load cached cleanup name verdicts", source))
-            }
-        )?;
+        let (all_tracks, verdicts) = if use_online_evidence {
+            let (tracks, verdicts) = tokio::try_join!(
+                async {
+                    self.repository
+                        .all_tracks()
+                        .await
+                        .map_err(|source| dependency("load the cleanup library catalog", source))
+                },
+                async {
+                    self.repository
+                        .cleanup_name_verdicts()
+                        .await
+                        .map_err(|source| dependency("load cached cleanup name verdicts", source))
+                }
+            )?;
+            (tracks, Some(verdicts))
+        } else {
+            let tracks = self
+                .repository
+                .all_tracks()
+                .await
+                .map_err(|source| dependency("load the cleanup library catalog", source))?;
+            (tracks, None)
+        };
         let scope_tracks = match scope {
             CleanupScope::All => all_tracks.clone(),
             CleanupScope::Tracks(track_ids) => {
@@ -638,9 +657,13 @@ impl CleanupService {
                 .cloned()
                 .collect(),
         };
-        let plans = analyze_cleanup(&scope_tracks, &all_tracks, rules, Some(&verdicts));
+        let plans = analyze_cleanup(&scope_tracks, &all_tracks, rules, verdicts.as_ref());
         let folders = analyze_cleanup_folders(&scope_tracks, &all_tracks, rules);
-        let pending_lookups = pending_cleanup_lookups(&plans, Some(&verdicts));
+        let pending_lookups = if use_online_evidence {
+            pending_cleanup_lookups(&plans, verdicts.as_ref())
+        } else {
+            Vec::new()
+        };
         Ok(CleanupAnalysis {
             scanned: scope_tracks.len(),
             plans,

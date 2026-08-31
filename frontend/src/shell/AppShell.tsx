@@ -28,6 +28,11 @@ import {
   EqAssistantView,
   InterruptsView,
   LibraryAnalysisView,
+  LibraryCleanupHistoryView,
+  LibraryCleanupModelView,
+  LibraryCleanupRunView,
+  LibraryCleanupShell,
+  LibraryCleanupSourcesView,
   LibraryContextView,
   LibraryTagsView,
   LibraryView,
@@ -205,6 +210,13 @@ export default function AppShell() {
               <Route path="context" element={<LibraryContextView />} />
               <Route path="tags" element={<LibraryTagsView />} />
             </Route>
+            <Route path="cleanup" element={<LibraryCleanupShell />}>
+              <Route index element={<Navigate to="run" replace />} />
+              <Route path="run" element={<LibraryCleanupRunView />} />
+              <Route path="sources" element={<LibraryCleanupSourcesView />} />
+              <Route path="model" element={<LibraryCleanupModelView />} />
+              <Route path="history" element={<LibraryCleanupHistoryView />} />
+            </Route>
             <Route path="settings" element={<AssistantSettingsShell />}>
               <Route index element={<Navigate to="models" replace />} />
               <Route
@@ -231,8 +243,6 @@ export default function AppShell() {
               path="ai"
               element={<Navigate to="/assistant/settings/models" replace />}
             />
-            {/* Preserve bookmarks for the removed placeholder page. */}
-            <Route path="cleanup" element={<Navigate to="/library" replace />} />
           </Route>
           {/* Legacy routes — old top-level paths keep working for bookmarks
               and external links by redirecting into the new IA. */}

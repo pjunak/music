@@ -5,6 +5,7 @@ import {
   LightningIcon,
   MusicNoteIcon,
   SettingsIcon,
+  SparkleIcon,
   TagIcon,
 } from "@/components/icons";
 
@@ -41,6 +42,13 @@ const ASSISTANT_TABS: AssistantTab[] = [
     shortLabel: "Moods",
     description: "Analyze, suggest, and review",
     icon: TagIcon,
+  },
+  {
+    to: "cleanup",
+    label: "Library cleanup",
+    shortLabel: "Cleanup",
+    description: "Repair files and metadata",
+    icon: SparkleIcon,
   },
   {
     to: "settings",
@@ -149,6 +157,32 @@ export function AssistantSettingsShell() {
         {
           to: "vocabulary",
           label: "Mood vocabulary",
+        },
+      ]}
+    />
+  );
+}
+
+export function LibraryCleanupShell() {
+  return (
+    <AssistantWorkspaceShell
+      ariaLabel="Library cleanup sections"
+      items={[
+        {
+          to: "run",
+          label: "Clean up",
+        },
+        {
+          to: "sources",
+          label: "Sources",
+        },
+        {
+          to: "model",
+          label: "AI assistance",
+        },
+        {
+          to: "history",
+          label: "History & rollback",
         },
       ]}
     />

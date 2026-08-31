@@ -1,5 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, Dispatch, DragEvent, MouseEvent, SetStateAction } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { Breadcrumb } from "@/components/Breadcrumb";
 import type { BreadcrumbItem } from "@/components/Breadcrumb";
@@ -48,10 +49,6 @@ import { wsClient } from "@/core/ws";
 import { lazyNamed } from "@/core/lazyNamed";
 import { RouteSpinner } from "@/shell/routeGuards";
 
-const CleanupDialog = lazyNamed(
-  () => import("@/components/CleanupDialog"),
-  (module) => module.CleanupDialog,
-);
 const MoodTaggingDialog = lazyNamed(
   () => import("@/components/MoodTaggingDialog"),
   (module) => module.MoodTaggingDialog,
@@ -94,16 +91,16 @@ const sfxAllFolders = async (): Promise<TreeFolder[]> =>
   }));
 
 export function LibraryView() {
+  const navigate = useNavigate();
   const [root, setRoot] = useState<Root>("music");
   const [path, setPath] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [pendingQuery, setPendingQuery] = useState("");
   const [query, setQuery] = useState("");
   // Ticked-checkbox selection of the music list. Lives here (not in
-  // MusicWorkspace) so the toolbar's Clean up dialog can offer
+  // MusicWorkspace) so the toolbar's cleanup shortcut can pass
   // "selected tracks" as a scope.
   const [checked, setChecked] = useState<Set<number>>(new Set());
-  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [moodTaggingOpen, setMoodTaggingOpen] = useState(false);
 
   // Search-as-you-type: debounce keystrokes and auto-submit the result.
@@ -191,24 +188,22 @@ export function LibraryView() {
             label="Find and batch-fix common filename/tag issues"
             icon={<SparkleIcon />}
             className="library-cleanup-btn"
-            onClick={() => setCleanupOpen(true)}
+            onClick={() =>
+              navigate("/assistant/cleanup/run", {
+                state: {
+                  cleanupScope: {
+                    path,
+                    trackIds: [...checked],
+                  },
+                },
+              })
+            }
           >
             Clean up
           </IconButton>
         ) : null}
         <RescanButton root={root} onComplete={() => setRefreshKey((k) => k + 1)} />
       </header>
-
-      {cleanupOpen && root === "music" ? (
-        <Suspense fallback={<RouteSpinner />}>
-          <CleanupDialog
-            path={path}
-            checkedIds={[...checked]}
-            onClose={() => setCleanupOpen(false)}
-            onApplied={() => setRefreshKey((k) => k + 1)}
-          />
-        </Suspense>
-      ) : null}
 
       {moodTaggingOpen && root === "music" ? (
         <Suspense fallback={<RouteSpinner />}>

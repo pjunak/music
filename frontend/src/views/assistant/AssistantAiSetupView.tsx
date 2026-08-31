@@ -660,7 +660,8 @@ export function AssistantAiSetupView() {
     ["music_tagger", "tag_cleanup"].includes(role.role_id),
   );
   const standaloneRoles = roles.filter(
-    (role) => !["music_tagger", "tag_cleanup"].includes(role.role_id),
+    (role) =>
+      !["music_tagger", "tag_cleanup", "library_cleanup"].includes(role.role_id),
   );
 
   return (

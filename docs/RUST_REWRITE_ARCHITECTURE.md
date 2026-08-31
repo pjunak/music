@@ -375,8 +375,9 @@ unknown tables/columns or damaged constraints fail closed. For a compatible exis
 SHA-256 hashed, and paired with a non-secret JSON manifest before the first read-write pool opens.
 The ordered migrations add the internal playback storage revision, create `remembered_devices`,
 `legacy_device_imports`, and `recovery_journal`, remove the validated Alembic ledger at schema
-version 5, and remove the validated obsolete known-device table at version 6. Missing databases are
-created directly because there is no prior state to back up.
+version 5, remove the validated obsolete known-device table at version 6, and add the cleanup
+source-policy table at version 7. Missing databases are created directly because there is no prior
+state to back up.
 `music-cli db doctor` is read-only; `music-cli db migrate` takes the same lifetime lock as the
 server and follows this identical path.
 

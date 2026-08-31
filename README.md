@@ -17,6 +17,11 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   a file or a whole album folder; native Rust metadata adapters read its tags, with a
   filename/parent-folder fallback. SQLite keeps a durable materialized index, and a visible,
   retryable reconciliation job refreshes it without blocking startup.
+- **Review-first library cleanup** — open **Assistant → Library cleanup** (or use the scoped
+  Library toolbar shortcut) to repair filenames, folder names, and embedded metadata through one
+  proposal and per-change review. MusicBrainz name evidence can be enabled under Sources without
+  weakening the local rules. Every applied run keeps a server journal in **History & rollback**,
+  where it can be downloaded, conflict-safely reverted, or restored later from the JSON file.
 - **Server-as-reducer playback** — the server holds the canonical `PlayerState`, owns the
   playback clock (`position_ms` is live in every push), and advances the queue itself at end of
   track; clients follow state and seek only when `position_epoch` changes. Repeat, shuffle,

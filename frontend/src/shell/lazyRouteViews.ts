@@ -62,6 +62,23 @@ export const TagVocabularyView = lazyNamed(
   () => import("@/views/assistant/TagVocabularyView"),
   (module) => module.TagVocabularyView,
 );
+const loadLibraryCleanupViews = () => import("@/views/assistant/LibraryCleanupViews");
+export const LibraryCleanupRunView = lazyNamed(
+  loadLibraryCleanupViews,
+  (module) => module.LibraryCleanupRunView,
+);
+export const LibraryCleanupHistoryView = lazyNamed(
+  loadLibraryCleanupViews,
+  (module) => module.LibraryCleanupHistoryView,
+);
+export const LibraryCleanupSourcesView = lazyNamed(
+  loadLibraryCleanupViews,
+  (module) => module.LibraryCleanupSourcesView,
+);
+export const LibraryCleanupModelView = lazyNamed(
+  loadLibraryCleanupViews,
+  (module) => module.LibraryCleanupModelView,
+);
 
 const loadAssistantShell = () => import("./AssistantShell");
 
@@ -76,6 +93,10 @@ export const AssistantSettingsShell = lazyNamed(
 export const MoodLibraryShell = lazyNamed(
   loadAssistantShell,
   (module) => module.MoodLibraryShell,
+);
+export const LibraryCleanupShell = lazyNamed(
+  loadAssistantShell,
+  (module) => module.LibraryCleanupShell,
 );
 export const AuthoringShell = lazyNamed(
   () => import("./AuthoringShell"),

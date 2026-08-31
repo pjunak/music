@@ -12,6 +12,7 @@
 pub mod assistant;
 pub mod auth;
 pub mod cleanup;
+pub mod cleanup_sources;
 pub mod devices;
 pub mod jobs;
 pub mod library;

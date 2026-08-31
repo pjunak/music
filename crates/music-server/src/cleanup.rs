@@ -18,6 +18,7 @@ use music_application::cleanup::{
     MAX_CLEANUP_APPLY_OPERATIONS, MAX_CLEANUP_REVERT_ITEMS, MAX_CLEANUP_SCOPE_LABEL_CHARS,
     MAX_CLEANUP_VERIFY_NAMES,
 };
+use music_application::cleanup_sources::{CleanupSource, CleanupSourceError};
 use music_application::library::LibraryCoordinatorError;
 use music_domain::{
     CleanupFolderSuggestion, CleanupRule, CleanupRuleSet, CleanupSuggestion, CleanupTrackPlan,
@@ -52,6 +53,8 @@ pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(analyze))
         .routes(routes!(verify_names))
+        .routes(routes!(list_sources))
+        .routes(routes!(update_source))
         .routes(routes!(apply_cleanup))
         .routes(routes!(list_batches))
         .routes(routes!(get_batch))
@@ -142,6 +145,37 @@ struct VerifyResponse {
     #[schema(schema_with = openapi_integer)]
     verified: usize,
     failed: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = CleanupSourceUpdate)]
+struct CleanupSourceUpdateRequest {
+    enabled: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = CleanupSourceOut)]
+struct CleanupSourceResponse {
+    id: String,
+    label: String,
+    description: String,
+    enabled: bool,
+    capabilities: Vec<String>,
+    #[schema(required = true, schema_with = openapi_nullable_string)]
+    credential_kind: Option<String>,
+}
+
+impl From<CleanupSource> for CleanupSourceResponse {
+    fn from(source: CleanupSource) -> Self {
+        Self {
+            id: source.id,
+            label: source.label,
+            description: source.description,
+            enabled: source.enabled,
+            capabilities: source.capabilities,
+            credential_kind: source.credential_kind,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -529,12 +563,72 @@ async fn analyze(
             .map(Into::into)
             .collect::<CleanupRuleSet>()
     });
-    let analysis = crate::library::library(&state)?
+    let library = crate::library::library(&state)?;
+    let use_online_evidence = library
+        .cleanup_sources
+        .musicbrainz_enabled()
+        .await
+        .map_err(map_cleanup_source_error)?;
+    let analysis = library
         .cleanup
-        .analyze(scope, rules)
+        .analyze_with_online_evidence(scope, rules, use_online_evidence)
         .await
         .map_err(map_cleanup_error)?;
     Ok(Json(analysis.into()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/library/cleanup/sources",
+    operation_id = "list_cleanup_sources_api_library_cleanup_sources_get",
+    summary = "List Cleanup Sources",
+    responses(
+        (status = 200, description = "Successful Response", body = Vec<CleanupSourceResponse>)
+    ),
+    tag = "library-cleanup"
+)]
+async fn list_sources(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<CleanupSourceResponse>>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let sources = crate::library::library(&state)?
+        .cleanup_sources
+        .sources()
+        .await
+        .map_err(map_cleanup_source_error)?;
+    Ok(Json(sources.into_iter().map(Into::into).collect()))
+}
+
+#[utoipa::path(
+    put,
+    path = "/library/cleanup/sources/{source_id}",
+    operation_id = "update_cleanup_source_api_library_cleanup_sources_source_id_put",
+    summary = "Update Cleanup Source",
+    params(("source_id" = String, Path, description = "Cleanup source id")),
+    request_body = CleanupSourceUpdateRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = CleanupSourceResponse),
+        (status = 404, description = "Source not found"),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn update_source(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    source_id: Result<Path<String>, PathRejection>,
+    payload: Result<Json<CleanupSourceUpdateRequest>, JsonRejection>,
+) -> Result<Json<CleanupSourceResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(source_id) = source_id.map_err(|_| ApiError::validation())?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let source = crate::library::library(&state)?
+        .cleanup_sources
+        .update(&source_id, payload.enabled)
+        .await
+        .map_err(map_cleanup_source_error)?;
+    Ok(Json(source.into()))
 }
 
 #[utoipa::path(
@@ -559,7 +653,19 @@ async fn verify_names(
     if !(1..=MAX_CLEANUP_VERIFY_NAMES).contains(&payload.names.len()) {
         return Err(ApiError::validation());
     }
-    let result = crate::library::library(&state)?
+    let library = crate::library::library(&state)?;
+    if !library
+        .cleanup_sources
+        .musicbrainz_enabled()
+        .await
+        .map_err(map_cleanup_source_error)?
+    {
+        return Ok(Json(VerifyResponse {
+            verified: 0,
+            failed: payload.names,
+        }));
+    }
+    let result = library
         .cleanup_verification
         .verify(payload.names)
         .await
@@ -778,6 +884,16 @@ fn map_cleanup_verification_error(error: CleanupVerificationError) -> ApiError {
         CleanupVerificationError::InvalidBatchSize => ApiError::validation(),
         CleanupVerificationError::Dependency { .. } => {
             tracing::error!(error = %error, "library cleanup verification persistence failed");
+            ApiError::internal()
+        }
+    }
+}
+
+fn map_cleanup_source_error(error: CleanupSourceError) -> ApiError {
+    match error {
+        CleanupSourceError::UnknownSource => ApiError::plain_not_found("cleanup source not found"),
+        CleanupSourceError::Dependency => {
+            tracing::error!(error = %error, "cleanup source settings failed");
             ApiError::internal()
         }
     }

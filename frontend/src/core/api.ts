@@ -1285,6 +1285,15 @@ export interface CleanupRevertResult {
   skipped: BulkActionSkip[];
 }
 
+export interface CleanupSource {
+  id: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  capabilities: string[];
+  credential_kind: string | null;
+}
+
 export const cleanupApi = {
   analyze: (scope: CleanupScope, rules: CleanupRuleId[]) =>
     api.post<CleanupAnalyzeResult>("/api/library/cleanup/analyze", { scope, rules }),
@@ -1292,6 +1301,11 @@ export const cleanupApi = {
    *  1 req/s — keep batches ≤ 5 and chunk longer lists). */
   verify: (names: string[]) =>
     api.post<CleanupVerifyResult>("/api/library/cleanup/verify", { names }),
+  sources: () => api.get<CleanupSource[]>("/api/library/cleanup/sources"),
+  updateSource: (sourceId: string, enabled: boolean) =>
+    api.put<CleanupSource>(`/api/library/cleanup/sources/${encodeURIComponent(sourceId)}`, {
+      enabled,
+    }),
   /** One chunk of accepted ops. Pass the batch_id from the previous chunk
    *  so the whole run lands in a single revertable journal. */
   apply: (ops: CleanupOpIn[], batchId: number | null, scopeLabel: string) =>

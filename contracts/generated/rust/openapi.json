@@ -1912,6 +1912,58 @@
         ],
         "type": "object"
       },
+      "CleanupSourceOut": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "credential_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "enabled",
+          "capabilities",
+          "credential_kind"
+        ],
+        "type": "object"
+      },
+      "CleanupSourceUpdate": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "CleanupTrackPlanOut": {
         "properties": {
           "notes": {
@@ -10271,6 +10323,85 @@
           }
         },
         "summary": "Revert From Journal",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/sources": {
+      "get": {
+        "operationId": "list_cleanup_sources_api_library_cleanup_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CleanupSourceOut"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Cleanup Sources",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/sources/{source_id}": {
+      "put": {
+        "operationId": "update_cleanup_source_api_library_cleanup_sources_source_id_put",
+        "parameters": [
+          {
+            "description": "Cleanup source id",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupSourceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupSourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Source not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Cleanup Source",
         "tags": [
           "library-cleanup"
         ]

@@ -367,7 +367,7 @@ mod tests {
         )
         .fetch_one(&storage.pool)
         .await?;
-        assert_eq!(table_count, 22);
+        assert_eq!(table_count, 23);
         let legacy_ledger_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master \
              WHERE type = 'table' AND name = 'alembic_version'",

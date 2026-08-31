@@ -126,7 +126,16 @@ Full task output contracts are `assistant-playlist-planner-output/v1`,
 `assistant-music-tagger-output/v3`, `assistant-model-tag-cleanup-output/v2`, and
 `assistant-eq-draft-output/v1`. Reserved roles `library_cleanup` and `audio_analyzer` use
 `reserved-library-cleanup/v1` and `reserved-audio-analyzer/v1`; they are visible but not
-configurable.
+configurable. `library_cleanup` is presented only in the task-specific **Library cleanup →
+AI assistance** tab; reusable provider connections remain under Assistant setup.
+
+The Library cleanup workspace preserves a separate local authority boundary. The local engine
+produces filename, folder, and embedded-tag proposals; `cleanup_batches` journals only explicitly
+selected writes. **History & rollback** reads those server journals, downloads the complete JSON,
+and invokes the existing conflict-aware revert path. **Sources** exposes only implemented adapters.
+The current `musicbrainz` policy is stored in `cleanup_source_policies`; when disabled, analysis does
+not surface online lookups and the verification endpoint performs no network request. Arbitrary URL
+scraping is not a supported source contract.
 
 ## Workflow traceability
 
