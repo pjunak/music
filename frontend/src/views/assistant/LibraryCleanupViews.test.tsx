@@ -185,7 +185,7 @@ describe("Library cleanup workspace views", () => {
 
   it("saves and removes a catalog key without returning it to the form", async () => {
     const user = userEvent.setup();
-    const apiKey = "test-acoustid-key-1234";
+    const submittedCredential = "fixture";
     vi.mocked(cleanupApi.sources).mockResolvedValue([acoustIdSource]);
     vi.mocked(confirmDialog).mockResolvedValue(true);
 
@@ -196,11 +196,14 @@ describe("Library cleanup workspace views", () => {
     );
 
     const keyInput = await screen.findByLabelText("AcoustID API key");
-    await user.type(keyInput, apiKey);
+    await user.type(keyInput, submittedCredential);
     await user.click(screen.getByRole("button", { name: "Save API key" }));
 
     await waitFor(() =>
-      expect(cleanupApi.saveSourceCredential).toHaveBeenCalledWith("acoustid", apiKey),
+      expect(cleanupApi.saveSourceCredential).toHaveBeenCalledWith(
+        "acoustid",
+        submittedCredential,
+      ),
     );
     expect(keyInput).toHaveValue("");
     expect(screen.getByText("application API key saved · ••••1234")).toBeVisible();

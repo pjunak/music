@@ -2,3 +2,8 @@
 # provider credential. Keep the exception fingerprint-scoped so all other
 # generic API-key findings, including findings in the same test file, still fail.
 f501bbe147c85ad61b6cdcd0727df71750f0d8a2:backend/tests/test_assistant_providers.py:generic-api-key:1009
+
+# Exact historical false positive: this was a synthetic AcoustID value in a
+# UI test, never an application API key. The current fixture no longer resembles
+# a key; retain this fingerprint only because push scans include the prior commit.
+83bc1bc5e9a54dc90465619fe8fd62049bf36ff3:frontend/src/views/assistant/LibraryCleanupViews.test.tsx:generic-api-key:188
