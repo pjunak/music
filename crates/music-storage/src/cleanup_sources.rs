@@ -1,4 +1,4 @@
-use music_application::assistant::CATALOG_TAG_ANALYZER_ID;
+use music_application::assistant::{CATALOG_TAG_ANALYZER_ID, EncryptedProviderCredential};
 use music_application::cleanup_sources::{CleanupSourceFuture, CleanupSourceRepository};
 use sqlx::Row;
 
@@ -55,10 +55,103 @@ impl CleanupSourceRepository for SqliteStorage {
             Ok(())
         })
     }
+
+    fn cleanup_source_credential(
+        &self,
+        source_id: &str,
+    ) -> CleanupSourceFuture<'_, Option<EncryptedProviderCredential>> {
+        let source_id = source_id.to_owned();
+        Box::pin(async move {
+            let row = sqlx::query(
+                "SELECT encrypted_api_key, api_key_nonce, api_key_hint \
+                 FROM cleanup_source_credentials WHERE source_id = ?",
+            )
+            .bind(source_id)
+            .fetch_optional(&self.pool)
+            .await?;
+            match row {
+                Some(row) => Ok(Some(EncryptedProviderCredential {
+                    ciphertext: row.try_get("encrypted_api_key")?,
+                    nonce: row.try_get("api_key_nonce")?,
+                    hint: row.try_get("api_key_hint")?,
+                })),
+                None => Ok(None),
+            }
+        })
+    }
+
+    fn store_cleanup_source_credential<'a>(
+        &'a self,
+        source_id: &'a str,
+        credential: &'a EncryptedProviderCredential,
+    ) -> CleanupSourceFuture<'a, ()> {
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await?;
+            sqlx::query(
+                "INSERT INTO cleanup_source_credentials \
+                 (source_id, encrypted_api_key, api_key_nonce, api_key_hint) \
+                 VALUES (?, ?, ?, ?) \
+                 ON CONFLICT(source_id) DO UPDATE SET \
+                    encrypted_api_key = excluded.encrypted_api_key, \
+                    api_key_nonce = excluded.api_key_nonce, \
+                    api_key_hint = excluded.api_key_hint, updated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(source_id)
+            .bind(&credential.ciphertext)
+            .bind(&credential.nonce)
+            .bind(&credential.hint)
+            .execute(&mut *transaction)
+            .await?;
+            invalidate_source_evidence(&mut transaction, source_id).await?;
+            transaction.commit().await?;
+            Ok(())
+        })
+    }
+
+    fn clear_cleanup_source_credential(&self, source_id: &str) -> CleanupSourceFuture<'_, bool> {
+        let source_id = source_id.to_owned();
+        Box::pin(async move {
+            let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await?;
+            let deleted = sqlx::query("DELETE FROM cleanup_source_credentials WHERE source_id = ?")
+                .bind(&source_id)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected()
+                > 0;
+            if deleted {
+                invalidate_source_evidence(&mut transaction, &source_id).await?;
+            }
+            transaction.commit().await?;
+            Ok(deleted)
+        })
+    }
+}
+
+async fn invalidate_source_evidence(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    source_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM cleanup_track_enrichments")
+        .execute(&mut **transaction)
+        .await?;
+    if source_id == "lastfm" {
+        sqlx::query("DELETE FROM track_analysis_tag_reviews WHERE analyzer_id = ?")
+            .bind(CATALOG_TAG_ANALYZER_ID)
+            .execute(&mut **transaction)
+            .await?;
+        sqlx::query("DELETE FROM track_analyses WHERE analyzer_id = ?")
+            .bind(CATALOG_TAG_ANALYZER_ID)
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use music_application::assistant::{EncryptedProviderCredential, ProviderRepository};
     use music_application::cleanup_sources::CleanupSourceRepository;
     use tempfile::tempdir;
 
@@ -79,6 +172,23 @@ mod tests {
             storage.cleanup_source_enabled("musicbrainz").await?,
             Some(false)
         );
+
+        let credential = EncryptedProviderCredential {
+            ciphertext: "ciphertext".to_owned(),
+            nonce: "nonce".to_owned(),
+            hint: "••••hint".to_owned(),
+        };
+        storage
+            .store_cleanup_source_credential("lastfm", &credential)
+            .await?;
+        assert!(storage.saved_provider_credentials_exist().await?);
+        assert_eq!(
+            storage.cleanup_source_credential("lastfm").await?,
+            Some(credential)
+        );
+        assert!(storage.clear_cleanup_source_credential("lastfm").await?);
+        assert_eq!(storage.cleanup_source_credential("lastfm").await?, None);
+        assert!(!storage.saved_provider_credentials_exist().await?);
         Ok(())
     }
 }

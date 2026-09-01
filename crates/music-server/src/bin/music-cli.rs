@@ -160,7 +160,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Audit or rotate provider credential encryption while the server is stopped.
+    /// Audit or rotate encrypted external-service credentials while the server is stopped.
     #[command(name = "assistant-credentials")]
     AssistantCredentials {
         #[command(subcommand)]
@@ -185,7 +185,7 @@ enum PlaylistEngine {
 
 #[derive(Debug, Subcommand)]
 enum CredentialCommand {
-    /// Verify that the configured key decrypts every saved provider credential.
+    /// Verify that the configured key decrypts every saved external-service credential.
     Check {
         /// Database file; defaults to DATABASE_URL from the application configuration.
         #[arg(long, value_name = "PATH")]
@@ -796,7 +796,7 @@ async fn rotate_provider_credentials(
             rotated_credentials,
         } => {
             if !json {
-                println!("Rotated {rotated_credentials} saved provider credential(s) atomically.");
+                println!("Rotated {rotated_credentials} saved API credential(s) atomically.");
                 println!(
                     "Before restarting, configure the credential key whose id is {}.",
                     replacement.key_id()

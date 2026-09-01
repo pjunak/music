@@ -6,9 +6,9 @@ import { toast } from "@/core/toast";
 interface CredentialStorageCardProps {
   status: ProviderFrameworkStatus;
   busy: boolean;
-  resetting: boolean;
+  resetting?: boolean;
   onInitialize: () => Promise<void>;
-  onReset: () => Promise<void>;
+  onReset?: () => Promise<void>;
 }
 
 const DEFAULT_HOST_SECRETS_DIRECTORY = "/srv/music-secrets";
@@ -66,11 +66,11 @@ function storageDescription(status: ProviderFrameworkStatus): string {
     if (status.credential_storage_source === "file") {
       return (
         "The server is using a private key file from its mounted secrets " +
-        "directory. Provider API keys can now be saved."
+        "directory. External-service API keys can now be saved."
       );
     }
     return (
-      "The master key is supplied by the server environment. Provider API " +
+      "The master key is supplied by the server environment. External-service API " +
       "keys can now be saved."
     );
   }
@@ -79,7 +79,7 @@ function storageDescription(status: ProviderFrameworkStatus): string {
     "saved_credentials_require_existing_key"
   ) {
     return (
-      "Encrypted provider keys already exist, so Music will not generate a " +
+      "Encrypted API keys already exist, so Music will not generate a " +
       "different master key. Restore the matching key file before continuing."
     );
   }
@@ -113,7 +113,7 @@ async function copyCommand(command: string): Promise<void> {
 export function CredentialStorageCard({
   status,
   busy,
-  resetting,
+  resetting = false,
   onInitialize,
   onReset,
 }: CredentialStorageCardProps) {
@@ -131,9 +131,10 @@ export function CredentialStorageCard({
     DEFAULT_HOST_SECRETS_DIRECTORY;
   const initializationError = status.credential_storage_initialization_error;
   const resetAvailable =
-    status.credential_storage_source === "file" ||
-    (keyFilePath !== null &&
-      initializationError === "saved_credentials_require_existing_key");
+    onReset !== undefined &&
+    (status.credential_storage_source === "file" ||
+      (keyFilePath !== null &&
+        initializationError === "saved_credentials_require_existing_key"));
   const needsMountSetup =
     !status.credential_storage_ready &&
     (initializationError === "master_key_file_not_configured" ||
@@ -191,9 +192,9 @@ export function CredentialStorageCard({
                 className="btn-danger"
                 type="button"
                 disabled={busy || resetting}
-                onClick={() => void onReset()}
+                onClick={() => void onReset?.()}
               >
-                {resetting ? "Resetting…" : "Reset AI secure storage"}
+                {resetting ? "Resetting…" : "Reset encrypted key storage"}
               </button>
             ) : null}
             <button
@@ -211,10 +212,11 @@ export function CredentialStorageCard({
           <div className="assistant-provider-storage-guide">
             <h4>Server maintenance</h4>
             <p>
-              File-backed storage can be reset above after an explicit warning and
-              current-password confirmation. Music erases every saved provider key
-              before it removes the fixed master-key file, so the reset cannot leave
-              encrypted credentials orphaned.
+              {onReset !== undefined
+                ? "File-backed storage can be reset above after an explicit warning and current-password confirmation. "
+                : "File-backed storage can be reset from Models and providers after an explicit warning and current-password confirmation. "}
+              Music erases every saved API key before it removes the fixed master-key
+              file, so the reset cannot leave encrypted credentials orphaned.
             </p>
 
             {status.credential_storage_source === "environment" ? (
@@ -256,7 +258,7 @@ export function CredentialStorageCard({
             ) : null}
 
             <p>
-              To change the key while keeping saved provider credentials, use the
+              To change the key while keeping saved external-service credentials, use the
               offline <code>music-cli assistant-credentials rotate</code> workflow.
               Never edit or replace the key file directly: the database and master key
               must stay a matching pair.

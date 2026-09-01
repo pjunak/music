@@ -224,8 +224,8 @@ docker build -t music-rust .
 # Prepare persistent data for the image's non-root UID.
 sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-data
 
-# Prepare the optional AI secrets directory for the same UID. Skip this and
-# its mount if no provider API keys will be used.
+# Prepare the optional external-service secrets directory for the same UID. Skip
+# this and its mount if no model-provider or catalog API keys will be saved in Music.
 sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-secrets
 
 # Run it — application data and optional secrets stay separate.
@@ -265,29 +265,31 @@ DB-backed tokens, nothing is signed.)
 | `ALLOWED_ORIGINS` | | `http://localhost:5173` | Comma-separated CORS origins (only needed for split dev) |
 | `SESSION_COOKIE_SECURE` | | `true` | Send the session cookie over HTTPS only. Set `false` only for a plain-HTTP (no-TLS) deployment |
 | `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
-| `ASSISTANT_CREDENTIAL_KEY` | Only for optional AI setup | — | URL-safe base64 32-byte key used to encrypt provider API keys in `app.db` |
-| `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional model setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; model settings may create it once when its private parent mount exists |
+| `ASSISTANT_CREDENTIAL_KEY` | Only for optional external-service setup | — | URL-safe base64 32-byte key used to encrypt model-provider and catalog API keys in `app.db` |
+| `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional external-service setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; authenticated settings may create it once when its private parent mount exists |
 | `ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT` | | — | Optional non-secret host path shown in model settings' copyable mount/setup guide |
 | `ASSISTANT_VOICE_MODEL_PATH` | Only for opt-in local voice analysis | — | Read-only path to the exact checksum-pinned Essentia voice/instrumental model |
 | `ASSISTANT_LIBRARY_CONTEXT_WORKERS` | | `1` | Bounded first-pass analysis workers (`1`–`4`); voice inference remains capacity one |
-| `CLEANUP_ACOUSTID_API_KEY` | Only for opt-in fingerprint lookup | — | AcoustID application client key; the public service is non-commercial and rate-limited |
-| `CLEANUP_LASTFM_API_KEY` | Only for opt-in community tags | — | Last.fm API key used for exact canonical artist/title top-tag lookup |
+| `CLEANUP_ACOUSTID_API_KEY` | Optional deployment fallback | — | AcoustID application client key; a key saved under Library cleanup → Sources takes precedence without a restart |
+| `CLEANUP_LASTFM_API_KEY` | Optional deployment fallback | — | Last.fm API key; a key saved under Library cleanup → Sources takes precedence without a restart |
 | `CLEANUP_FPCALC_PATH` | | `fpcalc` | Chromaprint executable used locally by the AcoustID fallback |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 
-### Optional AI connection storage
+### Optional encrypted API-key storage
 
 The local Assistant does not need a model provider or a credential key. For the standard Docker
-image, mount the private directory shown in Quick start, sign in, open
-**Assistant → Settings → Models and providers**, and select **Initialize secure storage**. Music creates the fixed
+image, mount the private directory shown in Quick start, sign in, open either
+**Assistant → Settings → Models and providers** or **Assistant → Library cleanup → Sources**, and
+select **Initialize secure storage**. Music creates the fixed
 `/run/music-secrets/assistant-credential.key` file with a new random key. The key value is never
 sent to the browser, stored in `app.db`, or mixed into `/data`.
 
 The API cannot choose a path, overwrite an existing file, replace a key, or initialize a new key
-when saved encrypted provider credentials already exist. A password-confirmed complete reset is the
-only browser operation that may remove the fixed file: it first erases every encrypted provider
-credential and resets the model gates in one database transaction, then removes that exact file.
+when saved encrypted credentials already exist. A password-confirmed complete reset is the only
+browser operation that may remove the fixed file: it first erases every encrypted model-provider
+and catalog credential, resets model gates, and clears catalog evidence caches in one database
+transaction, then removes that exact file.
 `ASSISTANT_CREDENTIAL_KEY_FILE` is a non-secret deployment setting; its parent directory must
 already exist, be private, and be writable by the container's UID 1000.
 
@@ -302,12 +304,12 @@ Managed deployments may instead generate a key externally:
 Set the printed value as `ASSISTANT_CREDENTIAL_KEY` in the server environment and restart the
 server. This environment value takes precedence over the configured file. Keep either form in the
 deployment's secret store, not in source control. A database backup and this key must be restored
-together; without the original key, saved provider credentials cannot be decrypted and must be
+together; without the original key, saved external-service credentials cannot be decrypted and must be
 entered again.
 
-For file-backed storage, model settings can delete every saved provider API key and the master key through
-**Reset AI secure storage** after a destructive-action warning and current-password confirmation.
-Connection and role drafts remain, active provider jobs block the reset, and a failed final file
+For file-backed storage, model settings can delete every saved API key and the master key through
+**Reset encrypted key storage** after a destructive-action warning and current-password confirmation.
+Connection and role drafts remain, active model or catalog-enrichment jobs block the reset, and a failed final file
 removal is reported separately after the credentials are already safely erased. Environment-backed
 keys still belong to the service configuration and cannot be removed by a running process. To
 preserve saved credentials, use the offline rotation workflow below instead of resetting or editing
@@ -325,7 +327,7 @@ choices, but prevents use until a new key is saved, the connection is verified, 
 configuration passes its tests again.
 
 Before relying on a backup, verify that its database and deployment key still match. This command
-is read-only: it prints a short non-secret key ID and counts, but never prints a provider key.
+is read-only: it prints a short non-secret key ID and counts, but never prints an API key.
 
 ```powershell
 music-cli assistant-credentials check
@@ -351,7 +353,8 @@ replace the configured environment key or key-file contents with the new key bef
 music-cli assistant-credentials rotate --apply --server-stopped
 ```
 
-Rotation decrypts every saved credential before changing any row, re-encrypts them in one database
+Rotation decrypts every saved model-provider and catalog credential before changing any row,
+re-encrypts them in one database
 transaction, and resets provider verification, conformance, and model-quality gates. Connection and
 role choices remain, but must be verified and checked again. Never keep the old and new keys in the
 same long-lived environment file.

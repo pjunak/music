@@ -13,6 +13,8 @@ use serde_json::Value;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 
+use music_application::cleanup_sources::cleanup_source_credential_subject;
+
 use crate::{CredentialVault, EncryptedCredential, SqliteStorage, StorageError};
 
 const CONNECTION_SELECT: &str = "SELECT id, name, adapter_id, base_url, encrypted_api_key, \
@@ -57,10 +59,17 @@ pub enum ProviderCredentialRotationOutcome {
 
 #[derive(Debug)]
 struct CredentialRotation {
+    target: CredentialRotationTarget,
     id: String,
     original_ciphertext: String,
     original_nonce: String,
     replacement: EncryptedCredential,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CredentialRotationTarget {
+    ProviderConnection,
+    CleanupSource,
 }
 
 impl SqliteStorage {
@@ -89,6 +98,28 @@ impl SqliteStorage {
             } else if ciphertext.is_empty()
                 || nonce.is_empty()
                 || vault.decrypt(&id, &ciphertext, &nonce).is_err()
+            {
+                unreadable_credentials += 1;
+            } else {
+                saved_credentials += 1;
+            }
+        }
+        let catalog_rows = sqlx::query(
+            "SELECT source_id, encrypted_api_key, api_key_nonce \
+             FROM cleanup_source_credentials ORDER BY source_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for row in catalog_rows {
+            let source_id: String = row.try_get("source_id")?;
+            let ciphertext: String = row.try_get("encrypted_api_key")?;
+            let nonce: String = row.try_get("api_key_nonce")?;
+            let subject = cleanup_source_credential_subject(&source_id).map_err(|_| {
+                StorageError::InvalidAssistantRecord("invalid cleanup source credential")
+            })?;
+            if ciphertext.is_empty()
+                || nonce.is_empty()
+                || vault.decrypt(&subject, &ciphertext, &nonce).is_err()
             {
                 unreadable_credentials += 1;
             } else {
@@ -136,7 +167,40 @@ impl SqliteStorage {
                 .encrypt(&id, secret.expose_secret())
                 .map_err(StorageError::CredentialCrypto)?;
             rotations.push(CredentialRotation {
+                target: CredentialRotationTarget::ProviderConnection,
                 id,
+                original_ciphertext: ciphertext,
+                original_nonce: nonce,
+                replacement: encrypted,
+            });
+        }
+        let catalog_rows = sqlx::query(
+            "SELECT source_id, encrypted_api_key, api_key_nonce \
+             FROM cleanup_source_credentials ORDER BY source_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for row in catalog_rows {
+            let source_id: String = row.try_get("source_id")?;
+            let ciphertext: String = row.try_get("encrypted_api_key")?;
+            let nonce: String = row.try_get("api_key_nonce")?;
+            if ciphertext.is_empty() || nonce.is_empty() {
+                unreadable_credentials += 1;
+                continue;
+            }
+            let subject = cleanup_source_credential_subject(&source_id).map_err(|_| {
+                StorageError::InvalidAssistantRecord("invalid cleanup source credential")
+            })?;
+            let Ok(secret) = current.decrypt(&subject, &ciphertext, &nonce) else {
+                unreadable_credentials += 1;
+                continue;
+            };
+            let encrypted = replacement
+                .encrypt(&subject, secret.expose_secret())
+                .map_err(StorageError::CredentialCrypto)?;
+            rotations.push(CredentialRotation {
+                target: CredentialRotationTarget::CleanupSource,
+                id: source_id,
                 original_ciphertext: ciphertext,
                 original_nonce: nonce,
                 replacement: encrypted,
@@ -152,7 +216,7 @@ impl SqliteStorage {
         let mut transaction = self.pool.begin().await?;
         let active: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM background_jobs \
-             WHERE kind LIKE 'assistant.model%' \
+             WHERE (kind LIKE 'assistant.model%' OR kind = 'library.cleanup-enrichment') \
              AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1)",
         )
         .fetch_one(&mut *transaction)
@@ -162,8 +226,10 @@ impl SqliteStorage {
             return Ok(ProviderCredentialRotationOutcome::ModelJobActive);
         }
         let current_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM assistant_provider_connections \
-             WHERE encrypted_api_key != '' OR api_key_nonce != ''",
+            "SELECT \
+                (SELECT COUNT(*) FROM assistant_provider_connections \
+                 WHERE encrypted_api_key != '' OR api_key_nonce != '') + \
+                (SELECT COUNT(*) FROM cleanup_source_credentials)",
         )
         .fetch_one(&mut *transaction)
         .await?;
@@ -172,22 +238,41 @@ impl SqliteStorage {
             return Ok(ProviderCredentialRotationOutcome::ChangedDuringPreflight);
         }
         for rotation in &rotations {
-            let result = sqlx::query(
-                "UPDATE assistant_provider_connections SET encrypted_api_key = ?, \
-                 api_key_nonce = ?, api_key_hint = ?, verification_status = 'never', \
-                 verification_error_code = NULL, verified_models_json = '[]', \
-                 verified_capabilities_json = '[]', last_verified_at = NULL, \
-                 updated_at = CURRENT_TIMESTAMP \
-                 WHERE id = ? AND encrypted_api_key = ? AND api_key_nonce = ?",
-            )
-            .bind(&rotation.replacement.ciphertext)
-            .bind(&rotation.replacement.nonce)
-            .bind(&rotation.replacement.hint)
-            .bind(&rotation.id)
-            .bind(&rotation.original_ciphertext)
-            .bind(&rotation.original_nonce)
-            .execute(&mut *transaction)
-            .await?;
+            let result = match rotation.target {
+                CredentialRotationTarget::ProviderConnection => {
+                    sqlx::query(
+                        "UPDATE assistant_provider_connections SET encrypted_api_key = ?, \
+                     api_key_nonce = ?, api_key_hint = ?, verification_status = 'never', \
+                     verification_error_code = NULL, verified_models_json = '[]', \
+                     verified_capabilities_json = '[]', last_verified_at = NULL, \
+                     updated_at = CURRENT_TIMESTAMP \
+                     WHERE id = ? AND encrypted_api_key = ? AND api_key_nonce = ?",
+                    )
+                    .bind(&rotation.replacement.ciphertext)
+                    .bind(&rotation.replacement.nonce)
+                    .bind(&rotation.replacement.hint)
+                    .bind(&rotation.id)
+                    .bind(&rotation.original_ciphertext)
+                    .bind(&rotation.original_nonce)
+                    .execute(&mut *transaction)
+                    .await?
+                }
+                CredentialRotationTarget::CleanupSource => {
+                    sqlx::query(
+                        "UPDATE cleanup_source_credentials SET encrypted_api_key = ?, \
+                     api_key_nonce = ?, api_key_hint = ?, updated_at = CURRENT_TIMESTAMP \
+                     WHERE source_id = ? AND encrypted_api_key = ? AND api_key_nonce = ?",
+                    )
+                    .bind(&rotation.replacement.ciphertext)
+                    .bind(&rotation.replacement.nonce)
+                    .bind(&rotation.replacement.hint)
+                    .bind(&rotation.id)
+                    .bind(&rotation.original_ciphertext)
+                    .bind(&rotation.original_nonce)
+                    .execute(&mut *transaction)
+                    .await?
+                }
+            };
             if result.rows_affected() != 1 {
                 transaction.rollback().await?;
                 return Ok(ProviderCredentialRotationOutcome::ChangedDuringPreflight);
@@ -328,8 +413,11 @@ impl ProviderRepository for SqliteStorage {
     fn saved_provider_credentials_exist(&self) -> AssistantFuture<'_, bool> {
         Box::pin(async move {
             sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM assistant_provider_connections \
-                 WHERE encrypted_api_key != '' OR api_key_nonce != '' LIMIT 1)",
+                "SELECT EXISTS(\
+                    SELECT 1 FROM assistant_provider_connections \
+                    WHERE encrypted_api_key != '' OR api_key_nonce != '' \
+                    UNION ALL SELECT 1 FROM cleanup_source_credentials LIMIT 1\
+                 )",
             )
             .fetch_one(&self.pool)
             .await
@@ -343,7 +431,7 @@ impl ProviderRepository for SqliteStorage {
             let mut transaction = self.pool.begin().await.map_err(box_storage)?;
             let active: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM background_jobs \
-                 WHERE kind LIKE 'assistant.model%' \
+                 WHERE (kind LIKE 'assistant.model%' OR kind = 'library.cleanup-enrichment') \
                  AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1)",
             )
             .fetch_one(&mut *transaction)
@@ -355,8 +443,10 @@ impl ProviderRepository for SqliteStorage {
             }
             let deleted_credentials = u64::try_from(
                 sqlx::query_scalar::<_, i64>(
-                    "SELECT COUNT(*) FROM assistant_provider_connections \
-                     WHERE encrypted_api_key != '' AND api_key_nonce != ''",
+                    "SELECT \
+                        (SELECT COUNT(*) FROM assistant_provider_connections \
+                         WHERE encrypted_api_key != '' AND api_key_nonce != '') + \
+                        (SELECT COUNT(*) FROM cleanup_source_credentials)",
                 )
                 .fetch_one(&mut *transaction)
                 .await
@@ -364,7 +454,7 @@ impl ProviderRepository for SqliteStorage {
             )
             .map_err(|_| {
                 box_storage(StorageError::InvalidAssistantRecord(
-                    "invalid provider credential count",
+                    "invalid credential count",
                 ))
             })?;
             sqlx::query(
@@ -377,6 +467,24 @@ impl ProviderRepository for SqliteStorage {
             .execute(&mut *transaction)
             .await
             .map_err(box_storage)?;
+            sqlx::query("DELETE FROM cleanup_source_credentials")
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+            sqlx::query("DELETE FROM cleanup_track_enrichments")
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+            sqlx::query("DELETE FROM track_analysis_tag_reviews WHERE analyzer_id = ?")
+                .bind(music_application::assistant::CATALOG_TAG_ANALYZER_ID)
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
+            sqlx::query("DELETE FROM track_analyses WHERE analyzer_id = ?")
+                .bind(music_application::assistant::CATALOG_TAG_ANALYZER_ID)
+                .execute(&mut *transaction)
+                .await
+                .map_err(box_storage)?;
             sqlx::query("DELETE FROM assistant_model_evaluations")
                 .execute(&mut *transaction)
                 .await
@@ -1539,6 +1647,13 @@ mod tests {
                 .await?,
             ProviderConformanceWriteOutcome::ModelJobActive
         );
+        sqlx::query(
+            "INSERT INTO cleanup_source_credentials \
+             (source_id, encrypted_api_key, api_key_nonce, api_key_hint) \
+             VALUES ('acoustid', 'catalog-ciphertext', 'catalog-nonce', '••••test')",
+        )
+        .execute(&storage.pool)
+        .await?;
         assert_eq!(
             storage.clear_provider_credential(&connection.id).await?,
             ProviderMutationOutcome::ConnectionModelJobActive
@@ -1563,9 +1678,14 @@ mod tests {
         assert_eq!(
             storage.reset_provider_credentials().await?,
             ProviderCredentialResetOutcome::Applied {
-                deleted_credentials: 1
+                deleted_credentials: 2
             }
         );
+        let catalog_credentials: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM cleanup_source_credentials")
+                .fetch_one(&storage.pool)
+                .await?;
+        assert_eq!(catalog_credentials, 0);
         let cleared = storage
             .provider_connection(&connection.id)
             .await?
@@ -1623,6 +1743,8 @@ mod tests {
         let current = CredentialVault::from_key([7; 32])?;
         let replacement = CredentialVault::from_key([9; 32])?;
         let encrypted = current.encrypt("aabbccddeeff00112233445566778899", "fixture-secret")?;
+        let catalog_subject = cleanup_source_credential_subject("acoustid")?;
+        let catalog_encrypted = current.encrypt(&catalog_subject, "catalog-secret")?;
         let mut saved = connection("aabbccddeeff00112233445566778899", "Fixture");
         saved.encrypted_api_key = encrypted.ciphertext;
         saved.api_key_nonce = encrypted.nonce;
@@ -1632,11 +1754,21 @@ mod tests {
             .save_model_role(&saved.fingerprint(), &role(&saved.id), false)
             .await?;
         sqlx::query(
+            "INSERT INTO cleanup_source_credentials \
+             (source_id, encrypted_api_key, api_key_nonce, api_key_hint) VALUES (?, ?, ?, ?)",
+        )
+        .bind("acoustid")
+        .bind(&catalog_encrypted.ciphertext)
+        .bind(&catalog_encrypted.nonce)
+        .bind(&catalog_encrypted.hint)
+        .execute(&storage.pool)
+        .await?;
+        sqlx::query(
             "INSERT INTO background_jobs \
              (id, kind, status, parameters_json, result_json, error, progress_current, \
               progress_total, progress_phase, progress_message, attempts, retry_of_id, \
               created_at, updated_at, lane, schema_version, restartable, checkpoint_policy) \
-             VALUES ('rotation-job', 'assistant.model.test', 'running', '{}', NULL, NULL, 0, 1, \
+             VALUES ('rotation-job', 'library.cleanup-enrichment', 'running', '{}', NULL, NULL, 0, 1, \
                      'Running', 'Running', 1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, \
                      'provider', 1, 0, 'replace')",
         )
@@ -1645,13 +1777,13 @@ mod tests {
 
         let audit = storage.audit_provider_credentials(&current).await?;
         assert!(audit.healthy());
-        assert_eq!(audit.saved_credentials, 1);
+        assert_eq!(audit.saved_credentials, 2);
         assert_eq!(
             storage
                 .audit_provider_credentials(&CredentialVault::from_key([8; 32])?)
                 .await?
                 .unreadable_credentials,
-            1
+            2
         );
 
         assert_eq!(
@@ -1681,7 +1813,7 @@ mod tests {
                 .rotate_provider_credentials(&current, &replacement)
                 .await?,
             ProviderCredentialRotationOutcome::Applied {
-                rotated_credentials: 1
+                rotated_credentials: 2
             }
         );
         assert_eq!(
@@ -1689,7 +1821,7 @@ mod tests {
                 .audit_provider_credentials(&current)
                 .await?
                 .unreadable_credentials,
-            1
+            2
         );
         assert!(
             storage
@@ -1725,6 +1857,20 @@ mod tests {
                 )?
                 .expose_secret(),
             "fixture-secret"
+        );
+        let catalog_row = sqlx::query(
+            "SELECT encrypted_api_key, api_key_nonce FROM cleanup_source_credentials \
+             WHERE source_id = 'acoustid'",
+        )
+        .fetch_one(&storage.pool)
+        .await?;
+        let catalog_ciphertext: String = catalog_row.try_get("encrypted_api_key")?;
+        let catalog_nonce: String = catalog_row.try_get("api_key_nonce")?;
+        assert_eq!(
+            replacement
+                .decrypt(&catalog_subject, &catalog_ciphertext, &catalog_nonce)?
+                .expose_secret(),
+            "catalog-secret"
         );
         Ok(())
     }

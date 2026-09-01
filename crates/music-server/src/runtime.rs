@@ -12,7 +12,8 @@ use music_analysis::{
 };
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
-    MetadataAnalysisJobHandler, ModelEvaluationRepository, ProviderRepository,
+    MetadataAnalysisJobHandler, ModelEvaluationRepository, ProviderCredentialSource,
+    ProviderRepository,
 };
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
@@ -177,7 +178,7 @@ impl AppRuntime {
         let providers = Arc::new(RuntimeProviders::new(
             provider_repository,
             evaluation_repository,
-            provider_credentials,
+            Arc::clone(&provider_credentials),
             provider_network,
             provider_runtime_contract_digest(),
         ));
@@ -310,6 +311,7 @@ impl AppRuntime {
         );
         let cleanup_source_service = Arc::new(CleanupSourceService::new(
             cleanup_source_repository,
+            provider_credentials as Arc<dyn ProviderCredentialSource>,
             CleanupSourceRuntime {
                 acoustid_configured: cleanup_connector_config.acoustid_configured(),
                 fpcalc_available: cleanup_connector_config.fpcalc_available().await,
@@ -848,13 +850,14 @@ mod tests {
     };
     use axum::http::{Request, StatusCode};
     use base64::Engine;
-    use base64::engine::general_purpose::STANDARD;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE};
     use flate2::read::GzDecoder;
     use music_application::auth::UnixSeconds;
     use music_application::cleanup::{
         CleanupBatchAppend, CleanupFuture, CleanupNameLookup, CleanupNameScores, CleanupRepository,
         CleanupVerificationService,
     };
+    use music_application::cleanup_sources::CleanupSourceRepository;
     use music_application::jobs::{
         JobCheckpointPolicy, JobDefinition, JobFinish, JobLane, JobRepository, NewJob,
     };
@@ -958,6 +961,91 @@ mod tests {
             .ok_or("session cookie was empty")?
             .to_owned();
         Ok((router, cookie))
+    }
+
+    #[tokio::test]
+    async fn catalog_source_credentials_are_encrypted_and_never_returned()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let mut config = runtime_config(directory.path())?;
+        config.assistant_credential_key = Some(music_storage::SecretString::new(
+            URL_SAFE.encode([7_u8; 32]),
+        ));
+        let runtime = AppRuntime::start(config).await?;
+        let unauthorized = runtime
+            .router()?
+            .oneshot(
+                Request::put("/api/library/cleanup/sources/acoustid/credential")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"api_key":"not-authorized"}"#))?,
+            )
+            .await?;
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let (router, cookie) = operator_router(&runtime).await?;
+        let api_key = ["catalog", "test", "secret", "1234"].join("-");
+
+        let save = router
+            .clone()
+            .oneshot(
+                Request::put("/api/library/cleanup/sources/acoustid/credential")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(json!({ "api_key": api_key }).to_string()))?,
+            )
+            .await?;
+        assert_eq!(save.status(), StatusCode::OK);
+        let save_body = to_bytes(save.into_body(), 1024 * 1024).await?;
+        let save_text = String::from_utf8(save_body.to_vec())?;
+        assert!(!save_text.contains(&api_key));
+        let saved: Value = serde_json::from_str(&save_text)?;
+        assert_eq!(saved["credential_saved"], true);
+        assert_eq!(saved["credential_source"], "saved");
+        assert_eq!(saved["key_hint"], "••••1234");
+
+        let encrypted = runtime
+            .storage
+            .cleanup_source_credential("acoustid")
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))?
+            .ok_or("saved catalog credential was missing")?;
+        assert_ne!(encrypted.ciphertext, api_key);
+        assert!(!encrypted.ciphertext.contains(&api_key));
+
+        let sources = router
+            .clone()
+            .oneshot(
+                Request::get("/api/library/cleanup/sources")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let sources_text =
+            String::from_utf8(to_bytes(sources.into_body(), 1024 * 1024).await?.to_vec())?;
+        assert!(!sources_text.contains(&api_key));
+
+        let delete = router
+            .oneshot(
+                Request::delete("/api/library/cleanup/sources/acoustid/credential")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(delete.status(), StatusCode::OK);
+        let deleted: Value =
+            serde_json::from_slice(&to_bytes(delete.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(deleted["credential_saved"], false);
+        assert_eq!(deleted["credential_source"], Value::Null);
+        assert!(
+            runtime
+                .storage
+                .cleanup_source_credential("acoustid")
+                .await
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+                .is_none()
+        );
+
+        runtime.shutdown().await?;
+        Ok(())
     }
 
     fn reference_wav() -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {

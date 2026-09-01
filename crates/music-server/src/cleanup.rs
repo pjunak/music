@@ -60,6 +60,7 @@ pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(start_enrichment))
         .routes(routes!(list_sources))
         .routes(routes!(update_source))
+        .routes(routes!(save_source_credential, delete_source_credential))
         .routes(routes!(apply_cleanup))
         .routes(routes!(list_batches))
         .routes(routes!(get_batch))
@@ -166,6 +167,14 @@ struct CleanupSourceUpdateRequest {
     enabled: bool,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = CleanupSourceCredentialUpdate)]
+struct CleanupSourceCredentialUpdateRequest {
+    #[schema(min_length = 1, max_length = 4096, format = Password, write_only)]
+    api_key: String,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[schema(as = CleanupSourceOut)]
 struct CleanupSourceResponse {
@@ -176,6 +185,11 @@ struct CleanupSourceResponse {
     capabilities: Vec<String>,
     #[schema(required = true, schema_with = openapi_nullable_string)]
     credential_kind: Option<String>,
+    credential_saved: bool,
+    #[schema(required = true, schema_with = openapi_nullable_string)]
+    credential_source: Option<String>,
+    #[schema(required = true, schema_with = openapi_nullable_string)]
+    key_hint: Option<String>,
     configured: bool,
     available: bool,
     #[schema(required = true, schema_with = openapi_nullable_string)]
@@ -193,6 +207,9 @@ impl From<CleanupSource> for CleanupSourceResponse {
             enabled: source.enabled,
             capabilities: source.capabilities,
             credential_kind: source.credential_kind,
+            credential_saved: source.credential_saved,
+            credential_source: source.credential_source,
+            key_hint: source.key_hint,
             configured: source.configured,
             available: source.available,
             configuration_hint: source.configuration_hint,
@@ -711,6 +728,63 @@ async fn update_source(
 }
 
 #[utoipa::path(
+    put,
+    path = "/library/cleanup/sources/{source_id}/credential",
+    operation_id = "save_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_put",
+    params(("source_id" = String, Path, description = "Cleanup source id")),
+    request_body = CleanupSourceCredentialUpdateRequest,
+    responses(
+        (status = 200, description = "Credential saved", body = CleanupSourceResponse),
+        (status = 404, description = "Source not found"),
+        (status = 409, description = "Encrypted storage unavailable"),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn save_source_credential(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    source_id: Result<Path<String>, PathRejection>,
+    payload: Result<Json<CleanupSourceCredentialUpdateRequest>, JsonRejection>,
+) -> Result<Json<CleanupSourceResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(source_id) = source_id.map_err(|_| ApiError::validation())?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let source = crate::library::library(&state)?
+        .cleanup_sources
+        .save_credential(&source_id, &payload.api_key)
+        .await
+        .map_err(map_cleanup_source_error)?;
+    Ok(Json(source.into()))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/library/cleanup/sources/{source_id}/credential",
+    operation_id = "delete_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_delete",
+    params(("source_id" = String, Path, description = "Cleanup source id")),
+    responses(
+        (status = 200, description = "Saved credential removed", body = CleanupSourceResponse),
+        (status = 404, description = "Source not found")
+    ),
+    tag = "library-cleanup"
+)]
+async fn delete_source_credential(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    source_id: Result<Path<String>, PathRejection>,
+) -> Result<Json<CleanupSourceResponse>, ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Path(source_id) = source_id.map_err(|_| ApiError::validation())?;
+    let source = crate::library::library(&state)?
+        .cleanup_sources
+        .delete_credential(&source_id)
+        .await
+        .map_err(map_cleanup_source_error)?;
+    Ok(Json(source.into()))
+}
+
+#[utoipa::path(
     post,
     path = "/library/cleanup/verify",
     operation_id = "verify_names_api_library_cleanup_verify_post",
@@ -971,6 +1045,12 @@ fn map_cleanup_verification_error(error: CleanupVerificationError) -> ApiError {
 fn map_cleanup_source_error(error: CleanupSourceError) -> ApiError {
     match error {
         CleanupSourceError::UnknownSource => ApiError::plain_not_found("cleanup source not found"),
+        CleanupSourceError::InvalidCredential => ApiError::validation(),
+        CleanupSourceError::CredentialStorage => ApiError::coded(
+            StatusCode::CONFLICT,
+            "credential_storage_unavailable",
+            "Encrypted credential storage is unavailable.",
+        ),
         CleanupSourceError::Dependency => {
             tracing::error!(error = %error, "cleanup source settings failed");
             ApiError::internal()

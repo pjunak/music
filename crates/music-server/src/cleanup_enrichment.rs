@@ -112,6 +112,14 @@ pub(crate) struct CleanupEnrichmentServices {
     pub(crate) musicbrainz: Arc<MusicBrainzNameLookup>,
 }
 
+#[derive(Clone, Copy)]
+struct CatalogAccess<'a> {
+    acoustid_enabled: bool,
+    acoustid_api_key: Option<&'a str>,
+    lastfm_enabled: bool,
+    lastfm_api_key: Option<&'a str>,
+}
+
 impl CleanupEnrichmentJobHandler {
     pub(crate) fn new(
         services: CleanupEnrichmentServices,
@@ -171,6 +179,52 @@ impl CleanupEnrichmentJobHandler {
             source(ACOUSTID_SOURCE_ID).is_some_and(|source| source.enabled && source.available);
         let lastfm_enabled =
             source(LASTFM_SOURCE_ID).is_some_and(|source| source.enabled && source.available);
+        let acoustid_saved = if acoustid_enabled {
+            self.sources
+                .saved_credential(ACOUSTID_SOURCE_ID)
+                .await
+                .map_err(|_| JobHandlerError::new("AcoustID credential is unavailable"))?
+        } else {
+            None
+        };
+        let lastfm_saved = if lastfm_enabled {
+            self.sources
+                .saved_credential(LASTFM_SOURCE_ID)
+                .await
+                .map_err(|_| JobHandlerError::new("Last.fm credential is unavailable"))?
+        } else {
+            None
+        };
+        let acoustid_api_key = acoustid_saved
+            .as_ref()
+            .map(|secret| secret.expose_secret())
+            .or_else(|| {
+                self.config
+                    .acoustid_api_key
+                    .as_ref()
+                    .map(SecretString::expose_secret)
+            });
+        let lastfm_api_key = lastfm_saved
+            .as_ref()
+            .map(|secret| secret.expose_secret())
+            .or_else(|| {
+                self.config
+                    .lastfm_api_key
+                    .as_ref()
+                    .map(SecretString::expose_secret)
+            });
+        if acoustid_enabled && acoustid_api_key.is_none() {
+            return Err(JobHandlerError::new("AcoustID credential is unavailable"));
+        }
+        if lastfm_enabled && lastfm_api_key.is_none() {
+            return Err(JobHandlerError::new("Last.fm credential is unavailable"));
+        }
+        let catalog = CatalogAccess {
+            acoustid_enabled,
+            acoustid_api_key,
+            lastfm_enabled,
+            lastfm_api_key,
+        };
         let active_sources = active_source_ids(acoustid_enabled, lastfm_enabled);
         let vocabulary = if lastfm_enabled {
             Some(
@@ -223,13 +277,7 @@ impl CleanupEnrichmentJobHandler {
                 result
             } else {
                 match self
-                    .enrich_track(
-                        track,
-                        acoustid_enabled,
-                        lastfm_enabled,
-                        vocabulary.as_ref(),
-                        context.job_id(),
-                    )
+                    .enrich_track(track, catalog, vocabulary.as_ref(), context.job_id())
                     .await
                 {
                     Ok(result) => {
@@ -309,22 +357,36 @@ impl CleanupEnrichmentJobHandler {
     async fn enrich_track(
         &self,
         track: &IndexedTrack,
-        acoustid_enabled: bool,
-        lastfm_enabled: bool,
+        catalog: CatalogAccess<'_>,
         vocabulary: Option<&TagVocabularySnapshot>,
         job_id: &str,
     ) -> Result<Map<String, Value>, CatalogError> {
         let metadata_match = self.search_metadata(track).await?;
         let (recording_id, method, confidence) = if let Some(candidate) = metadata_match {
             (candidate.id, "metadata", candidate.local_score)
-        } else if acoustid_enabled {
-            let recording_id = self.fingerprint_identity(track).await?;
+        } else if catalog.acoustid_enabled {
+            let recording_id = self
+                .fingerprint_identity(
+                    track,
+                    catalog
+                        .acoustid_api_key
+                        .ok_or(CatalogError::AcoustIdUnavailable)?,
+                )
+                .await?;
             let Some((recording_id, score)) = recording_id else {
-                return Ok(unmatched_result(track, acoustid_enabled, lastfm_enabled));
+                return Ok(unmatched_result(
+                    track,
+                    catalog.acoustid_enabled,
+                    catalog.lastfm_enabled,
+                ));
             };
             (recording_id, "fingerprint", score)
         } else {
-            return Ok(unmatched_result(track, acoustid_enabled, lastfm_enabled));
+            return Ok(unmatched_result(
+                track,
+                catalog.acoustid_enabled,
+                catalog.lastfm_enabled,
+            ));
         };
 
         let recording = self.recording(&recording_id).await?;
@@ -356,9 +418,18 @@ impl CleanupEnrichmentJobHandler {
                     .to_owned(),
             );
         }
-        if lastfm_enabled && let Some(vocabulary) = vocabulary {
+        if catalog.lastfm_enabled
+            && let Some(vocabulary) = vocabulary
+        {
             match self
-                .lastfm_tags(&recording.artist, &recording.title, vocabulary)
+                .lastfm_tags(
+                    &recording.artist,
+                    &recording.title,
+                    vocabulary,
+                    catalog
+                        .lastfm_api_key
+                        .ok_or(CatalogError::LastFmUnavailable)?,
+                )
                 .await
             {
                 Ok(mut suggestions) => {
@@ -403,7 +474,7 @@ impl CleanupEnrichmentJobHandler {
         json!({
             "schema": CLEANUP_ENRICHMENT_SCHEMA,
             "partial": partial,
-            "sources": active_source_ids(acoustid_enabled, lastfm_enabled),
+            "sources": active_source_ids(catalog.acoustid_enabled, catalog.lastfm_enabled),
             "track_id": track.id.get(),
             "path": track.path.as_str(),
             "status": status,
@@ -502,12 +573,8 @@ impl CleanupEnrichmentJobHandler {
     async fn fingerprint_identity(
         &self,
         track: &IndexedTrack,
+        api_key: &str,
     ) -> Result<Option<(String, f64)>, CatalogError> {
-        let key = self
-            .config
-            .acoustid_api_key
-            .as_ref()
-            .ok_or(CatalogError::AcoustIdUnavailable)?;
         let absolute = self
             .library_root
             .resolve_existing(&track.path)
@@ -536,7 +603,7 @@ impl CleanupEnrichmentJobHandler {
             .http
             .post(ACOUSTID_ENDPOINT)
             .form(&[
-                ("client", key.expose_secret().to_owned()),
+                ("client", api_key.to_owned()),
                 ("duration", fingerprint.duration.round().to_string()),
                 ("fingerprint", fingerprint.fingerprint),
                 ("meta", "recordingids".to_owned()),
@@ -558,12 +625,8 @@ impl CleanupEnrichmentJobHandler {
         artist: &str,
         title: &str,
         vocabulary: &TagVocabularySnapshot,
+        api_key: &str,
     ) -> Result<Vec<Value>, CatalogError> {
-        let key = self
-            .config
-            .lastfm_api_key
-            .as_ref()
-            .ok_or(CatalogError::LastFmUnavailable)?;
         let response = self
             .http
             .post(LASTFM_ENDPOINT)
@@ -571,7 +634,7 @@ impl CleanupEnrichmentJobHandler {
                 ("method", "track.gettoptags"),
                 ("artist", artist),
                 ("track", title),
-                ("api_key", key.expose_secret()),
+                ("api_key", api_key),
                 ("autocorrect", "0"),
                 ("format", "json"),
             ])

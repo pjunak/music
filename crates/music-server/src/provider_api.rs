@@ -1439,7 +1439,7 @@ fn map_reset_error(error: CredentialStoreError) -> ApiError {
     };
     let code = stable_credential_code(error.code());
     let message = if error.code() == "model_job_active" {
-        "Cancel or wait for active model jobs before resetting AI storage."
+        "Cancel or wait for active model or catalog-enrichment jobs before resetting encrypted storage."
     } else {
         "This credential store cannot be reset safely from the browser."
     };

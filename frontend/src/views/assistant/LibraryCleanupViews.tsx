@@ -3,11 +3,14 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
 import { CleanupWorkflow } from "@/components/CleanupDialog";
+import { confirmDialog } from "@/components/confirmDialog";
 import type { CleanupSource } from "@/core/api";
 import { cleanupApi } from "@/core/api";
-import type { ModelRole } from "@/core/assistantProvidersApi";
+import type { ModelRole, ProviderFrameworkStatus } from "@/core/assistantProvidersApi";
 import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
+
+import { CredentialStorageCard } from "./CredentialStorageCard";
 
 interface CleanupRouteState {
   cleanupScope?: {
@@ -131,17 +134,27 @@ export function LibraryCleanupSourcesView() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [credentialStatus, setCredentialStatus] = useState<ProviderFrameworkStatus | null>(null);
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
+  const [storageInitializing, setStorageInitializing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let disposed = false;
     setLoading(true);
-    cleanupApi
-      .sources()
-      .then((nextSources) => {
+    Promise.all([
+      cleanupApi.sources(),
+      assistantProvidersApi.getStatus().catch(() => null),
+    ])
+      .then(([nextSources, nextCredentialStatus]) => {
         if (disposed) return;
         setSources(nextSources);
-        setLoadError(null);
+        setCredentialStatus(nextCredentialStatus);
+        setLoadError(
+          nextCredentialStatus === null
+            ? "Encrypted key-storage status is unavailable. Existing source switches still work."
+            : null,
+        );
       })
       .catch((error: unknown) => {
         if (!disposed) {
@@ -165,6 +178,71 @@ export function LibraryCleanupSourcesView() {
     } catch (error) {
       toast.error(
         "Source setting was not saved",
+        error instanceof Error ? error.message : undefined,
+      );
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function initializeCredentialStorage() {
+    setStorageInitializing(true);
+    try {
+      const status = await assistantProvidersApi.initializeCredentialStorage();
+      setCredentialStatus(status);
+      setRefreshKey((value) => value + 1);
+      toast.success("Encrypted storage initialized", "Catalog API keys can now be saved here.");
+    } catch (error) {
+      toast.error(
+        "Encrypted storage could not be initialized",
+        error instanceof Error ? error.message : undefined,
+      );
+    } finally {
+      setStorageInitializing(false);
+    }
+  }
+
+  async function saveCredential(source: CleanupSource) {
+    const apiKey = credentialValues[source.id]?.trim() ?? "";
+    if (!apiKey) return;
+    setSavingId(source.id);
+    try {
+      const updated = await cleanupApi.saveSourceCredential(source.id, apiKey);
+      setSources((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setCredentialValues((current) => ({ ...current, [source.id]: "" }));
+      toast.success(
+        `${updated.label} API key ${source.credential_saved ? "replaced" : "saved"}`,
+        "The key is encrypted on the server and will not be shown again.",
+      );
+    } catch (error) {
+      toast.error(
+        "API key was not saved",
+        error instanceof Error ? error.message : undefined,
+      );
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function deleteCredential(source: CleanupSource) {
+    const confirmed = await confirmDialog({
+      title: `Remove the saved ${source.label} key?`,
+      body:
+        source.credential_source === "saved" && source.configuration_hint?.includes("fallback")
+          ? "The encrypted key will be deleted. If a server-environment fallback exists, it becomes active again; otherwise this source will need setup."
+          : "The encrypted key will be deleted and this source will need setup before it can be used again.",
+      confirmLabel: "Remove API key",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+    setSavingId(source.id);
+    try {
+      const updated = await cleanupApi.deleteSourceCredential(source.id);
+      setSources((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(`${updated.label} saved API key removed`);
+    } catch (error) {
+      toast.error(
+        "API key was not removed",
         error instanceof Error ? error.message : undefined,
       );
     } finally {
@@ -204,10 +282,18 @@ export function LibraryCleanupSourcesView() {
         </div>
         <p className="muted small">
           Each source must define its fields, rate limits, attribution, and confidence mapping.
-          API-key readiness and secure server-configuration guidance appear here only when an
-          implemented connector requires them.
+          Keys saved here use the same encrypted server vault as model-provider credentials and
+          are never returned to the browser. Environment keys remain deployment-managed fallbacks.
         </p>
       </section>
+
+      {credentialStatus !== null ? (
+        <CredentialStorageCard
+          status={credentialStatus}
+          busy={storageInitializing}
+          onInitialize={initializeCredentialStorage}
+        />
+      ) : null}
 
       <div className="cleanup-source-list" aria-busy={loading}>
         {loading ? <p className="muted small">Loading source settings…</p> : null}
@@ -245,8 +331,10 @@ export function LibraryCleanupSourcesView() {
                 <dd>
                   {source.credential_kind === null
                     ? "No API key required"
-                    : source.configured
-                      ? `${source.credential_kind} configured`
+                    : source.credential_source === "saved"
+                      ? `${source.credential_kind} saved${source.key_hint ? ` · ${source.key_hint}` : ""}`
+                      : source.credential_source === "environment"
+                        ? `${source.credential_kind} from server environment`
                       : `${source.credential_kind} required`}
                   {source.configuration_hint !== null ? (
                     <small>{source.configuration_hint}</small>
@@ -258,6 +346,72 @@ export function LibraryCleanupSourcesView() {
                 <dd>Never direct; suggestions return to review</dd>
               </div>
             </dl>
+            {source.credential_kind !== null ? (
+              <form
+                className="cleanup-source-credential-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveCredential(source);
+                }}
+              >
+                <label className="field">
+                  <span className="field-label">
+                    {source.credential_saved ? `Replace ${source.label} API key` : `${source.label} API key`}
+                  </span>
+                  <input
+                    type="password"
+                    value={credentialValues[source.id] ?? ""}
+                    maxLength={4096}
+                    autoComplete="new-password"
+                    disabled={savingId !== null || credentialStatus?.credential_storage_ready !== true}
+                    placeholder={source.credential_saved ? "Enter replacement key" : "Enter API key"}
+                    onChange={(event) =>
+                      setCredentialValues((current) => ({
+                        ...current,
+                        [source.id]: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <div className="cleanup-source-credential-actions">
+                  <button
+                    className="btn-primary"
+                    type="submit"
+                    disabled={
+                      savingId !== null ||
+                      credentialStatus?.credential_storage_ready !== true ||
+                      !(credentialValues[source.id]?.trim() ?? "")
+                    }
+                  >
+                    {savingId === source.id
+                      ? "Saving…"
+                      : source.credential_saved
+                        ? "Replace saved key"
+                        : "Save API key"}
+                  </button>
+                  {source.credential_saved ? (
+                    <button
+                      className="btn-ghost"
+                      type="button"
+                      disabled={savingId !== null}
+                      onClick={() => void deleteCredential(source)}
+                    >
+                      Remove saved key
+                    </button>
+                  ) : null}
+                </div>
+                {credentialStatus?.credential_storage_ready !== true ? (
+                  <small className="field-hint">
+                    Prepare encrypted key storage above before saving this key.
+                  </small>
+                ) : (
+                  <small className="field-hint">
+                    Saving a new value replaces the encrypted key immediately. The existing value
+                    is never loaded into this field.
+                  </small>
+                )}
+              </form>
+            ) : null}
             {source.unavailable_reason !== null ? (
               <p className="cleanup-source-requirement muted small">
                 {source.unavailable_reason}

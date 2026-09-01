@@ -191,7 +191,7 @@ export function AssistantAiSetupView() {
       setStatus(nextStatus);
       toast.success(
         "Encrypted storage initialized",
-        "You can now save provider API keys.",
+        "You can now save model-provider and catalog API keys.",
       );
     } catch (error) {
       toast.error("Encrypted storage could not be initialized", errorMessage(error));
@@ -203,20 +203,20 @@ export function AssistantAiSetupView() {
 
   async function resetCredentialStorage() {
     const confirmed = await confirmDialog({
-      title: "Reset all AI secure storage?",
+      title: "Reset all encrypted key storage?",
       body:
-        "Every saved provider API key will be permanently deleted, all model verification and quality gates will reset, and the file-backed master key will be removed. Connection and task drafts will remain.",
+        "Every saved model-provider and catalog API key will be permanently deleted, all model verification and quality gates will reset, catalog evidence caches will clear, and the file-backed master key will be removed. Connection and task drafts will remain.",
       confirmLabel: "Continue to password",
       tone: "danger",
     });
     if (!confirmed) return;
     const currentPassword = await inputDialog({
-      title: "Confirm AI storage reset",
+      title: "Confirm encrypted storage reset",
       body:
         "Enter the password for your currently signed-in Music account. This password is checked by the server and is not stored.",
       label: "Current password",
       type: "password",
-      confirmLabel: "Delete all AI credentials",
+      confirmLabel: "Delete all saved API keys",
       trim: false,
     });
     if (currentPassword === null) return;
@@ -231,17 +231,17 @@ export function AssistantAiSetupView() {
       refreshQuality();
       if (result.master_key_removed) {
         toast.success(
-          "AI secure storage reset",
-          `${result.deleted_credentials} saved provider API key${result.deleted_credentials === 1 ? " was" : "s were"} deleted. Connection and task drafts were kept.`,
+          "Encrypted key storage reset",
+          `${result.deleted_credentials} saved API key${result.deleted_credentials === 1 ? " was" : "s were"} deleted. Connection and task drafts were kept.`,
         );
       } else {
         toast.error(
-          "Provider API keys deleted, but the master key remains",
+          "API keys deleted, but the master key remains",
           "No credential still depends on that key. Retry the reset; if it still fails, SSH is needed to repair or remove the fixed key file.",
         );
       }
     } catch (error) {
-      toast.error("AI secure storage could not be reset", errorMessage(error));
+      toast.error("Encrypted key storage could not be reset", errorMessage(error));
       refresh();
     } finally {
       setStorageResetting(false);

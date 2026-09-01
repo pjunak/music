@@ -144,9 +144,12 @@ the existing database-tag review transaction and do not alter audio files.
 
 `library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. Results are
 cached by exact track/source signature and enabled-source set; partial connector failures are not
-cached, so the unavailable source retries. API keys stay in server environment configuration
-(`CLEANUP_ACOUSTID_API_KEY`, `CLEANUP_LASTFM_API_KEY`); the browser receives only readiness and setup
-hints. Disabling Last.fm atomically clears its cached generated profiles and review decisions while
+cached, so the unavailable source retries. Authenticated operators can save, explicitly replace, or
+remove AcoustID and Last.fm keys under **Library cleanup → Sources**. They use dedicated records in
+the same AES-GCM vault as model-provider credentials; the browser receives only saved state, source,
+and a masked hint. A saved key takes precedence immediately, while `CLEANUP_ACOUSTID_API_KEY` and
+`CLEANUP_LASTFM_API_KEY` remain deployment-managed fallbacks. Credential replacement or removal
+invalidates affected enrichment evidence. Disabling Last.fm atomically clears its cached generated profiles and review decisions while
 leaving already accepted operator tags intact. Arbitrary URL scraping is not a supported source
 contract.
 

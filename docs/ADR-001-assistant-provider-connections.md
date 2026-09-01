@@ -20,6 +20,12 @@ hardened transport. Google Gemini is the first explicit provider profile; generi
 connections remain available for other compatible services. See
 [ADR-011](ADR-011-in-process-provider-adapter-handlers.md).
 
+**Implementation follow-up (2026-09-01):** The same credential vault now stores dedicated
+AcoustID and Last.fm cleanup-source records. Authenticated source settings support explicit save,
+replacement, and removal; API responses expose only status and a masked hint. Environment catalog
+keys remain server-managed fallbacks. Audit, backup pairing, offline rotation, and complete reset
+cover both model-provider and catalog credentials.
+
 ## Context
 
 The Assistant needs optional access to user-chosen model providers without

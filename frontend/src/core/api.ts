@@ -1292,6 +1292,9 @@ export interface CleanupSource {
   enabled: boolean;
   capabilities: string[];
   credential_kind: string | null;
+  credential_saved: boolean;
+  credential_source: "saved" | "environment" | null;
+  key_hint: string | null;
   configured: boolean;
   available: boolean;
   configuration_hint: string | null;
@@ -1347,6 +1350,15 @@ export const cleanupApi = {
     api.put<CleanupSource>(`/api/library/cleanup/sources/${encodeURIComponent(sourceId)}`, {
       enabled,
     }),
+  saveSourceCredential: (sourceId: string, apiKey: string) =>
+    api.put<CleanupSource>(
+      `/api/library/cleanup/sources/${encodeURIComponent(sourceId)}/credential`,
+      { api_key: apiKey },
+    ),
+  deleteSourceCredential: (sourceId: string) =>
+    api.delete<CleanupSource>(
+      `/api/library/cleanup/sources/${encodeURIComponent(sourceId)}/credential`,
+    ),
   enrich: (scope: CleanupScope, force = false) =>
     api.post<BackgroundJob>("/api/library/cleanup/enrichment-jobs", {
       scope,

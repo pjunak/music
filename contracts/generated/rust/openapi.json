@@ -1926,6 +1926,22 @@
         ],
         "type": "object"
       },
+      "CleanupSourceCredentialUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "format": "password",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "type": "object"
+      },
       "CleanupSourceOut": {
         "properties": {
           "available": {
@@ -1960,6 +1976,19 @@
               }
             ]
           },
+          "credential_saved": {
+            "type": "boolean"
+          },
+          "credential_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -1968,6 +1997,16 @@
           },
           "id": {
             "type": "string"
+          },
+          "key_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "label": {
             "type": "string"
@@ -1990,6 +2029,9 @@
           "enabled",
           "capabilities",
           "credential_kind",
+          "credential_saved",
+          "credential_source",
+          "key_hint",
           "configured",
           "available",
           "configuration_hint",
@@ -10486,6 +10528,95 @@
           }
         },
         "summary": "Update Cleanup Source",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/sources/{source_id}/credential": {
+      "delete": {
+        "operationId": "delete_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_delete",
+        "parameters": [
+          {
+            "description": "Cleanup source id",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupSourceOut"
+                }
+              }
+            },
+            "description": "Saved credential removed"
+          },
+          "404": {
+            "description": "Source not found"
+          }
+        },
+        "tags": [
+          "library-cleanup"
+        ]
+      },
+      "put": {
+        "operationId": "save_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_put",
+        "parameters": [
+          {
+            "description": "Cleanup source id",
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupSourceCredentialUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupSourceOut"
+                }
+              }
+            },
+            "description": "Credential saved"
+          },
+          "404": {
+            "description": "Source not found"
+          },
+          "409": {
+            "description": "Encrypted storage unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
         "tags": [
           "library-cleanup"
         ]

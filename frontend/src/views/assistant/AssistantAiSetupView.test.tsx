@@ -884,7 +884,7 @@ describe("AssistantAiSetupView", () => {
     expect(screen.getByLabelText("API key")).toBeInTheDocument();
     expect(toast.success).toHaveBeenCalledWith(
       "Encrypted storage initialized",
-      "You can now save provider API keys.",
+      "You can now save model-provider and catalog API keys.",
     );
   });
 
@@ -898,7 +898,7 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     expect(
-      await screen.findByRole("button", { name: "Reset AI secure storage" }),
+      await screen.findByRole("button", { name: "Reset encrypted key storage" }),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -907,7 +907,7 @@ describe("AssistantAiSetupView", () => {
 
     expect(screen.getByText("Server maintenance")).toBeInTheDocument();
     expect(
-      screen.getByText(/erases every saved provider key before it removes/i),
+      screen.getByText(/erases every saved API key before it removes/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/assistant-credentials rotate/),
@@ -955,21 +955,21 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Reset AI secure storage" }),
+      await screen.findByRole("button", { name: "Reset encrypted key storage" }),
     );
 
     expect(confirmDialog).toHaveBeenCalledWith({
-      title: "Reset all AI secure storage?",
+      title: "Reset all encrypted key storage?",
       body: expect.stringContaining("permanently deleted"),
       confirmLabel: "Continue to password",
       tone: "danger",
     });
     expect(inputDialog).toHaveBeenCalledWith({
-      title: "Confirm AI storage reset",
+      title: "Confirm encrypted storage reset",
       body: expect.stringContaining("not stored"),
       label: "Current password",
       type: "password",
-      confirmLabel: "Delete all AI credentials",
+      confirmLabel: "Delete all saved API keys",
       trim: false,
     });
     await waitFor(() =>
@@ -978,8 +978,8 @@ describe("AssistantAiSetupView", () => {
       ),
     );
     expect(toast.success).toHaveBeenCalledWith(
-      "AI secure storage reset",
-      "1 saved provider API key was deleted. Connection and task drafts were kept.",
+      "Encrypted key storage reset",
+      "1 saved API key was deleted. Connection and task drafts were kept.",
     );
     expect(
       await screen.findByRole("button", { name: "Initialize secure storage" }),
