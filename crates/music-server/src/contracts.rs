@@ -514,6 +514,7 @@ mod tests {
         assert!(paths.contains_key("/api/library/upload"));
         assert!(paths.contains_key("/api/library/upload/check"));
         assert!(paths.contains_key("/api/library/cleanup/analyze"));
+        assert!(paths.contains_key("/api/library/cleanup/enrichment-jobs"));
         assert!(paths.contains_key("/api/library/cleanup/verify"));
         assert!(paths.contains_key("/api/library/rescan"));
         assert!(paths.contains_key("/api/modes"));

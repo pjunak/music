@@ -1,10 +1,10 @@
 use music_application::assistant::{
     AnalysisFailureState, AnalysisFailureWrite, AnalysisState, AnalysisWrite, AssistantFuture,
-    ContextState, ContextWrite, LOCAL_AUDIO_ANALYZER_ID, LOCAL_CONTEXT_ANALYZER_ID,
-    LOCAL_CONTEXT_IMPLEMENTATION_ID, LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository,
-    MAX_MODEL_EVIDENCE_ITEMS, MAX_MODEL_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ModelAnalysisWrite,
-    audio_source_signature, context_source_signature, metadata_source_signature,
-    model_tag_source_signature, parse_context_state,
+    CATALOG_TAG_ANALYZER_ID, ContextState, ContextWrite, LOCAL_AUDIO_ANALYZER_ID,
+    LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LOCAL_METADATA_ANALYZER_ID,
+    LocalAnalysisRepository, MAX_MODEL_EVIDENCE_ITEMS, MAX_MODEL_TAGS_PER_TRACK,
+    MODEL_TAG_ANALYZER_ID, ModelAnalysisWrite, audio_source_signature, context_source_signature,
+    metadata_source_signature, model_tag_source_signature, parse_context_state,
 };
 use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
@@ -100,13 +100,29 @@ impl LocalAnalysisRepository for SqliteStorage {
         profiles: &'a [AnalysisWrite],
     ) -> AssistantFuture<'a, usize> {
         Box::pin(async move {
-            if analyzer_id != LOCAL_METADATA_ANALYZER_ID {
+            if !matches!(
+                analyzer_id,
+                LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID
+            ) {
                 return Err(box_storage(StorageError::InvalidAssistantRecord(
                     "metadata analyzer id is invalid",
                 )));
             }
             let _admission = self.write_gate.lock().await;
             let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            if analyzer_id == CATALOG_TAG_ANALYZER_ID {
+                let enabled = sqlx::query_scalar::<_, bool>(
+                    "SELECT enabled FROM cleanup_source_policies WHERE source_id = 'lastfm'",
+                )
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(box_storage)?
+                .unwrap_or(false);
+                if !enabled {
+                    transaction.commit().await.map_err(box_storage)?;
+                    return Ok(0);
+                }
+            }
             let mut stored = 0_usize;
             for profile in profiles {
                 if !valid_profile(profile) {
@@ -138,16 +154,20 @@ impl LocalAnalysisRepository for SqliteStorage {
                 let evidence = serde_json::to_string(&profile.evidence)
                     .map_err(StorageError::AssistantSerialization)
                     .map_err(box_storage)?;
+                let metrics = serde_json::to_string(&profile.metrics)
+                    .map_err(StorageError::AssistantSerialization)
+                    .map_err(box_storage)?;
                 sqlx::query(
                     "INSERT INTO track_analyses \
                      (track_id, analyzer_id, source_signature, job_id, energy, brightness, \
                       tension, moods_json, evidence_json, metrics_json, confidence, updated_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, CURRENT_TIMESTAMP) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
                      ON CONFLICT(track_id, analyzer_id) DO UPDATE SET \
                        source_signature = excluded.source_signature, job_id = excluded.job_id, \
                        energy = excluded.energy, brightness = excluded.brightness, \
                        tension = excluded.tension, moods_json = excluded.moods_json, \
-                       evidence_json = excluded.evidence_json, confidence = excluded.confidence, \
+                       evidence_json = excluded.evidence_json, metrics_json = excluded.metrics_json, \
+                       confidence = excluded.confidence, \
                        updated_at = CURRENT_TIMESTAMP",
                 )
                 .bind(profile.track_id.get())
@@ -159,6 +179,7 @@ impl LocalAnalysisRepository for SqliteStorage {
                 .bind(profile.tension)
                 .bind(moods)
                 .bind(evidence)
+                .bind(metrics)
                 .bind(profile.confidence.as_str())
                 .execute(&mut *transaction)
                 .await
@@ -738,12 +759,13 @@ mod tests {
     use std::error::Error;
 
     use music_application::assistant::{
-        AnalysisFailureWrite, AnalysisWrite, Confidence, ContextWrite, LOCAL_AUDIO_ANALYZER_ID,
-        LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LOCAL_METADATA_ANALYZER_ID,
-        LocalAnalysisRepository, MODEL_TAG_ANALYZER_ID, ModelAnalysisWrite, audio_source_signature,
-        context_source_signature, metadata_source_signature, model_tag_source_signature,
-        parse_context_state,
+        AnalysisFailureWrite, AnalysisWrite, CATALOG_TAG_ANALYZER_ID, Confidence, ContextWrite,
+        LOCAL_AUDIO_ANALYZER_ID, LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID,
+        LOCAL_METADATA_ANALYZER_ID, LocalAnalysisRepository, MODEL_TAG_ANALYZER_ID,
+        ModelAnalysisWrite, audio_source_signature, context_source_signature,
+        metadata_source_signature, model_tag_source_signature, parse_context_state,
     };
+    use music_application::cleanup_sources::CleanupSourceRepository;
     use music_application::library::LibraryRepository;
     use tempfile::TempDir;
 
@@ -811,6 +833,50 @@ mod tests {
             LocalAnalysisRepository::analysis_states(&storage, LOCAL_METADATA_ANALYZER_ID).await?;
         assert_eq!(states.len(), 1);
         assert_eq!(states[0].job_id, "job-b");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn catalog_tags_can_only_land_while_lastfm_is_enabled()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let (_directory, storage) = storage().await?;
+        let track = LibraryRepository::all_tracks(&storage).await?.remove(0);
+        let profile = write(&track)?;
+        assert_eq!(
+            LocalAnalysisRepository::store_metadata_analysis(
+                &storage,
+                CATALOG_TAG_ANALYZER_ID,
+                "catalog-job-disabled",
+                std::slice::from_ref(&profile),
+            )
+            .await?,
+            0
+        );
+
+        CleanupSourceRepository::set_cleanup_source_enabled(&storage, "lastfm", true).await?;
+        assert_eq!(
+            LocalAnalysisRepository::store_metadata_analysis(
+                &storage,
+                CATALOG_TAG_ANALYZER_ID,
+                "catalog-job-enabled",
+                &[profile],
+            )
+            .await?,
+            1
+        );
+        assert_eq!(
+            LocalAnalysisRepository::analysis_states(&storage, CATALOG_TAG_ANALYZER_ID)
+                .await?
+                .len(),
+            1
+        );
+
+        CleanupSourceRepository::set_cleanup_source_enabled(&storage, "lastfm", false).await?;
+        assert!(
+            LocalAnalysisRepository::analysis_states(&storage, CATALOG_TAG_ANALYZER_ID)
+                .await?
+                .is_empty()
+        );
         Ok(())
     }
 

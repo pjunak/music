@@ -133,9 +133,22 @@ The Library cleanup workspace preserves a separate local authority boundary. The
 produces filename, folder, and embedded-tag proposals; `cleanup_batches` journals only explicitly
 selected writes. **History & rollback** reads those server journals, downloads the complete JSON,
 and invokes the existing conflict-aware revert path. **Sources** exposes only implemented adapters.
-The current `musicbrainz` policy is stored in `cleanup_source_policies`; when disabled, analysis does
-not surface online lookups and the verification endpoint performs no network request. Arbitrary URL
-scraping is not a supported source contract.
+`musicbrainz`, `acoustid`, and `lastfm` policies are stored in `cleanup_source_policies`. MusicBrainz
+is the identity and canonical-metadata authority; exact local title/artist plus provider score,
+duration, album evidence, and a clear result margin are required. AcoustID is an opt-in identity
+fallback: `fpcalc` computes the fingerprint locally and only its fingerprint plus duration reaches
+the fixed AcoustID endpoint. Last.fm runs only after identity and maps top tags by exact controlled-
+vocabulary name or declared alias. Catalog metadata and mood tags are suggestions, never direct
+writes. Metadata returns through the normal cleanup diff/journal path; accepted community tags use
+the existing database-tag review transaction and do not alter audio files.
+
+`library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. Results are
+cached by exact track/source signature and enabled-source set; partial connector failures are not
+cached, so the unavailable source retries. API keys stay in server environment configuration
+(`CLEANUP_ACOUSTID_API_KEY`, `CLEANUP_LASTFM_API_KEY`); the browser receives only readiness and setup
+hints. Disabling Last.fm atomically clears its cached generated profiles and review decisions while
+leaving already accepted operator tags intact. Arbitrary URL scraping is not a supported source
+contract.
 
 ## Workflow traceability
 

@@ -19,9 +19,14 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   retryable reconciliation job refreshes it without blocking startup.
 - **Review-first library cleanup** — open **Assistant → Library cleanup** (or use the scoped
   Library toolbar shortcut) to repair filenames, folder names, and embedded metadata through one
-  proposal and per-change review. MusicBrainz name evidence can be enabled under Sources without
-  weakening the local rules. Every applied run keeps a server journal in **History & rollback**,
-  where it can be downloaded, conflict-safely reverted, or restored later from the JSON file.
+  proposal and per-change review. Enabled Sources can identify a recording through a conservative
+  MusicBrainz metadata match, optionally fall back to a local Chromaprint/AcoustID fingerprint, and
+  retrieve Last.fm community tags only after identity is established. Canonical metadata repairs and
+  controlled-vocabulary mood-tag suggestions start unticked; ambiguous matches propose nothing.
+  Every applied filename, folder, and embedded-tag run keeps a server journal in **History &
+  rollback**, where it can be downloaded, conflict-safely reverted, or restored later from the JSON
+  file. Accepted community tags remain database-only operator tags and use the Mood Library's review
+  boundary rather than the file rollback journal.
 - **Server-as-reducer playback** — the server holds the canonical `PlayerState`, owns the
   playback clock (`position_ms` is live in every push), and advances the queue itself at end of
   track; clients follow state and seek only when `position_epoch` changes. Repeat, shuffle,
@@ -152,7 +157,8 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   instead of repeating their audio analysis. The Track Context tab mirrors the library folders,
   supports playback, and shows the full
   stored context for a selected song. The production image includes FFmpeg for the indexed MP3,
-  FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats; development without FFmpeg has a PCM-WAV fallback.
+  FLAC, OGG/Opus, M4A/AAC, WAV, and WMA formats plus Chromaprint's `fpcalc` for optional AcoustID
+  fallback; development without FFmpeg has a PCM-WAV analysis fallback.
   An opt-in, checksum-pinned MusiCNN model running through tract can add a normalized voice score
   and vocal-window coverage. It is never downloaded or enabled automatically because the model has
   separate non-commercial/share-alike license obligations; see
@@ -205,7 +211,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
 ## Quick start (Docker)
 
 The canonical `Dockerfile` builds the React SPA and Rust server/CLI, then copies only those
-binaries, the SPA, CA certificates, FFmpeg, and mode seeds into a non-root Debian runtime. It
+binaries, the SPA, CA certificates, FFmpeg, Chromaprint tools, and mode seeds into a non-root Debian runtime. It
 contains no Python runtime. Application data lives
 under `/data`; the optional Assistant credential master key uses a separate secrets mount so it is
 not mixed into the database/media backup. The runtime user can write only the data mount; application
@@ -264,6 +270,9 @@ DB-backed tokens, nothing is signed.)
 | `ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT` | | — | Optional non-secret host path shown in model settings' copyable mount/setup guide |
 | `ASSISTANT_VOICE_MODEL_PATH` | Only for opt-in local voice analysis | — | Read-only path to the exact checksum-pinned Essentia voice/instrumental model |
 | `ASSISTANT_LIBRARY_CONTEXT_WORKERS` | | `1` | Bounded first-pass analysis workers (`1`–`4`); voice inference remains capacity one |
+| `CLEANUP_ACOUSTID_API_KEY` | Only for opt-in fingerprint lookup | — | AcoustID application client key; the public service is non-commercial and rate-limited |
+| `CLEANUP_LASTFM_API_KEY` | Only for opt-in community tags | — | Last.fm API key used for exact canonical artist/title top-tag lookup |
+| `CLEANUP_FPCALC_PATH` | | `fpcalc` | Chromaprint executable used locally by the AcoustID fallback |
 | `MAX_UPLOAD_FILES` / `MAX_UPLOAD_FILE_BYTES` | | `500` / `1 GiB` | Per-request upload guard rails |
 | `LOG_LEVEL` | | `info` | Log verbosity |
 

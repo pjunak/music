@@ -554,6 +554,13 @@ commit for that item, while any ambiguous post-replacement failure stops the bat
   bodies, and may write only successful score verdicts to the dedicated cache. Lookup failures are
   not cached, so a later explicit attempt can retry them
   ([MusicBrainz rate-limit policy](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)).
+  A separate restartable `library.cleanup-enrichment` job extends that review with recording-level
+  catalog evidence for at most 500 tracks. MusicBrainz metadata search requires exact normalized
+  title and artist plus score, margin, album, and duration checks. If configured and enabled,
+  Chromaprint's rooted `fpcalc` process supplies an AcoustID fallback; a result with multiple
+  recording IDs is rejected as ambiguous. Last.fm is queried only with the canonical artist/title,
+  and only exact controlled-vocabulary names or declared aliases become reviewable database-tag
+  suggestions. Track/source signatures make complete results reusable; partial failures retry.
   Accepted cleanup operations return to `LibraryCoordinator`, so cleanup never becomes a second
   file/catalog writer. Each accepted item has a `cleanup` recovery journal before its rooted file
   effect; the refreshed catalog row or folder paths, compatible `cleanup_batches` append, and

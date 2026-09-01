@@ -32,6 +32,9 @@ const ENVIRONMENT_NAMES: &[&str] = &[
     "ASSISTANT_CREDENTIAL_HOST_DIRECTORY_HINT",
     "ASSISTANT_VOICE_MODEL_PATH",
     "ASSISTANT_LIBRARY_CONTEXT_WORKERS",
+    "CLEANUP_ACOUSTID_API_KEY",
+    "CLEANUP_LASTFM_API_KEY",
+    "CLEANUP_FPCALC_PATH",
     "MAX_UPLOAD_FILES",
     "MAX_UPLOAD_FILE_BYTES",
     "LOG_LEVEL",
@@ -79,6 +82,9 @@ pub struct AppConfig {
     pub assistant_credential_host_directory_hint: Option<String>,
     pub assistant_voice_model_path: Option<PathBuf>,
     pub assistant_library_context_workers: u8,
+    pub cleanup_acoustid_api_key: Option<SecretString>,
+    pub cleanup_lastfm_api_key: Option<SecretString>,
+    pub cleanup_fpcalc_path: PathBuf,
     pub max_upload_files: usize,
     pub max_upload_file_bytes: u64,
     pub request_body_limit_bytes: usize,
@@ -205,6 +211,11 @@ impl AppConfig {
             ),
             assistant_voice_model_path: optional_path(values, "ASSISTANT_VOICE_MODEL_PATH"),
             assistant_library_context_workers: workers,
+            cleanup_acoustid_api_key: optional_text(values, "CLEANUP_ACOUSTID_API_KEY")
+                .map(SecretString::new),
+            cleanup_lastfm_api_key: optional_text(values, "CLEANUP_LASTFM_API_KEY")
+                .map(SecretString::new),
+            cleanup_fpcalc_path: required_path(values, "CLEANUP_FPCALC_PATH", "fpcalc")?,
             max_upload_files,
             max_upload_file_bytes,
             request_body_limit_bytes,
@@ -535,6 +546,9 @@ mod tests {
         assert_eq!(config.session_cookie_name, "music_session");
         assert_eq!(config.session_ttl_days, 30);
         assert_eq!(config.assistant_library_context_workers, 1);
+        assert!(config.cleanup_acoustid_api_key.is_none());
+        assert!(config.cleanup_lastfm_api_key.is_none());
+        assert_eq!(config.cleanup_fpcalc_path, std::path::Path::new("fpcalc"));
         assert_eq!(config.max_upload_files, 500);
         assert_eq!(config.max_upload_file_bytes, 1024_u64.pow(3));
         assert_eq!(config.log_level, LogLevel::Info);
@@ -564,6 +578,15 @@ mod tests {
                 "definitely-secret".to_owned(),
             ),
             (
+                "CLEANUP_ACOUSTID_API_KEY".to_owned(),
+                "acoustid-secret".to_owned(),
+            ),
+            (
+                "CLEANUP_LASTFM_API_KEY".to_owned(),
+                "lastfm-secret".to_owned(),
+            ),
+            ("CLEANUP_FPCALC_PATH".to_owned(), "/tools/fpcalc".to_owned()),
+            (
                 "ASSISTANT_LIBRARY_CONTEXT_WORKERS".to_owned(),
                 "4".to_owned(),
             ),
@@ -585,6 +608,12 @@ mod tests {
         let debug = format!("{config:?}");
         assert!(debug.contains("[REDACTED]"));
         assert!(!debug.contains("definitely-secret"));
+        assert!(!debug.contains("acoustid-secret"));
+        assert!(!debug.contains("lastfm-secret"));
+        assert_eq!(
+            config.cleanup_fpcalc_path,
+            std::path::Path::new("/tools/fpcalc")
+        );
         Ok(())
     }
 

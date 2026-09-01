@@ -13,6 +13,7 @@ mod analysis;
 mod assistant;
 mod auth;
 mod backup;
+mod cleanup_enrichment;
 mod cleanup_sources;
 mod crypto;
 mod devices;

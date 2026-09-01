@@ -1,11 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
 import { WarnIcon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
-import { cleanupApi } from "@/core/api";
+import { assistantApi, cleanupApi, jobsApi } from "@/core/api";
 import type {
+  BackgroundJob,
   CleanupAnalyzeResult,
+  CleanupCatalogTagSuggestion,
+  CleanupEnrichmentResult,
   CleanupFolderSuggestion,
   CleanupOp,
   CleanupOpIn,
@@ -20,15 +23,22 @@ import { toast } from "@/core/toast";
  *  One reusable flow, rendered by the Assistant workspace and retained as a
  *  modal-compatible wrapper: configure (scope + rules) → review
  *  (every proposed change as an old → new diff with its own checkbox;
- *  low-confidence guesses start unticked) → apply (chunked, real progress
- *  bar, every applied change journaled server-side) → done (counts, skips,
+ *  low-confidence guesses start unticked) → apply (chunked, real progress;
+ *  filesystem and embedded-metadata changes are journaled) → done (counts, skips,
  *  journal download). The shared History panel lists past runs with one-click
  *  revert plus revert-from-file for a downloaded journal. Nothing is written
  *  without an explicit Apply on the reviewed diff.
  */
 
 type ScopeType = "all" | "folder" | "tracks";
-type Step = "configure" | "checking" | "review" | "applying" | "done" | "history";
+type Step =
+  | "configure"
+  | "checking"
+  | "enriching"
+  | "review"
+  | "applying"
+  | "done"
+  | "history";
 
 interface RuleMeta {
   id: CleanupRuleId;
@@ -135,6 +145,46 @@ const APPLY_CHUNK = 20;
 // Names per /verify call — the server paces MusicBrainz at 1 req/s with
 // two queries per name, so 5 keeps each request ~10s.
 const VERIFY_CHUNK = 5;
+const REVIEW_CHUNK = 500;
+const CLEANUP_ENRICHMENT_JOB_KIND = "library.cleanup-enrichment";
+
+function enrichmentResult(job: BackgroundJob): CleanupEnrichmentResult | null {
+  const result = job.result;
+  if (
+    job.kind !== CLEANUP_ENRICHMENT_JOB_KIND ||
+    result?.schema !== "library-cleanup-enrichment/v1" ||
+    !Array.isArray(result.plans)
+  ) {
+    return null;
+  }
+  return result as unknown as CleanupEnrichmentResult;
+}
+
+function mergeEnrichment(
+  local: CleanupAnalyzeResult,
+  enrichment: CleanupEnrichmentResult,
+): CleanupAnalyzeResult {
+  const plans = new Map(local.plans.map((plan) => [plan.track_id, plan]));
+  for (const catalog of enrichment.plans) {
+    if (catalog.ops.length === 0) continue;
+    const current = plans.get(catalog.track_id);
+    const catalogFields = new Set(
+      catalog.ops.filter((operation) => operation.kind === "tag").map((operation) => operation.field),
+    );
+    plans.set(catalog.track_id, {
+      track_id: catalog.track_id,
+      path: catalog.path,
+      ops: [
+        ...(current?.ops.filter(
+          (operation) => operation.kind !== "tag" || !catalogFields.has(operation.field),
+        ) ?? []),
+        ...catalog.ops,
+      ],
+      notes: [...(current?.notes ?? []), ...catalog.notes],
+    });
+  }
+  return { ...local, plans: [...plans.values()] };
+}
 
 function opLabel(op: CleanupOp): string {
   if (op.kind === "rename") return "File";
@@ -143,6 +193,8 @@ function opLabel(op: CleanupOp): string {
       return "Title";
     case "artist":
       return "Artist";
+    case "album_artist":
+      return "Album artist";
     case "album":
       return "Album";
     case "track_no":
@@ -157,7 +209,17 @@ function opLabel(op: CleanupOp): string {
 }
 
 /** Stable display order for the by-field tick chips. */
-const LABEL_ORDER = ["Folder", "File", "Title", "Artist", "Album", "Track #", "Disc #", "Year"];
+const LABEL_ORDER = [
+  "Folder",
+  "File",
+  "Title",
+  "Artist",
+  "Album artist",
+  "Album",
+  "Track #",
+  "Disc #",
+  "Year",
+];
 
 function Value({ value }: { value: string | number | null }) {
   if (value === null || value === "") {
@@ -204,19 +266,34 @@ export function CleanupWorkflow({
   );
   const [recursive, setRecursive] = useState(true);
   const [rules, setRules] = useState<Set<CleanupRuleId>>(new Set(DEFAULT_RULES));
+  const [useCatalogs, setUseCatalogs] = useState(true);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CleanupAnalyzeResult | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [catalogTags, setCatalogTags] = useState<CleanupCatalogTagSuggestion[]>([]);
+  const [tickedCatalogTags, setTickedCatalogTags] = useState<Set<string>>(new Set());
+  const [enrichmentJob, setEnrichmentJob] = useState<BackgroundJob | null>(null);
+  const [enrichmentSummary, setEnrichmentSummary] = useState<CleanupEnrichmentResult | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [checkProgress, setCheckProgress] = useState({ done: 0, total: 0 });
   // Set by the Skip button (or closing the dialog) to stop further lookup
   // chunks; whatever resolved so far still feeds the re-analysis.
   const skipCheckRef = useRef(false);
+  const mountedRef = useRef(true);
   const [summary, setSummary] = useState<{
     applied: number;
     skipped: { track_id: number; reason: string }[];
     batchId: number | null;
+    acceptedTags: number;
+    tagFailures: number;
   } | null>(null);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
 
   const scope: CleanupScope =
     scopeType === "tracks"
@@ -242,6 +319,10 @@ export function CleanupWorkflow({
     for (const f of folderSuggestions) m.set(f.path, f);
     return m;
   }, [folderSuggestions]);
+  const catalogPlanByTrack = useMemo(
+    () => new Map(enrichmentSummary?.plans.map((plan) => [plan.track_id, plan]) ?? []),
+    [enrichmentSummary],
+  );
 
   // Every tickable change (track ops + folder renames) flattened to a common
   // {op_id, confidence, label} shape — drives the count, the All/Confident/
@@ -297,8 +378,11 @@ export function CleanupWorkflow({
     });
   }
 
-  function prepareReview(r: CleanupAnalyzeResult): boolean {
-    if (r.plans.length === 0 && r.folders.length === 0) {
+  function prepareReview(
+    r: CleanupAnalyzeResult,
+    tags: CleanupCatalogTagSuggestion[] = [],
+  ): boolean {
+    if (r.plans.length === 0 && r.folders.length === 0 && tags.length === 0) {
       toast.success(
         "Nothing to clean",
         `Scanned ${r.scanned} track${r.scanned === 1 ? "" : "s"} — no issues matched the enabled rules.`,
@@ -306,6 +390,8 @@ export function CleanupWorkflow({
       return false;
     }
     setResult(r);
+    setCatalogTags(tags);
+    setTickedCatalogTags(new Set());
     // High-confidence suggestions start ticked; guesses (including folder
     // rebuilds) start unticked so a quick "Apply" only commits the safe set.
     setTicked(
@@ -356,6 +442,8 @@ export function CleanupWorkflow({
 
   async function runAnalyze() {
     setBusy(true);
+    setEnrichmentJob(null);
+    setEnrichmentSummary(null);
     try {
       let r = await cleanupApi.analyze(scope, [...rules]);
       if (r.pending_lookups.length > 0) {
@@ -364,6 +452,41 @@ export function CleanupWorkflow({
         await checkNamesOnline(r.pending_lookups);
         r = await cleanupApi.analyze(scope, [...rules]);
       }
+      if (useCatalogs) {
+        try {
+          setStep("enriching");
+          let job = await cleanupApi.enrich(scope);
+          if (mountedRef.current) setEnrichmentJob(job);
+          while (["queued", "running", "cancel_requested"].includes(job.status)) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+            if (!mountedRef.current) return;
+            job = await jobsApi.get(job.id);
+            setEnrichmentJob(job);
+          }
+          if (job.status === "succeeded") {
+            const enrichment = enrichmentResult(job);
+            if (enrichment !== null) {
+              setEnrichmentSummary(enrichment);
+              const tags = enrichment.plans.flatMap((plan) => plan.tag_suggestions);
+              r = mergeEnrichment(r, enrichment);
+              if (!prepareReview(r, tags)) setStep("configure");
+              return;
+            }
+          }
+          toast.warn(
+            "Catalog enrichment did not finish",
+            job.error ?? "Continuing with local cleanup suggestions only.",
+          );
+        } catch (error) {
+          toast.warn(
+            "Catalog enrichment unavailable",
+            error instanceof Error
+              ? `${error.message} Local cleanup suggestions are still available.`
+              : "Continuing with local cleanup suggestions only.",
+          );
+        }
+      }
+      setEnrichmentSummary(null);
       if (!prepareReview(r)) setStep("configure");
     } catch (e) {
       toast.error("Analysis failed", e instanceof Error ? e.message : undefined);
@@ -371,6 +494,20 @@ export function CleanupWorkflow({
     } finally {
       setBusy(false);
     }
+  }
+
+  function catalogTagKey(suggestion: CleanupCatalogTagSuggestion): string {
+    return `${suggestion.track_id}:${suggestion.analyzer_id}:${suggestion.source_signature}:${suggestion.tag}`;
+  }
+
+  function toggleCatalogTag(suggestion: CleanupCatalogTagSuggestion) {
+    const key = catalogTagKey(suggestion);
+    setTickedCatalogTags((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   function toggleOp(opId: string) {
@@ -425,12 +562,44 @@ export function CleanupWorkflow({
         path: f.path,
       }));
     const ops = [...trackOps, ...folderOps];
-    if (ops.length === 0) return;
+    const tagTargets = catalogTags
+      .filter((suggestion) => tickedCatalogTags.has(catalogTagKey(suggestion)))
+      .map(({ track_id, tag, analyzer_id, source_signature }) => ({
+        track_id,
+        tag,
+        analyzer_id,
+        source_signature,
+      }));
+    if (ops.length === 0 && tagTargets.length === 0) return;
     setStep("applying");
-    setProgress({ done: 0, total: ops.length });
+    setProgress({ done: 0, total: ops.length + tagTargets.length });
     let batchId: number | null = null;
     let applied = 0;
+    let acceptedTags = 0;
+    let tagFailures = 0;
     const skipped: { track_id: number; reason: string }[] = [];
+    // Catalog review targets are bound to the metadata signature that produced
+    // them. Accept those explicit choices before an embedded-metadata repair
+    // changes that signature; accepted operator tags then remain durable.
+    for (let i = 0; i < tagTargets.length; i += REVIEW_CHUNK) {
+      const chunk = tagTargets.slice(i, i + REVIEW_CHUNK);
+      try {
+        const review = await assistantApi.reviewAnalysisTagsBulk(chunk, "accepted");
+        acceptedTags += review.applied.length;
+        tagFailures += review.failures.length;
+      } catch (error) {
+        tagFailures += chunk.length;
+        toast.error(
+          "Mood tag review stopped partway",
+          error instanceof Error ? error.message : undefined,
+        );
+        break;
+      }
+      setProgress({
+        done: Math.min(i + REVIEW_CHUNK, tagTargets.length),
+        total: ops.length + tagTargets.length,
+      });
+    }
     try {
       for (let i = 0; i < ops.length; i += APPLY_CHUNK) {
         const chunk = ops.slice(i, i + APPLY_CHUNK);
@@ -438,7 +607,10 @@ export function CleanupWorkflow({
         batchId = r.batch_id ?? batchId;
         applied += r.applied;
         skipped.push(...r.skipped);
-        setProgress({ done: Math.min(i + APPLY_CHUNK, ops.length), total: ops.length });
+        setProgress({
+          done: tagTargets.length + Math.min(i + APPLY_CHUNK, ops.length),
+          total: ops.length + tagTargets.length,
+        });
       }
     } catch (e) {
       toast.error(
@@ -448,9 +620,9 @@ export function CleanupWorkflow({
         }`,
       );
     }
-    setSummary({ applied, skipped, batchId });
+    setSummary({ applied, skipped, batchId, acceptedTags, tagFailures });
     setStep("done");
-    if (applied > 0) onApplied();
+    if (applied > 0 || acceptedTags > 0) onApplied();
   }
 
   async function downloadJournal(batchId: number) {
@@ -543,15 +715,36 @@ export function CleanupWorkflow({
           </div>
         </section>
       ))}
+      <section>
+        <h3 className="section-label">Catalog evidence</h3>
+        <label className="cleanup-choice cleanup-catalog-choice">
+          <input
+            type="checkbox"
+            checked={useCatalogs}
+            onChange={(event) => setUseCatalogs(event.target.checked)}
+          />
+          <span>
+            Identify tracks and retrieve canonical metadata
+            <span className="cleanup-hint muted">
+              Uses the enabled Sources connectors. Ambiguous matches make no proposal; catalog
+              repairs and community mood tags always start unticked. MusicBrainz receives title,
+              artist, album, and duration; AcoustID receives a local fingerprint and duration;
+              Last.fm receives the identified artist and title. Library paths and audio files are
+              never uploaded.
+            </span>
+          </span>
+        </label>
+      </section>
       <p className="muted small">
         Nothing is changed yet — the next step shows every proposed fix as a
-        diff for you to confirm, and anything applied is journaled and can be
-        reverted from History.
+        diff for you to confirm. File, folder, and embedded-tag changes are
+        journaled and can be reverted from History; accepted community mood
+        tags remain database-only operator tags.
       </p>
     </div>
   );
 
-  const tickedCount = ticked.size;
+  const tickedCount = ticked.size + tickedCatalogTags.size;
   const reviewBody = (
     <>
       <div className="cleanup-review-controls">
@@ -613,6 +806,17 @@ export function CleanupWorkflow({
               </button>
             );
           })}
+        </div>
+      ) : null}
+      {enrichmentSummary !== null ? (
+        <div className="cleanup-catalog-summary" role="status">
+          <strong>{enrichmentSummary.identified}</strong> identified
+          {enrichmentSummary.fingerprinted > 0
+            ? ` · ${enrichmentSummary.fingerprinted} needed fingerprinting`
+            : ""}
+          {enrichmentSummary.unmatched > 0 ? ` · ${enrichmentSummary.unmatched} unmatched` : ""}
+          {enrichmentSummary.failed > 0 ? ` · ${enrichmentSummary.failed} failed` : ""}
+          {enrichmentSummary.cached > 0 ? ` · ${enrichmentSummary.cached} reused from cache` : ""}
         </div>
       ) : null}
       <div className="cleanup-review">
@@ -698,6 +902,41 @@ export function CleanupWorkflow({
           </section>
           );
         })}
+        {catalogTags.length > 0 ? (
+          <section className="cleanup-catalog-tag-review">
+            <h3 className="section-label cleanup-folder">Database mood tag suggestions</h3>
+            <p className="muted small">
+              Last.fm terms are shown only when they exactly match a controlled vocabulary name or
+              declared alias. Accepted tags become database-only mood tags; they are not embedded in
+              the file and are not part of the file-cleanup rollback journal.
+            </p>
+            {catalogTags.map((suggestion) => {
+              const key = catalogTagKey(suggestion);
+              const plan = catalogPlanByTrack.get(suggestion.track_id);
+              return (
+                <label key={key} className="cleanup-op cleanup-catalog-tag-op">
+                  <input
+                    type="checkbox"
+                    checked={tickedCatalogTags.has(key)}
+                    onChange={() => toggleCatalogTag(suggestion)}
+                  />
+                  <span className="cleanup-op-kind">Mood</span>
+                  <span className="cleanup-diff">
+                    <strong>{suggestion.tag}</strong>
+                    <span className="muted">
+                      {plan?.identity === null || plan?.identity === undefined
+                        ? `track #${suggestion.track_id}`
+                        : `${plan.identity.artist} — ${plan.identity.title}`}
+                    </span>
+                    <span className="badge cleanup-conf">
+                      Last.fm {suggestion.count}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </section>
+        ) : null}
       </div>
     </>
   );
@@ -712,6 +951,26 @@ export function CleanupWorkflow({
         value={progress.total > 0 ? progress.done / progress.total : 0}
         max={1}
       />
+    </div>
+  );
+
+  const enrichingBody = (
+    <div className="cleanup-checking cleanup-enriching">
+      <div className="upload-progress cleanup-progress">
+        <div className="upload-progress-label">
+          {enrichmentJob?.progress_message || "Preparing catalog lookup…"}
+        </div>
+        <progress
+          aria-label="Catalog enrichment progress"
+          value={enrichmentJob?.progress_current ?? 0}
+          max={Math.max(enrichmentJob?.progress_total ?? 1, 1)}
+        />
+      </div>
+      <p className="muted small">
+        MusicBrainz searches are paced to one request per second. AcoustID fingerprints are created
+        locally and used only as a fallback. You may leave this screen; the durable job keeps its
+        progress and cached track results.
+      </p>
     </div>
   );
 
@@ -747,6 +1006,13 @@ export function CleanupWorkflow({
         ) : null}
         .
       </p>
+      {summary.acceptedTags > 0 || summary.tagFailures > 0 ? (
+        <p>
+          Accepted <strong>{summary.acceptedTags}</strong> database mood tag
+          {summary.acceptedTags === 1 ? "" : "s"}
+          {summary.tagFailures > 0 ? `; ${summary.tagFailures} could not be reviewed` : ""}.
+        </p>
+      ) : null}
       {summary.skipped.length > 0 ? (
         <ul className="cleanup-skips">
           {summary.skipped.slice(0, 6).map((s, i) => (
@@ -761,8 +1027,8 @@ export function CleanupWorkflow({
       ) : null}
       {summary.batchId !== null ? (
         <p className="muted small">
-          Everything applied is journaled as run #{summary.batchId} — download it
-          for safekeeping, or revert it later from History.
+          The filename, folder, and embedded-tag changes are journaled as run #{summary.batchId} —
+          download it for safekeeping, or revert it later from History.
         </p>
       ) : null}
     </div>
@@ -840,11 +1106,28 @@ export function CleanupWorkflow({
       >
         Skip — use local clues only
       </button>
+    ) : step === "enriching" ? (
+      <button
+        type="button"
+        className="btn-ghost"
+        disabled={
+          enrichmentJob === null ||
+          !["queued", "running", "cancel_requested"].includes(enrichmentJob.status)
+        }
+        onClick={() => {
+          if (enrichmentJob !== null) {
+            void jobsApi.cancel(enrichmentJob.id).then(setEnrichmentJob).catch(() => undefined);
+          }
+        }}
+      >
+        Cancel catalog lookup
+      </button>
     ) : undefined; // applying: no actions — let it finish
 
   const titles: Record<Step, string> = {
     configure: "Clean up library",
     checking: "Checking names online",
+    enriching: "Identifying and enriching tracks",
     review: `Review proposed changes — ${scopeLabel}`,
     applying: "Applying changes",
     done: "Cleanup applied",
@@ -863,6 +1146,8 @@ export function CleanupWorkflow({
       ? configureBody
       : step === "checking"
         ? checkingBody
+        : step === "enriching"
+          ? enrichingBody
         : step === "review"
           ? reviewBody
           : step === "applying"

@@ -1687,6 +1687,20 @@
         ],
         "type": "object"
       },
+      "CleanupEnrichmentRequest": {
+        "properties": {
+          "force": {
+            "type": "boolean"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/CleanupScope"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "type": "object"
+      },
       "CleanupFolderOut": {
         "properties": {
           "confidence": {
@@ -1914,11 +1928,27 @@
       },
       "CleanupSourceOut": {
         "properties": {
+          "available": {
+            "type": "boolean"
+          },
           "capabilities": {
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "configuration_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "configured": {
+            "type": "boolean"
           },
           "credential_kind": {
             "anyOf": [
@@ -1941,6 +1971,16 @@
           },
           "label": {
             "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1949,7 +1989,11 @@
           "description",
           "enabled",
           "capabilities",
-          "credential_kind"
+          "credential_kind",
+          "configured",
+          "available",
+          "configuration_hint",
+          "unavailable_reason"
         ],
         "type": "object"
       },
@@ -10281,6 +10325,46 @@
           }
         },
         "summary": "Revert Batch",
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/enrichment-jobs": {
+      "post": {
+        "operationId": "start_cleanup_enrichment_api_library_cleanup_enrichment_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupEnrichmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Cleanup enrichment job accepted"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
         "tags": [
           "library-cleanup"
         ]

@@ -60,6 +60,7 @@ FROM debian:trixie-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
+        libchromaprint-tools \
         && rm -rf /var/lib/apt/lists/* /usr/share/gcc/python /usr/share/gdb && \
     groupadd --system music && \
     useradd --system --gid music --uid 1000 --home-dir /app --shell /usr/sbin/nologin music

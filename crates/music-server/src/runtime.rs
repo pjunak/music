@@ -18,7 +18,9 @@ use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
     CleanupVerificationRepository, CleanupVerificationService,
 };
-use music_application::cleanup_sources::{CleanupSourceRepository, CleanupSourceService};
+use music_application::cleanup_sources::{
+    CleanupSourceRepository, CleanupSourceRuntime, CleanupSourceService,
+};
 use music_application::jobs::{
     JobCoordinatorError, JobHandler, JobRepository, JobService, SpawnedJobCoordinator,
     start_job_coordinator,
@@ -56,6 +58,9 @@ use crate::analysis::{AudioAnalysisJobHandler, ContextAnalysisJobHandler};
 use crate::auth::RuntimeAuth;
 use crate::blocking::BlockingMediaExecutor;
 use crate::cleanup::MusicBrainzNameLookup;
+use crate::cleanup_enrichment::{
+    CleanupConnectorConfig, CleanupEnrichmentJobHandler, CleanupEnrichmentServices,
+};
 use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
 use crate::error::RuntimeError;
@@ -270,13 +275,13 @@ impl AppRuntime {
         let cleanup_verification_repository: Arc<dyn CleanupVerificationRepository> =
             storage.clone();
         let cleanup_source_repository: Arc<dyn CleanupSourceRepository> = storage.clone();
-        let cleanup_lookup: Arc<dyn CleanupNameLookup> =
-            Arc::new(MusicBrainzNameLookup::new().map_err(|source| {
-                RuntimeError::io(
-                    "initialize the MusicBrainz HTTP client",
-                    io::Error::other(source),
-                )
-            })?);
+        let cleanup_lookup = Arc::new(MusicBrainzNameLookup::new().map_err(|source| {
+            RuntimeError::io(
+                "initialize the MusicBrainz HTTP client",
+                io::Error::other(source),
+            )
+        })?);
+        let cleanup_name_lookup: Arc<dyn CleanupNameLookup> = cleanup_lookup.clone();
         let catalog_sink: Arc<dyn LibraryCatalogSink> = Arc::new(playback.clone());
         let effects = Arc::new(FilesystemLibraryMutations::new(
             library_root.clone(),
@@ -290,9 +295,27 @@ impl AppRuntime {
         let cleanup_service = Arc::new(CleanupService::new(cleanup_repository));
         let cleanup_verification_service = Arc::new(CleanupVerificationService::new(
             cleanup_verification_repository,
-            cleanup_lookup,
+            cleanup_name_lookup,
         ));
-        let cleanup_source_service = Arc::new(CleanupSourceService::new(cleanup_source_repository));
+        let cleanup_connector_config = CleanupConnectorConfig::new(
+            config
+                .cleanup_acoustid_api_key
+                .as_ref()
+                .map(|secret| music_storage::SecretString::new(secret.expose_secret())),
+            config
+                .cleanup_lastfm_api_key
+                .as_ref()
+                .map(|secret| music_storage::SecretString::new(secret.expose_secret())),
+            config.cleanup_fpcalc_path.clone(),
+        );
+        let cleanup_source_service = Arc::new(CleanupSourceService::new(
+            cleanup_source_repository,
+            CleanupSourceRuntime {
+                acoustid_configured: cleanup_connector_config.acoustid_configured(),
+                fpcalc_available: cleanup_connector_config.fpcalc_available().await,
+                lastfm_configured: cleanup_connector_config.lastfm_configured(),
+            },
+        ));
         let playlist_repository: Arc<dyn PlaylistRepository> = storage.clone();
         let playlist_service = Arc::new(PlaylistService::new(playlist_repository));
         let job_repository: Arc<dyn JobRepository> = storage.clone();
@@ -308,6 +331,26 @@ impl AppRuntime {
         let context_analyzer: Arc<dyn AudioContextAnalyzer> =
             Arc::new(FfmpegContextAnalyzer::new(ffmpeg, ffprobe_executable()));
         let mut job_handlers: Vec<Arc<dyn JobHandler>> = vec![
+            Arc::new(
+                CleanupEnrichmentJobHandler::new(
+                    CleanupEnrichmentServices {
+                        cleanup: Arc::clone(&cleanup_service),
+                        cache: storage.clone(),
+                        analyses: Arc::clone(&local_analysis_repository),
+                        assistant: Arc::clone(&assistant),
+                        sources: Arc::clone(&cleanup_source_service),
+                        musicbrainz: cleanup_lookup,
+                    },
+                    library_root.clone(),
+                    cleanup_connector_config,
+                )
+                .map_err(|source| {
+                    RuntimeError::io(
+                        "initialize the cleanup connector HTTP client",
+                        io::Error::other(source),
+                    )
+                })?,
+            ),
             Arc::new(MetadataAnalysisJobHandler::new(Arc::clone(
                 &local_analysis_repository,
             ))),

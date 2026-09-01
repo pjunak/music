@@ -7,7 +7,7 @@ use std::time::Duration;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use futures_util::TryStreamExt;
 use music_application::auth::SessionTouch;
 use music_application::cleanup::{
@@ -18,6 +18,9 @@ use music_application::cleanup::{
     MAX_CLEANUP_APPLY_OPERATIONS, MAX_CLEANUP_REVERT_ITEMS, MAX_CLEANUP_SCOPE_LABEL_CHARS,
     MAX_CLEANUP_VERIFY_NAMES,
 };
+use music_application::cleanup_enrichment::{
+    CLEANUP_ENRICHMENT_JOB_KIND, MAX_CLEANUP_ENRICHMENT_TRACKS,
+};
 use music_application::cleanup_sources::{CleanupSource, CleanupSourceError};
 use music_application::library::LibraryCoordinatorError;
 use music_domain::{
@@ -25,7 +28,7 @@ use music_domain::{
     CleanupValue, DEFAULT_CLEANUP_RULES, LibraryPath, TrackId,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use utoipa::ToSchema;
@@ -41,6 +44,7 @@ use crate::error::{
     openapi_nullable_datetime, openapi_nullable_integer, openapi_nullable_string,
 };
 use crate::http::HttpState;
+use crate::jobs::{BackgroundJobResponse, job_response, map_job_error};
 
 const MAX_SCOPE_TRACKS: usize = 5_000;
 const MUSICBRAINZ_ROOT: &str = "https://musicbrainz.org/ws/2";
@@ -53,6 +57,7 @@ pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(analyze))
         .routes(routes!(verify_names))
+        .routes(routes!(start_enrichment))
         .routes(routes!(list_sources))
         .routes(routes!(update_source))
         .routes(routes!(apply_cleanup))
@@ -62,7 +67,7 @@ pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(revert_from_journal))
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum CleanupScopeKind {
     All,
@@ -106,7 +111,7 @@ impl From<CleanupRuleRequest> for CleanupRule {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 #[schema(as = CleanupScope)]
 struct CleanupScopeRequest {
     #[serde(rename = "type")]
@@ -130,6 +135,14 @@ struct AnalyzeRequest {
     /// Enabled rule ids; omit for the default set.
     #[schema(required = false, schema_with = nullable_cleanup_rules_schema)]
     rules: Option<Vec<CleanupRuleRequest>>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = CleanupEnrichmentRequest)]
+struct CleanupEnrichmentRequest {
+    scope: CleanupScopeRequest,
+    #[serde(default)]
+    force: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -163,6 +176,12 @@ struct CleanupSourceResponse {
     capabilities: Vec<String>,
     #[schema(required = true, schema_with = openapi_nullable_string)]
     credential_kind: Option<String>,
+    configured: bool,
+    available: bool,
+    #[schema(required = true, schema_with = openapi_nullable_string)]
+    configuration_hint: Option<String>,
+    #[schema(required = true, schema_with = openapi_nullable_string)]
+    unavailable_reason: Option<String>,
 }
 
 impl From<CleanupSource> for CleanupSourceResponse {
@@ -174,6 +193,10 @@ impl From<CleanupSource> for CleanupSourceResponse {
             enabled: source.enabled,
             capabilities: source.capabilities,
             credential_kind: source.credential_kind,
+            configured: source.configured,
+            available: source.available,
+            configuration_hint: source.configuration_hint,
+            unavailable_reason: source.unavailable_reason,
         }
     }
 }
@@ -553,7 +576,7 @@ async fn analyze(
 ) -> Result<Json<AnalyzeResponse>, ApiError> {
     crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.scope.track_ids.len() > MAX_SCOPE_TRACKS {
+    if payload.scope.track_ids.len() > MAX_CLEANUP_ENRICHMENT_TRACKS {
         return Err(ApiError::validation());
     }
     let scope = cleanup_scope(payload.scope)?;
@@ -575,6 +598,62 @@ async fn analyze(
         .await
         .map_err(map_cleanup_error)?;
     Ok(Json(analysis.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/cleanup/enrichment-jobs",
+    operation_id = "start_cleanup_enrichment_api_library_cleanup_enrichment_jobs_post",
+    request_body = CleanupEnrichmentRequest,
+    responses(
+        (status = 202, description = "Cleanup enrichment job accepted", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library-cleanup"
+)]
+async fn start_enrichment(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    payload: Result<Json<CleanupEnrichmentRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if payload.scope.track_ids.len() > MAX_SCOPE_TRACKS {
+        return Err(ApiError::validation());
+    }
+    let _ = cleanup_scope(CleanupScopeRequest {
+        kind: payload.scope.kind,
+        path: payload.scope.path.clone(),
+        recursive: payload.scope.recursive,
+        track_ids: payload.scope.track_ids.clone(),
+    })?;
+    let scope = enrichment_scope_payload(&payload.scope);
+    let job = state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?
+        .enqueue(
+            CLEANUP_ENRICHMENT_JOB_KIND,
+            json!({"scope": scope, "force": payload.force}),
+        )
+        .await
+        .map_err(map_job_error)?;
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+fn enrichment_scope_payload(scope: &CleanupScopeRequest) -> Value {
+    match scope.kind {
+        CleanupScopeKind::All => json!({"type": "all"}),
+        CleanupScopeKind::Folder => json!({
+            "type": "folder",
+            "path": scope.path,
+            "recursive": scope.recursive,
+        }),
+        CleanupScopeKind::Tracks => json!({
+            "type": "tracks",
+            "track_ids": scope.track_ids,
+        }),
+    }
 }
 
 #[utoipa::path(
@@ -1109,6 +1188,25 @@ impl MusicBrainzNameLookup {
         query: &str,
         list_key: &'static str,
     ) -> Result<i32, MusicBrainzLookupError> {
+        let payload = self
+            .fetch_json(
+                resource,
+                &[
+                    ("query", query.to_owned()),
+                    ("fmt", "json".to_owned()),
+                    ("limit", "1".to_owned()),
+                ],
+            )
+            .await?;
+        let body = serde_json::to_vec(&payload).map_err(MusicBrainzLookupError::Json)?;
+        parse_top_score(&body, list_key)
+    }
+
+    pub(crate) async fn fetch_json(
+        &self,
+        resource: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value, MusicBrainzLookupError> {
         let endpoint = format!("{}/{resource}", self.base_url.trim_end_matches('/'));
         // Hold admission through receipt of the response headers and start the
         // next interval there. This is deliberately more conservative than
@@ -1121,12 +1219,7 @@ impl MusicBrainzNameLookup {
                 tokio::time::sleep_until(next_request_at).await;
             }
         }
-        let response = self
-            .client
-            .get(endpoint)
-            .query(&[("query", query), ("fmt", "json"), ("limit", "1")])
-            .send()
-            .await;
+        let response = self.client.get(endpoint).query(query).send().await;
         *last_request_at = Some(Instant::now());
         drop(last_request_at);
         let response = response
@@ -1155,7 +1248,7 @@ impl MusicBrainzNameLookup {
             }
             body.extend_from_slice(&chunk);
         }
-        parse_top_score(&body, list_key)
+        serde_json::from_slice(&body).map_err(MusicBrainzLookupError::Json)
     }
 }
 
@@ -1207,7 +1300,7 @@ fn parse_top_score(body: &[u8], list_key: &'static str) -> Result<i32, MusicBrai
 }
 
 #[derive(Debug)]
-enum MusicBrainzLookupError {
+pub(crate) enum MusicBrainzLookupError {
     Http(reqwest::Error),
     Json(serde_json::Error),
     InvalidScore(CleanupNameScoreError),
@@ -1262,7 +1355,34 @@ mod tests {
     use tokio::sync::Mutex;
     use tokio::time::Instant;
 
-    use super::{MUSICBRAINZ_USER_AGENT, MusicBrainzNameLookup, lucene_quote, parse_top_score};
+    use super::{
+        CleanupScopeKind, CleanupScopeRequest, MUSICBRAINZ_USER_AGENT, MusicBrainzNameLookup,
+        enrichment_scope_payload, lucene_quote, parse_top_score,
+    };
+
+    #[test]
+    fn enrichment_job_scope_omits_fields_for_other_scope_variants() {
+        let folder = CleanupScopeRequest {
+            kind: CleanupScopeKind::Folder,
+            path: "Album".to_owned(),
+            recursive: false,
+            track_ids: vec![7],
+        };
+        assert_eq!(
+            enrichment_scope_payload(&folder),
+            json!({"type":"folder", "path":"Album", "recursive":false})
+        );
+        let tracks = CleanupScopeRequest {
+            kind: CleanupScopeKind::Tracks,
+            path: "ignored".to_owned(),
+            recursive: true,
+            track_ids: vec![7],
+        };
+        assert_eq!(
+            enrichment_scope_payload(&tracks),
+            json!({"type":"tracks", "track_ids":[7]})
+        );
+    }
 
     #[derive(Debug, Clone)]
     struct ObservedRequest {

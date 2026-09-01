@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use music_application::assistant::{
     AnalysisReviewBatch, AnalysisReviewDecision, AnalysisReviewFailure, AnalysisReviewFailureCode,
     AnalysisReviewOutcome, AnalysisReviewTarget, AssistantFuture, AssistantRepository,
-    AssistantTrackEvidence, BulkTagFailure, BulkTagOutcome, CleanupApplyOutcome, CleanupMutation,
-    CleanupSelection, LOCAL_METADATA_ANALYZER_ID, MAX_TAGS_PER_TRACK, RenameTagOutcome,
-    StoredAnalysis, StoredAnalysisReview, TagUsage, TagVocabularyDocument, TagVocabularyRecord,
-    TagVocabularySnapshot, build_cleanup_preview, catalog_signature, metadata_source_signature,
-    vocabulary_fingerprint,
+    AssistantTrackEvidence, BulkTagFailure, BulkTagOutcome, CATALOG_TAG_ANALYZER_ID,
+    CleanupApplyOutcome, CleanupMutation, CleanupSelection, LOCAL_METADATA_ANALYZER_ID,
+    MAX_TAGS_PER_TRACK, RenameTagOutcome, StoredAnalysis, StoredAnalysisReview, TagUsage,
+    TagVocabularyDocument, TagVocabularyRecord, TagVocabularySnapshot, build_cleanup_preview,
+    catalog_signature, metadata_source_signature, vocabulary_fingerprint,
 };
 use music_domain::TrackId;
 use serde_json::{Map, Value};
@@ -437,7 +437,10 @@ impl AssistantRepository for SqliteStorage {
                     ));
                     continue;
                 };
-                if target.analyzer_id != LOCAL_METADATA_ANALYZER_ID {
+                if !matches!(
+                    target.analyzer_id.as_str(),
+                    LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID
+                ) {
                     failures.push(review_failure(
                         target,
                         AnalysisReviewFailureCode::NotFound,

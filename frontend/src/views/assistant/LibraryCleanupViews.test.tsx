@@ -52,6 +52,10 @@ const musicBrainzSource: CleanupSource = {
   enabled: true,
   capabilities: ["artist_name_verification", "album_name_verification"],
   credential_kind: null,
+  configured: true,
+  available: true,
+  configuration_hint: null,
+  unavailable_reason: null,
 };
 
 const cleanupRole: ModelRole = {

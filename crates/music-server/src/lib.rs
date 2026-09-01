@@ -17,6 +17,7 @@ mod auth;
 mod authoring;
 mod blocking;
 mod cleanup;
+mod cleanup_enrichment;
 mod config;
 mod contracts;
 mod devices;

@@ -633,30 +633,7 @@ impl CleanupService {
                 .map_err(|source| dependency("load the cleanup library catalog", source))?;
             (tracks, None)
         };
-        let scope_tracks = match scope {
-            CleanupScope::All => all_tracks.clone(),
-            CleanupScope::Tracks(track_ids) => {
-                let selected = track_ids.into_iter().collect::<BTreeSet<_>>();
-                all_tracks
-                    .iter()
-                    .filter(|track| selected.contains(&track.id))
-                    .cloned()
-                    .collect()
-            }
-            CleanupScope::Folder { path, recursive } => all_tracks
-                .iter()
-                .filter(|track| match path.as_ref() {
-                    None if recursive => true,
-                    None => track.path.parent().is_none(),
-                    Some(path) if recursive => {
-                        let prefix = format!("{}/", path.as_str());
-                        track.path.as_str().starts_with(&prefix)
-                    }
-                    Some(path) => track.path.parent().as_ref() == Some(path),
-                })
-                .cloned()
-                .collect(),
-        };
+        let scope_tracks = tracks_in_cleanup_scope(&scope, &all_tracks)?;
         let plans = analyze_cleanup(&scope_tracks, &all_tracks, rules, verdicts.as_ref());
         let folders = analyze_cleanup_folders(&scope_tracks, &all_tracks, rules);
         let pending_lookups = if use_online_evidence {
@@ -672,6 +649,18 @@ impl CleanupService {
         })
     }
 
+    pub async fn tracks(&self, scope: CleanupScope) -> Result<Vec<IndexedTrack>, CleanupError> {
+        if matches!(&scope, CleanupScope::Tracks(track_ids) if track_ids.is_empty()) {
+            return Err(CleanupError::EmptyTrackScope);
+        }
+        let all_tracks = self
+            .repository
+            .all_tracks()
+            .await
+            .map_err(|source| dependency("load the cleanup library catalog", source))?;
+        tracks_in_cleanup_scope(&scope, &all_tracks)
+    }
+
     pub async fn batches(&self) -> Result<Vec<CleanupBatchSummary>, CleanupError> {
         self.repository
             .cleanup_batches()
@@ -685,6 +674,39 @@ impl CleanupService {
             .await
             .map_err(|source| dependency("load a cleanup batch", source))
     }
+}
+
+pub fn tracks_in_cleanup_scope(
+    scope: &CleanupScope,
+    all_tracks: &[IndexedTrack],
+) -> Result<Vec<IndexedTrack>, CleanupError> {
+    if matches!(scope, CleanupScope::Tracks(track_ids) if track_ids.is_empty()) {
+        return Err(CleanupError::EmptyTrackScope);
+    }
+    Ok(match scope {
+        CleanupScope::All => all_tracks.to_vec(),
+        CleanupScope::Tracks(track_ids) => {
+            let selected = track_ids.iter().copied().collect::<BTreeSet<_>>();
+            all_tracks
+                .iter()
+                .filter(|track| selected.contains(&track.id))
+                .cloned()
+                .collect()
+        }
+        CleanupScope::Folder { path, recursive } => all_tracks
+            .iter()
+            .filter(|track| match path.as_ref() {
+                None if *recursive => true,
+                None => track.path.parent().is_none(),
+                Some(path) if *recursive => {
+                    let prefix = format!("{}/", path.as_str());
+                    track.path.as_str().starts_with(&prefix)
+                }
+                Some(path) => track.path.parent().as_ref() == Some(path),
+            })
+            .cloned()
+            .collect(),
+    })
 }
 
 fn dependency(operation: &'static str, source: LibraryDependencyError) -> CleanupError {

@@ -1292,6 +1292,47 @@ export interface CleanupSource {
   enabled: boolean;
   capabilities: string[];
   credential_kind: string | null;
+  configured: boolean;
+  available: boolean;
+  configuration_hint: string | null;
+  unavailable_reason: string | null;
+}
+
+export interface CleanupCatalogTagSuggestion extends AnalysisTagReviewTarget {
+  source_tag: string;
+  count: number;
+  confidence: "medium";
+}
+
+export interface CleanupEnrichmentPlan {
+  schema: "library-cleanup-enrichment/v1";
+  partial?: boolean;
+  track_id: number;
+  path: string;
+  status: "identified" | "fingerprinted" | "unmatched" | "failed";
+  identity: {
+    recording_mbid: string;
+    method: "metadata" | "fingerprint";
+    confidence: number;
+    title: string;
+    artist: string;
+    release_mbid: string | null;
+  } | null;
+  ops: CleanupOp[];
+  tag_suggestions: CleanupCatalogTagSuggestion[];
+  notes: string[];
+  error_code?: string;
+}
+
+export interface CleanupEnrichmentResult {
+  schema: "library-cleanup-enrichment/v1";
+  scanned: number;
+  identified: number;
+  fingerprinted: number;
+  unmatched: number;
+  failed: number;
+  cached: number;
+  plans: CleanupEnrichmentPlan[];
 }
 
 export const cleanupApi = {
@@ -1305,6 +1346,11 @@ export const cleanupApi = {
   updateSource: (sourceId: string, enabled: boolean) =>
     api.put<CleanupSource>(`/api/library/cleanup/sources/${encodeURIComponent(sourceId)}`, {
       enabled,
+    }),
+  enrich: (scope: CleanupScope, force = false) =>
+    api.post<BackgroundJob>("/api/library/cleanup/enrichment-jobs", {
+      scope,
+      force,
     }),
   /** One chunk of accepted ops. Pass the batch_id from the previous chunk
    *  so the whole run lands in a single revertable journal. */

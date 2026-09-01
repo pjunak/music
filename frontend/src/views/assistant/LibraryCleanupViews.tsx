@@ -61,8 +61,8 @@ export function LibraryCleanupRunView() {
           <p className="assistant-eyebrow">Library cleanup</p>
           <h1>Repair the library from evidence</h1>
           <p>
-            Start with local, deterministic fixes. Online catalogs and a configured model can
-            add evidence, but every proposed write remains visible and optional.
+            Start with local, deterministic fixes. Online catalogs can add identity evidence, while
+            the future model role remains visibly reserved. Every proposed write stays optional.
           </p>
         </div>
         <Link className="btn-link" to="../history">
@@ -113,6 +113,14 @@ function capabilityLabel(capability: string): string {
       return "artist names";
     case "album_name_verification":
       return "album names";
+    case "recording_identity":
+      return "recording identity";
+    case "canonical_metadata":
+      return "canonical metadata";
+    case "acoustic_fingerprint_identity":
+      return "fingerprint fallback";
+    case "community_tag_evidence":
+      return "community tag evidence";
     default:
       return capability.replaceAll("_", " ");
   }
@@ -196,7 +204,8 @@ export function LibraryCleanupSourcesView() {
         </div>
         <p className="muted small">
           Each source must define its fields, rate limits, attribution, and confidence mapping.
-          API-key controls appear here only when an implemented connector requires them.
+          API-key readiness and secure server-configuration guidance appear here only when an
+          implemented connector requires them.
         </p>
       </section>
 
@@ -208,8 +217,10 @@ export function LibraryCleanupSourcesView() {
               <div>
                 <div className="cleanup-source-title-row">
                   <h2>{source.label}</h2>
-                  <span className={`badge${source.enabled ? " badge-ok" : ""}`}>
-                    {source.enabled ? "active" : "off"}
+                  <span
+                    className={`badge${source.enabled && source.available ? " badge-ok" : ""}`}
+                  >
+                    {!source.available ? "needs setup" : source.enabled ? "active" : "off"}
                   </span>
                 </div>
                 <p>{source.description}</p>
@@ -218,7 +229,7 @@ export function LibraryCleanupSourcesView() {
                 <input
                   type="checkbox"
                   checked={source.enabled}
-                  disabled={savingId !== null}
+                  disabled={savingId !== null || (!source.available && !source.enabled)}
                   onChange={(event) => void setEnabled(source, event.target.checked)}
                 />
                 <span>{savingId === source.id ? "Saving…" : "Use in cleanup"}</span>
@@ -231,13 +242,27 @@ export function LibraryCleanupSourcesView() {
               </div>
               <div>
                 <dt>API access</dt>
-                <dd>{source.credential_kind === null ? "No API key required" : source.credential_kind}</dd>
+                <dd>
+                  {source.credential_kind === null
+                    ? "No API key required"
+                    : source.configured
+                      ? `${source.credential_kind} configured`
+                      : `${source.credential_kind} required`}
+                  {source.configuration_hint !== null ? (
+                    <small>{source.configuration_hint}</small>
+                  ) : null}
+                </dd>
               </div>
               <div>
                 <dt>Writes</dt>
                 <dd>Never direct; suggestions return to review</dd>
               </div>
             </dl>
+            {source.unavailable_reason !== null ? (
+              <p className="cleanup-source-requirement muted small">
+                {source.unavailable_reason}
+              </p>
+            ) : null}
           </section>
         ))}
       </div>

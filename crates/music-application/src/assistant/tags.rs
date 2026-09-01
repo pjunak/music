@@ -26,6 +26,7 @@ pub const MAX_TAG_LENGTH: usize = 64;
 pub const LOCAL_METADATA_ANALYZER_ID: &str = "local-metadata/v1";
 pub const LOCAL_AUDIO_ANALYZER_ID: &str = "local-audio/v1";
 pub const MODEL_TAG_ANALYZER_ID: &str = "model-context-tagger/v6";
+pub const CATALOG_TAG_ANALYZER_ID: &str = "catalog-tags/v1";
 
 pub type AssistantDependencyError = Box<dyn Error + Send + Sync>;
 pub type AssistantFuture<'a, T> =
@@ -872,9 +873,20 @@ pub(super) fn view_for_track(
 ) -> AssistantTrackView {
     let current = current_metadata_analysis(track);
     let mut suggestions = Vec::new();
-    if let Some((analysis, confidence)) = current
-        && analyzer_ids.is_none_or(|ids| ids.iter().any(|id| id == &analysis.analyzer_id))
-    {
+    let metadata_signature = metadata_source_signature(&track.track).ok();
+    for analysis in &track.analyses {
+        if !matches!(
+            analysis.analyzer_id.as_str(),
+            LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID
+        ) || metadata_signature.as_deref() != Some(analysis.source_signature.as_str())
+            || !axes_valid(analysis)
+            || analyzer_ids.is_some_and(|ids| !ids.iter().any(|id| id == &analysis.analyzer_id))
+        {
+            continue;
+        }
+        let Some(confidence) = Confidence::parse(&analysis.confidence) else {
+            continue;
+        };
         let mut seen = BTreeSet::new();
         for raw_tag in &analysis.moods {
             let Ok(tag) = normalize_manual_tag(raw_tag) else {
@@ -906,6 +918,8 @@ pub(super) fn view_for_track(
         .iter()
         .filter(|suggestion| suggestion.status != AnalysisReviewDecision::Rejected)
         .map(|suggestion| suggestion.tag.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect();
     let mut manual_tags = track.manual_tags.clone();
     manual_tags.sort();

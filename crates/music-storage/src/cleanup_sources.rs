@@ -1,3 +1,4 @@
+use music_application::assistant::CATALOG_TAG_ANALYZER_ID;
 use music_application::cleanup_sources::{CleanupSourceFuture, CleanupSourceRepository};
 use sqlx::Row;
 
@@ -26,16 +27,31 @@ impl CleanupSourceRepository for SqliteStorage {
         let source_id = source_id.to_owned();
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await?;
             sqlx::query(
                 "INSERT INTO cleanup_source_policies (source_id, enabled, updated_at) \
                  VALUES (?, ?, CURRENT_TIMESTAMP) \
                  ON CONFLICT(source_id) DO UPDATE SET \
                     enabled = excluded.enabled, updated_at = excluded.updated_at",
             )
-            .bind(source_id)
+            .bind(&source_id)
             .bind(enabled)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
+            sqlx::query("DELETE FROM cleanup_track_enrichments")
+                .execute(&mut *transaction)
+                .await?;
+            if source_id == "lastfm" {
+                sqlx::query("DELETE FROM track_analysis_tag_reviews WHERE analyzer_id = ?")
+                    .bind(CATALOG_TAG_ANALYZER_ID)
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query("DELETE FROM track_analyses WHERE analyzer_id = ?")
+                    .bind(CATALOG_TAG_ANALYZER_ID)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
+            transaction.commit().await?;
             Ok(())
         })
     }
