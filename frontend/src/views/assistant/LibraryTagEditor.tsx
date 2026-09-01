@@ -74,7 +74,10 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
   const [selectedReviewItems, setSelectedReviewItems] = useState<
     Map<string, AnalysisTagReviewTarget>
   >(new Map());
-  const [draftTags, setDraftTags] = useState<string[]>([]);
+  const [draftState, setDraftState] = useState<{
+    source: LibraryTagTrack | null;
+    tags: string[];
+  }>({ source: null, tags: [] });
   const [customTag, setCustomTag] = useState("");
   const [bulkTags, setBulkTags] = useState<string[]>([]);
   const [bulkCustomTag, setBulkCustomTag] = useState("");
@@ -158,11 +161,6 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     () => page.items.find((track) => track.track_id === selectedId),
     [page.items, selectedId],
   );
-  useEffect(() => {
-    setDraftTags(sortedUnique(selected?.manual_tags ?? []));
-    setCustomTag("");
-  }, [selected]);
-
   const filterTags = useMemo(
     () => sortedUnique(catalog?.used_tags ?? []),
     [catalog],
@@ -171,7 +169,29 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     () => sortedUnique(selected?.manual_tags ?? []),
     [selected],
   );
-  const dirty = selected !== undefined && !sameTags(draftTags, originalTags);
+  const draftTags =
+    draftState.source === (selected ?? null) ? draftState.tags : originalTags;
+
+  function setDraftTags(next: string[] | ((current: string[]) => string[])) {
+    setDraftState((current) => {
+      const source = selected ?? null;
+      const currentTags = current.source === source ? current.tags : originalTags;
+      return {
+        source,
+        tags: typeof next === "function" ? next(currentTags) : next,
+      };
+    });
+  }
+
+  useEffect(() => {
+    setDraftState({ source: selected ?? null, tags: originalTags });
+    setCustomTag("");
+  }, [originalTags, selected]);
+
+  const dirty =
+    selected !== undefined &&
+    draftState.source === selected &&
+    !sameTags(draftState.tags, originalTags);
   const loadError = listError ?? catalogError;
   const selectedReviewKeys = useMemo(
     () => new Set(selectedReviewItems.keys()),

@@ -315,10 +315,10 @@ describe("LibraryTagEditor", () => {
     render(<LibraryTagEditor />);
 
     await screen.findByRole("heading", { name: "Tavern Dance" });
-    await user.selectOptions(
-      screen.getByLabelText("Filter analysis review"),
-      "pending",
-    );
+    const reviewFilter = screen.getByLabelText("Filter analysis review");
+    expect(reviewFilter).toBeEnabled();
+    await user.selectOptions(reviewFilter, "pending");
+    expect(reviewFilter).toHaveValue("pending");
 
     await waitFor(() =>
       expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
