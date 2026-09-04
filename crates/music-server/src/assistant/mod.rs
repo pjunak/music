@@ -998,6 +998,8 @@ enum ModelTaggingContextPolicyWire {
 #[serde(default, deny_unknown_fields)]
 #[schema(as = ModelTaggingPlanRequest)]
 struct ModelTaggingPlanRequest {
+    #[schema(required = false, default = false)]
+    force: bool,
     #[schema(required = false, schema_with = model_tagging_scope_ref)]
     scope: ModelTaggingScopeWire,
     #[schema(required = false, schema_with = model_tagging_context_policy_schema)]
@@ -1579,6 +1581,7 @@ struct ModelRoleAvailability {
     connection_name: Option<String>,
     model_id: Option<String>,
     runtime_fingerprint: Option<String>,
+    execution: Option<music_application::assistant::ResolvedRoleExecution>,
 }
 
 async fn model_role_availability(
@@ -1597,12 +1600,12 @@ async fn model_role_availability(
         .map_err(map_provider_error)?
         .into_iter()
         .find(|role| role.role_id == role_id);
-    let (reason_code, runtime_fingerprint) = match providers
+    let (reason_code, runtime_fingerprint, execution) = match providers
         .quality_service()
         .prepare_quality_gated_role_execution(role_id, evaluation_id)
         .await
     {
-        Ok(execution) => (None, Some(execution.fingerprint)),
+        Ok(execution) => (None, Some(execution.fingerprint.clone()), Some(execution)),
         Err(error)
             if error.kind()
                 == music_application::assistant::ProviderServiceErrorKind::Dependency =>
@@ -1615,7 +1618,7 @@ async fn model_role_availability(
                 .current_role_runtime_fingerprint(role_id)
                 .await
                 .map_err(map_provider_error)?;
-            (Some(error.code().to_owned()), fingerprint)
+            (Some(error.code().to_owned()), fingerprint, None)
         }
     };
     Ok(ModelRoleAvailability {
@@ -1625,6 +1628,7 @@ async fn model_role_availability(
             .map(|role| role.model_id),
         reason_code,
         runtime_fingerprint,
+        execution,
     })
 }
 
@@ -1707,6 +1711,7 @@ async fn model_tagging_status(
             &state,
             ContextScopeParameters::default(),
             ModelTaggingContextPolicyWire::Include,
+            false,
         )
         .await?,
     ))
@@ -1732,7 +1737,7 @@ async fn plan_model_tagging(
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let scope = payload.scope.into_parameters()?;
     Ok(Json(
-        model_tagging_availability(&state, scope, payload.context_policy).await?,
+        model_tagging_availability(&state, scope, payload.context_policy, payload.force).await?,
     ))
 }
 
@@ -1761,6 +1766,22 @@ async fn start_model_tagging(
     }
     let scope = payload.scope.into_parameters()?;
     scope.to_scope().map_err(|_| ApiError::validation())?;
+    let plan =
+        model_tagging_availability(&state, scope.clone(), payload.context_policy, payload.force)
+            .await?;
+    if let Some(code) = plan.reason_code {
+        return Err(if code == "request_too_large" {
+            ApiError::coded_conflict(
+                "request_too_large",
+                "The vocabulary and track metadata exceed the provider request limit. Shorten descriptions, aliases, or context cues before starting.",
+            )
+        } else {
+            ApiError::coded_conflict(
+                "model_tagging_unavailable",
+                "Model tagging is unavailable; refresh the plan before starting.",
+            )
+        });
+    }
     let providers = state
         .providers
         .as_deref()
@@ -1799,9 +1820,11 @@ async fn model_tagging_availability(
     state: &HttpState,
     scope: ContextScopeParameters,
     context_policy: ModelTaggingContextPolicyWire,
+    force: bool,
 ) -> Result<ModelTaggingAvailabilityResponse, ApiError> {
     let scope_filter = scope.to_scope().map_err(|_| ApiError::validation())?;
-    let role = model_role_availability(state, "music_tagger", "music-tagging-quality-v1").await?;
+    let mut role =
+        model_role_availability(state, "music_tagger", "music-tagging-quality-v1").await?;
     let assistant = service(state)?;
     let tracks = assistant.tracks().await.map_err(map_assistant_error)?;
     let library_tracks = tracks.len();
@@ -1836,6 +1859,7 @@ async fn model_tagging_availability(
         })
         .collect::<Vec<_>>();
     let vocabulary = assistant.vocabulary().await.map_err(map_assistant_error)?;
+    let mut inputs = Vec::new();
     let current_profiles = if let Some(fingerprint) = role.runtime_fingerprint.as_deref() {
         let mut current = 0_usize;
         for track in &planned {
@@ -1846,11 +1870,18 @@ async fn model_tagging_availability(
                 contexts.get(&track.track.id),
             )
             .map_err(|_| ApiError::internal())?;
-            if track.analyses.iter().any(|analysis| {
+            let is_current = track.analyses.iter().any(|analysis| {
                 analysis.analyzer_id == MODEL_TAG_ANALYZER_ID
                     && analysis.source_signature == signature
-            }) {
+            });
+            if is_current {
                 current = current.saturating_add(1);
+            }
+            if force || !is_current {
+                inputs.push(music_application::assistant::model_tag_track_input(
+                    &track.track,
+                    contexts.get(&track.track.id),
+                ));
             }
         }
         current
@@ -1858,6 +1889,23 @@ async fn model_tagging_availability(
         0
     };
     let tracks_needing_tags = planned.len().saturating_sub(current_profiles);
+    let estimated_provider_requests = if let Some(execution) = role.execution.as_ref() {
+        match music_application::assistant::plan_model_tagger_batches(
+            &inputs,
+            &vocabulary,
+            |request| {
+                crate::provider_handlers::validate_structured_request(&execution.execution, request)
+            },
+        ) {
+            Ok(batches) => batches.len(),
+            Err(error) => {
+                role.reason_code = Some(error.code);
+                0
+            }
+        }
+    } else {
+        tracks_needing_tags.div_ceil(MODEL_TAG_BATCH_SIZE)
+    };
     Ok(ModelTaggingAvailabilityResponse {
         available: role.reason_code.is_none(),
         reason_code: role.reason_code,
@@ -1874,7 +1922,7 @@ async fn model_tagging_availability(
         tracks_missing_context: scoped.len().saturating_sub(contexts.len()),
         current_profiles,
         tracks_needing_tags,
-        estimated_provider_requests: tracks_needing_tags.div_ceil(MODEL_TAG_BATCH_SIZE),
+        estimated_provider_requests,
         disclosure: model_tagging_disclosure(&vocabulary),
     })
 }

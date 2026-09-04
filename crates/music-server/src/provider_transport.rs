@@ -22,14 +22,13 @@ use reqwest::{StatusCode, Url};
 use serde_json::Value;
 use tokio::sync::Semaphore;
 
-use crate::provider_handlers::{provider_handler, safe_provider_error_code};
+use crate::provider_handlers::{MAX_REQUEST_BYTES, provider_handler, safe_provider_error_code};
 
 const GOOGLE_GEMINI_OPENAI_BASE_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/openai";
 const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
 const MAX_VERIFICATION_BYTES: usize = 1_024 * 1_024;
 const MAX_VERIFIED_MODELS: usize = 200;
-const MAX_REQUEST_BYTES: usize = 256 * 1_024;
 const MAX_EXECUTION_RESPONSE_BYTES: usize = 2 * 1_024 * 1_024;
 const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
 const VERIFIER_USER_AGENT: &str = "music-assistant-provider-verifier/1";
@@ -253,47 +252,55 @@ impl ProviderNetworkBoundary {
             Url::parse(raw_url).map_err(|_| ProviderTransportError::new("invalid_request"))?;
         let host = url
             .host_str()
-            .ok_or_else(|| ProviderTransportError::new("invalid_request"))?;
+            .ok_or_else(|| ProviderTransportError::new("invalid_request"))?
+            .to_owned();
         let port = url
             .port_or_known_default()
             .ok_or_else(|| ProviderTransportError::new("invalid_request"))?;
-        let addresses = self.destination_addresses(host, port).await?;
-        if addresses.is_empty()
-            || (!allow_private_network && addresses.iter().any(|address| !is_global(address.ip())))
-        {
-            return Err(ProviderTransportError::new("destination_blocked"));
-        }
-        let headers = request_headers(api_key, user_agent, additional_headers)?;
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .referer(false)
-            .timeout(timeout)
-            .connect_timeout(timeout)
-            .read_timeout(timeout)
-            .pool_max_idle_per_host(0)
-            .no_gzip()
-            .no_brotli()
-            .no_zstd()
-            .no_deflate()
-            .resolve_to_addrs(host, &addresses)
-            .build()
-            .map_err(|_| ProviderTransportError::new("invalid_request"))?;
-        let request = if let Some(body) = body {
-            client
-                .post(url)
-                .header(CONTENT_TYPE, "application/json")
-                .body(body)
-        } else {
-            client.get(url)
-        };
-        let response = request
-            .headers(headers)
-            .send()
-            .await
-            .map_err(map_reqwest_error)?;
-        bounded_json_response(response, max_response_bytes).await
+        // One deadline covers DNS, connection establishment, headers and body.
+        // Reqwest's request timeout starts too late to bound our pinned lookup.
+        tokio::time::timeout(timeout, async {
+            let addresses = self.destination_addresses(&host, port).await?;
+            if addresses.is_empty()
+                || (!allow_private_network
+                    && addresses.iter().any(|address| !is_global(address.ip())))
+            {
+                return Err(ProviderTransportError::new("destination_blocked"));
+            }
+            let headers = request_headers(api_key, user_agent, additional_headers)?;
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .retry(reqwest::retry::never())
+                .referer(false)
+                .timeout(timeout)
+                .connect_timeout(timeout)
+                .read_timeout(timeout)
+                .pool_max_idle_per_host(0)
+                .no_gzip()
+                .no_brotli()
+                .no_zstd()
+                .no_deflate()
+                .resolve_to_addrs(&host, &addresses)
+                .build()
+                .map_err(|_| ProviderTransportError::new("invalid_request"))?;
+            let request = if let Some(body) = body {
+                client
+                    .post(url)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(body)
+            } else {
+                client.get(url)
+            };
+            let response = request
+                .headers(headers)
+                .send()
+                .await
+                .map_err(map_reqwest_error)?;
+            bounded_json_response(response, max_response_bytes).await
+        })
+        .await
+        .map_err(|_| ProviderTransportError::new("timeout"))?
     }
 
     async fn destination_addresses(
@@ -626,6 +633,39 @@ mod tests {
             let addresses = self.addresses.clone();
             Box::pin(async move { Ok(addresses) })
         }
+    }
+
+    #[derive(Debug)]
+    struct HangingResolver;
+
+    impl ProviderDnsResolver for HangingResolver {
+        fn resolve<'a>(&'a self, _host: &'a str, _port: u16) -> ResolveFuture<'a> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    #[tokio::test]
+    async fn dns_is_inside_the_request_deadline_and_releases_execution_capacity()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let boundary = ProviderNetworkBoundary::with_resolver(Arc::new(HangingResolver));
+        let mut target = execution_target(
+            OPENAI_COMPATIBLE_ADAPTER,
+            "https://provider.example".to_owned(),
+            ThinkingMode::ProviderDefault,
+        );
+        target.timeout_seconds = 1;
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            boundary.execute_structured_model_request(&target, &structured_request()),
+        )
+        .await;
+        let result = result?;
+        assert_eq!(result.error_code.as_deref(), Some("timeout"));
+        assert_eq!(
+            boundary.request_slots.available_permits(),
+            PROVIDER_REQUEST_CONCURRENCY
+        );
+        Ok(())
     }
 
     async fn test_server(

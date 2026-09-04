@@ -27,6 +27,8 @@ function errorMessage(error: unknown): string {
 
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
+    case "request_too_large":
+      return "The vocabulary and track metadata exceed the provider request limit. Shorten vocabulary descriptions, aliases, or context cues before starting.";
     case "model_quality_not_passed":
       return "Run and pass the mood tagging quality check in AI setup first.";
     case "role_not_enabled":
@@ -60,7 +62,7 @@ export function ModelTaggingPanel() {
     async function poll(initial: boolean) {
       if (initial) setLoading(true);
       const [availabilityResult, historyResult] = await Promise.allSettled([
-        assistantApi.planModelTagging({ type: "all" }, contextPolicy),
+        assistantApi.planModelTagging({ type: "all" }, contextPolicy, force),
         jobsApi.list({ kind: MODEL_TAGGING_JOB_KIND, limit: 1 }),
       ]);
       if (disposed) return;
@@ -95,7 +97,7 @@ export function ModelTaggingPanel() {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [contextPolicy, refreshKey]);
+  }, [contextPolicy, force, refreshKey]);
 
   const active = isModelTaggingJobActive(job);
   const result = modelTaggingResultFromJob(job);
@@ -127,10 +129,7 @@ export function ModelTaggingPanel() {
     }
     return {
         tracks: availability.planned_tracks,
-        requests: Math.ceil(
-        availability.planned_tracks /
-          Math.max(1, availability.disclosure.tracks_per_request),
-      ),
+        requests: availability.estimated_provider_requests,
     };
   }, [availability, force]);
 

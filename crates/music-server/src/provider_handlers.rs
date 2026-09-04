@@ -8,6 +8,7 @@ use music_application::assistant::{
 use serde_json::Value;
 
 const GEMINI_HEADERS: &[(&str, &str)] = &[("x-goog-api-client", "music-assistant-oai/1.0")];
+pub(crate) const MAX_REQUEST_BYTES: usize = 256 * 1_024;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum StructuredOutputMode {
@@ -176,6 +177,14 @@ impl ProviderHandler {
             }),
         };
         self.apply_thinking_mode(&mut payload, thinking_mode);
+        let bytes = serde_json::to_vec(&payload).map_err(|_| ProviderHandlerError {
+            code: "invalid_request",
+        })?;
+        if bytes.len() > MAX_REQUEST_BYTES {
+            return Err(ProviderHandlerError {
+                code: "request_too_large",
+            });
+        }
         Ok(PreparedProviderRequest {
             path: self.completion_path,
             additional_headers: self.additional_headers,
@@ -221,6 +230,23 @@ impl ProviderHandler {
             object.insert(value.0.to_owned(), value.1);
         }
     }
+}
+
+pub(crate) fn validate_structured_request(
+    target: &music_application::assistant::ProviderExecutionTarget,
+    request: &StructuredModelRequest,
+) -> Result<(), music_application::assistant::ModelTaskError> {
+    let handler = provider_handler(&target.adapter_id)
+        .ok_or_else(|| music_application::assistant::ModelTaskError::new("unsupported_adapter"))?;
+    handler
+        .prepare_structured_request(
+            &target.model_id,
+            target.max_output_tokens,
+            target.thinking_mode,
+            request,
+        )
+        .map(|_| ())
+        .map_err(|error| music_application::assistant::ModelTaskError::new(error.code()))
 }
 
 #[must_use]
@@ -622,6 +648,68 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::provider_handler;
+
+    #[test]
+    fn a_valid_large_vocabulary_is_rejected_by_every_actual_adapter_before_execution()
+    -> Result<(), Box<dyn Error>> {
+        use music_application::assistant::{
+            TAG_VOCABULARY_SCHEMA, TagVocabularyDocument, TagVocabularyEntry, TagVocabularyGroup,
+            TagVocabularySnapshot, plan_model_tagger_batches, vocabulary_fingerprint,
+        };
+        let document = TagVocabularyDocument {
+            schema_version: TAG_VOCABULARY_SCHEMA.to_owned(),
+            groups: (0..2)
+                .map(|group| TagVocabularyGroup {
+                    key: format!("group{group}"),
+                    label: format!("Group {group}"),
+                    description: "Synthetic group".to_owned(),
+                    tags: (0..100)
+                        .map(|tag| TagVocabularyEntry {
+                            id: format!("g{group}.tag{tag}"),
+                            name: format!("group {group} tag {tag}"),
+                            description: "Synthetic tag".to_owned(),
+                            aliases: vec![],
+                            context_cues: (0..32)
+                                .map(|cue| format!("{cue:02} {}", "x".repeat(57)))
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+        .normalized()?;
+        let vocabulary = TagVocabularySnapshot {
+            revision: 1,
+            fingerprint: vocabulary_fingerprint(&document)?,
+            document,
+        };
+        let inputs = vec![
+            json!({"track_id": 1, "artist": "", "album": "", "origin": "", "genre": "", "length_s": 120.0}),
+        ];
+        for adapter in [
+            super::OPENAI_COMPATIBLE_ADAPTER,
+            super::OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
+            super::GOOGLE_GEMINI_OPENAI_ADAPTER,
+            super::GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
+            super::OPENAI_RESPONSES_ADAPTER,
+        ] {
+            let handler = provider_handler(adapter).ok_or("missing adapter")?;
+            let result = plan_model_tagger_batches(&inputs, &vocabulary, |request| {
+                handler
+                    .prepare_structured_request("test-model", 8000, ThinkingMode::Enabled, request)
+                    .map(|_| ())
+                    .map_err(|error| {
+                        music_application::assistant::ModelTaskError::new(error.code())
+                    })
+            });
+            assert_eq!(
+                result.err().ok_or("oversized request accepted")?.code,
+                "request_too_large",
+                "{adapter}"
+            );
+        }
+        Ok(())
+    }
 
     fn production_tagging_request() -> Result<StructuredModelRequest, Box<dyn Error>> {
         let tracks = (1..=20)

@@ -56,6 +56,8 @@ function describeScope(scope: ModelTaggingScope): string {
 
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
+    case "request_too_large":
+      return "The vocabulary and track metadata exceed the provider request limit. Shorten vocabulary descriptions, aliases, or context cues before starting.";
     case "model_quality_not_passed":
       return "Run and pass the music-tagging quality check in AI setup first.";
     case "role_not_enabled":
@@ -142,7 +144,7 @@ export function MoodTaggingDialog({
     setPlanLoading(true);
     setPlanError(null);
     void assistantApi
-      .planModelTagging(scope, contextPolicy)
+      .planModelTagging(scope, contextPolicy, force)
       .then((next) => {
         if (!disposed) setPlan(next);
       })
@@ -158,7 +160,7 @@ export function MoodTaggingDialog({
     return () => {
       disposed = true;
     };
-  }, [contextPolicy, scope, step]);
+  }, [contextPolicy, force, scope, step]);
 
   const loadReview = useCallback(
     async (nextOffset: number, targetScope: ModelTaggingScope = reviewScope) => {
@@ -253,9 +255,7 @@ export function MoodTaggingDialog({
   async function startTagging() {
     if (plan === null || !plan.available || plan.scope_tracks === 0) return;
     const workTracks = force ? plan.planned_tracks : plan.tracks_needing_tags;
-    const requests = force
-      ? Math.ceil(plan.planned_tracks / plan.disclosure.tracks_per_request)
-      : plan.estimated_provider_requests;
+    const requests = plan.estimated_provider_requests;
     if (workTracks === 0) {
       setReviewScope(scope);
       await loadReview(0, scope);

@@ -770,10 +770,11 @@ export const assistantApi = {
   planModelTagging: (
     scope: ModelTaggingScope,
     contextPolicy: ModelTaggingContextPolicy = "include",
+    force = false,
   ) =>
     api.post<ModelTaggingAvailability>(
       "/api/assistant/library-tags/model-plan",
-      { scope, context_policy: contextPolicy },
+      { scope, context_policy: contextPolicy, force },
     ),
   startModelTagging: (
     force: boolean,

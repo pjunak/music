@@ -116,6 +116,17 @@ beforeEach(() => {
 });
 
 describe("ModelTaggingPanel", () => {
+  it("explains an oversized vocabulary and prevents starting a paid run", async () => {
+    vi.mocked(assistantApi.planModelTagging).mockResolvedValue({
+      ...availability,
+      available: false,
+      reason_code: "request_too_large",
+      estimated_provider_requests: 0,
+    });
+    renderPanel();
+    expect(await screen.findByText(/Shorten vocabulary descriptions/)).toBeInTheDocument();
+    expect(assistantApi.startModelTagging).not.toHaveBeenCalled();
+  });
   it("shows the provider boundary and starts only after exact consent", async () => {
     const queued = taggingJob({
       status: "queued",
@@ -187,6 +198,9 @@ describe("ModelTaggingPanel", () => {
   });
 
   it("makes a full-library rebuild explicit and updates its cost estimate", async () => {
+    vi.mocked(assistantApi.planModelTagging)
+      .mockResolvedValueOnce(availability)
+      .mockResolvedValue({ ...availability, estimated_provider_requests: 5 });
     const queued = taggingJob({
       status: "queued",
       progress_current: 0,
@@ -208,9 +222,10 @@ describe("ModelTaggingPanel", () => {
       await screen.findByLabelText("Rebuild every model profile"),
     );
     expect(
-      screen.getByRole("button", { name: "Suggest tags for 45 tracks" }),
+      await screen.findByRole("button", { name: "Suggest tags for 45 tracks" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/about 3 provider requests/)).toBeInTheDocument();
+    expect(screen.getByText(/about 5 provider requests/)).toBeInTheDocument();
+    expect(assistantApi.planModelTagging).toHaveBeenLastCalledWith({ type: "all" }, "include", true);
     await user.click(
       screen.getByRole("button", { name: "Suggest tags for 45 tracks" }),
     );

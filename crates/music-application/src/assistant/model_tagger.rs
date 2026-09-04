@@ -235,6 +235,51 @@ pub struct ModelTaggerBatch {
     vocabulary: TagVocabularySnapshot,
 }
 
+#[derive(Debug)]
+pub struct PlannedTaggerBatch {
+    pub input_range: std::ops::Range<usize>,
+    pub task: ModelTaggerBatch,
+}
+
+/// Plan every request before execution. The transport adapter supplies exact
+/// envelope validation; the application owns track membership and batching.
+/// Both ordinary and corrective requests must fit without dropping vocabulary.
+pub fn plan_model_tagger_batches(
+    inputs: &[Value],
+    vocabulary: &TagVocabularySnapshot,
+    validate: impl Fn(&StructuredModelRequest) -> Result<(), ModelTaskError>,
+) -> Result<Vec<PlannedTaggerBatch>, ModelTaskError> {
+    let mut planned = Vec::new();
+    let mut start = 0;
+    while start < inputs.len() {
+        let mut lower = 1;
+        let mut upper = MODEL_TAG_BATCH_SIZE.min(inputs.len() - start);
+        let mut selected = None;
+        while lower <= upper {
+            let length = lower + (upper - lower) / 2;
+            let task =
+                ModelTaggerBatch::new(inputs[start..start + length].to_vec(), vocabulary.clone())?;
+            match validate(&task.request(false)).and_then(|()| validate(&task.request(true))) {
+                Ok(()) => {
+                    selected = Some((length, task));
+                    lower = length + 1;
+                }
+                Err(error) if error.code == "request_too_large" => upper = length - 1,
+                Err(error) => return Err(error),
+            }
+        }
+        let Some((length, task)) = selected else {
+            return Err(ModelTaskError::new("request_too_large"));
+        };
+        planned.push(PlannedTaggerBatch {
+            input_range: start..start + length,
+            task,
+        });
+        start += length;
+    }
+    Ok(planned)
+}
+
 impl ModelTaggerBatch {
     pub fn new(
         tracks: Vec<Value>,
@@ -349,8 +394,10 @@ impl ModelTaggerBatch {
             .tracks
             .iter()
             .map(|track| track.track_id)
-            .collect::<Vec<_>>();
-        if returned_ids != self.track_ids {
+            .collect::<BTreeSet<_>>();
+        if returned_ids.len() != output.tracks.len()
+            || returned_ids != self.track_ids.iter().copied().collect::<BTreeSet<_>>()
+        {
             return Err(ModelTaskError::new("model_output_track_set_mismatch"));
         }
         let tags_by_id = self
@@ -931,6 +978,82 @@ mod tests {
             .err()
             .ok_or("duplicate IDs must fail closed")?;
         assert_eq!(error.code, "model_output_schema_invalid");
+        Ok(())
+    }
+
+    #[test]
+    fn response_track_membership_is_exact_and_independent_of_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let batch = ModelTaggerBatch::new(
+            [1, 2].into_iter().map(|id| json!({
+                "track_id": id, "artist": "", "album": "", "origin": "", "genre": "folk", "length_s": 120.0,
+            })).collect(), default_vocabulary_snapshot()?,
+        )?;
+        for (ids, valid) in [
+            (vec![1, 2], true),
+            (vec![2, 1], true),
+            (vec![1, 1], false),
+            (vec![1], false),
+            (vec![1, 3], false),
+        ] {
+            let result = batch.finish(StructuredModelResult {
+                succeeded: true, error_code: None,
+                payload: Some(json!({
+                    "schema_version": super::MODEL_TAGGER_OUTPUT_CONTRACT,
+                    "tracks": ids.into_iter().map(|id| json!({
+                        "track_id": id, "tag_ids": [], "confidence": "low", "evidence": ["Insufficient metadata"],
+                    })).collect::<Vec<_>>(),
+                })),
+                provider_model_id: None, finish_reason: Some("stop".to_owned()), input_tokens: None, output_tokens: None,
+            });
+            if valid {
+                assert!(result.is_ok(), "valid permutation failed: {result:?}");
+            } else {
+                assert_eq!(
+                    result.err().ok_or("invalid membership accepted")?.code,
+                    "model_output_track_set_mismatch"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn byte_budget_planning_partitions_all_inputs_and_preflights_corrections()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let inputs = (1..=23).map(|id| json!({
+            "track_id": id, "artist": "", "album": "", "origin": "", "genre": "folk", "length_s": 120.0,
+        })).collect::<Vec<_>>();
+        let vocabulary = default_vocabulary_snapshot()?;
+        let planned = super::plan_model_tagger_batches(&inputs, &vocabulary, |request| {
+            let input: serde_json::Value = serde_json::from_str(&request.user_prompt)
+                .map_err(|_| super::ModelTaskError::new("invalid_request"))?;
+            let tracks = input["tracks"]
+                .as_array()
+                .ok_or_else(|| super::ModelTaskError::new("invalid_request"))?;
+            if tracks.len() > 3 {
+                Err(super::ModelTaskError::new("request_too_large"))
+            } else {
+                Ok(())
+            }
+        })?;
+        assert_eq!(planned.len(), 8);
+        assert_eq!(
+            planned
+                .into_iter()
+                .flat_map(|batch| batch.input_range)
+                .collect::<Vec<_>>(),
+            (0..23).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            super::plan_model_tagger_batches(&inputs, &vocabulary, |_| Err(
+                super::ModelTaskError::new("request_too_large")
+            ))
+            .err()
+            .ok_or("oversized vocabulary accepted")?
+            .code,
+            "request_too_large"
+        );
         Ok(())
     }
 

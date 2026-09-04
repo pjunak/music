@@ -5036,6 +5036,10 @@
             ],
             "type": "string"
           },
+          "force": {
+            "default": false,
+            "type": "boolean"
+          },
           "scope": {
             "$ref": "#/components/schemas/ModelTaggingScope"
           }

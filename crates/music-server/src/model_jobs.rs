@@ -5,19 +5,18 @@ use music_application::assistant::{
     AnalysisWrite, AssistantService, Confidence, ContextScope, EQ_DRAFT_ENGINE_ID,
     EQ_QUALITY_EVALUATION_ID, EnergyCurve, EqDraftTask, EqQualityEvaluationResult,
     LocalAnalysisRepository, LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS,
-    MODEL_PLAYLIST_ENGINE_ID, MODEL_TAG_ANALYZER_ID, MODEL_TAG_BATCH_SIZE,
-    MODEL_TAG_CLEANUP_ENGINE_ID, MODEL_TAGGER_INPUT_CONTRACT,
-    MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ModelAnalysisWrite, ModelEvaluationExecution,
-    ModelPlaylistTask, ModelQualityService, ModelTagCleanupTask, ModelTaggerBatch, ModelTaskError,
-    PLAYLIST_QUALITY_EVALUATION_ID, PlaylistQualityEvaluationResult, PlaylistSuggestionRequest,
-    ProviderUsageAccumulator, ResolvedRoleExecution, StructuredModelRequest, StructuredModelResult,
-    TAG_CLEANUP_QUALITY_EVALUATION_ID, TAGGING_QUALITY_EVALUATION_ID,
-    TagCleanupQualityEvaluationResult, TagConfidence, TagQualityCase, TagQualityCaseResult,
-    TagQualityEvaluationResult, TagQualityGate, TagQualitySuite, build_cleanup_preview,
-    catalog_signature, default_vocabulary_snapshot, eq_quality_suite, local_context_axes,
-    merge_safety_repeats, model_tag_cleanup_suggestion_id, model_tag_source_signature,
-    model_tag_track_input, playlist_quality_suite, retryable_tagger_error,
-    tag_cleanup_quality_suite, tag_quality_suite,
+    MODEL_PLAYLIST_ENGINE_ID, MODEL_TAG_ANALYZER_ID, MODEL_TAG_CLEANUP_ENGINE_ID,
+    MODEL_TAGGER_INPUT_CONTRACT, MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ModelAnalysisWrite,
+    ModelEvaluationExecution, ModelPlaylistTask, ModelQualityService, ModelTagCleanupTask,
+    ModelTaskError, PLAYLIST_QUALITY_EVALUATION_ID, PlaylistQualityEvaluationResult,
+    PlaylistSuggestionRequest, ProviderUsageAccumulator, ResolvedRoleExecution,
+    StructuredModelRequest, StructuredModelResult, TAG_CLEANUP_QUALITY_EVALUATION_ID,
+    TAGGING_QUALITY_EVALUATION_ID, TagCleanupQualityEvaluationResult, TagConfidence,
+    TagQualityCase, TagQualityCaseResult, TagQualityEvaluationResult, TagQualityGate,
+    TagQualitySuite, build_cleanup_preview, catalog_signature, default_vocabulary_snapshot,
+    eq_quality_suite, local_context_axes, merge_safety_repeats, model_tag_cleanup_suggestion_id,
+    model_tag_source_signature, model_tag_track_input, playlist_quality_suite,
+    retryable_tagger_error, tag_cleanup_quality_suite, tag_quality_suite,
 };
 use music_application::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
@@ -494,12 +493,21 @@ impl ModelEvaluationJobHandler {
         deterministic_execution_failure: &mut Option<ModelTaskError>,
     ) -> Result<Vec<TagQualityCaseResult>, JobHandlerError> {
         let mut results = Vec::with_capacity(cases.len());
-        for chunk in cases.chunks(MODEL_TAG_BATCH_SIZE) {
-            let batch = ModelTaggerBatch::new(
-                chunk.iter().map(|case| case.track.clone()).collect(),
-                vocabulary.clone(),
-            )
-            .map_err(model_task_failure)?;
+        let inputs = cases
+            .iter()
+            .map(|case| case.track.clone())
+            .collect::<Vec<_>>();
+        let batches = music_application::assistant::plan_model_tagger_batches(
+            &inputs,
+            vocabulary,
+            |request| {
+                crate::provider_handlers::validate_structured_request(&role.execution, request)
+            },
+        )
+        .map_err(model_task_failure)?;
+        for planned in batches {
+            let chunk = &cases[planned.input_range];
+            let batch = planned.task;
             let profiles = if let Some(error) = deterministic_execution_failure.clone() {
                 Err(error)
             } else {
@@ -1227,6 +1235,18 @@ impl ModelFeatureJobHandler {
             })
             .collect::<Vec<_>>();
         let total = work.len();
+        let inputs = work
+            .iter()
+            .map(|track| model_tag_track_input(&track.track, contexts.get(&track.track.id)))
+            .collect::<Vec<_>>();
+        let batches = music_application::assistant::plan_model_tagger_batches(
+            &inputs,
+            &vocabulary,
+            |request| {
+                crate::provider_handlers::validate_structured_request(&role.execution, request)
+            },
+        )
+        .map_err(model_task_failure)?;
         update_progress(
             context,
             0,
@@ -1246,7 +1266,10 @@ impl ModelFeatureJobHandler {
         let mut skipped_changed = 0_usize;
         let mut provider_usage = ProviderUsageAccumulator::default();
         let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
-        for (batch_index, batch) in work.chunks(MODEL_TAG_BATCH_SIZE).enumerate() {
+        for planned in batches {
+            let start = planned.input_range.start;
+            let batch = &work[planned.input_range];
+            let task = planned.task;
             ensure_feature_role_unchanged(
                 &self.quality,
                 &parameters.role_id,
@@ -1256,13 +1279,6 @@ impl ModelFeatureJobHandler {
             .await?;
             ensure_vocabulary_unchanged(&self.assistant, &parameters.vocabulary_fingerprint)
                 .await?;
-            let inputs = batch
-                .iter()
-                .map(|track| model_tag_track_input(&track.track, contexts.get(&track.track.id)))
-                .collect::<Vec<_>>();
-            let task =
-                ModelTaggerBatch::new(inputs, vocabulary.clone()).map_err(model_task_failure)?;
-            let start = batch_index.saturating_mul(MODEL_TAG_BATCH_SIZE);
             update_progress(
                 context,
                 start,

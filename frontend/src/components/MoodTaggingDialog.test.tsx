@@ -200,6 +200,7 @@ describe("MoodTaggingDialog", () => {
       expect(assistantApi.planModelTagging).toHaveBeenLastCalledWith(
         { type: "tracks", track_ids: [9] },
         "skip",
+        false,
       ),
     );
     expect(screen.getByRole("link", { name: "Open context analysis" })).toHaveAttribute(
@@ -290,6 +291,7 @@ describe("MoodTaggingDialog", () => {
       expect(assistantApi.planModelTagging).toHaveBeenCalledWith(
         { type: "tracks", track_ids: [9] },
         "include",
+        false,
       ),
     );
     expect(screen.getByRole("radio", { name: /Selected tracks/ })).toBeChecked();
