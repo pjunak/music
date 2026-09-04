@@ -1,0 +1,46 @@
+{
+  "DELETE /api/library/cleanup/sources/{source_id}/credential#operation": {
+    "sha256": "82d00dc215cc191385670aa738c6f75cfe79e23c8f9c73fa4f41a7ca2d508cb3",
+    "reason": "Catalog credential removal is an authenticated extension added after the frozen v1 reference."
+  },
+  "GET /api/assistant/library-tags/model-status#responses": {
+    "sha256": "870d2854be0a91e0f06e2f455d6cc8d2a89956798e43f85af2db1a06049689cb",
+    "reason": "The current tagging disclosure and context coverage fields describe the metadata-only input contract and bounded retries."
+  },
+  "GET /api/assistant/library-tags#parameters": {
+    "sha256": "627083d7c8b115ca0a62a96472da8eb3e29185e9314437422750455f244b3db4",
+    "reason": "The supported tag review filters evolved with the local and model evidence views; existing optional-filter defaults remain supported."
+  },
+  "GET /api/library/cleanup/sources#operation": {
+    "sha256": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
+    "reason": "Catalog source availability and encrypted credential status are an authenticated extension."
+  },
+  "GET /api/readiness#operation": {
+    "sha256": "f208f591e599c6518d305726c2434464a6143ff3794a58a658485c9ec03006fb",
+    "reason": "Readiness separates dependency readiness from liveness for the Rust runtime."
+  },
+  "POST /api/assistant/library-tags/model-jobs#request_body": {
+    "sha256": "e9a37f7f24120da9e0fcc2e9b4bc747f4d694431855442045b89663bf748d765",
+    "reason": "Live model tagging requires the current v11 disclosure, scope, context policy, and explicit consent."
+  },
+  "POST /api/assistant/library-tags/model-plan#responses": {
+    "sha256": "316dfbe90df78f298fae888d796a1f66d43fa271ae20cfc7f45a2febe1146249",
+    "reason": "Tagging plans expose context coverage and current disclosure fields for operator review."
+  },
+  "POST /api/library/cleanup/enrichment-jobs#operation": {
+    "sha256": "5116ecfeaaedce515fe1f6fabe3a31f60f01110fec9c9eba385f215062f61378",
+    "reason": "Catalog enrichment creates bounded review-only jobs as an authenticated extension."
+  },
+  "PUT /api/library/cleanup/sources/{source_id}/credential#operation": {
+    "sha256": "17b6c9cc9e09c9a1b5503e5af2e0344e56a427f6a1b0c9c8d0c0e9c64cdf9794",
+    "reason": "Catalog keys use encrypted storage through an authenticated operator endpoint."
+  },
+  "PUT /api/library/cleanup/sources/{source_id}#operation": {
+    "sha256": "c9127de19696ead776f7b7819c8555d661639987e8adbfb788f4a7b2d3e2ab38",
+    "reason": "Catalog source policy is an authenticated operator setting."
+  },
+  "POST /api/assistant/library-tags/model-plan#request_body": {
+    "sha256": "160a42d529f52635e3822dd90deb0654575127c32d115f4d5e334b748b3fca2a",
+    "reason": "Optional force=false preserves existing clients; force=true asks the server to preflight and count every planned track for a rebuild."
+  }
+}

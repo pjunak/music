@@ -1,5 +1,5 @@
 {
-  "schema_version": "openapi-compatibility/v1",
+  "schema_version": "openapi-compatibility/v2",
   "verdict": "incomplete",
   "reference_operation_count": 144,
   "candidate_operation_count": 150,
@@ -18,11 +18,25 @@
     "GET /api/assistant/library-tags"
   ],
   "request_body_mismatches": [
-    "POST /api/assistant/library-tags/model-jobs"
+    "POST /api/assistant/library-tags/model-jobs",
+    "POST /api/assistant/library-tags/model-plan"
   ],
   "response_mismatches": [
     "GET /api/assistant/library-tags/model-status",
     "POST /api/assistant/library-tags/model-plan"
   ],
-  "security_mismatches": []
+  "security_mismatches": [],
+  "difference_fingerprints": {
+    "DELETE /api/library/cleanup/sources/{source_id}/credential#operation": "82d00dc215cc191385670aa738c6f75cfe79e23c8f9c73fa4f41a7ca2d508cb3",
+    "GET /api/assistant/library-tags#parameters": "627083d7c8b115ca0a62a96472da8eb3e29185e9314437422750455f244b3db4",
+    "GET /api/assistant/library-tags/model-status#responses": "870d2854be0a91e0f06e2f455d6cc8d2a89956798e43f85af2db1a06049689cb",
+    "GET /api/library/cleanup/sources#operation": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
+    "GET /api/readiness#operation": "f208f591e599c6518d305726c2434464a6143ff3794a58a658485c9ec03006fb",
+    "POST /api/assistant/library-tags/model-jobs#request_body": "e9a37f7f24120da9e0fcc2e9b4bc747f4d694431855442045b89663bf748d765",
+    "POST /api/assistant/library-tags/model-plan#request_body": "160a42d529f52635e3822dd90deb0654575127c32d115f4d5e334b748b3fca2a",
+    "POST /api/assistant/library-tags/model-plan#responses": "316dfbe90df78f298fae888d796a1f66d43fa271ae20cfc7f45a2febe1146249",
+    "POST /api/library/cleanup/enrichment-jobs#operation": "5116ecfeaaedce515fe1f6fabe3a31f60f01110fec9c9eba385f215062f61378",
+    "PUT /api/library/cleanup/sources/{source_id}#operation": "c9127de19696ead776f7b7819c8555d661639987e8adbfb788f4a7b2d3e2ab38",
+    "PUT /api/library/cleanup/sources/{source_id}/credential#operation": "17b6c9cc9e09c9a1b5503e5af2e0344e56a427f6a1b0c9c8d0c0e9c64cdf9794"
+  }
 }

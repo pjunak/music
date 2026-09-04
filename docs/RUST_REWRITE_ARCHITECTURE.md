@@ -141,16 +141,16 @@ remain ordinary Rust modules inside `music-application`; concrete transport and 
 |---|---|---|
 | HTTP and WebSocket | Axum on Tokio | Small, explicit handler model and Tower middleware; no second runtime abstraction. |
 | Runtime supervision | Tokio Util `CancellationToken` and `TaskTracker` | One cancellation tree and observable shutdown instead of detached tasks. |
-| Persistence | SQLx with bundled SQLite | Explicit SQL, async integration, migrations, and compile-time checked static queries. |
+| Persistence | SQLx with bundled SQLite | Explicit runtime-checked SQL, async integration, migrations, and repository integration tests. |
 | Serialization | Serde and `serde_json` | Canonical Rust ecosystem and exact tagged-enum control. |
 | REST documentation | `utoipa`/`utoipa-axum` | OpenAPI is generated from registered handlers and DTOs. |
 | TypeScript contract export | `ts-rs` | HTTP/WS types are generated from the same Serde types and committed for frontend use. |
-| Task JSON Schema | Schemars plus local validation | Draft 2020-12 schemas originate from the same strict Rust result types. |
+| Task JSON Schema | Task-owned JSON schemas plus strict Serde validation | Request-specific identifiers and bounds are checked locally. Deriving static schema structure from result types remains follow-up work. |
 | HTTP client | Reqwest with Rustls | Supports explicit redirect, proxy, retry, timeout, and DNS overrides needed by provider policy. |
 | Audio metadata | Lofty for its native formats; FFmpeg/ffprobe adapter for ASF/WMA | Keeps the common path in-process and typed without pretending Lofty supports WMA; both remain isolated behind one tag adapter. |
 | Decoding/probing | FFmpeg and ffprobe subprocesses | Preserves the existing broad format support, including formats pure-Rust decoders do not cover. |
 | DSP | RustFFT plus reusable buffers | Native SIMD-capable FFT without materializing Python lists or NumPy arrays. |
-| CPU execution | Dedicated fixed Rayon pool, subject to profiling | The application's CPU budget is explicit and separate from Tokio's general blocking pool. |
+| CPU execution | Bounded dedicated worker threads | The application's CPU budget is explicit and separate from Tokio's general blocking pool. |
 | Loudness | `ebur128` from the decoded stream | Standards-tested implementation; removes a second whole-file FFmpeg measurement pass after parity. |
 | Voice inference | `tract` candidate behind `VoiceBackend` | Try one model-owning Rust thread; select a Rust subprocess only if the feasibility gate proves isolation necessary. |
 | YAML | Typed adapter; candidate selected by corpus/security gate | Avoid deprecated `serde_yaml`/`serde_yml`; keep parser exposure small and input bounded. |

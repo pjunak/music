@@ -5,8 +5,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::http::openapi_document;
 
@@ -14,6 +15,7 @@ const TYPESCRIPT_PATH: &str = "frontend/src/generated/protocol.ts";
 const OPENAPI_PATH: &str = "contracts/generated/rust/openapi.json";
 const COMPATIBILITY_PATH: &str = "contracts/generated/rust/openapi-compatibility.json";
 const REFERENCE_OPENAPI_PATH: &str = "contracts/reference/v1/openapi.json";
+const COMPATIBILITY_REVIEW_PATH: &str = "contracts/openapi-compatibility-review.json";
 const HTTP_METHODS: [&str; 8] = [
     "get", "put", "post", "delete", "options", "head", "patch", "trace",
 ];
@@ -134,6 +136,25 @@ pub fn export_contracts(repository_root: &Path) -> Result<Vec<PathBuf>, Contract
 pub fn check_contracts(repository_root: &Path) -> Result<Vec<PathBuf>, ContractError> {
     let mut drifted = Vec::new();
     for artifact in render_contracts(repository_root)? {
+        if artifact.relative_path == COMPATIBILITY_PATH {
+            let report: OpenApiCompatibilityReport = serde_json::from_str(&artifact.content)
+                .map_err(|source| ContractError::Json {
+                    document: "compatibility report",
+                    source,
+                })?;
+            let review_json = read_to_string(
+                &repository_root.join(COMPATIBILITY_REVIEW_PATH),
+                "read compatibility review",
+            )?;
+            let review: BTreeMap<String, AcceptedDifference> =
+                serde_json::from_str(&review_json).map_err(|source| ContractError::Json {
+                    document: "compatibility review",
+                    source,
+                })?;
+            if !differences_reviewed(&report, &review) {
+                drifted.push(PathBuf::from(COMPATIBILITY_REVIEW_PATH));
+            }
+        }
         let path = repository_root.join(artifact.relative_path);
         if read_optional(&path)?.as_deref() != Some(artifact.content.as_str()) {
             drifted.push(PathBuf::from(artifact.relative_path));
@@ -169,10 +190,10 @@ fn pretty_json<T: Serialize>(value: &T, document: &'static str) -> Result<String
     Ok(rendered)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct OpenApiCompatibilityReport {
-    schema_version: &'static str,
-    verdict: &'static str,
+    schema_version: String,
+    verdict: String,
     reference_operation_count: usize,
     candidate_operation_count: usize,
     matched_operation_count: usize,
@@ -183,9 +204,39 @@ struct OpenApiCompatibilityReport {
     request_body_mismatches: Vec<String>,
     response_mismatches: Vec<String>,
     security_mismatches: Vec<String>,
+    difference_fingerprints: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AcceptedDifference {
+    sha256: String,
+    reason: String,
+}
+
+fn differences_reviewed(
+    report: &OpenApiCompatibilityReport,
+    review: &BTreeMap<String, AcceptedDifference>,
+) -> bool {
+    report.missing_operations.is_empty()
+        && report.security_mismatches.is_empty()
+        && report.difference_fingerprints.len() == review.len()
+        && report.difference_fingerprints.iter().all(|(key, digest)| {
+            review.get(key).is_some_and(|accepted| {
+                accepted.sha256 == *digest && !accepted.reason.trim().is_empty()
+            })
+        })
+}
+
+fn contract_digest(value: &impl Serialize) -> Result<String, ContractError> {
+    let bytes = serde_json::to_vec(value).map_err(|source| ContractError::Json {
+        document: "compatibility fingerprint",
+        source,
+    })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
 struct OperationContract {
     parameters: Value,
     request_body: Value,
@@ -225,6 +276,12 @@ fn compare_openapi(
     let mut request_body_mismatches = Vec::new();
     let mut response_mismatches = Vec::new();
     let mut security_mismatches = Vec::new();
+    let mut difference_fingerprints = BTreeMap::new();
+    for key in &candidate_only_operations {
+        if let Some(operation) = candidate_operations.get(key) {
+            difference_fingerprints.insert(format!("{key}#operation"), contract_digest(operation)?);
+        }
+    }
     for key in &matched {
         let Some(reference_operation) = reference_operations.get(key) else {
             continue;
@@ -239,12 +296,24 @@ fn compare_openapi(
         let security_matches = reference_operation.security == candidate_operation.security;
         if !parameters_match {
             parameter_mismatches.push(key.clone());
+            difference_fingerprints.insert(
+                format!("{key}#parameters"),
+                contract_digest(&candidate_operation.parameters)?,
+            );
         }
         if !request_body_matches {
             request_body_mismatches.push(key.clone());
+            difference_fingerprints.insert(
+                format!("{key}#request_body"),
+                contract_digest(&candidate_operation.request_body)?,
+            );
         }
         if !responses_match {
             response_mismatches.push(key.clone());
+            difference_fingerprints.insert(
+                format!("{key}#responses"),
+                contract_digest(&candidate_operation.responses)?,
+            );
         }
         if !security_matches {
             security_mismatches.push(key.clone());
@@ -260,12 +329,13 @@ fn compare_openapi(
         && response_mismatches.is_empty()
         && security_mismatches.is_empty();
     Ok(OpenApiCompatibilityReport {
-        schema_version: "openapi-compatibility/v1",
+        schema_version: "openapi-compatibility/v2".to_owned(),
         verdict: if compatible {
             "compatible"
         } else {
             "incomplete"
-        },
+        }
+        .to_owned(),
         reference_operation_count: reference_operations.len(),
         candidate_operation_count: candidate_operations.len(),
         matched_operation_count: matched.len(),
@@ -276,6 +346,7 @@ fn compare_openapi(
         request_body_mismatches,
         response_mismatches,
         security_mismatches,
+        difference_fingerprints,
     })
 }
 
@@ -470,6 +541,45 @@ mod tests {
     use serde_json::json;
 
     use super::{compare_openapi, openapi_document};
+
+    #[test]
+    fn compatibility_review_binds_exact_shapes_and_rejects_regressions()
+    -> Result<(), Box<dyn Error>> {
+        let reference = json!({"paths": {"/thing": {"get": {"responses": {"200": {"content": {"application/json": {"schema": {"type": "string"}}}}}}}}});
+        let mut candidate = reference.clone();
+        candidate["paths"]["/thing"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+            ["type"] = json!("integer");
+        let report = compare_openapi(&reference, &candidate)?;
+        let mut review = std::collections::BTreeMap::new();
+        assert!(!super::differences_reviewed(&report, &review));
+        for (key, digest) in &report.difference_fingerprints {
+            review.insert(
+                key.clone(),
+                super::AcceptedDifference {
+                    sha256: digest.clone(),
+                    reason: "Reviewed typed response".to_owned(),
+                },
+            );
+        }
+        assert!(super::differences_reviewed(&report, &review));
+        candidate["paths"]["/thing"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+            ["type"] = json!("boolean");
+        assert!(!super::differences_reviewed(
+            &compare_openapi(&reference, &candidate)?,
+            &review
+        ));
+        assert!(!super::differences_reviewed(
+            &compare_openapi(&reference, &json!({"paths": {}}))?,
+            &review
+        ));
+        let mut security = reference.clone();
+        security["paths"]["/thing"]["get"]["security"] = json!([{"session": []}]);
+        assert!(!super::differences_reviewed(
+            &compare_openapi(&reference, &security)?,
+            &std::collections::BTreeMap::new()
+        ));
+        Ok(())
+    }
 
     #[test]
     fn route_registration_is_the_openapi_source_of_truth() -> Result<(), Box<dyn Error>> {

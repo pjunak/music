@@ -36,12 +36,37 @@ remain authoritative for those claims.
   files, embedded metadata, or database mood tags directly.
 - Connection verification, role conformance, quality certification, and live-run consent are
   separate gates. Passing one does not imply another.
-- Runtime fingerprints include the shared harness and role contract plus a SHA-256 digest of each
-  role's executable prompt/schema modules and checked-in evaluation suites. Relevant source or
+- Runtime fingerprints include the shared harness and role contract plus a SHA-256 digest of all
+  executable prompt/schema modules and checked-in evaluation suites. Source or
   suite changes make saved conformance and quality results stale even when a developer forgets to
   advance the human-readable contract fragment.
+  The current aggregate is conservative: unrelated role changes also invalidate certification.
+  Splitting role source closures requires separating the shared job orchestration first.
 - Provider jobs are non-restartable after uncertain external cost. Usage is checkpointed after
   every attempt, including attempts that later fail.
+
+## Request planning and catalog provenance
+
+`plan_model_tagger_batches` in the application layer owns exact track partitioning.
+The provider adapter validates the actual serialized envelope against the 256 KiB limit.
+Preview, start preflight, execution, and evaluation use the same planner; ordinary and
+corrective requests must both fit. Batches contain at most 20 tracks and may be smaller.
+No vocabulary entries are dropped. An oversized single-track request prevents enqueueing
+a live job. Response order is immaterial, but track membership must be exact and unique.
+The provider deadline covers DNS resolution through complete response-body reading.
+
+Catalog lookups acquire a source execution lease before reading settings or credentials.
+Policy and credential edits return `cleanup_source_busy` while a lookup is active; finish
+or cancel that lookup before applying an edit. Enrichment and name verification share
+the same gate. Queued jobs read the settings in effect when execution begins.
+
+SQLite schema 10 gives catalog evidence a monotonic revision. Source-policy, credential,
+vault-reset, and vocabulary edits invalidate cached enrichments and catalog analysis/review
+rows in the same transaction. Old worker writes are rejected even after a setting is
+changed back. Review signatures include indexed metadata, mapper identity, and evidence
+revision, so an old review cannot accept a newly generated proposal by coincidence.
+Catalog profiles also record their vocabulary fingerprint. Accepted/manual tags survive
+invalidation and the migration; legacy catalog proposals must be regenerated.
 
 ## End-to-end flow
 
