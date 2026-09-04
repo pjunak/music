@@ -46,13 +46,13 @@ function errorMessage(error: unknown): string {
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the EQ quality check in model settings first.";
+      return "Run and pass the EQ quality check in AI setup first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable an EQ model in model settings first.";
+      return "Choose and make an EQ model available in AI setup first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned EQ model in model settings first.";
+      return "Verify and test the assigned EQ model in AI setup first.";
     default:
       return "The connected EQ model is not ready yet.";
   }
@@ -289,7 +289,7 @@ export function EqAssistantView({
             {!availability?.available ? (
               <p className="field-hint">
                 {statusError ?? unavailableMessage(availability?.reason_code ?? null)}{" "}
-                <Link to="/assistant/settings/models">Open model settings</Link>
+                <Link to="/assistant/ai">Open AI setup</Link>
               </p>
             ) : null}
           </form>

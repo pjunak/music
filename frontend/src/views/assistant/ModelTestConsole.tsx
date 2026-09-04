@@ -264,7 +264,7 @@ function buildLogEntries(
       time: null,
       tone: "warning",
       message:
-        "Model test passed. Select “Allow for task” and save before running quality scenarios.",
+        "Model test passed. Turn on “Available” and save before running quality scenarios.",
     });
   }
 

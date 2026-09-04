@@ -33,13 +33,13 @@ function errorMessage(error: unknown): string {
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the mood-tag cleanup quality check in model settings first.";
+      return "Run and pass the mood-tag cleanup quality check in AI setup first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable a mood-tag cleanup model in model settings first.";
+      return "Choose and make a mood-tag cleanup model available in AI setup first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned mood-tag cleanup model in model settings first.";
+      return "Verify and test the assigned mood-tag cleanup model in AI setup first.";
     case "tag_catalog_empty":
       return "Add at least one mood-library tag before asking a model to review the catalog.";
     case "tag_catalog_too_large":
@@ -273,7 +273,7 @@ export function ModelTagCleanupPanel({ onCatalogChanged }: Props) {
           <p>{unavailableMessage(availability.reason_code)}</p>
           {availability.reason_code !== "tag_catalog_empty" &&
           availability.reason_code !== "tag_catalog_too_large" ? (
-            <Link to="/assistant/settings/models">Open model settings</Link>
+            <Link to="/assistant/ai">Open AI setup</Link>
           ) : null}
         </div>
       ) : null}

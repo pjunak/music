@@ -6,7 +6,7 @@ not a second description of the implementation.
 ## By task
 
 - Product, deployment, configuration, and development: [root README](../README.md)
-- Optional model setup and operator acceptance: [Assistant setup guide](../ASSISTANT.md)
+- Optional model setup and operator acceptance: [AI setup guide](../ASSISTANT.md)
 - Assistant code, contracts, privacy boundaries, tests, and change procedure:
   [Assistant architecture and contract map](ASSISTANT_ARCHITECTURE.md)
 - External output protocol: [client guide](../clients/README.md)

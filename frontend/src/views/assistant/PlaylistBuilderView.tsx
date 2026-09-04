@@ -69,13 +69,13 @@ function optionalNumber(value: string): number | undefined {
 function modelUnavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the playlist quality check in model settings first.";
+      return "Run and pass the playlist quality check in AI setup first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable a playlist planning model in model settings first.";
+      return "Choose and make a playlist planning model available in AI setup first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned playlist model in model settings first.";
+      return "Verify and test the assigned playlist model in AI setup first.";
     default:
       return "The connected model is not ready. Check its setup before using it.";
   }
@@ -601,7 +601,7 @@ export function PlaylistBuilderView({
                   {modelStatusError !== null
                     ? `Model status is unavailable: ${modelStatusError}`
                     : modelUnavailableMessage(modelAvailability?.reason_code ?? null)}{" "}
-                  <Link to="/assistant/settings/models">Open model settings</Link>
+                  <Link to="/assistant/ai">Open AI setup</Link>
                 </p>
               ) : null}
             </fieldset>

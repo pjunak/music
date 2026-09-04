@@ -126,8 +126,8 @@ Full task output contracts are `assistant-playlist-planner-output/v1`,
 `assistant-music-tagger-output/v3`, `assistant-model-tag-cleanup-output/v2`, and
 `assistant-eq-draft-output/v1`. Reserved roles `library_cleanup` and `audio_analyzer` use
 `reserved-library-cleanup/v1` and `reserved-audio-analyzer/v1`; they are visible but not
-configurable. `library_cleanup` is presented only in the task-specific **Library cleanup →
-AI assistance** tab; reusable provider connections remain under Assistant setup.
+configurable. `library_cleanup` remains visible with the other planned roles in **AI setup**;
+task workspaces choose whether to use a configured model without duplicating model configuration.
 
 The Library cleanup workspace preserves a separate local authority boundary. The local engine
 produces filename, folder, and embedded-tag proposals; `cleanup_batches` journals only explicitly

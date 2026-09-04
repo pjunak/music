@@ -28,13 +28,13 @@ function errorMessage(error: unknown): string {
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
     case "model_quality_not_passed":
-      return "Run and pass the mood tagging quality check in model settings first.";
+      return "Run and pass the mood tagging quality check in AI setup first.";
     case "role_not_enabled":
     case "role_not_configured":
-      return "Assign and enable a mood tagging model in model settings first.";
+      return "Choose and make a mood tagging model available in AI setup first.";
     case "connection_not_verified":
     case "model_not_tested":
-      return "Verify and test the assigned mood tagging model in model settings first.";
+      return "Verify and test the assigned mood tagging model in AI setup first.";
     default:
       return "The connected mood tagging model is not ready yet.";
   }
@@ -222,7 +222,7 @@ export function ModelTaggingPanel() {
         <div className="assistant-model-tagging-unavailable">
           <strong>Model tagging is not ready</strong>
           <p>{unavailableMessage(availability.reason_code)}</p>
-          <Link to="/assistant/settings/models">Open model settings</Link>
+          <Link to="/assistant/ai">Open AI setup</Link>
         </div>
       ) : null}
       {availability !== null && (availability.available || active) ? (

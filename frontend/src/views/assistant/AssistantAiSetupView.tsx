@@ -474,11 +474,11 @@ export function AssistantAiSetupView() {
               role.role_id === roleId ? allowed : role,
             ),
           );
-          toast.success("Model tested and allowed", allowed.label);
+          toast.success("Model tested and available", allowed.label);
           refreshQuality();
         } catch (error) {
           toast.error(
-            "Model passed but could not be allowed",
+            "Model passed but could not be made available",
             errorMessage(error),
           );
         }
@@ -660,16 +660,15 @@ export function AssistantAiSetupView() {
     ["music_tagger", "tag_cleanup"].includes(role.role_id),
   );
   const standaloneRoles = roles.filter(
-    (role) =>
-      !["music_tagger", "tag_cleanup", "library_cleanup"].includes(role.role_id),
+    (role) => !["music_tagger", "tag_cleanup"].includes(role.role_id),
   );
 
   return (
     <div className="assistant-provider-view">
       <header className="assistant-page-header">
         <div>
-          <h1>Models and providers</h1>
-          <p>Connect providers, then assign and test a model for each task.</p>
+          <h1>AI setup</h1>
+          <p>Connect providers, then choose and test the model available to each task.</p>
         </div>
         <div className="assistant-page-tools">
           <AssistantInfoPopover label="Privacy and local tools" title="Setup stays synthetic">
@@ -891,15 +890,9 @@ export function AssistantAiSetupView() {
               <section className="assistant-role-family assistant-tag-role-family">
                 <div className="assistant-role-family-heading">
                   <div>
-                    <p className="assistant-eyebrow">Shared controlled vocabulary</p>
-                    <h3>Tag intelligence</h3>
-                    <p>
-                      Tagging chooses canonical IDs; cleanup maps existing names back
-                      to those same IDs. Keep separate models when speed and semantic
-                      depth need different settings.
-                    </p>
+                    <h3>Tag models</h3>
                   </div>
-                  <span>one vocabulary · two tasks</span>
+                  <span>Shared vocabulary</span>
                 </div>
                 <div className="assistant-role-family-grid">
                   {tagRoles.map(renderRoleCard)}

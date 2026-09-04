@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ApiModule from "@/core/api";
 import type * as ProviderApiModule from "@/core/assistantProvidersApi";
 import type { CleanupSource } from "@/core/api";
-import type { ModelRole, ProviderFrameworkStatus } from "@/core/assistantProvidersApi";
+import type { ProviderFrameworkStatus } from "@/core/assistantProvidersApi";
 
 vi.mock("@/core/api", async (importActual) => {
   const actual = await importActual<typeof ApiModule>();
@@ -31,7 +31,6 @@ vi.mock("@/core/assistantProvidersApi", async (importActual) => {
       ...actual.assistantProvidersApi,
       getStatus: vi.fn(),
       initializeCredentialStorage: vi.fn(),
-      listRoles: vi.fn(),
     },
   };
 });
@@ -47,7 +46,6 @@ import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 
 import {
   LibraryCleanupHistoryView,
-  LibraryCleanupModelView,
   LibraryCleanupSourcesView,
 } from "./LibraryCleanupViews";
 
@@ -97,27 +95,6 @@ const frameworkStatus: ProviderFrameworkStatus = {
   roles: [],
 };
 
-const cleanupRole: ModelRole = {
-  role_id: "library_cleanup",
-  label: "Library cleanup",
-  description: "Reserved for a review-first cleanup model pass.",
-  required_capability_ids: ["structured_text"],
-  configuration_available: false,
-  connection_id: null,
-  connection_name: null,
-  model_id: "",
-  enabled: false,
-  effective_enabled: false,
-  timeout_seconds: 30,
-  max_output_tokens: 1000,
-  thinking_mode: "provider_default",
-  verification_status: null,
-  conformance_status: "never",
-  conformance_error_code: null,
-  last_conformance_at: null,
-  updated_at: null,
-};
-
 describe("Library cleanup workspace views", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -142,7 +119,6 @@ describe("Library cleanup workspace views", () => {
     vi.mocked(assistantProvidersApi.initializeCredentialStorage).mockResolvedValue(
       frameworkStatus,
     );
-    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([cleanupRole]);
   });
 
   it("loads and persists the active catalog-source policy", async () => {
@@ -219,19 +195,6 @@ describe("Library cleanup workspace views", () => {
     await waitFor(() =>
       expect(cleanupApi.deleteSourceCredential).toHaveBeenCalledWith("acoustid"),
     );
-  });
-
-  it("mounts the unfinished cleanup role beside the tool instead of pretending it is active", async () => {
-    render(
-      <MemoryRouter>
-        <LibraryCleanupModelView />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByRole("heading", { name: "Library cleanup" })).toBeVisible();
-    expect(screen.getByText("planned")).toBeVisible();
-    expect(screen.getByText("Local cleanup stays authoritative")).toBeVisible();
-    expect(screen.getByText("Not assigned")).toBeVisible();
   });
 
   it("mounts server journals in the dedicated rollback tab", async () => {

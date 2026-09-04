@@ -79,7 +79,7 @@ function roleStateLabel(
     if (qualityEvaluation?.status === "passed") return "Ready";
     if (qualityEvaluation?.status === "failed") return "Quality check failed";
     if (qualityEvaluation?.status === "stale") return "Checks outdated";
-    return "Enabled, checks pending";
+    return "Available, quality pending";
   }
   if (role.enabled) {
     if (!credentialSaved) return "API key removed";
@@ -89,7 +89,7 @@ function roleStateLabel(
     return "Stored key unavailable";
   }
   if (!configured) return "Not configured";
-  if (role.conformance_status === "passed") return "Tested, switched off";
+  if (role.conformance_status === "passed") return "Tested, unavailable";
   if (role.conformance_status === "failed") return "Model test failed";
   return "Configured, not tested";
 }
@@ -197,6 +197,26 @@ export function ModelRoleCard({
     !qualityLoading &&
     !qualityActive;
   const actionsBusy = busy || testing || qualityActionBusy || qualityActive;
+  let setupHint: string | null = null;
+  if (!canEnable && connectionId) {
+    if (connection?.credential_saved !== true) {
+      setupHint = "Save an API key on the selected connection before using it.";
+    } else if (!adapterSupportsRole) {
+      setupHint = `Choose a connection that supports ${requiredCapabilityLabels.join(
+        " and ",
+      )}.`;
+    } else if (connection.verification_status !== "verified") {
+      setupHint = "Verify the selected connection before testing this model.";
+    } else if (!verifiedCapabilitiesSatisfied) {
+      setupHint = `Verification did not confirm ${requiredCapabilityLabels.join(
+        " and ",
+      )} for this connection.`;
+    } else if (!configurationMatches) {
+      setupHint = "Save these changes before testing the model.";
+    } else if (role.conformance_status === "passed") {
+      setupHint = "Encrypted credential storage is unavailable.";
+    }
+  }
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -242,19 +262,17 @@ export function ModelRoleCard({
         className="surface-card assistant-role-card is-planned"
       >
         <div className="assistant-role-heading">
-          <div>
+          <div className="assistant-role-heading-copy">
             <span className="assistant-role-state">{stateLabel}</span>
             <h3>{role.label}</h3>
+            <AssistantInfoPopover label="Task contract" title={role.label}>
+              <p>{role.description}</p>
+            </AssistantInfoPopover>
           </div>
         </div>
-        <p>{role.description}</p>
         <div className="assistant-role-planned-note">
-          <strong>Not configurable yet</strong>
-          <p>
-            This task will require: {requiredCapabilityLabels.join(" · ")}. Its
-            input, verification, quality, and review contracts must be implemented
-            before a model can be assigned.
-          </p>
+          <strong>Requires {requiredCapabilityLabels.join(" · ")}</strong>
+          <span>Configuration opens when its task and quality contracts are ready.</span>
         </div>
         {configured ? (
           <button
@@ -302,12 +320,12 @@ export function ModelRoleCard({
         <label className="checkbox-row assistant-role-enabled">
           <input
             type="checkbox"
-            aria-label="Allow this model for this task"
+            aria-label="Make this model available to its task"
             checked={enabled}
             disabled={qualityActive || (!enabled && !canEnable)}
             onChange={(event) => setEnabled(event.target.checked)}
           />
-          <span>Allow for task</span>
+          <span>Available</span>
         </label>
       </div>
 
@@ -392,24 +410,8 @@ export function ModelRoleCard({
             <strong>{qualityLabel}</strong>
           </a>
         </div>
-        {!canEnable && connectionId ? (
-          <p className="field-hint">
-            {connection?.credential_saved !== true
-              ? "Save an API key on the selected connection before enabling it."
-              : !adapterSupportsRole
-                ? `Choose a connection that supports ${requiredCapabilityLabels.join(
-                    " and ",
-                  )}.`
-                : connection.verification_status !== "verified"
-                ? "Verify the selected connection before enabling it."
-                : !verifiedCapabilitiesSatisfied
-                  ? `Verification did not confirm ${requiredCapabilityLabels.join(
-                      " and ",
-                    )} for this connection.`
-              : role.conformance_status !== "passed" || !configurationMatches
-                ? "Save and pass the model test before enabling this task."
-                : "Encrypted credential storage is unavailable."}
-          </p>
+        {setupHint !== null ? (
+          <p className="field-hint">{setupHint}</p>
         ) : null}
 
         {role.conformance_status === "failed" ? (
@@ -418,83 +420,74 @@ export function ModelRoleCard({
           </p>
         ) : null}
 
-        <details className="assistant-role-advanced">
-          <summary>
-            <span>Request settings</span>
-            <small>
-              Thinking {thinkingMode === "provider_default" ? "default" : thinkingMode}
-              {" · "}{timeoutSeconds}s{" · "}{maxOutputTokens.toLocaleString()} tokens
-            </small>
-          </summary>
-          <div
-            className="assistant-role-settings"
-            role="group"
-            aria-label="Request settings"
-          >
-            <fieldset className="assistant-thinking-mode">
-              <legend>
-                <span>Thinking</span>
-                {thinkingRecommendation !== undefined ? (
-                  <span className="assistant-thinking-recommendation">
-                    {thinkingRecommendation}
-                  </span>
-                ) : null}
-              </legend>
-              <div className="assistant-thinking-options">
-                {(
-                  [
-                    ["provider_default", "Provider default"],
-                    ["enabled", "On"],
-                    ["disabled", "Off"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <label key={value}>
-                    <input
-                      type="radio"
-                      name={`assistant-thinking-${role.role_id}`}
-                      value={value}
-                      checked={thinkingMode === value}
-                      disabled={qualityActive}
-                      onChange={() => {
-                        setThinkingMode(value);
-                        setEnabled(false);
-                      }}
-                    />
-                    <span>{label}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <label className="field">
-              <span className="field-label">Timeout (seconds)</span>
-              <input
-                type="number"
-                min={5}
-                max={300}
-                disabled={qualityActive}
-                value={timeoutSeconds}
-                onChange={(event) => {
-                  setTimeoutSeconds(Number(event.target.value));
-                  setEnabled(false);
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Maximum response tokens</span>
-              <input
-                type="number"
-                min={128}
-                max={65536}
-                disabled={qualityActive}
-                value={maxOutputTokens}
-                onChange={(event) => {
-                  setMaxOutputTokens(Number(event.target.value));
-                  setEnabled(false);
-                }}
-              />
-            </label>
-          </div>
-        </details>
+        <div
+          className="assistant-role-settings"
+          role="group"
+          aria-label="Request settings"
+        >
+          <fieldset className="assistant-thinking-mode">
+            <legend>
+              <span>Thinking</span>
+              {thinkingRecommendation !== undefined ? (
+                <span className="assistant-thinking-recommendation">
+                  {thinkingRecommendation}
+                </span>
+              ) : null}
+            </legend>
+            <div className="assistant-thinking-options">
+              {(
+                [
+                  ["provider_default", "Provider default"],
+                  ["enabled", "On"],
+                  ["disabled", "Off"],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value}>
+                  <input
+                    type="radio"
+                    name={`assistant-thinking-${role.role_id}`}
+                    value={value}
+                    checked={thinkingMode === value}
+                    disabled={qualityActive}
+                    onChange={() => {
+                      setThinkingMode(value);
+                      setEnabled(false);
+                    }}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <label className="field">
+            <span className="field-label">Timeout (seconds)</span>
+            <input
+              type="number"
+              min={5}
+              max={300}
+              disabled={qualityActive}
+              value={timeoutSeconds}
+              onChange={(event) => {
+                setTimeoutSeconds(Number(event.target.value));
+                setEnabled(false);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Response token limit</span>
+            <input
+              type="number"
+              min={128}
+              max={65536}
+              disabled={qualityActive}
+              value={maxOutputTokens}
+              onChange={(event) => {
+                setMaxOutputTokens(Number(event.target.value));
+                setEnabled(false);
+              }}
+            />
+          </label>
+        </div>
 
         <div className="assistant-role-actions">
           <button
@@ -513,7 +506,7 @@ export function ModelRoleCard({
               disabled={busy || testing || qualityActive || !canTest}
               onClick={() => void testModelAndAllow()}
             >
-              {testing ? "Testing and allowing…" : "Test model and allow"}
+              {testing ? "Testing model…" : "Test and make available"}
             </button>
           ) : null}
           {configured && role.conformance_status === "passed" ? (

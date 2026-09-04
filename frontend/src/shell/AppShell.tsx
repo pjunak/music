@@ -20,7 +20,6 @@ import { PlayerView } from "@/views/PlayerView";
 
 import {
   AssistantAiSetupView,
-  AssistantSettingsShell,
   AssistantShell,
   AuthoringShell,
   CuesView,
@@ -29,7 +28,6 @@ import {
   InterruptsView,
   LibraryAnalysisView,
   LibraryCleanupHistoryView,
-  LibraryCleanupModelView,
   LibraryCleanupRunView,
   LibraryCleanupShell,
   LibraryCleanupSourcesView,
@@ -209,24 +207,31 @@ export default function AppShell() {
               <Route path="workflow" element={<LibraryAnalysisView />} />
               <Route path="context" element={<LibraryContextView />} />
               <Route path="tags" element={<LibraryTagsView />} />
+              <Route path="vocabulary" element={<TagVocabularyView />} />
             </Route>
             <Route path="cleanup" element={<LibraryCleanupShell />}>
               <Route index element={<Navigate to="run" replace />} />
               <Route path="run" element={<LibraryCleanupRunView />} />
               <Route path="sources" element={<LibraryCleanupSourcesView />} />
-              <Route path="model" element={<LibraryCleanupModelView />} />
               <Route path="history" element={<LibraryCleanupHistoryView />} />
-            </Route>
-            <Route path="settings" element={<AssistantSettingsShell />}>
-              <Route index element={<Navigate to="models" replace />} />
               <Route
-                path="models"
-                element={
-                  <AssistantAiSetupView />
-                }
+                path="model"
+                element={<Navigate to="/assistant/ai" replace />}
               />
-              <Route path="vocabulary" element={<TagVocabularyView />} />
             </Route>
+            <Route path="ai" element={<AssistantAiSetupView />} />
+            <Route
+              path="settings"
+              element={<Navigate to="/assistant/ai" replace />}
+            />
+            <Route
+              path="settings/models"
+              element={<Navigate to="/assistant/ai" replace />}
+            />
+            <Route
+              path="settings/vocabulary"
+              element={<Navigate to="/assistant/moods/vocabulary" replace />}
+            />
             <Route
               path="analysis"
               element={<Navigate to="/assistant/moods/workflow" replace />}
@@ -237,11 +242,7 @@ export default function AppShell() {
             />
             <Route
               path="tags"
-              element={<Navigate to="/assistant/settings/vocabulary" replace />}
-            />
-            <Route
-              path="ai"
-              element={<Navigate to="/assistant/settings/models" replace />}
+              element={<Navigate to="/assistant/moods/vocabulary" replace />}
             />
           </Route>
           {/* Legacy routes — old top-level paths keep working for bookmarks

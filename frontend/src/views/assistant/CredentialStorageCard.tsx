@@ -214,7 +214,7 @@ export function CredentialStorageCard({
             <p>
               {onReset !== undefined
                 ? "File-backed storage can be reset above after an explicit warning and current-password confirmation. "
-                : "File-backed storage can be reset from Models and providers after an explicit warning and current-password confirmation. "}
+                : "File-backed storage can be reset from AI setup after an explicit warning and current-password confirmation. "}
               Music erases every saved API key before it removes the fixed master-key
               file, so the reset cannot leave encrypted credentials orphaned.
             </p>

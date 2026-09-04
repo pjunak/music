@@ -24,19 +24,22 @@ The Assistant navigation is organized around five operator goals:
 
 - **Playlist Builder** for local or model-refined playlist drafts.
 - **EQ Assistant** for bounded graphic-EQ starting points.
-- **Mood Library** for analysis, factual context, mood tagging, and review.
+- **Mood Library** for analysis, factual context, mood tagging, review, and the
+  controlled mood vocabulary.
 - **Library cleanup** for filename, folder, and embedded-metadata repair, catalog
-  source policy, optional task-specific model assistance, and rollback history.
-- **Settings** for model/provider routing and the controlled mood vocabulary.
+  source policy, optional model use, and rollback history.
+- **AI setup** for provider connections, model routing, request limits, and model tests.
 
-Reusable provider connections belong under Settings; task-specific routing and
-source policy belong beside the task that consumes them. Analysis and tagging belong
-together because they share one evidence and review pipeline. Playlist and EQ
-remain distinct because their inputs, output editors, and listening workflows
-are materially different.
+Reusable provider connections and task-model routing belong under AI setup. Each task
+workspace decides whether to use an available model; it does not duplicate provider or
+request configuration. Source policy stays beside Library cleanup, while vocabulary,
+analysis, and tagging stay together because they share one evidence and review pipeline.
+Playlist and EQ remain distinct because their inputs, output editors, and listening
+workflows are materially different.
 
-Library cleanup uses one canonical workspace with four tabs: **Clean up**,
-**Sources**, **AI assistance**, and **History & rollback**. The Library toolbar is
+Library cleanup uses one canonical workspace with three tabs: **Clean up**,
+**Sources**, and **History & rollback**. Its planned model role stays visible in AI
+setup instead of creating a second configuration surface. The Library toolbar is
 a scoped shortcut into that same workspace, carrying the current folder or selected
 tracks. Cleanup history is not general Assistant activity: it owns downloadable
 change journals and executable rollback, so it stays with the cleanup tool.

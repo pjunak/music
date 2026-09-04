@@ -1,4 +1,4 @@
-# Assistant setup and acceptance guide
+# AI setup and acceptance guide
 
 This is the operator guide for finishing and validating the local-first Assistant,
 optional model connections, review-first authoring, and automatic playlists. The
@@ -63,16 +63,16 @@ because the Rust migration mutates them.
 
 ## 2. Establish the local baseline first
 
-1. Open **Assistant -> Library Analysis**.
+1. Open **Assistant -> Mood library -> Analysis**.
 2. Run the comprehensive local context analysis. The job is server-owned, checkpoints each
    track, and may be closed and reopened without losing progress. It decodes audio locally into
    condensed dynamics, rhythm, spectrum, tempo, and structural development; it does not suggest
    semantic tags or send audio anywhere.
-3. Open **Assistant -> Track Context**, browse a representative set of folders, play several
+3. Open **Assistant -> Mood library -> Track context**, browse a representative set of folders, play several
    songs, and confirm that quiet openings, builds, peaks, and major sections look reasonable.
 4. Add or edit database mood tags such as `medieval`, `tavern`, `dancing`, `combat`, `travel`,
    and custom campaign terms. Generated model tags are reviewed only after optional provider setup.
-5. Open **Assistant -> Mood Vocabulary**. Review the canonical names, definitions, and
+5. Open **Assistant -> Mood library -> Mood vocabulary**. Review the canonical names, definitions, and
    aliases that models may use; promote any deliberate custom term that models should
    be able to generate.
 6. Open **Assistant -> Playlist Builder**, create at least one local suggestion, audition
@@ -128,7 +128,7 @@ cancelled, so idle service memory returns to its non-inference working set. The 
 shows one progress bar for each pass. If native voice inference is interrupted, retrying the job resumes
 the remaining voice rows from the saved first-pass context instead of decoding the library again.
 Then inspect several known vocal, instrumental, and intermittent-vocal tracks in
-**Assistant -> Track Context**. The UI reports the normalized two-class score and
+**Assistant -> Mood library -> Track context**. The UI reports the normalized two-class score and
 the fraction of windows where voice led instrumental. These are classifier measurements, not a
 calibrated probability or guarantee; library-specific threshold calibration is not required for
 this bounded factual-evidence use.
@@ -285,7 +285,7 @@ Use a small, representative sample before running across the whole library.
 
 ### Mood-tag cleanup
 
-1. Open **Assistant -> Mood Vocabulary** and review local conservative cleanup there.
+1. Open **Assistant -> Mood library -> Mood vocabulary** and review local conservative cleanup there.
    Declared aliases, spelling, and plural rules run
    before its provider boundary and does not spend a provider request when they resolve
    every candidate.

@@ -6,7 +6,7 @@ import { CleanupWorkflow } from "@/components/CleanupDialog";
 import { confirmDialog } from "@/components/confirmDialog";
 import type { CleanupSource } from "@/core/api";
 import { cleanupApi } from "@/core/api";
-import type { ModelRole, ProviderFrameworkStatus } from "@/core/assistantProvidersApi";
+import type { ProviderFrameworkStatus } from "@/core/assistantProvidersApi";
 import { assistantProvidersApi } from "@/core/assistantProvidersApi";
 import { toast } from "@/core/toast";
 
@@ -42,9 +42,9 @@ function CleanupEvidenceRail() {
         <span>3</span>
         <div>
           <strong>AI assistance</strong>
-          <small>Optional ambiguity review</small>
+          <small>Optional ambiguity review model</small>
         </div>
-        <Link to="../model">inspect</Link>
+        <Link to="/assistant/ai">AI setup</Link>
       </li>
     </ol>
   );
@@ -420,122 +420,6 @@ export function LibraryCleanupSourcesView() {
           </section>
         ))}
       </div>
-    </div>
-  );
-}
-
-export function LibraryCleanupModelView() {
-  const [role, setRole] = useState<ModelRole | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  useEffect(() => {
-    let disposed = false;
-    setLoading(true);
-    assistantProvidersApi
-      .listRoles()
-      .then((roles) => {
-        if (disposed) return;
-        setRole(roles.find((item) => item.role_id === "library_cleanup") ?? null);
-        setLoadError(null);
-      })
-      .catch((error: unknown) => {
-        if (!disposed) {
-          setLoadError(error instanceof Error ? error.message : "Model role status is unavailable.");
-        }
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [refreshKey]);
-
-  return (
-    <div className="assistant-cleanup-view assistant-cleanup-model-view">
-      <header className="assistant-page-header">
-        <div>
-          <p className="assistant-eyebrow">Library cleanup</p>
-          <h1>AI assistance</h1>
-          <p>
-            This task-specific role is kept beside the cleanup workflow. Provider credentials
-            and reusable connections remain in global Assistant setup.
-          </p>
-        </div>
-        <Link className="btn-link" to="/assistant/settings/models">
-          Manage provider connections
-        </Link>
-      </header>
-
-      {loadError !== null ? (
-        <div className="assistant-analysis-error cleanup-model-error" role="alert">
-          <span>{loadError}</span>
-          <button type="button" onClick={() => setRefreshKey((value) => value + 1)}>
-            Retry
-          </button>
-        </div>
-      ) : null}
-
-      <section className="surface-card cleanup-model-card" aria-busy={loading}>
-        {loading ? <p className="muted small">Loading model role…</p> : null}
-        {!loading && role === null && loadError === null ? (
-          <div role="alert">
-            <h2>Library cleanup role is unavailable</h2>
-            <p className="muted small">The server did not advertise the expected task role.</p>
-          </div>
-        ) : null}
-        {role !== null ? (
-          <>
-            <div className="cleanup-model-heading">
-              <div>
-                <div className="cleanup-source-title-row">
-                  <h2>{role.label}</h2>
-                  <span className={`badge${role.configuration_available ? " badge-ok" : ""}`}>
-                    {role.configuration_available ? "configurable" : "planned"}
-                  </span>
-                </div>
-                <p>{role.description}</p>
-              </div>
-              <span className="cleanup-model-role-id">{role.role_id}</span>
-            </div>
-
-            <div className="cleanup-model-boundary">
-              <div>
-                <strong>Local cleanup stays authoritative</strong>
-                <p>
-                  A future model pass may compare ambiguous candidates and explain its choice.
-                  It will not rename files or write tags without the same review and journal used
-                  by local rules.
-                </p>
-              </div>
-              <div>
-                <strong>Unavailable until its contract is testable</strong>
-                <p>
-                  Model selection remains locked until the cleanup response schema, bounded
-                  evidence input, and quality suite are implemented together.
-                </p>
-              </div>
-            </div>
-
-            <dl className="cleanup-source-details cleanup-model-details">
-              <div>
-                <dt>Required capability</dt>
-                <dd>{role.required_capability_ids.join(", ") || "none"}</dd>
-              </div>
-              <div>
-                <dt>Connection</dt>
-                <dd>{role.connection_name ?? "Not assigned"}</dd>
-              </div>
-              <div>
-                <dt>Runtime state</dt>
-                <dd>{role.effective_enabled ? "enabled" : "not active"}</dd>
-              </div>
-            </dl>
-          </>
-        ) : null}
-      </section>
     </div>
   );
 }

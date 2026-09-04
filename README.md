@@ -107,7 +107,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   stores suggestions under `model-context-tagger/v6` for explicit per-tag review.
   The pre-run plan shows the normal batch estimate and a maximum that includes up to two
   fresh contract-recovery requests; invalid output is never silently repaired.
-  **Assistant → Settings → Mood vocabulary** exposes every canonical name, definition, group,
+  **Assistant → Mood library → Mood vocabulary** exposes every canonical name, definition, group,
   exact alias, and bounded semantic context cue for manual editing. The provider receives those
   global cues to interpret soundtrack phrases, but no per-track local tag hypothesis. When current
   comprehensive local context exists, tagging may also send bounded
@@ -280,7 +280,7 @@ DB-backed tokens, nothing is signed.)
 
 The local Assistant does not need a model provider or a credential key. For the standard Docker
 image, mount the private directory shown in Quick start, sign in, open either
-**Assistant → Settings → Models and providers** or **Assistant → Library cleanup → Sources**, and
+**Assistant → AI setup** or **Assistant → Library cleanup → Sources**, and
 select **Initialize secure storage**. Music creates the fixed
 `/run/music-secrets/assistant-credential.key` file with a new random key. The key value is never
 sent to the browser, stored in `app.db`, or mixed into `/data`.

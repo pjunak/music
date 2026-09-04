@@ -51,10 +51,10 @@ const ASSISTANT_TABS: AssistantTab[] = [
     icon: SparkleIcon,
   },
   {
-    to: "settings",
-    label: "Assistant setup",
-    shortLabel: "Setup",
-    description: "Models and vocabulary",
+    to: "ai",
+    label: "AI setup",
+    shortLabel: "AI",
+    description: "Providers and task models",
     icon: SettingsIcon,
   },
 ];
@@ -140,20 +140,6 @@ export function MoodLibraryShell() {
           to: "tags",
           label: "Mood tags",
         },
-      ]}
-    />
-  );
-}
-
-export function AssistantSettingsShell() {
-  return (
-    <AssistantWorkspaceShell
-      ariaLabel="Assistant settings sections"
-      items={[
-        {
-          to: "models",
-          label: "Models and providers",
-        },
         {
           to: "vocabulary",
           label: "Mood vocabulary",
@@ -175,10 +161,6 @@ export function LibraryCleanupShell() {
         {
           to: "sources",
           label: "Sources",
-        },
-        {
-          to: "model",
-          label: "AI assistance",
         },
         {
           to: "history",

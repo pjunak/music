@@ -246,7 +246,7 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     const heading = await screen.findByRole("heading", {
-      name: "Tag intelligence",
+      name: "Tag models",
     });
     const family = heading.closest("section");
     expect(family).not.toBeNull();
@@ -283,7 +283,7 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     expect(
-      await screen.findByRole("heading", { name: "Models and providers" }),
+      await screen.findByRole("heading", { name: "AI setup" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/Each connection stores one provider key/i),
@@ -324,14 +324,40 @@ describe("AssistantAiSetupView", () => {
     expect(card).not.toBeNull();
     expect(within(card as HTMLElement).getByText("Planned")).toBeInTheDocument();
     expect(
-      within(card as HTMLElement).getByText("Not configurable yet"),
+      within(card as HTMLElement).getByText("Requires Audio input"),
     ).toBeInTheDocument();
     expect(
-      within(card as HTMLElement).getByText(/This task will require: Audio input/),
+      within(card as HTMLElement).getByText(
+        "Configuration opens when its task and quality contracts are ready.",
+      ),
     ).toBeInTheDocument();
     expect(
       within(card as HTMLElement).queryByRole("button", { name: "Save task" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps the planned library cleanup model in global AI setup", async () => {
+    const cleanupRole: ModelRole = {
+      ...role,
+      role_id: "library_cleanup",
+      label: "Library cleanup",
+      description: "Reserved for a review-first cleanup model pass.",
+      configuration_available: false,
+    };
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([cleanupRole]);
+
+    render(<AssistantAiSetupView />);
+
+    const heading = await screen.findByRole("heading", {
+      name: "Library cleanup",
+    });
+    const card = heading.closest("article");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("Planned")).toBeVisible();
+    expect(
+      within(card as HTMLElement).getByText("Requires Structured text"),
+    ).toBeVisible();
   });
 
   it("does not allow testing when verification lacks the required capability", async () => {
@@ -364,7 +390,7 @@ describe("AssistantAiSetupView", () => {
       within(connectionCard as HTMLElement).getByText("None confirmed"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Test model and allow" }),
+      screen.getByRole("button", { name: "Test and make available" }),
     ).toBeDisabled();
     expect(
       screen.getByText(/Verification did not confirm Structured text/),
@@ -419,7 +445,7 @@ describe("AssistantAiSetupView", () => {
     });
     render(<AssistantAiSetupView />);
 
-    await screen.findByRole("heading", { name: "Models and providers" });
+    await screen.findByRole("heading", { name: "AI setup" });
     await user.type(screen.getByLabelText("Connection name"), "Hosted models");
     await user.type(
       screen.getByLabelText("Provider address"),
@@ -629,10 +655,9 @@ describe("AssistantAiSetupView", () => {
 
     await user.selectOptions(await screen.findByLabelText("Connection"), connection.id);
     const allowCheckbox = screen.getByLabelText(
-      "Allow this model for this task",
+      "Make this model available to its task",
     );
     expect(allowCheckbox.closest(".assistant-role-heading")).not.toBeNull();
-    await user.click(screen.getByText("Request settings"));
     expect(screen.getByRole("group", { name: "Request settings" })).toBeVisible();
     expect(screen.getByLabelText("Provider default")).toBeVisible();
     expect(screen.getByText("Off recommended")).toBeVisible();
@@ -663,7 +688,7 @@ describe("AssistantAiSetupView", () => {
       ),
     );
     await user.click(
-      await screen.findByRole("button", { name: "Test model and allow" }),
+      await screen.findByRole("button", { name: "Test and make available" }),
     );
     await waitFor(() =>
       expect(assistantProvidersApi.testRole).toHaveBeenCalledWith(
@@ -684,10 +709,10 @@ describe("AssistantAiSetupView", () => {
       ),
     );
     expect(
-      screen.getByLabelText("Allow this model for this task"),
+      screen.getByLabelText("Make this model available to its task"),
     ).toBeChecked();
     expect(toast.success).toHaveBeenCalledWith(
-      "Model tested and allowed",
+      "Model tested and available",
       "Playlist planner",
     );
   });
@@ -725,20 +750,20 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Test model and allow" }),
+      await screen.findByRole("button", { name: "Test and make available" }),
     );
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        "Model passed but could not be allowed",
+        "Model passed but could not be made available",
         "Role changed while the model test was running.",
       ),
     );
     expect(
-      screen.getByLabelText("Allow this model for this task"),
+      screen.getByLabelText("Make this model available to its task"),
     ).not.toBeChecked();
     expect(
-      screen.getByText(/Model test passed\. Select “Allow for task”/),
+      screen.getByText(/Model test passed\. Turn on “Available”/),
     ).toBeVisible();
   });
 
@@ -773,7 +798,7 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Test model and allow" }),
+      await screen.findByRole("button", { name: "Test and make available" }),
     );
 
     await waitFor(() =>
@@ -788,7 +813,7 @@ describe("AssistantAiSetupView", () => {
       ),
     ).toHaveLength(2);
     expect(
-      screen.getByLabelText("Allow this model for this task"),
+      screen.getByLabelText("Make this model available to its task"),
     ).toBeDisabled();
     expect(
       screen.queryByText(/no songs or live library data/i),
@@ -1108,7 +1133,7 @@ describe("AssistantAiSetupView", () => {
       screen.queryByRole("button", { name: "Run quality check" }),
     ).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Test model and allow" }),
+      screen.getByRole("button", { name: "Test and make available" }),
     ).toBeEnabled();
     await user.click(screen.getByText("Test console"));
     expect(
@@ -1273,7 +1298,6 @@ describe("AssistantAiSetupView", () => {
     });
     const card = heading.closest("article");
     expect(card).not.toBeNull();
-    await user.click(within(card as HTMLElement).getByText("Request settings"));
     expect(within(card as HTMLElement).getByText("Off recommended")).toBeVisible();
     await user.click(
       within(card as HTMLElement).getByRole("button", {
@@ -1314,9 +1338,7 @@ describe("AssistantAiSetupView", () => {
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([configuredRole]);
     render(<AssistantAiSetupView />);
 
-    await userEvent.click(await screen.findByText("Request settings"));
-
-    expect(screen.getByText("Provider default first")).toBeVisible();
+    expect(await screen.findByText("Provider default first")).toBeVisible();
     expect(screen.queryByText("Off recommended")).not.toBeInTheDocument();
   });
 

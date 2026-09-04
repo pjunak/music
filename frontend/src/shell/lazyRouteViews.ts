@@ -75,20 +75,11 @@ export const LibraryCleanupSourcesView = lazyNamed(
   loadLibraryCleanupViews,
   (module) => module.LibraryCleanupSourcesView,
 );
-export const LibraryCleanupModelView = lazyNamed(
-  loadLibraryCleanupViews,
-  (module) => module.LibraryCleanupModelView,
-);
-
 const loadAssistantShell = () => import("./AssistantShell");
 
 export const AssistantShell = lazyNamed(
   loadAssistantShell,
   (module) => module.AssistantShell,
-);
-export const AssistantSettingsShell = lazyNamed(
-  loadAssistantShell,
-  (module) => module.AssistantSettingsShell,
 );
 export const MoodLibraryShell = lazyNamed(
   loadAssistantShell,

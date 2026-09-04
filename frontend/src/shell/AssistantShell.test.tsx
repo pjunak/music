@@ -3,7 +3,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import {
-  AssistantSettingsShell,
   AssistantShell,
   LibraryCleanupShell,
   MoodLibraryShell,
@@ -28,11 +27,11 @@ describe("AssistantShell", () => {
     expect(screen.getByRole("link", { name: "EQ drafts" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Mood library" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Library cleanup" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Assistant setup" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "AI setup" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
   });
 
-  it("keeps cleanup execution, sources, model help, and rollback together", () => {
+  it("keeps cleanup execution, sources, and rollback together", () => {
     render(
       <MemoryRouter initialEntries={["/assistant/cleanup/history"]}>
         <Routes>
@@ -45,31 +44,26 @@ describe("AssistantShell", () => {
 
     expect(screen.getByRole("link", { name: "Clean up" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sources" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "AI assistance" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "AI assistance" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "History & rollback" })).toHaveClass(
       "section-nav-tab-active",
     );
     expect(screen.getByText("Run journals")).toBeVisible();
   });
 
-  it("keeps Assistant setup distinct from the app-wide Settings destination", () => {
+  it("keeps AI setup distinct from the app-wide Settings destination", () => {
     render(
-      <MemoryRouter initialEntries={["/assistant/settings/models"]}>
+      <MemoryRouter initialEntries={["/assistant/ai"]}>
         <Routes>
           <Route path="/assistant" element={<AssistantShell />}>
-            <Route path="settings" element={<AssistantSettingsShell />}>
-              <Route path="models" element={<div>Model setup</div>} />
-            </Route>
+            <Route path="ai" element={<div>Model setup</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("link", { name: "Assistant setup" })).toHaveClass(
+    expect(screen.getByRole("link", { name: "AI setup" })).toHaveClass(
       "is-active",
-    );
-    expect(screen.getByRole("link", { name: "Models and providers" })).toHaveClass(
-      "section-nav-tab-active",
     );
     expect(screen.getByText("Model setup")).toBeVisible();
   });
@@ -82,6 +76,7 @@ describe("AssistantShell", () => {
             <Route path="workflow" element={<div>Mood workflow</div>} />
             <Route path="context" element={<div>Context browser</div>} />
             <Route path="tags" element={<div>Mood tag editor</div>} />
+            <Route path="vocabulary" element={<div>Vocabulary editor</div>} />
           </Route>
         </Routes>
       </MemoryRouter>,
@@ -100,6 +95,11 @@ describe("AssistantShell", () => {
     expect(
       screen.getByRole("link", {
         name: /Mood tags/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", {
+        name: /Mood vocabulary/,
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("Mood workflow")).toBeVisible();
