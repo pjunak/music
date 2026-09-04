@@ -151,6 +151,7 @@ impl AssistantRepository for SqliteStorage {
                 ))
             })?;
             let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
             let changed = sqlx::query(
                 "UPDATE assistant_tag_vocabularies SET document_json = ?, revision = ?, \
                  updated_at = CURRENT_TIMESTAMP WHERE \"key\" = ? AND revision = ?",
@@ -159,13 +160,17 @@ impl AssistantRepository for SqliteStorage {
             .bind(i64::from(next_revision))
             .bind(VOCABULARY_KEY)
             .bind(i64::from(expected_revision))
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(box_storage)?
             .rows_affected();
             if changed != 1 {
                 return Ok(None);
             }
+            crate::catalog_evidence::invalidate(&mut transaction)
+                .await
+                .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
             load_vocabulary(&self.pool).await.map_err(box_storage)
         })
     }
@@ -475,7 +480,17 @@ impl AssistantRepository for SqliteStorage {
                     ));
                     continue;
                 }
-                let current_signature = metadata_source_signature(&track).map_err(|_| {
+                let current_signature = if target.analyzer_id == CATALOG_TAG_ANALYZER_ID {
+                    music_application::assistant::catalog_tag_source_signature(
+                        &track,
+                        crate::catalog_evidence::revision(&mut transaction)
+                            .await
+                            .map_err(box_storage)?,
+                    )
+                } else {
+                    metadata_source_signature(&track)
+                }
+                .map_err(|_| {
                     box_storage(StorageError::InvalidAssistantRecord(
                         "invalid source signature",
                     ))

@@ -13,6 +13,7 @@ mod analysis;
 mod assistant;
 mod auth;
 mod backup;
+mod catalog_evidence;
 mod cleanup_enrichment;
 mod cleanup_sources;
 mod crypto;

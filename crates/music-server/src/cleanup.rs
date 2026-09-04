@@ -807,6 +807,7 @@ async fn verify_names(
         return Err(ApiError::validation());
     }
     let library = crate::library::library(&state)?;
+    let _source_lease = library.cleanup_sources.execution_lease().await;
     if !library
         .cleanup_sources
         .musicbrainz_enabled()
@@ -1046,6 +1047,11 @@ fn map_cleanup_source_error(error: CleanupSourceError) -> ApiError {
     match error {
         CleanupSourceError::UnknownSource => ApiError::plain_not_found("cleanup source not found"),
         CleanupSourceError::InvalidCredential => ApiError::validation(),
+        CleanupSourceError::Busy => ApiError::coded(
+            StatusCode::CONFLICT,
+            "cleanup_source_busy",
+            "Finish or cancel the active catalog lookup before changing sources.",
+        ),
         CleanupSourceError::CredentialStorage => ApiError::coded(
             StatusCode::CONFLICT,
             "credential_storage_unavailable",

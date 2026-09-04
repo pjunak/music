@@ -471,18 +471,7 @@ impl ProviderRepository for SqliteStorage {
                 .execute(&mut *transaction)
                 .await
                 .map_err(box_storage)?;
-            sqlx::query("DELETE FROM cleanup_track_enrichments")
-                .execute(&mut *transaction)
-                .await
-                .map_err(box_storage)?;
-            sqlx::query("DELETE FROM track_analysis_tag_reviews WHERE analyzer_id = ?")
-                .bind(music_application::assistant::CATALOG_TAG_ANALYZER_ID)
-                .execute(&mut *transaction)
-                .await
-                .map_err(box_storage)?;
-            sqlx::query("DELETE FROM track_analyses WHERE analyzer_id = ?")
-                .bind(music_application::assistant::CATALOG_TAG_ANALYZER_ID)
-                .execute(&mut *transaction)
+            crate::catalog_evidence::invalidate(&mut transaction)
                 .await
                 .map_err(box_storage)?;
             sqlx::query("DELETE FROM assistant_model_evaluations")

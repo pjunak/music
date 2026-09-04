@@ -9,13 +9,23 @@ use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
 use crate::{SqliteStorage, StorageError};
 
 impl CleanupEnrichmentRepository for SqliteStorage {
+    fn catalog_evidence_revision(&self) -> CleanupEnrichmentFuture<'_, i64> {
+        Box::pin(async move {
+            sqlx::query_scalar("SELECT revision FROM catalog_evidence_state WHERE id = 1")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(Into::into)
+        })
+    }
+
     fn cleanup_enrichment(
         &self,
         track_id: TrackId,
     ) -> CleanupEnrichmentFuture<'_, Option<CleanupEnrichmentRecord>> {
         Box::pin(async move {
             let row = sqlx::query(
-                "SELECT source_signature, result_json FROM cleanup_track_enrichments WHERE track_id = ?",
+                "SELECT source_signature, result_json, evidence_revision FROM cleanup_track_enrichments \
+                 WHERE track_id = ? AND evidence_revision = (SELECT revision FROM catalog_evidence_state WHERE id = 1)",
             )
             .bind(track_id.get())
             .fetch_optional(&self.pool)
@@ -34,6 +44,7 @@ impl CleanupEnrichmentRepository for SqliteStorage {
                         ))?;
                 Ok::<_, StorageError>(CleanupEnrichmentRecord {
                     track_id,
+                    evidence_revision: row.try_get("evidence_revision")?,
                     source_signature: row.try_get("source_signature")?,
                     result,
                 })
@@ -57,10 +68,18 @@ impl CleanupEnrichmentRepository for SqliteStorage {
                 .map_err(StorageError::AssistantSerialization)
                 .map_err(box_storage)?;
             let _admission = self.write_gate.lock().await;
+            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            if crate::catalog_evidence::revision(&mut transaction)
+                .await
+                .map_err(box_storage)?
+                != record.evidence_revision
+            {
+                return Ok(false);
+            }
             let query = format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE id = ?");
             let row = sqlx::query(AssertSqlSafe(query))
                 .bind(record.track_id.get())
-                .fetch_optional(&self.pool)
+                .fetch_optional(&mut *transaction)
                 .await
                 .map_err(box_storage)?;
             let Some(row) = row else {
@@ -77,18 +96,21 @@ impl CleanupEnrichmentRepository for SqliteStorage {
             }
             sqlx::query(
                 "INSERT INTO cleanup_track_enrichments \
-                 (track_id, source_signature, result_json, updated_at) \
-                 VALUES (?, ?, ?, CURRENT_TIMESTAMP) \
+                 (track_id, source_signature, result_json, evidence_revision, updated_at) \
+                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) \
                  ON CONFLICT(track_id) DO UPDATE SET \
                     source_signature = excluded.source_signature, \
-                    result_json = excluded.result_json, updated_at = CURRENT_TIMESTAMP",
+                    result_json = excluded.result_json, evidence_revision = excluded.evidence_revision, \
+                    updated_at = CURRENT_TIMESTAMP",
             )
             .bind(record.track_id.get())
             .bind(&record.source_signature)
             .bind(result)
-            .execute(&self.pool)
+            .bind(record.evidence_revision)
+            .execute(&mut *transaction)
             .await
             .map_err(box_storage)?;
+            transaction.commit().await.map_err(box_storage)?;
             Ok(true)
         })
     }
@@ -130,6 +152,7 @@ mod tests {
         let track = storage.track(track_id).await?.ok_or("missing track")?;
         let record = CleanupEnrichmentRecord {
             track_id,
+            evidence_revision: storage.catalog_evidence_revision().await?,
             source_signature: cleanup_enrichment_source_signature(&track)?,
             result: serde_json::json!({"schema":"library-cleanup-enrichment/v1"})
                 .as_object()
@@ -137,7 +160,48 @@ mod tests {
                 .ok_or("invalid fixture")?,
         };
         assert!(storage.store_cleanup_enrichment(&record).await?);
-        assert_eq!(storage.cleanup_enrichment(track_id).await?, Some(record));
+        assert_eq!(
+            storage.cleanup_enrichment(track_id).await?,
+            Some(record.clone())
+        );
+
+        // An old worker cannot resurrect invalidated evidence, even after a
+        // source is switched back on (the ABA settings-change case).
+        use music_application::cleanup_sources::CleanupSourceRepository;
+        storage
+            .set_cleanup_source_enabled("musicbrainz", false)
+            .await?;
+        storage
+            .set_cleanup_source_enabled("musicbrainz", true)
+            .await?;
+        assert!(!storage.store_cleanup_enrichment(&record).await?);
+        assert!(storage.cleanup_enrichment(track_id).await?.is_none());
+        let current = CleanupEnrichmentRecord {
+            evidence_revision: storage.catalog_evidence_revision().await?,
+            ..record
+        };
+        assert!(storage.store_cleanup_enrichment(&current).await?);
+
+        use music_application::assistant::{
+            AssistantRepository, TagVocabularyRecord, default_vocabulary,
+        };
+        let vocabulary = storage
+            .initialize_vocabulary(&TagVocabularyRecord {
+                revision: 1,
+                seed_version: 1,
+                document: default_vocabulary()?,
+            })
+            .await?;
+        let mut renamed = vocabulary.document;
+        renamed.groups[0].tags[0].name = "changed-name".to_owned();
+        assert!(
+            storage
+                .replace_vocabulary(vocabulary.revision, &renamed)
+                .await?
+                .is_some()
+        );
+        assert!(storage.cleanup_enrichment(track_id).await?.is_none());
+        assert!(!storage.store_cleanup_enrichment(&current).await?);
         Ok(())
     }
 }

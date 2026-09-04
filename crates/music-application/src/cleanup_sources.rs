@@ -4,6 +4,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use tokio::sync::{OwnedRwLockReadGuard, RwLock};
+
 use crate::assistant::{EncryptedProviderCredential, ProviderCredentialSource, ProviderSecret};
 
 pub const MUSICBRAINZ_SOURCE_ID: &str = "musicbrainz";
@@ -68,6 +70,7 @@ pub enum CleanupSourceError {
     UnknownSource,
     InvalidCredential,
     CredentialStorage,
+    Busy,
     Dependency,
 }
 
@@ -77,6 +80,7 @@ impl Display for CleanupSourceError {
             Self::UnknownSource => "cleanup source is not recognized",
             Self::InvalidCredential => "cleanup source credential is invalid",
             Self::CredentialStorage => "encrypted credential storage is unavailable",
+            Self::Busy => "finish or cancel the active catalog lookup before changing sources",
             Self::Dependency => "cleanup source settings are unavailable",
         })
     }
@@ -89,6 +93,7 @@ pub struct CleanupSourceService {
     repository: Arc<dyn CleanupSourceRepository>,
     credentials: Arc<dyn ProviderCredentialSource>,
     runtime: CleanupSourceRuntime,
+    execution_gate: Arc<RwLock<()>>,
 }
 
 impl fmt::Debug for CleanupSourceService {
@@ -110,7 +115,14 @@ impl CleanupSourceService {
             repository,
             credentials,
             runtime,
+            execution_gate: Arc::new(RwLock::new(())),
         }
+    }
+
+    /// Keep source policy and decrypted credentials stable through a lookup and
+    /// its evidence writes. Mutations fail promptly while this lease is held.
+    pub async fn execution_lease(&self) -> OwnedRwLockReadGuard<()> {
+        self.execution_gate.clone().read_owned().await
     }
 
     pub async fn sources(&self) -> Result<Vec<CleanupSource>, CleanupSourceError> {
@@ -134,6 +146,10 @@ impl CleanupSourceService {
         source_id: &str,
         enabled: bool,
     ) -> Result<CleanupSource, CleanupSourceError> {
+        let _mutation = self
+            .execution_gate
+            .try_write()
+            .map_err(|_| CleanupSourceError::Busy)?;
         if !matches!(
             source_id,
             MUSICBRAINZ_SOURCE_ID | ACOUSTID_SOURCE_ID | LASTFM_SOURCE_ID
@@ -199,6 +215,10 @@ impl CleanupSourceService {
         source_id: &str,
         api_key: &str,
     ) -> Result<CleanupSource, CleanupSourceError> {
+        let _mutation = self
+            .execution_gate
+            .try_write()
+            .map_err(|_| CleanupSourceError::Busy)?;
         let subject = cleanup_source_credential_subject(source_id)?;
         if !(1..=MAX_CREDENTIAL_CHARS).contains(&api_key.trim().chars().count()) {
             return Err(CleanupSourceError::InvalidCredential);
@@ -225,6 +245,10 @@ impl CleanupSourceService {
         &self,
         source_id: &str,
     ) -> Result<CleanupSource, CleanupSourceError> {
+        let _mutation = self
+            .execution_gate
+            .try_write()
+            .map_err(|_| CleanupSourceError::Busy)?;
         let _ = cleanup_source_credential_subject(source_id)?;
         self.repository
             .clear_cleanup_source_credential(source_id)
@@ -564,6 +588,47 @@ mod tests {
 
     fn credential_source() -> Arc<dyn ProviderCredentialSource> {
         Arc::new(TestCredentialSource)
+    }
+
+    #[tokio::test]
+    async fn lookup_lease_excludes_policy_and_credential_mutations_across_clones()
+    -> Result<(), super::CleanupSourceError> {
+        let service = CleanupSourceService::new(
+            Arc::new(InMemoryRepository::default()),
+            credential_source(),
+            CleanupSourceRuntime::default(),
+        );
+        let worker = service.clone();
+        let lease = worker.execution_lease().await;
+        assert_eq!(
+            service.update(MUSICBRAINZ_SOURCE_ID, false).await,
+            Err(super::CleanupSourceError::Busy)
+        );
+        assert_eq!(
+            service.save_credential(LASTFM_SOURCE_ID, "test-key").await,
+            Err(super::CleanupSourceError::Busy)
+        );
+        assert_eq!(
+            service.delete_credential(LASTFM_SOURCE_ID).await,
+            Err(super::CleanupSourceError::Busy)
+        );
+        assert!(service.musicbrainz_enabled().await?);
+        assert!(service.saved_credential(LASTFM_SOURCE_ID).await?.is_none());
+        drop(lease);
+        assert!(!service.update(MUSICBRAINZ_SOURCE_ID, false).await?.enabled);
+        assert!(
+            service
+                .save_credential(LASTFM_SOURCE_ID, "test-key")
+                .await?
+                .credential_saved
+        );
+        assert!(
+            !service
+                .delete_credential(LASTFM_SOURCE_ID)
+                .await?
+                .credential_saved
+        );
+        Ok(())
     }
 
     #[tokio::test]

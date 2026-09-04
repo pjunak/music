@@ -28,6 +28,8 @@ const CLEANUP_ENRICHMENTS_MIGRATION_SQL: &str =
     include_str!("../migrations/0008_cleanup_enrichments.sql");
 const CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL: &str =
     include_str!("../migrations/0009_cleanup_source_credentials.sql");
+const CATALOG_EVIDENCE_MIGRATION_SQL: &str =
+    include_str!("../migrations/0010_catalog_evidence_revision.sql");
 
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
@@ -264,6 +266,13 @@ fn migrator() -> Migrator {
             "encrypted cleanup source credentials".into(),
             MigrationType::Simple,
             CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            10,
+            "catalog evidence provenance".into(),
+            MigrationType::Simple,
+            CATALOG_EVIDENCE_MIGRATION_SQL.into_sql_str(),
             false,
         ),
     ])
@@ -546,5 +555,7 @@ mod tests {
         assert_eq!(CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION, 9);
         assert!(!CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL.contains('\r'));
         assert!(migrator().version_exists(CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION));
+        assert!(!super::CATALOG_EVIDENCE_MIGRATION_SQL.contains('\r'));
+        assert!(migrator().version_exists(10));
     }
 }

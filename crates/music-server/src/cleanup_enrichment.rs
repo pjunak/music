@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures_util::TryStreamExt;
 use music_application::assistant::{
     AnalysisWrite, AssistantService, CATALOG_TAG_ANALYZER_ID, Confidence, LocalAnalysisRepository,
-    TagVocabularySnapshot, metadata_source_signature, normalize_manual_tag,
+    TagVocabularySnapshot, catalog_tag_source_signature, normalize_manual_tag,
 };
 use music_application::cleanup::{CleanupScope, CleanupService};
 use music_application::cleanup_enrichment::{
@@ -114,6 +114,7 @@ pub(crate) struct CleanupEnrichmentServices {
 
 #[derive(Clone, Copy)]
 struct CatalogAccess<'a> {
+    evidence_revision: i64,
     acoustid_enabled: bool,
     acoustid_api_key: Option<&'a str>,
     lastfm_enabled: bool,
@@ -162,6 +163,7 @@ impl CleanupEnrichmentJobHandler {
                 "cleanup enrichment is limited to {MAX_CLEANUP_ENRICHMENT_TRACKS} tracks per run; choose a smaller folder"
             )));
         }
+        let _source_lease = self.sources.execution_lease().await;
         let source_states = self
             .sources
             .sources()
@@ -219,7 +221,15 @@ impl CleanupEnrichmentJobHandler {
         if lastfm_enabled && lastfm_api_key.is_none() {
             return Err(JobHandlerError::new("Last.fm credential is unavailable"));
         }
+        // Capture before vocabulary loading: an edit during snapshot loading
+        // makes this revision stale and fails the run before any request.
+        let evidence_revision = self
+            .cache
+            .catalog_evidence_revision()
+            .await
+            .map_err(|_| JobHandlerError::new("catalog evidence revision is unavailable"))?;
         let catalog = CatalogAccess {
+            evidence_revision,
             acoustid_enabled,
             acoustid_api_key,
             lastfm_enabled,
@@ -257,6 +267,17 @@ impl CleanupEnrichmentJobHandler {
                 .check_cancelled()
                 .await
                 .map_err(JobHandlerError::from_execution)?;
+            if self
+                .cache
+                .catalog_evidence_revision()
+                .await
+                .map_err(|_| JobHandlerError::new("catalog evidence revision is unavailable"))?
+                != evidence_revision
+            {
+                return Err(JobHandlerError::new(
+                    "Catalog settings or vocabulary changed; start a fresh lookup.",
+                ));
+            }
             let signature =
                 cleanup_enrichment_source_signature(track).map_err(JobHandlerError::new)?;
             let result = if !parameters.force {
@@ -266,6 +287,7 @@ impl CleanupEnrichmentJobHandler {
                     .map_err(|_| JobHandlerError::new("cleanup enrichment cache is unavailable"))?
                     .filter(|record| {
                         record.source_signature == signature
+                            && record.evidence_revision == evidence_revision
                             && cached_sources_match(&record.result, &active_sources)
                     })
                     .map(|record| record.result)
@@ -280,21 +302,32 @@ impl CleanupEnrichmentJobHandler {
                     .enrich_track(track, catalog, vocabulary.as_ref(), context.job_id())
                     .await
                 {
-                    Ok(result) => {
+                    Ok(mut result) => {
+                        result.insert("evidence_revision".to_owned(), json!(evidence_revision));
+                        result.insert(
+                            "vocabulary_fingerprint".to_owned(),
+                            json!(vocabulary.as_ref().map(|v| &v.fingerprint)),
+                        );
                         if result_is_cacheable(&result) {
                             let record = CleanupEnrichmentRecord {
                                 track_id: track.id,
+                                evidence_revision,
                                 source_signature: signature,
                                 result: result.clone(),
                             };
-                            self.cache
-                                .store_cleanup_enrichment(&record)
-                                .await
-                                .map_err(|_| {
-                                    JobHandlerError::new(
-                                        "cleanup enrichment cache could not be updated",
-                                    )
-                                })?;
+                            let stored =
+                                self.cache.store_cleanup_enrichment(&record).await.map_err(
+                                    |_| {
+                                        JobHandlerError::new(
+                                            "cleanup enrichment cache could not be updated",
+                                        )
+                                    },
+                                )?;
+                            if !stored {
+                                return Err(JobHandlerError::new(
+                                    "Catalog evidence became stale; start a fresh lookup.",
+                                ));
+                            }
                         }
                         result
                     }
@@ -433,8 +466,9 @@ impl CleanupEnrichmentJobHandler {
                 .await
             {
                 Ok(mut suggestions) => {
-                    let source_signature = metadata_source_signature(track)
-                        .map_err(|_| CatalogError::InvalidResponse)?;
+                    let source_signature =
+                        catalog_tag_source_signature(track, catalog.evidence_revision)
+                            .map_err(|_| CatalogError::InvalidResponse)?;
                     for suggestion in &mut suggestions {
                         if let Some(suggestion) = suggestion.as_object_mut() {
                             suggestion.insert(
@@ -444,7 +478,14 @@ impl CleanupEnrichmentJobHandler {
                         }
                     }
                     if self
-                        .store_catalog_tags(track, &recording_id, &suggestions, job_id)
+                        .store_catalog_tags(
+                            track,
+                            &recording_id,
+                            &suggestions,
+                            job_id,
+                            catalog.evidence_revision,
+                            vocabulary,
+                        )
                         .await
                         .is_ok()
                     {
@@ -655,6 +696,8 @@ impl CleanupEnrichmentJobHandler {
         recording_id: &str,
         suggestions: &[Value],
         job_id: &str,
+        evidence_revision: i64,
+        vocabulary: &TagVocabularySnapshot,
     ) -> Result<(), CatalogError> {
         let moods = suggestions
             .iter()
@@ -675,8 +718,8 @@ impl CleanupEnrichmentJobHandler {
                 })
                 .collect()
         };
-        let source_signature =
-            metadata_source_signature(track).map_err(|_| CatalogError::InvalidResponse)?;
+        let source_signature = catalog_tag_source_signature(track, evidence_revision)
+            .map_err(|_| CatalogError::InvalidResponse)?;
         let profile = AnalysisWrite {
             track_id: track.id,
             source_signature,
@@ -688,6 +731,8 @@ impl CleanupEnrichmentJobHandler {
             metrics: json!({
                 "schema": CATALOG_TAG_ANALYZER_ID,
                 "recording_mbid": recording_id,
+                "evidence_revision": evidence_revision,
+                "vocabulary_fingerprint": vocabulary.fingerprint,
             })
             .as_object()
             .cloned()

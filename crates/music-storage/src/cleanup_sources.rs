@@ -1,4 +1,4 @@
-use music_application::assistant::{CATALOG_TAG_ANALYZER_ID, EncryptedProviderCredential};
+use music_application::assistant::EncryptedProviderCredential;
 use music_application::cleanup_sources::{CleanupSourceFuture, CleanupSourceRepository};
 use sqlx::Row;
 
@@ -38,19 +38,7 @@ impl CleanupSourceRepository for SqliteStorage {
             .bind(enabled)
             .execute(&mut *transaction)
             .await?;
-            sqlx::query("DELETE FROM cleanup_track_enrichments")
-                .execute(&mut *transaction)
-                .await?;
-            if source_id == "lastfm" {
-                sqlx::query("DELETE FROM track_analysis_tag_reviews WHERE analyzer_id = ?")
-                    .bind(CATALOG_TAG_ANALYZER_ID)
-                    .execute(&mut *transaction)
-                    .await?;
-                sqlx::query("DELETE FROM track_analyses WHERE analyzer_id = ?")
-                    .bind(CATALOG_TAG_ANALYZER_ID)
-                    .execute(&mut *transaction)
-                    .await?;
-            }
+            crate::catalog_evidence::invalidate(&mut transaction).await?;
             transaction.commit().await?;
             Ok(())
         })
@@ -103,7 +91,7 @@ impl CleanupSourceRepository for SqliteStorage {
             .bind(&credential.hint)
             .execute(&mut *transaction)
             .await?;
-            invalidate_source_evidence(&mut transaction, source_id).await?;
+            crate::catalog_evidence::invalidate(&mut transaction).await?;
             transaction.commit().await?;
             Ok(())
         })
@@ -121,32 +109,12 @@ impl CleanupSourceRepository for SqliteStorage {
                 .rows_affected()
                 > 0;
             if deleted {
-                invalidate_source_evidence(&mut transaction, &source_id).await?;
+                crate::catalog_evidence::invalidate(&mut transaction).await?;
             }
             transaction.commit().await?;
             Ok(deleted)
         })
     }
-}
-
-async fn invalidate_source_evidence(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    source_id: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM cleanup_track_enrichments")
-        .execute(&mut **transaction)
-        .await?;
-    if source_id == "lastfm" {
-        sqlx::query("DELETE FROM track_analysis_tag_reviews WHERE analyzer_id = ?")
-            .bind(CATALOG_TAG_ANALYZER_ID)
-            .execute(&mut **transaction)
-            .await?;
-        sqlx::query("DELETE FROM track_analyses WHERE analyzer_id = ?")
-            .bind(CATALOG_TAG_ANALYZER_ID)
-            .execute(&mut **transaction)
-            .await?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

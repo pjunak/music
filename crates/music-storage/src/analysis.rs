@@ -125,6 +125,19 @@ impl LocalAnalysisRepository for SqliteStorage {
             }
             let mut stored = 0_usize;
             for profile in profiles {
+                if analyzer_id == CATALOG_TAG_ANALYZER_ID
+                    && profile
+                        .metrics
+                        .get("evidence_revision")
+                        .and_then(serde_json::Value::as_i64)
+                        != Some(
+                            crate::catalog_evidence::revision(&mut transaction)
+                                .await
+                                .map_err(box_storage)?,
+                        )
+                {
+                    continue;
+                }
                 if !valid_profile(profile) {
                     return Err(box_storage(StorageError::InvalidAssistantRecord(
                         "metadata analysis profile is invalid",
@@ -140,7 +153,17 @@ impl LocalAnalysisRepository for SqliteStorage {
                     continue;
                 };
                 let track = indexed_track_from_row(&row).map_err(box_storage)?;
-                let current_signature = metadata_source_signature(&track).map_err(|_| {
+                let current_signature = if analyzer_id == CATALOG_TAG_ANALYZER_ID {
+                    music_application::assistant::catalog_tag_source_signature(
+                        &track,
+                        crate::catalog_evidence::revision(&mut transaction)
+                            .await
+                            .map_err(box_storage)?,
+                    )
+                } else {
+                    metadata_source_signature(&track)
+                }
+                .map_err(|_| {
                     box_storage(StorageError::InvalidAssistantRecord(
                         "track metadata fingerprint is invalid",
                     ))
@@ -841,7 +864,7 @@ mod tests {
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let (_directory, storage) = storage().await?;
         let track = LibraryRepository::all_tracks(&storage).await?.remove(0);
-        let profile = write(&track)?;
+        let mut profile = write(&track)?;
         assert_eq!(
             LocalAnalysisRepository::store_metadata_analysis(
                 &storage,
@@ -854,12 +877,21 @@ mod tests {
         );
 
         CleanupSourceRepository::set_cleanup_source_enabled(&storage, "lastfm", true).await?;
+        use music_application::cleanup_enrichment::CleanupEnrichmentRepository;
+        profile.metrics.insert(
+            "evidence_revision".to_owned(),
+            serde_json::json!(storage.catalog_evidence_revision().await?),
+        );
+        profile.source_signature = music_application::assistant::catalog_tag_source_signature(
+            &track,
+            storage.catalog_evidence_revision().await?,
+        )?;
         assert_eq!(
             LocalAnalysisRepository::store_metadata_analysis(
                 &storage,
                 CATALOG_TAG_ANALYZER_ID,
                 "catalog-job-enabled",
-                &[profile],
+                std::slice::from_ref(&profile),
             )
             .await?,
             1
@@ -877,6 +909,100 @@ mod tests {
                 .await?
                 .is_empty()
         );
+        CleanupSourceRepository::set_cleanup_source_enabled(&storage, "lastfm", true).await?;
+        assert_eq!(
+            LocalAnalysisRepository::store_metadata_analysis(
+                &storage,
+                CATALOG_TAG_ANALYZER_ID,
+                "stale-worker",
+                &[profile]
+            )
+            .await?,
+            0
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn vocabulary_edit_expires_catalog_reviews_and_keeps_authored_tags()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        use music_application::assistant::{
+            AnalysisReviewDecision, AnalysisReviewFailureCode, AnalysisReviewTarget,
+            AssistantRepository, TagVocabularyRecord, catalog_tag_source_signature,
+            default_vocabulary,
+        };
+        use music_application::cleanup_enrichment::CleanupEnrichmentRepository;
+        let (_directory, storage) = storage().await?;
+        let track = LibraryRepository::all_tracks(&storage).await?.remove(0);
+        let vocabulary = storage
+            .initialize_vocabulary(&TagVocabularyRecord {
+                revision: 1,
+                seed_version: 1,
+                document: default_vocabulary()?,
+            })
+            .await?;
+        storage
+            .patch_tags(&[track.id], &["authored".to_owned()], &[])
+            .await?;
+        storage.set_cleanup_source_enabled("lastfm", true).await?;
+        let revision = storage.catalog_evidence_revision().await?;
+        let mut old = write(&track)?;
+        old.source_signature = catalog_tag_source_signature(&track, revision)?;
+        old.metrics
+            .insert("evidence_revision".to_owned(), serde_json::json!(revision));
+        assert_eq!(
+            storage
+                .store_metadata_analysis(
+                    CATALOG_TAG_ANALYZER_ID,
+                    "first",
+                    std::slice::from_ref(&old)
+                )
+                .await?,
+            1
+        );
+        let review = AnalysisReviewTarget {
+            track_id: track.id,
+            tag: "combat".to_owned(),
+            analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
+            source_signature: old.source_signature.clone(),
+        };
+        let mut document = vocabulary.document;
+        document.groups[0].tags[0]
+            .description
+            .push_str(" Updated meaning.");
+        storage
+            .replace_vocabulary(vocabulary.revision, &document)
+            .await?
+            .ok_or("vocabulary not updated")?;
+        assert_eq!(
+            storage
+                .store_metadata_analysis(
+                    CATALOG_TAG_ANALYZER_ID,
+                    "stale",
+                    std::slice::from_ref(&old)
+                )
+                .await?,
+            0
+        );
+        let revision = storage.catalog_evidence_revision().await?;
+        let mut fresh = old;
+        fresh.source_signature = catalog_tag_source_signature(&track, revision)?;
+        fresh
+            .metrics
+            .insert("evidence_revision".to_owned(), serde_json::json!(revision));
+        assert_eq!(
+            storage
+                .store_metadata_analysis(CATALOG_TAG_ANALYZER_ID, "fresh", &[fresh])
+                .await?,
+            1
+        );
+        let outcome = storage
+            .review_analysis(&[review], AnalysisReviewDecision::Accepted)
+            .await?;
+        assert!(outcome.applied.is_empty());
+        assert_eq!(outcome.failures[0].code, AnalysisReviewFailureCode::Stale);
+        let tracks = AssistantRepository::tracks(&storage).await?;
+        assert_eq!(tracks[0].manual_tags, vec!["authored"]);
         Ok(())
     }
 

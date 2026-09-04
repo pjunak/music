@@ -17,18 +17,21 @@ pub type CleanupEnrichmentFuture<'a, T> =
 #[derive(Debug, Clone, PartialEq)]
 pub struct CleanupEnrichmentRecord {
     pub track_id: TrackId,
+    pub evidence_revision: i64,
     pub source_signature: String,
     pub result: Map<String, Value>,
 }
 
 pub trait CleanupEnrichmentRepository: std::fmt::Debug + Send + Sync {
+    fn catalog_evidence_revision(&self) -> CleanupEnrichmentFuture<'_, i64>;
+
     fn cleanup_enrichment(
         &self,
         track_id: TrackId,
     ) -> CleanupEnrichmentFuture<'_, Option<CleanupEnrichmentRecord>>;
 
     /// Stores a result only while the indexed metadata still has the source
-    /// signature consumed by the connector job.
+    /// signature and catalog evidence revision consumed by the connector job.
     fn store_cleanup_enrichment<'a>(
         &'a self,
         record: &'a CleanupEnrichmentRecord,

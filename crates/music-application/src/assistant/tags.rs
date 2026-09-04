@@ -806,6 +806,17 @@ pub fn audio_source_signature(track: &IndexedTrack) -> Result<String, String> {
     ]))
 }
 
+pub fn catalog_tag_source_signature(
+    track: &IndexedTrack,
+    evidence_revision: i64,
+) -> Result<String, String> {
+    source_signature(&serde_json::json!([
+        CATALOG_TAG_ANALYZER_ID,
+        metadata_source_signature(track)?,
+        evidence_revision,
+    ]))
+}
+
 fn source_signature(value: &Value) -> Result<String, String> {
     serde_json::to_vec(value)
         .map(|encoded| format!("{:x}", Sha256::digest(encoded)))
@@ -873,12 +884,20 @@ pub(super) fn view_for_track(
 ) -> AssistantTrackView {
     let current = current_metadata_analysis(track);
     let mut suggestions = Vec::new();
-    let metadata_signature = metadata_source_signature(&track.track).ok();
     for analysis in &track.analyses {
+        let expected_signature = if analysis.analyzer_id == CATALOG_TAG_ANALYZER_ID {
+            analysis
+                .metrics
+                .get("evidence_revision")
+                .and_then(Value::as_i64)
+                .and_then(|revision| catalog_tag_source_signature(&track.track, revision).ok())
+        } else {
+            metadata_source_signature(&track.track).ok()
+        };
         if !matches!(
             analysis.analyzer_id.as_str(),
             LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID
-        ) || metadata_signature.as_deref() != Some(analysis.source_signature.as_str())
+        ) || expected_signature.as_deref() != Some(analysis.source_signature.as_str())
             || !axes_valid(analysis)
             || analyzer_ids.is_some_and(|ids| !ids.iter().any(|id| id == &analysis.analyzer_id))
         {

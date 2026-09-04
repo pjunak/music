@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 9;
+pub const CURRENT_SCHEMA_VERSION: i64 = 10;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
@@ -24,6 +24,8 @@ const CLEANUP_ENRICHMENTS_SCHEMA_SQL: &str =
     include_str!("../migrations/0008_cleanup_enrichments.sql");
 const CLEANUP_SOURCE_CREDENTIALS_SCHEMA_SQL: &str =
     include_str!("../migrations/0009_cleanup_source_credentials.sql");
+const CATALOG_EVIDENCE_SCHEMA_SQL: &str =
+    include_str!("../migrations/0010_catalog_evidence_revision.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
@@ -84,6 +86,7 @@ pub(crate) fn python_fixture_with_legacy_track_uniqueness(fixture: &str) -> Stri
 }
 
 const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
+    ("cleanup_track_enrichments", "evidence_revision"),
     ("tracks", "display_title"),
     ("tracks", "origin"),
     ("track_analyses", "metrics_json"),
@@ -592,6 +595,9 @@ async fn expected_shape() -> Result<DatabaseShape, StorageError> {
         .execute(&pool)
         .await?;
     sqlx::raw_sql(CLEANUP_SOURCE_CREDENTIALS_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(CATALOG_EVIDENCE_SCHEMA_SQL)
         .execute(&pool)
         .await?;
     let shape = read_shape(&pool).await;
