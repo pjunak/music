@@ -13,8 +13,6 @@ use rand::rngs::OsRng;
 use zeroize::Zeroizing;
 
 const SESSION_TOKEN_BYTES: usize = 48;
-const SESSION_PREFIX_LENGTH: usize = 12;
-const MINIMUM_REVOKE_PREFIX_LENGTH: usize = 8;
 const SECONDS_PER_DAY: i64 = 86_400;
 
 pub type DependencyError = Box<dyn Error + Send + Sync + 'static>;
@@ -108,7 +106,8 @@ pub struct AuthenticatedSession {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StoredSessionSummary {
-    pub token: SecretSessionToken,
+    pub session_id: String,
+    pub is_current: bool,
     pub created_at: UnixSeconds,
     pub expires_at: UnixSeconds,
     pub last_seen: UnixSeconds,
@@ -116,7 +115,7 @@ pub struct StoredSessionSummary {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ActiveSession {
-    pub token_prefix: String,
+    pub session_id: String,
     pub created_at: UnixSeconds,
     pub expires_at: UnixSeconds,
     pub last_seen: UnixSeconds,
@@ -143,7 +142,6 @@ pub enum SessionTouch {
 pub enum RevokeSessionOutcome {
     Revoked,
     Missing,
-    Ambiguous,
 }
 
 pub trait AuthRepository: Send + Sync + 'static {
@@ -170,12 +168,16 @@ pub trait AuthRepository: Send + Sync + 'static {
 
     fn delete_sessions_for_user(&self, user_id: i64) -> AuthFuture<'_, u64>;
 
-    fn list_sessions(&self, user_id: i64) -> AuthFuture<'_, Vec<StoredSessionSummary>>;
-
-    fn revoke_session_prefix<'a>(
+    fn list_sessions<'a>(
         &'a self,
         user_id: i64,
-        token_prefix: &'a str,
+        current_token: &'a str,
+    ) -> AuthFuture<'a, Vec<StoredSessionSummary>>;
+
+    fn revoke_session_id<'a>(
+        &'a self,
+        user_id: i64,
+        session_id: &'a str,
     ) -> AuthFuture<'a, RevokeSessionOutcome>;
 }
 
@@ -361,23 +363,18 @@ where
         current_token: &str,
     ) -> Result<Vec<ActiveSession>, AuthServiceError> {
         self.repository
-            .list_sessions(user_id)
+            .list_sessions(user_id, current_token)
             .await
             .map_err(|source| AuthServiceError::dependency("session listing", source))
             .map(|sessions| {
                 sessions
                     .into_iter()
                     .map(|session| ActiveSession {
-                        token_prefix: session
-                            .token
-                            .expose_secret()
-                            .chars()
-                            .take(SESSION_PREFIX_LENGTH)
-                            .collect(),
+                        session_id: session.session_id,
                         created_at: session.created_at,
                         expires_at: session.expires_at,
                         last_seen: session.last_seen,
-                        is_current: session.token.expose_secret() == current_token,
+                        is_current: session.is_current,
                     })
                     .collect()
             })
@@ -386,13 +383,17 @@ where
     pub async fn revoke_session(
         &self,
         user_id: i64,
-        token_prefix: &str,
+        session_id: &str,
     ) -> Result<RevokeSessionOutcome, AuthServiceError> {
-        if token_prefix.chars().count() < MINIMUM_REVOKE_PREFIX_LENGTH {
-            return Err(AuthServiceError::TokenPrefixTooShort);
+        if session_id.len() != 32
+            || !session_id
+                .bytes()
+                .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value))
+        {
+            return Err(AuthServiceError::InvalidSessionId);
         }
         self.repository
-            .revoke_session_prefix(user_id, token_prefix)
+            .revoke_session_id(user_id, session_id)
             .await
             .map_err(|source| AuthServiceError::dependency("session revocation", source))
     }
@@ -429,7 +430,7 @@ impl AuthClock for SystemAuthClock {
 pub enum AuthServiceError {
     InvalidConfiguration(&'static str),
     InvalidCredentials,
-    TokenPrefixTooShort,
+    InvalidSessionId,
     TimestampOverflow,
     Dependency {
         operation: &'static str,
@@ -450,7 +451,7 @@ impl Display for AuthServiceError {
                 write!(formatter, "invalid authentication configuration: {detail}")
             }
             Self::InvalidCredentials => formatter.write_str("invalid credentials"),
-            Self::TokenPrefixTooShort => formatter.write_str("token prefix too short"),
+            Self::InvalidSessionId => formatter.write_str("invalid session ID"),
             Self::TimestampOverflow => formatter.write_str("session timestamp overflowed"),
             Self::Dependency { operation, .. } => {
                 write!(

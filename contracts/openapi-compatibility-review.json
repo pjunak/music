@@ -1,4 +1,8 @@
 {
+  "GET /api/auth/sessions#responses": {
+    "sha256": "e3c35a44aa35fc6961bbe2a2979f7ab34332482d3ae19b619149c8c24b715754",
+    "reason": "ADR-024 adds the independent session_id. The legacy token_prefix field and delete path remain as aliases for the complete non-secret management ID; partial bearer-token prefixes are no longer accepted. Schema 11 deliberately revokes legacy sessions once. Cookies, auth requirements, timestamps, logout scope and native playback DTOs remain unchanged. Settings now uses session_id."
+  },
   "DELETE /api/library/cleanup/sources/{source_id}/credential#operation": {
     "sha256": "82d00dc215cc191385670aa738c6f75cfe79e23c8f9c73fa4f41a7ca2d508cb3",
     "reason": "Catalog credential removal is an authenticated extension added after the frozen v1 reference."

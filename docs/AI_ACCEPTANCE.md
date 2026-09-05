@@ -1,17 +1,38 @@
 # AI and playback acceptance after the quality audit
 
-This is the remaining operator validation plan after the fixes described in
+This is the remaining validation plan, with responsibilities split below, after the fixes described in
 [ADR-017](ADR-017-assistant-planning-and-evidence-provenance.md). Automated tests use
 synthetic data and local fixtures; they do not establish physical playback or model
 quality on a private library.
 
+## Who does what
+
+| Work | Codex owns | Operator owns |
+|---|---|---|
+| Code fixes and cleanup | Implementation, regression tests, documentation, local gates, commits, and a clear remaining list. | Product preferences when a real trade-off needs a decision. No coding required. |
+| Docker/release checks | Build and run the verification script when a Docker host is accessible; diagnose and fix failures. | Provide the host/access or run the supplied commands there. Approve production deployment separately. Docker is unavailable in the current workspace environment. |
+| Representative database migration | Prepare the isolated test, run it on an approved copy, compare preserved data, and diagnose failures. | Supply or authorize the particular representative copy. Keep production untouched until acceptance. |
+| Phone and speaker acceptance | Prepare exact actions, inspect logs, and fix failures. | Operate the physical phone and confirm what actually plays or stops. |
+| Chosen-model tests | Run and analyze the existing full suites once the environment and disclosed run are authorized; fix harness defects without lowering the gates. | Keep the chosen provider/model/Thinking, authorize the disclosed provider requests and any private metadata scope. |
+| Suggestion usefulness | Prepare a small review set and summarize corrections and failure patterns. | Judge whether tags, playlist choices, and EQ suggestions are useful for the intended scenes. Codex must not invent independent human labels. |
+
+The audit implementation phase has a finite exit: the approved hardening is
+implemented, local gates pass, release acceptance is recorded, and each AI role
+being enabled passes its current full suite and a small review-only trial. Fix
+demonstrated failures. A larger research corpus, scheduler redesign, or new feature
+is not required to finish this phase. Bounded code cleanup remains Codex-owned in
+[TODO.md](../TODO.md); new features are deferred.
+
 ## Release acceptance
 
 1. Start the candidate against a copy of a representative database. Keep the
-   migration's verified backup. Confirm schema 10, preserved manual tags, expired
+   migration's verified backup. Confirm schema 11, preserved manual tags, expired
    legacy catalog proposals, and successful new proposal generation. The typed
    connector update changes catalog evidence signatures again; old generated
    proposals become stale while accepted/manual tags remain unchanged.
+   Schema 11 revokes legacy logins once; sign in again on the browser and Baton.
+   Confirm Settings identifies the current session, can revoke another session,
+   and leaves the current one usable. Accounts and authored data must survive.
 2. With a physical Android phone selected, play music and overlapping SFX. Select
    another output from the browser. Both phone lanes must stop; newly fired SFX
    must remain silent. Select the phone again and confirm normal playback.
@@ -25,6 +46,9 @@ quality on a private library.
 5. Build the release image on a Docker host and run the existing image verification
    script. Exercise authenticated web/Baton registration, reconnect, transport,
    queue, device selection, and output volume against that image.
+   Confirm same-origin browser sockets connect through the actual proxy and Baton
+   reconnects after sign-in. If the proxy rewrites Host, configure the public
+   browser origin in `ALLOWED_ORIGINS`; do not trust forwarded headers implicitly.
 6. Generate a small current model-tag scope, open its pending review list, accept
    one explicit suggestion, reject another, and reopen a decision. Accepted manual
    tags must survive rejection/reopening. Change a vocabulary definition or model
@@ -34,8 +58,12 @@ quality on a private library.
 
 ## Provider acceptance
 
-Use the operator's selected connection, model, and Thinking setting. Re-run role
-conformance and the complete quality suite after deploying changed runtime code.
+Use the operator's selected connection, model, and Thinking setting. Run role
+conformance and the complete quality suite for the current role fingerprint.
+Changes to the provider, harness, task contract, or relevant vocabulary can make
+earlier results stale; unrelated authentication changes do not themselves require
+new model certification. Pending tests from the earlier Assistant changes still
+need to be completed before enabling those roles.
 Retests of failed cases remain diagnostic and cannot replace full certification.
 Do not lower thresholds or remove required concepts to make a model pass.
 
@@ -61,7 +89,9 @@ with provider-side records before deliberately starting another paid run.
 
 ## Held-out quality study
 
-Create a versioned set of 100–200 independently labelled, permitted examples covering
+Start with a small permitted sample that the operator can review meaningfully.
+Expand to a versioned set of 100–200 independently labelled examples if stronger
+quality comparisons are needed; the larger study is optional. Cover
 ambiguous metadata, misleading titles, mixed genres, sparse metadata, and incomplete
 local context. Keep titles and paths out of the provider payload. Store labels
 separately from prompts; do not tune prompts against the held-out split.

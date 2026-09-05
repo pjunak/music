@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
@@ -10,6 +11,7 @@ vi.mock("@/core/api", async (importActual) => {
     authApi: {
       ...actual.authApi,
       listSessions: vi.fn(),
+      revokeSession: vi.fn(),
     },
     devicesApi: {
       ...actual.devicesApi,
@@ -18,6 +20,10 @@ vi.mock("@/core/api", async (importActual) => {
   };
 });
 
+vi.mock("@/components/confirmDialog", () => ({ confirmDialog: vi.fn() }));
+vi.mock("@/core/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+import { confirmDialog } from "@/components/confirmDialog";
 import { authApi, devicesApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 
@@ -34,6 +40,23 @@ beforeEach(() => {
 });
 
 describe("SettingsView", () => {
+  it("revokes the complete management ID while protecting the current session", async () => {
+    const currentId = "a".repeat(32);
+    const otherId = "b".repeat(32);
+    vi.mocked(authApi.listSessions).mockResolvedValue([
+      { session_id: currentId, token_prefix: currentId, created_at: "2026-09-05T12:00:00Z", expires_at: "2026-10-05T12:00:00Z", last_seen: "2026-09-05T12:00:00Z", is_current: true },
+      { session_id: otherId, token_prefix: otherId, created_at: "2026-09-05T11:00:00Z", expires_at: "2026-10-05T11:00:00Z", last_seen: "2026-09-05T11:00:00Z", is_current: false },
+    ]);
+    vi.mocked(confirmDialog).mockResolvedValue(true);
+    vi.mocked(authApi.revokeSession).mockResolvedValue(undefined);
+    render(<SettingsView />);
+    const buttons = await screen.findAllByRole("button", { name: "Revoke" });
+    expect(buttons[0]).toBeDisabled();
+    await userEvent.click(buttons[1]);
+    await waitFor(() => expect(authApi.revokeSession).toHaveBeenCalledExactlyOnceWith(otherId));
+    expect(authApi.revokeSession).not.toHaveBeenCalledWith(otherId.slice(0, 12));
+  });
+
   it("presents desktop settings as one structured workspace", async () => {
     const { container } = render(<SettingsView />);
 

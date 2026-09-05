@@ -4,7 +4,7 @@
   "reference_operation_count": 144,
   "candidate_operation_count": 150,
   "matched_operation_count": 144,
-  "fully_compatible_operation_count": 139,
+  "fully_compatible_operation_count": 138,
   "missing_operations": [],
   "candidate_only_operations": [
     "DELETE /api/library/cleanup/sources/{source_id}/credential",
@@ -24,6 +24,7 @@
   "response_mismatches": [
     "GET /api/assistant/library-tags",
     "GET /api/assistant/library-tags/model-status",
+    "GET /api/auth/sessions",
     "POST /api/assistant/library-tags/model-plan",
     "POST /api/assistant/library-tags/query"
   ],
@@ -33,6 +34,7 @@
     "GET /api/assistant/library-tags#parameters": "627083d7c8b115ca0a62a96472da8eb3e29185e9314437422750455f244b3db4",
     "GET /api/assistant/library-tags#responses": "67847288b9202bf4957b298713f8a3fd955ad854254e4495349a03f7c3fe82f9",
     "GET /api/assistant/library-tags/model-status#responses": "870d2854be0a91e0f06e2f455d6cc8d2a89956798e43f85af2db1a06049689cb",
+    "GET /api/auth/sessions#responses": "e3c35a44aa35fc6961bbe2a2979f7ab34332482d3ae19b619149c8c24b715754",
     "GET /api/library/cleanup/sources#operation": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
     "GET /api/readiness#operation": "f208f591e599c6518d305726c2434464a6143ff3794a58a658485c9ec03006fb",
     "POST /api/assistant/library-tags/model-jobs#request_body": "e9a37f7f24120da9e0fcc2e9b4bc747f4d694431855442045b89663bf748d765",

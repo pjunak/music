@@ -50,6 +50,7 @@ const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-poli
 
 #[derive(Debug, Clone)]
 pub(crate) struct HttpState {
+    pub(crate) websocket_origin: crate::websocket_origin::WebsocketOriginPolicy,
     pub(crate) health: HealthRegistry,
     pub(crate) shutdown: CancellationToken,
     pub(crate) assistant: Option<Arc<AssistantService>>,
@@ -126,6 +127,7 @@ pub fn build_router(config: &AppConfig, services: RuntimeServices) -> Result<Rou
     build_router_inner(
         config,
         HttpState {
+            websocket_origin: crate::websocket_origin::WebsocketOriginPolicy::from_config(config),
             health: services.health,
             shutdown: services.shutdown,
             assistant: Some(services.assistant),
@@ -152,6 +154,7 @@ fn build_router_without_playback(
     build_router_inner(
         config,
         HttpState {
+            websocket_origin: crate::websocket_origin::WebsocketOriginPolicy::from_config(config),
             health,
             shutdown: CancellationToken::new(),
             assistant: None,
@@ -476,6 +479,38 @@ mod tests {
     async fn body_text(response: Response) -> Result<String, Box<dyn Error>> {
         let body = to_bytes(response.into_body(), 1024 * 1024).await?;
         Ok(String::from_utf8(body.to_vec())?)
+    }
+
+    #[tokio::test]
+    async fn websocket_origin_is_checked_even_when_playback_is_unavailable()
+    -> Result<(), Box<dyn Error>> {
+        let config = test_config(&[])?;
+        let router = build_router(&config, HealthRegistry::new())?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
+                .await
+        });
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = format!("ws://{address}/api/ws").into_client_request()?;
+        request.headers_mut().insert(
+            "origin",
+            HeaderValue::from_static("https://unapproved.example"),
+        );
+        match tokio_tungstenite::connect_async(request).await {
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                assert_eq!(response.status(), StatusCode::FORBIDDEN)
+            }
+            _ => return Err("unavailable branch skipped Origin enforcement".into()),
+        }
+        let _ = stop.send(());
+        server.await??;
+        Ok(())
     }
 
     #[tokio::test]

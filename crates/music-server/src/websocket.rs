@@ -116,6 +116,14 @@ pub async fn websocket_upgrade(
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
+    if !state.websocket_origin.allows(&headers) {
+        return crate::error::ApiError::coded(
+            axum::http::StatusCode::FORBIDDEN,
+            "websocket_origin_denied",
+            "The WebSocket origin is not allowed.",
+        )
+        .into_response();
+    }
     let Some(playback) = state.playback.clone() else {
         return upgrade.on_upgrade(unavailable_session).into_response();
     };
@@ -1890,6 +1898,78 @@ mod tests {
             "WebSocket did not publish {description} within eight messages"
         ))
         .into())
+    }
+
+    #[tokio::test]
+    async fn websocket_origin_gate_preserves_native_and_allowed_browsers_and_rejects_cookie_requests()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let token = "synthetic-origin-test-session";
+        seed_session(directory.path(), token).await?;
+        let mut config = runtime_config(directory.path())?;
+        config.allowed_origins = vec!["https://controller.example".to_owned()];
+        let runtime = AppRuntime::start(config).await?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server = tokio::spawn(runtime.run(listener, async move {
+            let _ = shutdown_rx.await;
+            Ok(())
+        }));
+        let url = format!("ws://{address}/api/ws");
+        let same_origin = format!("http://{address}");
+        for origin in [
+            None,
+            Some(same_origin.as_str()),
+            Some("https://controller.example"),
+        ] {
+            let mut request = url.as_str().into_client_request()?;
+            request.headers_mut().insert(
+                COOKIE,
+                HeaderValue::from_str(&format!("music_session={token}"))?,
+            );
+            if let Some(origin) = origin {
+                request
+                    .headers_mut()
+                    .insert("origin", HeaderValue::from_str(origin)?);
+            }
+            let (mut socket, response) = connect_async(request).await?;
+            assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+            assert!(matches!(
+                next_protocol_message(&mut socket).await?,
+                ServerMessage::StateSnapshot { .. }
+            ));
+            socket.close(None).await?;
+        }
+        for origins in [
+            vec!["https://unapproved.example"],
+            vec!["null"],
+            vec![""],
+            vec!["https://controller.example/path"],
+            vec!["https://controller.example@unapproved.example"],
+            vec!["https://controller.example https://unapproved.example"],
+            vec!["https://controller.example", "https://unapproved.example"],
+        ] {
+            let mut request = url.as_str().into_client_request()?;
+            request.headers_mut().insert(
+                COOKIE,
+                HeaderValue::from_str(&format!("music_session={token}"))?,
+            );
+            for origin in origins {
+                request
+                    .headers_mut()
+                    .append("origin", HeaderValue::from_str(origin)?);
+            }
+            match connect_async(request).await {
+                Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+                }
+                _ => return Err("unapproved Origin was not rejected before upgrade".into()),
+            }
+        }
+        let _ = shutdown_tx.send(());
+        server.await??;
+        Ok(())
     }
 
     #[tokio::test]

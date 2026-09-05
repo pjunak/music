@@ -218,6 +218,8 @@ impl From<UserInfo> for UserInfoResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 struct ActiveSessionResponse {
+    session_id: String,
+    /// Deprecated name for the same opaque management ID; never a bearer-token prefix.
     token_prefix: String,
     #[schema(format = DateTime)]
     created_at: String,
@@ -233,7 +235,8 @@ impl TryFrom<ActiveSession> for ActiveSessionResponse {
 
     fn try_from(session: ActiveSession) -> Result<Self, Self::Error> {
         Ok(Self {
-            token_prefix: session.token_prefix,
+            token_prefix: session.session_id.clone(),
+            session_id: session.session_id,
             created_at: format_rfc3339(session.created_at)?,
             expires_at: format_rfc3339(session.expires_at)?,
             last_seen: format_rfc3339(session.last_seen)?,
@@ -372,7 +375,7 @@ async fn list_sessions(
 #[utoipa::path(
     delete,
     path = "/auth/sessions/{token_prefix}",
-    params(("token_prefix" = String, Path, description = "Unique session token prefix")),
+    params(("token_prefix" = String, Path, description = "Exact opaque session ID (legacy parameter name)")),
     responses(
         (status = 204, description = "Successful Response"),
         (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
@@ -382,23 +385,18 @@ async fn list_sessions(
 async fn revoke_session(
     State(state): State<HttpState>,
     headers: HeaderMap,
-    Path(token_prefix): Path<String>,
+    Path(session_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let auth = state.auth.ok_or_else(ApiError::service_unavailable)?;
     match auth
         .service
-        .revoke_session(current.user.id, &token_prefix)
+        .revoke_session(current.user.id, &session_id)
         .await
     {
         Ok(RevokeSessionOutcome::Revoked) => Ok(axum::http::StatusCode::NO_CONTENT.into_response()),
         Ok(RevokeSessionOutcome::Missing) => Err(ApiError::plain_not_found("no matching session")),
-        Ok(RevokeSessionOutcome::Ambiguous) => Err(ApiError::conflict(
-            "prefix matches multiple sessions; pass a longer prefix",
-        )),
-        Err(AuthServiceError::TokenPrefixTooShort) => {
-            Err(ApiError::bad_request("token prefix too short"))
-        }
+        Err(AuthServiceError::InvalidSessionId) => Err(ApiError::bad_request("invalid session ID")),
         Err(error) => {
             tracing::error!(error = %error, "session revocation failed");
             Err(ApiError::internal())
@@ -686,7 +684,82 @@ mod tests {
         let sessions = body_json(sessions).await?;
         assert_eq!(sessions.as_array().map(Vec::len), Some(1));
         assert_eq!(sessions[0]["is_current"], true);
-        assert_eq!(sessions[0]["token_prefix"].as_str().map(str::len), Some(12));
+        assert_eq!(sessions[0]["session_id"].as_str().map(str::len), Some(32));
+        assert_eq!(sessions[0]["token_prefix"], sessions[0]["session_id"]);
+
+        let session_id = sessions[0]["session_id"]
+            .as_str()
+            .ok_or("missing session ID")?;
+        let forged = router
+            .clone()
+            .oneshot(
+                Request::get("/api/auth/me")
+                    .header(COOKIE, format!("test_session={session_id}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(forged.status(), StatusCode::UNAUTHORIZED);
+        let short_id = router
+            .clone()
+            .oneshot(
+                Request::delete(format!("/api/auth/sessions/{}", &session_id[..12]))
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(short_id.status(), StatusCode::BAD_REQUEST);
+
+        let second_login = router
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"operator","password":"correct-password"}"#,
+                    ))?,
+            )
+            .await?;
+        assert_eq!(second_login.status(), StatusCode::OK);
+        let second_cookie = second_login.headers()[SET_COOKIE]
+            .to_str()?
+            .split(';')
+            .next()
+            .ok_or("missing second cookie")?
+            .to_owned();
+        let both = router
+            .clone()
+            .oneshot(
+                Request::get("/api/auth/sessions")
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let both = body_json(both).await?;
+        let other = both
+            .as_array()
+            .ok_or("missing sessions")?
+            .iter()
+            .find(|session| session["is_current"] == false)
+            .ok_or("missing other session")?;
+        let other_id = other["session_id"].as_str().ok_or("missing other ID")?;
+        let revoked = router
+            .clone()
+            .oneshot(
+                Request::delete(format!("/api/auth/sessions/{other_id}"))
+                    .header(COOKIE, &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
+        let rejected = router
+            .clone()
+            .oneshot(
+                Request::get("/api/auth/me")
+                    .header(COOKIE, second_cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
 
         let logout = router
             .clone()

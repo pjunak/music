@@ -131,6 +131,16 @@ Runtime data lives outside the image.
   login state; do not reintroduce redirect loops or a full-shell auth block.
 - Sessions are opaque, random, database-backed tokens. Do not add a signing
   secret or hard-code the cookie name.
+- Store only domain-separated session hashes and independent random management
+  IDs. Never authenticate a hash or management ID or reintroduce plaintext-token
+  fallback. Schema 11 deliberately revokes legacy sessions after a verified backup.
+  The legacy `token_prefix` response field aliases the complete management ID;
+  revocation requires that exact ID. Preserve configured cookies and logout scope.
+- Check browser WebSocket Origin before every upgrade, including unavailable
+  playback. Accept the Host origin using the public scheme declared by
+  `SESSION_COOKIE_SECURE`, or an explicit `ALLOWED_ORIGINS` entry. Reject malformed
+  or multiple Origin values; absent Origin remains valid for native clients.
+  Do not infer a trusted proxy from forwarded headers.
 
 ## Library and filesystem safety
 

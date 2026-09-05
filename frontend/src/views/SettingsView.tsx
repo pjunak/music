@@ -374,9 +374,9 @@ function ActiveSessionsPanel() {
       tone: "danger",
     });
     if (!ok) return;
-    setBusy(s.token_prefix);
+    setBusy(s.session_id);
     try {
-      await authApi.revokeSession(s.token_prefix);
+      await authApi.revokeSession(s.session_id);
       toast.success("Session revoked");
       await refresh();
     } catch (e) {
@@ -406,10 +406,10 @@ function ActiveSessionsPanel() {
       ) : (
         <ul className="simple-list">
           {sessions.map((s) => (
-            <li key={s.token_prefix}>
+            <li key={s.session_id}>
               <div className="entity-row-main">
                 <div>
-                  <code>{s.token_prefix}…</code>
+                  <code>{s.session_id.slice(0, 12)}…</code>
                   {s.is_current ? (
                     <span className="badge badge-accent"> this device</span>
                   ) : null}
@@ -423,7 +423,7 @@ function ActiveSessionsPanel() {
               <button
                 type="button"
                 className="btn-danger"
-                disabled={s.is_current || busy === s.token_prefix}
+                disabled={s.is_current || busy === s.session_id}
                 onClick={() => void revoke(s)}
                 title={
                   s.is_current
@@ -431,7 +431,7 @@ function ActiveSessionsPanel() {
                     : "Revoke this session"
                 }
               >
-                {busy === s.token_prefix ? "…" : "Revoke"}
+                {busy === s.session_id ? "…" : "Revoke"}
               </button>
             </li>
           ))}

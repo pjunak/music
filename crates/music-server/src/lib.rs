@@ -41,6 +41,7 @@ mod sfx;
 mod storage_admin;
 mod supervisor;
 mod websocket;
+mod websocket_origin;
 
 pub use admin::{
     BackupError, RestoreOptions, RestoreOutcome, RestoreRecoveryOutcome,

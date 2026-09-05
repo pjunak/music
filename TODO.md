@@ -3,7 +3,28 @@
 Only actionable, deliberately deferred work belongs here. Completed items are
 deleted; accepted product/security decisions live in `README.md` or `AGENTS.md`.
 
-## Next
+## Scope and ownership
+
+The remaining operator checks and ownership split are in
+[the acceptance plan](docs/AI_ACCEPTANCE.md). These engineering items do not require
+the operator to write code or design tests. Session storage and WebSocket Origin
+hardening are complete; their deployment checks are in that plan. New features
+remain deferred while the bounded cleanup below is completed.
+
+## Cleanup — Codex owns bounded follow-up batches
+
+Completed schema derivation, typed catalog orchestration, provider attempt records,
+model-tag review, review metrics, playlist vocabulary recall, and job timing
+diagnostics are deliberately absent from this backlog.
+
+| Area | Purpose | Bounded next change |
+|---|---|---|
+| Generated-tag bulk review | Make stale checks, limits, and decisions easier to inspect without splitting the atomic write. | Extract pure review planning; preserve partial-result and stale-review tests. |
+| Authoring import commit | Make dependency validation and resource creation easier to maintain. | Extract resource-specific helpers under the existing preview/selection contract. |
+| Library cleanup apply/revert | Make each filesystem operation and its recovery obligations explicit. | Extract typed operation helpers while retaining journal and rollback behavior. |
+| Feature CSS | Reduce accidental coupling during later UI changes. | Move coherent feature rules when ownership is clear; preserve appearance and existing UI checks. |
+
+## Conditional cleanup
 
 - **Remove the SPA end-of-track stall backstop.** The server-side advancer has
   existed since 2026-07-08. Once its production behavior is confirmed, delete
@@ -11,31 +32,18 @@ deleted; accepted product/security decisions live in `README.md` or `AGENTS.md`.
   `frontend/src/core/playbackEngine.ts`. Preserve the low-latency `ended` → skip
   path.
 
-## Hardening
-
-- **Hash session tokens at rest.** This requires replacing the Settings UI's
-  token-prefix identity with a separate stable session identifier.
-- **Validate WebSocket origins.** Add an allowlist check as defense in depth on
-  top of SameSite cookies and the guest mutation gate.
 - **Pin container bases and CI actions by digest** if supply-chain
   reproducibility becomes more important than automatic patch updates.
+- **Provider queue fairness.** If quick drafts wait unacceptably behind bulk work,
+  use the existing timing diagnostics and implement bounded request scheduling.
+  No scheduler redesign or formal load study is required just to close this audit.
+- **Intermittent WebSocket timeout.** Investigate if it recurs; retain phase labels
+  and existing assertions. Do not treat a non-reproducing test failure as an ongoing
+  implementation task.
+- **Shared proposal provenance.** Unify model/catalog presentation only if the
+  existing review workflows demonstrate a concrete benefit.
 
-## Code health priorities
-
-Updated after the 2026-09-05 audit implementation. Preserve strict validation and
-transaction ownership during these follow-ups. Operator acceptance and held-out
-model evaluation are tracked in [the validation plan](docs/AI_ACCEPTANCE.md).
-
-| Area | Remaining risk | Next safe slice |
-|---|---|---|
-| Task result schemas | Static schema structure is authored separately from strict Serde result types. | Derive static structure and retain dynamic identifier/bounds validation; test adversarial schema/validator agreement. |
-| Catalog orchestration | Connector policy and mapping still live in the server enrichment module. | Move use cases behind typed catalog ports, following the model-job transport boundary. |
-| Generated-tag bulk review | Storage `review_analysis` combines stale checks, per-track limits, review transitions, and manual-tag writes. | Separate pure validation/planning from the single write transaction; preserve partial-result and stale-review tests. |
-| Authoring import commit | The authoring commit service validates dependencies and coordinates resource writers. | Extract resource-specific helpers behind the existing preview/selection/dependency contract. |
-| Library cleanup apply/revert | File and metadata mutation branches must preserve recovery and drift handling. | Extract one typed operation handler at a time, retaining the journal format and rollback tests. |
-| Provider attempt outcomes and queue fairness | Timeouts do not prove a request was unsent; long jobs can delay interactive drafts. | Record explicit attempt states and measure queue delay before changing scheduling or retry policy. |
-
-## Future feature
+## New features — deferred by the operator
 
 - **Specialized model audio analysis.** Choose a concrete provider protocol,
   then add a bounded `audio-input/v1` adapter, explicit file disclosure and

@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 10;
+pub const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
@@ -26,6 +26,7 @@ const CLEANUP_SOURCE_CREDENTIALS_SCHEMA_SQL: &str =
     include_str!("../migrations/0009_cleanup_source_credentials.sql");
 const CATALOG_EVIDENCE_SCHEMA_SQL: &str =
     include_str!("../migrations/0010_catalog_evidence_revision.sql");
+const HASHED_SESSIONS_SCHEMA_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
@@ -250,7 +251,7 @@ pub(crate) async fn inspect_pool(
     pool: &SqlitePool,
     database_exists: bool,
 ) -> Result<SchemaReport, StorageError> {
-    let expected = expected_shape().await?;
+    let (expected, legacy_sessions) = expected_shape().await?;
     let actual = read_shape(pool).await?;
     let sqlite_version = sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
         .fetch_one(pool)
@@ -347,6 +348,19 @@ pub(crate) async fn inspect_pool(
             );
             continue;
         };
+
+        // Only the exact historical table may take the deliberate session-reset
+        // migration. Other column/constraint drift must still fail inspection.
+        if table_name == "auth_sessions" && actual_table == &legacy_sessions {
+            requires_migration = true;
+            issue(
+                &mut issues,
+                SchemaIssueLevel::Warning,
+                "legacy_plaintext_sessions",
+                "migration revokes existing sessions; clients must sign in again",
+            );
+            continue;
+        }
 
         for column in actual_table.columns.keys() {
             if !expected_table.columns.contains_key(column) {
@@ -567,7 +581,7 @@ fn empty_report(database_exists: bool) -> SchemaReport {
     }
 }
 
-async fn expected_shape() -> Result<DatabaseShape, StorageError> {
+async fn expected_shape() -> Result<(DatabaseShape, TableShape), StorageError> {
     let options = SqliteConnectOptions::new()
         .in_memory(true)
         .foreign_keys(true);
@@ -600,9 +614,21 @@ async fn expected_shape() -> Result<DatabaseShape, StorageError> {
     sqlx::raw_sql(CATALOG_EVIDENCE_SCHEMA_SQL)
         .execute(&pool)
         .await?;
+    let legacy = read_shape(&pool).await?;
+    let legacy_sessions =
+        legacy
+            .tables
+            .get("auth_sessions")
+            .cloned()
+            .ok_or(StorageError::InvalidOption(
+                "baseline auth table is missing",
+            ))?;
+    sqlx::raw_sql(HASHED_SESSIONS_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
     let shape = read_shape(&pool).await;
     pool.close().await;
-    shape
+    shape.map(|shape| (shape, legacy_sessions))
 }
 
 async fn read_shape(pool: &SqlitePool) -> Result<DatabaseShape, StorageError> {

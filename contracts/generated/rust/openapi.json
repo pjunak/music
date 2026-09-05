@@ -36,11 +36,16 @@
             "format": "date-time",
             "type": "string"
           },
+          "session_id": {
+            "type": "string"
+          },
           "token_prefix": {
+            "description": "Deprecated name for the same opaque management ID; never a bearer-token prefix.",
             "type": "string"
           }
         },
         "required": [
+          "session_id",
           "token_prefix",
           "created_at",
           "expires_at",
@@ -9681,7 +9686,7 @@
         "operationId": "revoke_session",
         "parameters": [
           {
-            "description": "Unique session token prefix",
+            "description": "Exact opaque session ID (legacy parameter name)",
             "in": "path",
             "name": "token_prefix",
             "required": true,

@@ -5,7 +5,6 @@ use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use axum::http::Uri;
 use music_storage::SecretString;
 
 const DEFAULT_DATABASE_URL: &str = "sqlite:///./app.db";
@@ -441,20 +440,12 @@ fn parse_origins(configured: &str) -> Result<Vec<String>, ConfigError> {
         .filter(|origin| !origin.is_empty())
         .map(|origin| {
             let normalized = origin.strip_suffix('/').unwrap_or(origin);
-            let uri: Uri = normalized.parse().map_err(|_| {
-                ConfigError::invalid("ALLOWED_ORIGINS", "comma-separated HTTP(S) origins")
-            })?;
-            let valid_scheme = matches!(uri.scheme_str(), Some("http" | "https"));
-            let valid_authority = uri
-                .authority()
-                .is_some_and(|authority| !authority.as_str().contains('@'));
-            if !valid_scheme || !valid_authority || uri.path() != "/" || uri.query().is_some() {
-                return Err(ConfigError::invalid(
+            crate::websocket_origin::canonical_origin(normalized).ok_or_else(|| {
+                ConfigError::invalid(
                     "ALLOWED_ORIGINS",
                     "comma-separated HTTP(S) origins without paths",
-                ));
-            }
-            Ok(normalized.to_owned())
+                )
+            })
         })
         .collect()
 }

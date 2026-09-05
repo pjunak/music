@@ -934,6 +934,8 @@ export const assistantApi = {
 };
 
 export interface ActiveSession {
+  session_id: string;
+  /** Deprecated alias of session_id; contains no bearer-token material. */
   token_prefix: string;
   created_at: string;
   expires_at: string;
@@ -943,9 +945,9 @@ export interface ActiveSession {
 
 export const authApi = {
   listSessions: () => api.get<ActiveSession[]>("/api/auth/sessions"),
-  revokeSession: (tokenPrefix: string) =>
+  revokeSession: (sessionId: string) =>
     api.delete<void>(
-      `/api/auth/sessions/${encodeURIComponent(tokenPrefix)}`,
+      `/api/auth/sessions/${encodeURIComponent(sessionId)}`,
     ),
 };
 

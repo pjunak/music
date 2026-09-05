@@ -30,6 +30,7 @@ const CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL: &str =
     include_str!("../migrations/0009_cleanup_source_credentials.sql");
 const CATALOG_EVIDENCE_MIGRATION_SQL: &str =
     include_str!("../migrations/0010_catalog_evidence_revision.sql");
+const HASHED_SESSIONS_MIGRATION_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
 
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
@@ -273,6 +274,13 @@ fn migrator() -> Migrator {
             "catalog evidence provenance".into(),
             MigrationType::Simple,
             CATALOG_EVIDENCE_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            11,
+            "hashed sessions and independent management IDs".into(),
+            MigrationType::Simple,
+            HASHED_SESSIONS_MIGRATION_SQL.into_sql_str(),
             false,
         ),
     ])
@@ -528,6 +536,8 @@ mod tests {
 
     #[test]
     fn embedded_migration_is_cross_platform_stable() {
+        assert!(!super::HASHED_SESSIONS_MIGRATION_SQL.contains('\r'));
+        assert!(migrator().version_exists(11));
         assert_eq!(BASELINE_MIGRATION_VERSION, 1);
         assert!(!BASELINE_MIGRATION_SQL.contains('\r'));
         assert!(migrator().version_exists(BASELINE_MIGRATION_VERSION));
@@ -557,5 +567,142 @@ mod tests {
         assert!(migrator().version_exists(CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION));
         assert!(!super::CATALOG_EVIDENCE_MIGRATION_SQL.contains('\r'));
         assert!(migrator().version_exists(10));
+    }
+
+    async fn version_ten_fixture(
+        path: &std::path::Path,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(true),
+            )
+            .await?;
+        let old = sqlx::migrate::Migrator::with_migrations(
+            migrator()
+                .iter()
+                .filter(|migration| migration.version <= 10)
+                .cloned()
+                .collect(),
+        );
+        old.run(&pool).await?;
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'operator', 'preserved-password-hash', '2026-09-05 12:00:00')").execute(&pool).await?;
+        sqlx::query("INSERT INTO auth_sessions VALUES ('unexpired-legacy-bearer-secret', 1, '2026-09-05 12:00:00', '2100-01-01 00:00:00', '2026-09-05 12:00:00')").execute(&pool).await?;
+        pool.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn session_migration_revokes_unexpired_legacy_tokens_and_preserves_backup_and_accounts()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::{SqliteStorage, SqliteStorageOptions, inspect_database};
+        use music_application::auth::{AuthRepository, SessionLookup, SessionTouch, UnixSeconds};
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("app.db");
+        version_ten_fixture(&path).await?;
+        let before = inspect_database(&path).await?;
+        assert!(before.is_compatible());
+        assert!(
+            before
+                .issues
+                .iter()
+                .any(|issue| issue.code == "legacy_plaintext_sessions")
+        );
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(&path)).await?;
+        assert_eq!(
+            storage.migration_outcome().schema_after.migration_version,
+            Some(11)
+        );
+        let backup = storage
+            .migration_outcome()
+            .backup
+            .as_ref()
+            .ok_or("missing backup")?;
+        let backup_bytes = std::fs::read(&backup.database_path)?;
+        let legacy_token = "unexpired-legacy-bearer-secret";
+        assert!(
+            backup_bytes
+                .windows(legacy_token.len())
+                .any(|window| window == legacy_token.as_bytes())
+        );
+        assert_eq!(
+            storage
+                .lookup_session(
+                    legacy_token,
+                    UnixSeconds::new(1_800_000_000),
+                    SessionTouch::PreserveLastSeen,
+                    std::time::Duration::from_secs(60)
+                )
+                .await?,
+            SessionLookup::Missing
+        );
+        let user = storage
+            .find_user_by_username("operator")
+            .await?
+            .ok_or("user missing")?;
+        assert_eq!(user.password_hash.as_str(), "preserved-password-hash");
+        storage
+            .create_session(
+                1,
+                "fresh-bearer-cookie",
+                UnixSeconds::new(1_800_000_000),
+                UnixSeconds::new(1_900_000_000),
+            )
+            .await?;
+        assert!(matches!(
+            storage
+                .lookup_session(
+                    "fresh-bearer-cookie",
+                    UnixSeconds::new(1_800_000_001),
+                    SessionTouch::PreserveLastSeen,
+                    std::time::Duration::from_secs(60)
+                )
+                .await?,
+            SessionLookup::Authenticated { .. }
+        ));
+        storage.close().await;
+        drop(storage);
+        let reopened = SqliteStorage::open(SqliteStorageOptions::new(&path)).await?;
+        assert!(!reopened.migration_outcome().migration_applied);
+        assert_eq!(
+            reopened
+                .list_sessions(1, "fresh-bearer-cookie")
+                .await?
+                .len(),
+            1
+        );
+        reopened.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn session_migration_refuses_legacy_shape_drift_or_a_current_ledger_with_legacy_tokens()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        for mismatch in [
+            "ALTER TABLE auth_sessions ADD COLUMN unexpected TEXT",
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (11, 'synthetic drift', 1, X'00', 0)",
+        ] {
+            let directory = tempfile::tempdir()?;
+            let path = directory.path().join("app.db");
+            version_ten_fixture(&path).await?;
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(SqliteConnectOptions::new().filename(&path))
+                .await?;
+            sqlx::raw_sql(sqlx::AssertSqlSafe(mismatch))
+                .execute(&pool)
+                .await?;
+            pool.close().await;
+            assert!(!crate::inspect_database(&path).await?.is_compatible());
+            assert!(matches!(
+                crate::SqliteStorage::open(crate::SqliteStorageOptions::new(&path)).await,
+                Err(crate::StorageError::IncompatibleSchema(_))
+            ));
+        }
+        Ok(())
     }
 }

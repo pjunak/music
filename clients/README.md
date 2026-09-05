@@ -229,7 +229,18 @@ that's the browser *engine* feature; this is the simple output.)
 </script>
 ```
 
-Cross-origin media playback is fine, and browser WebSocket handshakes are not governed by CORS.
+Cross-origin media playback remains supported. Browser WebSocket handshakes are
+checked separately from CORS: the page must use the server's own origin or an exact
+origin configured in `ALLOWED_ORIGINS`. List a separate controller page's HTTP(S)
+origin there. Same-origin matching uses Host and the public scheme declared by
+`SESSION_COOKIE_SECURE`; a proxy which rewrites Host must list the public origin
+explicitly. Forwarded headers do not establish trust. Opaque/null origins, including
+local `file:` pages, are rejected; serve controller pages from an allowed HTTP(S)
+origin. Native clients may omit Origin; session and mutation permissions still apply.
+
+Server schema 11 revokes legacy sessions once. Authenticated clients sign in again
+and keep handling the configured session cookie as an opaque value. Guest outputs
+need no login. No WebSocket message or playback DTO changes are required.
 Deployments may still enforce an explicit WebSocket `Origin` allowlist. The browser autoplay
 policy remains the practical gotcha: audio will not start until a user gesture, which the
 on/off button provides.

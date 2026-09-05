@@ -270,8 +270,8 @@ DB-backed tokens, nothing is signed.)
 | `DEVICES_FILE` | | `/data/devices.json` | Legacy one-time device-import source; SQLite is authoritative afterward |
 | `DATABASE_URL` | | `sqlite:////data/app.db` | App DB (auth, playlists, indexed tracks) |
 | `STATIC_DIR` | | `/app/static` | Built SPA served at `/` |
-| `ALLOWED_ORIGINS` | | `http://localhost:5173` | Comma-separated CORS origins (only needed for split dev) |
-| `SESSION_COOKIE_SECURE` | | `true` | Send the session cookie over HTTPS only. Set `false` only for a plain-HTTP (no-TLS) deployment |
+| `ALLOWED_ORIGINS` | | `http://localhost:5173` | Additional browser origins for CORS and WebSockets; include the public origin if a proxy rewrites Host |
+| `SESSION_COOKIE_SECURE` | | `true` | Public HTTPS: secure cookies and HTTPS same-origin WebSockets, including behind a proxy. Set `false` only for plain HTTP |
 | `SESSION_COOKIE_DOMAIN` | | — | Cookie domain override for multi-host deploys |
 | `ASSISTANT_CREDENTIAL_KEY` | Only for optional external-service setup | — | URL-safe base64 32-byte key used to encrypt model-provider and catalog API keys in `app.db` |
 | `ASSISTANT_CREDENTIAL_KEY_FILE` | Only for optional external-service setup | `/run/music-secrets/assistant-credential.key` | Fixed master-key file; authenticated settings may create it once when its private parent mount exists |
@@ -382,6 +382,14 @@ queue wait and whole-job execution percentiles by lane and job kind while the se
 is running. The read-only command reports bounded aggregates without job payloads or
 provider calls. See [job diagnostics](docs/JOB_DIAGNOSTICS.md) for sampling limits
 and the provider scheduling study.
+
+Sessions are stored as SHA-256 verifiers with separate random management IDs.
+Schema 11 revokes existing logins once; sign in again in the browser and Baton after
+upgrading. Accounts, manual tags and authored data remain. Browser WebSocket
+handshakes require the application's own origin or an origin in `ALLOWED_ORIGINS`;
+native clients may omit Origin and retain the normal session and action checks.
+See [the authentication decision](docs/ADR-024-session-verifiers-and-websocket-origins.md)
+for migration, proxy and client compatibility details.
 
 Rust owns an ordered SQLx migration ledger and refuses unknown or incompatible database shapes
 before opening them for writes. `music-cli db doctor` is read-only; `music-cli db migrate` creates

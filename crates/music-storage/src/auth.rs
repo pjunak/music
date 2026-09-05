@@ -2,10 +2,12 @@ use std::time::Duration;
 
 use music_application::auth::{
     AuthFuture, AuthRepository, DependencyError, PasswordHash, PasswordVerifier,
-    RevokeSessionOutcome, SecretSessionToken, SessionLookup, SessionTouch, StoredSessionSummary,
-    UnixSeconds, UserCredentialRecord, UserInfo,
+    RevokeSessionOutcome, SessionLookup, SessionTouch, StoredSessionSummary, UnixSeconds,
+    UserCredentialRecord, UserInfo,
 };
+use sha2::{Digest, Sha256};
 use sqlx::Row;
+use uuid::Uuid;
 
 use crate::{SqliteStorage, StorageError, verify_password};
 
@@ -138,11 +140,12 @@ impl AuthRepository for SqliteStorage {
             let _admission = self.write_gate.lock().await;
             sqlx::query(
                 "INSERT INTO auth_sessions \
-                 (token, user_id, created_at, expires_at, last_seen) \
-                 VALUES (?, ?, datetime(?, 'unixepoch'), datetime(?, 'unixepoch'), \
+                 (session_id, token_hash, user_id, created_at, expires_at, last_seen) \
+                 VALUES (?, ?, ?, datetime(?, 'unixepoch'), datetime(?, 'unixepoch'), \
                          datetime(?, 'unixepoch'))",
             )
-            .bind(token)
+            .bind(Uuid::new_v4().simple().to_string())
+            .bind(session_token_hash(token))
             .bind(user_id)
             .bind(created_at.get())
             .bind(expires_at.get())
@@ -162,14 +165,15 @@ impl AuthRepository for SqliteStorage {
         last_seen_throttle: Duration,
     ) -> AuthFuture<'a, SessionLookup> {
         Box::pin(async move {
+            let token_hash = session_token_hash(token);
             let row = sqlx::query(
                 "SELECT s.user_id, u.username, unixepoch(s.expires_at) AS expires_at_epoch, \
                         unixepoch(s.last_seen) AS last_seen_epoch \
                  FROM auth_sessions AS s \
                  LEFT JOIN users AS u ON u.id = s.user_id \
-                 WHERE s.token = ?",
+                 WHERE s.token_hash = ?",
             )
-            .bind(token)
+            .bind(&token_hash)
             .fetch_optional(&self.pool)
             .await
             .map_err(box_storage)?;
@@ -179,8 +183,8 @@ impl AuthRepository for SqliteStorage {
             let expires_at = required_epoch(&row, "expires_at_epoch")?;
             if expires_at <= now {
                 let _admission = self.write_gate.lock().await;
-                sqlx::query("DELETE FROM auth_sessions WHERE token = ?")
-                    .bind(token)
+                sqlx::query("DELETE FROM auth_sessions WHERE token_hash = ?")
+                    .bind(&token_hash)
                     .execute(&self.pool)
                     .await
                     .map_err(box_storage)?;
@@ -200,10 +204,10 @@ impl AuthRepository for SqliteStorage {
                     let _admission = self.write_gate.lock().await;
                     let result = sqlx::query(
                         "UPDATE auth_sessions SET last_seen = datetime(?, 'unixepoch') \
-                         WHERE token = ? AND unixepoch(expires_at) > ?",
+                         WHERE token_hash = ? AND unixepoch(expires_at) > ?",
                     )
                     .bind(now.get())
-                    .bind(token)
+                    .bind(&token_hash)
                     .bind(now.get())
                     .execute(&self.pool)
                     .await
@@ -235,14 +239,19 @@ impl AuthRepository for SqliteStorage {
         })
     }
 
-    fn list_sessions(&self, user_id: i64) -> AuthFuture<'_, Vec<StoredSessionSummary>> {
+    fn list_sessions<'a>(
+        &'a self,
+        user_id: i64,
+        current_token: &'a str,
+    ) -> AuthFuture<'a, Vec<StoredSessionSummary>> {
         Box::pin(async move {
             let rows = sqlx::query(
-                "SELECT token, unixepoch(created_at) AS created_at_epoch, \
+                "SELECT session_id, token_hash = ? AS is_current, unixepoch(created_at) AS created_at_epoch, \
                         unixepoch(expires_at) AS expires_at_epoch, \
                         unixepoch(last_seen) AS last_seen_epoch \
                  FROM auth_sessions WHERE user_id = ? ORDER BY last_seen DESC",
             )
+            .bind(session_token_hash(current_token))
             .bind(user_id)
             .fetch_all(&self.pool)
             .await
@@ -250,9 +259,8 @@ impl AuthRepository for SqliteStorage {
             rows.iter()
                 .map(|row| {
                     Ok(StoredSessionSummary {
-                        token: SecretSessionToken::new(
-                            row.try_get::<String, _>("token").map_err(box_sqlx)?,
-                        ),
+                        session_id: row.try_get("session_id").map_err(box_sqlx)?,
+                        is_current: row.try_get("is_current").map_err(box_sqlx)?,
                         created_at: required_epoch(row, "created_at_epoch")?,
                         expires_at: required_epoch(row, "expires_at_epoch")?,
                         last_seen: required_epoch(row, "last_seen_epoch")?,
@@ -262,37 +270,36 @@ impl AuthRepository for SqliteStorage {
         })
     }
 
-    fn revoke_session_prefix<'a>(
+    fn revoke_session_id<'a>(
         &'a self,
         user_id: i64,
-        token_prefix: &'a str,
+        session_id: &'a str,
     ) -> AuthFuture<'a, RevokeSessionOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let matches = sqlx::query_scalar::<_, String>(
-                "SELECT token FROM auth_sessions \
-                 WHERE user_id = ? AND substr(token, 1, length(?)) = ? LIMIT 2",
-            )
-            .bind(user_id)
-            .bind(token_prefix)
-            .bind(token_prefix)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(box_storage)?;
-            match matches.as_slice() {
-                [] => Ok(RevokeSessionOutcome::Missing),
-                [token] => {
-                    sqlx::query("DELETE FROM auth_sessions WHERE token = ?")
-                        .bind(token)
-                        .execute(&self.pool)
-                        .await
-                        .map_err(box_storage)?;
-                    Ok(RevokeSessionOutcome::Revoked)
-                }
-                _ => Ok(RevokeSessionOutcome::Ambiguous),
-            }
+            let deleted =
+                sqlx::query("DELETE FROM auth_sessions WHERE user_id = ? AND session_id = ?")
+                    .bind(user_id)
+                    .bind(session_id)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(box_storage)?;
+            Ok(if deleted.rows_affected() == 1 {
+                RevokeSessionOutcome::Revoked
+            } else {
+                RevokeSessionOutcome::Missing
+            })
         })
     }
+}
+
+// Tokens carry 384 random bits. Hash at every storage lookup/write; never
+// accept a stored verifier or the independent management ID as a bearer token.
+fn session_token_hash(token: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"music-session/v1\0");
+    digest.update(token.as_bytes());
+    format!("{:x}", digest.finalize())
 }
 
 fn required_epoch(
@@ -401,9 +408,11 @@ mod tests {
             .await?;
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].is_current);
-        assert_eq!(sessions[0].token_prefix, "abcdefghijkl");
+        assert_eq!(sessions[0].session_id.len(), 32);
         assert_eq!(
-            service.revoke_session(user_id, "abcdefgh").await?,
+            service
+                .revoke_session(user_id, &sessions[0].session_id)
+                .await?,
             RevokeSessionOutcome::Revoked
         );
         assert_eq!(
@@ -443,6 +452,133 @@ mod tests {
             .await?,
             SessionLookup::Missing
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn session_hashes_and_management_ids_cannot_authenticate_and_snapshots_exclude_tokens()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (directory, storage) = test_storage().await?;
+        let user_id = storage
+            .create_user(
+                "operator",
+                super::DUMMY_PASSWORD_HASH,
+                UnixSeconds::new(1_799_000_000),
+            )
+            .await?;
+        let other_user = storage
+            .create_user(
+                "other",
+                super::DUMMY_PASSWORD_HASH,
+                UnixSeconds::new(1_799_000_000),
+            )
+            .await?;
+        let first = "synthetic-first-bearer-cookie-must-never-be-stored";
+        let second = "synthetic-second-bearer-cookie-must-never-be-stored";
+        for token in [first, second] {
+            storage
+                .create_session(
+                    user_id,
+                    token,
+                    UnixSeconds::new(1_799_999_000),
+                    UnixSeconds::new(1_900_000_000),
+                )
+                .await?;
+        }
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT session_id, token_hash FROM auth_sessions")
+                .fetch_all(&storage.pool)
+                .await?;
+        assert_eq!(rows.len(), 2);
+        for (session_id, digest) in &rows {
+            assert_eq!(session_id.len(), 32);
+            assert_eq!(digest.len(), 64);
+            for invalid_bearer in [session_id, digest] {
+                assert_eq!(
+                    storage
+                        .lookup_session(
+                            invalid_bearer,
+                            UnixSeconds::new(1_800_000_000),
+                            SessionTouch::PreserveLastSeen,
+                            Duration::from_secs(60)
+                        )
+                        .await?,
+                    SessionLookup::Missing
+                );
+            }
+        }
+        let listed = storage.list_sessions(user_id, first).await?;
+        let current_id = listed
+            .iter()
+            .find(|session| session.is_current)
+            .ok_or("current session missing")?
+            .session_id
+            .clone();
+        assert_eq!(
+            listed.iter().filter(|session| session.is_current).count(),
+            1
+        );
+        let snapshot_path = directory.path().join("snapshot.db");
+        storage.create_verified_snapshot(&snapshot_path).await?;
+        let bytes = std::fs::read(&snapshot_path)?;
+        for token in [first, second] {
+            assert!(
+                !bytes
+                    .windows(token.len())
+                    .any(|window| window == token.as_bytes())
+            );
+        }
+        storage.close().await;
+        drop(storage);
+        let storage =
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?;
+        assert_eq!(
+            storage
+                .list_sessions(user_id, first)
+                .await?
+                .iter()
+                .find(|session| session.is_current)
+                .ok_or("current after reopen")?
+                .session_id,
+            current_id
+        );
+        assert_eq!(
+            storage.revoke_session_id(other_user, &current_id).await?,
+            RevokeSessionOutcome::Missing
+        );
+        assert_eq!(
+            storage
+                .revoke_session_id(user_id, &current_id[..12])
+                .await?,
+            RevokeSessionOutcome::Missing
+        );
+        assert_eq!(
+            storage.revoke_session_id(user_id, &current_id).await?,
+            RevokeSessionOutcome::Revoked
+        );
+        assert_eq!(
+            storage
+                .lookup_session(
+                    first,
+                    UnixSeconds::new(1_800_000_000),
+                    SessionTouch::PreserveLastSeen,
+                    Duration::from_secs(60)
+                )
+                .await?,
+            SessionLookup::Missing
+        );
+        assert!(matches!(
+            storage
+                .lookup_session(
+                    second,
+                    UnixSeconds::new(1_800_000_000),
+                    SessionTouch::UpdateLastSeen,
+                    Duration::from_secs(60)
+                )
+                .await?,
+            SessionLookup::Authenticated { .. }
+        ));
+        storage.close().await;
         Ok(())
     }
 
