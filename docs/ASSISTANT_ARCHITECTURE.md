@@ -58,6 +58,21 @@ tags; rejection and reopening preserve manual tags. This local review path grant
 no provider access and does not expose model suggestions to the deterministic
 playlist projection. See [ADR-021](ADR-021-current-model-tag-review.md).
 
+At the storage boundary, `music-storage/src/assistant/review.rs` rechecks evidence
+inside the admitted write transaction. Its `review/plan.rs` helper computes tag
+capacity and explicit decisions without I/O; the same transaction applies the
+result and rolls back both manual tags and review records on any write failure.
+Duplicate suggestions from different analyzers share one manual-tag slot, and an
+overflowing selection cannot silently choose a subset based on request order.
+
+Authoring import keeps mode/JSON source adapters, resource dependency validation,
+and pure selection/mutation planning under `music-server/src/authoring/service/`.
+The service replans stale commits and the existing mode coordinator owns the
+recoverable write. Library cleanup similarly isolates typed operation preparation
+in `music-application/src/library/cleanup/prepare.rs`, with journalled apply/revert
+and recovery in `library/cleanup.rs`; the single library coordinator remains its
+execution owner. These modules do not grant generated suggestions new authority.
+
 The Mood Library's current review summary aggregates pending/accepted/rejected
 suggestions by analyzer before review-state filtering and pagination. It follows
 scope, search, and manual-tag filters and the same profile freshness rules. These

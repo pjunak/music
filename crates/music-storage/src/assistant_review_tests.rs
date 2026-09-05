@@ -1,4 +1,49 @@
 #[tokio::test]
+async fn review_write_failure_rolls_back_manual_tags_and_earlier_decisions()
+-> Result<(), Box<dyn Error + Send + Sync>> {
+    use music_application::assistant::{AnalysisWrite, Confidence, LocalAnalysisRepository};
+    let (_directory, storage) = storage().await?;
+    let tracks = AssistantRepository::tracks(&storage).await?;
+    let mut targets = Vec::new();
+    for evidence in &tracks {
+        let source_signature = metadata_source_signature(&evidence.track)?;
+        storage.store_metadata_analysis(
+            LOCAL_METADATA_ANALYZER_ID, "fixture", &[AnalysisWrite {
+                track_id: evidence.track.id, source_signature: source_signature.clone(),
+                energy: 0.2, brightness: 0.5, tension: 0.1,
+                moods: vec!["calm".to_owned()], evidence: vec!["Synthetic metadata".to_owned()],
+                metrics: Map::new(), confidence: Confidence::High,
+            }],
+        ).await?;
+        targets.push(AnalysisReviewTarget {
+            track_id: evidence.track.id, tag: "calm".to_owned(),
+            analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(), source_signature,
+        });
+    }
+    assert_eq!(targets.len(), 2);
+    // The second write fails after the first track's tag and review have been
+    // written. Neither the first decision nor either manual tag may escape.
+    sqlx::query("CREATE TRIGGER fail_second_review BEFORE INSERT ON track_analysis_tag_reviews \
+        WHEN NEW.track_id = 2 BEGIN SELECT RAISE(ABORT, 'synthetic review failure'); END")
+        .execute(&storage.pool).await?;
+    assert!(AssistantRepository::review_analysis(
+        &storage, &targets, AnalysisReviewDecision::Accepted, None,
+    ).await.is_err());
+    for table in ["track_user_tags", "track_analysis_tag_reviews"] {
+        let query = format!("SELECT COUNT(*) FROM {table}");
+        assert_eq!(sqlx::query_scalar::<_, i64>(AssertSqlSafe(query)).fetch_one(&storage.pool).await?, 0);
+    }
+    sqlx::query("DROP TRIGGER fail_second_review").execute(&storage.pool).await?;
+    let retry = AssistantRepository::review_analysis(
+        &storage, &targets, AnalysisReviewDecision::Accepted, None,
+    ).await?;
+    assert_eq!(retry.applied.len(), 2);
+    assert!(retry.failures.is_empty());
+    assert!(AssistantRepository::tracks(&storage).await?.iter().all(|evidence| evidence.manual_tags == ["calm"]));
+    Ok(())
+}
+
+#[tokio::test]
 async fn review_summary_preserves_denominators_and_tracks_real_decisions()
 -> Result<(), Box<dyn Error + Send + Sync>> {
     use music_application::assistant::{
