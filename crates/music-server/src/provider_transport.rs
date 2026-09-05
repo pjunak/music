@@ -344,6 +344,26 @@ impl ProviderConnectionPolicy for ProviderNetworkBoundary {
     }
 }
 
+impl music_application::assistant::StructuredModelTransport for ProviderNetworkBoundary {
+    fn validate_request(
+        &self,
+        target: &ProviderExecutionTarget,
+        request: &StructuredModelRequest,
+    ) -> Result<(), music_application::assistant::ModelTaskError> {
+        crate::provider_handlers::validate_structured_request(target, request)
+    }
+
+    fn execute_structured_model_request<'a>(
+        &'a self,
+        target: &'a ProviderExecutionTarget,
+        request: &'a StructuredModelRequest,
+    ) -> music_application::assistant::ModelTransportFuture<'a> {
+        Box::pin(ProviderNetworkBoundary::execute_structured_model_request(
+            self, target, request,
+        ))
+    }
+}
+
 #[derive(Debug)]
 struct JsonHttpResponse {
     status: StatusCode,

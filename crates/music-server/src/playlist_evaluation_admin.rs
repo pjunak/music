@@ -58,7 +58,8 @@ pub async fn evaluate_configured_playlist_suite(
         credential_source,
         policy,
         provider_runtime_contract_digest(),
-    );
+    )
+    .with_role_contract_digests(crate::provider_api::provider_role_contract_digests());
     let role = providers
         .prepare_role_execution("playlist_planner")
         .await

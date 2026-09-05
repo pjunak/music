@@ -181,6 +181,7 @@ impl AppRuntime {
             Arc::clone(&provider_credentials),
             provider_network,
             provider_runtime_contract_digest(),
+            crate::provider_api::provider_role_contract_digests(),
         ));
         let local_analysis_repository: Arc<dyn LocalAnalysisRepository> = storage.clone();
         let ffmpeg = ffmpeg_executable();

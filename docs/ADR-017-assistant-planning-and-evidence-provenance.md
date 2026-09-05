@@ -46,8 +46,9 @@ size limits remain enforced.
 - Existing catalog proposals expire once during migration and can be regenerated.
 - Smaller request batches may increase provider request counts; previews disclose
   those counts instead of assuming every batch contains 20 tracks.
-- Changed runtime source invalidates saved model quality/conformance results under
-  the existing aggregate fingerprint. Configured models and Thinking are retained.
+- Changed role runtime source invalidates its saved model quality/conformance results.
+  Shared policy changes invalidate all affected roles. Configured models and Thinking
+  are retained; unknown roles use the complete executable fingerprint.
 - Tests cover source changes across service clones, stale writes after settings are
   changed back, vocabulary edits with a subsequent fresh proposal, stale review
   rejection, authored-tag preservation, unordered responses, complete request
@@ -66,9 +67,10 @@ reference; a reviewed difference does not rewrite that reference.
 ## Follow-up architecture
 
 The application planner establishes a reusable boundary without a new service or
-agent framework. Continue by extracting task execution from the large server job
-module into application use cases with transport ports. Then scope certification
-digests to explicit role source closures, keeping shared policy fail-closed. Derive
+agent framework. Model feature jobs and quality evaluations now live in application use cases behind
+the `StructuredModelTransport` port; the server composes its bounded HTTP adapter. The four
+role execution modules have explicit certification source closures, with shared policy
+remaining fail-closed and a test enforcing source/suite inventory coverage. Next, derive
 static output-schema structure from strict result types while retaining request-
 specific identifier and numeric checks. These changes need their own behavior and
 compatibility tests; broad file moves alone do not establish the intended boundary.

@@ -917,6 +917,7 @@ pub struct ProviderService {
     credentials: Arc<dyn ProviderCredentialSource>,
     policy: Arc<dyn ProviderConnectionPolicy>,
     executable_contract_digest: String,
+    role_contract_digests: BTreeMap<String, String>,
 }
 
 impl ProviderService {
@@ -932,7 +933,16 @@ impl ProviderService {
             credentials,
             policy,
             executable_contract_digest,
+            role_contract_digests: BTreeMap::new(),
         }
+    }
+
+    /// Composition may supply reviewed role closures. Unlisted roles retain the
+    /// complete executable digest rather than silently omitting code coverage.
+    #[must_use]
+    pub fn with_role_contract_digests(mut self, digests: BTreeMap<String, String>) -> Self {
+        self.role_contract_digests = digests;
+        self
     }
 
     pub async fn list_connections(
@@ -1714,7 +1724,9 @@ impl ProviderService {
             connection_fingerprint.as_str(),
             role.role_id.as_str(),
             runtime_contract,
-            self.executable_contract_digest.as_str(),
+            self.role_contract_digests
+                .get(&role.role_id)
+                .map_or(self.executable_contract_digest.as_str(), String::as_str),
             role.model_id.as_str(),
             timeout_seconds.as_str(),
             max_output_tokens.as_str(),

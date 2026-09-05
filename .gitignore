@@ -128,6 +128,7 @@ docs/*
 !docs/assistant-ux-philosophy.md
 !docs/README.md
 !docs/ASSISTANT_ARCHITECTURE.md
+!docs/AI_ACCEPTANCE.md
 !docs/RUST_REWRITE_ARCHITECTURE.md
 !docs/RUST_REWRITE_PLAN.md
 !docs/RUST_ARCHITECTURE_REASSESSMENT.md

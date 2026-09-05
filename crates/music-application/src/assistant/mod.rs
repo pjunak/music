@@ -8,10 +8,12 @@
 mod fuzzing;
 mod local_analysis;
 mod model_eq;
+mod model_jobs;
 mod model_playlist;
 mod model_quality;
 mod model_tag_cleanup;
 mod model_tagger;
+mod model_transport;
 mod planner;
 mod playlist_evaluation;
 mod provider_usage;
@@ -35,10 +37,15 @@ pub use local_analysis::{
     parse_context_state,
 };
 pub use model_eq::*;
+pub use model_jobs::{
+    MODEL_EQ_DRAFT_JOB_KIND, MODEL_PLAYLIST_SUGGESTION_JOB_KIND, MODEL_TAG_CLEANUP_JOB_KIND,
+    MODEL_TAGGING_JOB_KIND, model_evaluation_job_handlers, model_feature_job_handlers,
+};
 pub use model_playlist::*;
 pub use model_quality::*;
 pub use model_tag_cleanup::*;
 pub use model_tagger::*;
+pub use model_transport::{ModelTransportFuture, StructuredModelTransport};
 pub use planner::{
     EnergyCurve, LOCAL_PLAYLIST_ENGINE_ID, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent,
     PlaylistPlan, PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
@@ -46,7 +53,10 @@ pub use planner::{
 pub use playlist_evaluation::*;
 pub use provider_usage::*;
 pub use providers::*;
-pub use runtime_contract::{ASSISTANT_RUNTIME_CONTRACT_VERSION, assistant_runtime_contract_digest};
+pub use runtime_contract::{
+    ASSISTANT_RUNTIME_CONTRACT_VERSION, assistant_role_runtime_contract_digest,
+    assistant_runtime_contract_digest,
+};
 pub use structured_harness::ModelTaskError;
 pub use tags::{
     AnalysisReviewBatch, AnalysisReviewDecision, AnalysisReviewFailure, AnalysisReviewFailureCode,

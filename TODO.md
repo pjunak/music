@@ -15,36 +15,25 @@ deleted; accepted product/security decisions live in `README.md` or `AGENTS.md`.
 
 - **Hash session tokens at rest.** This requires replacing the Settings UI's
   token-prefix identity with a separate stable session identifier.
-- **Sequence broadcasts per socket.** Concurrent commits can currently deliver
-  an older revision immediately after a newer one; clients self-heal on the next
-  snapshot, but strict ordering would remove the transient regression.
 - **Validate WebSocket origins.** Add an allowlist check as defense in depth on
   top of SameSite cookies and the guest mutation gate.
 - **Pin container bases and CI actions by digest** if supply-chain
   reproducibility becomes more important than automatic patch updates.
 
-## Maintenance
-
-- **Release the database session during MusicBrainz lookups.** `verify_names`
-  can hold a session for roughly 11 seconds while paced remote calls run;
-  separate scoring from the final write transaction.
-- **Make the headless reconciler independently testable.** Extract playback
-  state reconciliation from mpv/WebSocket plumbing and add unit tests.
-
 ## Code health priorities
 
-The 2026-08-25 sweep scored remaining structural debt as
-`(impact + risk) × (6 - effort)`, each input on a 1–5 scale. These are deliberate
-follow-up refactors, not permission to weaken current validation or combine safety
-boundaries merely to reduce line counts.
+Updated after the 2026-09-05 audit implementation. Preserve strict validation and
+transaction ownership during these follow-ups. Operator acceptance and held-out
+model evaluation are tracked in [the validation plan](docs/AI_ACCEPTANCE.md).
 
-| Score | Area | Evidence and risk | Next safe slice |
-|---:|---|---|---|
-| 30 | Model-tagging job orchestration | `run_model_music_tagging` mixes gate rechecks, batching, retry accounting, persistence, and progress in one long function. A future contract change can miss one boundary. | Extract typed preflight, one-batch execution, and atomic persistence helpers while keeping the existing end-to-end tests unchanged. |
-| 18 | Generated-tag bulk review | `review_analysis_tags_bulk` combines stale checks, per-track limits, review transitions, and manual-tag writes. This is operator-owned data with many partial-result branches. | Separate pure validation/planning from the one locked transaction; add table-driven tests before moving code. |
-| 18 | Authoring import commit | `commit_bundle` owns dependency validation and several resource writers in one transaction. It is correct but expensive to extend safely. | Extract resource-specific create helpers behind the existing preview/selection/dependency contract. |
-| 16 | Library cleanup apply/revert | `_apply_op` and `_revert_item` branch across file and metadata mutations. Drift handling is safety-critical and difficult to audit as one dispatcher. | Introduce typed operation handlers one operation kind at a time, preserving the journal format and rollback tests. |
-| 15 | Frontend main bundle | The production build emits a 603 kB minified main chunk, above Vite's 500 kB warning threshold. This increases initial transfer/parse work even though AI setup is already lazy-loaded. | Profile the module graph and lazy-load infrequent Authoring/Diagnostics surfaces; do not merely raise the warning threshold. |
+| Area | Remaining risk | Next safe slice |
+|---|---|---|
+| Task result schemas | Static schema structure is authored separately from strict Serde result types. | Derive static structure and retain dynamic identifier/bounds validation; test adversarial schema/validator agreement. |
+| Catalog orchestration | Connector policy and mapping still live in the server enrichment module. | Move use cases behind typed catalog ports, following the model-job transport boundary. |
+| Generated-tag bulk review | Storage `review_analysis` combines stale checks, per-track limits, review transitions, and manual-tag writes. | Separate pure validation/planning from the single write transaction; preserve partial-result and stale-review tests. |
+| Authoring import commit | The authoring commit service validates dependencies and coordinates resource writers. | Extract resource-specific helpers behind the existing preview/selection/dependency contract. |
+| Library cleanup apply/revert | File and metadata mutation branches must preserve recovery and drift handling. | Extract one typed operation handler at a time, retaining the journal format and rollback tests. |
+| Provider attempt outcomes and queue fairness | Timeouts do not prove a request was unsent; long jobs can delay interactive drafts. | Record explicit attempt states and measure queue delay before changing scheduling or retry policy. |
 
 ## Future feature
 

@@ -36,16 +36,21 @@ remain authoritative for those claims.
   files, embedded metadata, or database mood tags directly.
 - Connection verification, role conformance, quality certification, and live-run consent are
   separate gates. Passing one does not imply another.
-- Runtime fingerprints include the shared harness and role contract plus a SHA-256 digest of all
-  executable prompt/schema modules and checked-in evaluation suites. Source or
+- Runtime fingerprints include the shared harness and role contract plus a SHA-256 digest of the
+  role's executable prompt/schema modules, orchestration, and checked-in evaluation suites. Relevant source or
   suite changes make saved conformance and quality results stale even when a developer forgets to
   advance the human-readable contract fragment.
-  The current aggregate is conservative: unrelated role changes also invalidate certification.
-  Splitting role source closures requires separating the shared job orchestration first.
+  Shared policy remains conservative; unknown roles and artifacts use shared coverage.
+  Runtime inventory tests reject an Assistant source or suite omitted from digest coverage.
 - Provider jobs are non-restartable after uncertain external cost. Usage is checkpointed after
   every attempt, including attempts that later fail.
 
 ## Request planning and catalog provenance
+
+Application-owned `model_jobs.rs` registers feature and evaluation handlers; its
+`model_jobs/` modules hold the four roles' execution paths. `StructuredModelTransport`
+is the outbound port. The server composes the HTTP adapter and exposes routes;
+application workflows own gates, checkpoints, retry budgets, and proposal writes.
 
 `plan_model_tagger_batches` in the application layer owns exact track partitioning.
 The provider adapter validates the actual serialized envelope against the 256 KiB limit.
@@ -106,7 +111,7 @@ operator request / indexed library / local audio
 | URL validation, SSRF boundary, redirect refusal, byte/time limits | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | pinned-DNS, special-range, redirect, timeout, and response-limit tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Credential encryption, initialization, reset, and offline rotation | [`crypto.rs`](../crates/music-storage/src/crypto.rs), [`provider_credentials.rs`](../crates/music-server/src/provider_credentials.rs), [`providers.rs`](../crates/music-storage/src/providers.rs) | Python-compatibility fixture plus reset/rotation transaction tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Role preparation and stale-gate enforcement | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`provider_api.rs`](../crates/music-server/src/provider_api.rs) | role fingerprint, conformance, quality, and active-job tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
-| Attempt/token accounting | [`provider_usage.rs`](../crates/music-application/src/assistant/provider_usage.rs), [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs) | colocated usage and checkpoint tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
+| Attempt/token accounting | [`provider_usage.rs`](../crates/music-application/src/assistant/provider_usage.rs), [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs) | colocated usage and checkpoint tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
 | Durable job lifecycle | [`jobs.rs`](../crates/music-application/src/jobs.rs), [`jobs.rs`](../crates/music-storage/src/jobs.rs), [`jobs.rs`](../crates/music-server/src/jobs.rs) | persisted-boundary fault tests in `music-storage` | [Repository persistence rules](../AGENTS.md#persistence-and-deployment) |
 | Browser API/types and review workflows | [`frontend/src/core/api.ts`](../frontend/src/core/api.ts), [`frontend/src/views/assistant/`](../frontend/src/views/assistant) | colocated Vitest files | [Assistant UX philosophy](assistant-ux-philosophy.md) |
 
@@ -182,12 +187,12 @@ contract.
 
 | Workflow | Local authority and provider contract | Durable/API layer | Suite and regression tests | Decision record |
 |---|---|---|---|---|
-| Playlist draft | [`planner.rs`](../crates/music-application/src/assistant/planner.rs), [`model_playlist.rs`](../crates/music-application/src/assistant/model_playlist.rs) | [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs), [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs) | local [`playlist-local-v1.json`](../crates/music-application/src/assistant/evaluation_suites/playlist-local-v1.json), model [`playlist-model-v1.json`](../crates/music-application/src/assistant/evaluation_suites/playlist-model-v1.json), colocated task/runtime tests | [ADR-003](ADR-003-hybrid-model-playlist-evaluation.md), [ADR-005](ADR-005-consent-bound-model-playlist-suggestions.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| Playlist draft | [`planner.rs`](../crates/music-application/src/assistant/planner.rs), [`model_playlist.rs`](../crates/music-application/src/assistant/model_playlist.rs) | [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs), [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs) | local [`playlist-local-v1.json`](../crates/music-application/src/assistant/evaluation_suites/playlist-local-v1.json), model [`playlist-model-v1.json`](../crates/music-application/src/assistant/evaluation_suites/playlist-model-v1.json), colocated task/runtime tests | [ADR-003](ADR-003-hybrid-model-playlist-evaluation.md), [ADR-005](ADR-005-consent-bound-model-playlist-suggestions.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
 | Local track context | [`context.rs`](../crates/music-analysis/src/context.rs), [`voice.rs`](../crates/music-analysis/src/voice.rs), [`local_analysis.rs`](../crates/music-application/src/assistant/local_analysis.rs) | [`analysis.rs`](../crates/music-server/src/analysis.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | controlled numeric, exact-model, checkpoint, and runtime route tests | [ADR-008](ADR-008-comprehensive-local-track-context.md), [ADR-009](ADR-009-opt-in-local-voice-analysis.md), [ADR-014](ADR-014-perceptual-context-measurements.md) |
-| Mood-tag suggestion and review | [`model_tagger.rs`](../crates/music-application/src/assistant/model_tagger.rs), [`vocabulary.rs`](../crates/music-application/src/assistant/vocabulary.rs), [`tags.rs`](../crates/music-application/src/assistant/tags.rs) | [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs), storage review transactions | [`music-tagging-v1.json`](../crates/music-application/src/assistant/evaluation_suites/music-tagging-v1.json) and colocated contract/runtime tests | [ADR-006](ADR-006-review-only-model-music-tagging.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-008](ADR-008-comprehensive-local-track-context.md) |
-| Mood-tag cleanup | [`model_tag_cleanup.rs`](../crates/music-application/src/assistant/model_tag_cleanup.rs), [`tags.rs`](../crates/music-application/src/assistant/tags.rs) | [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | [`tag-cleanup-v1.json`](../crates/music-application/src/assistant/evaluation_suites/tag-cleanup-v1.json) and colocated strict-result tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
-| EQ draft | [`model_eq.rs`](../crates/music-application/src/assistant/model_eq.rs) | [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | [`eq-assistant-v1.json`](../crates/music-application/src/assistant/evaluation_suites/eq-assistant-v1.json) and envelope/runtime tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
-| Shared quality certification | [`model_quality.rs`](../crates/music-application/src/assistant/model_quality.rs) | [`provider_api.rs`](../crates/music-server/src/provider_api.rs), [`model_jobs.rs`](../crates/music-server/src/model_jobs.rs) | fixed suites plus complete/retest identity tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
+| Mood-tag suggestion and review | [`model_tagger.rs`](../crates/music-application/src/assistant/model_tagger.rs), [`vocabulary.rs`](../crates/music-application/src/assistant/vocabulary.rs), [`tags.rs`](../crates/music-application/src/assistant/tags.rs) | [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs), storage review transactions | [`music-tagging-v1.json`](../crates/music-application/src/assistant/evaluation_suites/music-tagging-v1.json) and colocated contract/runtime tests | [ADR-006](ADR-006-review-only-model-music-tagging.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-008](ADR-008-comprehensive-local-track-context.md) |
+| Mood-tag cleanup | [`model_tag_cleanup.rs`](../crates/music-application/src/assistant/model_tag_cleanup.rs), [`tags.rs`](../crates/music-application/src/assistant/tags.rs) | [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | [`tag-cleanup-v1.json`](../crates/music-application/src/assistant/evaluation_suites/tag-cleanup-v1.json) and colocated strict-result tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| EQ draft | [`model_eq.rs`](../crates/music-application/src/assistant/model_eq.rs) | [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs), [`assistant/mod.rs`](../crates/music-server/src/assistant/mod.rs) | [`eq-assistant-v1.json`](../crates/music-application/src/assistant/evaluation_suites/eq-assistant-v1.json) and envelope/runtime tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
+| Shared quality certification | [`model_quality.rs`](../crates/music-application/src/assistant/model_quality.rs) | [`provider_api.rs`](../crates/music-server/src/provider_api.rs), [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs) | fixed suites plus complete/retest identity tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
 
 ## Provider disclosure boundaries
 

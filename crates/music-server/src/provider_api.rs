@@ -55,16 +55,20 @@ impl RuntimeProviders {
         credentials: Arc<RuntimeCredentialStore>,
         network: Arc<ProviderNetworkBoundary>,
         executable_contract_digest: String,
+        role_contract_digests: std::collections::BTreeMap<String, String>,
     ) -> Self {
         let credential_source: Arc<dyn ProviderCredentialSource> = credentials.clone();
         let policy: Arc<dyn music_application::assistant::ProviderConnectionPolicy> =
             network.clone();
-        let service = Arc::new(ProviderService::new(
-            Arc::clone(&repository),
-            credential_source,
-            policy,
-            executable_contract_digest,
-        ));
+        let service = Arc::new(
+            ProviderService::new(
+                Arc::clone(&repository),
+                credential_source,
+                policy,
+                executable_contract_digest,
+            )
+            .with_role_contract_digests(role_contract_digests),
+        );
         let quality = Arc::new(ModelQualityService::new(
             evaluation_repository,
             Arc::clone(&service),
@@ -126,7 +130,30 @@ impl RuntimeProviders {
 }
 
 pub(crate) fn provider_runtime_contract_digest() -> String {
-    const PROVIDER_RUNTIME_CONTRACT_VERSION: &str = "music-rust-provider-runtime/v1";
+    provider_digest(&assistant_runtime_contract_digest())
+}
+
+pub(crate) fn provider_role_contract_digests() -> std::collections::BTreeMap<String, String> {
+    [
+        "eq_assistant",
+        "playlist_planner",
+        "music_tagger",
+        "tag_cleanup",
+    ]
+    .into_iter()
+    .map(|role| {
+        (
+            role.to_owned(),
+            provider_digest(
+                &music_application::assistant::assistant_role_runtime_contract_digest(role),
+            ),
+        )
+    })
+    .collect()
+}
+
+fn provider_digest(application_digest: &str) -> String {
+    const PROVIDER_RUNTIME_CONTRACT_VERSION: &str = "music-rust-provider-runtime/v2";
     const SERVER_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
         (
             "music-server/provider_handlers.rs",
@@ -149,11 +176,7 @@ pub(crate) fn provider_runtime_contract_digest() -> String {
         "contract-version",
         PROVIDER_RUNTIME_CONTRACT_VERSION,
     );
-    update_runtime_digest(
-        &mut digest,
-        "application-contract",
-        &assistant_runtime_contract_digest(),
-    );
+    update_runtime_digest(&mut digest, "application-contract", application_digest);
     for (name, contents) in SERVER_RUNTIME_ARTIFACTS {
         update_runtime_digest(&mut digest, name, contents);
     }
@@ -1750,6 +1773,20 @@ mod tests {
                 "{:x}",
                 sha2::Sha256::digest(b"music-rust-provider-runtime/pending-v1")
             )
+        );
+        let roles = super::provider_role_contract_digests();
+        assert_eq!(roles.len(), 4);
+        assert!(
+            roles
+                .values()
+                .all(|value| value.len() == 64 && value != &digest)
+        );
+        assert_eq!(
+            roles
+                .values()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            4
         );
     }
 
