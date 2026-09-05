@@ -404,6 +404,8 @@ Runtime data lives outside the image.
   `alert`, `confirm`, or `prompt`.
 - Use existing components, SVG icons, design tokens, and semantic accent rules.
   Do not introduce decorative danger/warning/success colors.
+- Feature styles follow `frontend/src/styles/README.md`. Preserve the single eager
+  `global.css` import order; lazy view imports must not change the shared cascade.
 - Keep global keyboard shortcuts out of interactive controls and synchronized
   with the shortcut sheet. Mutating shortcuts remain unavailable to guests.
 - The old-TV compatibility client is a supported guest output. Preserve the
