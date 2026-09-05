@@ -634,6 +634,14 @@ pub struct ResolvedRoleExecution {
     pub connection_name: String,
 }
 
+/// Current local identity for reviewing stored proposals; grants no provider access.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ModelRoleReviewIdentity {
+    pub runtime_fingerprint: String,
+    pub configuration_fingerprint: String,
+    pub connection_fingerprint: String,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct StructuredModelRequest {
     pub system_prompt: String,
@@ -1566,6 +1574,16 @@ impl ProviderService {
         &self,
         role_id: &str,
     ) -> Result<Option<String>, ProviderServiceError> {
+        Ok(self
+            .current_role_review_identity(role_id)
+            .await?
+            .map(|identity| identity.runtime_fingerprint))
+    }
+
+    pub async fn current_role_review_identity(
+        &self,
+        role_id: &str,
+    ) -> Result<Option<ModelRoleReviewIdentity>, ProviderServiceError> {
         if model_role(role_id).is_none() {
             return Err(role_not_found());
         }
@@ -1584,7 +1602,11 @@ impl ProviderService {
             .provider_connection(&role.connection_id)
             .await
             .map_err(ProviderServiceError::dependency)?;
-        Ok(connection.map(|connection| self.role_runtime_fingerprint(&role, &connection)))
+        Ok(connection.map(|connection| ModelRoleReviewIdentity {
+            runtime_fingerprint: self.role_runtime_fingerprint(&role, &connection),
+            configuration_fingerprint: role.configuration_fingerprint(),
+            connection_fingerprint: connection.fingerprint(),
+        }))
     }
 
     pub async fn prepare_role_execution(

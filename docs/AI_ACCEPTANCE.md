@@ -25,6 +25,12 @@ quality on a private library.
 5. Build the release image on a Docker host and run the existing image verification
    script. Exercise authenticated web/Baton registration, reconnect, transport,
    queue, device selection, and output volume against that image.
+6. Generate a small current model-tag scope, open its pending review list, accept
+   one explicit suggestion, reject another, and reopen a decision. Accepted manual
+   tags must survive rejection/reopening. Change a vocabulary definition or model
+   setting and verify old proposals disappear and cannot be accepted from an old
+   page. [ADR-021](ADR-021-current-model-tag-review.md) records the restored review
+   path and its atomic stale-result checks.
 
 ## Provider acceptance
 

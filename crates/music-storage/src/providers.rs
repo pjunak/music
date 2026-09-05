@@ -1042,7 +1042,7 @@ impl ProviderRepository for SqliteStorage {
     }
 }
 
-async fn load_connection_tx(
+pub(crate) async fn load_connection_tx(
     transaction: &mut Transaction<'_, Sqlite>,
     connection_id: &str,
 ) -> Result<Option<ProviderConnectionRecord>, StorageError> {
@@ -1054,7 +1054,7 @@ async fn load_connection_tx(
     row.as_ref().map(connection_from_row).transpose()
 }
 
-async fn load_role_tx(
+pub(crate) async fn load_role_tx(
     transaction: &mut Transaction<'_, Sqlite>,
     role_id: &str,
 ) -> Result<Option<ModelRoleRecord>, StorageError> {

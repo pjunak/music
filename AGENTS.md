@@ -346,6 +346,9 @@ Runtime data lives outside the image.
   Current-profile consumers omit rejected tag labels without deleting the analyzer's stored profile.
   Bulk review applies only explicitly selected suggestions, commits valid decisions together, and
   reports stale, missing, or tag-limited items individually. Never add a select-all implicit write.
+  Model-tag review listing and acceptance must validate current role, vocabulary, metadata,
+  local-context identity, and profile shape. Recheck the typed server-owned guard inside
+  the manual-tag transaction; never trust a client-provided currentness assertion.
   Tag cleanup detection is pure and conservative. Bind its preview to the current manual-tag
   catalog, require explicit per-suggestion selection, reject stale or invented selections, and apply
   all selected renames in one transaction without changing unselected tags.

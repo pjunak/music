@@ -316,35 +316,8 @@ impl LocalAnalysisRepository for SqliteStorage {
                 let Some(track) = load_track(&mut transaction, profile.track_id).await? else {
                     continue;
                 };
-                let expected_context_signature = context_source_signature(
-                    &track,
-                    LOCAL_CONTEXT_IMPLEMENTATION_ID,
-                    voice_signature,
-                )
-                .map_err(|_| {
-                    box_storage(StorageError::InvalidAssistantRecord(
-                        "track context fingerprint is invalid",
-                    ))
-                })?;
-                let context_row = sqlx::query(
-                    "SELECT source_signature, job_id, completeness, confidence, summary_json, \
-                     timeline_json, sections_json, technical_json, stages_json, \
-                     CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
-                     FROM track_contexts WHERE track_id = ? AND analyzer_id = ?",
-                )
-                .bind(track.id.get())
-                .bind(LOCAL_CONTEXT_ANALYZER_ID)
-                .fetch_optional(&mut *transaction)
-                .await
-                .map_err(box_storage)?;
-                let current_context = context_row
-                    .as_ref()
-                    .filter(|row| {
-                        row.try_get::<String, _>("source_signature")
-                            .is_ok_and(|signature| signature == expected_context_signature)
-                    })
-                    .and_then(|row| context_state_from_row(track.id, row).ok())
-                    .and_then(|state| parse_context_state(&state));
+                let current_context =
+                    current_model_context(&mut transaction, &track, voice_signature).await?;
                 let current_signature = model_tag_source_signature(
                     &track,
                     role_fingerprint,
@@ -673,6 +646,43 @@ fn valid_hex_digest(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+pub(crate) async fn current_model_context(
+    transaction: &mut Transaction<'_, Sqlite>,
+    track: &music_domain::IndexedTrack,
+    voice_signature: Option<&str>,
+) -> Result<
+    Option<music_application::assistant::CurrentTrackContext>,
+    music_application::assistant::AssistantDependencyError,
+> {
+    let expected =
+        context_source_signature(track, LOCAL_CONTEXT_IMPLEMENTATION_ID, voice_signature).map_err(
+            |_| {
+                box_storage(StorageError::InvalidAssistantRecord(
+                    "track context fingerprint is invalid",
+                ))
+            },
+        )?;
+    let row = sqlx::query(
+        "SELECT source_signature, job_id, completeness, confidence, summary_json, \
+         timeline_json, sections_json, technical_json, stages_json, \
+         CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
+         FROM track_contexts WHERE track_id = ? AND analyzer_id = ?",
+    )
+    .bind(track.id.get())
+    .bind(LOCAL_CONTEXT_ANALYZER_ID)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(box_storage)?;
+    Ok(row
+        .as_ref()
+        .filter(|row| {
+            row.try_get::<String, _>("source_signature")
+                .is_ok_and(|signature| signature == expected)
+        })
+        .and_then(|row| context_state_from_row(track.id, row).ok())
+        .and_then(|state| parse_context_state(&state)))
+}
+
 fn context_state_from_row(
     track_id: music_domain::TrackId,
     row: &SqliteRow,
@@ -997,7 +1007,7 @@ mod tests {
             1
         );
         let outcome = storage
-            .review_analysis(&[review], AnalysisReviewDecision::Accepted)
+            .review_analysis(&[review], AnalysisReviewDecision::Accepted, None)
             .await?;
         assert!(outcome.applied.is_empty());
         assert_eq!(outcome.failures[0].code, AnalysisReviewFailureCode::Stale);

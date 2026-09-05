@@ -50,6 +50,14 @@ remain authoritative for those claims.
 
 ## Request planning and catalog provenance
 
+Model-tag review is application-owned. `AssistantService` uses current provider
+role identity and local context to expose only matching, valid model profiles.
+Its typed internal review guard is rechecked with the selected profile, vocabulary,
+track, and context inside SQLite's manual-tag transaction. Acceptance adds selected
+tags; rejection and reopening preserve manual tags. This local review path grants
+no provider access and does not expose model suggestions to the deterministic
+playlist projection. See [ADR-021](ADR-021-current-model-tag-review.md).
+
 Application-owned `model_jobs.rs` registers feature and evaluation handlers; its
 `model_jobs/` modules hold the four roles' execution paths. `StructuredModelTransport`
 is the outbound port. The server composes the HTTP adapter and exposes routes;

@@ -5,9 +5,10 @@ use music_application::assistant::{
     AnalysisReviewOutcome, AnalysisReviewTarget, AssistantFuture, AssistantRepository,
     AssistantTrackEvidence, BulkTagFailure, BulkTagOutcome, CATALOG_TAG_ANALYZER_ID,
     CleanupApplyOutcome, CleanupMutation, CleanupSelection, LOCAL_METADATA_ANALYZER_ID,
-    MAX_TAGS_PER_TRACK, RenameTagOutcome, StoredAnalysis, StoredAnalysisReview, TagUsage,
-    TagVocabularyDocument, TagVocabularyRecord, TagVocabularySnapshot, build_cleanup_preview,
-    catalog_signature, metadata_source_signature, vocabulary_fingerprint,
+    MAX_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ModelTagReviewGuard, RenameTagOutcome,
+    StoredAnalysis, StoredAnalysisReview, TagUsage, TagVocabularyDocument, TagVocabularyRecord,
+    TagVocabularySnapshot, build_cleanup_preview, catalog_signature, metadata_source_signature,
+    vocabulary_fingerprint,
 };
 use music_domain::TrackId;
 use serde_json::{Map, Value};
@@ -427,12 +428,19 @@ impl AssistantRepository for SqliteStorage {
         &'a self,
         targets: &'a [AnalysisReviewTarget],
         decision: AnalysisReviewDecision,
+        model_guard: Option<&'a ModelTagReviewGuard>,
     ) -> AssistantFuture<'a, AnalysisReviewBatch> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self.pool.begin().await.map_err(box_storage)?;
             let mut valid = Vec::<AnalysisReviewTarget>::new();
             let mut failures = Vec::new();
+            // Recheck mutable model configuration inside the same transaction as
+            // manual-tag acceptance. A preflight read alone is insufficient.
+            let model_vocabulary = match model_guard {
+                Some(guard) => current_review_vocabulary(&mut transaction, guard).await?,
+                None => None,
+            };
             for target in targets {
                 let Some(track) = load_track(&mut transaction, target.track_id).await? else {
                     failures.push(review_failure(
@@ -444,7 +452,7 @@ impl AssistantRepository for SqliteStorage {
                 };
                 if !matches!(
                     target.analyzer_id.as_str(),
-                    LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID
+                    LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID | MODEL_TAG_ANALYZER_ID
                 ) {
                     failures.push(review_failure(
                         target,
@@ -454,7 +462,8 @@ impl AssistantRepository for SqliteStorage {
                     continue;
                 }
                 let row = sqlx::query(
-                    "SELECT source_signature, moods_json FROM track_analyses \
+                    "SELECT analyzer_id, source_signature, moods_json, evidence_json, metrics_json, \
+                     energy, brightness, tension, confidence FROM track_analyses \
                      WHERE track_id = ? AND analyzer_id = ?",
                 )
                 .bind(target.track_id.get())
@@ -480,7 +489,42 @@ impl AssistantRepository for SqliteStorage {
                     ));
                     continue;
                 }
-                let current_signature = if target.analyzer_id == CATALOG_TAG_ANALYZER_ID {
+                let current_signature = if target.analyzer_id == MODEL_TAG_ANALYZER_ID {
+                    let Some((guard, vocabulary)) = model_guard.zip(model_vocabulary.as_ref())
+                    else {
+                        failures.push(review_failure(
+                            target,
+                            AnalysisReviewFailureCode::Stale,
+                            "Model settings or vocabulary changed; refresh before reviewing",
+                        ));
+                        continue;
+                    };
+                    if !vocabulary
+                        .groups
+                        .iter()
+                        .flat_map(|group| &group.tags)
+                        .any(|tag| tag.name == target.tag)
+                    {
+                        failures.push(review_failure(
+                            target,
+                            AnalysisReviewFailureCode::Stale,
+                            "Tag is no longer in the model vocabulary",
+                        ));
+                        continue;
+                    }
+                    let context = crate::analysis::current_model_context(
+                        &mut transaction,
+                        &track,
+                        guard.voice_signature.as_deref(),
+                    )
+                    .await?;
+                    music_application::assistant::model_tag_source_signature(
+                        &track,
+                        &guard.role.runtime_fingerprint,
+                        &guard.vocabulary_fingerprint,
+                        context.as_ref(),
+                    )
+                } else if target.analyzer_id == CATALOG_TAG_ANALYZER_ID {
                     music_application::assistant::catalog_tag_source_signature(
                         &track,
                         crate::catalog_evidence::revision(&mut transaction)
@@ -497,6 +541,21 @@ impl AssistantRepository for SqliteStorage {
                 })?;
                 if current_signature != target.source_signature {
                     failures.push(review_failure(target, AnalysisReviewFailureCode::Stale, "Track or analyzer settings changed; rerun analysis before reviewing this tag"));
+                    continue;
+                }
+                if target.analyzer_id == MODEL_TAG_ANALYZER_ID
+                    && !analysis_from_row(&row).is_some_and(|profile| {
+                        music_application::assistant::model_tag_profile_is_current(
+                            &profile,
+                            &current_signature,
+                        )
+                    })
+                {
+                    failures.push(review_failure(
+                        target,
+                        AnalysisReviewFailureCode::Stale,
+                        "Model profile is invalid; regenerate suggestions before reviewing",
+                    ));
                     continue;
                 }
                 let moods: Vec<String> = serde_json::from_str(
@@ -636,6 +695,39 @@ fn analysis_from_row(row: &sqlx::sqlite::SqliteRow) -> Option<StoredAnalysis> {
         metrics,
         confidence: row.try_get("confidence").ok()?,
     })
+}
+
+async fn current_review_vocabulary(
+    transaction: &mut Transaction<'_, Sqlite>,
+    guard: &ModelTagReviewGuard,
+) -> Result<Option<TagVocabularyDocument>, AssistantDependencyErrorAlias> {
+    let Some(role) = crate::providers::load_role_tx(transaction, "music_tagger")
+        .await
+        .map_err(box_storage)?
+    else {
+        return Ok(None);
+    };
+    if role.configuration_fingerprint() != guard.role.configuration_fingerprint {
+        return Ok(None);
+    }
+    let Some(connection) = crate::providers::load_connection_tx(transaction, &role.connection_id)
+        .await
+        .map_err(box_storage)?
+    else {
+        return Ok(None);
+    };
+    if connection.fingerprint() != guard.role.connection_fingerprint {
+        return Ok(None);
+    }
+    let Some(vocabulary) = load_vocabulary_tx(transaction).await? else {
+        return Ok(None);
+    };
+    let fingerprint = vocabulary_fingerprint(&vocabulary.document).map_err(|_| {
+        box_storage(StorageError::InvalidAssistantRecord(
+            "invalid review vocabulary",
+        ))
+    })?;
+    Ok((fingerprint == guard.vocabulary_fingerprint).then_some(vocabulary.document))
 }
 
 async fn load_vocabulary(
@@ -799,6 +891,8 @@ mod tests {
 
     use super::*;
     use crate::SqliteStorageOptions;
+
+    include!("assistant_review_tests.rs");
 
     async fn storage() -> Result<(TempDir, SqliteStorage), Box<dyn Error + Send + Sync>> {
         let directory = tempfile::tempdir()?;

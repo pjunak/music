@@ -170,7 +170,6 @@ impl AppRuntime {
         initialize_legacy_devices(&storage, &config.devices_file, &health).await?;
         let auth = Arc::new(RuntimeAuth::new(Arc::clone(&storage), &config)?);
         let assistant_repository: Arc<dyn AssistantRepository> = storage.clone();
-        let assistant = Arc::new(AssistantService::new(assistant_repository));
         let provider_repository: Arc<dyn ProviderRepository> = storage.clone();
         let evaluation_repository: Arc<dyn ModelEvaluationRepository> = storage.clone();
         let provider_credentials = Arc::new(RuntimeCredentialStore::new(&config));
@@ -202,6 +201,10 @@ impl AppRuntime {
             Arc::clone(&local_analysis_repository),
             voice_analyzer.clone(),
         ));
+        let assistant = Arc::new(
+            AssistantService::new(assistant_repository)
+                .with_model_review(providers.provider_service(), Arc::clone(&local_analysis)),
+        );
         let backup = Arc::new(BackupService::new(
             Arc::clone(&storage),
             Arc::clone(&config),
@@ -4256,6 +4259,8 @@ mod tests {
         runtime.shutdown().await?;
         Ok(())
     }
+
+    include!("runtime_model_review_tests.rs");
 
     #[tokio::test]
     async fn deterministic_assistant_routes_keep_suggestions_review_only_and_cleanup_bound()

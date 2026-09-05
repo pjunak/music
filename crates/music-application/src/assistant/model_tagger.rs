@@ -24,6 +24,28 @@ pub const MAX_MODEL_EVIDENCE_ITEMS: usize = 4;
 pub const MAX_MODEL_EVIDENCE_LENGTH: usize = 512;
 pub const MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT: u8 = 2;
 
+#[must_use]
+pub fn model_tag_profile_is_current(
+    profile: &super::StoredAnalysis,
+    expected_signature: &str,
+) -> bool {
+    profile.analyzer_id == MODEL_TAG_ANALYZER_ID
+        && profile.source_signature == expected_signature
+        && profile.metrics.get("contract").and_then(Value::as_str)
+            == Some(MODEL_TAGGER_OUTPUT_CONTRACT)
+        && [profile.energy, profile.brightness, profile.tension]
+            .into_iter()
+            .all(|axis| axis.is_finite() && (0.0..=1.0).contains(&axis))
+        && super::Confidence::parse(&profile.confidence).is_some()
+        && profile.moods.len() <= MAX_MODEL_TAGS_PER_TRACK
+        && super::normalize_manual_tags(&profile.moods).is_ok_and(|tags| tags == profile.moods)
+        && profile.evidence.len() <= MAX_MODEL_EVIDENCE_ITEMS
+        && profile
+            .evidence
+            .iter()
+            .all(|item| !item.is_empty() && item.chars().count() <= MAX_MODEL_EVIDENCE_LENGTH)
+}
+
 pub fn model_tag_source_signature(
     track: &IndexedTrack,
     role_fingerprint: &str,

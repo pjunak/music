@@ -269,6 +269,13 @@ pub struct TagPage {
     pub limit: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct ModelTagReviewGuard {
+    pub role: super::ModelRoleReviewIdentity,
+    pub vocabulary_fingerprint: String,
+    pub voice_signature: Option<String>,
+}
+
 pub trait AssistantRepository: std::fmt::Debug + Send + Sync {
     fn tracks(&self) -> AssistantFuture<'_, Vec<AssistantTrackEvidence>>;
     fn vocabulary(&self) -> AssistantFuture<'_, Option<TagVocabularyRecord>>;
@@ -303,6 +310,7 @@ pub trait AssistantRepository: std::fmt::Debug + Send + Sync {
         &'a self,
         targets: &'a [AnalysisReviewTarget],
         decision: AnalysisReviewDecision,
+        model_guard: Option<&'a ModelTagReviewGuard>,
     ) -> AssistantFuture<'a, AnalysisReviewBatch>;
 }
 
@@ -350,12 +358,49 @@ impl From<VocabularyError> for AssistantServiceError {
 #[derive(Debug, Clone)]
 pub struct AssistantService {
     repository: Arc<dyn AssistantRepository>,
+    model_review: Option<(
+        Arc<super::ProviderService>,
+        Arc<super::LocalAnalysisService>,
+    )>,
 }
 
 impl AssistantService {
     #[must_use]
     pub fn new(repository: Arc<dyn AssistantRepository>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            model_review: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_model_review(
+        mut self,
+        providers: Arc<super::ProviderService>,
+        analysis: Arc<super::LocalAnalysisService>,
+    ) -> Self {
+        self.model_review = Some((providers, analysis));
+        self
+    }
+
+    async fn model_review_guard(
+        &self,
+    ) -> Result<Option<ModelTagReviewGuard>, AssistantServiceError> {
+        let Some((providers, analysis)) = &self.model_review else {
+            return Ok(None);
+        };
+        let Some(role) = providers
+            .current_role_review_identity("music_tagger")
+            .await
+            .map_err(|error| AssistantServiceError::Dependency(Box::new(error)))?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ModelTagReviewGuard {
+            role,
+            vocabulary_fingerprint: self.vocabulary().await?.fingerprint,
+            voice_signature: analysis.voice_analyzer().source_signature.clone(),
+        }))
     }
 
     pub async fn vocabulary(&self) -> Result<TagVocabularySnapshot, AssistantServiceError> {
@@ -433,9 +478,22 @@ impl AssistantService {
             .map(|tag| normalize_manual_tag(&tag))
             .transpose()
             .map_err(AssistantServiceError::Validation)?;
-        let mut views = self
-            .tracks()
-            .await?
+        let tracks = self.tracks().await?;
+        let guard = self.model_review_guard().await?;
+        let contexts = if let Some((_, analysis)) = &self.model_review {
+            analysis
+                .current_contexts(
+                    &tracks
+                        .iter()
+                        .map(|track| track.track.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .await
+                .map_err(|error| AssistantServiceError::Dependency(Box::new(error)))?
+        } else {
+            BTreeMap::new()
+        };
+        let mut views = tracks
             .into_iter()
             .filter(|track| {
                 query
@@ -443,7 +501,22 @@ impl AssistantService {
                     .as_ref()
                     .is_none_or(|scope| scope.contains(&track.track))
             })
-            .map(|track| view_for_track(&track, query.analyzer_ids.as_deref()))
+            .map(|track| {
+                let expected = guard.as_ref().and_then(|guard| {
+                    super::model_tag_source_signature(
+                        &track.track,
+                        &guard.role.runtime_fingerprint,
+                        &guard.vocabulary_fingerprint,
+                        contexts.get(&track.track.id),
+                    )
+                    .ok()
+                });
+                view_for_track_with_model(
+                    &track,
+                    query.analyzer_ids.as_deref(),
+                    expected.as_deref(),
+                )
+            })
             .filter(|view| {
                 query
                     .tag
@@ -516,12 +589,15 @@ impl AssistantService {
         if let Some(failure) = outcome.failures.first() {
             return Err(AssistantServiceError::Validation(failure.error.clone()));
         }
-        self.tracks()
-            .await?
-            .iter()
-            .find(|item| item.track.id == track_id)
-            .map(|item| view_for_track(item, None))
-            .ok_or_else(|| AssistantServiceError::NotFound("Track not found".to_owned()))
+        self.tag_page(ManualTagQuery {
+            scope: Some(ContextScope::Tracks(vec![track_id])),
+            ..ManualTagQuery::default()
+        })
+        .await?
+        .items
+        .into_iter()
+        .next()
+        .ok_or_else(|| AssistantServiceError::NotFound("Track not found".to_owned()))
     }
 
     pub async fn rename_tag(
@@ -675,8 +751,20 @@ impl AssistantService {
                 source_signature: target.source_signature.clone(),
             });
         }
+        let guard = if canonical
+            .iter()
+            .any(|target| target.analyzer_id == MODEL_TAG_ANALYZER_ID)
+        {
+            self.model_review_guard().await?
+        } else {
+            None
+        };
         self.repository
-            .review_analysis(&canonical.into_iter().collect::<Vec<_>>(), decision)
+            .review_analysis(
+                &canonical.into_iter().collect::<Vec<_>>(),
+                decision,
+                guard.as_ref(),
+            )
             .await
             .map_err(AssistantServiceError::Dependency)
     }
@@ -883,10 +971,20 @@ pub(super) fn view_for_track(
     track: &AssistantTrackEvidence,
     analyzer_ids: Option<&[String]>,
 ) -> AssistantTrackView {
+    view_for_track_with_model(track, analyzer_ids, None)
+}
+
+fn view_for_track_with_model(
+    track: &AssistantTrackEvidence,
+    analyzer_ids: Option<&[String]>,
+    model_signature: Option<&str>,
+) -> AssistantTrackView {
     let current = current_metadata_analysis(track);
     let mut suggestions = Vec::new();
     for analysis in &track.analyses {
-        let expected_signature = if analysis.analyzer_id == CATALOG_TAG_ANALYZER_ID {
+        let expected_signature = if analysis.analyzer_id == MODEL_TAG_ANALYZER_ID {
+            model_signature.map(str::to_owned)
+        } else if analysis.analyzer_id == CATALOG_TAG_ANALYZER_ID {
             analysis
                 .metrics
                 .get("evidence_revision")
@@ -897,10 +995,16 @@ pub(super) fn view_for_track(
         };
         if !matches!(
             analysis.analyzer_id.as_str(),
-            LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID
+            LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID | MODEL_TAG_ANALYZER_ID
         ) || expected_signature.as_deref() != Some(analysis.source_signature.as_str())
             || !axes_valid(analysis)
             || analyzer_ids.is_some_and(|ids| !ids.iter().any(|id| id == &analysis.analyzer_id))
+        {
+            continue;
+        }
+        if analysis.analyzer_id == MODEL_TAG_ANALYZER_ID
+            && !model_signature
+                .is_some_and(|expected| super::model_tag_profile_is_current(analysis, expected))
         {
             continue;
         }
