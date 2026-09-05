@@ -2541,7 +2541,7 @@ mod tests {
         let mut saw_item_rejection = false;
         for _ in 0..4 {
             if matches!(
-                next_protocol_message(&mut socket).await?,
+                next_protocol_message(&mut socket).await.map_err(|error| format!("Soundboard item rejection: {error}"))?,
                 ServerMessage::Error { detail, .. }
                     if detail == "item 'dnd/missing.ogg' not in soundboard 'main'"
             ) {
@@ -2566,7 +2566,7 @@ mod tests {
         let mut saw_sfx = false;
         for _ in 0..4 {
             if matches!(
-                next_protocol_message(&mut socket).await?,
+                next_protocol_message(&mut socket).await.map_err(|error| format!("Soundboard SFX event: {error}"))?,
                 ServerMessage::SfxFired { soundboard_id, item_path, .. }
                     if soundboard_id == "main" && item_path == "dnd/door.ogg"
             ) {
@@ -2594,7 +2594,7 @@ mod tests {
         let mut saw_loop = false;
         for _ in 0..4 {
             if matches!(
-                next_protocol_message(&mut socket).await?,
+                next_protocol_message(&mut socket).await.map_err(|error| format!("Soundboard loop start: {error}"))?,
                 ServerMessage::StateChanged { state }
                     if state.looping_sfx.iter().any(|looping| looping.id == "rain-loop")
             ) {
@@ -2615,7 +2615,7 @@ mod tests {
         let mut saw_pruned_loop = false;
         for _ in 0..5 {
             if matches!(
-                next_protocol_message(&mut socket).await?,
+                next_protocol_message(&mut socket).await.map_err(|error| format!("Soundboard loop pruning: {error}"))?,
                 ServerMessage::StateChanged { state } if state.looping_sfx.is_empty()
             ) {
                 saw_pruned_loop = true;
