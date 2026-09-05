@@ -56,8 +56,37 @@ Input contract v3 retains original `local_rank` values and uses `null` for addit
 outside that original pool. The fixed prompt explains this distinction. All
 existing defaults and their duration plan remain intact. The model still returns
 only bounded ranked/selected IDs, and the server reconstructs public fields from
-the local snapshot. The private request changes no public HTTP/WebSocket DTO,
+the local snapshot. That v3 request changed no public HTTP/WebSocket DTO,
 database schema, browser flow, output protocol, or provider disclosure fields.
+
+### Provider-visible vocabulary meaning (input v4)
+
+The operator's subsequent Terra/Thinking full-suite export passed 12/14 cases.
+Both failures had complete candidate recall but incorrect selection. The custom
+`lamplit study` alias and `silent passage` context cue were used by retrieval, yet
+their declared mappings were absent from the provider request. The custom alias
+cannot fairly be assessed as vocabulary reasoning without supplying its meaning.
+
+Input v4 includes only entries that match the request and a manual label actually
+present in the bounded provider payload. Each carries its canonical name,
+definition, exact matched request phrases, and matching candidate manual labels.
+The shared phrase matcher prevents disagreement with retrieval. Unmatched aliases
+and cues, unrelated entries, generated-only tags and excluded tracks cannot add
+vocabulary context. Normalized vocabulary bounds and the existing 256 KiB transport
+preflight still apply; the harness does not silently drop mappings to fit a request.
+
+The prompt treats this text as untrusted descriptive evidence, not instructions or
+mandatory selections. Original ranks/defaults and the strict output ID boundary
+remain unchanged. Disclosure v3 requires fresh consent to this additional category;
+the web client and generated HTTP disclosure constants advance together. Playback,
+Baton, storage identities and output contracts are unchanged.
+
+Offline regression reproduces the absent mapping before the fix and verifies both
+failed fixtures' payloads afterward. It does not establish that Terra will now pass.
+Keep quality suite v6 and every threshold unchanged and rerun the exact configured
+model's full suite. Updating the shared role-contract inventory conservatively
+stales all roles' gates in this release; historical exports remain useful evidence
+but cannot certify the changed runtime.
 
 ## Evaluation and verification
 

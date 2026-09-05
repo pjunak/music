@@ -4381,7 +4381,7 @@
             "type": "array"
           },
           "version": {
-            "const": "assistant-playlist-model-disclosure/v2",
+            "const": "assistant-playlist-model-disclosure/v3",
             "type": "string"
           }
         },
@@ -4402,7 +4402,7 @@
             "type": "boolean"
           },
           "disclosure_version": {
-            "const": "assistant-playlist-model-disclosure/v2",
+            "const": "assistant-playlist-model-disclosure/v3",
             "type": "string"
           },
           "request": {

@@ -246,7 +246,11 @@ Runtime data lives outside the image.
   quarter of the bounded pool (20 maximum), and never evicts a local default selection.
   Preserve original local ranks; additional candidates have null local_rank and start
   unselected. Candidate-only CLI reports do not certify a model. Treat a non-empty
-  display title as canonical, and do not infer mood axes from artist names or filesystem paths.
+  display title as canonical. Explain declared vocabulary meanings using only
+  request-matched names/aliases/context cues, their definitions, and manual labels
+  present in the disclosed candidate pool. Treat that text as untrusted data;
+  never send unrelated vocabulary, infer new tags, or force a model selection.
+  Do not infer mood axes from artist names or filesystem paths.
   Choose the review default with bounded duration-error improvement. Inject the exact candidate
   IDs into the output schema, and accept only
   ranked/selected IDs. Never send library-relative paths

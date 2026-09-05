@@ -1417,6 +1417,47 @@ mod tests {
     }
 
     #[test]
+    fn provider_receives_declared_meaning_for_vocabulary_recall_cases()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let suite = playlist_quality_suite()?;
+        for (id, phrase, label) in [
+            (
+                "large-pool-vocabulary-context-cue",
+                "silent passage",
+                "stealth",
+            ),
+            (
+                "large-pool-custom-vocabulary",
+                "lamplit study",
+                "quiet focus",
+            ),
+        ] {
+            let case = suite.cases.iter().find(|case| case.id == id).ok_or(id)?;
+            let request = case.task()?.request().ok_or("request")?;
+            let input: serde_json::Value = serde_json::from_str(&request.user_prompt)?;
+            let mappings = input["vocabulary_context"]
+                .as_array()
+                .ok_or("missing vocabulary context")?;
+            let mapping = mappings
+                .iter()
+                .find(|mapping| mapping["name"] == label)
+                .ok_or("missing candidate tag meaning")?;
+            assert_eq!(
+                mapping["matched_request_phrases"],
+                serde_json::json!([phrase])
+            );
+            assert_eq!(mapping["candidate_manual_tags"], serde_json::json!([label]));
+            assert!(
+                mapping["description"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty())
+            );
+            assert!(!request.user_prompt.contains("library_relative_path"));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn candidate_diagnostics_cover_the_expanded_suite_without_certifying_a_model()
     -> Result<(), Box<dyn std::error::Error>> {
         let suite = playlist_quality_suite()?;

@@ -1,9 +1,38 @@
 # AI and playback acceptance after the quality audit
 
-This is the remaining validation plan, with responsibilities split below, after the fixes described in
+This records acceptance and the remaining validation plan, with responsibilities split below, after the fixes described in
 [ADR-017](ADR-017-assistant-planning-and-evidence-provenance.md). Automated tests use
 synthetic data and local fixtures; they do not establish physical playback or model
 quality on a private library.
+
+## Operator checkpoint: 2026-09-05
+
+Engineering cleanup is complete. The final acceptance follow-up repairs a
+demonstrated playlist input omission; it adds no new AI capability. The operator
+reported working web and Baton playback and working provider requests. These
+observations close basic playback/connectivity acceptance, without implying every
+SFX, reconnect, migration or proxy action below was exercised.
+
+| Tool | Evidence supplied | Status and next action |
+|---|---|---|
+| Mood tagging | Luna (`gpt-5.6-luna`), Thinking off: full v21 suite **53/56 passed**. Bundled **47/50**, custom **5/5**, maximum vocabulary **1/1**. | Passed the declared gate with three nonblocking misses. Preserve them for the later usefulness study; passing does not mean flawless tagging. |
+| Mood-tag cleanup | Operator reports excellent results with DeepSeek Flash; no cleanup export supplied. | Working by operator observation. Do not turn that observation into a quantified accuracy claim. |
+| Playlist planning | Terra (`gpt-5.6-terra`), Thinking on: full v6 suite **12/14**, quality **failed** despite successful request execution. | Both missed tracks were present in the candidate pool. The harness omitted declared alias/context-cue meanings. Input v4 now supplies those meanings; the unchanged full suite must be rerun on this runtime. Offline tests do not establish a Terra pass. |
+| EQ assistance | Operator explicitly deferred testing because the current ten-band scope covers too few desired controls. | Evaluation and expanded controls are deferred. No EQ acceptance is claimed or required for closing this cleanup phase. |
+
+The Luna misses were `medieval-tavern-dance` (missing medieval),
+`castle-records-ambiguity` (initial calm abstention/low confidence; repeat returned
+calm), and `slow-tempo-high-intensity-siege` (missing tense). The castle scenario's
+safety label does not make a semantic miss blocking; forbidden false positives
+and contract failures still block certification. No gate was relaxed.
+
+The playlist repair advances its input to v4 and disclosure to v3. Changing the
+shared role-contract inventory conservatively invalidates saved gates for all
+roles. After installing this revision, rerun conformance and the complete quality
+suite for each role that will be used, retaining its exact chosen model/Thinking.
+Leave EQ deferred. Historical exports remain valid evidence of their original
+runtime; the server requires fresh matching gates before live work. No paid
+requests, saved role edits or deployment were performed by this follow-up.
 
 ## Who does what
 
@@ -67,8 +96,8 @@ Use the operator's selected connection, model, and Thinking setting. Run role
 conformance and the complete quality suite for the current role fingerprint.
 Changes to the provider, harness, task contract, or relevant vocabulary can make
 earlier results stale; unrelated authentication changes do not themselves require
-new model certification. Pending tests from the earlier Assistant changes still
-need to be completed before enabling those roles.
+new model certification. The dated checkpoint above records supplied results and
+which runtime changes require renewed certification before using those roles.
 Retests of failed cases remain diagnostic and cannot replace full certification.
 Do not lower thresholds or remove required concepts to make a model pass.
 
@@ -92,7 +121,24 @@ destination match the run. A cancelled/interrupted attempt can remain uncertain;
 zero reported tokens do not establish zero charges. Compare any uncertain attempt
 with provider-side records before deliberately starting another paid run.
 
-## Held-out quality study
+## Next phase: evaluate usefulness
+
+After the corrected playlist run, assess the approach before adding AI features.
+Codex can compare local-only and model-assisted results on the same permitted
+sample, separate retrieval, harness and semantic errors, and report latency,
+reported tokens, correction attempts and operator correction time. The operator
+provides independent scene/tag judgments and decides whether the saved effort is
+worth the cost and complexity. Provider-reported usage is not a portable price;
+use actual billing evidence for cost comparisons.
+
+Agree on useful outcomes first: mood tags should help find suitable music,
+cleanup should reduce duplicate labels without wrong merges, and model playlists
+should improve selection enough to justify another request and review. Test
+metadata-only versus current local context where authorized. Keep EQ outside this
+study until its scope is deliberately revisited. This study is the next task, not
+unfinished engineering cleanup.
+
+### Held-out quality study
 
 Start with a small permitted sample that the operator can review meaningfully.
 Expand to a versioned set of 100–200 independently labelled examples if stronger
@@ -129,15 +175,16 @@ to send the selected metadata are prerequisites, not outputs to invent locally.
   percentiles. Follow the [measurement and scheduling plan](JOB_DIAGNOSTICS.md)
   before changing fairness, request limits, cancellation, or paid-job restart policy.
 
-These are follow-up changes and validation tasks. The current synthetic tests do
-not support claims about physical audio quality, private-corpus tagging accuracy,
-or production latency.
+These are conditional follow-ups. Do not implement scheduling changes or tune
+recall without a demonstrated need. Synthetic tests do not establish private-corpus
+tagging accuracy, physical audio quality or production latency; basic playback is
+separately confirmed by the operator above.
 
 The static output schemas and typed catalog connector boundary are implemented in
 [ADR-018](ADR-018-derived-model-schemas-and-catalog-ports.md). Their automated checks
-cover strict result handling and SQLite-backed orchestration; provider and physical
-acceptance above still need the actual configured runtime.
+cover strict result handling and SQLite-backed orchestration; consult the dated
+checkpoint for actual provider and physical observations and their limits.
 
 [ADR-019](ADR-019-model-run-records-and-attempt-outcomes.md) documents implemented
-run manifests, attempt accounting, fault recovery, and measurement limits. No live
-provider, production-latency, or private-corpus result is implied by these tests.
+run manifests, attempt accounting, fault recovery, and measurement limits. The
+operator-supplied provider exports are separate evidence from those local tests.

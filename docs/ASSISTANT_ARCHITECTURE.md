@@ -85,6 +85,11 @@ all local defaults and their original ranks; additions have `local_rank: null` a
 start unselected. Recall uses at most a quarter of the pool (20 candidates maximum)
 and never exceeds the 100-candidate ceiling. The provider-free `evaluate-playlists
 --engine candidates` CLI reports retrieval separately from quality certification.
+Input v4 also explains the declared meanings behind request-matched vocabulary
+phrases: tag name, definition, exact matching phrases and manual labels actually
+present in the disclosed candidate pool. This uses the same phrase matcher as
+retrieval. Unrelated vocabulary and generated-only labels are omitted; the mappings
+remain untrusted data and do not force a ranking. Disclosure v3 covers this input.
 See [ADR-023](ADR-023-bounded-playlist-vocabulary-recall.md).
 
 Application-owned `model_jobs.rs` registers feature and evaluation handlers; its
@@ -202,7 +207,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
-| Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v3+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v2` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
+| Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v4+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v3` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
 | Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v19+output/v3+local-context/v2` | `assistant-model-music-tagging-disclosure/v11` | `model-context-tagger/v6` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |

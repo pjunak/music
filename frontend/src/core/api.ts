@@ -328,7 +328,7 @@ export interface PlaylistSuggestionRequest {
 }
 
 export const MODEL_PLAYLIST_DISCLOSURE_VERSION =
-  "assistant-playlist-model-disclosure/v2" as const;
+  "assistant-playlist-model-disclosure/v3" as const;
 
 export interface ModelPlaylistDisclosure {
   version: typeof MODEL_PLAYLIST_DISCLOSURE_VERSION;

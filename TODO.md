@@ -32,6 +32,9 @@ or demonstrated defect rather than extend the cleanup phase indefinitely.
 
 ## New features — deferred by the operator
 
+- **Broader EQ assistance.** Revisit the desired effect/control scope after the
+  AI usefulness evaluation. The current assistant drafts the fixed ten-band EQ;
+  expanded controls and EQ acceptance are explicitly deferred.
 - **Specialized model audio analysis.** Choose a concrete provider protocol,
   then add a bounded `audio-input/v1` adapter, explicit file disclosure and
   consent, a synthetic quality suite, durable non-restartable execution, and a

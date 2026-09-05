@@ -4,8 +4,40 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::{
     AssistantTrackEvidence, PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument,
-    normalize_manual_tag,
+    TagVocabularyEntry, normalize_manual_tag,
 };
+
+pub(super) struct VocabularyMatch<'a> {
+    pub entry: &'a TagVocabularyEntry,
+    pub request_phrases: Vec<&'a str>,
+}
+
+/// Retrieval and provider explanation must use the same declared phrase meanings.
+pub(super) fn matched_vocabulary<'a>(
+    prompt: &str,
+    vocabulary: &'a TagVocabularyDocument,
+) -> Vec<VocabularyMatch<'a>> {
+    let prompt = phrase_tokens(prompt);
+    vocabulary
+        .groups
+        .iter()
+        .flat_map(|group| &group.tags)
+        .filter_map(|entry| {
+            let request_phrases = std::iter::once(&entry.name)
+                .chain(&entry.aliases)
+                .chain(&entry.context_cues)
+                .filter(|term| contains_phrase(&prompt, &phrase_tokens(term)))
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            (!request_phrases.is_empty()).then_some(VocabularyMatch {
+                entry,
+                request_phrases,
+            })
+        })
+        .collect()
+}
 
 /// Supplement a local plan using only operator-authored labels and vocabulary mappings.
 /// Keep every default selection and bound recall to a quarter of the pool (at most 20).
@@ -15,18 +47,9 @@ pub(super) fn supplement_candidates(
     vocabulary: &TagVocabularyDocument,
     baseline: &mut PlaylistSuggestion,
 ) -> Result<(), String> {
-    let prompt = phrase_tokens(&request.prompt);
-    let labels = vocabulary
-        .groups
-        .iter()
-        .flat_map(|group| &group.tags)
-        .filter(|entry| {
-            std::iter::once(&entry.name)
-                .chain(&entry.aliases)
-                .chain(&entry.context_cues)
-                .any(|term| contains_phrase(&prompt, &phrase_tokens(term)))
-        })
-        .flat_map(|entry| std::iter::once(&entry.name).chain(&entry.aliases))
+    let labels = matched_vocabulary(&request.prompt, vocabulary)
+        .into_iter()
+        .flat_map(|matched| std::iter::once(&matched.entry.name).chain(&matched.entry.aliases))
         .filter_map(|term| normalize_manual_tag(term).ok())
         .collect::<BTreeSet<_>>();
     if labels.is_empty() {

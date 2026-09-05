@@ -256,7 +256,10 @@ Use a small, representative sample before running across the whole library.
 1. In Playlist Builder, run the same request once with the local planner and once with
    the configured model.
 2. Read the disclosure before consenting. The model receives at most 100 locally
-   eligible, path-free candidates and returns track IDs only.
+   eligible, path-free candidates and returns track IDs only. It also receives the
+   vocabulary names and definitions linking phrases in your prompt to those
+   candidates' database mood tags. Unmatched aliases, cues, and vocabulary entries
+   are omitted.
 3. Close or refresh the page during one run and confirm progress/result restoration.
 4. Audition suggestions one at a time. Starting another song or normal playback must
    stop the previous audition through the shared canonical playback state.

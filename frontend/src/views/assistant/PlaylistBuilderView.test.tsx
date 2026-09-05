@@ -140,10 +140,11 @@ const modelAvailability: ModelPlaylistAvailability = {
   quality_evaluation_id: "playlist-quality-v1",
   job_kind: "assistant.model-playlist-suggestion",
   disclosure: {
-    version: "assistant-playlist-model-disclosure/v2",
+    version: "assistant-playlist-model-disclosure/v3",
     shared_with_provider: [
       "Your mood prompt and filters",
       "Up to 100 locally prefiltered candidate IDs and metadata",
+      "Vocabulary definitions and matched phrases for candidate mood tags",
     ],
     never_shared: ["Audio files or cover artwork", "Filesystem paths"],
     maximum_candidates: 100,
@@ -161,7 +162,7 @@ function modelJob(
     status,
     parameters: {
       consent: true,
-      disclosure_version: "assistant-playlist-model-disclosure/v2",
+      disclosure_version: "assistant-playlist-model-disclosure/v3",
       request: {
         prompt: "misty medieval forest",
         target_minutes: 45,
@@ -174,7 +175,7 @@ function modelJob(
       status === "succeeded"
         ? {
             schema_version: "assistant-playlist-suggestion-job-result/v1",
-            disclosure_version: "assistant-playlist-model-disclosure/v2",
+            disclosure_version: "assistant-playlist-model-disclosure/v3",
             role_id: "playlist_planner",
             role_fingerprint: "a".repeat(64),
             suggestion: modelSuggestion,
@@ -431,6 +432,9 @@ describe("PlaylistBuilderView", () => {
     );
     expect(screen.getByText("Provider boundary")).toBeInTheDocument();
     expect(screen.getByText("What leaves the server")).toBeInTheDocument();
+    expect(
+      screen.getByText("Vocabulary definitions and matched phrases for candidate mood tags"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Filesystem paths")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Mood or scene"), "misty medieval forest");
     await user.click(
@@ -445,7 +449,7 @@ describe("PlaylistBuilderView", () => {
     );
     expect(assistantApi.startModelPlaylistSuggestion).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: "misty medieval forest" }),
-      "assistant-playlist-model-disclosure/v2",
+      "assistant-playlist-model-disclosure/v3",
     );
     expect(
       await screen.findByRole("progressbar", {

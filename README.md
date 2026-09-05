@@ -104,7 +104,9 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   planning sends at most 100 path-free candidates, constrains the response to those exact track
   IDs, and returns a draft.
   Playlist refinement keeps local defaults and supplements its bounded candidate pool through
-  current vocabulary aliases/cues matched to your tags. Use `music-cli evaluate-playlists SUITE
+  current vocabulary aliases/cues matched to your tags. The provider receives only
+  request-matched vocabulary meanings linked to manual tags in that candidate pool;
+  these help interpret your prompt without forcing a selection. Use `music-cli evaluate-playlists SUITE
   --engine candidates --json` to inspect synthetic candidate recall without a provider call;
   this diagnostic does not certify model quality.
   Mood tagging sends bounded artist, album, origin, and genre metadata in

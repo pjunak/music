@@ -1504,7 +1504,7 @@ async fn start_model_playlist_suggestion(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-playlist-model-disclosure/v2" || !payload.consent {
+    if payload.disclosure_version != "assistant-playlist-model-disclosure/v3" || !payload.consent {
         return Err(ApiError::validation());
     }
     let request_value =
@@ -1701,12 +1701,13 @@ async fn enqueue_model_feature(
 
 fn playlist_disclosure() -> ModelPlaylistDisclosureResponse {
     ModelPlaylistDisclosureResponse {
-        version: "assistant-playlist-model-disclosure/v2",
+        version: "assistant-playlist-model-disclosure/v3",
         shared_with_provider: vec![
             "Your mood prompt, duration, tempo filters, and requested energy flow",
             "Up to 100 locally prefiltered candidate IDs and descriptive metadata",
             "Candidate titles, artists, albums, origins, genres, durations, and BPM values",
             "Your database mood tags, generated analysis tags, and numeric audio-signal summaries",
+            "Vocabulary names and definitions linking matched prompt aliases or context cues to candidate database mood tags",
             "The deterministic local ranking, default selection, sequence, and duration plan",
         ],
         never_shared: vec![
@@ -3378,7 +3379,7 @@ fn cleanup_apply_version_schema() -> RefOr<Schema> {
     const_string_schema(TAG_CLEANUP_APPLY_SCHEMA)
 }
 fn playlist_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-playlist-model-disclosure/v2")
+    const_string_schema("assistant-playlist-model-disclosure/v3")
 }
 fn playlist_role_id_schema() -> RefOr<Schema> {
     const_string_schema("playlist_planner")

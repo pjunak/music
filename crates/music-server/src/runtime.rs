@@ -4263,6 +4263,59 @@ mod tests {
     include!("runtime_model_review_tests.rs");
 
     #[tokio::test]
+    async fn playlist_vocabulary_disclosure_requires_current_explicit_consent()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+        let (router, cookie) = operator_router(&runtime).await?;
+        let status = router
+            .clone()
+            .oneshot(
+                Request::get("/api/assistant/playlists/model-status")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(status.status(), StatusCode::OK);
+        let status: Value =
+            serde_json::from_slice(&to_bytes(status.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(
+            status["disclosure"]["version"],
+            "assistant-playlist-model-disclosure/v3"
+        );
+        assert!(
+            status["disclosure"]["shared_with_provider"]
+                .as_array()
+                .ok_or("disclosure")?
+                .iter()
+                .any(|text| text
+                    .as_str()
+                    .is_some_and(|text| text.contains("Vocabulary")))
+        );
+        for (version, consent) in [
+            ("assistant-playlist-model-disclosure/v2", true),
+            ("assistant-playlist-model-disclosure/v3", false),
+        ] {
+            let rejected = router
+                .clone()
+                .oneshot(
+                    Request::post("/api/assistant/playlists/model-suggestions/jobs")
+                        .header("cookie", &cookie)
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({"request": {"prompt": "lamplit study"},
+                        "disclosure_version": version, "consent": consent})
+                            .to_string(),
+                        ))?,
+                )
+                .await?;
+            assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        runtime.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn deterministic_assistant_routes_keep_suggestions_review_only_and_cleanup_bound()
     -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
