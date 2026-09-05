@@ -525,7 +525,11 @@ async fn process_loss_after_external_effect_replays_idempotently() -> TestResult
     )
     .await?;
     wait_for_job(&storage, "effect", |job| {
-        job.status == JobStatus::Running && handler.attempt_count() == 1
+        // Handler entry precedes an awaited checkpoint read and the durable effect.
+        // Interrupt only after the effect has actually reached the crash boundary.
+        job.status == JobStatus::Running
+            && handler.attempt_count() == 1
+            && handler.effect_count() == 1
     })
     .await?;
     assert_eq!(handler.effect_count(), 1);
