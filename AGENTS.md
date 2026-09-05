@@ -313,7 +313,9 @@ Runtime data lives outside the image.
   per-scenario progress and diagnostics, then repeats every safety scenario once to catch unstable
   forbidden output. Provider/contract failures and forbidden false positives block certification;
   a scenario's safety label alone does not turn a required semantic-tag miss into a blocking error.
-  All scenarios contribute to the suite's explicit minimum scored pass rate. A
+  All scenarios contribute to the suite's explicit minimum scored pass rate. Each
+  fixed vocabulary group must independently meet that same threshold; keep custom
+  and maximum-size fixtures isolated during batching, safety repeats, and retests. A
   failed-scenario recheck may call the provider only for failures from the exact current complete
   result and may merge those results only for diagnosis. Only another complete suite may update
   certification.

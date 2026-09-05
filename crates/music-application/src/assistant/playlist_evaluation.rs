@@ -228,6 +228,27 @@ impl PlaylistQualityCase {
     }
 
     #[must_use]
+    pub fn candidate_recall(&self, task: &ModelPlaylistTask) -> PlaylistCandidateRecall {
+        let pool = task.candidate_track_ids().collect::<BTreeSet<_>>();
+        let missing_relevant_track_ids = self
+            .expectations
+            .relevant_track_ids
+            .iter()
+            .copied()
+            .filter(|id| !pool.contains(id))
+            .collect::<Vec<_>>();
+        let relevant_tracks = self.expectations.relevant_track_ids.len();
+        let relevant_in_pool = relevant_tracks - missing_relevant_track_ids.len();
+        PlaylistCandidateRecall {
+            pool_tracks: pool.len(),
+            relevant_tracks,
+            relevant_in_pool,
+            recall: round_to(relevant_in_pool as f64 / relevant_tracks as f64, 4),
+            missing_relevant_track_ids,
+        }
+    }
+
+    #[must_use]
     pub fn assess(
         &self,
         first: Result<PlaylistSuggestion, ModelTaskError>,
@@ -243,8 +264,13 @@ impl PlaylistQualityCase {
         first: Result<PlaylistSuggestion, ModelTaskError>,
         repeated: Option<Result<PlaylistSuggestion, ModelTaskError>>,
     ) -> PlaylistEvaluationCaseResult {
+        let candidate_recall = (engine_id == MODEL_PLAYLIST_ENGINE_ID)
+            .then(|| self.task().map(|task| self.candidate_recall(&task)).ok())
+            .flatten();
         let Ok(response) = first else {
-            return engine_error_result(self, first.err());
+            let mut result = engine_error_result(self, first.err());
+            result.candidate_recall = candidate_recall;
+            return result;
         };
         let assessment = assess_response(self, engine_id, &response);
         let mut metrics = assessment.metrics.clone();
@@ -312,6 +338,7 @@ impl PlaylistQualityCase {
         }
 
         PlaylistEvaluationCaseResult {
+            candidate_recall,
             id: self.id.clone(),
             description: self.description.clone(),
             passed: failures.is_empty(),
@@ -356,6 +383,7 @@ pub struct PlaylistEvaluationMetrics {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlaylistEvaluationCaseResult {
+    pub candidate_recall: Option<PlaylistCandidateRecall>,
     pub id: String,
     pub description: String,
     pub passed: bool,
@@ -368,6 +396,15 @@ pub struct PlaylistEvaluationCaseResult {
     pub repeated_selected_track_ids: Option<Vec<i64>>,
     pub repeated_response_fingerprint: Option<String>,
     pub exact_response_match: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlaylistCandidateRecall {
+    pub pool_tracks: usize,
+    pub relevant_tracks: usize,
+    pub relevant_in_pool: usize,
+    pub recall: f64,
+    pub missing_relevant_track_ids: Vec<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1101,6 +1138,7 @@ fn engine_error_result(
     error: Option<ModelTaskError>,
 ) -> PlaylistEvaluationCaseResult {
     PlaylistEvaluationCaseResult {
+        candidate_recall: None,
         id: case.id.clone(),
         description: case.description.clone(),
         passed: false,
@@ -1281,6 +1319,56 @@ mod tests {
         let result = evaluate_local_playlist_suite(&suite)?;
         assert_eq!(result.engine_id, LOCAL_PLAYLIST_ENGINE_ID);
         assert_eq!(result.summary.cases, 11);
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_recall_identifies_local_omissions_even_when_the_provider_fails()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let raw = serde_json::from_value(serde_json::json!({
+            "schema_version": "playlist-evaluation/v1", "id": "candidate-recall-test",
+            "description": "A relevant track competes with many equally scored distractors.",
+            "cases": [{"id": "pool-omission", "description": "Relevant candidate outside the local pool",
+                "request": {"prompt": "background", "target_minutes": 5, "candidate_limit": 5},
+                "tracks": [{"id": 1001, "path": "Fixture/Neutral.flac", "title": "Neutral",
+                    "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300}],
+                "generated_tracks": {"count": 100, "id_start": 1, "path_prefix": "Distractors",
+                    "title_prefix": "Neutral", "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300},
+                "expectations": {"top_k": 1, "relevant_track_ids": [1, 1001]}
+            }]
+        }))?;
+        let suite = super::materialize_suite(raw)?;
+        let case = &suite.cases[0];
+        let task = case.task()?;
+        let recall = case.candidate_recall(&task);
+        assert_eq!(recall.pool_tracks, 15);
+        assert_eq!(recall.relevant_in_pool, 1);
+        assert_eq!(recall.recall, 0.5);
+        assert_eq!(recall.missing_relevant_track_ids, vec![1001]);
+        let result = case.assess(
+            Err(super::ModelTaskError::new("model_execution_timeout")),
+            None,
+        );
+        assert!(!result.passed);
+        assert_eq!(
+            result
+                .candidate_recall
+                .ok_or("recall missing on failure")?
+                .recall,
+            0.5
+        );
+        assert!(
+            result
+                .failures
+                .iter()
+                .any(|failure| failure.contains("timeout"))
+        );
+        let local = case.assess_for_engine(
+            LOCAL_PLAYLIST_ENGINE_ID,
+            Err(super::ModelTaskError::new("local_evaluation_failed")),
+            None,
+        );
+        assert!(local.candidate_recall.is_none());
         Ok(())
     }
 }

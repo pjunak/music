@@ -48,21 +48,19 @@ impl ModelEvaluationJobHandler {
         )
         .await?;
         let execution = self.prepare(parameters).await?;
-        let vocabulary = default_vocabulary_snapshot().map_err(model_task_failure)?;
         let mut planned_requests = 0;
         for safety_only in [false, true] {
-            let inputs = execution_cases
+            let cases = execution_cases
                 .iter()
                 .filter(|case| !safety_only || case.gate == TagQualityGate::Safety)
-                .map(|case| case.track.clone())
+                .cloned()
                 .collect::<Vec<_>>();
-            planned_requests +=
-                crate::assistant::plan_model_tagger_batches(&inputs, &vocabulary, |request| {
-                    self.transport
-                        .validate_request(&execution.role.execution, request)
-                })
-                .map_err(model_task_failure)?
-                .len();
+            planned_requests += crate::assistant::plan_tag_quality_batches(&cases, |request| {
+                self.transport
+                    .validate_request(&execution.role.execution, request)
+            })
+            .map_err(model_task_failure)?
+            .len();
         }
         let max_attempts = tagging_attempt_budget(planned_requests);
         let mut usage =
@@ -75,7 +73,6 @@ impl ModelEvaluationJobHandler {
                 context,
                 &execution.role,
                 &execution_cases,
-                &vocabulary,
                 &mut usage,
                 &mut retry_budget,
                 &mut completed,
@@ -94,7 +91,6 @@ impl ModelEvaluationJobHandler {
                 context,
                 &execution.role,
                 &safety_cases,
-                &vocabulary,
                 &mut usage,
                 &mut retry_budget,
                 &mut completed,
@@ -145,7 +141,6 @@ impl ModelEvaluationJobHandler {
         context: &JobExecutionContext,
         role: &ResolvedRoleExecution,
         cases: &[TagQualityCase],
-        vocabulary: &crate::assistant::TagVocabularySnapshot,
         usage: &mut ProviderUsageAccumulator,
         retry_budget: &mut u8,
         completed: &mut usize,
@@ -154,16 +149,13 @@ impl ModelEvaluationJobHandler {
         deterministic_execution_failure: &mut Option<ModelTaskError>,
     ) -> Result<Vec<TagQualityCaseResult>, JobHandlerError> {
         let mut results = Vec::with_capacity(cases.len());
-        let inputs = cases
-            .iter()
-            .map(|case| case.track.clone())
-            .collect::<Vec<_>>();
-        let batches = crate::assistant::plan_model_tagger_batches(&inputs, vocabulary, |request| {
+        let batches = crate::assistant::plan_tag_quality_batches(cases, |request| {
             self.transport.validate_request(&role.execution, request)
         })
         .map_err(model_task_failure)?;
         for planned in batches {
-            let chunk = &cases[planned.input_range];
+            let chunk = &cases[planned.case_range];
+            let vocabulary = &planned.vocabulary;
             let batch = planned.task;
             let profiles = if let Some(error) = deterministic_execution_failure.clone() {
                 Err(error)

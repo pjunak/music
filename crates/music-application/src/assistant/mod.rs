@@ -20,6 +20,7 @@ mod provider_usage;
 mod providers;
 mod runtime_contract;
 mod structured_harness;
+mod tagging_evaluation;
 mod tags;
 mod vocabulary;
 
@@ -58,6 +59,7 @@ pub use runtime_contract::{
     assistant_runtime_contract_digest,
 };
 pub use structured_harness::ModelTaskError;
+pub use tagging_evaluation::*;
 pub use tags::{
     AnalysisReviewBatch, AnalysisReviewDecision, AnalysisReviewFailure, AnalysisReviewFailureCode,
     AnalysisReviewOutcome, AnalysisReviewTarget, AnalysisSuggestion, AssistantDependencyError,

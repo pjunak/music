@@ -36,6 +36,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export interface QualityEvidenceNote {
+  id: string;
+  message: string;
+  tone: TestTone;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function qualityEvidenceNotes(job: BackgroundJob | undefined): QualityEvidenceNote[] {
+  const evaluation = job?.result?.evaluation;
+  if (!isRecord(evaluation)) return [];
+  const notes: QualityEvidenceNote[] = [];
+  if (Array.isArray(evaluation.vocabulary_results)) {
+    const labels: Record<string, string> = {
+      default: "Bundled vocabulary", custom: "Custom vocabulary", maximum: "200-tag vocabulary",
+    };
+    for (const group of evaluation.vocabulary_results.slice(0, 3)) {
+      if (!isRecord(group) || typeof group.vocabulary !== "string" ||
+          !Object.hasOwn(labels, group.vocabulary) || typeof group.passed !== "boolean" ||
+          !isCount(group.passed_cases) || !isCount(group.total_cases) ||
+          group.total_cases === 0 || group.passed_cases > group.total_cases) continue;
+      notes.push({
+        id: `vocabulary-${group.vocabulary}`,
+        tone: group.passed ? "success" : "failure",
+        message: `${labels[group.vocabulary]}: ${group.passed_cases}/${group.total_cases} scenarios; ${group.passed ? "passed" : "failed"} its independent quality gate.`,
+      });
+    }
+  }
+  if (Array.isArray(evaluation.cases)) {
+    for (const scenario of evaluation.cases.slice(0, 100)) {
+      if (!isRecord(scenario) || typeof scenario.id !== "string" ||
+          typeof scenario.description !== "string" || !isRecord(scenario.candidate_recall)) continue;
+      const recall = scenario.candidate_recall;
+      if (!isCount(recall.pool_tracks) || recall.pool_tracks > 100 ||
+          !isCount(recall.relevant_tracks) || !isCount(recall.relevant_in_pool) ||
+          recall.relevant_in_pool > recall.pool_tracks ||
+          recall.relevant_in_pool >= recall.relevant_tracks) continue;
+      notes.push({
+        id: `candidate-pool-${scenario.id}`,
+        tone: "warning",
+        message: `${scenario.description}: local candidate preparation supplied ${recall.relevant_in_pool}/${recall.relevant_tracks} relevant tracks in a pool of ${recall.pool_tracks}. The model cannot rank tracks absent from its input.`,
+      });
+    }
+  }
+  return notes;
+}
+
 function failedScenarios(job: BackgroundJob | undefined): FailedScenario[] {
   const evaluation = job?.result?.evaluation;
   if (!isRecord(evaluation) || !Array.isArray(evaluation.cases)) return [];

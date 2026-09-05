@@ -1256,7 +1256,9 @@ fn failed_case_ids_from_baseline(
     let mut failed = Vec::new();
     for (value, expected) in cases.iter().zip(&suite.cases) {
         let item = value.as_object().ok_or_else(retest_baseline_unavailable)?;
-        if item.get("id").and_then(serde_json::Value::as_str) != Some(expected.id.as_str()) {
+        if item.get("id").and_then(serde_json::Value::as_str) != Some(expected.id.as_str())
+            || item.get("vocabulary") != Some(&serde_json::json!(expected.vocabulary))
+        {
             return Err(ApiError::coded_conflict(
                 "evaluation_retest_baseline_stale",
                 "The saved quality result belongs to different model settings.",

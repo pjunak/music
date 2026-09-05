@@ -651,6 +651,70 @@ mod tests {
     use super::provider_handler;
 
     #[test]
+    fn every_adapter_preserves_twenty_tracks_and_the_full_two_hundred_tag_vocabulary()
+    -> Result<(), Box<dyn Error>> {
+        use music_application::assistant::{
+            PROVIDER_ADAPTERS, TagQualityVocabulary, plan_model_tagger_batches,
+        };
+        let vocabulary = TagQualityVocabulary::Maximum.snapshot()?;
+        let inputs = (1..=20)
+            .map(|id| {
+                json!({
+                    "track_id": id, "artist": "Équipe 静かな音楽", "album": "Archive cue 196",
+                    "origin": "", "genre": "instrumental", "length_s": 180, "bpm": null
+                })
+            })
+            .collect::<Vec<_>>();
+        for adapter in PROVIDER_ADAPTERS {
+            let handler = provider_handler(adapter.id).ok_or("adapter missing handler")?;
+            let planned = plan_model_tagger_batches(&inputs, &vocabulary, |request| {
+                handler
+                    .prepare_structured_request(
+                        "test-model",
+                        8000,
+                        ThinkingMode::ProviderDefault,
+                        request,
+                    )
+                    .map(|_| ())
+                    .map_err(|error| {
+                        music_application::assistant::ModelTaskError::new(error.code())
+                    })
+            })?;
+            assert_eq!(planned.len(), 1, "{}", adapter.id);
+            assert_eq!(planned[0].input_range, 0..20);
+            for correction in [false, true] {
+                let request = planned[0].task.request(correction);
+                let prepared = handler.prepare_structured_request(
+                    "test-model",
+                    8000,
+                    ThinkingMode::ProviderDefault,
+                    &request,
+                )?;
+                let bytes = serde_json::to_vec(&prepared.payload)?;
+                assert!(bytes.len() <= super::MAX_REQUEST_BYTES);
+                let payload = String::from_utf8(bytes)?;
+                assert!(payload.contains("archive.cue_196"));
+                assert!(payload.contains("study.focus"));
+                let input: Value = serde_json::from_str(&request.user_prompt)?;
+                assert_eq!(
+                    input["tracks"].as_array().ok_or("tracks missing")?.len(),
+                    20
+                );
+                assert_eq!(
+                    input["vocabulary_groups"]
+                        .as_array()
+                        .ok_or("groups missing")?
+                        .iter()
+                        .flat_map(|group| group["tags"].as_array().into_iter().flatten())
+                        .count(),
+                    200
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn a_valid_large_vocabulary_is_rejected_by_every_actual_adapter_before_execution()
     -> Result<(), Box<dyn Error>> {
         use music_application::assistant::{

@@ -227,6 +227,16 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
+Tagging suite `controlled-vocabulary-tagging-baseline-v21` uses 50 bundled-vocabulary,
+five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
+vocabularies during batching and validates fixed fixture identities for retests.
+Each vocabulary group must independently meet the existing 90% threshold; all
+blocking failures remain blocking. The ten safety scenarios are repeated once.
+Playlist reports separately record labelled candidate recall before model ranking,
+including missing candidate IDs, even when the provider fails. These are synthetic
+diagnostics; they do not establish live-library recall or change retrieval policy.
+See [ADR-020](ADR-020-vocabulary-quality-and-candidate-recall.md).
+
 Quality suites exercise the same production request shape: 20-track tagging batches,
 20-source cleanup batches, and the 100-candidate playlist boundary. Playlist certification
 also scores target-duration error and selected-artist diversity, and requires one semantic

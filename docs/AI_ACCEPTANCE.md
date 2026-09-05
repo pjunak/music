@@ -33,6 +33,14 @@ conformance and the complete quality suite after deploying changed runtime code.
 Retests of failed cases remain diagnostic and cannot replace full certification.
 Do not lower thresholds or remove required concepts to make a model pass.
 
+Tagging now evaluates the bundled, custom, and 200-tag vocabularies separately;
+each group must meet the same 90% threshold and avoid blocking failures. Inspect
+the per-group summary when a high overall score still fails. Playlist reports
+identify relevant fixture tracks omitted from the candidate pool before ranking,
+including when a provider fails. Evaluate those local omissions separately from
+incorrect model selections. Both changes are described in
+[ADR-020](ADR-020-vocabulary-quality-and-candidate-recall.md).
+
 Review the disclosed payload and planned request count before any live-library
 run. Verify a small scope first, then force-rebuild that same scope and confirm the
 server estimate changes appropriately. Include vocabulary sizes near the payload
@@ -65,9 +73,10 @@ to send the selected metadata are prerequisites, not outputs to invent locally.
 - Shared immutable manifests and request budgets are implemented for all model
   tools/evaluations. Assess a common model/catalog proposal provenance envelope
   only if it improves review workflows; retain catalog revision and lease guards.
-- Extend quality evaluation with custom-vocabulary and maximum-size scenarios,
-  separate candidate recall from playlist ranking, and record operator review
-  outcomes without using them as automatic training labels.
+- Custom and maximum-vocabulary tagging cases and separate playlist candidate
+  recall are implemented. Extend coverage to custom-vocabulary cleanup and record
+  operator review outcomes without using them as automatic training labels. Use
+  candidate recall measurements to justify any retrieval-policy changes.
 - Collect queue-wait and completed-request-duration measurements from usage v2
   for small interactive drafts behind long catalog/evaluation jobs. Compare queue
   delay percentiles by job type and workload before changing provider-lane fairness.

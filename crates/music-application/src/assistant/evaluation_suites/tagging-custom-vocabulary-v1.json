@@ -1,0 +1,13 @@
+{
+  "schema_version": "assistant-tag-vocabulary/v1",
+  "groups": [{
+    "key": "custom_scene", "label": "Custom scene labels",
+    "description": "Synthetic operator definitions replace the bundled taxonomy.",
+    "tags": [
+      {"id": "study.focus", "name": "quiet focus", "description": "Calm background for focused reading or study, without urgency.", "aliases": ["lamplit study"], "context_cues": ["reading room underscore"]},
+      {"id": "pace.clockwork", "name": "clockwork rush", "description": "Urgent mechanical motion, busy clockwork, or a rapidly operating machine.", "aliases": ["mechanical sprint"], "context_cues": ["racing gears"]},
+      {"id": "palette.dark", "name": "dark", "description": "A dim, warm, reassuring ambience without danger or tension. This custom label describes low light, never horror.", "aliases": ["gentle low light"], "context_cues": ["warm hearth", "dim lantern"]},
+      {"id": "ritual.still", "name": "静かな儀式", "description": "A quiet solemn ceremony or contemplative ritual without celebration or urgency.", "aliases": ["still ceremony"], "context_cues": ["silent ritual"]}
+    ]
+  }]
+}

@@ -16,8 +16,8 @@ use super::{
 
 pub const MODEL_TAGGER_INPUT_CONTRACT: &str = "assistant-music-tagger-input/v19";
 pub const MODEL_TAGGER_OUTPUT_CONTRACT: &str = "assistant-music-tagger-output/v3";
-pub const MODEL_TAGGING_EVALUATION_CONTRACT: &str = "assistant-music-tagger-evaluation/v7";
-pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v20";
+pub const MODEL_TAGGING_EVALUATION_CONTRACT: &str = "assistant-music-tagger-evaluation/v8";
+pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v21";
 pub const MODEL_TAG_BATCH_SIZE: usize = 20;
 pub const MAX_MODEL_TAGS_PER_TRACK: usize = 8;
 pub const MAX_MODEL_EVIDENCE_ITEMS: usize = 4;
@@ -469,6 +469,8 @@ pub enum TagQualityGate {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TagQualityCase {
+    #[serde(default)]
+    pub vocabulary: super::TagQualityVocabulary,
     pub id: String,
     pub description: String,
     pub track: Value,
@@ -500,6 +502,8 @@ pub struct TagQualitySuite {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TagQualityCaseResult {
+    #[serde(default)]
+    pub vocabulary: super::TagQualityVocabulary,
     pub id: String,
     pub description: String,
     pub passed: bool,
@@ -524,7 +528,16 @@ pub struct TagQualityEvaluationResult {
     pub quality_passed_cases: u32,
     pub quality_total_cases: u32,
     pub minimum_quality_pass_rate: f64,
+    pub vocabulary_results: Vec<TagVocabularyQualityResult>,
     pub cases: Vec<TagQualityCaseResult>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TagVocabularyQualityResult {
+    pub vocabulary: super::TagQualityVocabulary,
+    pub passed: bool,
+    pub passed_cases: u32,
+    pub total_cases: u32,
 }
 
 impl TagQualityCase {
@@ -608,6 +621,7 @@ impl TagQualityCase {
                 || returned_forbidden
                 || (self.gate == TagQualityGate::Safety && exceeded_tag_limit));
         TagQualityCaseResult {
+            vocabulary: self.vocabulary,
             id: self.id.clone(),
             description: self.description.clone(),
             passed: failures.is_empty(),
@@ -629,11 +643,11 @@ impl TagQualityEvaluationResult {
         let expected = suite
             .cases
             .iter()
-            .map(|case| (case.id.as_str(), case.gate))
+            .map(|case| (case.id.as_str(), case.gate, case.vocabulary))
             .collect::<Vec<_>>();
         let actual = cases
             .iter()
-            .map(|case| (case.id.as_str(), case.gate))
+            .map(|case| (case.id.as_str(), case.gate, case.vocabulary))
             .collect::<Vec<_>>();
         if actual != expected {
             return Err(ModelTaskError::new("model_evaluation_result_invalid"));
@@ -653,12 +667,37 @@ impl TagQualityEvaluationResult {
         } else {
             f64::from(passed_cases) / f64::from(total_cases)
         };
+        // Added easy fixtures cannot dilute the original baseline's 90% gate.
+        let vocabulary_results = cases
+            .iter()
+            .map(|case| case.vocabulary)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|vocabulary| {
+                let group = cases
+                    .iter()
+                    .filter(|case| case.vocabulary == vocabulary)
+                    .collect::<Vec<_>>();
+                let total_cases = u32::try_from(group.len()).unwrap_or(u32::MAX);
+                let passed_cases = u32::try_from(group.iter().filter(|case| case.passed).count())
+                    .unwrap_or(u32::MAX);
+                TagVocabularyQualityResult {
+                    vocabulary,
+                    passed_cases,
+                    total_cases,
+                    passed: !group.iter().any(|case| case.blocking)
+                        && f64::from(passed_cases) / f64::from(total_cases)
+                            >= suite.minimum_quality_pass_rate,
+                }
+            })
+            .collect::<Vec<_>>();
         Ok(Self {
-            schema_version: "assistant-music-tagger-quality-result/v3",
+            schema_version: "assistant-music-tagger-quality-result/v4",
             suite_id: suite.id.clone(),
             engine_id: MODEL_TAG_ANALYZER_ID,
             passed: !cases.iter().any(|case| case.blocking)
-                && quality_rate >= suite.minimum_quality_pass_rate,
+                && quality_rate >= suite.minimum_quality_pass_rate
+                && vocabulary_results.iter().all(|group| group.passed),
             passed_cases,
             total_cases,
             safety_passed_cases,
@@ -666,6 +705,7 @@ impl TagQualityEvaluationResult {
             quality_passed_cases: passed_cases,
             quality_total_cases: total_cases,
             minimum_quality_pass_rate: suite.minimum_quality_pass_rate,
+            vocabulary_results,
             cases,
         })
     }
@@ -728,6 +768,36 @@ pub fn tag_quality_suite() -> Result<TagQualitySuite, ModelTaskError> {
         || track_ids.len() != suite.cases.len()
     {
         return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+    }
+    for case in &suite.cases {
+        let vocabulary = case.vocabulary.snapshot()?;
+        let names = vocabulary
+            .entries()
+            .map(|tag| tag.name.as_str())
+            .collect::<BTreeSet<_>>();
+        if case.maximum_tags > MAX_MODEL_TAGS_PER_TRACK
+            || case.required_tags.len() > case.maximum_tags
+            || case.allowed_confidences.is_empty()
+            || case
+                .required_tags
+                .iter()
+                .chain(&case.forbidden_tags)
+                .any(|name| !names.contains(name.as_str()))
+            || case
+                .required_tags
+                .iter()
+                .any(|name| case.forbidden_tags.contains(name))
+            || case.forbidden_groups.iter().any(|key| {
+                !vocabulary
+                    .document
+                    .groups
+                    .iter()
+                    .any(|group| &group.key == key)
+            })
+        {
+            return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+        }
+        ModelTaggerBatch::new(vec![case.track.clone()], vocabulary)?;
     }
     Ok(suite)
 }
@@ -1116,14 +1186,14 @@ mod tests {
     fn bundled_tagging_suite_keeps_quality_and_safety_coverage()
     -> Result<(), Box<dyn std::error::Error>> {
         let suite = tag_quality_suite()?;
-        assert_eq!(suite.cases.len(), 50);
+        assert_eq!(suite.cases.len(), 56);
         assert_eq!(
             suite
                 .cases
                 .iter()
                 .filter(|case| case.gate == super::TagQualityGate::Safety)
                 .count(),
-            8
+            10
         );
         assert!(suite.cases.iter().all(|case| {
             ["title", "display_title", "library_path"]

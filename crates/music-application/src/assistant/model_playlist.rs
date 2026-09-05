@@ -84,6 +84,14 @@ impl ModelPlaylistTask {
             .then(|| self.baseline.clone())
     }
 
+    /// IDs in the actual locally prepared provider pool, before model ranking.
+    pub fn candidate_track_ids(&self) -> impl Iterator<Item = i64> + '_ {
+        self.baseline
+            .candidates
+            .iter()
+            .map(|candidate| candidate.track_id.get())
+    }
+
     #[must_use]
     pub fn request(&self) -> Option<StructuredModelRequest> {
         if self.baseline.candidates.is_empty() {

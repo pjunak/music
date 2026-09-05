@@ -340,11 +340,11 @@ async fn load_tagging_baseline(
     let expected = suite
         .cases
         .iter()
-        .map(|case| (case.id.as_str(), case.gate))
+        .map(|case| (case.id.as_str(), case.gate, case.vocabulary))
         .collect::<Vec<_>>();
     let actual = cases
         .iter()
-        .map(|case| (case.id.as_str(), case.gate))
+        .map(|case| (case.id.as_str(), case.gate, case.vocabulary))
         .collect::<Vec<_>>();
     let failed = cases
         .iter()

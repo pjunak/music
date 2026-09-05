@@ -11,6 +11,7 @@ import { toast } from "@/core/toast";
 import { readableBackgroundJobError } from "./backgroundJobs";
 import {
   modelQualityView,
+  qualityEvidenceNotes,
   qualityGateSummary,
   qualityProgressLabel,
   qualityStatusLabel,
@@ -387,6 +388,10 @@ function buildLogEntries(
         });
       }
     }
+  }
+
+  for (const note of qualityEvidenceNotes(quality.currentJob)) {
+    entries.push({ ...note, time: quality.currentJob?.finished_at ?? null });
   }
 
   const usage = providerUsageFromJob(quality.currentJob);

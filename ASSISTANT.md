@@ -242,6 +242,11 @@ may be poor at conservative EQ or metadata tagging. Provider-side spending limit
 the authoritative cost guard; Music records reported token usage but does not estimate
 portable monetary cost.
 
+The tagging report also shows separate bundled, custom, and 200-tag vocabulary
+scores. Each group must pass the same 90% gate; a high overall score cannot hide
+a failed group. Playlist reports flag relevant test tracks omitted before model
+ranking, so those local preparation failures can be investigated separately.
+
 ## 6. Validate model-backed workflows with real data
 
 Use a small, representative sample before running across the whole library.
