@@ -498,6 +498,7 @@ mod tests {
         let provider_request = task.request().ok_or("expected provider request")?;
         assert!(!provider_request.user_prompt.contains("Private/Calm.flac"));
         let response = task.finish(StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
             payload: Some(json!({
@@ -520,6 +521,7 @@ mod tests {
     fn unknown_provider_track_ids_fail_closed() -> Result<(), Box<dyn std::error::Error>> {
         let task = ModelPlaylistTask::new(&[track(1, "Calm.flac", "Calm")?], &request())?;
         let Err(error) = task.finish(StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
             payload: Some(json!({

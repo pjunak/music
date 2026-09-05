@@ -49,7 +49,24 @@ impl ModelEvaluationJobHandler {
         .await?;
         let execution = self.prepare(parameters).await?;
         let vocabulary = default_vocabulary_snapshot().map_err(model_task_failure)?;
-        let mut usage = ProviderUsageAccumulator::default();
+        let mut planned_requests = 0;
+        for safety_only in [false, true] {
+            let inputs = execution_cases
+                .iter()
+                .filter(|case| !safety_only || case.gate == TagQualityGate::Safety)
+                .map(|case| case.track.clone())
+                .collect::<Vec<_>>();
+            planned_requests +=
+                crate::assistant::plan_model_tagger_batches(&inputs, &vocabulary, |request| {
+                    self.transport
+                        .validate_request(&execution.role.execution, request)
+                })
+                .map_err(model_task_failure)?
+                .len();
+        }
+        let max_attempts = tagging_attempt_budget(planned_requests);
+        let mut usage =
+            start_evaluation_run(context, &execution.role, parameters, max_attempts).await?;
         let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
         let mut completed = 0_usize;
         let mut deterministic_execution_failure = None;
@@ -327,7 +344,20 @@ impl ModelFeatureJobHandler {
         .await?;
         let mut updated = 0_usize;
         let mut skipped_changed = 0_usize;
-        let mut provider_usage = ProviderUsageAccumulator::default();
+        let mut provider_usage = start_model_run(
+            context,
+            &role,
+            &parameters.quality_evaluation_id,
+            Some(&parameters.disclosure_version),
+            &parameters,
+            &signatures
+                .iter()
+                .map(|(id, signature)| (id.get(), signature))
+                .collect::<Vec<_>>(),
+            tagging_attempt_budget(batches.len()),
+            ModelReviewDestination::TrackTagReview,
+        )
+        .await?;
         let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
         for planned in batches {
             let start = planned.input_range.start;

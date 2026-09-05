@@ -17,7 +17,19 @@ impl ModelEvaluationJobHandler {
         .await?;
         let execution = self.prepare(parameters).await?;
         let vocabulary = default_vocabulary_snapshot().map_err(model_task_failure)?;
-        let mut usage = ProviderUsageAccumulator::default();
+        let max_attempts = suite
+            .cases
+            .iter()
+            .map(|case| {
+                ModelTagCleanupTask::new(&case.usage(), vocabulary.clone())
+                    .map(|task| task.total_model_batches())
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(model_task_failure)?
+            .into_iter()
+            .sum();
+        let mut usage =
+            start_evaluation_run(context, &execution.role, parameters, max_attempts).await?;
         let mut results = Vec::with_capacity(suite.cases.len());
         for (index, case) in suite.cases.iter().enumerate() {
             let mut task = ModelTagCleanupTask::new(&case.usage(), vocabulary.clone())
@@ -143,7 +155,20 @@ impl ModelFeatureJobHandler {
             },
         )
         .await?;
-        let mut provider_usage = ProviderUsageAccumulator::default();
+        let mut provider_usage = start_model_run(
+            context,
+            &role,
+            &parameters.quality_evaluation_id,
+            Some(&parameters.disclosure_version),
+            &parameters,
+            &(
+                &parameters.catalog_signature,
+                &parameters.vocabulary_fingerprint,
+            ),
+            total_batches,
+            ModelReviewDestination::TagCleanupReview,
+        )
+        .await?;
         while let Some(request) = task.next_request() {
             ensure_feature_role_unchanged(
                 &self.quality,

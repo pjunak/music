@@ -43,8 +43,10 @@ remain authoritative for those claims.
   Shared policy remains conservative; unknown roles and artifacts use shared coverage.
   Locked dependency changes also expire all roles, including schema/parser updates.
   Runtime inventory tests reject an Assistant source or suite omitted from digest coverage.
-- Provider jobs are non-restartable after uncertain external cost. Usage is checkpointed after
-  every attempt, including attempts that later fail.
+- Provider jobs are non-restartable after uncertain external cost. An uncertain attempt is
+  checkpointed before network execution; observed outcomes and usage are checkpointed afterward.
+  Shared immutable model run manifests bind configuration, scope/evidence fingerprints,
+  request budgets, and review destinations. See [ADR-019](ADR-019-model-run-records-and-attempt-outcomes.md).
 
 ## Request planning and catalog provenance
 
@@ -127,7 +129,7 @@ operator request / indexed library / local audio
 | URL validation, SSRF boundary, redirect refusal, byte/time limits | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | pinned-DNS, special-range, redirect, timeout, and response-limit tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Credential encryption, initialization, reset, and offline rotation | [`crypto.rs`](../crates/music-storage/src/crypto.rs), [`provider_credentials.rs`](../crates/music-server/src/provider_credentials.rs), [`providers.rs`](../crates/music-storage/src/providers.rs) | Python-compatibility fixture plus reset/rotation transaction tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Role preparation and stale-gate enforcement | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`provider_api.rs`](../crates/music-server/src/provider_api.rs) | role fingerprint, conformance, quality, and active-job tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
-| Attempt/token accounting | [`provider_usage.rs`](../crates/music-application/src/assistant/provider_usage.rs), [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs) | colocated usage and checkpoint tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
+| Run manifests and attempt/token accounting | [`provider_usage.rs`](../crates/music-application/src/assistant/provider_usage.rs), [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs) | SQLite-backed provider attempt fault tests and local HTTP fixtures | [ADR-019](ADR-019-model-run-records-and-attempt-outcomes.md) |
 | Durable job lifecycle | [`jobs.rs`](../crates/music-application/src/jobs.rs), [`jobs.rs`](../crates/music-storage/src/jobs.rs), [`jobs.rs`](../crates/music-server/src/jobs.rs) | persisted-boundary fault tests in `music-storage` | [Repository persistence rules](../AGENTS.md#persistence-and-deployment) |
 | Browser API/types and review workflows | [`frontend/src/core/api.ts`](../frontend/src/core/api.ts), [`frontend/src/views/assistant/`](../frontend/src/views/assistant) | colocated Vitest files | [Assistant UX philosophy](assistant-ux-philosophy.md) |
 

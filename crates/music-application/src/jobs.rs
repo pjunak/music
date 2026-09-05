@@ -598,6 +598,16 @@ impl JobExecutionContext {
         &self.claim.job.id
     }
 
+    /// Persisted timestamps have one-second resolution. Clock reversal is unknown.
+    #[must_use]
+    pub fn queue_wait_seconds(&self) -> Option<u64> {
+        self.claim
+            .job
+            .started_at_unix_seconds
+            .and_then(|started| started.checked_sub(self.claim.job.created_at_unix_seconds))
+            .and_then(|elapsed| u64::try_from(elapsed).ok())
+    }
+
     #[must_use]
     pub const fn progress_current(&self) -> u64 {
         self.claim.job.progress_current

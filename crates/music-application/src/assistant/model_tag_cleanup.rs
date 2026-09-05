@@ -657,6 +657,7 @@ mod tests {
         )?;
         assert!(task.next_request().is_some());
         task.accept(StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
             payload: Some(json!({

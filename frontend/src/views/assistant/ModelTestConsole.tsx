@@ -391,23 +391,30 @@ function buildLogEntries(
 
   const usage = providerUsageFromJob(quality.currentJob);
   if (usage !== null) {
-    const missing = Math.max(
-      usage.attempted_requests - usage.input_tokens_reported_requests,
-      usage.attempted_requests - usage.output_tokens_reported_requests,
-    );
+    const missing =
+      usage.outcomes?.responses_missing_usage ??
+      Math.max(
+        usage.attempted_requests - usage.input_tokens_reported_requests,
+        usage.attempted_requests - usage.output_tokens_reported_requests,
+      );
     const reportedModels =
       usage.provider_model_ids.length > 0
         ? ` · reported model ${usage.provider_model_ids.join(", ")}${
             usage.provider_model_ids_truncated ? " and additional IDs" : ""
           }`
         : "";
+    const outcomeNote = usage.outcomes
+      ? ` · ${usage.outcomes.response_received} responses received · ${usage.outcomes.not_sent + usage.outcomes.preflight_rejected} not sent · ${usage.outcomes.uncertain} in-progress or uncertain`
+      : "";
     entries.push({
       id: "provider-usage",
       time: quality.currentJob?.finished_at ?? quality.currentJob?.updated_at ?? null,
-      tone: missing > 0 ? "warning" : "info",
+      tone: missing > 0 || (usage.outcomes?.uncertain ?? 0) > 0 ? "warning" : "info",
       message:
-        `${count(usage.attempted_requests)} provider calls · ${count(usage.input_tokens)} input tokens · ${count(usage.output_tokens)} output tokens${reportedModels}` +
-        (missing > 0 ? ` · ${missing} calls omitted one or both token counts.` : "."),
+        `${count(usage.attempted_requests)} provider ${usage.outcomes ? "attempts" : "calls"} · ${count(usage.input_tokens)} input tokens · ${count(usage.output_tokens)} output tokens${reportedModels}${outcomeNote}` +
+        (missing > 0
+          ? ` · ${usage.outcomes ? missing : `At least ${missing}`} ${usage.outcomes ? "responses" : "calls"} have incomplete token counts.`
+          : "."),
     });
   }
 

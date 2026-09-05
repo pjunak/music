@@ -30,7 +30,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FaultPoint {
     Claim,
+    BeforeCheckpoint,
     Checkpoint,
+    AttemptCompletion,
     Completion,
 }
 
@@ -123,6 +125,16 @@ impl JobRepository for FaultInjectingRepository {
         result: &'a Map<String, Value>,
     ) -> JobFuture<'a, JobLeaseState> {
         Box::pin(async move {
+            if self.trip(FaultPoint::BeforeCheckpoint)
+                || (result
+                    .get("usage")
+                    .is_some_and(|usage| usage["response_received_requests"] == 1)
+                    && self.trip(FaultPoint::AttemptCompletion))
+            {
+                return Err(injected_failure(
+                    "injected failure before checkpoint commit",
+                ));
+            }
             let state = self.inner.checkpoint(claim, result).await?;
             if self.trip(FaultPoint::Checkpoint) {
                 return Err(injected_failure("injected failure after checkpoint commit"));
@@ -152,6 +164,9 @@ impl JobRepository for FaultInjectingRepository {
         self.inner.recover_interrupted(definitions)
     }
 }
+
+#[path = "jobs_fault_tests/provider_attempts.rs"]
+mod provider_attempts;
 
 #[derive(Debug)]
 struct ImmediateHandler {

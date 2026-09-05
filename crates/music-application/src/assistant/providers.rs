@@ -634,7 +634,7 @@ pub struct ResolvedRoleExecution {
     pub connection_name: String,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct StructuredModelRequest {
     pub system_prompt: String,
     pub user_prompt: String,
@@ -645,6 +645,7 @@ pub struct StructuredModelRequest {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StructuredModelResult {
+    pub outcome: ProviderAttemptOutcome,
     pub succeeded: bool,
     pub error_code: Option<String>,
     pub payload: Option<Value>,
@@ -652,6 +653,16 @@ pub struct StructuredModelResult {
     pub finish_reason: Option<String>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+}
+
+/// Transport facts, independent of schema validation and provider billing.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAttemptOutcome {
+    PreflightRejected,
+    NotSent,
+    ResponseReceived,
+    Uncertain,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -2092,6 +2103,7 @@ mod tests {
             Some(true)
         );
         let passed = target.evaluate(StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
             payload: Some(serde_json::json!({
@@ -2108,6 +2120,7 @@ mod tests {
         assert!(passed.passed);
 
         let mismatch = target.evaluate(StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
             payload: Some(serde_json::json!({

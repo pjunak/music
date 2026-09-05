@@ -31,7 +31,66 @@ use music_domain::LibraryPath;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use super::StructuredModelTransport;
+use super::{
+    ModelReviewDestination, ModelRunManifest, StructuredModelTransport,
+    execute_recorded_provider_request as execute_provider_request,
+};
+
+#[allow(clippy::too_many_arguments)]
+async fn start_model_run(
+    context: &JobExecutionContext,
+    role: &ResolvedRoleExecution,
+    evaluation_id: &str,
+    disclosure_version: Option<&str>,
+    scope: &impl Serialize,
+    evidence: &impl Serialize,
+    max_attempts: usize,
+    destination: ModelReviewDestination,
+) -> Result<ProviderUsageAccumulator, JobHandlerError> {
+    let usage = ProviderUsageAccumulator::for_run(ModelRunManifest::new(
+        context,
+        role,
+        evaluation_id,
+        disclosure_version,
+        scope,
+        evidence,
+        max_attempts,
+        destination,
+    )?);
+    context
+        .checkpoint(usage.checkpoint())
+        .await
+        .map_err(JobHandlerError::from_execution)?;
+    Ok(usage)
+}
+
+async fn start_evaluation_run(
+    context: &JobExecutionContext,
+    role: &ResolvedRoleExecution,
+    parameters: &ModelEvaluationJobParameters,
+    max_attempts: usize,
+) -> Result<ProviderUsageAccumulator, JobHandlerError> {
+    // The role fingerprint covers the exact synthetic suite and task sources.
+    start_model_run(
+        context,
+        role,
+        &parameters.evaluation_id,
+        None,
+        parameters,
+        &(&parameters.evaluation_id, &role.fingerprint),
+        max_attempts,
+        ModelReviewDestination::QualityEvaluation,
+    )
+    .await
+}
+
+fn tagging_attempt_budget(planned_requests: usize) -> usize {
+    if planned_requests == 0 {
+        0
+    } else {
+        planned_requests + usize::from(MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT)
+    }
+}
 
 pub const MODEL_PLAYLIST_SUGGESTION_JOB_KIND: &str = "assistant.model-playlist-suggestion";
 pub const MODEL_EQ_DRAFT_JOB_KIND: &str = "assistant.model-eq-draft";
@@ -136,20 +195,7 @@ impl ModelEvaluationJobHandler {
         request: &StructuredModelRequest,
         usage: &mut ProviderUsageAccumulator,
     ) -> Result<StructuredModelResult, JobHandlerError> {
-        context
-            .check_cancelled()
-            .await
-            .map_err(JobHandlerError::from_execution)?;
-        let result = self
-            .transport
-            .execute_structured_model_request(&role.execution, request)
-            .await;
-        usage.record(&result);
-        context
-            .checkpoint(usage.checkpoint())
-            .await
-            .map_err(JobHandlerError::from_execution)?;
-        Ok(result)
+        execute_provider_request(context, self.transport.as_ref(), role, request, usage).await
     }
 }
 
@@ -208,7 +254,7 @@ fn evaluation_job_definition(kind: EvaluationKind) -> JobDefinition {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ModelEvaluationJobParameters {
     role_id: String,
@@ -429,7 +475,7 @@ fn feature_job_definition(kind: FeatureKind) -> JobDefinition {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ModelPlaylistJobParameters {
     role_id: String,
@@ -440,7 +486,7 @@ struct ModelPlaylistJobParameters {
     request: PlaylistRequestParameters,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct PlaylistRequestParameters {
     prompt: String,
@@ -477,7 +523,7 @@ impl PlaylistRequestParameters {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ModelEqJobParameters {
     role_id: String,
@@ -488,14 +534,14 @@ struct ModelEqJobParameters {
     request: EqRequestParameters,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct EqRequestParameters {
     name: String,
     goal: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ModelTagCleanupJobParameters {
     role_id: String,
@@ -507,7 +553,7 @@ struct ModelTagCleanupJobParameters {
     vocabulary_fingerprint: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ModelTaggingJobParameters {
     role_id: String,
@@ -616,28 +662,6 @@ pub fn model_feature_job_handlers(
         }) as Arc<dyn JobHandler>
     })
     .collect()
-}
-
-async fn execute_provider_request(
-    context: &JobExecutionContext,
-    transport: &dyn StructuredModelTransport,
-    role: &ResolvedRoleExecution,
-    request: &StructuredModelRequest,
-    usage: &mut ProviderUsageAccumulator,
-) -> Result<StructuredModelResult, JobHandlerError> {
-    context
-        .check_cancelled()
-        .await
-        .map_err(JobHandlerError::from_execution)?;
-    let result = transport
-        .execute_structured_model_request(&role.execution, request)
-        .await;
-    usage.record(&result);
-    context
-        .checkpoint(usage.checkpoint())
-        .await
-        .map_err(JobHandlerError::from_execution)?;
-    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]

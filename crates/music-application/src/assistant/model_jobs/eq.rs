@@ -16,7 +16,8 @@ impl ModelEvaluationJobHandler {
         )
         .await?;
         let execution = self.prepare(parameters).await?;
-        let mut usage = ProviderUsageAccumulator::default();
+        let mut usage =
+            start_evaluation_run(context, &execution.role, parameters, suite.cases.len()).await?;
         let mut results = Vec::with_capacity(suite.cases.len());
         for (index, case) in suite.cases.iter().enumerate() {
             let task = EqDraftTask::new(&case.id, &case.goal).map_err(model_task_failure)?;
@@ -102,7 +103,17 @@ impl ModelFeatureJobHandler {
             "Sending only the disclosed sound goal and fixed EQ limits",
         )
         .await?;
-        let mut usage = ProviderUsageAccumulator::default();
+        let mut usage = start_model_run(
+            context,
+            &role,
+            &parameters.quality_evaluation_id,
+            Some(&parameters.disclosure_version),
+            &parameters,
+            &task.request(),
+            1,
+            ModelReviewDestination::EqAuthoring,
+        )
+        .await?;
         let result = execute_provider_request(
             context,
             self.transport.as_ref(),

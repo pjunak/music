@@ -16,7 +16,21 @@ impl ModelEvaluationJobHandler {
         )
         .await?;
         let execution = self.prepare(parameters).await?;
-        let mut usage = ProviderUsageAccumulator::default();
+        let max_attempts = suite
+            .cases
+            .iter()
+            .map(|case| {
+                case.task().map(|task| {
+                    usize::from(task.request().is_some())
+                        * (1 + usize::from(case.requires_repeat()))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(model_task_failure)?
+            .into_iter()
+            .sum();
+        let mut usage =
+            start_evaluation_run(context, &execution.role, parameters, max_attempts).await?;
         let mut results = Vec::with_capacity(suite.cases.len());
         for (index, case) in suite.cases.iter().enumerate() {
             let task = case.task().map_err(model_task_failure)?;
@@ -137,7 +151,18 @@ impl ModelFeatureJobHandler {
         )
         .await?;
         let task = ModelPlaylistTask::new(&tracks, &request).map_err(model_task_failure)?;
-        let mut usage = ProviderUsageAccumulator::default();
+        let model_request = task.request();
+        let mut usage = start_model_run(
+            context,
+            &role,
+            &parameters.quality_evaluation_id,
+            Some(&parameters.disclosure_version),
+            &parameters,
+            &model_request,
+            usize::from(model_request.is_some()),
+            ModelReviewDestination::PlaylistPreview,
+        )
+        .await?;
         let suggestion = if let Some(suggestion) = task.immediate_result() {
             suggestion
         } else {

@@ -930,6 +930,7 @@ mod tests {
             default_vocabulary_snapshot()?,
         )?;
         let Err(error) = batch.finish(StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
             payload: Some(json!({
@@ -986,6 +987,7 @@ mod tests {
         );
         let error = batch
             .finish(StructuredModelResult {
+                outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
                 succeeded: true,
                 error_code: None,
                 payload: Some(json!({
@@ -1024,6 +1026,7 @@ mod tests {
             (vec![1, 3], false),
         ] {
             let result = batch.finish(StructuredModelResult {
+                outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
                 succeeded: true, error_code: None,
                 payload: Some(json!({
                     "schema_version": super::MODEL_TAGGER_OUTPUT_CONTRACT,

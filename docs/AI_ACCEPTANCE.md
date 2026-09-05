@@ -39,6 +39,12 @@ server estimate changes appropriately. Include vocabulary sizes near the payload
 limit and verify a rejected oversized plan causes no provider request. Preserve the
 two-correction limit and record usage for unsuccessful attempts as well as successes.
 
+Usage v2 retains a shared run manifest and write-ahead attempt outcomes. Check that
+the chosen model/Thinking, request limit, scope/evidence fingerprints, and review
+destination match the run. A cancelled/interrupted attempt can remain uncertain;
+zero reported tokens do not establish zero charges. Compare any uncertain attempt
+with provider-side records before deliberately starting another paid run.
+
 ## Held-out quality study
 
 Create a versioned set of 100–200 independently labelled, permitted examples covering
@@ -56,18 +62,17 @@ to send the selected metadata are prerequisites, not outputs to invent locally.
 
 ## Engineering follow-up
 
-- Unify immutable run manifests and proposal provenance across tasks: role/config
-  identity, scope, evidence signatures, revisions, request budgets, and review
-  destination should share a vocabulary without erasing task-specific contracts.
+- Shared immutable manifests and request budgets are implemented for all model
+  tools/evaluations. Assess a common model/catalog proposal provenance envelope
+  only if it improves review workflows; retain catalog revision and lease guards.
 - Extend quality evaluation with custom-vocabulary and maximum-size scenarios,
   separate candidate recall from playlist ranking, and record operator review
   outcomes without using them as automatic training labels.
-- Measure queue delay for small interactive drafts behind long catalog/evaluation
-  jobs before changing provider-lane fairness. Preserve per-provider request limits,
-  cancellation, checkpointing, and non-restartable paid jobs.
-- Make attempt outcomes distinguish preflight rejection, known-unsent requests,
-  responses received, and uncertain external outcomes. Do not treat a timeout as
-  proof that the provider performed no work.
+- Collect queue-wait and completed-request-duration measurements from usage v2
+  for small interactive drafts behind long catalog/evaluation jobs. Compare queue
+  delay percentiles by job type and workload before changing provider-lane fairness.
+  Queue timestamps resolve to seconds; interrupted durations may be unavailable.
+  Preserve request limits, cancellation, checkpointing, and non-restartable paid jobs.
 
 These are follow-up changes and validation tasks. The current synthetic tests do
 not support claims about physical audio quality, private-corpus tagging accuracy,
@@ -77,3 +82,7 @@ The static output schemas and typed catalog connector boundary are implemented i
 [ADR-018](ADR-018-derived-model-schemas-and-catalog-ports.md). Their automated checks
 cover strict result handling and SQLite-backed orchestration; provider and physical
 acceptance above still need the actual configured runtime.
+
+[ADR-019](ADR-019-model-run-records-and-attempt-outcomes.md) documents implemented
+run manifests, attempt accounting, fault recovery, and measurement limits. No live
+provider, production-latency, or private-corpus result is implied by these tests.

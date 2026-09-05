@@ -483,6 +483,7 @@ mod tests {
             .map(|band| band.baseline_gain_db)
             .collect::<Vec<_>>();
         let draft = task.finish(StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
             payload: Some(json!({

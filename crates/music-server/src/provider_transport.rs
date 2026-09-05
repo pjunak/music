@@ -11,9 +11,9 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use music_application::assistant::{
     GOOGLE_GEMINI_OPENAI_ADAPTER, GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
-    OPENAI_RESPONSES_ADAPTER, ProviderConnectionPolicy, ProviderExecutionTarget,
-    ProviderPolicyError, ProviderVerificationResult, ProviderVerificationTarget,
-    StructuredModelRequest, StructuredModelResult, provider_adapter,
+    OPENAI_RESPONSES_ADAPTER, ProviderAttemptOutcome, ProviderConnectionPolicy,
+    ProviderExecutionTarget, ProviderPolicyError, ProviderVerificationResult,
+    ProviderVerificationTarget, StructuredModelRequest, StructuredModelResult, provider_adapter,
 };
 use reqwest::header::{
     ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT,
@@ -136,10 +136,13 @@ impl ProviderNetworkBoundary {
         request: &StructuredModelRequest,
     ) -> StructuredModelResult {
         let Ok(_permit) = self.request_slots.try_acquire() else {
-            return failed_structured_model("provider_busy");
+            return failed_structured_model("provider_busy", ProviderAttemptOutcome::NotSent);
         };
         let Some(handler) = provider_handler(&target.adapter_id) else {
-            return failed_structured_model("unsupported_adapter");
+            return failed_structured_model(
+                "unsupported_adapter",
+                ProviderAttemptOutcome::PreflightRejected,
+            );
         };
         let prepared = match handler.prepare_structured_request(
             &target.model_id,
@@ -148,7 +151,12 @@ impl ProviderNetworkBoundary {
             request,
         ) {
             Ok(prepared) => prepared,
-            Err(error) => return failed_structured_model(error.code()),
+            Err(error) => {
+                return failed_structured_model(
+                    error.code(),
+                    ProviderAttemptOutcome::PreflightRejected,
+                );
+            }
         };
         let url = format!("{}{}", target.base_url.trim_end_matches('/'), prepared.path);
         let response = self
@@ -165,14 +173,17 @@ impl ProviderNetworkBoundary {
             .await;
         let response = match response {
             Ok(response) => response,
-            Err(error) => return failed_structured_model(error.code()),
+            Err(error) => return failed_structured_model(error.code(), error.outcome),
         };
         if !response.status.is_success() {
-            return failed_structured_model(safe_http_error_code(
-                response.status,
-                "completion_endpoint_not_found",
-                &response.payload,
-            ));
+            return failed_structured_model(
+                safe_http_error_code(
+                    response.status,
+                    "completion_endpoint_not_found",
+                    &response.payload,
+                ),
+                ProviderAttemptOutcome::ResponseReceived,
+            );
         }
         handler.parse_structured_response(&response.payload)
     }
@@ -259,7 +270,8 @@ impl ProviderNetworkBoundary {
             .ok_or_else(|| ProviderTransportError::new("invalid_request"))?;
         // One deadline covers DNS, connection establishment, headers and body.
         // Reqwest's request timeout starts too late to bound our pinned lookup.
-        tokio::time::timeout(timeout, async {
+        let mut outcome = ProviderAttemptOutcome::NotSent;
+        let result = tokio::time::timeout(timeout, async {
             let addresses = self.destination_addresses(&host, port).await?;
             if addresses.is_empty()
                 || (!allow_private_network
@@ -292,15 +304,20 @@ impl ProviderNetworkBoundary {
             } else {
                 client.get(url)
             };
-            let response = request
+            let request = request
                 .headers(headers)
-                .send()
-                .await
+                .build()
                 .map_err(map_reqwest_error)?;
+            // Once execution starts, a network error cannot prove the provider
+            // did not receive the request. Headers prove a response arrived.
+            outcome = ProviderAttemptOutcome::Uncertain;
+            let response = client.execute(request).await.map_err(map_reqwest_error)?;
+            outcome = ProviderAttemptOutcome::ResponseReceived;
             bounded_json_response(response, max_response_bytes).await
         })
         .await
-        .map_err(|_| ProviderTransportError::new("timeout"))?
+        .unwrap_or_else(|_| Err(ProviderTransportError::new("timeout")));
+        result.map_err(|error| ProviderTransportError { outcome, ..error })
     }
 
     async fn destination_addresses(
@@ -373,11 +390,15 @@ struct JsonHttpResponse {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct ProviderTransportError {
     code: &'static str,
+    outcome: ProviderAttemptOutcome,
 }
 
 impl ProviderTransportError {
     const fn new(code: &'static str) -> Self {
-        Self { code }
+        Self {
+            code,
+            outcome: ProviderAttemptOutcome::NotSent,
+        }
     }
 
     const fn code(self) -> &'static str {
@@ -471,8 +492,12 @@ fn map_reqwest_error(error: reqwest::Error) -> ProviderTransportError {
     }
 }
 
-fn failed_structured_model(error_code: &str) -> StructuredModelResult {
+fn failed_structured_model(
+    error_code: &str,
+    outcome: ProviderAttemptOutcome,
+) -> StructuredModelResult {
     StructuredModelResult {
+        outcome,
         succeeded: false,
         error_code: Some(error_code.to_owned()),
         payload: None,
@@ -681,6 +706,7 @@ mod tests {
         .await;
         let result = result?;
         assert_eq!(result.error_code.as_deref(), Some("timeout"));
+        assert_eq!(result.outcome, ProviderAttemptOutcome::NotSent);
         assert_eq!(
             boundary.request_slots.available_permits(),
             PROVIDER_REQUEST_CONCURRENCY
@@ -697,6 +723,72 @@ mod tests {
             let _result = axum::serve(listener, app).await;
         });
         Ok((address, task))
+    }
+
+    #[tokio::test]
+    async fn attempt_outcomes_follow_response_headers_even_when_body_fails()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (reply, expected_code, expected_outcome) in [
+            ("", "timeout", ProviderAttemptOutcome::Uncertain),
+            (
+                "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n{",
+                "timeout",
+                ProviderAttemptOutcome::ResponseReceived,
+            ),
+            (
+                "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nnope",
+                "invalid_response",
+                ProviderAttemptOutcome::ResponseReceived,
+            ),
+            (
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 2\r\n\r\n{}",
+                "rate_limited",
+                ProviderAttemptOutcome::ResponseReceived,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let address = listener.local_addr()?;
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await?;
+                let mut buffer = [0_u8; 4096];
+                let _read = stream.read(&mut buffer).await?;
+                stream.write_all(reply.as_bytes()).await?;
+                std::future::pending::<()>().await;
+                Ok::<(), io::Error>(())
+            });
+            let mut target = execution_target(
+                OPENAI_COMPATIBLE_ADAPTER,
+                format!("http://{address}"),
+                ThinkingMode::ProviderDefault,
+            );
+            target.timeout_seconds = 1;
+            let result = ProviderNetworkBoundary::new()
+                .execute_structured_model_request(&target, &structured_request())
+                .await;
+            server.abort();
+            assert_eq!(result.error_code.as_deref(), Some(expected_code));
+            assert_eq!(result.outcome, expected_outcome);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejected_request_never_reaches_dns() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let boundary = ProviderNetworkBoundary::with_resolver(Arc::new(HangingResolver));
+        let target = execution_target(
+            "unsupported",
+            "https://provider.example".to_owned(),
+            ThinkingMode::ProviderDefault,
+        );
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            boundary.execute_structured_model_request(&target, &structured_request()),
+        )
+        .await?;
+        assert_eq!(result.outcome, ProviderAttemptOutcome::PreflightRejected);
+        assert_eq!(result.error_code.as_deref(), Some("unsupported_adapter"));
+        Ok(())
     }
 
     fn target(base_url: String, allow_private_network: bool) -> ProviderVerificationTarget {
@@ -775,6 +867,7 @@ mod tests {
             .await;
         assert!(!execution.succeeded);
         assert_eq!(execution.error_code.as_deref(), Some("provider_busy"));
+        assert_eq!(execution.outcome, ProviderAttemptOutcome::NotSent);
         Ok(())
     }
 

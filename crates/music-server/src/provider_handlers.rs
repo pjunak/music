@@ -585,6 +585,7 @@ fn structured_model_result(
     output_tokens: Option<u64>,
 ) -> StructuredModelResult {
     StructuredModelResult {
+        outcome: music_application::assistant::ProviderAttemptOutcome::ResponseReceived,
         succeeded,
         error_code: error_code.map(str::to_owned),
         payload,

@@ -169,6 +169,7 @@ pub(super) mod tests {
         payload: serde_json::Value,
     ) -> crate::assistant::StructuredModelResult {
         crate::assistant::StructuredModelResult {
+            outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             payload: Some(payload),
             error_code: None,
