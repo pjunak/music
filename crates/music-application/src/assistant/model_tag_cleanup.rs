@@ -15,9 +15,9 @@ use super::{
 
 pub const MODEL_TAG_CLEANUP_INPUT_CONTRACT: &str = "assistant-model-tag-cleanup-input/v3";
 pub const MODEL_TAG_CLEANUP_OUTPUT_CONTRACT: &str = "assistant-model-tag-cleanup-output/v2";
-pub const MODEL_TAG_CLEANUP_EVALUATION_CONTRACT: &str = "assistant-model-tag-cleanup-evaluation/v2";
+pub const MODEL_TAG_CLEANUP_EVALUATION_CONTRACT: &str = "assistant-model-tag-cleanup-evaluation/v3";
 pub const MODEL_TAG_CLEANUP_ENGINE_ID: &str = "model-tag-cleanup/v3";
-pub const TAG_CLEANUP_QUALITY_SUITE_ID: &str = "controlled-vocabulary-cleanup-baseline-v6";
+pub const TAG_CLEANUP_QUALITY_SUITE_ID: &str = "controlled-vocabulary-cleanup-baseline-v7";
 pub const MAX_MODEL_CLEANUP_TAGS: usize = 500;
 pub const MAX_MODEL_CLEANUP_SUGGESTIONS: usize = 100;
 pub const MODEL_TAG_CLEANUP_BATCH_SIZE: usize = 20;
@@ -347,6 +347,8 @@ struct GeneratedCleanupTags {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TagCleanupQualityCase {
+    #[serde(default)]
+    pub vocabulary: super::TagQualityVocabulary,
     pub id: String,
     pub description: String,
     #[serde(default)]
@@ -369,6 +371,10 @@ pub struct TagUsageWire {
 }
 
 impl TagCleanupQualityCase {
+    pub fn task(&self) -> Result<ModelTagCleanupTask, ModelTaskError> {
+        ModelTagCleanupTask::new(&self.usage(), self.vocabulary.snapshot()?)
+    }
+
     #[must_use]
     pub fn usage(&self) -> Vec<TagUsage> {
         let mut usage = self
@@ -438,6 +444,7 @@ impl TagCleanupQualityCase {
             ));
         }
         TagCleanupQualityCaseResult {
+            vocabulary: self.vocabulary,
             id: self.id.clone(),
             description: self.description.clone(),
             passed: failures.is_empty(),
@@ -457,6 +464,7 @@ pub struct TagCleanupQualitySuite {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TagCleanupQualityCaseResult {
+    pub vocabulary: super::TagQualityVocabulary,
     pub id: String,
     pub description: String,
     pub passed: bool,
@@ -472,27 +480,63 @@ pub struct TagCleanupQualityEvaluationResult {
     pub passed: bool,
     pub passed_cases: u32,
     pub total_cases: u32,
+    pub vocabulary_results: Vec<super::TagVocabularyQualityResult>,
     pub cases: Vec<TagCleanupQualityCaseResult>,
 }
 
 impl TagCleanupQualityEvaluationResult {
-    #[must_use]
     pub fn from_cases(
         suite: &TagCleanupQualitySuite,
         cases: Vec<TagCleanupQualityCaseResult>,
-    ) -> Self {
+    ) -> Result<Self, ModelTaskError> {
+        if cases.is_empty()
+            || cases
+                .iter()
+                .map(|case| (&case.id, case.vocabulary))
+                .collect::<Vec<_>>()
+                != suite
+                    .cases
+                    .iter()
+                    .map(|case| (&case.id, case.vocabulary))
+                    .collect::<Vec<_>>()
+        {
+            return Err(ModelTaskError::new("model_evaluation_result_invalid"));
+        }
         let total_cases = u32::try_from(cases.len()).unwrap_or(u32::MAX);
         let passed_cases =
             u32::try_from(cases.iter().filter(|case| case.passed).count()).unwrap_or(u32::MAX);
-        Self {
-            schema_version: "assistant-model-tag-cleanup-quality-result/v1",
+        let vocabulary_results = cases
+            .iter()
+            .map(|case| case.vocabulary)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|vocabulary| {
+                let total_cases = cases
+                    .iter()
+                    .filter(|case| case.vocabulary == vocabulary)
+                    .count() as u32;
+                let passed_cases = cases
+                    .iter()
+                    .filter(|case| case.vocabulary == vocabulary && case.passed)
+                    .count() as u32;
+                super::TagVocabularyQualityResult {
+                    vocabulary,
+                    total_cases,
+                    passed_cases,
+                    passed: passed_cases == total_cases,
+                }
+            })
+            .collect();
+        Ok(Self {
+            schema_version: "assistant-model-tag-cleanup-quality-result/v2",
             suite_id: suite.id.clone(),
             engine_id: MODEL_TAG_CLEANUP_ENGINE_ID,
             passed: passed_cases == total_cases,
             passed_cases,
             total_cases,
+            vocabulary_results,
             cases,
-        }
+        })
     }
 }
 
@@ -513,6 +557,21 @@ pub fn tag_cleanup_quality_suite() -> Result<TagCleanupQualitySuite, ModelTaskEr
             != suite.cases.len()
     {
         return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+    }
+    for case in &suite.cases {
+        let usage = case.usage();
+        let vocabulary = case.vocabulary.snapshot()?;
+        if case.maximum_suggestions > MAX_MODEL_CLEANUP_SUGGESTIONS
+            || case.required_pairs.len() > case.maximum_suggestions
+            || case.required_pairs.iter().any(|pair| {
+                !usage.iter().any(|item| item.tag == pair.source)
+                    || !vocabulary.entries().any(|entry| entry.name == pair.target)
+                    || case.forbidden_pairs.contains(pair)
+            })
+        {
+            return Err(ModelTaskError::new("model_evaluation_suite_invalid"));
+        }
+        case.task()?;
     }
     Ok(suite)
 }
@@ -684,13 +743,71 @@ mod tests {
     fn bundled_cleanup_suite_materializes_boundary_cases() -> Result<(), Box<dyn std::error::Error>>
     {
         let suite = tag_cleanup_quality_suite()?;
-        assert_eq!(suite.cases.len(), 15);
+        assert_eq!(suite.cases.len(), 20);
         let boundary = suite
             .cases
             .iter()
             .find(|case| case.id == "production-batch-boundary")
             .ok_or("missing boundary case")?;
         assert_eq!(boundary.usage().len(), 20);
+        Ok(())
+    }
+
+    #[test]
+    fn cleanup_fixtures_round_trip_and_incomplete_results_cannot_certify()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::assistant::structured_harness::tests::model_result;
+        let suite = tag_cleanup_quality_suite()?;
+        let mut results = Vec::new();
+        for case in &suite.cases {
+            let vocabulary = case.vocabulary.snapshot()?;
+            let mut task = case.task()?;
+            if case.id == "custom-aliases-local" {
+                assert_eq!(task.total_model_batches(), 0);
+            }
+            if matches!(
+                case.id.as_str(),
+                "custom-definition-semantic" | "maximum-vocabulary-last-entry"
+            ) {
+                assert!(
+                    task.next_request().is_some(),
+                    "{} must exercise model reasoning",
+                    case.id
+                );
+            }
+            while let Some(request) = task.next_request() {
+                let input: serde_json::Value = serde_json::from_str(&request.user_prompt)?;
+                assert_eq!(
+                    input["canonical_tags"]
+                        .as_array()
+                        .ok_or("canonical tags missing")?
+                        .len(),
+                    vocabulary.entries().count()
+                );
+                let decisions = input["candidate_sources"].as_array().ok_or("sources missing")?.iter().map(|source| {
+                    let target = case.required_pairs.iter().find(|pair| source["tag"] == pair.source)
+                        .and_then(|pair| vocabulary.entries().find(|entry| entry.name == pair.target))
+                        .map(|entry| &entry.id);
+                    json!({"source_id":source["source_id"],"target_tag_id":target,"confidence":"high","reason":"Synthetic expected-label fixture."})
+                }).collect::<Vec<_>>();
+                task.accept(model_result(json!({"schema_version":super::MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,"decisions":decisions})))?;
+            }
+            let result = case.assess(
+                task.finish()
+                    .ok_or_else(|| super::ModelTaskError::new("incomplete fixture")),
+            );
+            assert!(result.passed, "{}: {:?}", case.id, result.failures);
+            results.push(result);
+        }
+        assert!(
+            super::TagCleanupQualityEvaluationResult::from_cases(&suite, results.clone())?.passed
+        );
+        assert!(super::TagCleanupQualityEvaluationResult::from_cases(&suite, Vec::new()).is_err());
+        let mut incomplete = results.clone();
+        incomplete.pop();
+        assert!(super::TagCleanupQualityEvaluationResult::from_cases(&suite, incomplete).is_err());
+        results[0].passed = false;
+        assert!(!super::TagCleanupQualityEvaluationResult::from_cases(&suite, results)?.passed);
         Ok(())
     }
 }

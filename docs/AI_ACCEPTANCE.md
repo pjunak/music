@@ -79,9 +79,9 @@ to send the selected metadata are prerequisites, not outputs to invent locally.
 - Shared immutable manifests and request budgets are implemented for all model
   tools/evaluations. Assess a common model/catalog proposal provenance envelope
   only if it improves review workflows; retain catalog revision and lease guards.
-- Custom and maximum-vocabulary tagging cases and separate playlist candidate
-  recall are implemented. Extend coverage to custom-vocabulary cleanup and record
-  operator review outcomes without using them as automatic training labels. Use
+- Custom and maximum-vocabulary tagging and cleanup cases, model-tag review, and
+  separate playlist candidate recall are implemented. Record operator review
+  metrics without using decisions as automatic training labels. Use
   candidate recall measurements to justify any retrieval-policy changes.
 - Collect queue-wait and completed-request-duration measurements from usage v2
   for small interactive drafts behind long catalog/evaluation jobs. Compare queue

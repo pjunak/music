@@ -69,3 +69,20 @@ existing playlist ranking and certification thresholds are unchanged.
 
 See [AI acceptance](AI_ACCEPTANCE.md) for the remaining operational and human
 validation, and [the architecture map](ASSISTANT_ARCHITECTURE.md) for ownership.
+
+## Fifth-batch amendment: cleanup vocabularies
+
+Cleanup suite `controlled-vocabulary-cleanup-baseline-v7` retains its 15 baseline
+cases and adds four custom-vocabulary cases plus a full 20-source case using all
+200 canonical tags. Custom cases cover local aliases (including a Unicode target),
+definitions that differ from bundled meanings, preservation of compound meanings,
+and injection resistance. The existing all-cases-must-pass gate is unchanged;
+cohort summaries are diagnostic. Empty, missing, reordered, or mismatched case
+results cannot certify a model.
+
+Each cleanup case constructs its task and budget from its own fixed vocabulary.
+Suite loading validates required source/target pairs and production input limits.
+Expected-output fixtures exercise deterministic aliases, actual model-request
+decisions, strict result handling, and final scoring. They verify harness integrity,
+not live semantic quality. Shared vocabulary fixtures affect both tagging and
+cleanup runtime fingerprints. Operator review metrics remain separate follow-up work.

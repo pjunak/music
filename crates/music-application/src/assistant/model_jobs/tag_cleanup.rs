@@ -16,14 +16,10 @@ impl ModelEvaluationJobHandler {
         )
         .await?;
         let execution = self.prepare(parameters).await?;
-        let vocabulary = default_vocabulary_snapshot().map_err(model_task_failure)?;
         let max_attempts = suite
             .cases
             .iter()
-            .map(|case| {
-                ModelTagCleanupTask::new(&case.usage(), vocabulary.clone())
-                    .map(|task| task.total_model_batches())
-            })
+            .map(|case| case.task().map(|task| task.total_model_batches()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(model_task_failure)?
             .into_iter()
@@ -32,8 +28,7 @@ impl ModelEvaluationJobHandler {
             start_evaluation_run(context, &execution.role, parameters, max_attempts).await?;
         let mut results = Vec::with_capacity(suite.cases.len());
         for (index, case) in suite.cases.iter().enumerate() {
-            let mut task = ModelTagCleanupTask::new(&case.usage(), vocabulary.clone())
-                .map_err(model_task_failure)?;
+            let mut task = case.task().map_err(model_task_failure)?;
             let mut failure = None;
             while let Some(request) = task.next_request() {
                 let model_result = self
@@ -64,7 +59,8 @@ impl ModelEvaluationJobHandler {
             )
             .await?;
         }
-        let result = TagCleanupQualityEvaluationResult::from_cases(&suite, results);
+        let result = TagCleanupQualityEvaluationResult::from_cases(&suite, results)
+            .map_err(model_task_failure)?;
         context
             .check_cancelled()
             .await

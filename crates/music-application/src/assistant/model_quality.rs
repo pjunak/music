@@ -43,7 +43,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         role_id: "tag_cleanup",
         label: "Mood-tag cleanup quality",
         description: "Runs fixed synthetic canonical-ID and no-match tag-cleanup cases through this model. No songs or live library data are sent.",
-        suite_id: "controlled-vocabulary-cleanup-baseline-v6",
+        suite_id: "controlled-vocabulary-cleanup-baseline-v7",
         job_kind: "assistant.model-evaluation.tag-cleanup-quality-v1",
     },
     ModelEvaluationDefinition {

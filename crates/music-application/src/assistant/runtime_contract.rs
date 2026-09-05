@@ -151,14 +151,16 @@ fn artifact_affects_role(name: &str, role: &str) -> bool {
         | "assistant/evaluation_suites/playlist-local-v1.json"
         | "assistant/evaluation_suites/playlist-model-v1.json" => role == "playlist_planner",
         "assistant/model_tagger.rs"
-        | "assistant/tagging_evaluation.rs"
-        | "assistant/evaluation_suites/tagging-custom-vocabulary-v1.json"
         | "assistant/model_jobs/tagging.rs"
         | "assistant/evaluation_suites/music-tagging-v1.json" => role == "music_tagger",
         "assistant/model_jobs/tag_cleanup.rs"
         | "assistant/evaluation_suites/tag-cleanup-v1.json" => role == "tag_cleanup",
         // This module also owns the default vocabulary snapshot used by tagging.
         "assistant/model_tag_cleanup.rs" => matches!(role, "tag_cleanup" | "music_tagger"),
+        "assistant/tagging_evaluation.rs"
+        | "assistant/evaluation_suites/tagging-custom-vocabulary-v1.json" => {
+            matches!(role, "tag_cleanup" | "music_tagger")
+        }
         _ => true,
     }
 }

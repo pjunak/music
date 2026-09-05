@@ -245,6 +245,12 @@ including missing candidate IDs, even when the provider fails. These are synthet
 diagnostics; they do not establish live-library recall or change retrieval policy.
 See [ADR-020](ADR-020-vocabulary-quality-and-candidate-recall.md).
 
+Cleanup suite `controlled-vocabulary-cleanup-baseline-v7` uses 15 bundled cases,
+four custom cases, and a 20-source case with 200 canonical tags. It retains the
+all-cases-must-pass rule and reports vocabulary groups separately. Case identity,
+required labels, production inputs, and complete result membership are validated
+before certification; deterministic aliases never require a provider call.
+
 Quality suites exercise the same production request shape: 20-track tagging batches,
 20-source cleanup batches, and the 100-candidate playlist boundary. Playlist certification
 also scores target-duration error and selected-artist diversity, and requires one semantic

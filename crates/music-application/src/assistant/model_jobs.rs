@@ -18,8 +18,8 @@ use crate::assistant::{
     StructuredModelRequest, StructuredModelResult, TAG_CLEANUP_QUALITY_EVALUATION_ID,
     TAGGING_QUALITY_EVALUATION_ID, TagCleanupQualityEvaluationResult, TagConfidence,
     TagQualityCase, TagQualityCaseResult, TagQualityEvaluationResult, TagQualityGate,
-    TagQualitySuite, build_cleanup_preview, catalog_signature, default_vocabulary_snapshot,
-    eq_quality_suite, local_context_axes, merge_safety_repeats, model_tag_cleanup_suggestion_id,
+    TagQualitySuite, build_cleanup_preview, catalog_signature, eq_quality_suite,
+    local_context_axes, merge_safety_repeats, model_tag_cleanup_suggestion_id,
     model_tag_source_signature, model_tag_track_input, playlist_quality_suite,
     retryable_tagger_error, tag_cleanup_quality_suite, tag_quality_suite,
 };
