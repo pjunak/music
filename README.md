@@ -377,6 +377,12 @@ The complete first-run sequence—local baseline, connection verification, per-r
 quality checks, live-data acceptance, and isolated backup restore—is in
 [`ASSISTANT.md`](ASSISTANT.md).
 
+Use `music-cli jobs timing --database /data/app.db --limit 1000 --json` to inspect
+queue wait and whole-job execution percentiles by lane and job kind while the server
+is running. The read-only command reports bounded aggregates without job payloads or
+provider calls. See [job diagnostics](docs/JOB_DIAGNOSTICS.md) for sampling limits
+and the provider scheduling study.
+
 Rust owns an ordered SQLx migration ledger and refuses unknown or incompatible database shapes
 before opening them for writes. `music-cli db doctor` is read-only; `music-cli db migrate` creates
 and verifies a pre-migration backup before applying compatible migrations. The track index remains

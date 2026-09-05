@@ -15,6 +15,9 @@ use music_application::assistant::{
     load_playlist_quality_suite,
 };
 use music_application::auth::{AuthRepository, UnixSeconds};
+use music_application::jobs::timing::{
+    DEFAULT_JOB_TIMING_SAMPLE, DurationSummary, JobTimingReport, MAX_JOB_TIMING_SAMPLE,
+};
 use music_application::modes::ModeCatalogSource;
 use music_media::FilesystemModeCatalogSource;
 use music_server::{
@@ -25,7 +28,7 @@ use music_server::{
 use music_storage::{
     CredentialVault, DeviceImportOutcome, ProviderCredentialAudit,
     ProviderCredentialRotationOutcome, SchemaReport, SecretString, SqliteStorage,
-    SqliteStorageOptions, StorageError, hash_password,
+    SqliteStorageOptions, StorageError, hash_password, read_job_timing_report,
 };
 
 const INCOMPATIBLE_EXIT_CODE: u8 = 2;
@@ -66,7 +69,7 @@ impl PasswordArgument {
 #[command(
     name = "music-cli",
     version,
-    about = "Offline administration for the Rust music server"
+    about = "Administration and read-only diagnostics for the Rust music server"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -75,6 +78,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Inspect background jobs without starting a worker or contacting providers.
+    Jobs {
+        #[command(subcommand)]
+        command: JobCommand,
+    },
     /// Inspect or migrate the SQLite application database.
     Db {
         #[command(subcommand)]
@@ -184,6 +192,23 @@ enum PlaylistEngine {
     /// Inspect locally prepared model candidates without provider access or certification.
     Candidates,
     ConfiguredModel,
+}
+
+#[derive(Debug, Subcommand)]
+enum JobCommand {
+    /// Summarize a bounded newest-created sample; safe while the server is running.
+    Timing {
+        /// Explicit existing database file; no application configuration is loaded.
+        #[arg(long, value_name = "PATH")]
+        database: PathBuf,
+        /// Maximum jobs across both lanes (1–10000).
+        #[arg(long, default_value_t = DEFAULT_JOB_TIMING_SAMPLE,
+            value_parser = clap::value_parser!(u16).range(1..=i64::from(MAX_JOB_TIMING_SAMPLE)))]
+        limit: u16,
+        /// Emit a versioned report containing aggregates only.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -333,6 +358,18 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli) -> Result<ExitCode, CliError> {
     match cli.command {
+        Command::Jobs {
+            command:
+                JobCommand::Timing {
+                    database,
+                    limit,
+                    json,
+                },
+        } => {
+            let report = read_job_timing_report(&database, limit).await?;
+            print_job_timing_report(&report, json)?;
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Db {
             command: DatabaseCommand::Doctor { database, json },
         } => {
@@ -1146,6 +1183,50 @@ fn database_path(override_path: Option<PathBuf>) -> Result<PathBuf, CliError> {
     }
 }
 
+fn print_job_timing_report(report: &JobTimingReport, json: bool) -> Result<(), serde_json::Error> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    println!(
+        "newest-created jobs: {} (limit {}, more: {})",
+        report.sampled_jobs, report.sample_limit, report.has_more
+    );
+    println!("Timing precision: 1 second. Percentiles exclude unavailable measurements.");
+    println!("Execution covers the whole job; restarted jobs have unavailable timing.");
+    for group in &report.groups {
+        println!(
+            "{}/{}: {} jobs, {} restarted; {:?}",
+            group.lane.as_str(),
+            group.kind,
+            group.jobs,
+            group.restarted_jobs,
+            group.statuses
+        );
+        for (label, summary) in [
+            ("queue wait", &group.queue_wait_seconds),
+            ("execution", &group.execution_seconds),
+        ] {
+            print_duration_summary(label, summary);
+        }
+    }
+    Ok(())
+}
+
+fn print_duration_summary(label: &str, summary: &DurationSummary) {
+    let display = |value: Option<u64>| {
+        value.map_or_else(|| "unavailable".to_owned(), |value| format!("{value}s"))
+    };
+    println!(
+        "  {label}: p50={}, p95={}, max={} ({} measured, {} unavailable)",
+        display(summary.p50),
+        display(summary.p95),
+        display(summary.max),
+        summary.measured,
+        summary.unavailable
+    );
+}
+
 fn print_schema_report(
     path: &Path,
     report: &SchemaReport,
@@ -1194,9 +1275,50 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        BackupCommand, Cli, Command, CredentialCommand, DeviceCommand, PlaylistEngine,
+        BackupCommand, Cli, Command, CredentialCommand, DeviceCommand, JobCommand, PlaylistEngine,
         liveness_status_is_ok, probe_liveness,
     };
+
+    #[test]
+    fn job_timing_parser_requires_explicit_database_and_bounds_sample() -> Result<(), Box<dyn Error>>
+    {
+        let cli = Cli::try_parse_from([
+            "music-cli",
+            "jobs",
+            "timing",
+            "--database",
+            "copy.db",
+            "--limit",
+            "10000",
+            "--json",
+        ])?;
+        assert!(matches!(
+            cli.command,
+            Command::Jobs {
+                command: JobCommand::Timing {
+                    limit: 10_000,
+                    json: true,
+                    ..
+                }
+            }
+        ));
+        assert!(Cli::try_parse_from(["music-cli", "jobs", "timing"]).is_err());
+        for limit in ["0", "10001", "-1"] {
+            assert!(
+                Cli::try_parse_from([
+                    "music-cli",
+                    "jobs",
+                    "timing",
+                    "--database",
+                    "copy.db",
+                    "--limit",
+                    limit
+                ])
+                .is_err()
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn parser_redacts_inline_passwords_and_accepts_explicit_device_replacement()

@@ -27,6 +27,9 @@ type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+#[path = "jobs_fault_tests/scheduling.rs"]
+mod scheduling;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FaultPoint {
     Claim,

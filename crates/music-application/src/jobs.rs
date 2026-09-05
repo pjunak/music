@@ -1,3 +1,5 @@
+pub mod timing;
+
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};

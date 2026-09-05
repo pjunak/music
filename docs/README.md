@@ -8,6 +8,7 @@ not a second description of the implementation.
 - Product, deployment, configuration, and development: [root README](../README.md)
 - Optional model setup and operator acceptance: [AI setup guide](../ASSISTANT.md)
 - Post-audit release and model acceptance: [validation plan](AI_ACCEPTANCE.md)
+- Queue measurements and scheduling limits: [job diagnostics](JOB_DIAGNOSTICS.md)
 - Assistant code, contracts, privacy boundaries, tests, and change procedure:
   [Assistant architecture and contract map](ASSISTANT_ARCHITECTURE.md)
 - External output protocol: [client guide](../clients/README.md)

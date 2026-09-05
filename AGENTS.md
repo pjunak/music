@@ -412,6 +412,10 @@ Runtime data lives outside the image.
 - Graceful shutdown follows the same restartability policy as crash recovery. Never requeue a
   non-restartable provider job after it may have incurred cost; retain its latest safe checkpoint
   and mark it interrupted instead.
+- Job ordering breaks equal creation timestamps by insertion order, not random UUID.
+  Keep `jobs timing` diagnostics read-only and bounded; never load job payloads or
+  treat missing, unfinished, or restarted-job timing as zero. Follow
+  [`docs/JOB_DIAGNOSTICS.md`](docs/JOB_DIAGNOSTICS.md) before changing lane fairness.
 - SQLx owns an ordered migration ledger. The schema doctor accepts only documented legacy/additive
   shapes; renames, drops, type changes, and future versions require a deliberate migration and a
   verified pre-migration backup.

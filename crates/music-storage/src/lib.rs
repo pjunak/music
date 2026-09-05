@@ -20,6 +20,7 @@ mod crypto;
 mod devices;
 mod error;
 mod instance_lock;
+mod job_timing;
 mod jobs;
 mod library;
 mod migration;
@@ -42,6 +43,7 @@ pub use devices::{
 };
 pub use error::StorageError;
 pub use instance_lock::InstanceLock;
+pub use job_timing::read_job_timing_report;
 pub use migration::{MigrationBackup, MigrationOutcome};
 pub use providers::{ProviderCredentialAudit, ProviderCredentialRotationOutcome};
 pub use schema::{

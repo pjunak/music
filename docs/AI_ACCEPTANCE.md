@@ -85,11 +85,14 @@ to send the selected metadata are prerequisites, not outputs to invent locally.
   synthetic fixtures; use `evaluate-playlists SUITE --engine candidates --json` to
   measure candidate availability without a provider. Assess gains and displaced
   candidates on the independently labelled study before tuning the recall quota.
-- Collect queue-wait and completed-request-duration measurements from usage v2
-  for small interactive drafts behind long catalog/evaluation jobs. Compare queue
-  delay percentiles by job type and workload before changing provider-lane fairness.
-  Queue timestamps resolve to seconds; interrupted durations may be unavailable.
-  Preserve request limits, cancellation, checkpointing, and non-restartable paid jobs.
+- Use `music-cli jobs timing --database /data/app.db --limit 1000 --json` for
+  read-only queue-wait and whole-job execution percentiles by lane and kind.
+  Pair these with completed-request durations from model usage v2 for short drafts
+  behind long catalog/evaluation jobs. The same-second UUID ordering defect is
+  repaired; the provider lane still executes one whole job at a time. Check sample
+  coverage, queued/running counts, and unavailable durations before comparing
+  percentiles. Follow the [measurement and scheduling plan](JOB_DIAGNOSTICS.md)
+  before changing fairness, request limits, cancellation, or paid-job restart policy.
 
 These are follow-up changes and validation tasks. The current synthetic tests do
 not support claims about physical audio quality, private-corpus tagging accuracy,

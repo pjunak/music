@@ -43,7 +43,7 @@ impl JobRepository for SqliteStorage {
             let mut transaction = self.pool.begin().await.map_err(box_storage)?;
             let query = format!(
                 "{JOB_SELECT} WHERE kind = ? AND status IN ('queued', 'running', 'cancel_requested') \
-                 ORDER BY created_at DESC, id DESC LIMIT 1"
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1"
             );
             if let Some(row) = sqlx::query(AssertSqlSafe(query))
                 .bind(job.definition.kind)
@@ -88,7 +88,7 @@ impl JobRepository for SqliteStorage {
             let status = filter.status.map(JobStatus::as_str);
             let query = format!(
                 "{JOB_SELECT} WHERE (? IS NULL OR kind = ?) AND (? IS NULL OR status = ?) \
-                 ORDER BY created_at DESC, id DESC LIMIT ?"
+                 ORDER BY created_at DESC, rowid DESC LIMIT ?"
             );
             let rows = sqlx::query(AssertSqlSafe(query))
                 .bind(kind)
@@ -160,9 +160,11 @@ impl JobRepository for SqliteStorage {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            // Creation timestamps resolve to seconds. UUIDs are random, so use
+            // the table's insertion order to break ties within that second.
             let id = sqlx::query_scalar::<_, String>(
                 "SELECT id FROM background_jobs WHERE status = 'queued' AND lane = ? \
-                 ORDER BY created_at, id LIMIT 1",
+                 ORDER BY created_at, rowid LIMIT 1",
             )
             .bind(lane.as_str())
             .fetch_optional(&mut *transaction)
@@ -605,6 +607,97 @@ mod tests {
             parameters: Map::from_iter([("steps".to_owned(), json!(3))]),
             retry_of_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn equal_timestamp_jobs_follow_insertion_order_across_reopen_and_cancellation()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let path = directory.path().join("db");
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(&path)).await?;
+        let provider = definition("test.provider", JobLane::Provider, false);
+        for id in ["z-first", "y-cancelled", "a-last"] {
+            storage.create(&new_job(id, provider.clone())).await?;
+        }
+        sqlx::query("UPDATE background_jobs SET created_at = '2026-09-05 12:00:00'")
+            .execute(&storage.pool)
+            .await?;
+        storage.request_cancellation("y-cancelled").await?;
+        storage.close().await;
+        drop(storage);
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(&path)).await?;
+        let listed = storage.list(&JobListFilter::default()).await?;
+        assert_eq!(
+            listed.iter().map(|job| job.id.as_str()).collect::<Vec<_>>(),
+            ["a-last", "y-cancelled", "z-first"]
+        );
+        let (existing, created) = storage
+            .create_unique_active(&new_job("unused", provider))
+            .await?;
+        assert!(!created);
+        assert_eq!(existing.id, "a-last");
+        for expected in ["z-first", "a-last"] {
+            let claim = storage
+                .claim_next(JobLane::Provider)
+                .await?
+                .ok_or("missing claim")?;
+            assert_eq!(claim.job.id, expected);
+            storage
+                .finish(&claim, &JobFinish::Succeeded(Map::new()))
+                .await?;
+        }
+        assert_eq!(storage.claim_next(JobLane::Provider).await?, None);
+        storage.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn recovery_keeps_original_queue_position_and_explicit_retry_joins_tail()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage =
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("db"))).await?;
+        let local = definition("test.ordering", JobLane::Local, true);
+        for id in ["z-original", "a-later"] {
+            storage.create(&new_job(id, local.clone())).await?;
+        }
+        sqlx::query("UPDATE background_jobs SET created_at = '2026-09-05 12:00:00'")
+            .execute(&storage.pool)
+            .await?;
+        let original = storage
+            .claim_next(JobLane::Local)
+            .await?
+            .ok_or("missing claim")?;
+        assert_eq!(original.job.id, "z-original");
+        let definitions = BTreeMap::from([(local.kind.to_owned(), local.clone())]);
+        assert_eq!(storage.recover_interrupted(&definitions).await?, 1);
+        let resumed = storage
+            .claim_next(JobLane::Local)
+            .await?
+            .ok_or("missing resumed claim")?;
+        assert_eq!(resumed.job.id, "z-original");
+        assert_ne!(resumed.execution_id, original.execution_id);
+        storage
+            .finish(&resumed, &JobFinish::Failed("synthetic failure".to_owned()))
+            .await?;
+        let mut retry = new_job("0-retry", local);
+        retry.retry_of_id = Some("z-original".to_owned());
+        storage.create(&retry).await?;
+        sqlx::query("UPDATE background_jobs SET created_at = '2026-09-05 12:00:00'")
+            .execute(&storage.pool)
+            .await?;
+        for expected in ["a-later", "0-retry"] {
+            let claim = storage
+                .claim_next(JobLane::Local)
+                .await?
+                .ok_or("missing claim")?;
+            assert_eq!(claim.job.id, expected);
+            storage
+                .finish(&claim, &JobFinish::Succeeded(Map::new()))
+                .await?;
+        }
+        storage.close().await;
+        Ok(())
     }
 
     #[tokio::test]
