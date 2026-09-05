@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 pub const ASSISTANT_RUNTIME_CONTRACT_VERSION: &str = "assistant-runtime-contract/v2";
 
 const ASSISTANT_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
+    // Derivation and deserialization depend on locked library versions as well
+    // as task source. Dependency changes conservatively expire every role.
+    ("runtime/Cargo.lock", include_str!("../../../../Cargo.lock")),
     (
         "assistant/runtime_contract.rs",
         include_str!("runtime_contract.rs"),
@@ -207,6 +210,7 @@ mod tests {
                 "assistant/new_policy.rs",
                 role
             ));
+            assert!(super::artifact_affects_role("runtime/Cargo.lock", role));
         }
         assert!(super::artifact_affects_role(
             "assistant/model_tag_cleanup.rs",

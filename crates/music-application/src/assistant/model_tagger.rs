@@ -201,7 +201,7 @@ const TAGGING_TASK: StructuredTaskDefinition = StructuredTaskDefinition {
 
 const CORRECTION_RULE: &str = "CORRECTION ATTEMPT: the previous response was rejected at the strict contract boundary. Rebuild the complete batch from the original input, return plain JSON only, and copy every track_id and tag_id exactly from the supplied document. Do not explain or reuse the rejected response.";
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TagConfidence {
     High,
@@ -442,14 +442,14 @@ impl ModelTaggerBatch {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ModelTaggerOutput {
     schema_version: String,
     tracks: Vec<ModelTagTrackChoice>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ModelTagTrackChoice {
     track_id: i64,
@@ -824,29 +824,20 @@ fn bound_tagger_evidence(mut payload: Value) -> Value {
 }
 
 fn tagger_output_schema(track_ids: &[i64], tag_ids: &[String]) -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["schema_version", "tracks"],
-        "properties": {
-            "schema_version": {"type": "string", "const": MODEL_TAGGER_OUTPUT_CONTRACT},
-            "tracks": {
-                "type": "array", "minItems": track_ids.len(), "maxItems": track_ids.len(),
-                "items": {
-                    "type": "object", "additionalProperties": false,
-                    "required": ["track_id", "tag_ids", "confidence", "evidence"],
-                    "properties": {
-                        "track_id": {"type": "integer", "enum": track_ids},
-                        "tag_ids": {"type": "array", "maxItems": 8, "uniqueItems": true,
-                            "items": {"type": "string", "enum": tag_ids}},
-                        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-                        "evidence": {"type": "array", "maxItems": 4,
-                            "items": {"type": "string", "minLength": 1, "maxLength": 512}}
-                    }
-                }
-            }
-        }
-    })
+    let mut schema = super::structured_harness::output_schema::<ModelTaggerOutput>();
+    schema["properties"]["schema_version"]["const"] = json!(MODEL_TAGGER_OUTPUT_CONTRACT);
+    let tracks = &mut schema["properties"]["tracks"];
+    tracks["minItems"] = json!(track_ids.len());
+    tracks["maxItems"] = json!(track_ids.len());
+    let properties = &mut tracks["items"]["properties"];
+    properties["track_id"]["enum"] = json!(track_ids);
+    properties["tag_ids"]["maxItems"] = json!(MAX_MODEL_TAGS_PER_TRACK);
+    properties["tag_ids"]["uniqueItems"] = json!(true);
+    properties["tag_ids"]["items"]["enum"] = json!(tag_ids);
+    properties["evidence"]["maxItems"] = json!(4);
+    properties["evidence"]["items"]["minLength"] = json!(1);
+    properties["evidence"]["items"]["maxLength"] = json!(512);
+    schema
 }
 
 fn format_task_failure(prefix: &str, error: &ModelTaskError) -> String {
@@ -887,6 +878,42 @@ mod tests {
     use crate::assistant::{
         CurrentTrackContext, StructuredModelResult, default_vocabulary_snapshot,
     };
+
+    #[test]
+    fn derived_schema_agrees_with_strict_tagger_results() -> Result<(), Box<dyn std::error::Error>>
+    {
+        use crate::assistant::structured_harness::tests::{assert_output_contract, model_result};
+        let inputs = [1, 2].into_iter().map(|id| json!({"track_id": id, "artist": "Artist", "album": "Album", "origin": "", "genre": "folk", "length_s": 120.0})).collect();
+        let batch = ModelTaggerBatch::new(inputs, default_vocabulary_snapshot()?)?;
+        let schema = batch.request(false).output_schema.ok_or("missing schema")?;
+        let choice = json!({"track_id": 1, "tag_ids": ["scene.investigation"],
+            "confidence": "high", "evidence": ["A factual metadata phrase."]});
+        let mut second = choice.clone();
+        second["track_id"] = json!(2);
+        let valid = json!({"schema_version": super::MODEL_TAGGER_OUTPUT_CONTRACT, "tracks": [choice, second]});
+        assert_output_contract(&schema, &valid, |value| {
+            batch.finish(model_result(value)).is_ok()
+        })?;
+        for (field, value) in [
+            ("track_id", json!(999)),
+            ("tag_ids", json!(["invented"])),
+            (
+                "tag_ids",
+                json!(["scene.investigation", "scene.investigation"]),
+            ),
+            ("confidence", json!("certain")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["tracks"][0][field] = value;
+            assert!(!jsonschema::is_valid(&schema, &invalid));
+            assert!(batch.finish(model_result(invalid)).is_err());
+        }
+        let mut duplicate = valid;
+        duplicate["tracks"][1]["track_id"] = json!(1);
+        assert!(jsonschema::is_valid(&schema, &duplicate));
+        assert!(batch.finish(model_result(duplicate)).is_err());
+        Ok(())
+    }
 
     #[test]
     fn tagger_rejects_unknown_ids_instead_of_repairing_them()

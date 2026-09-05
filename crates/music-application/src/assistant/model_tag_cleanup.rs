@@ -43,7 +43,7 @@ const TAG_CLEANUP_TASK: StructuredTaskDefinition = StructuredTaskDefinition {
     ],
 };
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CleanupConfidence {
     High,
@@ -264,7 +264,7 @@ impl ModelTagCleanupTask {
             .collect::<BTreeMap<_, _>>();
         for (decision, (_, source)) in output.decisions.into_iter().zip(&batch) {
             validate_cleanup_decision(&decision)?;
-            let Some(target_id) = decision.target_tag_id else {
+            let ModelTagCleanupTarget::Tag(target_id) = decision.target_tag_id else {
                 continue;
             };
             let target = tags_by_id
@@ -304,34 +304,28 @@ impl ModelTagCleanupTask {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ModelTagCleanupOutput {
     schema_version: String,
     decisions: Vec<ModelTagCleanupDecision>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ModelTagCleanupDecision {
     source_id: String,
-    target_tag_id: Option<String>,
+    target_tag_id: ModelTagCleanupTarget,
     confidence: CleanupConfidence,
     reason: String,
 }
 
-impl<'de> Deserialize<'de> for CleanupConfidence {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        match String::deserialize(deserializer)?.as_str() {
-            "high" => Ok(Self::High),
-            "medium" => Ok(Self::Medium),
-            "low" => Ok(Self::Low),
-            _ => Err(serde::de::Error::custom("invalid cleanup confidence")),
-        }
-    }
+// An explicit null means abstention. Option would also accept an omitted field.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum ModelTagCleanupTarget {
+    Tag(String),
+    Abstain,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Deserialize, Serialize)]
@@ -542,10 +536,8 @@ fn validate_cleanup_decision(decision: &ModelTagCleanupDecision) -> Result<(), M
             .bytes()
             .all(|byte| byte.is_ascii_digit());
     if !valid_source_id
-        || decision
-            .target_tag_id
-            .as_ref()
-            .is_some_and(|value| !(2..=64).contains(&value.chars().count()))
+        || matches!(&decision.target_tag_id, ModelTagCleanupTarget::Tag(value)
+            if !(2..=64).contains(&value.chars().count()))
         || decision.reason.is_empty()
         || decision.reason.chars().count() > 512
     {
@@ -576,33 +568,20 @@ fn bound_cleanup_reasons(mut payload: Value) -> Value {
 }
 
 fn cleanup_output_schema(source_ids: &[String], tag_ids: &[String]) -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["schema_version", "decisions"],
-        "properties": {
-            "schema_version": {"type": "string", "const": MODEL_TAG_CLEANUP_OUTPUT_CONTRACT},
-            "decisions": {
-                "type": "array",
-                "minItems": source_ids.len(),
-                "maxItems": source_ids.len(),
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["source_id", "target_tag_id", "confidence", "reason"],
-                    "properties": {
-                        "source_id": {"type": "string", "enum": source_ids},
-                        "target_tag_id": {"anyOf": [
-                            {"type": "string", "minLength": 2, "maxLength": 64, "enum": tag_ids},
-                            {"type": "null"}
-                        ]},
-                        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-                        "reason": {"type": "string", "minLength": 1, "maxLength": 512}
-                    }
-                }
-            }
-        }
-    })
+    let mut schema = super::structured_harness::output_schema::<ModelTagCleanupOutput>();
+    schema["properties"]["schema_version"]["const"] = json!(MODEL_TAG_CLEANUP_OUTPUT_CONTRACT);
+    let decisions = &mut schema["properties"]["decisions"];
+    decisions["minItems"] = json!(source_ids.len());
+    decisions["maxItems"] = json!(source_ids.len());
+    let properties = &mut decisions["items"]["properties"];
+    properties["source_id"]["enum"] = json!(source_ids);
+    let target = &mut properties["target_tag_id"]["anyOf"][0];
+    target["minLength"] = json!(2);
+    target["maxLength"] = json!(64);
+    target["enum"] = json!(tag_ids);
+    properties["reason"]["minLength"] = json!(1);
+    properties["reason"]["maxLength"] = json!(512);
+    schema
 }
 
 fn format_pairs(pairs: &[TagCleanupPair]) -> String {
@@ -627,6 +606,44 @@ mod tests {
 
     use super::{ModelTagCleanupTask, default_vocabulary_snapshot, tag_cleanup_quality_suite};
     use crate::assistant::{StructuredModelResult, TagUsage};
+
+    #[test]
+    fn derived_schema_requires_explicit_cleanup_decisions() -> Result<(), Box<dyn std::error::Error>>
+    {
+        use crate::assistant::structured_harness::tests::{assert_output_contract, model_result};
+        let make_task = || {
+            ModelTagCleanupTask::new(
+                &[TagUsage {
+                    tag: "clue hunting".to_owned(),
+                    track_count: 2,
+                }],
+                default_vocabulary_snapshot()?,
+            )
+        };
+        let schema = make_task()?
+            .next_request()
+            .and_then(|request| request.output_schema)
+            .ok_or("missing schema")?;
+        for target in [json!(null), json!("scene.investigation")] {
+            let valid = json!({"schema_version": super::MODEL_TAG_CLEANUP_OUTPUT_CONTRACT,
+                "decisions": [{"source_id": "source-001", "target_tag_id": target,
+                    "confidence": "high", "reason": "Catalog-level decision."}]});
+            assert_output_contract(&schema, &valid, |value| {
+                make_task().is_ok_and(|mut task| task.accept(model_result(value)).is_ok())
+            })?;
+            for (field, value) in [
+                ("source_id", json!("source-999")),
+                ("target_tag_id", json!("invented")),
+                ("confidence", json!("certain")),
+            ] {
+                let mut invalid = valid.clone();
+                invalid["decisions"][0][field] = value;
+                assert!(!jsonschema::is_valid(&schema, &invalid));
+                assert!(make_task()?.accept(model_result(invalid)).is_err());
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn cleanup_requires_one_ordered_decision_per_source() -> Result<(), Box<dyn std::error::Error>>

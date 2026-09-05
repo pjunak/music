@@ -254,7 +254,7 @@ impl ModelPlaylistTask {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ModelPlaylistOutput {
     schema_version: String,
@@ -389,22 +389,15 @@ fn bounded_tags(tags: &[String], maximum: usize) -> Vec<String> {
 
 fn playlist_output_schema(candidate_ids: &[i64], candidate_limit: usize) -> Value {
     let maximum = candidate_limit.min(candidate_ids.len());
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["schema_version", "ranked_track_ids", "selected_track_ids"],
-        "properties": {
-            "schema_version": {"type": "string", "const": MODEL_PLAYLIST_OUTPUT_CONTRACT},
-            "ranked_track_ids": {
-                "type": "array", "maxItems": maximum, "uniqueItems": true,
-                "items": {"type": "integer", "enum": candidate_ids}
-            },
-            "selected_track_ids": {
-                "type": "array", "maxItems": maximum, "uniqueItems": true,
-                "items": {"type": "integer", "enum": candidate_ids}
-            }
-        }
-    })
+    let mut schema = super::structured_harness::output_schema::<ModelPlaylistOutput>();
+    let properties = &mut schema["properties"];
+    properties["schema_version"]["const"] = json!(MODEL_PLAYLIST_OUTPUT_CONTRACT);
+    for field in ["ranked_track_ids", "selected_track_ids"] {
+        properties[field]["maxItems"] = json!(maximum);
+        properties[field]["uniqueItems"] = json!(true);
+        properties[field]["items"]["enum"] = json!(candidate_ids);
+    }
+    schema
 }
 
 fn round_to(value: f64, places: i32) -> f64 {
@@ -468,6 +461,34 @@ mod tests {
             exclude_track_ids: Vec::new(),
             energy_curve: EnergyCurve::Steady,
         }
+    }
+
+    #[test]
+    fn derived_schema_agrees_with_strict_playlist_results() -> Result<(), Box<dyn std::error::Error>>
+    {
+        use crate::assistant::structured_harness::tests::{assert_output_contract, model_result};
+        let task = ModelPlaylistTask::new(&[track(1, "Calm.flac", "Calm")?], &request())?;
+        let schema = task
+            .request()
+            .and_then(|request| request.output_schema)
+            .ok_or("missing schema")?;
+        let valid = json!({"schema_version": super::MODEL_PLAYLIST_OUTPUT_CONTRACT,
+            "ranked_track_ids": [1], "selected_track_ids": [1]});
+        assert_output_contract(&schema, &valid, |value| {
+            task.finish(model_result(value)).is_ok()
+        })?;
+        for ids in [json!([999]), json!([1, 1])] {
+            let mut invalid = valid.clone();
+            invalid["ranked_track_ids"] = ids;
+            assert!(!jsonschema::is_valid(&schema, &invalid));
+            assert!(task.finish(model_result(invalid)).is_err());
+        }
+        // Selected IDs must also be ranked, beyond each array's closed ID set.
+        let mut unranked = valid;
+        unranked["ranked_track_ids"] = json!([]);
+        assert!(jsonschema::is_valid(&schema, &unranked));
+        assert!(task.finish(model_result(unranked)).is_err());
+        Ok(())
     }
 
     #[test]

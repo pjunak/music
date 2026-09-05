@@ -156,7 +156,7 @@ impl EqDraftTask {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EqDraftOutput {
     schema_version: String,
@@ -403,23 +403,20 @@ fn bound_incidental_text(mut payload: Value) -> Value {
 }
 
 fn eq_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["schema_version", "gains_db", "rationale", "cautions"],
-        "properties": {
-            "schema_version": {"type": "string", "const": EQ_DRAFT_OUTPUT_CONTRACT},
-            "gains_db": {
-                "type": "array", "minItems": 10, "maxItems": 10,
-                "items": {"type": "number", "minimum": -12.0, "maximum": 12.0}
-            },
-            "rationale": {"type": "string", "minLength": 1, "maxLength": 1000},
-            "cautions": {
-                "type": "array", "maxItems": 5,
-                "items": {"type": "string", "minLength": 1, "maxLength": 256}
-            }
-        }
-    })
+    let mut schema = super::structured_harness::output_schema::<EqDraftOutput>();
+    let properties = &mut schema["properties"];
+    properties["schema_version"]["const"] = json!(EQ_DRAFT_OUTPUT_CONTRACT);
+    properties["gains_db"]["minItems"] = json!(EQ_FREQUENCIES.len());
+    properties["gains_db"]["maxItems"] = json!(EQ_FREQUENCIES.len());
+    properties["gains_db"]["items"]["minimum"] = json!(-12.0);
+    properties["gains_db"]["items"]["maximum"] = json!(12.0);
+    properties["gains_db"]["items"]["multipleOf"] = json!(0.5);
+    properties["rationale"]["minLength"] = json!(1);
+    properties["rationale"]["maxLength"] = json!(1000);
+    properties["cautions"]["maxItems"] = json!(5);
+    properties["cautions"]["items"]["minLength"] = json!(1);
+    properties["cautions"]["items"]["maxLength"] = json!(256);
+    schema
 }
 
 fn compact_number(value: f64) -> String {
@@ -436,6 +433,34 @@ mod tests {
 
     use super::{EQ_FREQUENCIES, EqDraftTask, build_local_eq_guidance, eq_quality_suite};
     use crate::assistant::StructuredModelResult;
+
+    #[test]
+    fn derived_schema_agrees_with_strict_eq_results() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::assistant::structured_harness::tests::{assert_output_contract, model_result};
+        let task = EqDraftTask::new("Neutral", "neutral")?;
+        let schema = task.request().output_schema.ok_or("missing schema")?;
+        let valid = json!({"schema_version": super::EQ_DRAFT_OUTPUT_CONTRACT,
+            "gains_db": vec![0.0; 10], "rationale": "Neutral baseline.", "cautions": ["Review first."]});
+        assert_output_contract(&schema, &valid, |value| {
+            task.finish(model_result(value)).is_ok()
+        })?;
+        for invalid_gain in [json!(0.25), json!(12.5), json!("0")] {
+            let mut invalid = valid.clone();
+            invalid["gains_db"][0] = invalid_gain;
+            assert!(!jsonschema::is_valid(&schema, &invalid));
+            assert!(task.finish(model_result(invalid)).is_err());
+        }
+        // Per-band envelopes are relational checks; the schema is the outer bound.
+        let mut outside_envelope = valid.clone();
+        outside_envelope["gains_db"][0] = json!(12.0);
+        assert!(jsonschema::is_valid(&schema, &outside_envelope));
+        assert!(task.finish(model_result(outside_envelope)).is_err());
+        let mut verbose = valid;
+        verbose["rationale"] = json!("a".repeat(1001));
+        assert!(!jsonschema::is_valid(&schema, &verbose));
+        assert!(task.finish(model_result(verbose)).is_ok());
+        Ok(())
+    }
 
     #[test]
     fn deterministic_guidance_is_bounded_and_composes_matching_rules() {

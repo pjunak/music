@@ -31,6 +31,8 @@ futures-util = "0.3.34"
 lofty = "0.25.1"
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 rand = "0.9.5"
+schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
+jsonschema = { version = "0.53.0", default-features = false }
 regex = "1.13.1"
 reqwest = { version = "0.13.4", default-features = false, features = ["form", "query", "rustls", "stream"] }
 rpassword = "7.5.4"

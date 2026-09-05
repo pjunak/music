@@ -1,10 +1,33 @@
 use std::fmt::{self, Display, Formatter};
 
+use schemars::{JsonSchema, Schema, generate::SchemaSettings, transform::transform_subschemas};
 use serde_json::{Value, json};
 
 use super::StructuredModelRequest;
 
 pub const STRUCTURED_TASK_HARNESS_CONTRACT: &str = "assistant-structured-harness/v3";
+
+/// Derive field names, required fields, nullability, and closed object shapes from
+/// the same types used to deserialize provider output. Task-specific IDs and
+/// bounds are added by the task; relational invariants remain local validation.
+pub(super) fn output_schema<T: JsonSchema>() -> Value {
+    let settings = SchemaSettings::draft2020_12().with(|settings| {
+        settings.inline_subschemas = true;
+        settings.meta_schema = None;
+    });
+    let mut schema = settings.into_generator().into_root_schema_for::<T>();
+    remove_schema_annotations(&mut schema);
+    schema.to_value()
+}
+
+fn remove_schema_annotations(schema: &mut Schema) {
+    if let Some(object) = schema.as_object_mut() {
+        // Only schema annotations are removed, never identically named fields.
+        object.remove("title");
+        object.remove("format");
+    }
+    transform_subschemas(&mut remove_schema_annotations, schema);
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct StructuredTaskDefinition {
@@ -134,13 +157,101 @@ pub fn truncate_chars(value: &str, maximum: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use serde_json::json;
 
     use super::{
         STRUCTURED_TASK_HARNESS_CONTRACT, StructuredTaskDefinition, build_structured_request,
         safe_execution_error, truncate_chars,
     };
+
+    pub(crate) fn model_result(
+        payload: serde_json::Value,
+    ) -> crate::assistant::StructuredModelResult {
+        crate::assistant::StructuredModelResult {
+            succeeded: true,
+            payload: Some(payload),
+            error_code: None,
+            provider_model_id: None,
+            finish_reason: Some("stop".to_owned()),
+            input_tokens: None,
+            output_tokens: None,
+        }
+    }
+
+    /// Compare an independent JSON Schema implementation with the production
+    /// result handler. Mutate every nested field, including nullable fields.
+    pub(crate) fn assert_output_contract(
+        schema: &serde_json::Value,
+        valid: &serde_json::Value,
+        mut accepts: impl FnMut(serde_json::Value) -> bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let validator = jsonschema::validator_for(schema)?;
+        assert!(
+            validator.is_valid(valid),
+            "valid example rejected: {schema}"
+        );
+        assert!(accepts(valid.clone()));
+        for invalid in invalid_shapes(valid) {
+            assert!(!validator.is_valid(&invalid), "schema accepted {invalid}");
+            assert!(!accepts(invalid.clone()), "handler accepted {invalid}");
+        }
+        Ok(())
+    }
+
+    fn invalid_shapes(value: &serde_json::Value) -> Vec<serde_json::Value> {
+        use serde_json::Value;
+        let mut mutations = vec![json!(true)];
+        match value {
+            Value::Object(object) => {
+                let mut extra = object.clone();
+                extra.insert("unexpected".to_owned(), json!("untrusted"));
+                mutations.push(Value::Object(extra));
+                for (field, child) in object {
+                    let mut missing = object.clone();
+                    missing.remove(field);
+                    mutations.push(Value::Object(missing));
+                    for invalid in invalid_shapes(child) {
+                        let mut changed = object.clone();
+                        changed.insert(field.clone(), invalid);
+                        mutations.push(Value::Object(changed));
+                    }
+                }
+            }
+            Value::Array(values) => {
+                for (index, child) in values.iter().enumerate() {
+                    for invalid in invalid_shapes(child) {
+                        let mut changed = values.clone();
+                        changed[index] = invalid;
+                        mutations.push(Value::Array(changed));
+                    }
+                }
+            }
+            _ => {}
+        }
+        mutations
+    }
+
+    #[test]
+    fn schema_annotations_do_not_erase_identically_named_result_fields()
+    -> Result<(), Box<dyn std::error::Error>> {
+        #[derive(schemars::JsonSchema, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct NamedFields {
+            title: String,
+            format: String,
+        }
+        let schema = super::output_schema::<Vec<NamedFields>>();
+        let valid = json!([{"title": "Label", "format": "text"}]);
+        assert_output_contract(&schema, &valid, |value| {
+            serde_json::from_value::<Vec<NamedFields>>(value).is_ok_and(|items| {
+                items
+                    .iter()
+                    .all(|item| item.title == "Label" && item.format == "text")
+            })
+        })?;
+        Ok(())
+    }
 
     #[test]
     fn harness_marks_user_fields_untrusted_and_binds_the_schema() {
