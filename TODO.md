@@ -5,24 +5,11 @@ deleted; accepted product/security decisions live in `README.md` or `AGENTS.md`.
 
 ## Scope and ownership
 
-The remaining operator checks and ownership split are in
-[the acceptance plan](docs/AI_ACCEPTANCE.md). These engineering items do not require
-the operator to write code or design tests. Session storage and WebSocket Origin
-hardening are complete; their deployment checks are in that plan. New features
-remain deferred while the bounded cleanup below is completed.
-
-## Cleanup — Codex owns bounded follow-up batches
-
-Completed schema derivation, typed catalog orchestration, provider attempt records,
-model-tag review, review metrics, playlist vocabulary recall, and job timing
-diagnostics are deliberately absent from this backlog.
-
-| Area | Purpose | Bounded next change |
-|---|---|---|
-| Generated-tag bulk review | Make stale checks, limits, and decisions easier to inspect without splitting the atomic write. | Extract pure review planning; preserve partial-result and stale-review tests. |
-| Authoring import commit | Make dependency validation and resource creation easier to maintain. | Extract resource-specific helpers under the existing preview/selection contract. |
-| Library cleanup apply/revert | Make each filesystem operation and its recovery obligations explicit. | Extract typed operation helpers while retaining journal and rollback behavior. |
-| Feature CSS | Reduce accidental coupling during later UI changes. | Move coherent feature rules when ownership is clear; preserve appearance and existing UI checks. |
+The approved audit fixes and bounded cleanup are implemented. Remaining release
+and AI-role checks, with the engineering/operator split, are in
+[the acceptance plan](docs/AI_ACCEPTANCE.md). They do not require the operator to
+write code or design tests. Further refactoring should accompany a concrete change
+or demonstrated defect rather than extend the cleanup phase indefinitely.
 
 ## Conditional cleanup
 

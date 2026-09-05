@@ -16,12 +16,17 @@ quality on a private library.
 | Chosen-model tests | Run and analyze the existing full suites once the environment and disclosed run are authorized; fix harness defects without lowering the gates. | Keep the chosen provider/model/Thinking, authorize the disclosed provider requests and any private metadata scope. |
 | Suggestion usefulness | Prepare a small review set and summarize corrections and failure patterns. | Judge whether tags, playlist choices, and EQ suggestions are useful for the intended scenes. Codex must not invent independent human labels. |
 
-The audit implementation phase has a finite exit: the approved hardening is
-implemented, local gates pass, release acceptance is recorded, and each AI role
-being enabled passes its current full suite and a small review-only trial. Fix
-demonstrated failures. A larger research corpus, scheduler redesign, or new feature
-is not required to finish this phase. Bounded code cleanup remains Codex-owned in
-[TODO.md](../TODO.md); new features are deferred.
+Feature development can resume once the approved fixes and bounded cleanup are
+implemented and the local engineering gates pass. That work now includes session
+hardening, pure tag-review planning, separated import and library-cleanup helpers,
+and explicit stylesheet ownership. Further extraction should follow actual changes.
+
+Release acceptance and AI-role acceptance remain separate: record the applicable
+deployment/physical checks below, and require each role being enabled to pass its
+current full suite and a small review-only trial. Codex owns preparation and fixes;
+operator access, consent and independent observations remain necessary. A larger
+research corpus, scheduler redesign, or new feature is not a prerequisite for
+resuming development. [TODO.md](../TODO.md) contains conditional and future work.
 
 ## Release acceptance
 
