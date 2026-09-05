@@ -179,6 +179,9 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   playlist evidence, and never mutates authored data.
   Review-state filters and explicitly selected bulk decisions make larger libraries manageable;
   stale or invalid suggestions are reported individually instead of blocking valid selections.
+  The Mood Library's expandable review summary counts pending, accepted, and rejected current
+  suggestions by source across all matching tracks and pages, regardless of the review-state
+  filter. These describe operator decisions, not model accuracy or lifetime history.
   An optional quality-certified context-aware tagging model can populate the same review surface through
   a durable server job for the whole library, the current folder (recursive or direct children), or
   explicitly selected tracks. Its Library dialog previews counts, provider calls, and full/partial/

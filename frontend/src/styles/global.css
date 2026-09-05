@@ -5924,6 +5924,31 @@ kbd,
   display: flex;
   gap: var(--space-2);
 }
+.assistant-tag-review-summary {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.assistant-tag-review-summary summary {
+  cursor: pointer;
+}
+.assistant-tag-review-summary-scroll {
+  overflow-x: auto;
+}
+.assistant-tag-review-summary table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.assistant-tag-review-summary th,
+.assistant-tag-review-summary td {
+  padding: var(--space-1) var(--space-2);
+  text-align: right;
+}
+.assistant-tag-review-summary th:first-child {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
 .assistant-tag-toolbar input {
   min-width: 0;
   flex: 1;

@@ -11,6 +11,14 @@
     "sha256": "627083d7c8b115ca0a62a96472da8eb3e29185e9314437422750455f244b3db4",
     "reason": "The supported tag review filters evolved with the local and model evidence views; existing optional-filter defaults remain supported."
   },
+  "GET /api/assistant/library-tags#responses": {
+    "sha256": "67847288b9202bf4957b298713f8a3fd955ad854254e4495349a03f7c3fe82f9",
+    "reason": "ADR-022 adds optional review_summary counts across matching tracks before review-state filtering and pagination. Existing page fields and authentication are unchanged; older browser responses may omit the summary. Output clients do not consume this administrative endpoint."
+  },
+  "POST /api/assistant/library-tags/query#responses": {
+    "sha256": "67847288b9202bf4957b298713f8a3fd955ad854254e4495349a03f7c3fe82f9",
+    "reason": "ADR-022 adds the same optional review_summary to the model-only review page; counts include all review states and pages within the requested scope. Existing page fields and authentication remain unchanged."
+  },
   "GET /api/library/cleanup/sources#operation": {
     "sha256": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
     "reason": "Catalog source availability and encrypted credential status are an authenticated extension."

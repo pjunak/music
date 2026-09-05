@@ -57,6 +57,6 @@ playlist inputs. Manual-tag patch responses retain the current review projection
 - Affected model fingerprints change, so old generated profiles and certification
   need regeneration/evaluation. This repair does not recover a profile whose
   current evidence or runtime identity no longer matches.
-- Operator review metrics and the independent held-out quality study remain
-  follow-up work. Correct review behavior is a prerequisite for useful metrics;
-  manual acceptance must never be treated as a verified training label by default.
+- [ADR-022](ADR-022-current-suggestion-review-metrics.md) subsequently added current
+  operator review metrics. The independent held-out quality study remains follow-up
+  work; manual acceptance is not a verified training label by default.

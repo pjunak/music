@@ -349,6 +349,9 @@ Runtime data lives outside the image.
   Model-tag review listing and acceptance must validate current role, vocabulary, metadata,
   local-context identity, and profile shape. Recheck the typed server-owned guard inside
   the manual-tag transaction; never trust a client-provided currentness assertion.
+  Review summaries count current suggestions by source after scope/search/manual-tag
+  filters but before review-state filtering and pagination. Never infer decisions
+  from manual tags or present these counts as model accuracy or lifetime history.
   Tag cleanup detection is pure and conservative. Bind its preview to the current manual-tag
   catalog, require explicit per-suggestion selection, reject stale or invented selections, and apply
   all selected renames in one transaction without changing unselected tags.

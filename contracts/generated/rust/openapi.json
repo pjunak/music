@@ -3661,6 +3661,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "review_summary": {
+            "$ref": "#/components/schemas/TagReviewSummary"
+          },
           "total": {
             "minimum": 0,
             "type": "integer"
@@ -6895,6 +6898,53 @@
           "source_track_count",
           "target_track_count",
           "merged"
+        ],
+        "type": "object"
+      },
+      "TagReviewSource": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "analyzer_id": {
+            "type": "string"
+          },
+          "pending": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rejected": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "analyzer_id",
+          "pending",
+          "accepted",
+          "rejected"
+        ],
+        "type": "object"
+      },
+      "TagReviewSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "matching_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/TagReviewSource"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "matching_tracks",
+          "sources"
         ],
         "type": "object"
       },

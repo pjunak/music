@@ -122,10 +122,54 @@ beforeEach(() => {
 });
 
 describe("LibraryTagEditor", () => {
+  const summary = { matching_tracks: 100, sources: [
+    { analyzer_id: "local-metadata/v1", pending: 10, accepted: 4, rejected: 2 },
+  ] };
+
+  it.each(["accept", "reopen", "bulk"] as const)("refreshes the full summary after %s", async (action) => {
+    const reopening = action === "reopen";
+    const suggestion = track.analysis_suggestions[reopening ? 1 : 0];
+    const decision = reopening ? "pending" : "accepted";
+    const updated = { ...track, manual_tags: reopening ? track.manual_tags : ["medieval", "tavern"],
+      analysis_suggestions: track.analysis_suggestions.map((item) => item === suggestion ? { ...item, status: decision } : item),
+    } satisfies LibraryTagTrack;
+    vi.mocked(assistantApi.listLibraryTags).mockResolvedValueOnce({ ...page, review_summary: summary }).mockResolvedValue({
+      ...page, items: [updated], review_summary: { ...summary, sources: [
+        { analyzer_id: "local-metadata/v1", pending: reopening ? 11 : 9, accepted: reopening ? 4 : 5, rejected: reopening ? 1 : 2 },
+      ] },
+    });
+    vi.mocked(assistantApi.reviewAnalysisTag).mockResolvedValue({ ...suggestion, track_id: 7, decision, manual_tags: updated.manual_tags });
+    vi.mocked(assistantApi.reviewAnalysisTagsBulk).mockResolvedValue({ requested_items: 1, applied: [{ ...suggestion, track_id: 7, decision: "accepted" }], failures: [] });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+    await screen.findByText("Review summary · 6 of 16 suggestions reviewed");
+    if (action === "bulk") {
+      await user.click(screen.getByRole("checkbox", { name: "Select tavern suggestion for bulk review" }));
+      await user.click(within(screen.getByRole("region", { name: "Bulk analysis review" })).getByRole("button", { name: "Add selected to my tags" }));
+    } else {
+      await user.click(screen.getByRole("button", { name: reopening ? "Review festive again" : "Accept tavern into mood library" }));
+    }
+    expect(await screen.findByText(`Review summary · ${reopening ? 5 : 7} of 16 suggestions reviewed`)).toBeInTheDocument();
+    expect(assistantApi.listLibraryTags).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides stale counts during a failed refresh and restores them on retry", async () => {
+    vi.mocked(assistantApi.listLibraryTags).mockResolvedValueOnce({ ...page, review_summary: summary }).mockRejectedValueOnce(new Error("Refresh unavailable")).mockResolvedValue({ ...page, review_summary: summary });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+    await screen.findByText("Review summary · 6 of 16 suggestions reviewed");
+    await user.selectOptions(screen.getByLabelText("Filter analysis review"), "rejected");
+    expect(await screen.findByText("Refresh unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/Review summary/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Review summary · 6 of 16 suggestions reviewed")).toBeInTheDocument();
+  });
+
   it("keeps editable manual tags separate from reviewable analysis tags", async () => {
     render(<LibraryTagEditor />);
 
     expect(await screen.findByRole("heading", { name: "Tavern Dance" })).toBeInTheDocument();
+    expect(screen.queryByText(/Review summary/)).not.toBeInTheDocument();
     expect(screen.getByText("Your tags")).toBeInTheDocument();
     expect(screen.getByText("Generated suggestions")).toBeInTheDocument();
     expect(screen.getByText("Audio signal evidence")).toBeInTheDocument();

@@ -698,11 +698,22 @@ export interface LibraryTagTrack {
   audio_signal: AudioSignalProfile | null;
 }
 
+export interface TagReviewSummary {
+  matching_tracks: number;
+  sources: {
+    analyzer_id: string;
+    pending: number;
+    accepted: number;
+    rejected: number;
+  }[];
+}
+
 export interface LibraryTagPage {
   items: LibraryTagTrack[];
   total: number;
   offset: number;
   limit: number;
+  review_summary?: TagReviewSummary;
 }
 
 export const jobsApi = {

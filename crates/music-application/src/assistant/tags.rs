@@ -267,6 +267,41 @@ pub struct TagPage {
     pub total: usize,
     pub offset: usize,
     pub limit: usize,
+    pub review_summary: TagReviewSummary,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct TagReviewCounts {
+    pub pending: usize,
+    pub accepted: usize,
+    pub rejected: usize,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct TagReviewSummary {
+    pub matching_tracks: usize,
+    pub sources: BTreeMap<String, TagReviewCounts>,
+}
+
+impl TagReviewSummary {
+    fn for_tracks(tracks: &[AssistantTrackView]) -> Self {
+        let mut summary = Self {
+            matching_tracks: tracks.len(),
+            ..Self::default()
+        };
+        for suggestion in tracks.iter().flat_map(|track| &track.analysis_suggestions) {
+            let counts = summary
+                .sources
+                .entry(suggestion.analyzer_id.clone())
+                .or_default();
+            match suggestion.status {
+                AnalysisReviewDecision::Pending => counts.pending += 1,
+                AnalysisReviewDecision::Accepted => counts.accepted += 1,
+                AnalysisReviewDecision::Rejected => counts.rejected += 1,
+            }
+        }
+        summary
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -523,13 +558,17 @@ impl AssistantService {
                     .as_ref()
                     .is_none_or(|tag| view.manual_tags.contains(tag))
                     && (query.search.is_empty() || view_matches_search(view, &query.search))
-                    && query.review.is_none_or(|status| {
-                        view.analysis_suggestions
-                            .iter()
-                            .any(|suggestion| suggestion.status == status)
-                    })
             })
             .collect::<Vec<_>>();
+        // Review-state filters and pagination must not change the review denominator.
+        let review_summary = TagReviewSummary::for_tracks(&views);
+        views.retain(|view| {
+            query.review.is_none_or(|status| {
+                view.analysis_suggestions
+                    .iter()
+                    .any(|suggestion| suggestion.status == status)
+            })
+        });
         views.sort_by(|left, right| {
             display_title(&left.track)
                 .to_lowercase()
@@ -547,6 +586,7 @@ impl AssistantService {
             total,
             offset: query.offset,
             limit: query.limit,
+            review_summary,
         })
     }
 
@@ -1131,6 +1171,62 @@ mod tests {
             Ok("cálm room".to_owned())
         );
         assert!(normalize_manual_tag("\u{0000}").is_err());
+    }
+
+    #[test]
+    fn review_counts_use_current_deduplicated_suggestions_per_source() -> Result<(), Box<dyn Error>>
+    {
+        let track = track()?;
+        let local_signature = metadata_source_signature(&track)?;
+        let profile = StoredAnalysis {
+            analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
+            source_signature: local_signature.clone(),
+            energy: 0.2,
+            brightness: 0.5,
+            tension: 0.1,
+            moods: vec!["calm".to_owned(), " CALM ".to_owned(), "festive".to_owned()],
+            evidence: Vec::new(),
+            metrics: Map::new(),
+            confidence: "high".to_owned(),
+        };
+        let catalog = StoredAnalysis {
+            analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
+            source_signature: catalog_tag_source_signature(&track, 1)?,
+            metrics: serde_json::json!({"evidence_revision": 1})
+                .as_object()
+                .cloned()
+                .ok_or("metrics")?,
+            ..profile.clone()
+        };
+        let mut evidence = AssistantTrackEvidence {
+            track,
+            manual_tags: vec!["calm".to_owned()],
+            analyses: vec![profile, catalog],
+            reviews: vec![StoredAnalysisReview {
+                analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
+                source_signature: local_signature,
+                tag: "festive".to_owned(),
+                decision: AnalysisReviewDecision::Rejected,
+            }],
+        };
+        let summarize = |evidence: &AssistantTrackEvidence| {
+            TagReviewSummary::for_tracks(&[view_for_track(evidence, None)])
+        };
+        let summary = summarize(&evidence);
+        assert_eq!(summary.matching_tracks, 1);
+        assert_eq!(
+            summary.sources[LOCAL_METADATA_ANALYZER_ID],
+            TagReviewCounts {
+                pending: 1,
+                rejected: 1,
+                accepted: 0
+            }
+        );
+        assert_eq!(summary.sources[CATALOG_TAG_ANALYZER_ID].pending, 2);
+        evidence.analyses[0].source_signature = "stale".to_owned();
+        evidence.analyses[1].confidence = "invalid".to_owned();
+        assert!(summarize(&evidence).sources.is_empty());
+        Ok(())
     }
 
     #[test]

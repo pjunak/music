@@ -133,6 +133,16 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
             serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await?)?;
         assert_eq!(body["total"], 1, "{decision}: {body}");
         assert_eq!(
+            body["review_summary"],
+            json!({
+                "matching_tracks": 1,
+                "sources": [{"analyzer_id": MODEL_TAG_ANALYZER_ID,
+                    "pending": usize::from(decision == "pending"),
+                    "accepted": usize::from(decision == "accepted"),
+                    "rejected": usize::from(decision == "rejected")}]
+            })
+        );
+        assert_eq!(
             body["items"][0]["analysis_suggestions"][0]["status"],
             decision
         );
@@ -155,7 +165,33 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
         .tag_page(music_application::assistant::ManualTagQuery::default())
         .await?;
     assert!(page.items[0].analysis_suggestions.is_empty());
+    assert!(page.review_summary.sources.is_empty());
     assert_eq!(page.items[0].manual_tags, vec!["authored", "calm"]);
+    for authorized in [false, true] {
+        let mut request =
+            Request::get("/api/assistant/library-tags?offset=20&limit=1&review=accepted");
+        if authorized {
+            request = request.header("cookie", &cookie);
+        }
+        let response = router.clone().oneshot(request.body(Body::empty())?).await?;
+        assert_eq!(
+            response.status(),
+            if authorized {
+                StatusCode::OK
+            } else {
+                StatusCode::UNAUTHORIZED
+            }
+        );
+        if authorized {
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await?)?;
+            assert_eq!(body["total"], 0);
+            assert_eq!(
+                body["review_summary"],
+                json!({"matching_tracks": 1, "sources": []})
+            );
+        }
+    }
     runtime.shutdown().await?;
     Ok(())
 }

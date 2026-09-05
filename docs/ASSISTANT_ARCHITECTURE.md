@@ -58,6 +58,12 @@ tags; rejection and reopening preserve manual tags. This local review path grant
 no provider access and does not expose model suggestions to the deterministic
 playlist projection. See [ADR-021](ADR-021-current-model-tag-review.md).
 
+The Mood Library's current review summary aggregates pending/accepted/rejected
+suggestions by analyzer before review-state filtering and pagination. It follows
+scope, search, and manual-tag filters and the same profile freshness rules. These
+operator decisions are separate from model-quality evidence and lifetime history.
+See [ADR-022](ADR-022-current-suggestion-review-metrics.md).
+
 Application-owned `model_jobs.rs` registers feature and evaluation handlers; its
 `model_jobs/` modules hold the four roles' execution paths. `StructuredModelTransport`
 is the outbound port. The server composes the HTTP adapter and exposes routes;

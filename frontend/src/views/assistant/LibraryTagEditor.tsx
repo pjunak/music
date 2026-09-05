@@ -21,6 +21,7 @@ import { toast } from "@/core/toast";
 import { AnalysisTagReview } from "./AnalysisTagReview";
 import { analysisTagSuggestionKey } from "./analysisTagSelection";
 import { AudioSignalEvidence } from "./AudioSignalEvidence";
+import { TagReviewSummary } from "./TagReviewSummary";
 
 const PAGE_SIZE = 50;
 const MAX_TAGS = 32;
@@ -522,7 +523,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
           );
         });
     }
-    if (reviewFilter) setReloadKey((value) => value + 1);
+    if (page.review_summary || reviewFilter) setReloadKey((value) => value + 1);
   }
 
   return (
@@ -601,6 +602,10 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
               </label>
             </div>
           </div>
+
+          {!loading && listError === null ? (
+            <TagReviewSummary summary={page.review_summary} />
+          ) : null}
 
           {loadError !== null ? (
             <div className="assistant-analysis-error" role="alert">

@@ -12,9 +12,9 @@ use music_application::assistant::{
     METADATA_ANALYSIS_JOB_KIND, MODEL_TAG_ANALYZER_ID, MODEL_TAG_BATCH_SIZE,
     MODEL_TAG_CLEANUP_BATCH_SIZE, MODEL_TAG_CLEANUP_ENGINE_ID,
     MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ManualTagQuery, ModelTagCleanupTask,
-    PlaylistSuggestion, PlaylistSuggestionRequest, TagVocabularyDocument, TagVocabularyEntry,
-    TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail, VoiceAnalyzerStatus,
-    catalog_signature, model_tag_source_signature,
+    PlaylistSuggestion, PlaylistSuggestionRequest, TagReviewSummary, TagVocabularyDocument,
+    TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail,
+    VoiceAnalyzerStatus, catalog_signature, model_tag_source_signature,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::jobs::JobStatus;
@@ -714,6 +714,48 @@ struct LibraryTagPageResponse {
     offset: usize,
     #[schema(schema_with = positive_integer_schema)]
     limit: usize,
+    #[schema(required = false)]
+    review_summary: TagReviewSummaryResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = TagReviewSource)]
+struct TagReviewSourceResponse {
+    analyzer_id: String,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    pending: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    accepted: usize,
+    #[schema(schema_with = nonnegative_integer_schema)]
+    rejected: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = TagReviewSummary)]
+struct TagReviewSummaryResponse {
+    #[schema(schema_with = nonnegative_integer_schema)]
+    matching_tracks: usize,
+    sources: Vec<TagReviewSourceResponse>,
+}
+
+impl From<TagReviewSummary> for TagReviewSummaryResponse {
+    fn from(summary: TagReviewSummary) -> Self {
+        Self {
+            matching_tracks: summary.matching_tracks,
+            sources: summary
+                .sources
+                .into_iter()
+                .map(|(analyzer_id, counts)| TagReviewSourceResponse {
+                    analyzer_id,
+                    pending: counts.pending,
+                    accepted: counts.accepted,
+                    rejected: counts.rejected,
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -2599,6 +2641,7 @@ async fn list_library_tags(
         total: page.total,
         offset: page.offset,
         limit: page.limit,
+        review_summary: page.review_summary.into(),
     }))
 }
 
@@ -2645,6 +2688,7 @@ async fn query_model_library_tags(
         total: page.total,
         offset: page.offset,
         limit: page.limit,
+        review_summary: page.review_summary.into(),
     }))
 }
 
