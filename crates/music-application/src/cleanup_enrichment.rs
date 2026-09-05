@@ -1,3 +1,7 @@
+pub mod catalog;
+mod workflow;
+pub use workflow::{CleanupEnrichmentJobHandler, CleanupEnrichmentServices};
+
 use std::error::Error;
 use std::future::Future;
 use std::pin::Pin;
@@ -8,6 +12,8 @@ use sha2::{Digest, Sha256};
 
 pub const CLEANUP_ENRICHMENT_JOB_KIND: &str = "library.cleanup-enrichment";
 pub const CLEANUP_ENRICHMENT_SCHEMA: &str = "library-cleanup-enrichment/v1";
+/// Invalidates evidence generated before strict typed connector observations.
+pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v2";
 pub const MAX_CLEANUP_ENRICHMENT_TRACKS: usize = 500;
 
 pub type CleanupEnrichmentDependencyError = Box<dyn Error + Send + Sync>;
@@ -41,6 +47,7 @@ pub trait CleanupEnrichmentRepository: std::fmt::Debug + Send + Sync {
 pub fn cleanup_enrichment_source_signature(track: &IndexedTrack) -> Result<String, String> {
     let value = serde_json::json!([
         CLEANUP_ENRICHMENT_SCHEMA,
+        CATALOG_EVIDENCE_POLICY_CONTRACT,
         track.path.as_str(),
         track.metadata.title,
         track.display_title,

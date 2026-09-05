@@ -70,10 +70,10 @@ The application planner establishes a reusable boundary without a new service or
 agent framework. Model feature jobs and quality evaluations now live in application use cases behind
 the `StructuredModelTransport` port; the server composes its bounded HTTP adapter. The four
 role execution modules have explicit certification source closures, with shared policy
-remaining fail-closed and a test enforcing source/suite inventory coverage. Next, derive
-static output-schema structure from strict result types while retaining request-
-specific identifier and numeric checks. These changes need their own behavior and
-compatibility tests; broad file moves alone do not establish the intended boundary.
+remaining fail-closed and a test enforcing source/suite inventory coverage.
+[ADR-018](ADR-018-derived-model-schemas-and-catalog-ports.md) completes the next step:
+derived static output schemas, request-specific identifier and numeric checks, and
+application-owned catalog orchestration with behavior and compatibility tests.
 
 Held-out human-labelled evaluations and physical playback acceptance remain separate
 evidence from synthetic tests. They do not justify weakening gates or changing the

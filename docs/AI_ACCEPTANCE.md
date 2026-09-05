@@ -9,7 +9,9 @@ quality on a private library.
 
 1. Start the candidate against a copy of a representative database. Keep the
    migration's verified backup. Confirm schema 10, preserved manual tags, expired
-   legacy catalog proposals, and successful new proposal generation.
+   legacy catalog proposals, and successful new proposal generation. The typed
+   connector update changes catalog evidence signatures again; old generated
+   proposals become stale while accepted/manual tags remain unchanged.
 2. With a physical Android phone selected, play music and overlapping SFX. Select
    another output from the browser. Both phone lanes must stop; newly fired SFX
    must remain silent. Select the phone again and confirm normal playback.
@@ -54,11 +56,12 @@ to send the selected metadata are prerequisites, not outputs to invent locally.
 
 ## Engineering follow-up
 
-- Derive static output-schema structure from strict result types. Keep dynamic
-  track/tag identifier sets, numeric limits, and local reconstruction authoritative.
-  Prove schema/validator agreement with adversarial fixtures before switching.
-- Extract catalog connector policy and mapping orchestration behind typed
-  application ports, following the model-job boundary now in place.
+- Unify immutable run manifests and proposal provenance across tasks: role/config
+  identity, scope, evidence signatures, revisions, request budgets, and review
+  destination should share a vocabulary without erasing task-specific contracts.
+- Extend quality evaluation with custom-vocabulary and maximum-size scenarios,
+  separate candidate recall from playlist ranking, and record operator review
+  outcomes without using them as automatic training labels.
 - Measure queue delay for small interactive drafts behind long catalog/evaluation
   jobs before changing provider-lane fairness. Preserve per-provider request limits,
   cancellation, checkpointing, and non-restartable paid jobs.
@@ -69,3 +72,8 @@ to send the selected metadata are prerequisites, not outputs to invent locally.
 These are follow-up changes and validation tasks. The current synthetic tests do
 not support claims about physical audio quality, private-corpus tagging accuracy,
 or production latency.
+
+The static output schemas and typed catalog connector boundary are implemented in
+[ADR-018](ADR-018-derived-model-schemas-and-catalog-ports.md). Their automated checks
+cover strict result handling and SQLite-backed orchestration; provider and physical
+acceptance above still need the actual configured runtime.

@@ -60,7 +60,7 @@ use crate::auth::RuntimeAuth;
 use crate::blocking::BlockingMediaExecutor;
 use crate::cleanup::MusicBrainzNameLookup;
 use crate::cleanup_enrichment::{
-    CleanupConnectorConfig, CleanupEnrichmentJobHandler, CleanupEnrichmentServices,
+    CleanupConnectorConfig, CleanupEnrichmentServices, cleanup_enrichment_handler,
 };
 use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
@@ -335,7 +335,7 @@ impl AppRuntime {
             Arc::new(FfmpegContextAnalyzer::new(ffmpeg, ffprobe_executable()));
         let mut job_handlers: Vec<Arc<dyn JobHandler>> = vec![
             Arc::new(
-                CleanupEnrichmentJobHandler::new(
+                cleanup_enrichment_handler(
                     CleanupEnrichmentServices {
                         cleanup: Arc::clone(&cleanup_service),
                         cache: storage.clone(),

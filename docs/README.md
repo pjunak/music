@@ -24,6 +24,7 @@ not a second description of the implementation.
 ## Architecture decisions
 
 - [ADR-017: Assistant planning and catalog evidence provenance](ADR-017-assistant-planning-and-evidence-provenance.md)
+- [ADR-018: Derived model schemas and typed catalog ports](ADR-018-derived-model-schemas-and-catalog-ports.md)
 
 ADRs explain why a durable decision was made. The living Assistant contract map above identifies
 the current version strings and source files; older version strings inside an ADR describe the

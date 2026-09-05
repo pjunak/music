@@ -812,6 +812,7 @@ pub fn catalog_tag_source_signature(
 ) -> Result<String, String> {
     source_signature(&serde_json::json!([
         CATALOG_TAG_ANALYZER_ID,
+        crate::cleanup_enrichment::CATALOG_EVIDENCE_POLICY_CONTRACT,
         metadata_source_signature(track)?,
         evidence_revision,
     ]))

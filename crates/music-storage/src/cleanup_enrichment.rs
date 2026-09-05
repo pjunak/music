@@ -121,6 +121,10 @@ fn box_storage(source: impl Into<StorageError>) -> CleanupEnrichmentDependencyEr
 }
 
 #[cfg(test)]
+#[path = "cleanup_enrichment_workflow_tests.rs"]
+mod workflow_tests;
+
+#[cfg(test)]
 mod tests {
     use std::error::Error;
 

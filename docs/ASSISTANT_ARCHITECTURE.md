@@ -1,7 +1,7 @@
 # Assistant architecture and contract map
 
 **Status:** Living documentation
-**Last audited:** 2026-08-30
+**Last audited:** 2026-09-05
 
 This is the current map for the local-first Assistant and its optional model workflows. Use it to
 find ownership, privacy boundaries, contract versions, evaluation gates, and regression tests.
@@ -41,6 +41,7 @@ remain authoritative for those claims.
   suite changes make saved conformance and quality results stale even when a developer forgets to
   advance the human-readable contract fragment.
   Shared policy remains conservative; unknown roles and artifacts use shared coverage.
+  Locked dependency changes also expire all roles, including schema/parser updates.
   Runtime inventory tests reject an Assistant source or suite omitted from digest coverage.
 - Provider jobs are non-restartable after uncertain external cost. Usage is checkpointed after
   every attempt, including attempts that later fail.
@@ -72,6 +73,21 @@ changed back. Review signatures include indexed metadata, mapper identity, and e
 revision, so an old review cannot accept a newly generated proposal by coincidence.
 Catalog profiles also record their vocabulary fingerprint. Accepted/manual tags survive
 invalidation and the migration; legacy catalog proposals must be regenerated.
+
+Catalog workflow now lives in `music-application/cleanup_enrichment/workflow.rs`.
+Its `CatalogConnector` port returns typed observations; server adapters retain HTTP,
+credential fallback, rooted fingerprint execution, and response parsing. The application
+owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
+review proposals. Malformed collection responses fail instead of being cached as empty
+evidence. `catalog-evidence-policy/v2` is included in evidence signatures.
+
+The four model tasks derive their static output shapes from the strict Serde result
+types with Schemars. Required fields, nested object closure, types, nullability, and
+confidence enums share one definition. Dynamic allowed IDs and task bounds extend
+the generated schema; cross-field policy and local reconstruction remain in Rust.
+Adversarial tests compare an independent schema validator with actual task handlers.
+See [ADR-018](ADR-018-derived-model-schemas-and-catalog-ports.md) for the boundary and
+the deliberate relational-validation and bounded-prose exceptions.
 
 ## End-to-end flow
 
