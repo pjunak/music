@@ -13,10 +13,10 @@ use super::{
     suggest_local_playlist,
 };
 
-pub const MODEL_PLAYLIST_INPUT_CONTRACT: &str = "assistant-playlist-planner-input/v2";
+pub const MODEL_PLAYLIST_INPUT_CONTRACT: &str = "assistant-playlist-planner-input/v3";
 pub const MODEL_PLAYLIST_OUTPUT_CONTRACT: &str = "assistant-playlist-planner-output/v1";
 pub const MODEL_PLAYLIST_ENGINE_ID: &str = "model-playlist-planner/v2";
-pub const PLAYLIST_QUALITY_SUITE_ID: &str = "model-dnd-playlist-quality-v5";
+pub const PLAYLIST_QUALITY_SUITE_ID: &str = "model-dnd-playlist-quality-v6";
 pub const MAX_MODEL_PLAYLIST_CANDIDATES: usize = 100;
 
 const PLAYLIST_TASK: StructuredTaskDefinition = StructuredTaskDefinition {
@@ -37,6 +37,7 @@ const PLAYLIST_TASK: StructuredTaskDefinition = StructuredTaskDefinition {
         "Every candidate already passed local exclusions and BPM eligibility. Use only candidate track_id values and never infer missing candidates.",
         "Treat manual_tags as operator-owned evidence, then explicit descriptive metadata, then generated analysis_tags and numeric local evidence. A weak source must not overrule a strong source without clear support.",
         "Use local_match_score, local_rank, local_default_selected, and local_plan as the deterministic baseline. Change that baseline only when the supplied evidence better satisfies the request.",
+        "A null local_rank identifies an additional vocabulary-recalled candidate outside the original bounded local plan. It is not a top-ranked or default-selected local recommendation.",
         "Respect request.candidate_limit, target duration, energy_curve, effective_bpm, and the intended playback order. Unknown BPM is not zero BPM.",
         "ranked_track_ids contains the best review candidates in relevance order. selected_track_ids is a unique subset of those IDs in intended playback order.",
         "Do not explain the ranking or copy candidate text into the response; the server reconstructs all public metadata and reasons locally.",
@@ -47,6 +48,7 @@ const PLAYLIST_TASK: StructuredTaskDefinition = StructuredTaskDefinition {
 pub struct ModelPlaylistTask {
     request: PlaylistSuggestionRequest,
     baseline: PlaylistSuggestion,
+    local_ranks: BTreeMap<music_domain::TrackId, usize>,
 }
 
 impl ModelPlaylistTask {
@@ -54,6 +56,20 @@ impl ModelPlaylistTask {
         tracks: &[AssistantTrackEvidence],
         request: &PlaylistSuggestionRequest,
     ) -> Result<Self, ModelTaskError> {
+        let vocabulary =
+            super::default_vocabulary().map_err(|_| ModelTaskError::new("model_input_invalid"))?;
+        Self::with_vocabulary(tracks, request, &vocabulary)
+    }
+
+    pub fn with_vocabulary(
+        tracks: &[AssistantTrackEvidence],
+        request: &PlaylistSuggestionRequest,
+        vocabulary: &super::TagVocabularyDocument,
+    ) -> Result<Self, ModelTaskError> {
+        let vocabulary = vocabulary
+            .clone()
+            .normalized()
+            .map_err(|_| ModelTaskError::new("model_input_invalid"))?;
         request
             .validate()
             .map_err(|_| ModelTaskError::new("model_input_invalid"))?;
@@ -67,12 +83,26 @@ impl ModelPlaylistTask {
             .map_err(|_| ModelTaskError::new("model_input_invalid"))?;
         let mut baseline = suggest_local_playlist(tracks, &prefilter_request)
             .map_err(|_| ModelTaskError::new("model_input_invalid"))?;
+        let local_ranks = baseline
+            .candidates
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| (candidate.track_id, index + 1))
+            .collect();
+        super::playlist_retrieval::supplement_candidates(
+            tracks,
+            &prefilter_request,
+            &vocabulary,
+            &mut baseline,
+        )
+        .map_err(|_| ModelTaskError::new("model_input_invalid"))?;
         if baseline.candidates.is_empty() {
             baseline.engine = MODEL_PLAYLIST_ENGINE_ID.to_owned();
         }
         Ok(Self {
             request: request.clone(),
             baseline,
+            local_ranks,
         })
     }
 
@@ -134,8 +164,8 @@ impl ModelPlaylistTask {
                 "target_duration_s": f64::from(self.request.target_minutes) * 60.0,
                 "energy_curve": self.request.energy_curve.as_str(),
             },
-            "candidates": self.baseline.candidates.iter().enumerate()
-                .map(|(index, candidate)| candidate_payload(candidate, index + 1))
+            "candidates": self.baseline.candidates.iter()
+                .map(|candidate| candidate_payload(candidate, self.local_ranks.get(&candidate.track_id).copied()))
                 .collect::<Vec<_>>(),
         });
         Some(build_structured_request(
@@ -342,7 +372,7 @@ pub fn playlist_suggestion_payload(suggestion: &PlaylistSuggestion) -> Value {
     })
 }
 
-fn candidate_payload(candidate: &PlaylistCandidate, local_rank: usize) -> Value {
+fn candidate_payload(candidate: &PlaylistCandidate, local_rank: Option<usize>) -> Value {
     let effective_bpm = candidate.bpm.map(f64::from).or_else(|| {
         candidate
             .audio_signal
@@ -415,6 +445,8 @@ fn round_to(value: f64, places: i32) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use crate::assistant::{PlaylistSuggestion, suggest_local_playlist};
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
     use music_domain::{IndexedTrack, LibraryPath, TrackId, TrackMetadata};
@@ -545,6 +577,160 @@ mod tests {
             return Err("unknown IDs must not be repaired".into());
         };
         assert_eq!(error.code, "model_output_unknown_track");
+        Ok(())
+    }
+
+    #[test]
+    fn vocabulary_recall_keeps_original_ranks_defaults_sources_and_pool_limits()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut tracks = (1..=100)
+            .map(|id| track(id, &format!("Private/{id}.flac"), "Neutral"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut recalled = track(1001, "Private/Recall.flac", "Neutral")?;
+        recalled.manual_tags = vec!["stealth".to_owned()];
+        tracks.push(recalled);
+        for limit in [5, 100] {
+            let mut request = request();
+            request.prompt = "covert approach".to_owned();
+            request.candidate_limit = limit;
+            let mut expanded = request.clone();
+            expanded.candidate_limit = limit.saturating_mul(3).min(100);
+            let original = suggest_local_playlist(&tracks, &expanded)?;
+            let original_ranks = original
+                .candidates
+                .iter()
+                .enumerate()
+                .map(|(index, candidate)| (candidate.track_id, index + 1))
+                .collect::<BTreeMap<_, _>>();
+            let task = ModelPlaylistTask::new(&tracks, &request)?;
+            assert_eq!(
+                task.baseline.candidates.len(),
+                usize::from(expanded.candidate_limit)
+            );
+            assert_eq!(task.baseline.plan, original.plan);
+            let selected = |plan: &PlaylistSuggestion| {
+                plan.candidates
+                    .iter()
+                    .filter(|candidate| candidate.default_selected)
+                    .map(|candidate| candidate.track_id)
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(selected(&task.baseline), selected(&original));
+            for candidate in &task.baseline.candidates {
+                if candidate.track_id.get() == 1001 {
+                    assert!(!candidate.default_selected);
+                    assert!(candidate.sequence_position.is_none());
+                    assert_eq!(candidate.manual_tags, vec!["stealth"]);
+                    assert_eq!(candidate.path, "Private/Recall.flac");
+                    assert!(
+                        super::candidate_payload(
+                            candidate,
+                            task.local_ranks.get(&candidate.track_id).copied()
+                        )["local_rank"]
+                            .is_null()
+                    );
+                } else {
+                    assert_eq!(
+                        task.local_ranks.get(&candidate.track_id),
+                        original_ranks.get(&candidate.track_id)
+                    );
+                }
+            }
+            assert!(task.candidate_track_ids().any(|id| id == 1001));
+            let provider_request = task.request().ok_or("request missing")?;
+            assert!(!provider_request.user_prompt.contains("Private/"));
+            let schema = provider_request.output_schema.ok_or("schema missing")?;
+            assert!(
+                schema["properties"]["ranked_track_ids"]["items"]["enum"]
+                    .as_array()
+                    .ok_or("ids missing")?
+                    .contains(&json!(1001))
+            );
+            request.target_minutes = 600;
+            let task = ModelPlaylistTask::new(&tracks, &request)?;
+            assert!(
+                !task.candidate_track_ids().any(|id| id == 1001),
+                "recall must not evict local default selections"
+            );
+            request.target_minutes = 5;
+            let mut many_matches = tracks.clone();
+            for id in 1002..=1030 {
+                let mut extra = track(id, &format!("Private/{id}.flac"), "Neutral")?;
+                extra.manual_tags = vec!["stealth".to_owned()];
+                many_matches.push(extra);
+            }
+            let task = ModelPlaylistTask::new(&many_matches, &request)?;
+            assert_eq!(
+                task.candidate_track_ids().count(),
+                usize::from(expanded.candidate_limit)
+            );
+            assert_eq!(
+                task.candidate_track_ids().filter(|id| *id > 100).count(),
+                (usize::from(expanded.candidate_limit) / 4).min(20)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn recall_rechecks_eligibility_and_does_not_promote_unaccepted_or_partial_labels()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let base = (1..=100)
+            .map(|id| {
+                let mut item = track(id, &format!("Fixture/{id}.flac"), "Neutral")?;
+                item.track.metadata.bpm = Some(100);
+                Ok(item)
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+        for scenario in [
+            "canonical",
+            "alias",
+            "excluded",
+            "slow",
+            "unknown",
+            "partial",
+            "metadata-only",
+            "analysis-only",
+        ] {
+            let mut tracks = base.clone();
+            let mut target = track(1001, "Fixture/stealth.flac", "stealth")?;
+            target.track.metadata.bpm = Some(100);
+            target.manual_tags = vec!["stealth".to_owned()];
+            let mut request = request();
+            request.prompt = "covert approach".to_owned();
+            request.min_bpm = Some(80);
+            request.include_unknown_bpm = false;
+            match scenario {
+                "alias" => target.manual_tags = vec!["sneaking".to_owned()],
+                "excluded" => request.exclude_track_ids.push(target.track.id),
+                "slow" => target.track.metadata.bpm = Some(60),
+                "unknown" => target.track.metadata.bpm = None,
+                "partial" => target.manual_tags = vec!["stealth combat".to_owned()],
+                "metadata-only" => target.manual_tags.clear(),
+                "analysis-only" => {
+                    target.manual_tags.clear();
+                    target.analyses.push(super::super::StoredAnalysis {
+                        analyzer_id: super::super::LOCAL_METADATA_ANALYZER_ID.to_owned(),
+                        source_signature: super::super::metadata_source_signature(&target.track)?,
+                        energy: 0.5,
+                        brightness: 0.5,
+                        tension: 0.5,
+                        moods: vec!["stealth".to_owned()],
+                        evidence: vec!["Synthetic suggestion".to_owned()],
+                        metrics: serde_json::Map::new(),
+                        confidence: "high".to_owned(),
+                    });
+                }
+                _ => {}
+            }
+            tracks.push(target);
+            let task = ModelPlaylistTask::new(&tracks, &request)?;
+            assert_eq!(
+                task.candidate_track_ids().any(|id| id == 1001),
+                matches!(scenario, "canonical" | "alias"),
+                "{scenario}"
+            );
+        }
         Ok(())
     }
 }

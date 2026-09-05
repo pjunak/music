@@ -350,6 +350,13 @@ pub fn suggest_local_playlist(
     source: &[AssistantTrackEvidence],
     request: &PlaylistSuggestionRequest,
 ) -> Result<PlaylistSuggestion, String> {
+    suggest_local_playlist_from(source.iter(), request)
+}
+
+pub(super) fn suggest_local_playlist_from<'a>(
+    source: impl Iterator<Item = &'a AssistantTrackEvidence>,
+    request: &PlaylistSuggestionRequest,
+) -> Result<PlaylistSuggestion, String> {
     request.validate()?;
     let prompt = request.prompt.trim();
     let intent = interpret_prompt(prompt);
@@ -366,7 +373,9 @@ pub fn suggest_local_playlist(
         .collect::<BTreeSet<_>>();
     let mut ranked = Vec::new();
     let mut eligible_tracks = 0usize;
+    let mut library_tracks = 0usize;
     for evidence in source {
+        library_tracks += 1;
         let signal = current_audio_analysis(evidence);
         if !eligible(&evidence.track, signal.as_ref(), request, &excluded) {
             continue;
@@ -444,7 +453,7 @@ pub fn suggest_local_playlist(
         .collect();
     Ok(PlaylistSuggestion {
         engine: LOCAL_PLAYLIST_ENGINE_ID.to_owned(),
-        library_tracks: source.len(),
+        library_tracks,
         eligible_tracks,
         intent,
         plan: PlaylistPlan {

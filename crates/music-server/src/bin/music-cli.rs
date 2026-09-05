@@ -11,7 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use music_application::assistant::{
-    PlaylistQualityEvaluationResult, evaluate_local_playlist_suite, load_playlist_quality_suite,
+    PlaylistQualityEvaluationResult, evaluate_local_playlist_suite, evaluate_playlist_candidates,
+    load_playlist_quality_suite,
 };
 use music_application::auth::{AuthRepository, UnixSeconds};
 use music_application::modes::ModeCatalogSource;
@@ -180,6 +181,8 @@ enum Command {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
 enum PlaylistEngine {
     Local,
+    /// Inspect locally prepared model candidates without provider access or certification.
+    Candidates,
     ConfiguredModel,
 }
 
@@ -612,6 +615,29 @@ async fn evaluate_playlists(
         }
     };
     let result = match engine {
+        PlaylistEngine::Candidates => {
+            let result = evaluate_playlist_candidates(&suite)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "{}: candidate availability only; no provider calls or model certification",
+                    result.suite_id
+                );
+                for case in &result.cases {
+                    println!(
+                        "  {}: pool={}, relevant={}/{}, recall={:.2}, missing={:?}",
+                        case.id,
+                        case.candidate_recall.pool_tracks,
+                        case.candidate_recall.relevant_in_pool,
+                        case.candidate_recall.relevant_tracks,
+                        case.candidate_recall.recall,
+                        case.candidate_recall.missing_relevant_track_ids
+                    );
+                }
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
         PlaylistEngine::Local => evaluate_local_playlist_suite(&suite)?,
         PlaylistEngine::ConfiguredModel => {
             if !send_suite_to_provider {
@@ -1246,6 +1272,22 @@ mod tests {
             Command::EvaluatePlaylists {
                 engine: PlaylistEngine::ConfiguredModel,
                 send_suite_to_provider: true,
+                ..
+            }
+        ));
+
+        let candidates = Cli::try_parse_from([
+            "music-cli",
+            "evaluate-playlists",
+            "suite.json",
+            "--engine",
+            "candidates",
+        ])?;
+        assert!(matches!(
+            candidates.command,
+            Command::EvaluatePlaylists {
+                engine: PlaylistEngine::Candidates,
+                send_suite_to_provider: false,
                 ..
             }
         ));

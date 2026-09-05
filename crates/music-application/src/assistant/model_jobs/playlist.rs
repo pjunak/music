@@ -150,7 +150,13 @@ impl ModelFeatureJobHandler {
             ),
         )
         .await?;
-        let task = ModelPlaylistTask::new(&tracks, &request).map_err(model_task_failure)?;
+        let vocabulary = self
+            .assistant
+            .vocabulary()
+            .await
+            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+        let task = ModelPlaylistTask::with_vocabulary(&tracks, &request, &vocabulary.document)
+            .map_err(model_task_failure)?;
         let model_request = task.request();
         let mut usage = start_model_run(
             context,

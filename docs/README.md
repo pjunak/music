@@ -29,6 +29,7 @@ not a second description of the implementation.
 - [ADR-020: Vocabulary quality gates and playlist candidate recall](ADR-020-vocabulary-quality-and-candidate-recall.md)
 - [ADR-021: Current model-tag review and atomic acceptance](ADR-021-current-model-tag-review.md)
 - [ADR-022: Current suggestion review metrics](ADR-022-current-suggestion-review-metrics.md)
+- [ADR-023: Bounded playlist vocabulary recall](ADR-023-bounded-playlist-vocabulary-recall.md)
 
 ADRs explain why a durable decision was made. The living Assistant contract map above identifies
 the current version strings and source files; older version strings inside an ADR describe the

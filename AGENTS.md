@@ -231,7 +231,11 @@ Runtime data lives outside the image.
   disclosure version before enqueueing, and make model jobs non-restartable to avoid silently
   repeating provider cost. Locally enforce eligibility and exclusions, send a privacy-reduced pool
   of at most 100 candidates, and preserve the original local rank while unioning additional recall
-  candidates found through controlled-vocabulary aliases and context cues. Treat a non-empty
+  candidates found through controlled-vocabulary aliases and context cues.
+  Recall uses only operator-owned tags, reserves at most a
+  quarter of the bounded pool (20 maximum), and never evicts a local default selection.
+  Preserve original local ranks; additional candidates have null local_rank and start
+  unselected. Candidate-only CLI reports do not certify a model. Treat a non-empty
   display title as canonical, and do not infer mood axes from artist names or filesystem paths.
   Choose the review default with bounded duration-error improvement. Inject the exact candidate
   IDs into the output schema, and accept only

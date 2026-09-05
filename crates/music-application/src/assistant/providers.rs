@@ -120,7 +120,7 @@ pub const MODEL_ROLES: &[ModelRoleDefinition] = &[
         description: "Interpret playlist requests and improve a reviewable local draft.",
         required_capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
         configuration_available: true,
-        runtime_contract: "assistant-playlist-planner-input/v2+output/v1+closed-ids/v1",
+        runtime_contract: "assistant-playlist-planner-input/v3+output/v1+closed-ids/v1",
     },
     ModelRoleDefinition {
         id: "tag_cleanup",

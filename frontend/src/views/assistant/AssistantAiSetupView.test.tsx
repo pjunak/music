@@ -157,7 +157,7 @@ const qualityEvaluation: ModelQualityEvaluation = {
     "No songs or live library data are sent."
   ),
   status: "never",
-  suite_id: "model-dnd-playlist-quality-v5",
+  suite_id: "model-dnd-playlist-quality-v6",
   passed_cases: 0,
   total_cases: 0,
   last_job_id: null,

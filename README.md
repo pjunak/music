@@ -102,7 +102,12 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   optional model tasks.
   Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
   planning sends at most 100 path-free candidates, constrains the response to those exact track
-  IDs, and returns a draft. Mood tagging sends bounded artist, album, origin, and genre metadata in
+  IDs, and returns a draft.
+  Playlist refinement keeps local defaults and supplements its bounded candidate pool through
+  current vocabulary aliases/cues matched to your tags. Use `music-cli evaluate-playlists SUITE
+  --engine candidates --json` to inspect synthetic candidate recall without a provider call;
+  this diagnostic does not certify model quality.
+  Mood tagging sends bounded artist, album, origin, and genre metadata in
   batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
   stores suggestions under `model-context-tagger/v6` for explicit per-tag review.
   The pre-run plan shows the normal batch estimate and a maximum that includes up to two

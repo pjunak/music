@@ -185,6 +185,8 @@ struct RawPlaylistQualityCase {
     tracks: Vec<EvaluationTrack>,
     #[serde(default)]
     generated_tracks: Option<GeneratedEvaluationTracks>,
+    #[serde(default)]
+    vocabulary: Option<super::TagVocabularyDocument>,
     expectations: EvaluationExpectations,
     #[serde(default = "default_thresholds")]
     thresholds: EvaluationThresholds,
@@ -210,6 +212,7 @@ pub struct PlaylistQualityCase {
     fixture_tracks: Vec<EvaluationTrack>,
     expectations: EvaluationExpectations,
     thresholds: EvaluationThresholds,
+    vocabulary: super::TagVocabularyDocument,
 }
 
 impl PlaylistQualityCase {
@@ -224,7 +227,7 @@ impl PlaylistQualityCase {
     }
 
     pub fn task(&self) -> Result<ModelPlaylistTask, ModelTaskError> {
-        ModelPlaylistTask::new(&self.source, &self.request)
+        ModelPlaylistTask::with_vocabulary(&self.source, &self.request, &self.vocabulary)
     }
 
     #[must_use]
@@ -551,6 +554,40 @@ pub fn evaluate_local_playlist_suite(
     PlaylistQualityEvaluationResult::from_cases(suite, LOCAL_PLAYLIST_ENGINE_ID, cases)
 }
 
+/// Local candidate availability only; this result cannot certify model quality.
+#[derive(Debug, Serialize)]
+pub struct PlaylistCandidateEvaluation {
+    pub schema_version: &'static str,
+    pub suite_id: String,
+    pub cases: Vec<PlaylistCandidateCaseEvaluation>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PlaylistCandidateCaseEvaluation {
+    pub id: String,
+    pub candidate_recall: PlaylistCandidateRecall,
+}
+
+pub fn evaluate_playlist_candidates(
+    suite: &PlaylistQualitySuite,
+) -> Result<PlaylistCandidateEvaluation, ModelTaskError> {
+    Ok(PlaylistCandidateEvaluation {
+        schema_version: "playlist-candidate-evaluation/v1",
+        suite_id: suite.id.clone(),
+        cases: suite
+            .cases
+            .iter()
+            .map(|case| {
+                let task = case.task()?;
+                Ok(PlaylistCandidateCaseEvaluation {
+                    id: case.id.clone(),
+                    candidate_recall: case.candidate_recall(&task),
+                })
+            })
+            .collect::<Result<Vec<_>, ModelTaskError>>()?,
+    })
+}
+
 fn load_raw_suite(
     path: &Path,
     depth: usize,
@@ -632,6 +669,12 @@ fn materialize_case(
         raw.tracks.extend(materialize_generated(&generated)?);
     }
     validate_case(&raw)?;
+    let vocabulary = raw
+        .vocabulary
+        .clone()
+        .map_or_else(super::default_vocabulary, Ok)
+        .and_then(super::TagVocabularyDocument::normalized)
+        .map_err(|_| ModelTaskError::new("model_evaluation_suite_invalid"))?;
     let request = raw.request.application_request()?;
     let source = raw
         .tracks
@@ -646,6 +689,7 @@ fn materialize_case(
         fixture_tracks: raw.tracks,
         expectations: raw.expectations,
         thresholds: raw.thresholds,
+        vocabulary,
     })
 }
 
@@ -1292,7 +1336,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let suite = playlist_quality_suite()?;
         assert_eq!(suite.id, PLAYLIST_QUALITY_SUITE_ID);
-        assert_eq!(suite.cases.len(), 11);
+        assert_eq!(suite.cases.len(), 14);
         assert_eq!(
             suite
                 .cases
@@ -1315,10 +1359,10 @@ mod tests {
             .join("src/assistant/evaluation_suites/playlist-model-v1.json");
         let suite = load_playlist_quality_suite(&path)?;
         assert_eq!(suite.id, PLAYLIST_QUALITY_SUITE_ID);
-        assert_eq!(suite.cases.len(), 11);
+        assert_eq!(suite.cases.len(), 14);
         let result = evaluate_local_playlist_suite(&suite)?;
         assert_eq!(result.engine_id, LOCAL_PLAYLIST_ENGINE_ID);
-        assert_eq!(result.summary.cases, 11);
+        assert_eq!(result.summary.cases, 14);
         Ok(())
     }
 
@@ -1369,6 +1413,56 @@ mod tests {
             None,
         );
         assert!(local.candidate_recall.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_diagnostics_cover_the_expanded_suite_without_certifying_a_model()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let suite = playlist_quality_suite()?;
+        let report = super::evaluate_playlist_candidates(&suite)?;
+        assert_eq!(report.cases.len(), 14);
+        for result in &report.cases {
+            assert_eq!(result.candidate_recall.recall, 1.0, "{}", result.id);
+            assert!(result.candidate_recall.pool_tracks <= 100);
+        }
+        let document = serde_json::to_value(report)?;
+        assert!(document.get("passed").is_none());
+        assert_eq!(
+            document["schema_version"],
+            "playlist-candidate-evaluation/v1"
+        );
+        for case in suite
+            .cases
+            .iter()
+            .filter(|case| case.id.starts_with("large-pool-"))
+        {
+            let mut request = case.request.clone();
+            request.candidate_limit = request.candidate_limit.saturating_mul(3).min(100);
+            let original = super::suggest_local_playlist(&case.source, &request)?;
+            assert!(
+                original.candidates.iter().all(|candidate| !case
+                    .expectations
+                    .relevant_track_ids
+                    .contains(&candidate.track_id.get())),
+                "{} must reproduce the old omission",
+                case.id
+            );
+            let task = case.task()?;
+            let repeated = case.task()?;
+            assert_eq!(
+                task.request().ok_or("request")?.user_prompt,
+                repeated.request().ok_or("request")?.user_prompt
+            );
+            let output = serde_json::json!({"schema_version": "assistant-playlist-planner-output/v1",
+                "ranked_track_ids": case.expectations.relevant_track_ids,
+                "selected_track_ids": case.expectations.required_default_track_ids});
+            let result = task.finish(crate::assistant::structured_harness::tests::model_result(
+                output,
+            ))?;
+            let assessed = case.assess(Ok(result), None);
+            assert!(assessed.passed, "{}: {:?}", case.id, assessed.failures);
+        }
         Ok(())
     }
 }

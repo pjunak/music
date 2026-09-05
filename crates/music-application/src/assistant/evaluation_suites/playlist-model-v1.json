@@ -1,9 +1,37 @@
 {
   "schema_version": "playlist-evaluation/v1",
-  "id": "model-dnd-playlist-quality-v5",
+  "id": "model-dnd-playlist-quality-v6",
   "description": "The local safety baseline plus semantic-uplift and production-shape checks for a configured playlist model.",
   "include_cases_from": "playlist-local-v1.json",
   "cases": [
+    {
+      "id": "large-pool-vocabulary-alias",
+      "description": "A declared multiword alias must retrieve an operator-tagged track beyond the local cutoff.",
+      "request": {"prompt": "covert approach", "target_minutes": 5, "candidate_limit": 5},
+      "tracks": [{"id": 1501, "path": "Fixture/Neutral.flac", "title": "Neutral", "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300, "manual_tags": ["stealth"]}],
+      "generated_tracks": {"count": 100, "id_start": 1, "path_prefix": "Distractors", "title_prefix": "Neutral", "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300},
+      "expectations": {"top_k": 1, "relevant_track_ids": [1501], "required_default_track_ids": [1501]},
+      "thresholds": {"min_precision_at_k": 1, "min_recall_at_k": 1, "min_required_selected_recall": 1, "max_duration_error_ratio": 0}
+    },
+    {
+      "id": "large-pool-vocabulary-context-cue",
+      "description": "A complete declared context cue must retrieve an operator-tagged track from a library larger than the maximum provider pool.",
+      "request": {"prompt": "silent passage", "target_minutes": 5, "candidate_limit": 100},
+      "tracks": [{"id": 1502, "path": "Fixture/Neutral.flac", "title": "Neutral", "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300, "manual_tags": ["stealth"]}],
+      "generated_tracks": {"count": 100, "id_start": 1, "path_prefix": "Distractors", "title_prefix": "Neutral", "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300},
+      "expectations": {"top_k": 1, "relevant_track_ids": [1502], "required_default_track_ids": [1502]},
+      "thresholds": {"min_precision_at_k": 1, "min_recall_at_k": 1, "min_required_selected_recall": 1, "max_duration_error_ratio": 0}
+    },
+    {
+      "id": "large-pool-custom-vocabulary",
+      "description": "Use the case's custom vocabulary rather than silently substituting bundled definitions.",
+      "request": {"prompt": "lamplit study", "target_minutes": 5, "candidate_limit": 5},
+      "vocabulary": {"schema_version": "assistant-tag-vocabulary/v1", "groups": [{"key": "study", "label": "Study", "tags": [{"id": "study.focus", "name": "quiet focus", "description": "Calm background for focused reading or study.", "aliases": ["lamplit study"], "context_cues": ["reading room underscore"]}]}]},
+      "tracks": [{"id": 1503, "path": "Fixture/Neutral.flac", "title": "Neutral", "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300, "manual_tags": ["quiet focus"]}],
+      "generated_tracks": {"count": 100, "id_start": 1, "path_prefix": "Distractors", "title_prefix": "Neutral", "artist": "Fixture Ensemble", "genre": "instrumental", "length_s": 300},
+      "expectations": {"top_k": 1, "relevant_track_ids": [1503], "required_default_track_ids": [1503]},
+      "thresholds": {"min_precision_at_k": 1, "min_recall_at_k": 1, "min_required_selected_recall": 1, "max_duration_error_ratio": 0}
+    },
     {
       "id": "semantic-burglary-uplift",
       "description": "The model must connect a natural-language burglary scene to stealth music instead of echoing an unrelated local tie order.",

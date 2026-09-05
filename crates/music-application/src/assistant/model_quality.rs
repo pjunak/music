@@ -27,7 +27,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         role_id: "playlist_planner",
         label: "Playlist planning quality",
         description: "Runs fixed synthetic D&D playlist scenarios through this model. No songs or live library data are sent.",
-        suite_id: "model-dnd-playlist-quality-v5",
+        suite_id: "model-dnd-playlist-quality-v6",
         job_kind: "assistant.model-evaluation.playlist-quality-v1",
     },
     ModelEvaluationDefinition {

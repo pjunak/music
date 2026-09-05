@@ -85,4 +85,6 @@ Suite loading validates required source/target pairs and production input limits
 Expected-output fixtures exercise deterministic aliases, actual model-request
 decisions, strict result handling, and final scoring. They verify harness integrity,
 not live semantic quality. Shared vocabulary fixtures affect both tagging and
-cleanup runtime fingerprints. Operator review metrics remain separate follow-up work.
+cleanup runtime fingerprints. Subsequent [ADR-022](ADR-022-current-suggestion-review-metrics.md)
+implements current operator review metrics; [ADR-023](ADR-023-bounded-playlist-vocabulary-recall.md)
+records measured playlist recall repairs and the provider-free diagnostic command.

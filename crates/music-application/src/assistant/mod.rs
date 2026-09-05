@@ -16,6 +16,7 @@ mod model_tagger;
 mod model_transport;
 mod planner;
 mod playlist_evaluation;
+mod playlist_retrieval;
 mod provider_usage;
 mod providers;
 mod runtime_contract;
