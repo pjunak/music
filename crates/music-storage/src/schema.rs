@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 11;
+pub const CURRENT_SCHEMA_VERSION: i64 = 12;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
@@ -27,6 +27,7 @@ const CLEANUP_SOURCE_CREDENTIALS_SCHEMA_SQL: &str =
 const CATALOG_EVIDENCE_SCHEMA_SQL: &str =
     include_str!("../migrations/0010_catalog_evidence_revision.sql");
 const HASHED_SESSIONS_SCHEMA_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
+const MODEL_BATCH_SCHEMA_SQL: &str = include_str!("../migrations/0012_model_batches.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
@@ -257,6 +258,7 @@ pub(crate) async fn inspect_pool(
         .fetch_one(pool)
         .await?;
     let mut issues = Vec::new();
+    let migration_version = migration_version(pool, &actual, &mut issues).await;
     let mut requires_migration = false;
 
     let integrity_rows = sqlx::query_scalar::<_, String>("PRAGMA quick_check")
@@ -351,7 +353,10 @@ pub(crate) async fn inspect_pool(
 
         // Only the exact historical table may take the deliberate session-reset
         // migration. Other column/constraint drift must still fail inspection.
-        if table_name == "auth_sessions" && actual_table == &legacy_sessions {
+        if table_name == "auth_sessions"
+            && actual_table == &legacy_sessions
+            && migration_version.is_none_or(|version| version < 11)
+        {
             requires_migration = true;
             issue(
                 &mut issues,
@@ -504,7 +509,6 @@ pub(crate) async fn inspect_pool(
         }
     }
 
-    let migration_version = migration_version(pool, &actual, &mut issues).await;
     if migration_version.is_none() {
         requires_migration = true;
     }
@@ -626,6 +630,7 @@ async fn expected_shape() -> Result<(DatabaseShape, TableShape), StorageError> {
     sqlx::raw_sql(HASHED_SESSIONS_SCHEMA_SQL)
         .execute(&pool)
         .await?;
+    sqlx::raw_sql(MODEL_BATCH_SCHEMA_SQL).execute(&pool).await?;
     let shape = read_shape(&pool).await;
     pool.close().await;
     shape.map(|shape| (shape, legacy_sessions))

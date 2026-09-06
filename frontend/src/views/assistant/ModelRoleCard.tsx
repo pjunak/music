@@ -330,6 +330,16 @@ export function ModelRoleCard({
       </div>
 
       <form className="assistant-role-route-form" onSubmit={(event) => void save(event)}>
+        {role.role_id === "tag_cleanup" ? (
+          <p className="field-hint">{role.conformance_error_code === "shared_mood_model_required"
+            ? "The old cleanup assignment is inactive. Save Music tagging to link the shared model."
+            : `Uses the mood-tagging model: ${role.model_id || "not configured"}.`} Change the shared connection, model and request settings in Music tagging, then save. Cleanup retains its own test and quality check.</p>
+        ) : null}
+        {role.role_id === "music_tagger" ? (
+          <p className="field-hint">Saving shares these settings with Mood tag cleanup. A configuration change resets both tasks' tests; each task must pass its own quality check.</p>
+        ) : null}
+        {role.role_id !== "tag_cleanup" ? <>
+
         <label className="field">
           <span className="field-label">Connection</span>
           <select
@@ -392,6 +402,8 @@ export function ModelRoleCard({
           />
         </div>
 
+        </> : null}
+
         <div className="assistant-role-checks" aria-label={`${role.label} checks`}>
           <a
             className={`assistant-role-check is-${modelTestTone(role)}`}
@@ -420,7 +432,7 @@ export function ModelRoleCard({
           </p>
         ) : null}
 
-        <div
+        {role.role_id !== "tag_cleanup" ? <div
           className="assistant-role-settings"
           role="group"
           aria-label="Request settings"
@@ -488,6 +500,8 @@ export function ModelRoleCard({
             />
           </label>
         </div>
+
+        : null}
 
         <div className="assistant-role-actions">
           <button

@@ -379,7 +379,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v11" as const;
+  "assistant-model-music-tagging-disclosure/v12" as const;
 
 export type ModelTaggingScope =
   | { type: "all" }
@@ -398,7 +398,29 @@ export interface ModelTaggingDisclosure {
   may_incur_cost: boolean;
 }
 
+export interface ModelTaggingLimits {
+  max_tracks: number;
+  max_requests: number;
+  max_token_reservation: number;
+}
+
+export const DEFAULT_MODEL_TAGGING_LIMITS: ModelTaggingLimits = {
+  max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000,
+};
+
+export interface ModelBatchStatus {
+  id: string; state: string; input_file_id: string | null;
+  remote_batch_id: string | null; result: Record<string, unknown> | null;
+}
+
 export interface ModelTaggingAvailability {
+  execution_mode: "standard" | "batch";
+  batch_available: boolean;
+  pending_batch_id: string | null;
+  limits: ModelTaggingLimits;
+  run_tracks: number;
+  deferred_tracks: number;
+  token_reservation: number;
   available: boolean;
   reason_code: string | null;
   role_id: "music_tagger";
@@ -782,24 +804,32 @@ export const assistantApi = {
     scope: ModelTaggingScope,
     contextPolicy: ModelTaggingContextPolicy = "include",
     force = false,
+    limits: ModelTaggingLimits = DEFAULT_MODEL_TAGGING_LIMITS,
+    executionMode: "standard" | "batch" = "standard",
   ) =>
     api.post<ModelTaggingAvailability>(
       "/api/assistant/library-tags/model-plan",
-      { scope, context_policy: contextPolicy, force },
+      { scope, context_policy: contextPolicy, force, limits, execution_mode: executionMode },
     ),
   startModelTagging: (
     force: boolean,
     disclosureVersion: typeof MODEL_TAGGING_DISCLOSURE_VERSION,
     scope: ModelTaggingScope = { type: "all" },
     contextPolicy: ModelTaggingContextPolicy = "include",
+    limits: ModelTaggingLimits = DEFAULT_MODEL_TAGGING_LIMITS,
+    executionMode: "standard" | "batch" = "standard",
   ) =>
     api.post<BackgroundJob>("/api/assistant/library-tags/model-jobs", {
+      limits,
+      execution_mode: executionMode,
       force,
       scope,
       context_policy: contextPolicy,
       disclosure_version: disclosureVersion,
       consent: true,
     }),
+  getModelBatch: (id: string) => api.get<ModelBatchStatus>(`/api/assistant/library-tags/model-batches/${encodeURIComponent(id)}`),
+  updateModelBatch: (id: string, cancel: boolean, remoteBatchId?: string, abandonUncertain = false) => api.post<BackgroundJob>(`/api/assistant/library-tags/model-batches/${encodeURIComponent(id)}/actions`, { cancel, remote_batch_id: remoteBatchId, abandon_uncertain: abandonUncertain }),
   getManualTagCatalog: () =>
     api.get<ManualTagCatalog>("/api/assistant/library-tags/catalog"),
   getTagVocabulary: () =>

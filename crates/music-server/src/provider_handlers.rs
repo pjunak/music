@@ -142,6 +142,19 @@ impl ProviderHandler {
             }
         };
         let maximum_output_tokens = request.max_output_tokens.min(target_max_output_tokens);
+        if request.output_schema_name.as_deref() == Some("assistant-music-tagger-response") {
+            let tracks = request
+                .output_schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/properties/tracks/minItems"))
+                .and_then(Value::as_u64)
+                .unwrap_or(1);
+            if u64::from(maximum_output_tokens) < 128 + tracks * 200 {
+                return Err(ProviderHandlerError {
+                    code: "request_too_large",
+                });
+            }
+        }
         let normalized_model_id = self.normalize_model_id(model_id);
         let mut payload = match self.execution_api_style {
             ExecutionApiStyle::Responses => {
@@ -177,6 +190,41 @@ impl ProviderHandler {
             }),
         };
         self.apply_thinking_mode(&mut payload, thinking_mode);
+        // Keep static, untrusted reference data in its own user message. This
+        // creates a stable cache boundary without granting vocabulary authority.
+        if self.execution_api_style == ExecutionApiStyle::Responses
+            && request.output_schema_name.as_deref() == Some("assistant-music-tagger-response")
+        {
+            let input: Value =
+                serde_json::from_str(&request.user_prompt).map_err(|_| ProviderHandlerError {
+                    code: "invalid_request",
+                })?;
+            let reference = serde_json::json!({
+                "schema_version": input["schema_version"],
+                "vocabulary_groups": input["vocabulary_groups"],
+            })
+            .to_string();
+            let mut static_part = serde_json::json!({"type":"input_text", "text": reference});
+            use sha2::{Digest, Sha256};
+            let mut cache_key = Sha256::new();
+            cache_key.update(request.system_prompt.as_bytes());
+            cache_key.update(reference.as_bytes());
+            payload["prompt_cache_key"] = serde_json::json!(format!("{:x}", cache_key.finalize()));
+            // These controls are documented for this family. Other configured
+            // models retain compatible message-boundary caching without new flags.
+            if matches!(normalized_model_id, "gpt-5.6" | "gpt-6")
+                || normalized_model_id.starts_with("gpt-5.6-")
+                || normalized_model_id.starts_with("gpt-6-")
+            {
+                static_part["prompt_cache_breakpoint"] = serde_json::json!({"mode":"explicit"});
+                payload["prompt_cache_options"] =
+                    serde_json::json!({"mode":"explicit", "ttl":"30m"});
+            }
+            payload["input"] = serde_json::json!([
+                {"role":"user", "content":[static_part]},
+                {"role":"user", "content":serde_json::json!({"tracks":input["tracks"]}).to_string()}
+            ]);
+        }
         let bytes = serde_json::to_vec(&payload).map_err(|_| ProviderHandlerError {
             code: "invalid_request",
         })?;
@@ -194,10 +242,28 @@ impl ProviderHandler {
 
     #[must_use]
     pub(crate) fn parse_structured_response(self, payload: &Value) -> StructuredModelResult {
-        match self.execution_api_style {
+        let mut result = match self.execution_api_style {
             ExecutionApiStyle::Responses => parse_responses_result(payload),
             ExecutionApiStyle::ChatCompletions => parse_chat_completions_result(payload),
-        }
+        };
+        let (input, output) = match self.execution_api_style {
+            ExecutionApiStyle::Responses => ("input_tokens_details", "output_tokens_details"),
+            ExecutionApiStyle::ChatCompletions => {
+                ("prompt_tokens_details", "completion_tokens_details")
+            }
+        };
+        result.token_details = music_application::assistant::ModelTokenDetails {
+            cached_input_tokens: payload["usage"][input]["cached_tokens"]
+                .as_u64()
+                .filter(|count| result.input_tokens.is_none_or(|total| *count <= total)),
+            cache_write_tokens: payload["usage"][input]["cache_write_tokens"]
+                .as_u64()
+                .filter(|count| result.input_tokens.is_none_or(|total| *count <= total)),
+            reasoning_output_tokens: payload["usage"][output]["reasoning_tokens"]
+                .as_u64()
+                .filter(|count| result.output_tokens.is_none_or(|total| *count <= total)),
+        };
+        result
     }
 
     fn prepare_output_schema(self, schema: &Value) -> Value {
@@ -585,6 +651,7 @@ fn structured_model_result(
     output_tokens: Option<u64>,
 ) -> StructuredModelResult {
     StructuredModelResult {
+        token_details: Default::default(),
         outcome: music_application::assistant::ProviderAttemptOutcome::ResponseReceived,
         succeeded,
         error_code: error_code.map(str::to_owned),
@@ -620,7 +687,11 @@ pub(crate) fn safe_provider_error_code(payload: &Value) -> Option<&'static str> 
             "authentication_error" | "invalid_api_key" => "unauthorized",
             "deadline_exceeded" => "provider_timeout",
             "failed_precondition" => "failed_precondition",
-            "insufficient_quota" | "quota_exceeded" => "quota_exceeded",
+            "insufficient_quota"
+            | "quota_exceeded"
+            | "credit_balance_exhausted"
+            | "organization_spend_limit_exceeded"
+            | "project_spend_limit_exceeded" => "quota_exceeded",
             "invalid_argument" | "invalid_request" | "invalid_request_error" | "invalid_value" => {
                 "invalid_request"
             }
@@ -649,6 +720,77 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::provider_handler;
+
+    #[test]
+    fn quota_errors_are_distinct_from_rate_limits_and_do_not_echo_messages() {
+        for code in [
+            "credit_balance_exhausted",
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+        ] {
+            assert_eq!(
+                super::safe_provider_error_code(
+                    &json!({"error":{"code":code,"message":"private diagnostic"}})
+                ),
+                Some("quota_exceeded")
+            );
+        }
+        assert_eq!(
+            super::safe_provider_error_code(&json!({"error":{"code":"rate_limit_exceeded"}})),
+            Some("rate_limited")
+        );
+    }
+
+    #[test]
+    fn tagging_planner_fits_the_configured_output_allowance() -> Result<(), Box<dyn Error>> {
+        let vocabulary = default_vocabulary_snapshot()?;
+        let inputs = (1..=20).map(|id| json!({"track_id":id,"artist":"A","album":"B","origin":"","genre":"folk","length_s":120})).collect::<Vec<_>>();
+        let handler = provider_handler(OPENAI_RESPONSES_ADAPTER).ok_or("adapter missing")?;
+        let plan = music_application::assistant::plan_model_tagger_batches(
+            &inputs,
+            &vocabulary,
+            |request| {
+                handler
+                    .prepare_structured_request(
+                        "gpt-5.6-luna",
+                        2000,
+                        ThinkingMode::Disabled,
+                        request,
+                    )
+                    .map(|_| ())
+                    .map_err(|error| music_application::assistant::ModelTaskError::new(error.code))
+            },
+        )?;
+        assert_eq!(
+            plan.iter()
+                .map(|batch| batch.input_range.len())
+                .collect::<Vec<_>>(),
+            [9, 9, 2]
+        );
+        let one = ModelTaggerBatch::new(inputs[..1].to_vec(), vocabulary)?;
+        assert_eq!(
+            handler
+                .prepare_structured_request(
+                    "gpt-5.6",
+                    2000,
+                    ThinkingMode::Disabled,
+                    &one.request(false)
+                )?
+                .payload["prompt_cache_options"]["mode"],
+            "explicit"
+        );
+        assert!(
+            handler
+                .prepare_structured_request(
+                    "gpt-5.6-luna",
+                    200,
+                    ThinkingMode::Disabled,
+                    &one.request(false)
+                )
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn every_adapter_preserves_twenty_tracks_and_the_full_two_hundred_tag_vocabulary()

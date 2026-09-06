@@ -47,6 +47,9 @@ import { toast } from "@/core/toast";
 import { ModelTaggingPanel } from "./ModelTaggingPanel";
 
 const availability: ModelTaggingAvailability = {
+  execution_mode: "standard", batch_available: false, pending_batch_id: null,
+  limits: { max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000 },
+  run_tracks: 40, deferred_tracks: 0, token_reservation: 200_000,
   available: true,
   reason_code: null,
   role_id: "music_tagger",
@@ -162,6 +165,8 @@ describe("ModelTaggingPanel", () => {
         MODEL_TAGGING_DISCLOSURE_VERSION,
         { type: "all" },
         "include",
+        availability.limits,
+        "standard",
       ),
     );
     expect(toast.success).toHaveBeenCalledWith(
@@ -200,7 +205,7 @@ describe("ModelTaggingPanel", () => {
   it("makes a full-library rebuild explicit and updates its cost estimate", async () => {
     vi.mocked(assistantApi.planModelTagging)
       .mockResolvedValueOnce(availability)
-      .mockResolvedValue({ ...availability, estimated_provider_requests: 5 });
+      .mockResolvedValue({ ...availability, run_tracks: 45, estimated_provider_requests: 5 });
     const queued = taggingJob({
       status: "queued",
       progress_current: 0,
@@ -225,7 +230,7 @@ describe("ModelTaggingPanel", () => {
       await screen.findByRole("button", { name: "Suggest tags for 45 tracks" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/about 5 provider requests/)).toBeInTheDocument();
-    expect(assistantApi.planModelTagging).toHaveBeenLastCalledWith({ type: "all" }, "include", true);
+    expect(assistantApi.planModelTagging).toHaveBeenLastCalledWith({ type: "all" }, "include", true, availability.limits, "standard");
     await user.click(
       screen.getByRole("button", { name: "Suggest tags for 45 tracks" }),
     );
@@ -236,6 +241,8 @@ describe("ModelTaggingPanel", () => {
         MODEL_TAGGING_DISCLOSURE_VERSION,
         { type: "all" },
         "include",
+        availability.limits,
+        "standard",
       ),
     );
   });

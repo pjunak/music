@@ -16,8 +16,8 @@
     "reason": "Catalog credential removal is an authenticated extension added after the frozen v1 reference."
   },
   "GET /api/assistant/library-tags/model-status#responses": {
-    "sha256": "870d2854be0a91e0f06e2f455d6cc8d2a89956798e43f85af2db1a06049689cb",
-    "reason": "The current tagging disclosure and context coverage fields describe the metadata-only input contract and bounded retries."
+    "sha256": "071e6f824b228859f5ab7b98ea6a2e9ea925e8a2b501aa9392436cb391460480",
+    "reason": "ADR-025 adds bounded-run limits, selected/deferred counts, conservative reservation units, Batch availability and pending Batch identity. Existing status fields remain; disclosure v12 describes slots, reliability and optional provider file processing."
   },
   "GET /api/assistant/library-tags#parameters": {
     "sha256": "627083d7c8b115ca0a62a96472da8eb3e29185e9314437422750455f244b3db4",
@@ -40,12 +40,12 @@
     "reason": "Readiness separates dependency readiness from liveness for the Rust runtime."
   },
   "POST /api/assistant/library-tags/model-jobs#request_body": {
-    "sha256": "e9a37f7f24120da9e0fcc2e9b4bc747f4d694431855442045b89663bf748d765",
-    "reason": "Live model tagging requires the current v11 disclosure, scope, context policy, and explicit consent."
+    "sha256": "062af072b38d2b40555af14bd5ebcaf036d07ceb89743cdc223e6116e60f1271",
+    "reason": "ADR-025 adds defaulted limits and processing mode to explicit mood-tagging jobs. Standard mode remains the default; new inference requires disclosure v12 and current quality gates. Old disclosure consent is intentionally rejected. No native playback DTO changes."
   },
   "POST /api/assistant/library-tags/model-plan#responses": {
-    "sha256": "316dfbe90df78f298fae888d796a1f66d43fa271ae20cfc7f45a2febe1146249",
-    "reason": "Tagging plans expose context coverage and current disclosure fields for operator review."
+    "sha256": "7526c3561beba558804c36a2de84af8241d071db0e315334cffc7bc5206f8568",
+    "reason": "ADR-025 adds explicit limits, selected/deferred counts, conservative reservations and Batch availability/status. Existing scope and context fields remain. The browser uses server-owned counts before requesting consent."
   },
   "POST /api/library/cleanup/enrichment-jobs#operation": {
     "sha256": "5116ecfeaaedce515fe1f6fabe3a31f60f01110fec9c9eba385f215062f61378",
@@ -60,7 +60,15 @@
     "reason": "Catalog source policy is an authenticated operator setting."
   },
   "POST /api/assistant/library-tags/model-plan#request_body": {
-    "sha256": "160a42d529f52635e3822dd90deb0654575127c32d115f4d5e334b748b3fca2a",
-    "reason": "Optional force=false preserves existing clients; force=true asks the server to preflight and count every planned track for a rebuild."
+    "sha256": "3acb49ce5914db7b563bbf3e553a4a8f2bb34490adf534c571b674c8e7784b14",
+    "reason": "ADR-025 adds defaulted run limits and processing mode to the read-only local planner. Existing callers retain bounded standard defaults; planning performs no provider inference."
+  },
+  "GET /api/assistant/library-tags/model-batches/{batch_id}#operation": {
+    "sha256": "3635098b7aa1089dff47312339490e90b8b0eb9c13376580fd31da67eb7f5f38",
+    "reason": "ADR-025 adds an authenticated metadata-only Batch status endpoint. It excludes frozen track inputs and exposes durable provider IDs/results for review and recovery; no playback or Baton contract changes."
+  },
+  "POST /api/assistant/library-tags/model-batches/{batch_id}/actions#operation": {
+    "sha256": "cba94bd1c872217aa3f070e0e8ed92f0bc05d447d7331068ca8ed5a5d4b8b8bf",
+    "reason": "ADR-025 adds authenticated explicit collect/cancel/recovery actions for already-recorded batches. Recovery checks run and input-file identity. Actions cannot start new paid inference; abandonment requires an explicit acknowledgement in the browser."
   }
 }

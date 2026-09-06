@@ -1036,10 +1036,87 @@ enum ModelTaggingContextPolicyWire {
     Skip,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = ModelTaggingExecutionMode)]
+enum ModelTaggingExecutionModeWire {
+    #[default]
+    Standard,
+    Batch,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[derive(Default)]
+struct ModelBatchActionRequest {
+    abandon_uncertain: bool,
+    cancel: bool,
+    remote_batch_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct ModelBatchStatusResponse {
+    id: String,
+    state: String,
+    input_file_id: Option<String>,
+    remote_batch_id: Option<String>,
+    result: Option<Value>,
+}
+
+#[utoipa::path(get, path = "/assistant/library-tags/model-batches/{batch_id}", params(("batch_id" = String, Path)), responses((status = 200, body = ModelBatchStatusResponse)), tag = "assistant-tags")]
+async fn model_batch_status(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    Path(batch_id): Path<String>,
+) -> Result<Json<ModelBatchStatusResponse>, ApiError> {
+    authorize(&state, &headers).await?;
+    let batch = state
+        .providers
+        .as_ref()
+        .ok_or_else(ApiError::service_unavailable)?
+        .batches
+        .model_batch_summary(&batch_id)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::not_found)?;
+    Ok(Json(ModelBatchStatusResponse {
+        id: batch.id,
+        state: batch.state,
+        input_file_id: batch.input_file_id,
+        remote_batch_id: batch.remote_batch_id,
+        result: batch.document.get("result").cloned(),
+    }))
+}
+
+#[utoipa::path(post, path = "/assistant/library-tags/model-batches/{batch_id}/actions", params(("batch_id" = String, Path)), request_body = ModelBatchActionRequest, responses((status = 202, body = BackgroundJobResponse)), tag = "assistant-tags")]
+async fn model_batch_action(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    Path(batch_id): Path<String>,
+    payload: Result<Json<ModelBatchActionRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    authorize(&state, &headers).await?;
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if batch_id.len() != 32
+        || !batch_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || payload
+            .remote_batch_id
+            .as_ref()
+            .is_some_and(|id| id.len() > 128)
+    {
+        return Err(ApiError::validation());
+    }
+    enqueue_model_feature(&state, music_application::assistant::MODEL_TAGGING_BATCH_COLLECT_JOB_KIND,
+        json!({"batch_id":batch_id,"role_id":"music_tagger","cancel":payload.cancel,"remote_batch_id":payload.remote_batch_id,"abandon_uncertain":payload.abandon_uncertain}),
+        "model_batch_action_in_progress", "A batch update is already running.").await
+}
+
 #[derive(Debug, Default, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
 #[schema(as = ModelTaggingPlanRequest)]
 struct ModelTaggingPlanRequest {
+    execution_mode: ModelTaggingExecutionModeWire,
+    limits: ModelTaggingLimitsWire,
     #[schema(required = false, default = false)]
     force: bool,
     #[schema(required = false, schema_with = model_tagging_scope_ref)]
@@ -1053,6 +1130,10 @@ struct ModelTaggingPlanRequest {
 #[schema(as = ModelTaggingStartRequest)]
 struct ModelTaggingStartRequest {
     #[serde(default)]
+    execution_mode: ModelTaggingExecutionModeWire,
+    #[serde(default)]
+    limits: ModelTaggingLimitsWire,
+    #[serde(default)]
     #[schema(required = false, default = false)]
     force: bool,
     #[serde(default)]
@@ -1065,6 +1146,41 @@ struct ModelTaggingStartRequest {
     disclosure_version: String,
     #[schema(schema_with = true_schema)]
     consent: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ModelTaggingLimits)]
+struct ModelTaggingLimitsWire {
+    #[schema(minimum = 1, maximum = 10000, default = 100)]
+    max_tracks: usize,
+    #[schema(minimum = 1, maximum = 1000, default = 10)]
+    max_requests: usize,
+    #[schema(minimum = 1000, maximum = 100000000, default = 1000000)]
+    max_token_reservation: u64,
+}
+
+impl Default for ModelTaggingLimitsWire {
+    fn default() -> Self {
+        let limits = music_application::assistant::ModelTaggingLimits::default();
+        Self {
+            max_tracks: limits.max_tracks,
+            max_requests: limits.max_requests,
+            max_token_reservation: limits.max_token_reservation,
+        }
+    }
+}
+
+impl ModelTaggingLimitsWire {
+    fn validate(self) -> Result<(), ApiError> {
+        music_application::assistant::ModelTaggingLimits {
+            max_tracks: self.max_tracks,
+            max_requests: self.max_requests,
+            max_token_reservation: self.max_token_reservation,
+        }
+        .validate()
+        .map_err(|_| ApiError::validation())
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -1087,6 +1203,13 @@ struct ModelTaggingDisclosureResponse {
 #[serde(deny_unknown_fields)]
 #[schema(as = ModelTaggingAvailability)]
 struct ModelTaggingAvailabilityResponse {
+    execution_mode: ModelTaggingExecutionModeWire,
+    batch_available: bool,
+    pending_batch_id: Option<String>,
+    limits: ModelTaggingLimitsWire,
+    run_tracks: usize,
+    deferred_tracks: usize,
+    token_reservation: u64,
     available: bool,
     #[schema(required = true, schema_with = nullable_string_schema)]
     reason_code: Option<String>,
@@ -1245,6 +1368,8 @@ pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(model_tagging_status))
         .routes(routes!(plan_model_tagging))
         .routes(routes!(start_model_tagging))
+        .routes(routes!(model_batch_status))
+        .routes(routes!(model_batch_action))
         .routes(routes!(rename_tag))
         .routes(routes!(patch_tags_bulk))
         .routes(routes!(review_analysis_tags_bulk))
@@ -1622,7 +1747,7 @@ struct ModelRoleAvailability {
     reason_code: Option<String>,
     connection_name: Option<String>,
     model_id: Option<String>,
-    runtime_fingerprint: Option<String>,
+    inference_fingerprint: Option<String>,
     execution: Option<music_application::assistant::ResolvedRoleExecution>,
 }
 
@@ -1642,12 +1767,16 @@ async fn model_role_availability(
         .map_err(map_provider_error)?
         .into_iter()
         .find(|role| role.role_id == role_id);
-    let (reason_code, runtime_fingerprint, execution) = match providers
+    let (reason_code, inference_fingerprint, execution) = match providers
         .quality_service()
         .prepare_quality_gated_role_execution(role_id, evaluation_id)
         .await
     {
-        Ok(execution) => (None, Some(execution.fingerprint.clone()), Some(execution)),
+        Ok(execution) => (
+            None,
+            Some(execution.inference_fingerprint.clone()),
+            Some(execution),
+        ),
         Err(error)
             if error.kind()
                 == music_application::assistant::ProviderServiceErrorKind::Dependency =>
@@ -1657,10 +1786,14 @@ async fn model_role_availability(
         Err(error) => {
             let fingerprint = providers
                 .provider_service()
-                .current_role_runtime_fingerprint(role_id)
+                .current_role_review_identity(role_id)
                 .await
                 .map_err(map_provider_error)?;
-            (Some(error.code().to_owned()), fingerprint, None)
+            (
+                Some(error.code().to_owned()),
+                fingerprint.map(|identity| identity.inference_fingerprint),
+                None,
+            )
         }
     };
     Ok(ModelRoleAvailability {
@@ -1669,7 +1802,7 @@ async fn model_role_availability(
             .filter(|role| role.configuration_available)
             .map(|role| role.model_id),
         reason_code,
-        runtime_fingerprint,
+        inference_fingerprint,
         execution,
     })
 }
@@ -1755,6 +1888,8 @@ async fn model_tagging_status(
             ContextScopeParameters::default(),
             ModelTaggingContextPolicyWire::Include,
             false,
+            ModelTaggingLimitsWire::default(),
+            ModelTaggingExecutionModeWire::Standard,
         )
         .await?,
     ))
@@ -1780,7 +1915,15 @@ async fn plan_model_tagging(
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let scope = payload.scope.into_parameters()?;
     Ok(Json(
-        model_tagging_availability(&state, scope, payload.context_policy, payload.force).await?,
+        model_tagging_availability(
+            &state,
+            scope,
+            payload.context_policy,
+            payload.force,
+            payload.limits,
+            payload.execution_mode,
+        )
+        .await?,
     ))
 }
 
@@ -1802,16 +1945,22 @@ async fn start_model_tagging(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v11"
+    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v12"
         || !payload.consent
     {
         return Err(ApiError::validation());
     }
     let scope = payload.scope.into_parameters()?;
     scope.to_scope().map_err(|_| ApiError::validation())?;
-    let plan =
-        model_tagging_availability(&state, scope.clone(), payload.context_policy, payload.force)
-            .await?;
+    let plan = model_tagging_availability(
+        &state,
+        scope.clone(),
+        payload.context_policy,
+        payload.force,
+        payload.limits,
+        payload.execution_mode,
+    )
+    .await?;
     if let Some(code) = plan.reason_code {
         return Err(if code == "request_too_large" {
             ApiError::coded_conflict(
@@ -1841,6 +1990,7 @@ async fn start_model_tagging(
     let parameters = json!({
         "role_id": "music_tagger",
         "quality_evaluation_id": "music-tagging-quality-v1",
+        "inference_fingerprint": role.inference_fingerprint,
         "disclosure_version": payload.disclosure_version,
         "consent": true,
         "role_fingerprint": role.fingerprint,
@@ -1848,6 +1998,8 @@ async fn start_model_tagging(
         "scope": scope,
         "context_policy": payload.context_policy,
         "force": payload.force,
+        "limits": payload.limits,
+        "execution_mode": payload.execution_mode,
     });
     enqueue_model_feature(
         &state,
@@ -1864,7 +2016,10 @@ async fn model_tagging_availability(
     scope: ContextScopeParameters,
     context_policy: ModelTaggingContextPolicyWire,
     force: bool,
+    limits: ModelTaggingLimitsWire,
+    execution_mode: ModelTaggingExecutionModeWire,
 ) -> Result<ModelTaggingAvailabilityResponse, ApiError> {
+    limits.validate()?;
     let scope_filter = scope.to_scope().map_err(|_| ApiError::validation())?;
     let mut role =
         model_role_availability(state, "music_tagger", "music-tagging-quality-v1").await?;
@@ -1903,7 +2058,7 @@ async fn model_tagging_availability(
         .collect::<Vec<_>>();
     let vocabulary = assistant.vocabulary().await.map_err(map_assistant_error)?;
     let mut inputs = Vec::new();
-    let current_profiles = if let Some(fingerprint) = role.runtime_fingerprint.as_deref() {
+    let current_profiles = if let Some(fingerprint) = role.inference_fingerprint.as_deref() {
         let mut current = 0_usize;
         for track in &planned {
             let signature = model_tag_source_signature(
@@ -1914,8 +2069,7 @@ async fn model_tagging_availability(
             )
             .map_err(|_| ApiError::internal())?;
             let is_current = track.analyses.iter().any(|analysis| {
-                analysis.analyzer_id == MODEL_TAG_ANALYZER_ID
-                    && analysis.source_signature == signature
+                music_application::assistant::model_tag_profile_is_current(analysis, &signature)
             });
             if is_current {
                 current = current.saturating_add(1);
@@ -1932,6 +2086,28 @@ async fn model_tagging_availability(
         0
     };
     let tracks_needing_tags = planned.len().saturating_sub(current_profiles);
+    let batch_available = role.execution.as_ref().is_some_and(|role| {
+        role.execution.adapter_id == music_application::assistant::OPENAI_RESPONSES_ADAPTER
+    });
+    let pending_batch_id = match state.providers.as_ref() {
+        Some(providers) => providers
+            .batches
+            .pending_model_batch()
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map(|batch| batch.id),
+        None => None,
+    };
+    if pending_batch_id.is_some() {
+        role.reason_code = Some("model_batch_pending".to_owned());
+    }
+    if execution_mode == ModelTaggingExecutionModeWire::Batch && !batch_available {
+        role.reason_code = Some("batch_unsupported_adapter".to_owned());
+    }
+    let deferred_tracks = inputs.len().saturating_sub(limits.max_tracks);
+    inputs.truncate(limits.max_tracks);
+    let run_tracks = inputs.len();
+    let mut token_reservation = 0;
     let estimated_provider_requests = if let Some(execution) = role.execution.as_ref() {
         match music_application::assistant::plan_model_tagger_batches(
             &inputs,
@@ -1940,7 +2116,46 @@ async fn model_tagging_availability(
                 crate::provider_handlers::validate_structured_request(&execution.execution, request)
             },
         ) {
-            Ok(batches) => batches.len(),
+            Ok(batches) => {
+                let reservations = batches
+                    .iter()
+                    .map(|batch| {
+                        music_application::assistant::model_request_reservation(
+                            &batch.task.request(true),
+                            execution.execution.max_output_tokens,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let retries =
+                    usize::from(if execution_mode == ModelTaggingExecutionModeWire::Batch {
+                        0
+                    } else {
+                        MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT
+                    })
+                    .min(limits.max_requests.saturating_sub(batches.len()));
+                token_reservation = reservations.iter().sum::<u64>()
+                    + reservations.iter().max().copied().unwrap_or(0) * retries as u64;
+                if execution_mode == ModelTaggingExecutionModeWire::Batch && !batches.is_empty() {
+                    use music_application::assistant::ModelBatchTransport;
+                    let requests = batches
+                        .iter()
+                        .map(|batch| batch.task.request(false))
+                        .collect::<Vec<_>>();
+                    if let Some(providers) = &state.providers
+                        && let Err(error) = providers
+                            .network_boundary()
+                            .validate(&execution.execution, &requests)
+                    {
+                        role.reason_code = Some(error.code);
+                    }
+                }
+                if batches.len() > limits.max_requests
+                    || token_reservation > limits.max_token_reservation
+                {
+                    role.reason_code = Some("tagging_budget_too_small".to_owned());
+                }
+                batches.len()
+            }
             Err(error) => {
                 role.reason_code = Some(error.code);
                 0
@@ -1950,6 +2165,13 @@ async fn model_tagging_availability(
         tracks_needing_tags.div_ceil(MODEL_TAG_BATCH_SIZE)
     };
     Ok(ModelTaggingAvailabilityResponse {
+        execution_mode,
+        batch_available,
+        pending_batch_id,
+        limits,
+        run_tracks,
+        deferred_tracks,
+        token_reservation,
         available: role.reason_code.is_none(),
         reason_code: role.reason_code,
         role_id: "music_tagger",
@@ -1972,13 +2194,14 @@ async fn model_tagging_availability(
 
 fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingDisclosureResponse {
     ModelTaggingDisclosureResponse {
-        version: "assistant-model-music-tagging-disclosure/v11",
+        version: "assistant-model-music-tagging-disclosure/v12",
         shared_with_provider: vec![
             "Indexed artist, album, origin, and genre metadata",
             "Track durations and BPM values when available",
-            "Current bounded local track context when available: intensity, loudness, rhythmic drive, brightness, density and spectral-change trajectories; tempo development; major acoustic sections and transitions; structural repetition; analyzer confidence; and optional local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status)",
-            "A server-assigned numeric track ID used only to match the response",
+            "Current bounded local track context when available: intensity, loudness, rhythmic drive, brightness, density and spectral-change trajectories; tempo development; major acoustic sections and transitions; structural repetition; analysis-coverage confidence and per-measurement reliability; and optional local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status)",
+            "A batch-local numeric slot used only to match the response; database track IDs are not sent",
             "The full operator-managed canonical tag ID, name, group, definition, exact-alias, and bounded semantic context cue index; the model may return only IDs from this index",
+            "In Batch mode, this same evidence is uploaded as a provider file: input expires after seven days and output after up to thirty days; the app deletes known files after collecting results. Completion may take twenty-four hours and completed requests remain chargeable after cancellation.",
         ],
         never_shared: vec![
             "Track titles, display titles, file names, folder names, or library-relative paths",
@@ -3418,7 +3641,7 @@ fn model_tag_cleanup_request_count_schema() -> RefOr<Schema> {
         .into()
 }
 fn model_tagging_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-model-music-tagging-disclosure/v11")
+    const_string_schema("assistant-model-music-tagging-disclosure/v12")
 }
 fn model_tagging_role_schema() -> RefOr<Schema> {
     const_string_schema("music_tagger")

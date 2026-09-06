@@ -540,7 +540,7 @@ impl AssistantService {
                 let expected = guard.as_ref().and_then(|guard| {
                     super::model_tag_source_signature(
                         &track.track,
-                        &guard.role.runtime_fingerprint,
+                        &guard.role.inference_fingerprint,
                         &guard.vocabulary_fingerprint,
                         contexts.get(&track.track.id),
                     )

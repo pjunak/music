@@ -97,7 +97,7 @@ pub(super) async fn review_in_transaction(
             .await?;
             music_application::assistant::model_tag_source_signature(
                 &track,
-                &guard.role.runtime_fingerprint,
+                &guard.role.inference_fingerprint,
                 &guard.vocabulary_fingerprint,
                 context.as_ref(),
             )

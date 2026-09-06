@@ -31,6 +31,7 @@ const CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL: &str =
 const CATALOG_EVIDENCE_MIGRATION_SQL: &str =
     include_str!("../migrations/0010_catalog_evidence_revision.sql");
 const HASHED_SESSIONS_MIGRATION_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
+const MODEL_BATCH_MIGRATION_SQL: &str = include_str!("../migrations/0012_model_batches.sql");
 
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
@@ -281,6 +282,13 @@ fn migrator() -> Migrator {
             "hashed sessions and independent management IDs".into(),
             MigrationType::Simple,
             HASHED_SESSIONS_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            12,
+            "durable model batches".into(),
+            MigrationType::Simple,
+            MODEL_BATCH_MIGRATION_SQL.into_sql_str(),
             false,
         ),
     ])
@@ -614,7 +622,7 @@ mod tests {
         let storage = SqliteStorage::open(SqliteStorageOptions::new(&path)).await?;
         assert_eq!(
             storage.migration_outcome().schema_after.migration_version,
-            Some(11)
+            Some(crate::schema::CURRENT_SCHEMA_VERSION)
         );
         let backup = storage
             .migration_outcome()

@@ -4098,6 +4098,55 @@
         ],
         "type": "object"
       },
+      "ModelBatchActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "abandon_uncertain": {
+            "default": false,
+            "type": "boolean"
+          },
+          "cancel": {
+            "default": false,
+            "type": "boolean"
+          },
+          "remote_batch_id": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ModelBatchStatusResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "input_file_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remote_batch_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {},
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "type": "object"
+      },
       "ModelConformanceOut": {
         "additionalProperties": false,
         "properties": {
@@ -4881,6 +4930,9 @@
           "available": {
             "type": "boolean"
           },
+          "batch_available": {
+            "type": "boolean"
+          },
           "connection_name": {
             "anyOf": [
               {
@@ -4895,6 +4947,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "deferred_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "disclosure": {
             "$ref": "#/components/schemas/ModelTaggingDisclosure"
           },
@@ -4902,12 +4958,18 @@
             "minimum": 0,
             "type": "integer"
           },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ModelTaggingExecutionMode"
+          },
           "job_kind": {
             "type": "string"
           },
           "library_tracks": {
             "minimum": 0,
             "type": "integer"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/ModelTaggingLimits"
           },
           "model_id": {
             "anyOf": [
@@ -4917,6 +4979,12 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "pending_batch_id": {
+            "type": [
+              "string",
+              "null"
             ]
           },
           "planned_tracks": {
@@ -4941,7 +5009,16 @@
             "const": "music_tagger",
             "type": "string"
           },
+          "run_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "scope_tracks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "token_reservation": {
+            "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
@@ -4963,6 +5040,12 @@
           }
         },
         "required": [
+          "execution_mode",
+          "batch_available",
+          "limits",
+          "run_tracks",
+          "deferred_tracks",
+          "token_reservation",
           "available",
           "reason_code",
           "role_id",
@@ -5018,7 +5101,7 @@
             "type": "integer"
           },
           "version": {
-            "const": "assistant-model-music-tagging-disclosure/v11",
+            "const": "assistant-model-music-tagging-disclosure/v12",
             "type": "string"
           }
         },
@@ -5033,6 +5116,38 @@
         ],
         "type": "object"
       },
+      "ModelTaggingExecutionMode": {
+        "enum": [
+          "standard",
+          "batch"
+        ],
+        "type": "string"
+      },
+      "ModelTaggingLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "max_requests": {
+            "default": 10,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_token_reservation": {
+            "default": 1000000,
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "max_tracks": {
+            "default": 100,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "ModelTaggingPlanRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5044,9 +5159,29 @@
             ],
             "type": "string"
           },
+          "execution_mode": {
+            "default": "standard",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelTaggingExecutionMode"
+              }
+            ]
+          },
           "force": {
             "default": false,
             "type": "boolean"
+          },
+          "limits": {
+            "default": {
+              "max_requests": 10,
+              "max_token_reservation": 1000000,
+              "max_tracks": 100
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelTaggingLimits"
+              }
+            ]
           },
           "scope": {
             "$ref": "#/components/schemas/ModelTaggingScope"
@@ -5130,12 +5265,18 @@
             "type": "string"
           },
           "disclosure_version": {
-            "const": "assistant-model-music-tagging-disclosure/v11",
+            "const": "assistant-model-music-tagging-disclosure/v12",
             "type": "string"
+          },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ModelTaggingExecutionMode"
           },
           "force": {
             "default": false,
             "type": "boolean"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/ModelTaggingLimits"
           },
           "scope": {
             "$ref": "#/components/schemas/ModelTaggingScope"
@@ -8583,6 +8724,76 @@
               }
             },
             "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/model-batches/{batch_id}": {
+      "get": {
+        "operationId": "model_batch_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelBatchStatusResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "assistant-tags"
+        ]
+      }
+    },
+    "/api/assistant/library-tags/model-batches/{batch_id}/actions": {
+      "post": {
+        "operationId": "model_batch_action",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelBatchActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": ""
           }
         },
         "tags": [

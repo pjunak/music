@@ -112,7 +112,7 @@ pub const MODEL_ROLES: &[ModelRoleDefinition] = &[
         description: "Suggest reviewable setting, period, scene, and mood database tags from approved track evidence.",
         required_capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
         configuration_available: true,
-        runtime_contract: "assistant-music-tagger-input/v19+output/v3+local-context/v2",
+        runtime_contract: "assistant-music-tagger-input/v20+output/v3+local-context/v2",
     },
     ModelRoleDefinition {
         id: "playlist_planner",
@@ -626,6 +626,8 @@ pub struct ProviderExecutionTarget {
 
 #[derive(Debug)]
 pub struct ResolvedRoleExecution {
+    pub inference_fingerprint: String,
+    pub connection_id: String,
     pub role_id: String,
     pub execution: ProviderExecutionTarget,
     pub fingerprint: String,
@@ -637,6 +639,7 @@ pub struct ResolvedRoleExecution {
 /// Current local identity for reviewing stored proposals; grants no provider access.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ModelRoleReviewIdentity {
+    pub inference_fingerprint: String,
     pub runtime_fingerprint: String,
     pub configuration_fingerprint: String,
     pub connection_fingerprint: String,
@@ -653,6 +656,7 @@ pub struct StructuredModelRequest {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StructuredModelResult {
+    pub token_details: ModelTokenDetails,
     pub outcome: ProviderAttemptOutcome,
     pub succeeded: bool,
     pub error_code: Option<String>,
@@ -663,8 +667,15 @@ pub struct StructuredModelResult {
     pub output_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct ModelTokenDetails {
+    pub cached_input_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    pub reasoning_output_tokens: Option<u64>,
+}
+
 /// Transport facts, independent of schema validation and provider billing.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderAttemptOutcome {
     PreflightRejected,
@@ -1301,7 +1312,22 @@ impl ProviderService {
                                 .is_ok()
                         })
                 });
-                self.role_view(definition, role, connection, credential_available)
+                let mut view = self.role_view(definition, role, connection, credential_available);
+                if let Some(cleanup) = role.filter(|role| role.role_id == "tag_cleanup") {
+                    let linked = roles.get("music_tagger").is_some_and(|tagger| {
+                        tagger.connection_id == cleanup.connection_id
+                            && tagger.model_id == cleanup.model_id
+                            && tagger.timeout_seconds == cleanup.timeout_seconds
+                            && tagger.max_output_tokens == cleanup.max_output_tokens
+                            && tagger.thinking_mode == cleanup.thinking_mode
+                    });
+                    if !linked {
+                        view.effective_enabled = false;
+                        view.conformance_status = ModelConformanceStatus::Never;
+                        view.conformance_error_code = Some("shared_mood_model_required".to_owned());
+                    }
+                }
+                view
             })
             .collect())
     }
@@ -1324,6 +1350,7 @@ impl ProviderService {
             }
             ProviderRolePreparation::ModelJobActive => return Err(role_job_active()),
         };
+        self.ensure_shared_mood_configuration(&runtime.role).await?;
         if ProviderVerificationStatus::parse(&runtime.connection.verification_status)
             != ProviderVerificationStatus::Verified
         {
@@ -1508,6 +1535,7 @@ impl ProviderService {
                 .and_then(|current| current.last_conformance_at_unix_seconds),
             updated_at_unix_seconds: 0,
         };
+        self.ensure_shared_mood_configuration(&record).await?;
         match self
             .repository
             .save_model_role(&connection.fingerprint(), &record, runtime_changed)
@@ -1603,6 +1631,7 @@ impl ProviderService {
             .await
             .map_err(ProviderServiceError::dependency)?;
         Ok(connection.map(|connection| ModelRoleReviewIdentity {
+            inference_fingerprint: self.role_inference_fingerprint(&role, &connection),
             runtime_fingerprint: self.role_runtime_fingerprint(&role, &connection),
             configuration_fingerprint: role.configuration_fingerprint(),
             connection_fingerprint: connection.fingerprint(),
@@ -1622,6 +1651,7 @@ impl ProviderService {
             .into_iter()
             .find(|role| role.role_id == role_id)
             .ok_or_else(role_not_enabled)?;
+        self.ensure_shared_mood_configuration(&role).await?;
         if !role.enabled {
             return Err(role_not_enabled());
         }
@@ -1647,6 +1677,8 @@ impl ProviderService {
         }
         let api_key = self.decrypt_credential(&connection).await?;
         Ok(ResolvedRoleExecution {
+            inference_fingerprint: self.role_inference_fingerprint(&role, &connection),
+            connection_id: role.connection_id.clone(),
             role_id: role_id.to_owned(),
             execution: ProviderExecutionTarget {
                 adapter_id: connection.adapter_id.clone(),
@@ -1663,6 +1695,66 @@ impl ProviderService {
             connection_fingerprint: connection.fingerprint(),
             connection_name: connection.name,
         })
+    }
+
+    /// Only for management of an already recorded external batch. This target
+    /// has no model/output allowance and cannot create inference requests.
+    pub async fn prepare_batch_management(
+        &self,
+        connection_id: &str,
+    ) -> Result<ProviderExecutionTarget, ProviderServiceError> {
+        let connection = self.connection_record(connection_id).await?;
+        Ok(ProviderExecutionTarget {
+            adapter_id: connection.adapter_id.clone(),
+            base_url: connection.base_url.clone(),
+            api_key: self.decrypt_credential(&connection).await?,
+            allow_private_network: connection.allow_private_network,
+            model_id: String::new(),
+            timeout_seconds: 60,
+            max_output_tokens: 0,
+            thinking_mode: ThinkingMode::ProviderDefault,
+        })
+    }
+
+    fn role_inference_fingerprint(
+        &self,
+        role: &ModelRoleRecord,
+        connection: &ProviderConnectionRecord,
+    ) -> String {
+        if role.role_id == "music_tagger" {
+            super::model_tag_inference_fingerprint(role, connection)
+        } else {
+            self.role_runtime_fingerprint(role, connection)
+        }
+    }
+
+    async fn ensure_shared_mood_configuration(
+        &self,
+        role: &ModelRoleRecord,
+    ) -> Result<(), ProviderServiceError> {
+        if role.role_id != "tag_cleanup" {
+            return Ok(());
+        }
+        let roles = self
+            .repository
+            .model_roles()
+            .await
+            .map_err(ProviderServiceError::dependency)?;
+        if roles.iter().any(|tagger| {
+            tagger.role_id == "music_tagger"
+                && tagger.connection_id == role.connection_id
+                && tagger.model_id == role.model_id
+                && tagger.timeout_seconds == role.timeout_seconds
+                && tagger.max_output_tokens == role.max_output_tokens
+                && tagger.thinking_mode == role.thinking_mode
+        }) {
+            return Ok(());
+        }
+        Err(ProviderServiceError::public(
+            ProviderServiceErrorKind::Conflict,
+            "shared_mood_model_required",
+            "Save the shared model in Music tagging before testing or enabling tag cleanup.",
+        ))
     }
 
     #[must_use]
@@ -2125,6 +2217,7 @@ mod tests {
             Some(true)
         );
         let passed = target.evaluate(StructuredModelResult {
+            token_details: Default::default(),
             outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
@@ -2142,6 +2235,7 @@ mod tests {
         assert!(passed.passed);
 
         let mismatch = target.evaluate(StructuredModelResult {
+            token_details: Default::default(),
             outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,

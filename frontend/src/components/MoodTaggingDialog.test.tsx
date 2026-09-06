@@ -49,6 +49,9 @@ import { wsClient } from "@/core/ws";
 import { MoodTaggingDialog } from "./MoodTaggingDialog";
 
 const availability: ModelTaggingAvailability = {
+  execution_mode: "standard", batch_available: false, pending_batch_id: null,
+  limits: { max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000 },
+  run_tracks: 1, deferred_tracks: 0, token_reservation: 200_000,
   available: true,
   reason_code: null,
   role_id: "music_tagger",
@@ -201,6 +204,8 @@ describe("MoodTaggingDialog", () => {
         { type: "tracks", track_ids: [9] },
         "skip",
         false,
+        availability.limits,
+        "standard",
       ),
     );
     expect(screen.getByRole("link", { name: "Open context analysis" })).toHaveAttribute(
@@ -292,6 +297,8 @@ describe("MoodTaggingDialog", () => {
         { type: "tracks", track_ids: [9] },
         "include",
         false,
+        availability.limits,
+        "standard",
       ),
     );
     expect(screen.getByRole("radio", { name: /Selected tracks/ })).toBeChecked();
@@ -306,6 +313,8 @@ describe("MoodTaggingDialog", () => {
         MODEL_TAGGING_DISCLOSURE_VERSION,
         { type: "tracks", track_ids: [9] },
         "include",
+        availability.limits,
+        "standard",
       ),
     );
 

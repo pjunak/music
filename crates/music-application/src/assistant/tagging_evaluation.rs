@@ -116,10 +116,7 @@ mod tests {
                 selected[index].vocabulary.snapshot()?.fingerprint
             );
             let input: Value = serde_json::from_str(&planned.task.request(false).user_prompt)?;
-            assert_eq!(
-                input["tracks"][0]["track_id"],
-                selected[index].track["track_id"]
-            );
+            assert_eq!(input["tracks"][0]["track_id"], 1);
             let supplied = input["vocabulary_groups"]
                 .as_array()
                 .ok_or("groups missing")?
@@ -160,12 +157,13 @@ mod tests {
             let id = case.track["track_id"].as_i64().ok_or("track ID missing")?;
             let batch = ModelTaggerBatch::new(vec![case.track.clone()], vocabulary.clone())?;
             let profiles = batch.finish(StructuredModelResult {
+                token_details: Default::default(),
                 outcome: ProviderAttemptOutcome::ResponseReceived,
                 succeeded: true,
                 error_code: None,
                 payload: Some(
                     json!({"schema_version": MODEL_TAGGER_OUTPUT_CONTRACT, "tracks": [{
-                        "track_id": id, "tag_ids": ids, "confidence": case.allowed_confidences[0],
+                        "track_id": 1, "tag_ids": ids, "confidence": case.allowed_confidences[0],
                         "evidence": ["Fixed synthetic expected-label fixture."]
                     }]}),
                 ),

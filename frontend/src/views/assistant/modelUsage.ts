@@ -9,6 +9,7 @@ export interface ProviderUsageSummary {
   output_tokens_reported_requests: number;
   provider_model_ids: string[];
   provider_model_ids_truncated: boolean;
+  token_details?: { label: string; tokens: number; reported: number }[];
   outcomes?: {
     preflight_rejected: number;
     not_sent: number;
@@ -30,7 +31,7 @@ function isCount(value: unknown): value is number {
 }
 
 export function providerUsageFromJob(
-  job: BackgroundJob | null | undefined,
+  job: Pick<BackgroundJob, "result"> | null | undefined,
 ): ProviderUsageSummary | null {
   const usage = job?.result?.usage;
   if (
@@ -89,7 +90,20 @@ export function providerUsageFromJob(
       max_attempts: manifest.max_attempts,
     };
   }
+  const details = usage.token_details;
+  const tokenDetails: { label: string; tokens: number; reported: number }[] = [];
+  if (isRecord(details)) {
+    for (const [value, reports, label] of [
+      ["cached_input_tokens", "cached_input_reported_requests", "Cache reads"],
+      ["cache_write_tokens", "cache_write_reported_requests", "Cache writes"],
+      ["reasoning_output_tokens", "reasoning_output_reported_requests", "Reasoning output"],
+    ]) {
+      const tokens = details[value]; const reported = details[reports];
+      if (isCount(tokens) && isCount(reported) && reported > 0 && reported <= usage.attempted_requests) tokenDetails.push({ label, tokens, reported });
+    }
+  }
   return {
+    ...(tokenDetails.length ? { token_details: tokenDetails } : {}),
     schema_version: usage.schema_version,
     attempted_requests: usage.attempted_requests,
     input_tokens: usage.input_tokens,

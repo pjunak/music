@@ -7,6 +7,7 @@
 #[cfg(feature = "fuzzing")]
 mod fuzzing;
 mod local_analysis;
+mod model_batch;
 mod model_eq;
 mod model_jobs;
 mod model_playlist;
@@ -38,10 +39,12 @@ pub use local_analysis::{
     VOICE_MODEL_FILENAME, VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature,
     parse_context_state,
 };
+pub use model_batch::*;
 pub use model_eq::*;
 pub use model_jobs::{
     MODEL_EQ_DRAFT_JOB_KIND, MODEL_PLAYLIST_SUGGESTION_JOB_KIND, MODEL_TAG_CLEANUP_JOB_KIND,
-    MODEL_TAGGING_JOB_KIND, model_evaluation_job_handlers, model_feature_job_handlers,
+    MODEL_TAGGING_BATCH_COLLECT_JOB_KIND, MODEL_TAGGING_JOB_KIND, model_evaluation_job_handlers,
+    model_feature_job_handlers,
 };
 pub use model_playlist::*;
 pub use model_quality::*;

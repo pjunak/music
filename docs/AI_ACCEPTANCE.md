@@ -60,7 +60,7 @@ resuming development. [TODO.md](../TODO.md) contains conditional and future work
 ## Release acceptance
 
 1. Start the candidate against a copy of a representative database. Keep the
-   migration's verified backup. Confirm schema 11, preserved manual tags, expired
+   migration's verified backup. Confirm schema 12, preserved manual tags, expired
    legacy catalog proposals, and successful new proposal generation. The typed
    connector update changes catalog evidence signatures again; old generated
    proposals become stale while accepted/manual tags remain unchanged.
@@ -188,3 +188,15 @@ checkpoint for actual provider and physical observations and their limits.
 [ADR-019](ADR-019-model-run-records-and-attempt-outcomes.md) documents implemented
 run manifests, attempt accounting, fault recovery, and measurement limits. The
 operator-supplied provider exports are separate evidence from those local tests.
+
+## Mood efficiency acceptance (2026-09-06)
+
+Engineering now supplies bounded runs, shared mood configuration, Batch recovery, accounting,
+and corrected spectral coverage. No live provider call was used to validate this implementation.
+The operator's remaining work is to save the shared model, pass both relevant task suites,
+refresh a small sample's local context, and run a bounded Batch pilot (for example 20 tracks,
+2 requests, 150,000 reservation units; use the actual preview if it requires a smaller scope).
+Verify provider acceptance, reported usage, collection after restart and review-only suggestions.
+Do not interpret a tagging pass as a cleanup pass: the supplied Luna cleanup export previously
+failed one of twenty strict cases. Keep cleanup unavailable until the selected shared model passes.
+Then assess useful tags by listening, using [the context review](MOOD_CONTEXT_REVIEW.md).

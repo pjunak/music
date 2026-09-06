@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -13,7 +13,7 @@ use crate::jobs::{JobExecutionContext, JobHandlerError};
 const MAX_PROVIDER_MODEL_IDS: usize = 8;
 const MAX_ATTEMPT_RECORDS: usize = 128;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelReviewDestination {
     EqAuthoring,
@@ -25,9 +25,9 @@ pub enum ModelReviewDestination {
 
 /// Frozen before execution; only fingerprints of scope/evidence are retained.
 /// This is provenance, not permission to apply a proposal or replay a paid run.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ModelRunManifest {
-    schema_version: &'static str,
+    schema_version: String,
     job_id: String,
     role_id: String,
     role_fingerprint: String,
@@ -46,6 +46,8 @@ pub struct ModelRunManifest {
     evidence_fingerprint: String,
     review_destination: ModelReviewDestination,
     queue_wait_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_token_reservation: Option<u64>,
 }
 
 impl ModelRunManifest {
@@ -66,7 +68,7 @@ impl ModelRunManifest {
             .checked_mul(u64::from(role.execution.max_output_tokens))
             .ok_or_else(|| JobHandlerError::new("model_run_budget_overflow"))?;
         Ok(Self {
-            schema_version: "assistant-model-run/v1",
+            schema_version: "assistant-model-run/v1".to_owned(),
             job_id: context.job_id().to_owned(),
             role_id: role.role_id.clone(),
             role_fingerprint: role.fingerprint.clone(),
@@ -85,6 +87,7 @@ impl ModelRunManifest {
             evidence_fingerprint: model_input_fingerprint(evidence)?,
             review_destination,
             queue_wait_seconds: context.queue_wait_seconds(),
+            max_token_reservation: None,
         })
     }
 }
@@ -95,7 +98,7 @@ pub fn model_input_fingerprint(value: &impl Serialize) -> Result<String, JobHand
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProviderAttemptRecord {
     sequence: u64,
     request_fingerprint: String,
@@ -104,9 +107,12 @@ pub struct ProviderAttemptRecord {
     elapsed_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProviderUsageSummary {
-    pub schema_version: &'static str,
+    #[serde(default)]
+    pub token_details: ProviderTokenUsage,
+    pub reserved_tokens: u64,
+    pub schema_version: String,
     pub attempted_requests: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -125,6 +131,16 @@ pub struct ProviderUsageSummary {
     pub run_manifest: ModelRunManifest,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProviderTokenUsage {
+    pub cached_input_tokens: u64,
+    pub cached_input_reported_requests: u64,
+    pub cache_write_tokens: u64,
+    pub cache_write_reported_requests: u64,
+    pub reasoning_output_tokens: u64,
+    pub reasoning_output_reported_requests: u64,
+}
+
 #[derive(Debug)]
 pub struct ProviderUsageAccumulator {
     summary: ProviderUsageSummary,
@@ -132,11 +148,37 @@ pub struct ProviderUsageAccumulator {
 }
 
 impl ProviderUsageAccumulator {
+    pub fn resume(summary: ProviderUsageSummary) -> Self {
+        Self {
+            summary,
+            pending: false,
+        }
+    }
+
+    pub fn reserve_batch(
+        &mut self,
+        role: &ResolvedRoleExecution,
+        requests: &[StructuredModelRequest],
+    ) -> Result<(), JobHandlerError> {
+        for request in requests {
+            self.begin(role, request)?;
+            self.pending = false;
+        }
+        Ok(())
+    }
+
+    pub fn observe_batch_result(&mut self, sequence: u64, result: &StructuredModelResult) {
+        // Result membership/uniqueness is checked before this accumulator is
+        // reconstructed. Each reconciliation starts from the submission ledger.
+        self.finish_at(sequence, result, 0);
+    }
     #[must_use]
     pub fn for_run(run_manifest: ModelRunManifest) -> Self {
         Self {
             summary: ProviderUsageSummary {
-                schema_version: "assistant-provider-usage/v2",
+                token_details: ProviderTokenUsage::default(),
+                reserved_tokens: 0,
+                schema_version: "assistant-provider-usage/v2".to_owned(),
                 attempted_requests: 0,
                 input_tokens: 0,
                 output_tokens: 0,
@@ -156,6 +198,10 @@ impl ProviderUsageAccumulator {
             },
             pending: false,
         }
+    }
+
+    pub fn limit_token_reservation(&mut self, maximum: u64) {
+        self.summary.run_manifest.max_token_reservation = Some(maximum);
     }
 
     fn begin(
@@ -180,10 +226,20 @@ impl ProviderUsageAccumulator {
             return Err(JobHandlerError::new("role_changed"));
         }
         let request_fingerprint = model_input_fingerprint(request)?;
+        let reservation =
+            super::model_request_reservation(request, role.execution.max_output_tokens);
+        let reserved = self.summary.reserved_tokens.saturating_add(reservation);
+        if manifest
+            .max_token_reservation
+            .is_some_and(|maximum| reserved > maximum)
+        {
+            return Err(JobHandlerError::new("model_run_token_budget_exhausted"));
+        }
         let max_output_tokens = request
             .max_output_tokens
             .min(manifest.max_output_tokens_per_request);
         let summary = &mut self.summary;
+        summary.reserved_tokens = reserved;
         summary.attempted_requests += 1;
         summary.uncertain_requests += 1;
         if summary.attempts.len() == MAX_ATTEMPT_RECORDS {
@@ -202,16 +258,46 @@ impl ProviderUsageAccumulator {
     }
 
     fn finish(&mut self, result: &StructuredModelResult, elapsed_ms: u64) {
+        self.finish_at(self.summary.attempted_requests, result, elapsed_ms);
+    }
+
+    fn finish_at(&mut self, sequence: u64, result: &StructuredModelResult, elapsed_ms: u64) {
         let summary = &mut self.summary;
+        for (value, total, reported) in [
+            (
+                result.token_details.cached_input_tokens,
+                &mut summary.token_details.cached_input_tokens,
+                &mut summary.token_details.cached_input_reported_requests,
+            ),
+            (
+                result.token_details.cache_write_tokens,
+                &mut summary.token_details.cache_write_tokens,
+                &mut summary.token_details.cache_write_reported_requests,
+            ),
+            (
+                result.token_details.reasoning_output_tokens,
+                &mut summary.token_details.reasoning_output_tokens,
+                &mut summary.token_details.reasoning_output_reported_requests,
+            ),
+        ] {
+            if let Some(value) = value {
+                *total = total.saturating_add(value);
+                *reported += 1;
+            }
+        }
         self.pending = false;
-        summary.uncertain_requests -= 1;
+        summary.uncertain_requests = summary.uncertain_requests.saturating_sub(1);
         match result.outcome {
             ProviderAttemptOutcome::PreflightRejected => summary.preflight_rejected_requests += 1,
             ProviderAttemptOutcome::NotSent => summary.not_sent_requests += 1,
             ProviderAttemptOutcome::ResponseReceived => summary.response_received_requests += 1,
             ProviderAttemptOutcome::Uncertain => summary.uncertain_requests += 1,
         }
-        if let Some(attempt) = summary.attempts.last_mut() {
+        if let Some(attempt) = summary
+            .attempts
+            .iter_mut()
+            .find(|attempt| attempt.sequence == sequence)
+        {
             attempt.outcome = result.outcome;
             attempt.elapsed_ms = Some(elapsed_ms);
         }
@@ -281,6 +367,7 @@ pub async fn execute_recorded_provider_request(
     usage.begin(role, request)?;
     if let Err(error) = transport.validate_request(&role.execution, request) {
         let result = StructuredModelResult {
+            token_details: Default::default(),
             outcome: ProviderAttemptOutcome::PreflightRejected,
             succeeded: false,
             error_code: Some(error.code),

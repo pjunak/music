@@ -401,9 +401,7 @@ export function AssistantAiSetupView() {
     setBusyItem(`role:${roleId}`);
     try {
       const updated = await assistantProvidersApi.updateRole(roleId, payload);
-      setRoles((current) =>
-        current.map((role) => (role.role_id === roleId ? updated : role)),
-      );
+      setRoles(await assistantProvidersApi.listRoles());
       toast.success("Model task saved", updated.label);
       refreshQuality();
     } catch (error) {

@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+mod batch;
 use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 use std::io;
@@ -497,6 +498,7 @@ fn failed_structured_model(
     outcome: ProviderAttemptOutcome,
 ) -> StructuredModelResult {
     StructuredModelResult {
+        token_details: Default::default(),
         outcome,
         succeeded: false,
         error_code: Some(error_code.to_owned()),

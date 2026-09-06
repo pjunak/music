@@ -32,6 +32,8 @@ not a second description of the implementation.
 - [ADR-022: Current suggestion review metrics](ADR-022-current-suggestion-review-metrics.md)
 - [ADR-023: Bounded playlist vocabulary recall](ADR-023-bounded-playlist-vocabulary-recall.md)
 - [ADR-024: Session verifiers and browser WebSocket origins](ADR-024-session-verifiers-and-websocket-origins.md)
+- [ADR-025: Bounded shared mood inference](ADR-025-bounded-shared-mood-inference.md)
+- [Mood context quality review and evaluation plan](MOOD_CONTEXT_REVIEW.md)
 
 ADRs explain why a durable decision was made. The living Assistant contract map above identifies
 the current version strings and source files; older version strings inside an ADR describe the

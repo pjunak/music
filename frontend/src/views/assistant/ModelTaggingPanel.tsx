@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ModelTaggingRunControls } from "@/components/ModelTaggingRunControls";
+import { ModelBatchStatusPanel } from "@/components/ModelBatchStatusPanel";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { confirmDialog } from "@/components/confirmDialog";
 import {
   type BackgroundJob,
   MODEL_TAGGING_DISCLOSURE_VERSION,
+  DEFAULT_MODEL_TAGGING_LIMITS,
   type ModelTaggingAvailability,
   type ModelTaggingContextPolicy,
   assistantApi,
@@ -27,6 +30,10 @@ function errorMessage(error: unknown): string {
 
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
+    case "model_batch_pending":
+      return "Collect or cancel the pending batch before starting another run.";
+    case "tagging_budget_too_small":
+      return "Reduce the track limit or raise the limits to cover the plan.";
     case "request_too_large":
       return "The vocabulary and track metadata exceed the provider request limit. Shorten vocabulary descriptions, aliases, or context cues before starting.";
     case "model_quality_not_passed":
@@ -50,6 +57,8 @@ export function ModelTaggingPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [force, setForce] = useState(false);
+  const [limits, setLimits] = useState(DEFAULT_MODEL_TAGGING_LIMITS);
+  const [executionMode, setExecutionMode] = useState<"standard" | "batch">("standard");
   const [contextPolicy, setContextPolicy] =
     useState<ModelTaggingContextPolicy>("include");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -58,17 +67,23 @@ export function ModelTaggingPanel() {
   useEffect(() => {
     let disposed = false;
     let timer: number | undefined;
+    let lastPlanAt = 0;
+    let lastPlan: ModelTaggingAvailability | null = null;
 
     async function poll(initial: boolean) {
       if (initial) setLoading(true);
       const [availabilityResult, historyResult] = await Promise.allSettled([
-        assistantApi.planModelTagging({ type: "all" }, contextPolicy, force),
+        initial || lastPlan === null || Date.now() - lastPlanAt >= 30_000
+          ? assistantApi.planModelTagging({ type: "all" }, contextPolicy, force, limits, executionMode)
+          : Promise.resolve(lastPlan),
         jobsApi.list({ kind: MODEL_TAGGING_JOB_KIND, limit: 1 }),
       ]);
       if (disposed) return;
 
       const errors: string[] = [];
       if (availabilityResult.status === "fulfilled") {
+        if (lastPlan !== availabilityResult.value) lastPlanAt = Date.now();
+        lastPlan = availabilityResult.value;
         setAvailability(availabilityResult.value);
       } else {
         errors.push(errorMessage(availabilityResult.reason));
@@ -88,7 +103,7 @@ export function ModelTaggingPanel() {
           : jobRef.current;
       timer = window.setTimeout(
         () => void poll(false),
-        isModelTaggingJobActive(latest) ? 1500 : 5000,
+        isModelTaggingJobActive(latest) ? 1500 : 30_000,
       );
     }
 
@@ -97,7 +112,7 @@ export function ModelTaggingPanel() {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [contextPolicy, force, refreshKey]);
+  }, [contextPolicy, executionMode, force, limits, refreshKey]);
 
   const active = isModelTaggingJobActive(job);
   const result = modelTaggingResultFromJob(job);
@@ -119,26 +134,14 @@ export function ModelTaggingPanel() {
         : availability?.available
           ? "Ready"
           : "Optional";
-  const requestPlan = useMemo(() => {
-    if (availability === null) return { tracks: 0, requests: 0 };
-    if (!force) {
-      return {
-        tracks: availability.tracks_needing_tags,
-        requests: availability.estimated_provider_requests,
-      };
-    }
-    return {
-        tracks: availability.planned_tracks,
-        requests: availability.estimated_provider_requests,
-    };
-  }, [availability, force]);
+  const requestPlan = { tracks: availability?.run_tracks ?? 0, requests: availability?.estimated_provider_requests ?? 0 };
 
   async function start() {
     if (availability === null || !availability.available) return;
     const confirmed = await confirmDialog({
       title: "Send library evidence to your mood-tagging model?",
       body:
-        `${requestPlan.tracks} track${requestPlan.tracks === 1 ? "" : "s"} will be ` +
+        `${executionMode === "batch" ? "OpenAI Batch uploads a metadata/context file; input expires after 7 days, output after up to 30 days. Completion can take 24 hours; completed work is charged even after cancellation. " : ""}Limits: ${limits.max_tracks} tracks, ${limits.max_requests} model requests including corrections, ${limits.max_token_reservation.toLocaleString()} reservation units. ${availability.deferred_tracks} tracks deferred. ${requestPlan.tracks} track${requestPlan.tracks === 1 ? "" : "s"} will be ` +
         `processed in about ${requestPlan.requests} provider request${
           requestPlan.requests === 1 ? "" : "s"
         }. Artist, album, origin, and genre metadata plus durations and BPM may be sent ` +
@@ -155,6 +158,8 @@ export function ModelTaggingPanel() {
         MODEL_TAGGING_DISCLOSURE_VERSION,
         { type: "all" },
         contextPolicy,
+        limits,
+        executionMode,
       );
       jobRef.current = nextJob;
       setJob(nextJob);
@@ -214,6 +219,8 @@ export function ModelTaggingPanel() {
           </button>
         </div>
       ) : null}
+      <ModelTaggingRunControls limits={limits} onLimits={setLimits} mode={executionMode} onMode={setExecutionMode} batchAvailable={availability?.batch_available ?? false} />
+      <ModelBatchStatusPanel id={availability?.pending_batch_id ?? (typeof job?.result?.batch_id === "string" ? job.result.batch_id : null)} />
       {loading && availability === null && job === null ? (
         <p className="muted">Checking the mood tagging model…</p>
       ) : null}

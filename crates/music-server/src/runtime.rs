@@ -175,6 +175,7 @@ impl AppRuntime {
         let provider_credentials = Arc::new(RuntimeCredentialStore::new(&config));
         let provider_network = Arc::new(ProviderNetworkBoundary::new());
         let providers = Arc::new(RuntimeProviders::new(
+            storage.clone(),
             provider_repository,
             evaluation_repository,
             Arc::clone(&provider_credentials),
@@ -385,12 +386,18 @@ impl AppRuntime {
             Arc::clone(&assistant),
             Arc::clone(&local_analysis),
             local_analysis_repository,
+            Some(Arc::new(music_application::assistant::ModelBatchServices {
+                repository: storage.clone(),
+                transport: providers.network_boundary(),
+                providers: providers.provider_service(),
+            })),
         ));
         let jobs = supervise_jobs(
             &supervisor,
             start_job_coordinator(job_repository, job_handlers).await?,
         )?;
         health.set_component("background_jobs", true, ComponentStatus::Ready);
+        start_model_batch_monitor(&supervisor, providers.batches.clone(), Arc::clone(&jobs))?;
         health.set_component("library_coordinator", true, ComponentStatus::Ready);
         apply_library_health(&health, library.status().status);
         library.request_reconciliation()?;
@@ -783,6 +790,35 @@ fn start_database_monitor(
                         Err(_) => {
                             return Err(CriticalTaskError::new("database_healthcheck_timed_out"));
                         }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn start_model_batch_monitor(
+    supervisor: &TaskSupervisor,
+    repository: Arc<dyn music_application::assistant::ModelBatchRepository>,
+    jobs: Arc<music_application::jobs::JobService>,
+) -> Result<(), RuntimeError> {
+    let cancellation = supervisor.cancellation_token();
+    supervisor.spawn_critical("model-batch-monitor", "background_jobs", async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                () = cancellation.cancelled() => return Ok(()),
+                _ = interval.tick() => {
+                    match repository.pending_model_batch().await {
+                        Ok(Some(batch)) if batch.remote_batch_id.is_some() => {
+                            if jobs.enqueue_unique_active(music_application::assistant::MODEL_TAGGING_BATCH_COLLECT_JOB_KIND,
+                                serde_json::json!({"batch_id":batch.id,"role_id":"music_tagger"})).await.is_err() {
+                                tracing::warn!("model_batch_reconciliation_enqueue_failed");
+                            }
+                        }
+                        Err(_) => tracing::warn!("model_batch_reconciliation_lookup_failed"),
+                        _ => {}
                     }
                 }
             }

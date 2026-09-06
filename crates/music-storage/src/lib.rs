@@ -25,6 +25,7 @@ mod jobs;
 mod library;
 mod migration;
 mod mode_import;
+mod model_batches;
 mod playback;
 mod playlists;
 mod providers;

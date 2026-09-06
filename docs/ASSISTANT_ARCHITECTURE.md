@@ -1,7 +1,7 @@
 # Assistant architecture and contract map
 
 **Status:** Living documentation
-**Last audited:** 2026-09-05
+**Last audited:** 2026-09-06
 
 This is the current map for the local-first Assistant and its optional model workflows. Use it to
 find ownership, privacy boundaries, contract versions, evaluation gates, and regression tests.
@@ -98,12 +98,35 @@ is the outbound port. The server composes the HTTP adapter and exposes routes;
 application workflows own gates, checkpoints, retry budgets, and proposal writes.
 
 `plan_model_tagger_batches` in the application layer owns exact track partitioning.
-The provider adapter validates the actual serialized envelope against the 256 KiB limit.
+The provider adapter validates the actual serialized envelope against the 256 KiB limit
+and reserves output capacity before choosing the number of tracks.
 Preview, start preflight, execution, and evaluation use the same planner; ordinary and
 corrective requests must both fit. Batches contain at most 20 tracks and may be smaller.
 No vocabulary entries are dropped. An oversized single-track request prevents enqueueing
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
+
+Mood tagging input v20 uses batch-local slots, a stable vocabulary reference prefix and
+per-measurement context reliability. Full membership is validated before resolving slots
+back to local IDs. Explicit cache controls are limited to documented native OpenAI model
+families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
+The context implementation is `local-context/v2+rustfft/v2`: overlapping FFT windows cover
+every half-second frame. The model projection retains all ten sections.
+
+`ModelBatchTransport` is the separate asynchronous port; `model_jobs/batch.rs` owns the
+upload/submission/collection lifecycle. SQLite schema 12 stores durable pending batches.
+The server's `provider_transport/batch.rs` is restricted to native OpenAI Responses and
+uses bounded pinned-DNS HTTP without automatic retries. App limits are 500 requests and
+32 MiB per uploaded batch. Only the collection handler is restartable. Collection validates
+current inference identity and review evidence, without requiring permission for new inference.
+Pending records block model/connection and credential mutations; terminal connection deletion
+also deletes its Batch records, while ordinary job history retains usage/results.
+
+The shared mood configuration retains independent gates for tagging and cleanup. Inference
+identity hashes the task's rendered prompt/schema and meaningful inference settings; runtime
+source fingerprints still govern certification. Per-track evidence/vocabulary/context hashes
+remain mandatory. See [ADR-025](ADR-025-bounded-shared-mood-inference.md) and the
+[context review](MOOD_CONTEXT_REVIEW.md) for the measurements and remaining evaluation work.
 
 Catalog lookups acquire a source execution lease before reading settings or credentials.
 Policy and credential edits return `cleanup_source_busy` while a lookup is active; finish
@@ -208,7 +231,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v4+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v3` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v19+output/v3+local-context/v2` | `assistant-model-music-tagging-disclosure/v11` | `model-context-tagger/v6` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v20+output/v3+local-context/v2` | `assistant-model-music-tagging-disclosure/v12` | `model-context-tagger/v6` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 

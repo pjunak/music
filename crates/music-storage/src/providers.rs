@@ -217,7 +217,9 @@ impl SqliteStorage {
         let active: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM background_jobs \
              WHERE (kind LIKE 'assistant.model%' OR kind = 'library.cleanup-enrichment') \
-             AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1)",
+             AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1) \
+             OR EXISTS(SELECT 1 FROM assistant_model_batches \
+             WHERE state NOT IN ('completed','cancelled','failed','expired'))",
         )
         .fetch_one(&mut *transaction)
         .await?;
@@ -432,7 +434,9 @@ impl ProviderRepository for SqliteStorage {
             let active: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM background_jobs \
                  WHERE (kind LIKE 'assistant.model%' OR kind = 'library.cleanup-enrichment') \
-                 AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1)",
+                 AND status IN ('queued', 'running', 'cancel_requested') LIMIT 1) \
+             OR EXISTS(SELECT 1 FROM assistant_model_batches \
+             WHERE state NOT IN ('completed','cancelled','failed','expired'))",
             )
             .fetch_one(&mut *transaction)
             .await
@@ -752,6 +756,13 @@ impl ProviderRepository for SqliteStorage {
                 transaction.rollback().await.map_err(box_storage)?;
                 return Ok(ProviderMutationOutcome::NotFound);
             }
+            if connection_has_active_model_job(&mut transaction, connection_id)
+                .await
+                .map_err(box_storage)?
+            {
+                transaction.rollback().await.map_err(box_storage)?;
+                return Ok(ProviderMutationOutcome::ConnectionModelJobActive);
+            }
             let assigned: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM assistant_model_roles WHERE connection_id = ?)",
             )
@@ -962,6 +973,51 @@ impl ProviderRepository for SqliteStorage {
             {
                 transaction.rollback().await.map_err(box_storage)?;
                 return Ok(ProviderMutationOutcome::RoleModelJobActive);
+            }
+            // Mood tasks share configuration, but never conformance, quality or
+            // enablement. Synchronize under the same write admission/transaction.
+            let sibling = match role.role_id.as_str() {
+                "music_tagger" => Some("tag_cleanup"),
+                "tag_cleanup" => Some("music_tagger"),
+                _ => None,
+            };
+            if let Some(sibling) = sibling {
+                if role_has_active_model_job(&mut transaction, sibling)
+                    .await
+                    .map_err(box_storage)?
+                {
+                    transaction.rollback().await.map_err(box_storage)?;
+                    return Ok(ProviderMutationOutcome::RoleModelJobActive);
+                }
+                let current = load_role_tx(&mut transaction, sibling)
+                    .await
+                    .map_err(box_storage)?;
+                let changed = current.as_ref().is_none_or(|current| {
+                    current.connection_id != role.connection_id
+                        || current.model_id != role.model_id
+                        || current.timeout_seconds != role.timeout_seconds
+                        || current.max_output_tokens != role.max_output_tokens
+                        || current.thinking_mode != role.thinking_mode
+                });
+                if changed {
+                    sqlx::query(
+                        "INSERT INTO assistant_model_roles \
+                         (role_id, connection_id, model_id, enabled, timeout_seconds, max_output_tokens, thinking_mode, conformance_status, updated_at) \
+                         VALUES (?, ?, ?, 0, ?, ?, ?, 'never', CURRENT_TIMESTAMP) \
+                         ON CONFLICT(role_id) DO UPDATE SET connection_id = excluded.connection_id, \
+                         model_id = excluded.model_id, enabled = 0, timeout_seconds = excluded.timeout_seconds, \
+                         max_output_tokens = excluded.max_output_tokens, thinking_mode = excluded.thinking_mode, \
+                         conformance_status = 'never', conformance_error_code = NULL, conformance_fingerprint = NULL, \
+                         last_conformance_at = NULL, updated_at = CURRENT_TIMESTAMP"
+                    ).bind(sibling).bind(&role.connection_id).bind(&role.model_id)
+                        .bind(i64::from(role.timeout_seconds)).bind(i64::from(role.max_output_tokens))
+                        .bind(&role.thinking_mode).execute(&mut *transaction).await.map_err(box_storage)?;
+                    sqlx::query("DELETE FROM assistant_model_evaluations WHERE role_id = ?")
+                        .bind(sibling)
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(box_storage)?;
+                }
             }
             sqlx::query(
                 "INSERT INTO assistant_model_roles \
@@ -1193,6 +1249,9 @@ async fn role_has_active_model_job(
     transaction: &mut Transaction<'_, Sqlite>,
     role_id: &str,
 ) -> Result<bool, StorageError> {
+    if matches!(role_id, "music_tagger" | "tag_cleanup") && sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM assistant_model_batches WHERE state NOT IN ('completed','cancelled','failed','expired'))"
+    ).fetch_one(&mut **transaction).await? { return Ok(true); }
     let rows = sqlx::query(
         "SELECT parameters_json FROM background_jobs WHERE kind LIKE 'assistant.model%' \
          AND status IN ('queued', 'running', 'cancel_requested')",
@@ -1217,6 +1276,16 @@ async fn connection_has_active_model_job(
     transaction: &mut Transaction<'_, Sqlite>,
     connection_id: &str,
 ) -> Result<bool, StorageError> {
+    let pending: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM assistant_model_batches WHERE connection_id = ? \
+         AND state NOT IN ('completed','cancelled','failed','expired'))",
+    )
+    .bind(connection_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if pending {
+        return Ok(true);
+    }
     let role_rows =
         sqlx::query("SELECT role_id FROM assistant_model_roles WHERE connection_id = ?")
             .bind(connection_id)
@@ -1314,6 +1383,104 @@ mod tests {
             last_conformance_at_unix_seconds: Some(1_800_000_001),
             updated_at_unix_seconds: 0,
         }
+    }
+
+    #[tokio::test]
+    async fn mood_models_share_configuration_but_keep_independent_gates()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        use music_application::assistant::{
+            ModelBatchRecord, ModelBatchRepository, model_tag_inference_fingerprint,
+        };
+        let (_directory, storage) = storage().await?;
+        let connection = connection("aabbccddeeff00112233445566778899", "Fixture");
+        storage.create_provider_connection(&connection).await?;
+        let mut tagger = role(&connection.id);
+        storage
+            .save_model_role(&connection.fingerprint(), &tagger, false)
+            .await?;
+        let roles = storage.model_roles().await?;
+        let cleanup = roles
+            .iter()
+            .find(|role| role.role_id == "tag_cleanup")
+            .ok_or("cleanup missing")?;
+        assert_eq!(cleanup.model_id, tagger.model_id);
+        assert!(!cleanup.enabled);
+        assert_eq!(cleanup.conformance_status, "never");
+        assert_eq!(
+            roles
+                .iter()
+                .find(|role| role.role_id == "music_tagger")
+                .ok_or("tagger missing")?
+                .conformance_status,
+            "passed"
+        );
+        let before = model_tag_inference_fingerprint(&tagger, &connection);
+        tagger.timeout_seconds = 120;
+        assert_eq!(
+            before,
+            model_tag_inference_fingerprint(&tagger, &connection)
+        );
+        tagger.model_id = "another-model".to_owned();
+        assert_ne!(
+            before,
+            model_tag_inference_fingerprint(&tagger, &connection)
+        );
+        tagger.enabled = false;
+        storage
+            .save_model_role(&connection.fingerprint(), &tagger, true)
+            .await?;
+        let roles = storage.model_roles().await?;
+        assert!(roles.iter().all(|role| role.model_id == "another-model"));
+        let mut batch = ModelBatchRecord {
+            id: "run".to_owned(),
+            connection_id: connection.id.clone(),
+            state: "submitting".to_owned(),
+            input_file_id: None,
+            remote_batch_id: None,
+            document: serde_json::json!({"fixture":true}),
+        };
+        assert!(storage.create_model_batch(&batch).await?);
+        assert!(!storage.create_model_batch(&batch).await?);
+        assert_eq!(
+            storage
+                .model_batch_summary("run")
+                .await?
+                .ok_or("summary missing")?
+                .document,
+            serde_json::json!({"result":null})
+        );
+        assert_eq!(
+            storage
+                .save_model_role(&connection.fingerprint(), &tagger, true)
+                .await?,
+            ProviderMutationOutcome::RoleModelJobActive
+        );
+        assert_eq!(
+            storage.reset_provider_credentials().await?,
+            ProviderCredentialResetOutcome::ModelJobActive
+        );
+        assert_eq!(
+            storage.clear_provider_credential(&connection.id).await?,
+            ProviderMutationOutcome::ConnectionModelJobActive
+        );
+        batch.input_file_id = Some("file-owned".to_owned());
+        batch.remote_batch_id = Some("batch_owned".to_owned());
+        batch.state = "submitted".to_owned();
+        assert!(storage.update_model_batch("submitting", &batch).await?);
+        assert!(!storage.update_model_batch("submitting", &batch).await?);
+        assert_eq!(
+            storage
+                .model_batch("run")
+                .await?
+                .ok_or("batch missing")?
+                .remote_batch_id
+                .as_deref(),
+            Some("batch_owned")
+        );
+        batch.state = "cancelled".to_owned();
+        assert!(storage.update_model_batch("submitted", &batch).await?);
+        assert!(storage.pending_model_batch().await?.is_none());
+        Ok(())
     }
 
     #[tokio::test]

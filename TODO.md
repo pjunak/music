@@ -30,6 +30,17 @@ or demonstrated defect rather than extend the cleanup phase indefinitely.
 - **Shared proposal provenance.** Unify model/catalog presentation only if the
   existing review workflows demonstrate a concrete benefit.
 
+## Mood quality evaluation
+
+- **Calibrate acoustic context.** Compare gain-normalized intensity evidence, a finer tempo
+  estimator, and present context on a small reviewed sample before another full-library model
+  pass. The spectral coverage defect is fixed; intensity still includes recording volume,
+  tempo is approximate and classifier confidence is not calibrated mood accuracy.
+  [The context review](docs/MOOD_CONTEXT_REVIEW.md) defines the engineering/operator split.
+- **Measure cost per useful accepted tag.** Compare metadata-only and metadata-plus-context
+  with identical scope/model/Thinking/limits; record unsupported tags and abstentions, not only
+  schema validity. Keep new audio encoders or vocabulary pruning conditional on these results.
+
 ## New features — deferred by the operator
 
 - **Broader EQ assistance.** Revisit the desired effect/control scope after the
@@ -44,9 +55,9 @@ or demonstrated defect rather than extend the cleanup phase indefinitely.
   journal -> execute cleanup workflow with a minimized model input and fixed
   output schema. The model must not move, rename, or delete files directly.
 - **Provider-independent cost controls.** Provider dashboards remain the source
-  of truth for spending limits. Add in-app budgets only if adapters can expose a
-  trustworthy portable accounting contract; never infer charges from missing
-  token usage.
+  of truth for spending limits. The current track/request/reservation limits bound individual tagging runs. Add
+  currency or account-wide budgets only with a trustworthy accounting contract;
+  never infer charges from missing usage.
 - **Weighted shuffle.** Reintroduce `"weighted"` only with a real play-count or
   recency algorithm. Persisted legacy values already coerce to `"random"`, so
   the protocol addition can remain additive.

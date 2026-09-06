@@ -23,7 +23,7 @@ pub const METADATA_ANALYSIS_JOB_KIND: &str = "assistant.library-analysis";
 pub const AUDIO_ANALYSIS_JOB_KIND: &str = "assistant.library-audio-analysis";
 pub const LIBRARY_CONTEXT_JOB_KIND: &str = "assistant.library-context-analysis";
 pub const LOCAL_CONTEXT_ANALYZER_ID: &str = "local-context/v2";
-pub const LOCAL_CONTEXT_IMPLEMENTATION_ID: &str = "local-context/v2+rustfft/v1";
+pub const LOCAL_CONTEXT_IMPLEMENTATION_ID: &str = "local-context/v2+rustfft/v2";
 const METADATA_ANALYSIS_BATCH_SIZE: usize = 50;
 pub const VOICE_ANALYZER_ID: &str = "essentia-musicnn-voice/v1";
 pub const VOICE_MODEL_FILENAME: &str = "voice_instrumental-musicnn-msd-2.pb";
@@ -48,8 +48,12 @@ pub struct AnalysisFailureState {
     pub updated_at_unix_seconds: i64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisWrite {
+    #[serde(
+        serialize_with = "super::model_batch::serialize_track_id",
+        deserialize_with = "super::model_batch::deserialize_track_id"
+    )]
     pub track_id: TrackId,
     pub source_signature: String,
     pub energy: f64,

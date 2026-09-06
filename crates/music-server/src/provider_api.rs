@@ -41,6 +41,7 @@ use crate::provider_transport::ProviderNetworkBoundary;
 
 #[derive(Debug)]
 pub(crate) struct RuntimeProviders {
+    pub(crate) batches: Arc<dyn music_application::assistant::ModelBatchRepository>,
     service: Arc<ProviderService>,
     quality: Arc<ModelQualityService>,
     repository: Arc<dyn ProviderRepository>,
@@ -50,6 +51,7 @@ pub(crate) struct RuntimeProviders {
 
 impl RuntimeProviders {
     pub(crate) fn new(
+        batches: Arc<dyn music_application::assistant::ModelBatchRepository>,
         repository: Arc<dyn ProviderRepository>,
         evaluation_repository: Arc<dyn ModelEvaluationRepository>,
         credentials: Arc<RuntimeCredentialStore>,
@@ -74,6 +76,7 @@ impl RuntimeProviders {
             Arc::clone(&service),
         ));
         Self {
+            batches,
             service,
             quality,
             repository,
@@ -155,6 +158,10 @@ pub(crate) fn provider_role_contract_digests() -> std::collections::BTreeMap<Str
 fn provider_digest(application_digest: &str) -> String {
     const PROVIDER_RUNTIME_CONTRACT_VERSION: &str = "music-rust-provider-runtime/v2";
     const SERVER_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
+        (
+            "music-server/provider_transport/batch.rs",
+            include_str!("provider_transport/batch.rs"),
+        ),
         (
             "music-server/provider_handlers.rs",
             include_str!("provider_handlers.rs"),

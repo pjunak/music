@@ -716,6 +716,7 @@ mod tests {
         )?;
         assert!(task.next_request().is_some());
         task.accept(StructuredModelResult {
+            token_details: Default::default(),
             outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,

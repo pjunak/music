@@ -637,6 +637,9 @@ describe("AssistantAiSetupView", () => {
       enabled: true,
       effective_enabled: true,
     };
+    vi.mocked(assistantProvidersApi.listRoles)
+      .mockResolvedValueOnce([role])
+      .mockResolvedValue([configuredRole]);
     vi.mocked(assistantProvidersApi.updateRole)
       .mockResolvedValueOnce(configuredRole)
       .mockResolvedValueOnce(enabledRole);

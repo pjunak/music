@@ -81,6 +81,9 @@ const summary: LibraryContextSummary = {
 };
 
 const unavailableTagger: ModelTaggingAvailability = {
+  execution_mode: "standard", batch_available: false, pending_batch_id: null,
+  limits: { max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000 },
+  run_tracks: 1, deferred_tracks: 0, token_reservation: 200_000,
   available: false,
   reason_code: "role_not_configured",
   role_id: "music_tagger",
@@ -98,7 +101,7 @@ const unavailableTagger: ModelTaggingAvailability = {
   tracks_needing_tags: 120,
   estimated_provider_requests: 6,
   disclosure: {
-    version: "assistant-model-music-tagging-disclosure/v11",
+    version: "assistant-model-music-tagging-disclosure/v12",
     shared_with_provider: [],
     never_shared: [],
     allowed_tags: ["calm"],

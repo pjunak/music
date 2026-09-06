@@ -71,6 +71,7 @@ fn tagger_fixture() -> Option<ModelTaggerBatch> {
 
 fn successful_result(payload: Value) -> StructuredModelResult {
     StructuredModelResult {
+        token_details: Default::default(),
         outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
         succeeded: true,
         error_code: None,

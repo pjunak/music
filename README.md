@@ -386,6 +386,8 @@ provider calls. See [job diagnostics](docs/JOB_DIAGNOSTICS.md) for sampling limi
 and the provider scheduling study.
 
 Sessions are stored as SHA-256 verifiers with separate random management IDs.
+Schema 12 adds durable asynchronous mood-tagging Batch records. Existing manual tags survive;
+provider work remains bounded, opt-in and review-only. See [the mood workflow](ASSISTANT.md#bounded-runs-and-asynchronous-batch).
 Schema 11 revokes existing logins once; sign in again in the browser and Baton after
 upgrading. Accounts, manual tags and authored data remain. Browser WebSocket
 handshakes require the application's own origin or an origin in `ALLOWED_ORIGINS`;

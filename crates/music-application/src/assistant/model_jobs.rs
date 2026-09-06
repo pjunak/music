@@ -1,3 +1,4 @@
+mod batch;
 mod eq;
 mod playlist;
 mod tag_cleanup;
@@ -96,6 +97,7 @@ pub const MODEL_PLAYLIST_SUGGESTION_JOB_KIND: &str = "assistant.model-playlist-s
 pub const MODEL_EQ_DRAFT_JOB_KIND: &str = "assistant.model-eq-draft";
 pub const MODEL_TAG_CLEANUP_JOB_KIND: &str = "assistant.model-tag-cleanup";
 pub const MODEL_TAGGING_JOB_KIND: &str = "assistant.model-music-tagging";
+pub const MODEL_TAGGING_BATCH_COLLECT_JOB_KIND: &str = "assistant.model-tagging-batch-collect";
 
 #[derive(Debug, Clone, Copy)]
 enum EvaluationKind {
@@ -407,10 +409,12 @@ enum FeatureKind {
     Eq,
     TagCleanup,
     Tagging,
+    TaggingBatchCollect,
 }
 
 #[derive(Debug)]
 struct ModelFeatureJobHandler {
+    batch: Option<Arc<super::ModelBatchServices>>,
     kind: FeatureKind,
     quality: Arc<ModelQualityService>,
     transport: Arc<dyn StructuredModelTransport>,
@@ -433,6 +437,9 @@ impl JobHandler for ModelFeatureJobHandler {
     ) -> JobHandlerFuture<'a> {
         Box::pin(async move {
             match self.kind {
+                FeatureKind::TaggingBatchCollect => {
+                    self.collect_tagging_batch(context, parameters).await
+                }
                 FeatureKind::Playlist => {
                     let parameters = serde_json::from_value(Value::Object(parameters))
                         .map_err(|_| JobHandlerError::new("invalid playlist model parameters"))?;
@@ -467,10 +474,11 @@ fn feature_job_definition(kind: FeatureKind) -> JobDefinition {
             FeatureKind::Eq => MODEL_EQ_DRAFT_JOB_KIND,
             FeatureKind::TagCleanup => MODEL_TAG_CLEANUP_JOB_KIND,
             FeatureKind::Tagging => MODEL_TAGGING_JOB_KIND,
+            FeatureKind::TaggingBatchCollect => MODEL_TAGGING_BATCH_COLLECT_JOB_KIND,
         },
         schema_version: 1,
         lane: JobLane::Provider,
-        restartable: false,
+        restartable: matches!(kind, FeatureKind::TaggingBatchCollect),
         checkpoint_policy: JobCheckpointPolicy::Replace,
     }
 }
@@ -556,6 +564,11 @@ struct ModelTagCleanupJobParameters {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ModelTaggingJobParameters {
+    inference_fingerprint: String,
+    #[serde(default)]
+    execution_mode: super::ModelTaggingExecutionMode,
+    #[serde(default)]
+    limits: super::ModelTaggingLimits,
     role_id: String,
     quality_evaluation_id: String,
     disclosure_version: String,
@@ -643,16 +656,19 @@ pub fn model_feature_job_handlers(
     assistant: Arc<AssistantService>,
     local_analysis: Arc<LocalAnalysisService>,
     analysis_repository: Arc<dyn LocalAnalysisRepository>,
+    batch: Option<Arc<super::ModelBatchServices>>,
 ) -> Vec<Arc<dyn JobHandler>> {
     [
         FeatureKind::Playlist,
         FeatureKind::Eq,
         FeatureKind::TagCleanup,
         FeatureKind::Tagging,
+        FeatureKind::TaggingBatchCollect,
     ]
     .into_iter()
     .map(|kind| {
         Arc::new(ModelFeatureJobHandler {
+            batch: batch.clone(),
             kind,
             quality: Arc::clone(&quality),
             transport: Arc::clone(&transport),
@@ -798,6 +814,11 @@ mod tests {
         assert!(!deterministic_tagger_execution_failure(
             &ModelTaskError::new("model_output_schema_invalid")
         ));
+    }
+
+    #[test]
+    fn batch_collection_can_restart_without_starting_inference() {
+        assert!(feature_job_definition(FeatureKind::TaggingBatchCollect).restartable);
     }
 
     #[test]

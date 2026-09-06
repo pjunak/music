@@ -280,7 +280,7 @@ Use a small, representative sample before running across the whole library.
    separate from local analysis and database mood tags.
 5. Inspect the disclosure: the model receives artist, album, origin, and genre metadata, the current full canonical
    ID/name/definition/alias list, and—when available—a bounded projection of locally measured
-   whole-track trajectories, tempo development, major acoustic sections, repetition, confidence,
+   whole-track trajectories, tempo development, all ten bounded acoustic sections, repetition, coverage confidence, measurement reliability,
    and optional local voice/instrumental classifier evidence or explicit unknown/unavailable voice
    status. It does not receive a local tag hypothesis or model-owned
    signal axes. Track titles, display titles, file and folder names, library paths, audio,
@@ -291,7 +291,49 @@ Use a small, representative sample before running across the whole library.
 7. Confirm automatic playlists do not react to pending or rejected model suggestions;
    they may react after an accepted suggestion becomes a manual tag.
 
+### Bounded runs and asynchronous Batch
+
+The default plan selects at most **100 tracks**, allows **10 model requests** including
+contract recovery, and reserves at most **1,000,000 units**. Adjust these limits before
+confirming. Reservation units conservatively combine prompt/schema UTF-8 bytes and
+maximum output tokens; they are not an exact token count, price estimate, or account-wide
+spending limit. Provider dashboards remain authoritative for charges and account limits.
+A later ordinary run skips valid current results. Use rebuild only when deliberately
+replacing those results. API quota errors are distinguished from transient rate limits.
+
+With the native OpenAI Responses connection, select **OpenAI Batch** after passing the
+Music tagging gates. The configured model must support Batch. The same metadata, vocabulary
+and optional local context are uploaded as JSONL; no audio, titles or paths are uploaded.
+Completion can take 24 hours. There are no automatic corrective calls or resubmissions.
+The server checks every five minutes, including after restart, and stores valid results
+for ordinary Mood Library review. Keep the server/database and configured credential key.
+
+Input files expire after seven days; output files may remain up to thirty days. The app
+attempts to delete known input/output/error files after results are saved. Cancellation
+can take time and completed work remains chargeable. A failed deletion leaves a recoverable
+pending record. Do not remove provider files manually before collecting them.
+
+If submission times out after the provider may have accepted it, the app blocks another
+run. Find the provider batch whose metadata contains the displayed `music_run_id`, then
+paste its batch ID into the recovery field. The server verifies ownership before collecting
+or cancelling it. If the submission cannot be found, resolve it in the provider account
+before explicitly abandoning the local record; abandoning cannot cancel unknown remote work.
+Connection/model/credential changes remain blocked while the record is pending.
+
+This update separates generated-result identity from model certification. Operational
+recertification, timeout and credential changes do not alone invalidate saved suggestions.
+Changes to the actual inference contract, model/Thinking/output allowance, vocabulary or
+input evidence do. New inference always requires current conformance and quality passes.
+The new input identity and corrected spectral implementation make older generated profiles
+and local context stale once. Accepted/manual tags remain intact; nothing runs automatically.
+Recompute local context first, then try a small bounded model sample.
+
 ### Mood-tag cleanup
+
+Configure its shared model in **Music tagging**, then run cleanup's own conformance and
+quality checks. Sharing a model does not transfer a pass between tasks. Existing independent
+cleanup assignments remain inactive until Music tagging is saved to link them. Cleanup is
+an optional operation on unresolved manual tag names, not a second pass over tagging output.
 
 1. Open **Assistant -> Mood library -> Mood vocabulary** and review local conservative cleanup there.
    Declared aliases, spelling, and plural rules run

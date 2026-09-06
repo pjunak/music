@@ -42,6 +42,7 @@ impl StructuredModelTransport for Transport {
                 self.release.notified().await;
             }
             StructuredModelResult {
+                token_details: Default::default(),
                 outcome: ProviderAttemptOutcome::ResponseReceived,
                 succeeded: true,
                 error_code: None,
@@ -62,6 +63,7 @@ struct Handler {
     requests: usize,
     change_role: bool,
     change_output_limit: bool,
+    token_budget: Option<u64>,
 }
 
 impl Handler {
@@ -72,6 +74,7 @@ impl Handler {
             requests: 1,
             change_role: false,
             change_output_limit: false,
+            token_budget: None,
         })
     }
 }
@@ -88,6 +91,8 @@ impl JobHandler for Handler {
     ) -> JobHandlerFuture<'a> {
         Box::pin(async move {
             let mut role = ResolvedRoleExecution {
+                inference_fingerprint: "c".repeat(64),
+                connection_id: "fixture".to_owned(),
                 role_id: "eq_assistant".to_owned(),
                 fingerprint: "a".repeat(64),
                 role_configuration_fingerprint: "b".repeat(64),
@@ -115,6 +120,9 @@ impl JobHandler for Handler {
                 ModelReviewDestination::EqAuthoring,
             )?;
             let mut usage = ProviderUsageAccumulator::for_run(manifest);
+            if let Some(budget) = self.token_budget {
+                usage.limit_token_reservation(budget);
+            }
             if self.change_role {
                 role.connection_fingerprint = "d".repeat(64);
             }
@@ -270,6 +278,7 @@ async fn budgets_bound_requests_and_records_without_losing_aggregate_usage() -> 
         requests: 130,
         change_role: false,
         change_output_limit: false,
+        token_budget: None,
     });
     setup(&storage, &handler).await?;
     let coordinator = start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
@@ -337,6 +346,7 @@ async fn preflight_rejection_and_changed_role_never_send() -> TestResult {
             requests: 1,
             change_role,
             change_output_limit,
+            token_budget: None,
         });
         setup(&storage, &handler).await?;
         let coordinator =
@@ -356,4 +366,39 @@ async fn preflight_rejection_and_changed_role_never_send() -> TestResult {
         stop_coordinator(coordinator).await?;
     }
     Ok(())
+}
+
+#[tokio::test]
+async fn token_reservation_stops_before_a_second_paid_request() -> TestResult {
+    let directory = tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("db"))).await?,
+    );
+    let handler = Arc::new(Handler {
+        transport: Arc::new(Transport::default()),
+        max_attempts: 10,
+        requests: 10,
+        change_role: false,
+        change_output_limit: false,
+        token_budget: Some(1500),
+    });
+    setup(&storage, &handler).await?;
+    let coordinator = start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
+    let failed = wait_for_job(&storage, "attempt", |job| job.status == JobStatus::Failed).await?;
+    assert_eq!(
+        failed.error.as_deref(),
+        Some("model_run_token_budget_exhausted")
+    );
+    assert_eq!(handler.transport.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(usage(&failed)?["attempted_requests"], 1);
+    assert_eq!(
+        usage(&failed)?["run_manifest"]["max_token_reservation"],
+        1500
+    );
+    assert!(
+        usage(&failed)?["reserved_tokens"]
+            .as_u64()
+            .is_some_and(|total| total <= 1500)
+    );
+    stop_coordinator(coordinator).await
 }

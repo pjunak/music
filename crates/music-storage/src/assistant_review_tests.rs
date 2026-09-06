@@ -248,6 +248,7 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
         tx.rollback().await?;
         let guard = ModelTagReviewGuard {
             role: ModelRoleReviewIdentity {
+                inference_fingerprint: "a".repeat(64),
                 runtime_fingerprint: "a".repeat(64),
                 configuration_fingerprint: role.configuration_fingerprint(),
                 connection_fingerprint: connection.fingerprint(),
@@ -257,7 +258,7 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
         };
         let signature = model_tag_source_signature(
             &track,
-            &guard.role.runtime_fingerprint,
+            &guard.role.inference_fingerprint,
             &vocabulary.fingerprint,
             None,
         )?;
@@ -272,7 +273,7 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
                 .store_model_analysis(
                     MODEL_TAG_ANALYZER_ID,
                     "fixture-job",
-                    &guard.role.runtime_fingerprint,
+                    &guard.role.inference_fingerprint,
                     &vocabulary.fingerprint,
                     None,
                     &[ModelAnalysisWrite {

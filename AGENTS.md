@@ -269,11 +269,25 @@ Runtime data lives outside the image.
   The result is a review-only draft and may create a preset only through the existing Authoring
   import preview/select/commit transaction. Never send songs, audio, library metadata, paths,
   playlists, existing presets, or credentials to the EQ role.
+- Mood tagging and optional tag cleanup share one connection/model/Thinking/request configuration.
+  Configure it through Music tagging; preserve independent enablement, conformance and quality gates.
+  Local alias cleanup remains authoritative and never becomes a mandatory second model pass.
+- Tagging plans must enforce explicit track/request/reservation limits before provider I/O.
+  Reservation units are conservative input bytes plus output allowance, never billed tokens or money.
+  Separate result inference identity from operational certification; timeout/credential or unrelated
+  source changes must not automatically rebill unchanged evidence. Meaningful task/schema/adapter
+  semantics must change the inference contract. New inference still requires current certification.
+- OpenAI Batch uses the same strict task and review contracts. Persist state before upload/submit;
+  never automatically repeat an uncertain submission. Batch collection alone is restartable and may
+  collect already-paid responses without fresh certification, after checking current inference,
+  vocabulary, context and profile shape. Keep remote-file IDs durable until deletion succeeds.
+  Pending batches block role/connection/credential reset and rotation, including while no job runs.
+  Explicitly disclose provider files, retention, cancellation costs and unknown-submission recovery.
 - Optional mood tagging may run only through `assistant.model-music-tagging`. Require the
   exact current `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks
   per provider request, and keep jobs non-restartable. Resolve whole-library, folder
   (recursive/direct), or explicit-track scope locally. Provider input is limited to indexed
-  artist, album, origin, and genre metadata, duration, BPM, numeric track IDs, the full revisioned
+  artist, album, origin, and genre metadata, duration, BPM, batch-local numeric slots, the full revisioned
   operator vocabulary's IDs/names/groups/definitions/
   exact aliases and bounded semantic context cues, and an optional bounded projection of current
   `local-context/v2` evidence:

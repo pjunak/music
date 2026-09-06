@@ -14,7 +14,7 @@ use super::{
     TagVocabularySnapshot,
 };
 
-pub const MODEL_TAGGER_INPUT_CONTRACT: &str = "assistant-music-tagger-input/v19";
+pub const MODEL_TAGGER_INPUT_CONTRACT: &str = "assistant-music-tagger-input/v20";
 pub const MODEL_TAGGER_OUTPUT_CONTRACT: &str = "assistant-music-tagger-output/v3";
 pub const MODEL_TAGGING_EVALUATION_CONTRACT: &str = "assistant-music-tagger-evaluation/v8";
 pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v21";
@@ -23,6 +23,42 @@ pub const MAX_MODEL_TAGS_PER_TRACK: usize = 8;
 pub const MAX_MODEL_EVIDENCE_ITEMS: usize = 4;
 pub const MAX_MODEL_EVIDENCE_LENGTH: usize = 512;
 pub const MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT: u8 = 2;
+
+/// Result identity follows the actual task contract and inference settings.
+/// Operational timeout, credentials and certification/source inventory are
+/// deliberately separate; changing them must not rebill an unchanged library.
+#[must_use]
+pub fn model_tag_inference_fingerprint(
+    role: &super::ModelRoleRecord,
+    connection: &super::ProviderConnectionRecord,
+) -> String {
+    let prototype = build_structured_request_with_extra_rule(
+        &TAGGING_TASK,
+        json!({}),
+        tagger_output_schema(&[1], &[]),
+        tagging_example(&[1]),
+        8_000,
+        None,
+    );
+    let value = json!([
+        "mood-inference/v1",
+        MODEL_TAGGER_INPUT_CONTRACT,
+        MODEL_TAGGER_OUTPUT_CONTRACT,
+        prototype,
+        connection.adapter_id,
+        connection.base_url,
+        role.model_id,
+        role.max_output_tokens,
+        super::ThinkingMode::parse(&role.thinking_mode)
+    ]);
+    format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
+}
+
+fn tagging_example(slots: &[i64]) -> Value {
+    json!({"schema_version":MODEL_TAGGER_OUTPUT_CONTRACT,"tracks":slots.iter().map(|track_id| json!({
+        "track_id":track_id,"tag_ids":[],"confidence":"low", "evidence":["Supplied metadata is insufficient for a specific tag."]
+    })).collect::<Vec<_>>()})
+}
 
 #[must_use]
 pub fn model_tag_profile_is_current(
@@ -117,7 +153,7 @@ pub fn compact_context_projection(context: &CurrentTrackContext) -> Value {
     let sections = context
         .sections
         .iter()
-        .take(8)
+        .take(10)
         .map(|section| {
             Value::Object(
                 section_fields
@@ -146,6 +182,7 @@ pub fn compact_context_projection(context: &CurrentTrackContext) -> Value {
         "analyzer_id": context.analyzer_id,
         "completeness": context.completeness,
         "confidence": context.confidence,
+        "measurement_reliability": summary_object("measurement_reliability"),
         "trajectories": summary_object("trajectories"),
         "tempo": summary_object("tempo"),
         "structure": summary_object("structure"),
@@ -196,6 +233,7 @@ const TAGGING_RULES: &[&str] = &[
     "Treat album, origin, and genre as equally available semantic evidence. Origin may name a source, location, culture, or scene, so interpret its complete phrase instead of discounting the field. An artist name is weak evidence by itself, but may contribute when album, origin, genre, or context_evidence independently corroborates the same interpretation.",
     "One fact or phrase may positively support several non-exclusive tags. Selecting its most literal tag does not satisfy related entries: audit every vocabulary entry whose name, alias, definition, or context cue matches that fact, and include each entry whose own core definition is supported by the complete evidence.",
     "Interpret metadata phrases in context. An isolated tag word inside an artist, label, company, metaphor, or competition name is not sufficient when the remaining metadata contradicts that setting or scene. A literal scene action remains strong evidence, but a named contest such as a battle of performers is not combat.",
+    "Read context_evidence conservatively: its overall confidence describes analysis coverage, not certainty about mood. Respect each measurement_reliability value; missing reliability is unknown. Intensity includes recording level, density measures spectral spread, and rhythmic_drive measures onset activity. These are acoustic proxies, not calibrated emotions, instrument counts, or proof of a regular beat. Tempo may be approximate or half/double time; voice_probability is a classifier score, not a calibrated probability. Acoustic context alone cannot establish an era, location, scene, or narrative.",
     "context_evidence is a factual, locally measured summary, never audio and never local tag suggestions. Use trajectories and section changes when deciding mood or activity tags. A quiet opening does not make a track calm or suitable for rest when later sections become intense, urgent, or volatile.",
     "Context measurements can support mood, pace, and development, but cannot by themselves prove a setting, scene, period, culture, genre, or instrument. If context_evidence is absent, use metadata conservatively and do not infer missing measurements.",
     "Evidence strings should cite supplied metadata fields or context section IDs such as s2. Do not claim that an unconfigured voice classifier found vocals.",
@@ -263,6 +301,58 @@ pub struct PlannedTaggerBatch {
     pub task: ModelTaggerBatch,
 }
 
+/// Operator limits apply to a whole live run, including corrective requests.
+/// Reservation units deliberately count UTF-8 bytes rather than assuming four
+/// characters per token. They are conservative planning units, not a bill.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ModelTaggingLimits {
+    pub max_tracks: usize,
+    pub max_requests: usize,
+    pub max_token_reservation: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelTaggingExecutionMode {
+    #[default]
+    Standard,
+    Batch,
+}
+
+impl Default for ModelTaggingLimits {
+    fn default() -> Self {
+        Self {
+            max_tracks: 100,
+            max_requests: 10,
+            max_token_reservation: 1_000_000,
+        }
+    }
+}
+
+impl ModelTaggingLimits {
+    pub fn validate(self) -> Result<(), ModelTaskError> {
+        if !(1..=10_000).contains(&self.max_tracks)
+            || !(1..=1_000).contains(&self.max_requests)
+            || !(1_000..=100_000_000).contains(&self.max_token_reservation)
+        {
+            return Err(ModelTaskError::new("invalid_tagging_limits"));
+        }
+        Ok(())
+    }
+}
+
+#[must_use]
+pub fn model_request_reservation(request: &StructuredModelRequest, output_limit: u32) -> u64 {
+    // The schema is also sent natively by structured-output adapters.
+    let schema_bytes = request
+        .output_schema
+        .as_ref()
+        .map_or(0, |schema| schema.to_string().len());
+    (request.system_prompt.len() + request.user_prompt.len() + schema_bytes + 1024) as u64
+        + u64::from(request.max_output_tokens.min(output_limit))
+}
+
 /// Plan every request before execution. The transport adapter supplies exact
 /// envelope validation; the application owns track membership and batching.
 /// Both ordinary and corrective requests must fit without dropping vocabulary.
@@ -314,7 +404,7 @@ impl ModelTaggerBatch {
         let mut track_ids = Vec::with_capacity(tracks.len());
         let mut seen = BTreeSet::new();
         for track in tracks {
-            let track = normalize_track_input(track)?;
+            let mut track = normalize_track_input(track)?;
             let track_id = track
                 .get("track_id")
                 .and_then(Value::as_i64)
@@ -324,6 +414,7 @@ impl ModelTaggerBatch {
                 return Err(ModelTaskError::new("model_input_invalid"));
             }
             track_ids.push(track_id);
+            track.insert("track_id".to_owned(), json!(track_ids.len()));
             normalized.push(Value::Object(track));
         }
         Ok(Self {
@@ -335,6 +426,7 @@ impl ModelTaggerBatch {
 
     #[must_use]
     pub fn request(&self, correction: bool) -> StructuredModelRequest {
+        let slots = (1..=self.track_ids.len() as i64).collect::<Vec<_>>();
         let vocabulary_groups = self
             .vocabulary
             .document
@@ -367,16 +459,8 @@ impl ModelTaggerBatch {
                 "tracks": self.tracks,
                 "vocabulary_groups": vocabulary_groups,
             }),
-            tagger_output_schema(&self.track_ids, &tag_ids),
-            json!({
-                "schema_version": MODEL_TAGGER_OUTPUT_CONTRACT,
-                "tracks": self.track_ids.iter().map(|track_id| json!({
-                    "track_id": track_id,
-                    "tag_ids": [],
-                    "confidence": "low",
-                    "evidence": ["Supplied metadata is insufficient for a specific tag."]
-                })).collect::<Vec<_>>(),
-            }),
+            tagger_output_schema(&slots, &tag_ids),
+            tagging_example(&slots),
             8_000,
             correction.then_some(CORRECTION_RULE),
         )
@@ -418,7 +502,7 @@ impl ModelTaggerBatch {
             .map(|track| track.track_id)
             .collect::<BTreeSet<_>>();
         if returned_ids.len() != output.tracks.len()
-            || returned_ids != self.track_ids.iter().copied().collect::<BTreeSet<_>>()
+            || returned_ids != (1..=self.track_ids.len() as i64).collect::<BTreeSet<_>>()
         {
             return Err(ModelTaskError::new("model_output_track_set_mismatch"));
         }
@@ -451,9 +535,9 @@ impl ModelTaggerBatch {
                 .map(|name| (*name).to_owned())
                 .collect();
             resolved.insert(
-                track.track_id,
+                self.track_ids[track.track_id as usize - 1],
                 ModelTagTrackOutput {
-                    track_id: track.track_id,
+                    track_id: self.track_ids[track.track_id as usize - 1],
                     tags,
                     confidence: track.confidence,
                     evidence: track.evidence,
@@ -963,6 +1047,40 @@ mod tests {
     use music_domain::{IndexedTrack, LibraryPath, TrackId, TrackMetadata};
     use serde_json::json;
 
+    #[test]
+    fn batch_slots_are_stable_and_resolve_to_original_ids() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let vocabulary = crate::assistant::default_vocabulary_snapshot()?;
+        let first = ModelTaggerBatch::new(
+            vec![
+                json!({"track_id":101,"artist":"Artist","album":"Album","origin":"","genre":"folk","length_s":120.0}),
+                json!({"track_id":9001,"artist":"Artist","album":"Album","origin":"","genre":"ambient","length_s":120.0}),
+            ],
+            vocabulary.clone(),
+        )?;
+        let second = ModelTaggerBatch::new(
+            vec![
+                json!({"track_id":44,"artist":"Artist","album":"Album","origin":"","genre":"folk","length_s":120.0}),
+                json!({"track_id":97,"artist":"Artist","album":"Album","origin":"","genre":"ambient","length_s":120.0}),
+            ],
+            vocabulary,
+        )?;
+        assert_eq!(first.request(false), second.request(false));
+        let output = json!({"schema_version":super::MODEL_TAGGER_OUTPUT_CONTRACT,"tracks":[
+            {"track_id":2,"tag_ids":[],"confidence":"low","evidence":["genre"]},
+            {"track_id":1,"tag_ids":[],"confidence":"low","evidence":["genre"]}
+        ]});
+        let resolved = first.finish(crate::assistant::structured_harness::tests::model_result(
+            output,
+        ))?;
+        assert_eq!(
+            resolved.keys().copied().collect::<Vec<_>>(),
+            vec![101, 9001]
+        );
+        assert_eq!(resolved[&9001].track_id, 9001);
+        Ok(())
+    }
+
     use super::{
         ModelTaggerBatch, compact_context_projection, model_tag_source_signature,
         model_tag_track_input, tag_quality_suite,
@@ -1022,6 +1140,7 @@ mod tests {
             default_vocabulary_snapshot()?,
         )?;
         let Err(error) = batch.finish(StructuredModelResult {
+            token_details: Default::default(),
             outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
             succeeded: true,
             error_code: None,
@@ -1079,6 +1198,7 @@ mod tests {
         );
         let error = batch
             .finish(StructuredModelResult {
+                token_details: Default::default(),
                 outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
                 succeeded: true,
                 error_code: None,
@@ -1118,6 +1238,7 @@ mod tests {
             (vec![1, 3], false),
         ] {
             let result = batch.finish(StructuredModelResult {
+                token_details: Default::default(),
                 outcome: crate::assistant::ProviderAttemptOutcome::ResponseReceived,
                 succeeded: true, error_code: None,
                 payload: Some(json!({
@@ -1287,6 +1408,7 @@ mod tests {
                 "tempo": {"status": "unresolved"},
                 "structure": {"section_count": 1},
                 "voice": {"status": "not_classified"},
+                "measurement_reliability": {"tempo": "low", "brightness": "medium"},
                 "evidence": ["one", "two", "three", "four", "not shared"],
                 "private_summary_field": "not shared"
             })
@@ -1311,7 +1433,9 @@ mod tests {
             stages: serde_json::Map::new(),
         };
         let projection = compact_context_projection(&context);
-        assert_eq!(projection["sections"].as_array().map(Vec::len), Some(8));
+        assert_eq!(projection["sections"].as_array().map(Vec::len), Some(10));
+        assert_eq!(projection["sections"][9]["id"], "s10");
+        assert_eq!(projection["measurement_reliability"]["tempo"], "low");
         assert_eq!(projection["evidence"].as_array().map(Vec::len), Some(4));
         assert!(projection.get("timeline").is_none());
         assert!(projection.get("technical").is_none());

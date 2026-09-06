@@ -1,3 +1,5 @@
+import { ModelTaggingRunControls } from "./ModelTaggingRunControls";
+import { ModelBatchStatusPanel } from "./ModelBatchStatusPanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -10,6 +12,7 @@ import {
   type BackgroundJob,
   type LibraryTagPage,
   MODEL_TAGGING_DISCLOSURE_VERSION,
+  DEFAULT_MODEL_TAGGING_LIMITS,
   type ModelTaggingAvailability,
   type ModelTaggingContextPolicy,
   type ModelTaggingScope,
@@ -56,6 +59,12 @@ function describeScope(scope: ModelTaggingScope): string {
 
 function unavailableMessage(reasonCode: string | null): string {
   switch (reasonCode) {
+    case "model_batch_pending":
+      return "Finish collecting or cancel the pending batch before starting another tagging run.";
+    case "batch_unsupported_adapter":
+      return "Batch processing requires the OpenAI Responses connection and a model supporting Batch.";
+    case "tagging_budget_too_small":
+      return "Reduce the track limit or raise the request and token reservation limits to cover this plan.";
     case "request_too_large":
       return "The vocabulary and track metadata exceed the provider request limit. Shorten vocabulary descriptions, aliases, or context cues before starting.";
     case "model_quality_not_passed":
@@ -88,6 +97,8 @@ export function MoodTaggingDialog({
   );
   const [recursive, setRecursive] = useState(true);
   const [force, setForce] = useState(false);
+  const [limits, setLimits] = useState(DEFAULT_MODEL_TAGGING_LIMITS);
+  const [executionMode, setExecutionMode] = useState<"standard" | "batch">("standard");
   const [contextPolicy, setContextPolicy] =
     useState<ModelTaggingContextPolicy>("include");
   const [plan, setPlan] = useState<ModelTaggingAvailability | null>(null);
@@ -125,7 +136,9 @@ export function MoodTaggingDialog({
       .list({ kind: MODEL_TAGGING_JOB_KIND, limit: 1 })
       .then((history) => {
         const latest = history[0];
-        if (disposed || !isModelTaggingJobActive(latest)) return;
+        if (disposed) return;
+        if (latest?.result?.schema_version === "assistant-model-batch-submitted/v1") { setJob(latest); return; }
+        if (!isModelTaggingJobActive(latest)) return;
         setReviewScope(modelTaggingScopeFromJob(latest) ?? { type: "all" });
         setJob(latest);
         setStep("running");
@@ -144,7 +157,7 @@ export function MoodTaggingDialog({
     setPlanLoading(true);
     setPlanError(null);
     void assistantApi
-      .planModelTagging(scope, contextPolicy, force)
+      .planModelTagging(scope, contextPolicy, force, limits, executionMode)
       .then((next) => {
         if (!disposed) setPlan(next);
       })
@@ -160,7 +173,7 @@ export function MoodTaggingDialog({
     return () => {
       disposed = true;
     };
-  }, [contextPolicy, force, scope, step]);
+  }, [contextPolicy, executionMode, force, limits, scope, step]);
 
   const loadReview = useCallback(
     async (nextOffset: number, targetScope: ModelTaggingScope = reviewScope) => {
@@ -219,7 +232,9 @@ export function MoodTaggingDialog({
         .then((next) => {
           if (disposed) return;
           setJob(next);
-          if (next.status === "succeeded") {
+          if (next.status === "succeeded" && next.result?.schema_version === "assistant-model-batch-submitted/v1") {
+            setStep("configure");
+          } else if (next.status === "succeeded") {
             void loadReview(
               0,
               modelTaggingScopeFromJob(next) ?? reviewScope,
@@ -254,7 +269,7 @@ export function MoodTaggingDialog({
 
   async function startTagging() {
     if (plan === null || !plan.available || plan.scope_tracks === 0) return;
-    const workTracks = force ? plan.planned_tracks : plan.tracks_needing_tags;
+    const workTracks = plan.run_tracks;
     const requests = plan.estimated_provider_requests;
     if (workTracks === 0) {
       setReviewScope(scope);
@@ -265,7 +280,7 @@ export function MoodTaggingDialog({
       title: "Create mood-library suggestions?",
       body:
         `${workTracks} track${workTracks === 1 ? "" : "s"} in ${scopeLabel} will use about ` +
-        `${requests} provider request${requests === 1 ? "" : "s"}. Artist, album, origin, and genre metadata plus bounded time-aware local context may be sent. Track titles, display titles, file and folder names, library paths, audio, waveforms, full-resolution timelines, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
+        `${executionMode === "batch" ? "OpenAI Batch uploads a metadata/context file; input expires after 7 days, output after up to 30 days. Completion can take 24 hours; completed work is charged even after cancellation. " : ""}${requests} provider request${requests === 1 ? "" : "s"}, with a hard limit of ${limits.max_requests} calls including corrections. ${plan.deferred_tracks} tracks are deferred. Token reservation: ${plan.token_reservation.toLocaleString()} of ${limits.max_token_reservation.toLocaleString()} units (conservative input bytes plus output allowance, not a bill). Artist, album, origin, and genre metadata plus bounded time-aware local context may be sent. Track titles, display titles, file and folder names, library paths, audio, waveforms, full-resolution timelines, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
       confirmLabel: workTracks === 0 ? "Check current suggestions" : "Create suggestions",
       tone: "primary",
     });
@@ -277,6 +292,8 @@ export function MoodTaggingDialog({
         MODEL_TAGGING_DISCLOSURE_VERSION,
         scope,
         contextPolicy,
+        limits,
+        executionMode,
       );
       setReviewScope(scope);
       setJob(started);
@@ -410,6 +427,9 @@ export function MoodTaggingDialog({
         </div>
       </section>
 
+      <ModelTaggingRunControls limits={limits} onLimits={setLimits} mode={executionMode} onMode={setExecutionMode} batchAvailable={plan?.batch_available ?? false} />
+      <ModelBatchStatusPanel id={plan?.pending_batch_id ?? (typeof job?.result?.batch_id === "string" ? job.result.batch_id : null)} />
+
       <section className="mood-tagging-plan" aria-live="polite">
         <div>
           <h3 className="section-label">Planned run</h3>
@@ -420,18 +440,20 @@ export function MoodTaggingDialog({
           ) : plan !== null ? (
             <div className="mood-tagging-stats">
               <span><strong>{plan.scope_tracks}</strong> tracks in scope</span>
-              <span><strong>{plan.planned_tracks}</strong> eligible for this run</span>
+              <span><strong>{plan.run_tracks}</strong> selected for this run</span>
               <span><strong>{plan.estimated_provider_requests}</strong> expected provider requests</span>
               <span>
                 <strong>
-                  {plan.estimated_provider_requests +
-                    Math.min(
+                  {Math.min(plan.limits.max_requests, plan.estimated_provider_requests +
+                    (executionMode === "batch" ? 0 : Math.min(
                       plan.estimated_provider_requests,
                       plan.disclosure.invalid_response_retry_limit,
-                    )}
+                    )))}
                 </strong>{" "}
                 maximum with contract recovery
               </span>
+              <span><strong>{plan.deferred_tracks}</strong> deferred by track limit</span>
+              <span><strong>{plan.token_reservation.toLocaleString()}</strong> reservation units</span>
               <span><strong>{plan.tracks_with_full_context}</strong> have full context</span>
             </div>
           ) : null}

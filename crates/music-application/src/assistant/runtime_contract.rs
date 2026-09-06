@@ -9,6 +9,11 @@ use sha2::{Digest, Sha256};
 pub const ASSISTANT_RUNTIME_CONTRACT_VERSION: &str = "assistant-runtime-contract/v2";
 
 const ASSISTANT_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
+    (
+        "assistant/model_jobs/batch.rs",
+        include_str!("model_jobs/batch.rs"),
+    ),
+    ("assistant/model_batch.rs", include_str!("model_batch.rs")),
     // Derivation and deserialization depend on locked library versions as well
     // as task source. Dependency changes conservatively expire every role.
     ("runtime/Cargo.lock", include_str!("../../../../Cargo.lock")),

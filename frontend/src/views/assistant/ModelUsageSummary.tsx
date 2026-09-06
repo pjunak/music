@@ -7,7 +7,7 @@ function formatCount(value: number): string {
 }
 
 interface Props {
-  job: BackgroundJob | null | undefined;
+  job: (Pick<BackgroundJob, "result"> & Partial<Pick<BackgroundJob, "status">>) | null | undefined;
 }
 
 export function ModelUsageSummary({ job }: Props) {
@@ -68,6 +68,7 @@ export function ModelUsageSummary({ job }: Props) {
           <strong>{formatCount(usage.output_tokens)}</strong> output tokens
         </span>
       </div>
+      {usage.token_details?.map((detail) => <p key={detail.label}>{detail.label}: {formatCount(detail.tokens)} tokens ({detail.reported} requests reporting). Included in the totals above.</p>)}
       {usage.provider_model_ids.length > 0 ? (
         <p>
           Reported model: {usage.provider_model_ids.join(", ")}

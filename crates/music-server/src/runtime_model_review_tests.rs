@@ -69,9 +69,9 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
     let fingerprint = runtime
         .providers
         .provider_service()
-        .current_role_runtime_fingerprint("music_tagger")
+        .current_role_review_identity("music_tagger")
         .await?
-        .ok_or("role missing")?;
+        .ok_or("role missing")?.inference_fingerprint;
     let vocabulary = runtime.assistant.vocabulary().await?;
     let track = runtime.assistant.tracks().await?.remove(0).track;
     let signature =

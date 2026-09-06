@@ -505,18 +505,30 @@ impl ContextAccumulator {
     }
 
     fn spectrum(&mut self) -> Spectrum {
-        self.fft_buffer.fill(Complex::new(0.0, 0.0));
-        let start = self.frame.len().saturating_sub(FFT_SIZE) / 2;
-        let selected = &self.frame[start..self.frame.len().min(start.saturating_add(FFT_SIZE))];
-        for (index, sample) in selected.iter().enumerate() {
-            self.fft_buffer[index].re = *sample * self.hann[index];
+        // Cover the complete half-second frame. A single centered FFT missed
+        // most transients and made brightness depend on their position in the frame.
+        let last_start = self.frame.len().saturating_sub(FFT_SIZE);
+        let mut starts = (0..=last_start).step_by(FFT_SIZE / 2).collect::<Vec<_>>();
+        if starts.last().copied() != Some(last_start) {
+            starts.push(last_start);
         }
-        self.fft
-            .process_with_scratch(&mut self.fft_buffer, &mut self.fft_scratch);
-        let powers = self.fft_buffer[..FFT_SIZE / 2]
-            .iter()
-            .map(|value| value.norm_sqr().max(1e-18))
-            .collect::<Vec<_>>();
+        let mut powers = vec![0.0; FFT_SIZE / 2];
+        for start in &starts {
+            self.fft_buffer.fill(Complex::new(0.0, 0.0));
+            let selected =
+                &self.frame[*start..self.frame.len().min(start.saturating_add(FFT_SIZE))];
+            for (index, sample) in selected.iter().enumerate() {
+                self.fft_buffer[index].re = *sample * self.hann[index];
+            }
+            self.fft
+                .process_with_scratch(&mut self.fft_buffer, &mut self.fft_scratch);
+            for (power, value) in powers.iter_mut().zip(&self.fft_buffer) {
+                *power += value.norm_sqr();
+            }
+        }
+        for power in &mut powers {
+            *power = (*power / starts.len() as f64).max(1e-18);
+        }
         let total = powers.iter().sum::<f64>();
         if total <= 1e-12 {
             return Spectrum::silent();
@@ -1799,9 +1811,9 @@ mod tests {
     }
 
     #[test]
-    fn rustfft_matches_the_v2_two_tone_calibration() -> Result<(), Box<dyn std::error::Error>> {
+    fn single_fft_keeps_the_two_tone_calibration() -> Result<(), Box<dyn std::error::Error>> {
         let mut accumulator = ContextAccumulator::new(16_000)?;
-        for index in 0..8_000_u32 {
+        for index in 2_976..5_024_u32 {
             let sample = 0.55 * (TAU * 440.0 * f64::from(index) / 16_000.0).sin()
                 + 0.2 * (TAU * 1_700.0 * f64::from(index) / 16_000.0).sin();
             accumulator.frame.push(sample);
@@ -1817,6 +1829,38 @@ mod tests {
         assert!((spectrum.peak_concentration - 0.999_825_279_846_876_6).abs() < 1e-12);
         assert!((spectrum.spectral_entropy - 0.113_592_960_950_734_1).abs() < 1e-12);
         assert_eq!(spectrum.band_coverage, 2.0 / 24.0);
+        Ok(())
+    }
+
+    #[test]
+    fn spectral_coverage_keeps_bright_bursts_across_the_whole_frame()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut centroids = Vec::new();
+        for begin in [0.01, 0.11, 0.21, 0.31, 0.41] {
+            let mut accumulator = ContextAccumulator::new(16_000)?;
+            accumulator.frame = (0..8_000)
+                .map(|index| {
+                    let time = f64::from(index) / 16_000.0;
+                    0.05 * (TAU * 200.0 * time).sin()
+                        + if time >= begin && time < begin + 0.08 {
+                            0.4 * (TAU * 4_000.0 * time).sin()
+                        } else {
+                            0.0
+                        }
+                })
+                .collect();
+            let spectrum = accumulator.spectrum();
+            assert!(
+                spectrum.centroid_hz > 2_500.0,
+                "burst at {begin}: {}",
+                spectrum.centroid_hz
+            );
+            assert!(spectrum.high_ratio > 0.75);
+            centroids.push(spectrum.centroid_hz);
+        }
+        let minimum = centroids.iter().copied().fold(f64::INFINITY, f64::min);
+        let maximum = centroids.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!(maximum - minimum < 500.0, "{centroids:?}");
         Ok(())
     }
 
@@ -1878,7 +1922,7 @@ mod tests {
     }
 
     #[test]
-    fn full_rust_document_matches_the_python_v2_development_probe()
+    fn full_rust_document_keeps_the_developing_track_calibration()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("developing.wav");
@@ -1896,15 +1940,15 @@ mod tests {
         assert_eq!(document.summary["confidence"], "medium");
         assert_eq!(
             document.summary["trajectories"]["intensity"]["typical"],
-            0.542_36
+            0.550_38
         );
         assert_eq!(
             document.summary["trajectories"]["intensity"]["end"],
-            0.516_2
+            0.526_04
         );
         assert_eq!(
             document.summary["trajectories"]["intensity"]["slope"],
-            0.432_03
+            0.445_91
         );
         assert_eq!(
             document.summary["trajectories"]["rhythmic_drive"]["typical"],
@@ -1916,10 +1960,10 @@ mod tests {
             0.616_19
         );
         assert_eq!(document.sections.len(), 1);
-        assert_eq!(document.sections[0]["intensity"], 0.542_36);
+        assert_eq!(document.sections[0]["intensity"], 0.550_38);
         assert_eq!(document.timeline.len(), 6);
-        assert_eq!(document.timeline[3]["brightness"], 0.160_12);
-        assert_eq!(document.timeline[3]["intensity"], 0.563_09);
+        assert_eq!(document.timeline[3]["brightness"], 0.220_96);
+        assert_eq!(document.timeline[3]["intensity"], 0.572_93);
         assert_eq!(document.stages["voice"]["status"], "not_configured");
         assert_eq!(document.completeness, "full");
         Ok(())

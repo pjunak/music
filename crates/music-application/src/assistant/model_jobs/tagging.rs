@@ -223,13 +223,14 @@ impl ModelFeatureJobHandler {
         context: &JobExecutionContext,
         parameters: ModelTaggingJobParameters,
     ) -> Result<Value, JobHandlerError> {
+        parameters.limits.validate().map_err(model_task_failure)?;
         validate_feature_header(
             &parameters.role_id,
             "music_tagger",
             &parameters.quality_evaluation_id,
             TAGGING_QUALITY_EVALUATION_ID,
             &parameters.disclosure_version,
-            "assistant-model-music-tagging-disclosure/v11",
+            "assistant-model-music-tagging-disclosure/v12",
             parameters.consent,
             &parameters.role_fingerprint,
         )?;
@@ -241,7 +242,9 @@ impl ModelFeatureJobHandler {
             )
             .await
             .map_err(|error| JobHandlerError::new(error.code()))?;
-        if role.fingerprint != parameters.role_fingerprint {
+        if role.fingerprint != parameters.role_fingerprint
+            || role.inference_fingerprint != parameters.inference_fingerprint
+        {
             return Err(JobHandlerError::new("role_changed"));
         }
         let vocabulary = self
@@ -288,7 +291,7 @@ impl ModelFeatureJobHandler {
             .map(|track| {
                 model_tag_source_signature(
                     &track.track,
-                    &parameters.role_fingerprint,
+                    &parameters.inference_fingerprint,
                     &parameters.vocabulary_fingerprint,
                     contexts.get(&track.track.id),
                 )
@@ -302,13 +305,14 @@ impl ModelFeatureJobHandler {
             .filter(|track| {
                 parameters.force
                     || !track.analyses.iter().any(|analysis| {
-                        analysis.analyzer_id == MODEL_TAG_ANALYZER_ID
-                            && signatures
-                                .get(&track.track.id)
-                                .is_some_and(|signature| analysis.source_signature == *signature)
+                        signatures.get(&track.track.id).is_some_and(|signature| {
+                            crate::assistant::model_tag_profile_is_current(analysis, signature)
+                        })
                     })
             })
             .collect::<Vec<_>>();
+        let deferred_tracks = work.len().saturating_sub(parameters.limits.max_tracks);
+        let work = &work[..work.len().min(parameters.limits.max_tracks)];
         let total = work.len();
         let inputs = work
             .iter()
@@ -319,6 +323,33 @@ impl ModelFeatureJobHandler {
                 self.transport.validate_request(&role.execution, request)
             })
             .map_err(model_task_failure)?;
+        if parameters.execution_mode == crate::assistant::ModelTaggingExecutionMode::Batch
+            && !work.is_empty()
+        {
+            let templates = work.iter().map(|track| {
+                let (energy, brightness, tension) = local_context_axes(contexts.get(&track.track.id));
+                AnalysisWrite {
+                    track_id: track.track.id, source_signature: signatures[&track.track.id].clone(),
+                    energy, brightness, tension, moods: Vec::new(), evidence: Vec::new(), confidence: Confidence::Low,
+                    metrics: json!({"contract":"assistant-music-tagger-output/v3", "input_contract":MODEL_TAGGER_INPUT_CONTRACT,
+                        "context_status":contexts.get(&track.track.id).map_or("missing", |context| context.completeness.as_str()),
+                        "role_fingerprint":parameters.role_fingerprint,"vocabulary_fingerprint":parameters.vocabulary_fingerprint}).as_object().cloned().unwrap_or_default(),
+                }
+            }).collect();
+            return self
+                .submit_tagging_batch(context, &parameters, &role, &inputs, &batches, templates)
+                .await;
+        }
+        if let Some(services) = &self.batch
+            && services
+                .repository
+                .pending_model_batch()
+                .await
+                .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?
+                .is_some()
+        {
+            return Err(JobHandlerError::new("model_batch_pending"));
+        }
         update_progress(
             context,
             0,
@@ -346,10 +377,15 @@ impl ModelFeatureJobHandler {
                 .iter()
                 .map(|(id, signature)| (id.get(), signature))
                 .collect::<Vec<_>>(),
-            tagging_attempt_budget(batches.len()),
+            tagging_attempt_budget(batches.len()).min(parameters.limits.max_requests),
             ModelReviewDestination::TrackTagReview,
         )
         .await?;
+        provider_usage.limit_token_reservation(parameters.limits.max_token_reservation);
+        context
+            .checkpoint(provider_usage.checkpoint())
+            .await
+            .map_err(JobHandlerError::from_execution)?;
         let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
         for planned in batches {
             let start = planned.input_range.start;
@@ -453,7 +489,7 @@ impl ModelFeatureJobHandler {
                 .store_model_analysis(
                     MODEL_TAG_ANALYZER_ID,
                     context.job_id(),
-                    &parameters.role_fingerprint,
+                    &parameters.inference_fingerprint,
                     &parameters.vocabulary_fingerprint,
                     self.local_analysis
                         .voice_analyzer()
@@ -486,6 +522,7 @@ impl ModelFeatureJobHandler {
             "scope_tracks": scoped.len(),
             "context_policy": parameters.context_policy,
             "skipped_context_tracks": skipped_context_tracks,
+            "deferred_tracks": deferred_tracks,
             "updated_profiles": updated,
             "unchanged_profiles": planned.len().saturating_sub(work.len()),
             "skipped_changed_tracks": skipped_changed,

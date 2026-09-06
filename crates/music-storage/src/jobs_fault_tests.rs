@@ -171,6 +171,9 @@ impl JobRepository for FaultInjectingRepository {
 #[path = "jobs_fault_tests/provider_attempts.rs"]
 mod provider_attempts;
 
+#[path = "jobs_fault_tests/model_batches.rs"]
+mod model_batches;
+
 #[derive(Debug)]
 struct ImmediateHandler {
     definition: JobDefinition,
