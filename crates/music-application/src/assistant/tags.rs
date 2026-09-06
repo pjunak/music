@@ -71,6 +71,8 @@ impl Confidence {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredAnalysis {
+    pub job_id: String,
+    pub updated_at_unix_seconds: Option<i64>,
     pub analyzer_id: String,
     pub source_signature: String,
     pub energy: f64,
@@ -129,6 +131,54 @@ pub struct AssistantTrackView {
     pub analysis_confidence: Option<Confidence>,
     pub analysis_suggestions: Vec<AnalysisSuggestion>,
     pub audio_signal: Option<AudioSignalProfile>,
+    pub model_analysis: ModelAnalysisStatus,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ModelTagFilter {
+    Processed,
+    Current,
+    Stale,
+    Missing,
+}
+
+impl ModelTagFilter {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "processed" => Some(Self::Processed),
+            "current" => Some(Self::Current),
+            "stale" => Some(Self::Stale),
+            "missing" => Some(Self::Missing),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize)]
+pub struct ModelAnalysisStatus {
+    pub status: ModelAnalysisState,
+    pub job_id: Option<String>,
+    pub updated_at_unix_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAnalysisState {
+    #[default]
+    Missing,
+    Current,
+    Stale,
+}
+
+impl ModelAnalysisStatus {
+    fn matches(&self, filter: ModelTagFilter) -> bool {
+        match filter {
+            ModelTagFilter::Processed => self.status != ModelAnalysisState::Missing,
+            ModelTagFilter::Current => self.status == ModelAnalysisState::Current,
+            ModelTagFilter::Stale => self.status == ModelAnalysisState::Stale,
+            ModelTagFilter::Missing => self.status == ModelAnalysisState::Missing,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -238,6 +288,8 @@ pub struct RenameTagOutcome {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ManualTagQuery {
+    pub model_status: Option<ModelTagFilter>,
+    pub model_job_id: Option<String>,
     pub search: String,
     pub tag: Option<String>,
     pub review: Option<AnalysisReviewDecision>,
@@ -250,6 +302,8 @@ pub struct ManualTagQuery {
 impl Default for ManualTagQuery {
     fn default() -> Self {
         Self {
+            model_status: None,
+            model_job_id: None,
             search: String::new(),
             tag: None,
             review: None,
@@ -503,6 +557,17 @@ impl AssistantService {
             ));
         }
         query.search = query.search.trim().to_owned();
+        if query.model_job_id.as_ref().is_some_and(|id| {
+            id.is_empty()
+                || id.len() > 128
+                || !id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        }) {
+            return Err(AssistantServiceError::Validation(
+                "model_job_id is invalid".to_owned(),
+            ));
+        }
         if query.search.chars().count() > 128 {
             return Err(AssistantServiceError::Validation(
                 "search cannot exceed 128 characters".to_owned(),
@@ -558,6 +623,13 @@ impl AssistantService {
                     .as_ref()
                     .is_none_or(|tag| view.manual_tags.contains(tag))
                     && (query.search.is_empty() || view_matches_search(view, &query.search))
+                    && query
+                        .model_status
+                        .is_none_or(|filter| view.model_analysis.matches(filter))
+                    && query
+                        .model_job_id
+                        .as_ref()
+                        .is_none_or(|id| view.model_analysis.job_id.as_ref() == Some(id))
             })
             .collect::<Vec<_>>();
         // Review-state filters and pagination must not change the review denominator.
@@ -1019,6 +1091,33 @@ fn view_for_track_with_model(
     analyzer_ids: Option<&[String]>,
     model_signature: Option<&str>,
 ) -> AssistantTrackView {
+    // Processing provenance survives empty or rejected tags and expired evidence.
+    // Currentness still uses the same strict guard as review acceptance.
+    let model = track
+        .analyses
+        .iter()
+        .filter(|analysis| analysis.analyzer_id.starts_with("model-context-tagger/"))
+        .max_by_key(|analysis| {
+            (
+                model_signature.is_some_and(|expected| {
+                    super::model_tag_profile_is_current(analysis, expected)
+                }),
+                analysis.updated_at_unix_seconds,
+            )
+        });
+    let model_analysis = model.map_or_else(ModelAnalysisStatus::default, |analysis| {
+        ModelAnalysisStatus {
+            status: if model_signature
+                .is_some_and(|expected| super::model_tag_profile_is_current(analysis, expected))
+            {
+                ModelAnalysisState::Current
+            } else {
+                ModelAnalysisState::Stale
+            },
+            job_id: (!analysis.job_id.is_empty()).then(|| analysis.job_id.clone()),
+            updated_at_unix_seconds: analysis.updated_at_unix_seconds,
+        }
+    });
     let current = current_metadata_analysis(track);
     let mut suggestions = Vec::new();
     for analysis in &track.analyses {
@@ -1095,6 +1194,7 @@ fn view_for_track_with_model(
         analysis_confidence: current.map(|(_, confidence)| confidence),
         analysis_suggestions: suggestions,
         audio_signal: current_audio_analysis(track),
+        model_analysis,
     }
 }
 
@@ -1179,6 +1279,8 @@ mod tests {
         let track = track()?;
         let local_signature = metadata_source_signature(&track)?;
         let profile = StoredAnalysis {
+            job_id: String::new(),
+            updated_at_unix_seconds: None,
             analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
             source_signature: local_signature.clone(),
             energy: 0.2,
@@ -1190,6 +1292,8 @@ mod tests {
             confidence: "high".to_owned(),
         };
         let catalog = StoredAnalysis {
+            job_id: String::new(),
+            updated_at_unix_seconds: None,
             analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
             source_signature: catalog_tag_source_signature(&track, 1)?,
             metrics: serde_json::json!({"evidence_revision": 1})
@@ -1230,11 +1334,75 @@ mod tests {
     }
 
     #[test]
+    fn model_processing_status_survives_empty_rejected_and_stale_results()
+    -> Result<(), Box<dyn Error>> {
+        let signature = "fixture-signature";
+        let mut evidence = AssistantTrackEvidence {
+            track: track()?,
+            manual_tags: vec!["authored".to_owned()],
+            reviews: Vec::new(),
+            analyses: vec![StoredAnalysis {
+                job_id: "run-30".to_owned(),
+                updated_at_unix_seconds: Some(123),
+                analyzer_id: MODEL_TAG_ANALYZER_ID.to_owned(),
+                source_signature: signature.to_owned(),
+                energy: 0.5,
+                brightness: 0.5,
+                tension: 0.5,
+                moods: Vec::new(),
+                evidence: vec!["Insufficient evidence".to_owned()],
+                confidence: "low".to_owned(),
+                metrics: serde_json::json!({"contract": "assistant-music-tagger-output/v3"})
+                    .as_object()
+                    .cloned()
+                    .ok_or("metrics")?,
+            }],
+        };
+        let view = view_for_track_with_model(&evidence, None, Some(signature));
+        assert_eq!(view.model_analysis.status, ModelAnalysisState::Current);
+        assert_eq!(view.model_analysis.job_id.as_deref(), Some("run-30"));
+        assert_eq!(view.model_analysis.updated_at_unix_seconds, Some(123));
+        assert!(view.analysis_suggestions.is_empty());
+        assert!(view.model_analysis.matches(ModelTagFilter::Processed));
+        evidence.analyses[0].moods = vec!["calm".to_owned()];
+        evidence.reviews.push(StoredAnalysisReview {
+            analyzer_id: MODEL_TAG_ANALYZER_ID.to_owned(),
+            source_signature: signature.to_owned(),
+            tag: "calm".to_owned(),
+            decision: AnalysisReviewDecision::Rejected,
+        });
+        let view = view_for_track_with_model(&evidence, None, Some(signature));
+        assert!(view.analysis_tags.is_empty());
+        assert_eq!(view.model_analysis.status, ModelAnalysisState::Current);
+        for expected in [None, Some("changed")] {
+            let view = view_for_track_with_model(&evidence, None, expected);
+            assert_eq!(view.model_analysis.status, ModelAnalysisState::Stale);
+            assert!(view.model_analysis.matches(ModelTagFilter::Processed));
+            assert!(view.analysis_suggestions.is_empty());
+            assert_eq!(view.manual_tags, vec!["authored"]);
+        }
+        evidence.analyses[0].confidence = "invalid".to_owned();
+        assert_eq!(
+            view_for_track_with_model(&evidence, None, Some(signature))
+                .model_analysis
+                .status,
+            ModelAnalysisState::Stale
+        );
+        evidence.analyses.clear();
+        let view = view_for_track_with_model(&evidence, None, Some(signature));
+        assert_eq!(view.model_analysis.status, ModelAnalysisState::Missing);
+        assert!(!view.model_analysis.matches(ModelTagFilter::Processed));
+        Ok(())
+    }
+
+    #[test]
     fn stale_profiles_are_not_exposed_as_current_suggestions() -> Result<(), Box<dyn Error>> {
         let evidence = AssistantTrackEvidence {
             track: track()?,
             manual_tags: Vec::new(),
             analyses: vec![StoredAnalysis {
+                job_id: String::new(),
+                updated_at_unix_seconds: None,
                 analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
                 source_signature: "stale".to_owned(),
                 energy: 0.2,

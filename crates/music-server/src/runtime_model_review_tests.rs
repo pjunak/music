@@ -71,7 +71,8 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
         .provider_service()
         .current_role_review_identity("music_tagger")
         .await?
-        .ok_or("role missing")?.inference_fingerprint;
+        .ok_or("role missing")?
+        .inference_fingerprint;
     let vocabulary = runtime.assistant.vocabulary().await?;
     let track = runtime.assistant.tracks().await?.remove(0).track;
     let signature =
@@ -152,6 +153,106 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
         .patch_track(track.id, &["authored".to_owned()], &[])
         .await?;
     assert_eq!(patched.analysis_suggestions.len(), 1);
+    for (query, total) in [
+        (
+            "model_status=processed&model_job_id=synthetic-model-job&suggestion_source=model",
+            1,
+        ),
+        ("model_status=current&tag=authored&search=Review", 1),
+        ("model_status=missing", 0),
+        ("model_status=stale", 0),
+        ("model_job_id=other-run", 0),
+        ("model_status=processed&folder=Other&recursive=true", 0),
+        ("suggestion_source=metadata&review=pending", 0),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/assistant/library-tags?{query}"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(body["total"], total, "{query}: {body}");
+        if total == 1 {
+            assert_eq!(body["items"][0]["model_analysis"]["status"], "current");
+            assert_eq!(
+                body["items"][0]["model_analysis"]["job_id"],
+                "synthetic-model-job"
+            );
+            assert!(body["items"][0]["model_analysis"]["updated_at_unix_seconds"].is_i64());
+        }
+    }
+    for query in [
+        "model_status=unknown",
+        "suggestion_source=unknown",
+        "model_job_id=bad%20id",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/assistant/library-tags?{query}"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{query}"
+        );
+    }
+    // An empty, valid model result is still processed; pending-review filtering is independent.
+    runtime
+        .storage
+        .store_model_analysis(
+            MODEL_TAG_ANALYZER_ID,
+            "synthetic-empty-job",
+            &fingerprint,
+            &vocabulary.fingerprint,
+            None,
+            &[ModelAnalysisWrite {
+                profile: AnalysisWrite {
+                    track_id: track.id,
+                    source_signature: signature.clone(),
+                    energy: 0.5,
+                    brightness: 0.5,
+                    tension: 0.5,
+                    moods: Vec::new(),
+                    evidence: vec!["Insufficient evidence".to_owned()],
+                    confidence: Confidence::Low,
+                    metrics: json!({"contract":"assistant-music-tagger-output/v3"})
+                        .as_object()
+                        .cloned()
+                        .ok_or("metrics")?,
+                },
+            }],
+        )
+        .await
+        .map_err(|_| "empty profile fixture")?;
+    for (query, total) in [
+        ("model_status=processed", 1),
+        ("model_status=current&review=pending", 0),
+        ("model_status=processed&offset=1&limit=1", 1),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/api/assistant/library-tags?{query}"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await?)?;
+        assert_eq!(body["total"], total, "{query}: {body}");
+        if query.contains("offset") {
+            assert_eq!(body["items"], json!([]));
+        }
+    }
     let mut changed = vocabulary.document;
     changed.groups[0].tags[0]
         .description
@@ -165,6 +266,10 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
         .tag_page(music_application::assistant::ManualTagQuery::default())
         .await?;
     assert!(page.items[0].analysis_suggestions.is_empty());
+    assert_eq!(
+        page.items[0].model_analysis.status,
+        music_application::assistant::ModelAnalysisState::Stale
+    );
     assert!(page.review_summary.sources.is_empty());
     assert_eq!(page.items[0].manual_tags, vec!["authored", "calm"]);
     for authorized in [false, true] {

@@ -879,6 +879,8 @@ fn evaluation_track_evidence(
     let mut analyses = Vec::new();
     if let Some(analysis) = &fixture.analysis {
         analyses.push(StoredAnalysis {
+            job_id: String::new(),
+            updated_at_unix_seconds: None,
             analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
             source_signature: metadata_source_signature(&track)
                 .map_err(|_| ModelTaskError::new("model_evaluation_suite_invalid"))?,
@@ -896,6 +898,8 @@ fn evaluation_track_evidence(
         metrics.insert("schema".to_owned(), json!(LOCAL_AUDIO_ANALYZER_ID));
         metrics.insert("tempo_bpm".to_owned(), json!(signal.tempo_bpm));
         analyses.push(StoredAnalysis {
+            job_id: String::new(),
+            updated_at_unix_seconds: None,
             analyzer_id: LOCAL_AUDIO_ANALYZER_ID.to_owned(),
             source_signature: audio_source_signature(&track)
                 .map_err(|_| ModelTaskError::new("model_evaluation_suite_invalid"))?,

@@ -3747,6 +3747,45 @@
             },
             "type": "array"
           },
+          "model_analysis": {
+            "additionalProperties": false,
+            "properties": {
+              "job_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "current",
+                  "stale",
+                  "missing"
+                ],
+                "type": "string"
+              },
+              "updated_at_unix_seconds": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "job_id",
+              "updated_at_unix_seconds"
+            ],
+            "type": "object"
+          },
           "path": {
             "type": "string"
           },
@@ -8312,6 +8351,42 @@
       "get": {
         "operationId": "list_library_tags_api_assistant_library_tags_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "model_status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "processed",
+                "current",
+                "stale",
+                "missing"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model_job_id",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suggestion_source",
+            "required": false,
+            "schema": {
+              "enum": [
+                "model",
+                "metadata",
+                "catalog"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "query",
             "name": "search",

@@ -718,7 +718,15 @@ export interface LibraryTagTrack {
   analysis_confidence: "high" | "medium" | "low" | null;
   analysis_suggestions: AnalysisTagSuggestion[];
   audio_signal: AudioSignalProfile | null;
+  model_analysis?: {
+    status: "current" | "stale" | "missing";
+    job_id: string | null;
+    updated_at_unix_seconds: number | null;
+  };
 }
+
+export type ModelTagFilter = "processed" | "current" | "stale" | "missing";
+export type TagSuggestionSource = "model" | "metadata" | "catalog";
 
 export interface TagReviewSummary {
   matching_tracks: number;
@@ -845,6 +853,9 @@ export const assistantApi = {
     }),
   listLibraryTags: (
     params: {
+      model_status?: ModelTagFilter;
+      model_job_id?: string;
+      suggestion_source?: TagSuggestionSource;
       search?: string;
       tag?: string;
       review?: AnalysisTagReviewDecision;
@@ -855,6 +866,9 @@ export const assistantApi = {
     } = {},
   ) => {
     const query = new URLSearchParams();
+    if (params.model_status) query.set("model_status", params.model_status);
+    if (params.model_job_id) query.set("model_job_id", params.model_job_id);
+    if (params.suggestion_source) query.set("suggestion_source", params.suggestion_source);
     if (params.search) query.set("search", params.search);
     if (params.tag) query.set("tag", params.tag);
     if (params.review) query.set("review", params.review);

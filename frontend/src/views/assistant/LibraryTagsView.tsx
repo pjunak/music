@@ -1,4 +1,6 @@
 import { lazy, Suspense } from "react";
+import { useSearchParams } from "react-router-dom";
+import type { ModelTagFilter, TagSuggestionSource } from "@/core/api";
 
 const LibraryTagEditor = lazy(async () => {
   const module = await import("./LibraryTagEditor");
@@ -6,6 +8,10 @@ const LibraryTagEditor = lazy(async () => {
 });
 
 export function LibraryTagsView() {
+  const [params] = useSearchParams();
+  const status = params.get("model_status") ?? "";
+  const source = params.get("suggestion_source") ?? "";
+  const jobId = params.get("model_job_id") ?? "";
   return (
     <Suspense
       fallback={
@@ -14,7 +20,12 @@ export function LibraryTagsView() {
         </div>
       }
     >
-      <LibraryTagEditor />
+      <LibraryTagEditor
+        key={params.toString()}
+        initialModelFilter={(["processed", "current", "stale", "missing"].includes(status) ? status : "") as "" | ModelTagFilter}
+        initialSourceFilter={(["model", "metadata", "catalog"].includes(source) ? source : "") as "" | TagSuggestionSource}
+        initialModelJobId={jobId}
+      />
     </Suspense>
   );
 }

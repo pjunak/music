@@ -14,8 +14,8 @@ describe("TagReviewSummary", () => {
     ] }} />);
     await userEvent.click(screen.getByText("Review summary · 7 of 20 suggestions reviewed"));
     const table = screen.getByRole("table", { name: "Current suggestion review counts" });
-    expect(within(table).getByRole("row", { name: "local-metadata/v1 5 2 1" })).toBeInTheDocument();
-    expect(within(table).getByRole("row", { name: "model-context-tagger/v6 8 4 0" })).toBeInTheDocument();
+    expect(within(table).getByRole("row", { name: "Metadata keyword guesses 5 2 1" })).toBeInTheDocument();
+    expect(within(table).getByRole("row", { name: "AI suggestions 8 4 0" })).toBeInTheDocument();
     expect(screen.getByText(/200 matching tracks, including all pages and review states/)).toBeInTheDocument();
     expect(screen.getByText(/not model accuracy or lifetime history/)).toBeInTheDocument();
   });

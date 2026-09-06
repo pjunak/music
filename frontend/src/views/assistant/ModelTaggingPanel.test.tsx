@@ -274,9 +274,10 @@ describe("ModelTaggingPanel", () => {
       await screen.findByText("Generated suggestions are ready for review"),
     ).toBeInTheDocument();
     expect(screen.getByText(/Updated 40 profiles/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Review mood tags" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "View saved results from this run" }).getAttribute("href")).toContain("model_job_id=");
+    expect(screen.getByRole("link", { name: "Review AI results" })).toHaveAttribute(
       "href",
-      "/assistant/moods/tags",
+      "/assistant/moods/tags?model_status=processed&suggestion_source=model",
     );
   });
 });

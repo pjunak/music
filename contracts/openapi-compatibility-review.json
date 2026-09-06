@@ -20,16 +20,16 @@
     "reason": "ADR-025 adds bounded-run limits, selected/deferred counts, conservative reservation units, Batch availability and pending Batch identity. Existing status fields remain; disclosure v12 describes slots, reliability and optional provider file processing."
   },
   "GET /api/assistant/library-tags#parameters": {
-    "sha256": "627083d7c8b115ca0a62a96472da8eb3e29185e9314437422750455f244b3db4",
-    "reason": "The supported tag review filters evolved with the local and model evidence views; existing optional-filter defaults remain supported."
+    "sha256": "f3a5f738cec551f529854906b9f3e89b9fd86a4ebafe1c79248f10d1aacb6e87",
+    "reason": "Adds optional model_status, model_job_id and suggestion_source filters for retained AI results. Existing search/tag/review/folder/pagination semantics and defaults remain supported; source narrows suggestions before review filtering. No playback or Baton contract change."
   },
   "GET /api/assistant/library-tags#responses": {
-    "sha256": "67847288b9202bf4957b298713f8a3fd955ad854254e4495349a03f7c3fe82f9",
-    "reason": "ADR-022 adds optional review_summary counts across matching tracks before review-state filtering and pagination. Existing page fields and authentication are unchanged; older browser responses may omit the summary. Output clients do not consume this administrative endpoint."
+    "sha256": "1ba402f59ac22339299e9e7cebeba239a7807f9ac182af15f51c5787970da16e",
+    "reason": "Retains ADR-022 optional review_summary and adds optional model_analysis to each track: current/stale/missing, saved job ID and timestamp. Processing is independent of tag count and decisions. Existing response fields and authentication are unchanged; older responses can omit provenance and the UI displays unavailable."
   },
   "POST /api/assistant/library-tags/query#responses": {
-    "sha256": "67847288b9202bf4957b298713f8a3fd955ad854254e4495349a03f7c3fe82f9",
-    "reason": "ADR-022 adds the same optional review_summary to the model-only review page; counts include all review states and pages within the requested scope. Existing page fields and authentication remain unchanged."
+    "sha256": "1ba402f59ac22339299e9e7cebeba239a7807f9ac182af15f51c5787970da16e",
+    "reason": "Adds the same optional saved model_analysis provenance to model-only review items while preserving ADR-022 review_summary, request defaults and authentication. Empty results are discoverable through the GET processing filter; this review endpoint retains its pending-review default."
   },
   "GET /api/library/cleanup/sources#operation": {
     "sha256": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
@@ -70,5 +70,9 @@
   "POST /api/assistant/library-tags/model-batches/{batch_id}/actions#operation": {
     "sha256": "cba94bd1c872217aa3f070e0e8ed92f0bc05d447d7331068ca8ed5a5d4b8b8bf",
     "reason": "ADR-025 adds authenticated explicit collect/cancel/recovery actions for already-recorded batches. Recovery checks run and input-file identity. Actions cannot start new paid inference; abandonment requires an explicit acknowledgement in the browser."
+  },
+  "PATCH /api/assistant/library-tags/{track_id}#responses": {
+    "sha256": "a438cc728678d730168174e39632d257a3c4a7b606125809f24cb6292336ec0d",
+    "reason": "Returns optional model_analysis provenance with the refreshed track after explicit manual-tag edits, matching the list response. Mutation deltas, review freshness, authored-tag authority and authentication remain unchanged. Native playback clients do not consume this administrative endpoint."
   }
 }

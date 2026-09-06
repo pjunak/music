@@ -42,7 +42,8 @@ pub(super) async fn review_in_transaction(
         }
         let row = sqlx::query(
             "SELECT analyzer_id, source_signature, moods_json, evidence_json, metrics_json, \
-             energy, brightness, tension, confidence FROM track_analyses \
+             energy, brightness, tension, confidence, job_id, \
+             CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds FROM track_analyses \
              WHERE track_id = ? AND analyzer_id = ?",
         )
         .bind(target.track_id.get())

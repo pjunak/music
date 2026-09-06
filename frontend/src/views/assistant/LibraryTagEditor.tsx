@@ -13,6 +13,8 @@ import {
   type LibraryTagPage,
   type LibraryTagTrack,
   type ManualTagCatalog,
+  type ModelTagFilter,
+  type TagSuggestionSource,
   assistantApi,
   libraryApi,
 } from "@/core/api";
@@ -22,6 +24,7 @@ import { AnalysisTagReview } from "./AnalysisTagReview";
 import { analysisTagSuggestionKey } from "./analysisTagSelection";
 import { AudioSignalEvidence } from "./AudioSignalEvidence";
 import { TagReviewSummary } from "./TagReviewSummary";
+import { modelStatusLabel, suggestionSource } from "./tagProvenance";
 
 const PAGE_SIZE = 50;
 const MAX_TAGS = 32;
@@ -52,9 +55,12 @@ function sameTags(left: readonly string[], right: readonly string[]): boolean {
 
 interface LibraryTagEditorProps {
   refreshKey?: number;
+  initialModelFilter?: "" | ModelTagFilter;
+  initialSourceFilter?: "" | TagSuggestionSource;
+  initialModelJobId?: string;
 }
 
-export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
+export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", initialSourceFilter = "", initialModelJobId = "" }: LibraryTagEditorProps) {
   const [catalog, setCatalog] = useState<ManualTagCatalog | null>(null);
   const [page, setPage] = useState<LibraryTagPage>({
     items: [],
@@ -65,6 +71,10 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [path, setPath] = useState("");
+  const [wholeLibrary, setWholeLibrary] = useState(true);
+  const [modelFilter, setModelFilter] = useState(initialModelFilter);
+  const [sourceFilter, setSourceFilter] = useState(initialSourceFilter);
+  const [modelJobId, setModelJobId] = useState(initialModelJobId);
   const [tagFilter, setTagFilter] = useState("");
   const [reviewFilter, setReviewFilter] = useState<
     "" | AnalysisTagReviewDecision
@@ -128,8 +138,10 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
         ...(search ? { search } : {}),
         ...(tagFilter ? { tag: tagFilter } : {}),
         ...(reviewFilter ? { review: reviewFilter } : {}),
-        folder: path,
-        recursive: false,
+        ...(modelFilter ? { model_status: modelFilter } : {}),
+        ...(sourceFilter ? { suggestion_source: sourceFilter } : {}),
+        ...(modelJobId ? { model_job_id: modelJobId } : {}),
+        ...(!wholeLibrary ? { folder: path, recursive: false } : {}),
         offset,
         limit: PAGE_SIZE,
       })
@@ -156,7 +168,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
     return () => {
       disposed = true;
     };
-  }, [offset, path, refreshKey, reloadKey, reviewFilter, search, tagFilter]);
+  }, [offset, path, wholeLibrary, modelFilter, sourceFilter, modelJobId, refreshKey, reloadKey, reviewFilter, search, tagFilter]);
 
   const selected = useMemo(
     () => page.items.find((track) => track.track_id === selectedId),
@@ -217,8 +229,9 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
   }
 
   async function selectFolder(nextPath: string) {
-    if (nextPath === path || !(await canLeaveDraft())) return;
+    if ((!wholeLibrary && nextPath === path) || !(await canLeaveDraft())) return;
     setPath(nextPath);
+    setWholeLibrary(false);
     setOffset(0);
     setSelectedId(null);
     setSelectedTrackIds(new Set());
@@ -523,7 +536,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
           );
         });
     }
-    if (page.review_summary || reviewFilter) setReloadKey((value) => value + 1);
+    if (page.review_summary || reviewFilter || sourceFilter) setReloadKey((value) => value + 1);
   }
 
   return (
@@ -540,28 +553,72 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
 
         <section
           className={`library-main assistant-context-tracks assistant-tag-tracks${selectedTrackIds.size > 0 ? " has-selection" : ""}`}
-          aria-label="Tracks and mood tags in selected folder"
+          aria-label={wholeLibrary ? "Tracks and mood tags in the whole library" : "Tracks and mood tags in selected folder"}
         >
           <div className="folder-header assistant-context-folder-header">
             <button type="button" className="btn-ghost" onClick={() => void selectFolder("")}>
               Music
             </button>
-            <span>{path || "Library root"}</span>
+            <span>{wholeLibrary ? "Whole library" : path || "Library root"}</span>
             <small>{page.total} track{page.total === 1 ? "" : "s"}</small>
           </div>
 
           <div className="assistant-tag-toolbar">
+            <label className="assistant-tag-scope">
+              <input type="checkbox" checked={wholeLibrary} disabled={dirty}
+                onChange={(event) => {
+                  setWholeLibrary(event.target.checked);
+                  setOffset(0);
+                  setSelectedTrackIds(new Set());
+                  setSelectedReviewItems(new Map());
+                }} />
+              Search and filter the whole library
+            </label>
+            {modelJobId ? <div className="assistant-tag-run-scope">
+              <strong>Saved results from this AI run</strong>
+              <span>Includes empty or outdated results. Later runs may have replaced some profiles.</span>
+              <button type="button" disabled={dirty} onClick={() => {
+                setModelJobId(""); setOffset(0); setSelectedTrackIds(new Set()); setSelectedReviewItems(new Map());
+              }}>Show all runs</button>
+            </div> : null}
             <form onSubmit={submitSearch} role="search">
               <input
                 value={searchDraft}
                 onChange={(event) => setSearchDraft(event.target.value)}
                 disabled={dirty}
                 aria-label="Search tracks to tag"
-                placeholder="Search this folder"
+                placeholder={wholeLibrary ? "Search the whole library" : "Search this folder"}
               />
               <button type="submit" disabled={dirty}>Search</button>
             </form>
             <div className="assistant-tag-filters">
+              <label>
+                <span>AI processing</span>
+                <select aria-label="Filter AI processing" value={modelFilter} disabled={dirty}
+                  onChange={(event) => {
+                    setModelFilter(event.target.value as "" | ModelTagFilter); setOffset(0);
+                    setSelectedTrackIds(new Set()); setSelectedReviewItems(new Map());
+                  }}>
+                  <option value="">All tracks</option>
+                  <option value="processed">AI processed (any saved result)</option>
+                  <option value="current">AI processed · current</option>
+                  <option value="stale">AI processed · outdated</option>
+                  <option value="missing">No saved AI result</option>
+                </select>
+              </label>
+              <label>
+                <span>Suggestion source</span>
+                <select aria-label="Filter suggestion source" value={sourceFilter} disabled={dirty}
+                  onChange={(event) => {
+                    setSourceFilter(event.target.value as "" | TagSuggestionSource); setOffset(0);
+                    setSelectedTrackIds(new Set()); setSelectedReviewItems(new Map());
+                  }}>
+                  <option value="">All sources</option>
+                  <option value="model">AI suggestions</option>
+                  <option value="metadata">Metadata keyword guesses</option>
+                  <option value="catalog">Catalog suggestions</option>
+                </select>
+              </label>
               <label>
                 <span>Your tag</span>
                 <select
@@ -601,6 +658,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
                 </select>
               </label>
             </div>
+            <p className="muted small">AI processing counts saved results, even with no suggested tags. Review filters apply to the selected suggestion source.</p>
           </div>
 
           {!loading && listError === null ? (
@@ -670,10 +728,11 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
                           />
                         </td>
                         <td>
-                          <strong>{displayName(track)}</strong>
+                          <strong title={displayName(track)}>{displayName(track)}</strong>
                           <span className="assistant-tag-track-artist">
                             {track.artist || track.album || "Unknown artist"}
                           </span>
+                          <span className="assistant-track-model-status">{modelStatusLabel(track.model_analysis)}</span>
                         </td>
                         <td>
                           <span className={`assistant-track-tag-preview${track.manual_tags.length === 0 ? " is-empty" : ""}`}>
@@ -681,7 +740,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
                           </span>
                           {pending > 0 ? (
                             <span className="assistant-track-review-count">
-                              {pending} to review
+                              {pending} to review · {track.analysis_suggestions.filter((suggestion) => suggestion.status === "pending" && suggestionSource(suggestion.analyzer_id) === "model").length} AI
                             </span>
                           ) : null}
                         </td>
@@ -696,7 +755,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
           <div className="assistant-tag-pagination">
             <button
               type="button"
-              disabled={offset === 0 || loading}
+              disabled={offset === 0 || loading || dirty}
               onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
             >
               Previous
@@ -707,7 +766,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
             </span>
             <button
               type="button"
-              disabled={offset + page.items.length >= page.total || loading}
+              disabled={offset + page.items.length >= page.total || loading || dirty}
               onClick={() => setOffset(offset + PAGE_SIZE)}
             >
               Next
@@ -901,6 +960,7 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
 
                 <AnalysisTagReview
                   trackId={selected.track_id}
+                  modelAnalysis={selected.model_analysis}
                   suggestions={selected.analysis_suggestions}
                   selectedSuggestionKeys={selectedReviewKeys}
                   disabled={dirty || saving}
@@ -910,7 +970,10 @@ export function LibraryTagEditor({ refreshKey = 0 }: LibraryTagEditorProps) {
                   }
                 />
 
-                <AudioSignalEvidence profile={selected.audio_signal} />
+                <details className="assistant-tag-audio-details">
+                  <summary>Local audio measurements</summary>
+                  <AudioSignalEvidence profile={selected.audio_signal} />
+                </details>
               </div>
             )}
           </div>

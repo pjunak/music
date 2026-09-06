@@ -1644,6 +1644,53 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.assistant-tag-track-table td strong,
+.assistant-tag-track-table td .assistant-track-model-status {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.assistant-track-model-status {
+  margin-top: var(--space-2);
+  color: var(--muted-strong);
+  font-size: var(--text-xs);
+}
+.assistant-tag-toolbar .assistant-tag-scope {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+.assistant-tag-toolbar > p {
+  margin: 0;
+}
+.assistant-tag-toolbar .assistant-tag-scope input {
+  flex: none;
+  width: auto;
+}
+.assistant-tag-run-scope,
+.assistant-model-review-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.assistant-review-source-group h3 {
+  margin: var(--space-2) 0;
+  font-size: var(--text-sm);
+}
+.assistant-review-source-group .assistant-analysis-review + .assistant-analysis-review {
+  margin-top: var(--space-2);
+}
+.assistant-tag-audio-details > summary {
+  cursor: pointer;
+  padding: var(--space-3);
+  color: var(--muted-strong);
+}
 .assistant-tag-track-artist {
   margin-top: 0.15rem;
   color: var(--muted);

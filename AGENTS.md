@@ -384,6 +384,12 @@ Runtime data lives outside the image.
   Review summaries count current suggestions by source after scope/search/manual-tag
   filters but before review-state filtering and pagination. Never infer decisions
   from manual tags or present these counts as model accuracy or lifetime history.
+  Mood Library model-processing status comes from saved profiles, independently of
+  tag count and review decisions. Preserve run ID/time for current and outdated
+  results; empty results still count as processed. Apply model/run/source filters
+  before review counts and pagination. Run views are retained profiles, not lifetime
+  history. Label local metadata keyword guesses honestly, never as AI detection or
+  embedded mood metadata.
   Tag cleanup detection is pure and conservative. Bind its preview to the current manual-tag
   catalog, require explicit per-suggestion selection, reject stale or invented selections, and apply
   all selected renames in one transaction without changing unselected tags.

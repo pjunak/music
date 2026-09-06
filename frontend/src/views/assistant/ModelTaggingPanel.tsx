@@ -23,6 +23,7 @@ import {
   modelTaggingResultFromJob,
 } from "./modelTaggingJobs";
 import { ModelUsageSummary } from "./ModelUsageSummary";
+import { modelRunReviewUrl } from "./tagProvenance";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Model tagging is unavailable.";
@@ -207,7 +208,7 @@ export function ModelTaggingPanel() {
           <span className={`assistant-job-status is-${headingStatusClass}`}>
             {headingStatusLabel}
           </span>
-          <Link to="/assistant/moods/tags">Review mood tags</Link>
+          <Link to={modelRunReviewUrl()}>Review AI results</Link>
         </div>
       </div>
 
@@ -362,6 +363,7 @@ export function ModelTaggingPanel() {
         </div>
       ) : null}
 
+      {job && !active ? <Link to={modelRunReviewUrl(job.id)}>View saved results from this run</Link> : null}
       <ModelUsageSummary job={job} />
 
       {active && job !== null ? (

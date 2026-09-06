@@ -293,6 +293,28 @@ Use a small, representative sample before running across the whole library.
 
 ### Bounded runs and asynchronous Batch
 
+To find tracks from a completed pilot, choose **View saved results from this run**
+in Optional model suggestions (or the equivalent Batch link). The Mood Library
+opens across the whole library with **AI processed** and **AI suggestions** selected.
+Keep **Review: All states** to include tracks whose AI returned no tags, or whose
+suggestions you already reviewed. **Needs review** narrows this to pending tags.
+Use **Show all runs** to remove the run restriction.
+
+Every track shows **AI processed · current**, **AI processed · outdated**, or
+**No saved AI result**. The inspector includes its saved date and run ID. Outdated
+means the retained result fails current evidence/configuration/profile checks;
+it is still identifiable but its old tags cannot be accepted. Failed attempts
+without a saved result remain in job diagnostics. Run views are not permanent
+history: a later run can replace a saved profile. Existing profiles need no new
+provider call just to appear in these filters.
+
+**Metadata keyword guesses** is the corrected label for the older local suggestions
+previously shown as "Mood metadata". Those guesses match words in the title, album
+and genre; they are neither embedded mood fields nor AI detection. Misleading names
+can produce wrong guesses. Select **Suggestion source: AI suggestions** to exclude
+them from review, or reject individual guesses. Existing accepted/manual tags are
+preserved. The model does not receive these guesses or the track title.
+
 The default plan selects at most **100 tracks**, allows **10 model requests** including
 contract recovery, and reserves at most **1,000,000 units**. Adjust these limits before
 confirming. Reservation units conservatively combine prompt/schema UTF-8 bytes and

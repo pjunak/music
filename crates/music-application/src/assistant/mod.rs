@@ -70,10 +70,11 @@ pub use tags::{
     AssistantFuture, AssistantRepository, AssistantService, AssistantServiceError,
     AssistantTrackEvidence, AssistantTrackView, AudioSignalProfile, BulkTagFailure, BulkTagOutcome,
     CATALOG_TAG_ANALYZER_ID, Confidence, LOCAL_AUDIO_ANALYZER_ID, LOCAL_METADATA_ANALYZER_ID,
-    MAX_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ManualTagQuery, ModelTagReviewGuard,
-    RenameTagOutcome, StoredAnalysis, StoredAnalysisReview, TagPage, TagReviewCounts,
-    TagReviewSummary, TagUsage, audio_source_signature, catalog_tag_source_signature,
-    metadata_source_signature, normalize_manual_tag, normalize_manual_tags,
+    MAX_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ManualTagQuery, ModelAnalysisState,
+    ModelAnalysisStatus, ModelTagFilter, ModelTagReviewGuard, RenameTagOutcome, StoredAnalysis,
+    StoredAnalysisReview, TagPage, TagReviewCounts, TagReviewSummary, TagUsage,
+    audio_source_signature, catalog_tag_source_signature, metadata_source_signature,
+    normalize_manual_tag, normalize_manual_tags,
 };
 pub use vocabulary::{
     CleanupApplyOutcome, CleanupMutation, CleanupPreview, CleanupSelection, CleanupSuggestion,

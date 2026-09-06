@@ -814,6 +814,8 @@ mod tests {
                 "analysis-only" => {
                     target.manual_tags.clear();
                     target.analyses.push(super::super::StoredAnalysis {
+                        job_id: String::new(),
+                        updated_at_unix_seconds: None,
                         analyzer_id: super::super::LOCAL_METADATA_ANALYZER_ID.to_owned(),
                         source_signature: super::super::metadata_source_signature(&target.track)?,
                         energy: 0.5,

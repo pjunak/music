@@ -6,15 +6,16 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use music_application::assistant::{
     AUDIO_ANALYSIS_JOB_KIND, AnalysisReviewDecision, AnalysisReviewTarget, AssistantService,
-    AssistantServiceError, AssistantTrackView, CleanupSelection, Confidence, EnergyCurve,
-    LIBRARY_CONTEXT_JOB_KIND, LibraryAnalysisSummary, LibraryContextPassSummary,
-    LibraryContextSummary, LocalAnalysisError, LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS,
-    METADATA_ANALYSIS_JOB_KIND, MODEL_TAG_ANALYZER_ID, MODEL_TAG_BATCH_SIZE,
-    MODEL_TAG_CLEANUP_BATCH_SIZE, MODEL_TAG_CLEANUP_ENGINE_ID,
-    MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ManualTagQuery, ModelTagCleanupTask,
-    PlaylistSuggestion, PlaylistSuggestionRequest, TagReviewSummary, TagVocabularyDocument,
-    TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail,
-    VoiceAnalyzerStatus, catalog_signature, model_tag_source_signature,
+    AssistantServiceError, AssistantTrackView, CATALOG_TAG_ANALYZER_ID, CleanupSelection,
+    Confidence, EnergyCurve, LIBRARY_CONTEXT_JOB_KIND, LOCAL_METADATA_ANALYZER_ID,
+    LibraryAnalysisSummary, LibraryContextPassSummary, LibraryContextSummary, LocalAnalysisError,
+    LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS, METADATA_ANALYSIS_JOB_KIND,
+    MODEL_TAG_ANALYZER_ID, MODEL_TAG_BATCH_SIZE, MODEL_TAG_CLEANUP_BATCH_SIZE,
+    MODEL_TAG_CLEANUP_ENGINE_ID, MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ManualTagQuery,
+    ModelAnalysisStatus, ModelTagCleanupTask, ModelTagFilter, PlaylistSuggestion,
+    PlaylistSuggestionRequest, TagReviewSummary, TagVocabularyDocument, TagVocabularyEntry,
+    TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail, VoiceAnalyzerStatus,
+    catalog_signature, model_tag_source_signature,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::jobs::JobStatus;
@@ -701,6 +702,8 @@ struct LibraryTagTrackResponse {
     analysis_suggestions: Vec<AnalysisTagSuggestionResponse>,
     #[schema(required = true, schema_with = nullable_audio_profile_schema)]
     audio_signal: Option<AudioSignalProfileResponse>,
+    #[schema(required = false, schema_with = model_analysis_status_schema)]
+    model_analysis: ModelAnalysisStatus,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -761,6 +764,12 @@ impl From<TagReviewSummary> for TagReviewSummaryResponse {
 #[derive(Debug, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct LibraryTagListQuery {
+    #[param(schema_with = model_tag_filter_schema)]
+    model_status: Option<String>,
+    #[param(max_length = 128)]
+    model_job_id: Option<String>,
+    #[param(schema_with = suggestion_source_schema)]
+    suggestion_source: Option<String>,
     #[serde(default)]
     #[param(max_length = 128, default = "")]
     search: String,
@@ -2850,12 +2859,27 @@ async fn list_library_tags(
         .transpose()?;
     let page = service(&state)?
         .tag_page(ManualTagQuery {
+            model_status: query
+                .model_status
+                .as_deref()
+                .map(|value| ModelTagFilter::parse(value).ok_or_else(ApiError::validation))
+                .transpose()?,
+            model_job_id: query.model_job_id,
             search: query.search,
             tag: query.tag,
             review: query.review.map(Into::into),
             offset: query.offset,
             limit: query.limit,
-            analyzer_ids: None,
+            analyzer_ids: query
+                .suggestion_source
+                .as_deref()
+                .map(|value| match value {
+                    "model" => Ok(vec![MODEL_TAG_ANALYZER_ID.to_owned()]),
+                    "metadata" => Ok(vec![LOCAL_METADATA_ANALYZER_ID.to_owned()]),
+                    "catalog" => Ok(vec![CATALOG_TAG_ANALYZER_ID.to_owned()]),
+                    _ => Err(ApiError::validation()),
+                })
+                .transpose()?,
             scope,
         })
         .await
@@ -2904,6 +2928,7 @@ async fn query_model_library_tags(
             limit: payload.limit,
             analyzer_ids: Some(vec![MODEL_TAG_ANALYZER_ID.to_owned()]),
             scope: Some(scope),
+            ..ManualTagQuery::default()
         })
         .await
         .map_err(map_assistant_error)?;
@@ -3149,6 +3174,7 @@ fn track_response(value: AssistantTrackView) -> LibraryTagTrackResponse {
         artist: value.track.metadata.artist,
         album: value.track.metadata.album,
         manual_tags: value.manual_tags,
+        model_analysis: value.model_analysis,
         analysis_analyzer: value.analysis_analyzer,
         analysis_tags: value.analysis_tags,
         analysis_confidence: value.analysis_confidence.map(Into::into),
@@ -3493,6 +3519,43 @@ fn unit_number_schema() -> RefOr<Schema> {
         .schema_type(Type::Number)
         .minimum(Some(0))
         .maximum(Some(1))
+        .into()
+}
+
+fn model_tag_filter_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["processed", "current", "stale", "missing"]))
+        .into()
+}
+
+fn suggestion_source_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["model", "metadata", "catalog"]))
+        .into()
+}
+
+fn model_analysis_status_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::Object)
+        .additional_properties(Some(AdditionalProperties::FreeForm(false)))
+        .property(
+            "status",
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .enum_values(Some(["current", "stale", "missing"])),
+        )
+        .property("job_id", nullable_string_schema())
+        .property(
+            "updated_at_unix_seconds",
+            AnyOfBuilder::new()
+                .item(openapi_integer())
+                .item(ObjectBuilder::new().schema_type(Type::Null)),
+        )
+        .required("status")
+        .required("job_id")
+        .required("updated_at_unix_seconds")
         .into()
 }
 

@@ -122,6 +122,54 @@ beforeEach(() => {
 });
 
 describe("LibraryTagEditor", () => {
+  it("filters saved AI results across the whole library and combines source and review", async () => {
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.selectOptions(screen.getByLabelText("Filter AI processing"), "processed");
+    await user.selectOptions(screen.getByLabelText("Filter suggestion source"), "model");
+    await user.selectOptions(screen.getByLabelText("Filter analysis review"), "pending");
+    await waitFor(() => expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
+      model_status: "processed", suggestion_source: "model", review: "pending", offset: 0, limit: 50,
+    }));
+    expect(screen.getByLabelText("Search and filter the whole library")).toBeChecked();
+  });
+
+  it("opens a specific run without excluding empty results and can clear the run", async () => {
+    const user = userEvent.setup();
+    render(<LibraryTagEditor initialModelFilter="processed" initialSourceFilter="model" initialModelJobId="run-30" />);
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
+      model_status: "processed", suggestion_source: "model", model_job_id: "run-30", offset: 0, limit: 50,
+    });
+    expect(screen.getByLabelText("Filter analysis review")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Show all runs" }));
+    await waitFor(() => expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
+      model_status: "processed", suggestion_source: "model", offset: 0, limit: 50,
+    }));
+  });
+
+  it.each(["current", "stale", "missing"] as const)("shows %s AI provenance independently of suggested tags", async (status) => {
+    vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({ ...page, items: [{ ...track,
+      analysis_suggestions: [], model_analysis: { status, job_id: status === "missing" ? null : "run-30", updated_at_unix_seconds: status === "missing" ? null : 1788700000 },
+    }] });
+    render(<LibraryTagEditor />);
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    const expected = status === "missing" ? "No saved AI result" : `AI processed · ${status === "current" ? "current" : "outdated"}`;
+    expect(screen.getByText(expected, { selector: ".assistant-track-model-status" })).toBeInTheDocument();
+    expect(screen.getByText(expected, { selector: ".assistant-model-review-status > strong" })).toBeInTheDocument();
+    if (status === "current") expect(screen.getByText(/A completed analysis can return no tags/)).toBeInTheDocument();
+    if (status === "stale") expect(screen.getByText(/old suggestions cannot be accepted/)).toBeInTheDocument();
+  });
+
+  it("explains the legacy keyword guesses without claiming mood metadata was detected", async () => {
+    render(<LibraryTagEditor />);
+    const group = await screen.findByRole("region", { name: "Metadata keyword guesses" });
+    expect(within(group).getByText(/not embedded mood tags or AI detection/)).toBeInTheDocument();
+    expect(within(group).queryByText(/^Mood metadata:/)).not.toBeInTheDocument();
+    expect(within(group).getAllByText("Keyword match: tavern, festive")).toHaveLength(2);
+  });
+
   const summary = { matching_tracks: 100, sources: [
     { analyzer_id: "local-metadata/v1", pending: 10, accepted: 4, rejected: 2 },
   ] };
@@ -204,7 +252,7 @@ describe("LibraryTagEditor", () => {
     render(<LibraryTagEditor />);
 
     expect(
-      await screen.findByText(/model-context-tagger\/v6/),
+      await screen.findByRole("heading", { name: "AI suggestions" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Accept dancing into mood library" }),
@@ -367,8 +415,6 @@ describe("LibraryTagEditor", () => {
     await waitFor(() =>
       expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith({
         review: "pending",
-        folder: "",
-        recursive: false,
         offset: 0,
         limit: 50,
       }),

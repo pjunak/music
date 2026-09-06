@@ -79,6 +79,25 @@ scope, search, and manual-tag filters and the same profile freshness rules. Thes
 operator decisions are separate from model-quality evidence and lifetime history.
 See [ADR-022](ADR-022-current-suggestion-review-metrics.md).
 
+The Mood Library also exposes saved model-processing provenance independently of
+tag suggestions: `model_analysis` contains `current`, `stale`, or `missing`, the
+source job ID, and the saved timestamp. Empty and fully rejected model outputs
+still count as processed. Strict inference/evidence/profile checks remain the
+authority for currentness; outdated suggestions stay unavailable for acceptance.
+`GET /api/assistant/library-tags` accepts `model_status` (processed/current/stale/missing),
+`model_job_id`, and `suggestion_source` (model/metadata/catalog). Model and run filters
+apply before the review summary and pagination; the source filter selects suggestions
+and therefore controls the meaning of the review-state filter and summary.
+Run links select currently retained profiles from that job, not lifetime history;
+later inference can replace a profile. No migration or new inference is needed to
+expose existing job IDs. Missing means no readable saved model profile, not proof
+that no provider attempt ever occurred.
+
+`local-metadata/v1` suggestions are title/album/genre keyword guesses. The legacy
+stored prose "Mood metadata" is relabeled in the review UI, with its actual source
+explained separately from AI results. This presentation correction does not alter
+the inference contract, stored review signatures, or operator-owned tags.
+
 Playlist model candidates supplement the original local pool through current
 vocabulary names, aliases and context cues matched to operator-owned tags. Preserve
 all local defaults and their original ranks; additions have `local_rank: null` and

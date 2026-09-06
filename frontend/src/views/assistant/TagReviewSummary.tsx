@@ -1,4 +1,5 @@
 import type { TagReviewSummary as Summary } from "@/core/api";
+import { suggestionSourceLabel } from "./tagProvenance";
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -55,7 +56,7 @@ export function TagReviewSummary({ summary }: { summary: Summary | undefined }) 
             <tbody>
               {summary.sources.map((row) => (
                 <tr key={row.analyzer_id}>
-                  <th scope="row">{row.analyzer_id}</th>
+                  <th scope="row">{suggestionSourceLabel(row.analyzer_id)}</th>
                   <td>{row.pending}</td>
                   <td>{row.accepted}</td>
                   <td>{row.rejected}</td>

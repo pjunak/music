@@ -48,7 +48,8 @@ impl AssistantRepository for SqliteStorage {
             let mut analyses = BTreeMap::<i64, Vec<StoredAnalysis>>::new();
             for row in sqlx::query(
                 "SELECT track_id, analyzer_id, source_signature, energy, brightness, tension, \
-                 moods_json, evidence_json, metrics_json, confidence FROM track_analyses \
+                 moods_json, evidence_json, metrics_json, confidence, job_id, \
+                 CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds FROM track_analyses \
                  ORDER BY track_id, analyzer_id",
             )
             .fetch_all(&self.pool)
@@ -450,6 +451,8 @@ fn analysis_from_row(row: &sqlx::sqlite::SqliteRow) -> Option<StoredAnalysis> {
     let metrics =
         serde_json::from_str::<Map<String, Value>>(row.try_get("metrics_json").ok()?).ok()?;
     Some(StoredAnalysis {
+        job_id: row.try_get("job_id").ok()?,
+        updated_at_unix_seconds: row.try_get("updated_at_unix_seconds").ok()?,
         analyzer_id: row.try_get("analyzer_id").ok()?,
         source_signature: row.try_get("source_signature").ok()?,
         energy: row.try_get("energy").ok()?,

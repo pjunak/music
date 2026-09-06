@@ -276,6 +276,9 @@
     minmax(32rem, 1fr);
   gap: var(--space-4);
 }
+.assistant-context-workspace.assistant-tag-library-workspace {
+  grid-template-columns: minmax(12rem, var(--rail-tree)) minmax(25rem, 0.9fr) minmax(30rem, 1.1fr);
+}
 .assistant-context-tracks {
   gap: 0;
   overflow: hidden;
@@ -383,6 +386,11 @@
   .assistant-context-workspace .assistant-context-main {
     grid-column: 1 / -1;
   }
+  .assistant-context-workspace.assistant-tag-library-workspace {
+    grid-template-columns: minmax(12rem, var(--rail-tree)) minmax(0, 1fr);
+    grid-template-rows: minmax(36rem, 65vh) minmax(28rem, 1fr);
+    overflow: auto;
+  }
 }
 
 @media (max-width: 900px) {
@@ -473,7 +481,8 @@
     grid-template-rows: auto minmax(14rem, 35vh) minmax(28rem, auto);
   }
   .assistant-context-workspace.assistant-tag-library-workspace {
-    grid-template-rows: minmax(10rem, 18rem) minmax(24rem, auto) minmax(28rem, auto);
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(10rem, 18rem) minmax(30rem, auto) minmax(28rem, auto);
   }
   .assistant-tag-library-workspace .assistant-tag-tracks {
     max-height: none;
