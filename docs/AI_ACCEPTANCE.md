@@ -5,6 +5,20 @@ This records acceptance and the remaining validation plan, with responsibilities
 synthetic data and local fixtures; they do not establish physical playback or model
 quality on a private library.
 
+## Current use of this record
+
+Provider/model/Thinking configurations are swappable in the server UI. The dated
+results below are observations of particular configurations, not a settled choice
+of production models. Preserve the evidence while evaluating replacements against
+their current conformance and quality contracts. Astra may be used as the coding
+agent to build and tighten the custom harness; that does not certify an application
+role or authorize paid requests or private-library disclosure.
+
+Environment limitations in checkpoints describe that run only. Check current
+tool and host availability before declaring a task blocked; record what was
+actually verified and keep local engineering, provider and physical acceptance
+separate.
+
 ## Operator checkpoint: 2026-09-05
 
 Engineering cleanup is complete. The final acceptance follow-up repairs a
@@ -39,7 +53,7 @@ requests, saved role edits or deployment were performed by this follow-up.
 | Work | Codex owns | Operator owns |
 |---|---|---|
 | Code fixes and cleanup | Implementation, regression tests, documentation, local gates, commits, and a clear remaining list. | Product preferences when a real trade-off needs a decision. No coding required. |
-| Docker/release checks | Build and run the verification script when a Docker host is accessible; diagnose and fix failures. | Provide the host/access or run the supplied commands there. Approve production deployment separately. Docker is unavailable in the current workspace environment. |
+| Docker/release checks | Build and run the verification script when a Docker host is accessible; diagnose and fix failures. | Provide the host/access or run the supplied commands there. Approve production deployment separately. Docker was unavailable in the recorded audit environment; recheck current availability. |
 | Representative database migration | Prepare the isolated test, run it on an approved copy, compare preserved data, and diagnose failures. | Supply or authorize the particular representative copy. Keep production untouched until acceptance. |
 | Phone and speaker acceptance | Prepare exact actions, inspect logs, and fix failures. | Operate the physical phone and confirm what actually plays or stops. |
 | Chosen-model tests | Run and analyze the existing full suites once the environment and disclosed run are authorized; fix harness defects without lowering the gates. | Keep the chosen provider/model/Thinking, authorize the disclosed provider requests and any private metadata scope. |

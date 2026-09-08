@@ -128,6 +128,8 @@ docs/*
 !docs/assistant-ux-philosophy.md
 !docs/README.md
 !docs/ASSISTANT_ARCHITECTURE.md
+!docs/ENGINEERING.md
+!docs/VALIDATION.md
 !docs/AI_ACCEPTANCE.md
 !docs/JOB_DIAGNOSTICS.md
 !docs/RUST_REWRITE_ARCHITECTURE.md

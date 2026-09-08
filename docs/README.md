@@ -5,6 +5,9 @@ not a second description of the implementation.
 
 ## By task
 
+- Engineering invariants by subsystem: [engineering contracts](ENGINEERING.md)
+- Development commands and checks by change scope: [validation matrix](VALIDATION.md)
+
 - Product, deployment, configuration, and development: [root README](../README.md)
 - Optional model setup and operator acceptance: [AI setup guide](../ASSISTANT.md)
 - Post-audit release and model acceptance: [validation plan](AI_ACCEPTANCE.md)

@@ -8,6 +8,23 @@ find ownership, privacy boundaries, contract versions, evaluation gates, and reg
 The practical deployment and acceptance sequence remains in [the operator guide](../ASSISTANT.md);
 the reasons behind durable choices remain in the linked ADRs.
 
+## Reading and harness development
+
+Use the platform/workflow tables to locate the affected owner, then read the
+matching task-rule subsection. These rules apply across application, storage,
+server, transport, and frontend changes; their ownership is not confined to a
+single source directory.
+
+Providers, models, and reasoning settings are replaceable in the server UI.
+There is no settled production-model choice. Dated evaluations record a tested
+configuration, not a permanent provider decision. Use the coding model selected
+for the task, including Astra, to build and tighten the custom harness. Keep the
+harness provider-neutral: express task intent, typed inputs/outputs, disclosures,
+failure policy, and quality evidence explicitly. Provider-specific behavior
+belongs in versioned adapters with declared capabilities. Changing a UI-selected
+configuration still requires its applicable verification and certification;
+an old result must not certify a replacement model or authorize private data use.
+
 ## Source-of-truth order
 
 When two descriptions disagree, resolve the disagreement in the same change:
@@ -216,7 +233,7 @@ operator request / indexed library / local audio
 | Credential encryption, initialization, reset, and offline rotation | [`crypto.rs`](../crates/music-storage/src/crypto.rs), [`provider_credentials.rs`](../crates/music-server/src/provider_credentials.rs), [`providers.rs`](../crates/music-storage/src/providers.rs) | Python-compatibility fixture plus reset/rotation transaction tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Role preparation and stale-gate enforcement | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`provider_api.rs`](../crates/music-server/src/provider_api.rs) | role fingerprint, conformance, quality, and active-job tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
 | Run manifests and attempt/token accounting | [`provider_usage.rs`](../crates/music-application/src/assistant/provider_usage.rs), [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs) | SQLite-backed provider attempt fault tests and local HTTP fixtures | [ADR-019](ADR-019-model-run-records-and-attempt-outcomes.md) |
-| Durable job lifecycle | [`jobs.rs`](../crates/music-application/src/jobs.rs), [`jobs.rs`](../crates/music-storage/src/jobs.rs), [`jobs.rs`](../crates/music-server/src/jobs.rs) | persisted-boundary fault tests in `music-storage` | [Repository persistence rules](../AGENTS.md#persistence-and-deployment) |
+| Durable job lifecycle | [`jobs.rs`](../crates/music-application/src/jobs.rs), [`jobs.rs`](../crates/music-storage/src/jobs.rs), [`jobs.rs`](../crates/music-server/src/jobs.rs) | persisted-boundary fault tests in `music-storage` | [Repository persistence rules](ENGINEERING.md#persistence-and-deployment) |
 | Browser API/types and review workflows | [`frontend/src/core/api.ts`](../frontend/src/core/api.ts), [`frontend/src/views/assistant/`](../frontend/src/views/assistant) | colocated Vitest files | [Assistant UX philosophy](assistant-ux-philosophy.md) |
 
 ## Current contract inventory
@@ -354,8 +371,10 @@ prior consent.
    differences in a versioned handler. Keep network I/O in the shared transport, update the handler
    fingerprint coverage, and never select behavior from a connection name, URL, or model-name guess.
 7. Update this inventory and amend the relevant ADR when the reasoning or trade-off changed.
-8. Run the narrow task tests, documentation checks, full Rust workspace gates, frontend gates, and a real
-   provider conformance/quality run before enabling the changed configuration in production.
+8. Use [the validation matrix](VALIDATION.md) for the changed surface. Prose-only edits
+   require document checks; harness/runtime changes require affected Rust, schema,
+   negative-case and frontend gates. Before enabling a changed configuration in
+   production, require its current real-provider conformance and quality evidence.
 9. Treat real-provider and real-audio checks as manual acceptance. Passing mocked automation does
    not establish compatibility with a provider or accuracy on the operator's library.
 
@@ -365,3 +384,266 @@ The harness-specific standards, vendor behavior, security guidance, and the reas
 them are recorded beside the decision in [ADR-007](ADR-007-algorithm-first-structured-model-harness.md#sources-and-rationale).
 Those references support the architecture; they do not replace local validation, synthetic quality
 suites, provider conformance, or explicit human review.
+
+## Detailed task rules
+
+These implementation constraints were consolidated from the root agent guidance.
+Read the subsection for the task being changed; the inventory above owns current
+version values and the tables locate the corresponding code and tests.
+
+### Draft authority
+
+- Assistant suggestions are read-only drafts until the operator explicitly previews and commits
+  them through Authoring import. Keep local heuristics and future model providers behind the same
+  suggestion contracts; never let a ranking engine write playlists or mutate the library directly.
+
+### Playlist evaluation
+
+- Playlist recommendation changes must run the versioned synthetic suites under
+  `crates/music-application/src/assistant/evaluation_suites/` through the provider-neutral evaluator. Add
+  representative cases and explicit thresholds without copying private library data or freezing
+  one incidental exact ranking. Future model providers must pass the same unknown-track,
+  source-integrity, exclusion, selection-plan, and candidate-limit checks before UI integration.
+
+### Connections, roles, and credentials
+
+- Optional model providers use encrypted connection records and per-task role mappings. Each
+  connection owns exactly one credential; roles reference connections so tasks may deliberately
+  reuse one credential or choose separate connections, including separate keys for the same
+  provider. Never store a credential directly on a role.
+  Credential presence is an explicit server-derived state; never infer it from a masked hint.
+  Removing or replacing a connection credential keeps role drafts but resets verification,
+  conformance, and quality results, so enabled roles remain ineffective until the new credential is
+  saved and every gate passes again.
+  Adapters declare transport capabilities, successful verification persists the capabilities
+  actually confirmed, and roles declare their required capabilities. Enforce compatibility again
+  during role save, testing, enablement, and execution; never infer it from provider or model names.
+  Roles without a complete feature, quality, consent, and review contract stay explicitly
+  unavailable for configuration even if their future role ID is already reserved.
+  Never return or log a provider key, never infer provider capabilities from a saved URL, and never
+  enable a role until the operator explicitly verifies its connection and its exact runtime
+  configuration passes the fixed synthetic conformance challenge. Provider I/O must stay off the
+  event loop, bounded by request size, time, and response size, and protected against redirects and
+  unsafe destinations. Keep provider-specific model-ID normalization and inference parameters in
+  explicit versioned adapter handlers; handlers shape requests but must not bypass the shared
+  pinned-DNS transport or infer behavior from connection names, URLs, or model names.
+  OpenAI-compatible structured requests must carry the generated task JSON
+  Schema. The standard adapter uses JSON-object response mode; the explicit strict adapter may use
+  `json_schema` only when selected and proven by conformance. Each fixed feature prompt includes a
+  locally validated example of its strict output shape. Include the versioned harness, conformance,
+  and per-role feature contracts in the runtime fingerprint so a transport or task-contract change
+  makes existing model tests and quality results stale instead of silently reusing them. Feature
+  code resolves usable roles through `prepare_role_execution()` and
+  owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt
+  endpoint. Saving, verifying, or testing a role does not authorize sending library data or
+  replacing a local engine. Preserve the Assistant credential master key separately from database
+  backups. `ASSISTANT_CREDENTIAL_KEY` takes precedence over the fixed
+  `ASSISTANT_CREDENTIAL_KEY_FILE`; the authenticated API may exclusively create only that configured
+  file and must never accept a path, return the key, overwrite an existing file, or generate a new
+  key while saved provider credentials exist. Saved provider credentials are write-once and must be
+  explicitly deleted before another key can be added. The password-confirmed browser reset may
+  remove only the configured file-backed key after atomically erasing all saved credentials and
+  resetting every provider/model gate; preserve connection and role drafts, refuse active provider
+  jobs, and report post-commit file-removal failure as a partial result. Environment-key removal and
+  credential-preserving rotation remain explicit console/offline maintenance workflows.
+
+### Offline credential recovery
+
+- Credential recovery checks and master-key rotation are offline operator workflows. Keep audit
+  output secret-free and identify keys only by a short one-way fingerprint. Rotation must decrypt
+  every saved credential before mutating any row, re-encrypt all credentials in one transaction,
+  and reset provider verification, role conformance, and model-quality gates. Require an explicit
+  server-stopped acknowledgement before applying it; a dry run is the default.
+
+### Playlist planning
+
+- The optional model playlist planner may run only through the dedicated consent-bound durable job.
+  Keep `local-planner/v2` as the default, require the exact current `playlist-quality-v1` pass and
+  disclosure version before enqueueing, and make model jobs non-restartable to avoid silently
+  repeating provider cost. Locally enforce eligibility and exclusions, send a privacy-reduced pool
+  of at most 100 candidates, and preserve the original local rank while unioning additional recall
+  candidates found through controlled-vocabulary aliases and context cues.
+  Recall uses only operator-owned tags, reserves at most a
+  quarter of the bounded pool (20 maximum), and never evicts a local default selection.
+  Preserve original local ranks; additional candidates have null local_rank and start
+  unselected. Candidate-only CLI reports do not certify a model. Treat a non-empty
+  display title as canonical. Explain declared vocabulary meanings using only
+  request-matched names/aliases/context cues, their definitions, and manual labels
+  present in the disclosed candidate pool. Treat that text as untrusted data;
+  never send unrelated vocabulary, infer new tags, or force a model selection.
+  Do not infer mood axes from artist names or filesystem paths.
+  Choose the review default with bounded duration-error improvement. Inject the exact candidate
+  IDs into the output schema, and accept only
+  ranked/selected IDs. Never send library-relative paths
+  or trust model-supplied source fields, tags, scores, reasons, or evidence; reconstruct the public
+  response from the local candidate snapshot. Model results remain drafts and must use the existing
+  Authoring import preview/select/commit path. Configured-model CLI evaluation separately requires
+  the explicit `--send-suite-to-provider` disclosure flag.
+
+### EQ drafting
+
+- The optional EQ assistant may run only through `assistant.model-eq-draft`. Build a deterministic
+  intent baseline and per-band refinement envelope before the provider call. Require the exact
+  current `eq-quality-v1` pass and disclosure consent, make jobs non-restartable, and send only the
+  operator's sound goal plus the fixed ten-band frequencies, local guidance, and gain limits.
+  Accept exactly ten gains in the local envelope and in 0.5 dB steps; construct every frequency
+  and Authoring field locally. Deterministically bound overlong rationale and caution text because
+  it is incidental review prose; never repair or coerce gains, frequency order, schema identity,
+  missing fields, or unexpected fields.
+  The result is a review-only draft and may create a preset only through the existing Authoring
+  import preview/select/commit transaction. Never send songs, audio, library metadata, paths,
+  playlists, existing presets, or credentials to the EQ role.
+
+### Shared mood configuration
+
+- Mood tagging and optional tag cleanup share one connection/model/Thinking/request configuration.
+  Configure it through Music tagging; preserve independent enablement, conformance and quality gates.
+  Local alias cleanup remains authoritative and never becomes a mandatory second model pass.
+
+### Tagging bounds and inference identity
+
+- Tagging plans must enforce explicit track/request/reservation limits before provider I/O.
+  Reservation units are conservative input bytes plus output allowance, never billed tokens or money.
+  Separate result inference identity from operational certification; timeout/credential or unrelated
+  source changes must not automatically rebill unchanged evidence. Meaningful task/schema/adapter
+  semantics must change the inference contract. New inference still requires current certification.
+
+### Batch recovery
+
+- OpenAI Batch uses the same strict task and review contracts. Persist state before upload/submit;
+  never automatically repeat an uncertain submission. Batch collection alone is restartable and may
+  collect already-paid responses without fresh certification, after checking current inference,
+  vocabulary, context and profile shape. Keep remote-file IDs durable until deletion succeeds.
+  Pending batches block role/connection/credential reset and rotation, including while no job runs.
+  Explicitly disclose provider files, retention, cancellation costs and unknown-submission recovery.
+
+### Mood tagging
+
+- Optional mood tagging may run only through `assistant.model-music-tagging`. Require the
+  exact current `music-tagging-quality-v1` pass and disclosure consent, batch at most 20 tracks
+  per provider request, and keep jobs non-restartable. Resolve whole-library, folder
+  (recursive/direct), or explicit-track scope locally. Provider input is limited to indexed
+  artist, album, origin, and genre metadata, duration, BPM, batch-local numeric slots, the full revisioned
+  operator vocabulary's IDs/names/groups/definitions/
+  exact aliases and bounded semantic context cues, and an optional bounded projection of current
+  `local-context/v2` evidence:
+  loudness, intensity, rhythmic-drive, brightness, density and spectral-change trajectories;
+  tempo development; major acoustic sections/transitions; repetition; confidence; and optional
+  local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status).
+  Never send track titles, display titles, file or folder names, library-relative paths, the absolute media root, paths outside the indexed library,
+  audio, waveforms, spectrograms, full-resolution timelines, database mood tags, stored
+  suggestions, playlists, review history, or credentials. Local context analysis must remain
+  factual and may never propose setting, period, scene, mood, genre, or instrument tags.
+  Context cues are global operator-managed vocabulary guidance, not per-track local tag
+  hypotheses; the model must confirm them against the complete untrusted metadata phrase.
+  Keep each tag's ID, name, definition, aliases, and cues together in the provider input so the
+  model never has to join a compact index to a second definition table. A run may spend at most
+  two disclosed correction requests on malformed JSON, schema-invalid output, track-set mismatch,
+  or unsupported tag IDs. Each correction is a fresh strict classification; never edit, coerce,
+  or locally repair the rejected output, and never retry provider, network, timeout, or truncation
+  failures through this budget.
+  Period feel is separate from physical setting and describes the era evoked by the complete
+  evidence, not release date or recording technology. It is a zero-or-one categorical group;
+  `cross era` replaces rather than accompanies its component period tags. The model must choose
+  zero through eight exact IDs from the full controlled vocabulary and
+  return confidence plus at most four bounded evidence strings. Do not ask it for signal axes and
+  do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,
+  missing track IDs, malformed confidence, extra fields, and truncated output; only incidental
+  evidence text may be bounded. Store output under `model-context-tagger/v6` in
+  `track_analyses` and bind its source signature to metadata, current context signature (or its
+  absence), vocabulary fingerprint, contract version, and role fingerprint.
+  Before a live run, report full, partial, missing/stale, and failed context coverage. Let the
+  operator either include incomplete tracks using metadata alone or skip every track without
+  full current context. The model may never write `track_user_tags`; accepted suggestions become
+  database mood tags only through explicit single or bulk review.
+
+### Manual-tag cleanup
+
+- Optional model-assisted manual-tag cleanup may run only through
+  `assistant.model-tag-cleanup`. Run declared-alias and deterministic spelling/plural cleanup first and make no
+  provider call when it resolves every candidate. Require the exact current
+  `tag-cleanup-quality-v1` pass and versioned disclosure consent, allow at most 500 catalog tags,
+  make the provider job non-restartable, batch at most 20 unresolved names per call, and send only
+  source IDs/names and usage counts plus canonical vocabulary IDs, names, groups, and definitions.
+  Require one ordered canonical-ID-or-null decision per source. Bound overlong reason text locally,
+  but never repair source order, source or target IDs, confidence, missing decisions, or unexpected
+  fields. Never send song metadata,
+  paths, audio, playlists, generated tags, review
+  history, or credentials. Store only a review-only proposal bound to the exact role fingerprint
+  catalog signature, and vocabulary fingerprint. Apply only explicitly selected source/target pairs from that stored job,
+  reject stale or invented selections, and commit all selected manual-tag renames atomically.
+
+### Quality certification
+
+- Task-specific model quality checks run as durable, non-restartable jobs and persist their current
+  certification separately from job history. Bind every result to the exact model-role runtime
+  fingerprint, clear it after connection reverification or runtime changes, and keep historical
+  reports synthetic and secret-free. A quality pass does not authorize live-library access.
+  Connection changes, credential deletion, and reverification must refuse to reset assigned roles
+  while their model jobs are queued or running; the UI must warn that deliberate reverification
+  clears their model tests and quality results.
+  The mood-tagging suite batches 20 synthetic tracks per provider request, matching live work,
+  while preserving
+  per-scenario progress and diagnostics, then repeats every safety scenario once to catch unstable
+  forbidden output. Provider/contract failures and forbidden false positives block certification;
+  a scenario's safety label alone does not turn a required semantic-tag miss into a blocking error.
+  All scenarios contribute to the suite's explicit minimum scored pass rate. Each
+  fixed vocabulary group must independently meet that same threshold; keep custom
+  and maximum-size fixtures isolated during batching, safety repeats, and retests. A
+  failed-scenario recheck may call the provider only for failures from the exact current complete
+  result and may merge those results only for diagnosis. Only another complete suite may update
+  certification.
+
+### Usage accounting
+
+- Durable quality, playlist, tagging, and tag-cleanup model jobs record the shared bounded provider-usage
+  summary: attempted calls, provider-reported model IDs, and reported input/output token totals.
+  Checkpoint it after every provider attempt so failures, cancellation, and graceful shutdown keep
+  the usage already incurred. Preserve missing-usage counts explicitly; never infer unreported
+  tokens or portable cost from provider-specific pricing.
+
+### Analysis identity
+
+- Generated tag profiles remain keyed by `(track_id, analyzer_id)` in `track_analyses`.
+  Comprehensive factual audio context is keyed the same way in `track_contexts` and stores its
+  summary, condensed timeline, major sections, technical facts, and stage status separately from
+  semantic tag suggestions. Preserve source signatures, confidence, and analyzer versioning.
+  Consumers may use only current, well-formed context/profiles and must fall back safely when data
+  is absent, partial, stale, failed, or malformed.
+
+### Local voice analysis
+
+- Optional local voice analysis may use only the checksum-pinned Essentia MusiCNN model through the
+  explicit deployment setting. Keep it off by default, local-only, and non-fatal; include its
+  model/runtime identity in context staleness, preserve unknown/unavailable states, and never label
+  spectral heuristics as human-voice detection.
+
+### Manual tags and suggestion review
+
+- Database mood tags are operator-owned rows in `track_user_tags`, independent from embedded file
+  tags such as album, artist, year, and genre and independent from generated analysis. Never write
+  these rows into media files. Update them with additive/removal deltas, display their source explicitly,
+  and pass them separately to suggestion engines. An analyzer or provider must never overwrite or
+  silently promote its output into manual tags. Bulk updates commit valid tracks together and
+  report missing/limited tracks; library-wide rename merges duplicate target rows atomically.
+  Generated-tag decisions live in `track_analysis_tag_reviews` and bind to the reviewed source
+  signature. Acceptance atomically adds the manual tag; rejection and reopening never remove or
+  rewrite manual tags, and a changed analysis signature returns the suggestion to pending review.
+  Current-profile consumers omit rejected tag labels without deleting the analyzer's stored profile.
+  Bulk review applies only explicitly selected suggestions, commits valid decisions together, and
+  reports stale, missing, or tag-limited items individually. Never add a select-all implicit write.
+  Model-tag review listing and acceptance must validate current role, vocabulary, metadata,
+  local-context identity, and profile shape. Recheck the typed server-owned guard inside
+  the manual-tag transaction; never trust a client-provided currentness assertion.
+  Review summaries count current suggestions by source after scope/search/manual-tag
+  filters but before review-state filtering and pagination. Never infer decisions
+  from manual tags or present these counts as model accuracy or lifetime history.
+  Mood Library model-processing status comes from saved profiles, independently of
+  tag count and review decisions. Preserve run ID/time for current and outdated
+  results; empty results still count as processed. Apply model/run/source filters
+  before review counts and pagination. Run views are retained profiles, not lifetime
+  history. Label local metadata keyword guesses honestly, never as AI detection or
+  embedded mood metadata.
+  Tag cleanup detection is pure and conservative. Bind its preview to the current manual-tag
+  catalog, require explicit per-suggestion selection, reject stale or invented selections, and apply
+  all selected renames in one transaction without changing unselected tags.
