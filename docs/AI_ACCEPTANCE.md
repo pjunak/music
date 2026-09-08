@@ -19,6 +19,41 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Operator checkpoint: 2026-09-09
+
+The supplied Sol (`gpt-5.6-sol`, Thinking disabled) export for tagging suite v22
+passed conformance and 59/63 quality scenarios. All 13 safety scenarios passed;
+bundled vocabulary was 53/57, custom 5/5 and maximum vocabulary 1/1. The independent
+context-only score was 8/9, below 90%, so certification correctly failed under
+that declared threshold. The export reports nine requests, 93,378 input tokens
+and 5,265 output tokens; these are observations of this run, not a price estimate.
+
+Two fixture expectations were underspecified: a puzzle setting did not establish
+an inquisitive musical mood, and heavy battle music did not explicitly establish
+suspense. Suite v23 adds the missing descriptive genre evidence while retaining
+the required and forbidden tags. The castle omission remains a valid semantic
+miss. The loud settled-texture abstention identifies a gap in the task guidance:
+input v22 explains that recording level contributes 50% of window intensity, so
+these correlated values must not outweigh unchanged texture and development.
+The old export discarded model evidence, so the exact reason for its abstention
+cannot be recovered. New quality results retain that bounded public explanation.
+
+The badge now counts distinct scenarios before and after completion; thirteen
+safety reruns are included in those scenarios rather than increasing its total
+from 63 to 76. Detailed logs retain the individual-check count. Neither the
+90% gates nor strict safety validation were relaxed. Keep Sol with Thinking off
+for the next deliberate full check after installation; this engineering change
+has not been evaluated against the paid provider and does not establish a pass.
+No saved configuration, live library, provider quota or deployment was changed.
+
+Local validation passed: 390 Rust tests, 306 frontend tests (plus the focused
+35-test rerun after shortening the badge text), workspace check, strict Clippy,
+formatting, documentation tests, generated-contract checks, and frontend
+lint/typecheck/build. Architecture and listening-pilot tooling passed 11 Node
+tests. An offline browser fixture verified the running, safety-rerun and completed
+states, including the compact badge and failure evidence. None of these checks
+certifies Sol on the revised suite or establishes listening accuracy.
+
 ## Operator checkpoint: 2026-09-05
 
 Engineering cleanup is complete. The final acceptance follow-up repairs a

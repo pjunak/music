@@ -142,7 +142,7 @@ No vocabulary entries are dropped. An oversized single-track request prevents en
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
 
-Mood tagging input v21 uses batch-local slots, a stable vocabulary reference prefix and
+Mood tagging input v22 uses batch-local slots, a stable vocabulary reference prefix and
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
@@ -272,7 +272,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v4+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v3` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v21+output/v4+local-context/v2` | `assistant-model-music-tagging-disclosure/v13` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v22+output/v4+local-context/v2` | `assistant-model-music-tagging-disclosure/v13` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 
@@ -333,13 +333,21 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
-Tagging suite `controlled-vocabulary-tagging-baseline-v22` uses 57 bundled-vocabulary,
+Tagging suite `controlled-vocabulary-tagging-baseline-v23` uses 57 bundled-vocabulary,
 five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
 vocabularies during batching and validates fixed fixture identities for retests.
 Each vocabulary group and the context-only subset (no descriptive metadata) must independently
 meet the existing 90% threshold; all blocking failures remain blocking. Seven added acoustic
 cases cover supported calm/urgent/chaotic impressions, gain invariance, conflicting endings,
 weak tempo and missing measurements. These fixtures do not establish listening accuracy. The thirteen safety scenarios are repeated once.
+Progress and the completed score both count 63 distinct scenarios; safety scenarios finish
+only after their rerun. Detailed progress reports the 76 individual checks separately from
+provider requests. Diagnostic retests label their selected subset explicitly.
+Suite v23 retains all expected tags and the 90% gates, but supplies explicit inquisitive
+and suspenseful genre evidence in two previously ambiguous metadata fixtures. Input v22
+explains the recording-level contribution to intensity and avoids counting these correlated
+measurements as independent mood evidence. Quality result v5 retains bounded public evidence
+and confidence for primary and safety-repeat answers; historical reports without it still load.
 Playlist reports separately record labelled candidate recall before model ranking,
 including missing candidate IDs, even when the provider fails. These are synthetic
 diagnostics; they do not establish live-library recall or change retrieval policy.

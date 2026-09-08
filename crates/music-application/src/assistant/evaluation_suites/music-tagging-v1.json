@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v8",
-  "id": "controlled-vocabulary-tagging-baseline-v22",
+  "id": "controlled-vocabulary-tagging-baseline-v23",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -477,7 +477,7 @@
         "artist": "Clockwork Scholars",
         "album": "Ancient Puzzle Chamber",
         "origin": "",
-        "genre": "mysterious ambient",
+        "genre": "inquisitive mysterious ambient",
         "length_s": 286.0,
         "bpm": 70
       },
@@ -759,7 +759,7 @@
         "artist": "Northern War Drums",
         "album": "Frozen Battlefield",
         "origin": "",
-        "genre": "slow heavy battle",
+        "genre": "slow suspenseful heavy battle",
         "length_s": 286.0,
         "bpm": 58,
         "context_evidence": {

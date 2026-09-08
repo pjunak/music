@@ -54,8 +54,12 @@ export function qualityEvidenceNotes(job: BackgroundJob | undefined): QualityEvi
   if (isRecord(context) && typeof context.passed === "boolean" &&
       isCount(context.passed_cases) && isCount(context.total_cases) &&
       context.total_cases > 0 && context.passed_cases <= context.total_cases) {
+    const rate = evaluation.minimum_quality_pass_rate;
+    const threshold = typeof rate === "number" && rate >= 0 && rate <= 1
+      ? ` Requires ${Math.ceil(context.total_cases * rate)}/${context.total_cases} at the ${Math.round(rate * 100)}% threshold.`
+      : "";
     notes.push({ id: "context-only", tone: context.passed ? "success" : "failure",
-      message: `Acoustic context without descriptive metadata: ${context.passed_cases}/${context.total_cases} scenarios; ${context.passed ? "passed" : "failed"} its independent quality gate. Listening accuracy still needs a reviewed music sample.` });
+      message: `Acoustic context without descriptive metadata: ${context.passed_cases}/${context.total_cases} scenarios; ${context.passed ? "passed" : "failed"} its independent quality gate.${threshold} Listening accuracy still needs a reviewed music sample.` });
   }
   if (Array.isArray(evaluation.vocabulary_results)) {
     const labels: Record<string, string> = {
@@ -76,7 +80,25 @@ export function qualityEvidenceNotes(job: BackgroundJob | undefined): QualityEvi
   if (Array.isArray(evaluation.cases)) {
     for (const scenario of evaluation.cases.slice(0, 100)) {
       if (!isRecord(scenario) || typeof scenario.id !== "string" ||
-          typeof scenario.description !== "string" || !isRecord(scenario.candidate_recall)) continue;
+          typeof scenario.description !== "string") continue;
+      for (const repeat of [false, true]) {
+        const failures = repeat ? scenario.safety_repeat_failures : scenario.failures;
+        const evidence = repeat ? scenario.safety_repeat_evidence : scenario.evidence;
+        if (!Array.isArray(failures) || failures.length === 0 || !Array.isArray(evidence)) continue;
+        const reasons = evidence.filter((item): item is string => typeof item === "string")
+          .slice(0, 4).map((item) => item.slice(0, 512));
+        if (reasons.length === 0) continue;
+        const tags = repeat ? scenario.safety_repeat_tags : scenario.tags;
+        const names = Array.isArray(tags)
+          ? tags.filter((item): item is string => typeof item === "string").slice(0, 8).join(", ")
+          : "";
+        notes.push({
+          id: `model-evidence-${scenario.id}${repeat ? "-repeat" : ""}`,
+          tone: "info",
+          message: `${scenario.description}${repeat ? " (safety rerun)" : ""}: returned ${names || "no tags"}. Model-reported evidence: ${reasons.join("; ")}`,
+        });
+      }
+      if (!isRecord(scenario.candidate_recall)) continue;
       const recall = scenario.candidate_recall;
       if (!isCount(recall.pool_tracks) || recall.pool_tracks > 100 ||
           !isCount(recall.relevant_tracks) || !isCount(recall.relevant_in_pool) ||
@@ -194,15 +216,16 @@ export function qualityStatusLabel(
   if (view.activeJob !== undefined) {
     if (view.activeJob.status === "cancel_requested") return "Cancelling";
     if (view.activeJob.progress_total !== null) {
-      const progressUnit =
-        evaluation.role_id === "music_tagger" ? "scored attempts" : "scenarios";
-      return `${view.activeJob.progress_current} / ${view.activeJob.progress_total} ${progressUnit}`;
+      const tagging = evaluation.role_id === "music_tagger";
+      const retest = Array.isArray(view.activeJob.parameters.case_ids) &&
+        view.activeJob.parameters.case_ids.length > 0;
+      return `${retest ? "Rechecking " : ""}${view.activeJob.progress_current} / ${view.activeJob.progress_total} ${tagging && !retest ? "checked" : "scenarios"}`;
     }
     return view.activeJob.status === "queued" ? "Queued" : "Running";
   }
   if (evaluation.status === "passed" || evaluation.status === "failed") {
     return evaluation.total_cases > 0
-      ? `${evaluation.passed_cases} / ${evaluation.total_cases} scenarios`
+      ? `${evaluation.passed_cases} / ${evaluation.total_cases} ${evaluation.role_id === "music_tagger" ? "passed" : "scenarios"}`
       : evaluation.status === "passed"
         ? "Passed"
         : "Failed";

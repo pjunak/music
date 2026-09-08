@@ -1,5 +1,45 @@
 use super::*;
 
+struct TaggingQualityProgress {
+    total_scenarios: usize,
+    total_attempts: usize,
+    completed_scenarios: usize,
+    completed_attempts: usize,
+}
+
+impl TaggingQualityProgress {
+    fn new(cases: &[TagQualityCase]) -> Self {
+        let safety_count = cases
+            .iter()
+            .filter(|case| case.gate == TagQualityGate::Safety)
+            .count();
+        Self {
+            total_scenarios: cases.len(),
+            total_attempts: cases.len() + safety_count,
+            completed_scenarios: 0,
+            completed_attempts: 0,
+        }
+    }
+
+    fn record(&mut self, gate: TagQualityGate, safety_repeat: bool) {
+        self.completed_attempts += 1;
+        // A safety scenario is complete only after both of its checks.
+        if gate != TagQualityGate::Safety || safety_repeat {
+            self.completed_scenarios += 1;
+        }
+    }
+
+    fn message(&self) -> String {
+        format!(
+            "Checked {} of {} scenarios; {} of {} individual checks including safety reruns",
+            self.completed_scenarios,
+            self.total_scenarios,
+            self.completed_attempts,
+            self.total_attempts,
+        )
+    }
+}
+
 impl ModelEvaluationJobHandler {
     pub(super) async fn execute_tagging(
         &self,
@@ -32,18 +72,17 @@ impl ModelEvaluationJobHandler {
             .iter()
             .filter(|case| case.gate == TagQualityGate::Safety)
             .count();
-        let total_attempts = execution_cases.len().saturating_add(safety_count);
+        let mut progress = TaggingQualityProgress::new(&execution_cases);
         update_progress(
             context,
             0,
-            total_attempts,
+            progress.total_scenarios,
             "Preparing evaluation",
             format!(
-                "Loading {} {} tagging scenarios; {} safety reruns make {} scored attempts",
+                "Loading {} {} tagging scenarios; {} safety reruns are included in these scenarios",
                 execution_cases.len(),
                 if retest { "failed" } else { "fixed" },
                 safety_count,
-                total_attempts,
             ),
         )
         .await?;
@@ -66,7 +105,6 @@ impl ModelEvaluationJobHandler {
         let mut usage =
             start_evaluation_run(context, &execution.role, parameters, max_attempts).await?;
         let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
-        let mut completed = 0_usize;
         let mut deterministic_execution_failure = None;
         let results = self
             .evaluate_tagging_cases(
@@ -75,9 +113,8 @@ impl ModelEvaluationJobHandler {
                 &execution_cases,
                 &mut usage,
                 &mut retry_budget,
-                &mut completed,
-                total_attempts,
-                execution_cases.len(),
+                &mut progress,
+                false,
                 &mut deterministic_execution_failure,
             )
             .await?;
@@ -93,9 +130,8 @@ impl ModelEvaluationJobHandler {
                 &safety_cases,
                 &mut usage,
                 &mut retry_budget,
-                &mut completed,
-                total_attempts,
-                execution_cases.len(),
+                &mut progress,
+                true,
                 &mut deterministic_execution_failure,
             )
             .await?;
@@ -136,16 +172,15 @@ impl ModelEvaluationJobHandler {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn evaluate_tagging_cases(
+    async fn evaluate_tagging_cases(
         &self,
         context: &JobExecutionContext,
         role: &ResolvedRoleExecution,
         cases: &[TagQualityCase],
         usage: &mut ProviderUsageAccumulator,
         retry_budget: &mut u8,
-        completed: &mut usize,
-        total_attempts: usize,
-        scenario_count: usize,
+        progress: &mut TaggingQualityProgress,
+        safety_repeat: bool,
         deterministic_execution_failure: &mut Option<ModelTaskError>,
     ) -> Result<Vec<TagQualityCaseResult>, JobHandlerError> {
         let mut results = Vec::with_capacity(cases.len());
@@ -199,16 +234,13 @@ impl ModelEvaluationJobHandler {
                     Err(error) => case.assess(Err(error), vocabulary),
                 };
                 results.push(result);
-                *completed = completed.saturating_add(1);
+                progress.record(case.gate, safety_repeat);
                 update_progress(
                     context,
-                    *completed,
-                    total_attempts,
+                    progress.completed_scenarios,
+                    progress.total_scenarios,
                     "Evaluating tagging model",
-                    format!(
-                        "Completed {} of {} scored attempts across {} scenarios",
-                        *completed, total_attempts, scenario_count,
-                    ),
+                    progress.message(),
                 )
                 .await?;
             }
@@ -580,5 +612,46 @@ impl ModelFeatureJobHandler {
             "skipped_changed_tracks": skipped_changed,
             "usage": provider_usage.summary(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod quality_progress_tests {
+    use super::*;
+
+    #[test]
+    fn full_suite_and_retest_count_scenarios_once_after_safety_repeats()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let suite = tag_quality_suite()?;
+        let retest = suite
+            .cases
+            .iter()
+            .filter(|case| {
+                ["curious-puzzle", "metadata-prompt-injection"].contains(&case.id.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for cases in [&suite.cases, &retest] {
+            let mut progress = TaggingQualityProgress::new(cases);
+            let safety = cases
+                .iter()
+                .filter(|case| case.gate == TagQualityGate::Safety)
+                .collect::<Vec<_>>();
+            let expected_total = cases.len();
+            for case in cases {
+                progress.record(case.gate, false);
+                assert_eq!(progress.total_scenarios, expected_total);
+                assert!(progress.completed_scenarios < expected_total);
+            }
+            assert_eq!(progress.completed_scenarios, expected_total - safety.len());
+            assert_eq!(progress.completed_attempts, expected_total);
+            for case in safety {
+                progress.record(case.gate, true);
+                assert_eq!(progress.total_scenarios, expected_total);
+            }
+            assert_eq!(progress.completed_scenarios, expected_total);
+            assert_eq!(progress.completed_attempts, progress.total_attempts);
+        }
+        Ok(())
     }
 }

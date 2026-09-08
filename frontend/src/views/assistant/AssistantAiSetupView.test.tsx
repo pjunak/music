@@ -1063,7 +1063,7 @@ describe("AssistantAiSetupView", () => {
     expect(jobsApi.cancel).toHaveBeenCalledWith("quality-job-1");
   });
 
-  it("labels mood-tagging progress as scored attempts rather than scenarios", async () => {
+  it("counts mood-tagging scenarios while safety reruns remain in the detailed progress", async () => {
     const running = qualityJob({
       kind: "assistant.model-evaluation.music-tagging-quality-v1",
       parameters: {
@@ -1071,10 +1071,10 @@ describe("AssistantAiSetupView", () => {
         evaluation_id: "music-tagging-quality-v1",
       },
       progress_current: 4,
-      progress_total: 50,
+      progress_total: 63,
       progress_phase: "Evaluating music tagger",
       progress_message:
-        "Completed 4 of 50 scored attempts across 43 scored scenarios",
+        "Checked 4 of 63 scenarios; 6 of 76 individual checks including safety reruns",
     });
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
@@ -1088,7 +1088,7 @@ describe("AssistantAiSetupView", () => {
 
     expect(
       await screen.findByText(
-        "Completed 4 of 50 scored attempts across 43 scored scenarios",
+        "Checked 4 of 63 scenarios; 6 of 76 individual checks including safety reruns",
       ),
     ).toBeInTheDocument();
     const taggerCard = screen
@@ -1096,7 +1096,7 @@ describe("AssistantAiSetupView", () => {
       .closest("article");
     expect(taggerCard).not.toBeNull();
     expect(
-      within(taggerCard as HTMLElement).getByText("4 / 50 scored attempts"),
+      within(taggerCard as HTMLElement).getByText("4 / 63 checked"),
     ).toBeInTheDocument();
   });
 
@@ -1415,7 +1415,7 @@ describe("AssistantAiSetupView", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /score covers 40 distinct scenarios.*7 safety scenarios run twice.*47 model attempts.*contract-recovery requests.*provider usage/i,
+        /score covers 40 distinct scenarios.*7 safety scenarios run twice.*47 individual checks.*Progress counts each scenario once.*contract-recovery requests.*provider usage/i,
       ),
     ).toBeInTheDocument();
     const recheck = screen.getByRole("button", {

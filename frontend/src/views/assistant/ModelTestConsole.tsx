@@ -255,7 +255,7 @@ function buildLogEntries(
       tone: "info",
       message:
         `The score covers ${evaluation.total_cases} distinct scenarios. ` +
-        `${gateSummary.safetyTotalCases} safety ${gateSummary.safetyTotalCases === 1 ? "scenario runs" : "scenarios run"} twice for stability, so a full suite scores ${totalAttempts} model attempts. Any contract-recovery requests are recorded separately in provider usage.`,
+        `${gateSummary.safetyTotalCases} safety ${gateSummary.safetyTotalCases === 1 ? "scenario runs" : "scenarios run"} twice for stability, making ${totalAttempts} individual checks. Progress counts each scenario once, after all its checks finish. Batches and any contract-recovery requests are recorded separately in provider usage.`,
     });
   }
 

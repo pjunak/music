@@ -245,7 +245,13 @@ portable monetary cost.
 
 The tagging report also shows separate bundled, custom, and 200-tag vocabulary
 scores. Each group must pass the same 90% gate; a high overall score cannot hide
-a failed group. Playlist reports flag relevant test tracks omitted before model
+a failed group. The context-only group has nine scenarios, so its 90% threshold
+requires all nine to pass. The badge counts distinct scenarios throughout the run;
+safety reruns are included in each scenario, with individual-check totals in the log.
+A finished score says how many scenarios passed, whereas progress says how many were
+checked. New failure reports retain the model's brief evidence, including explanations
+for empty tag lists. These explanations are model claims, not verified musical facts.
+Playlist reports flag relevant test tracks omitted before model
 ranking, so those local preparation failures can be investigated separately.
 
 ## 6. Validate model-backed workflows with real data
