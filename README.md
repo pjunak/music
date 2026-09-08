@@ -100,7 +100,8 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   feature-specific input, quality, consent, and review contracts exist. The playlist planner,
   context-aware mood tagger, mood-tag cleanup reviewer, and EQ draft assistant are the implemented
   optional model tasks.
-  Each requires its own current synthetic quality pass and versioned disclosure consent. Playlist
+  Each task being used requires its own current synthetic quality pass and versioned disclosure
+  consent. Mood tagging does not require configuring, testing or running mood-tag cleanup. Playlist
   planning sends at most 100 path-free candidates, constrains the response to those exact track
   IDs, and returns a draft.
   Playlist refinement keeps local defaults and supplements its bounded candidate pool through
@@ -197,8 +198,9 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   preselects only high/medium-confidence suggestions for explicit acceptance. It never receives
   track titles, display titles, library paths, audio, existing database mood tags, or review decisions; it skips unchanged
   model profiles and cannot promote its output without acceptance.
-  A separately assigned, quality-certified cleanup model can review only the database mood-tag catalog and
-  usage counts. It proposes renames in a durable server job, selects nothing by default, and can
+  Optional AI cleanup shares the mood-tagging model settings but has its own quality check.
+  It reviews only the database mood-tag catalog and usage counts, not generated tagging results.
+  It proposes renames in a durable server job, selects nothing by default, and can
   apply only the individually checked, still-current proposal items in one atomic transaction.
 - **Automatic playlists** — switch a normal playlist to a versioned local tag/BPM rule after
   previewing its exact resolved songs. Rules can match any or every included tag, exclude tags,

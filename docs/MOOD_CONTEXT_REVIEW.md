@@ -1,4 +1,190 @@
-# Mood context: quality review and next evaluation
+# Mood workflow: findings, proposed rework and evaluation
+
+## Current assessment — 2026-09-08
+
+**Status: analysis and proposed implementation, not an implemented redesign.**
+Reviewed source at `a66b039`, the supplied screenshots and the operator's report
+that algorithmic analysis completed for the library. No private database, exact
+production request/response, or audio was inspected. No paid model call was made.
+This assessment supersedes the forward-looking September 6 plan below; its old
+implementation measurements remain historical evidence.
+
+Mood-tag cleanup is not required for tagging. The previous change unified model
+settings but retained a separate cleanup task and certification. The setup copy
+and the previous instruction to run both checks made this look like a required
+pipeline. That guidance was wrong for someone who only wants tagging.
+
+The central problem is a mismatch between the available evidence and the requested
+result. A text model receives metadata and acoustic measurements, not music.
+Completing every local stage improves coverage; it does not turn DSP and voice
+detection into a musical mood, instrument or scene recognizer. The prompt requires
+explicit semantic evidence for setting, scene and period tags. Sparse metadata can
+therefore produce a valid but useless abstention even with full audio context.
+
+Keep local analysis, bounded execution and human review. Simplify setup and develop
+audio-based musical evidence before scaling paid tagging. More thinking, retries
+or a second cleanup model would not address missing evidence.
+
+### Findings
+
+| Finding | Source evidence | Consequence |
+| --- | --- | --- |
+| Cleanup is independent | `providers.rs::ensure_shared_mood_configuration` checks shared settings only for `tag_cleanup`. `ModelTaggerBatch::finish` accepts supplied canonical IDs only. | Generated names are already canonical. AI cleanup concerns ambiguous operator-owned names, not a second pass over model tags. |
+| Empty results are valid and cached | The schema permits zero tags; `model_tag_profile_is_current` accepts valid empty profiles. Jobs skip current profiles regardless of tag count. | A completed job can save no suggestions. Repeating an unchanged run skips them; forcing a rebuild can spend again without better evidence. |
+| Abstention evidence is hidden | `tags.rs::view_for_track_with_model` exposes evidence only inside the loop over tags. `ModelAnalysisStatus` omits evidence and the stored `context_status`. | An empty profile's explanation disappears. Evidence can also be empty, so some older results may have no reason to recover. |
+| The inspector displays different evidence | `LibraryTagEditor.tsx` shows `audio_signal` from `local-audio/v1`; the tagger uses bounded `local-context/v2`. | The displayed measurements do not show exactly what the AI used. This does not prove the production request omitted full context. |
+| Completion does not measure usefulness | `model_jobs/tagging.rs` counts stored profiles, including empty ones, without a tag-yield stop. | A run can declare suggestions ready while every result is empty and continue spending on further requests. |
+| Deferred tracks can be called current | `unchanged_profiles` subtracts the truncated work list from eligible tracks. | Tracks deferred by the run limit are included in “already current.” Count current and deferred work before truncation. |
+| Quality fixtures miss the real use case | Only 5 of 56 cases in `music-tagging-v1.json` contain context. Three also contain explicit semantic metadata; two are restraint cases. None includes production `measurement_reliability`. | No positive case requires useful mood inference from acoustic context alone. A 56/56 pass establishes synthetic contract/semantic performance, not musical usefulness on this library. |
+| Most tags need unavailable semantics | The default vocabulary has 49 settings, 8 periods, 42 scenes and 39 moods: 138 total. | Most choices cannot be supported by generic acoustic measurements under the current prompt. |
+| The example only demonstrates abstention | `tagging_example` repeats empty tags and insufficient-metadata evidence for every slot. The harness says it teaches structure only. | Possible additional abstention bias; this is a hypothesis, not proven model reasoning. |
+
+The reported full-analysis run rules out incomplete analysis as the working
+explanation. Current profiles and zero suggestions are consistent with saved
+empty tag sets. Inspection found no normal parser path that silently discards all
+valid canonical tags. Exact abstention reasons and historical context still need
+the retained records. Expose those first, without paying to recreate the failure.
+
+Source entry points: [tagger](../crates/music-application/src/assistant/model_tagger.rs),
+[job](../crates/music-application/src/assistant/model_jobs/tagging.rs),
+[review projection](../crates/music-application/src/assistant/tags.rs),
+[roles](../crates/music-application/src/assistant/providers.rs),
+[fixtures](../crates/music-application/src/assistant/evaluation_suites/music-tagging-v1.json),
+[review UI](../frontend/src/views/assistant/AnalysisTagReview.tsx),
+[editor](../frontend/src/views/assistant/LibraryTagEditor.tsx).
+
+### Cost and usefulness
+
+The operator reported 3 responses for a 50-track pilot, with 119,136 input tokens,
+2,074 output tokens and no visible suggestions: about **2,383 input tokens per
+track** with zero demonstrated yield. Cache reads were 11,092 tokens, about 9.3%
+of input. Cache reads/writes are already included in totals; do not add them again.
+These are reported usage figures, not a verified bill or portable price estimate.
+
+Reconstructing the current default vocabulary projection gives **32,225 UTF-8
+bytes per request**, before track evidence. This is not a token count. Definitions,
+aliases and cues accompany trajectories, sections and prose describing overlapping
+facts. Aggregate usage cannot identify each component's exact production cost.
+The older synthetic request-size measurements below are not this private run.
+
+Batch can change scheduling and price; it does not improve an uninformative
+classification. Measure useful accepted tags, missed useful tags and false positives
+alongside cost. More tags or more cache hits alone do not establish success.
+
+### Proposed workflow and architecture
+
+Keep the existing library browser and directly editable manual tags. Use three
+clear steps: **Prepare evidence → Suggest tags → Review results**. Preparation
+distinguishes analysis coverage from musical-classifier availability. Suggestions
+use one optional text-model configuration and explicit scope/budgets. Review filters
+separate tracks with tags, abstentions, failures and outdated results; every result
+shows what happened, why, and the evidence used.
+
+Retain execution outcome, result content and freshness as separate fields. A
+processed track may have a current abstention or an outdated positive result.
+Summaries need tracks with tags, total tags, abstentions, errors, current profiles,
+skipped changes and deferred work. Preserve bounded run membership/outcomes apart
+from the replaceable latest-profile cache. Old profiles expose whatever evidence
+exists, otherwise “reason not recorded.” Future abstentions require a concise
+public reason, not hidden reasoning. Store a bounded authenticated input/result
+snapshot without credentials or audio; do not present reconstructed current
+context as the exact historical input.
+
+Separate three kinds of evidence and suggestions:
+
+| Layer | Meaning | Source |
+| --- | --- | --- |
+| Acoustic facts | Approximate pulse, voice presence, relative development and significant section changes | Existing local analysis; useful for browsing without paid inference. Recording level stays separate from emotional intensity. |
+| Musical impressions | Relaxed, melancholic, tense; instrumentation/style when supported | A music-specific audio model and bounded metadata. Predictions retain uncertainty and are not automatic manual tags. |
+| Suggested session uses | Could suit rest, pursuit, exploration or a tavern | Editorial suitability based on musical evidence and operator vocabulary meanings, with separate provenance and explicit review. |
+
+This resolves asking what a song *could suit* while demanding metadata that
+literally names that situation. It does not justify loudness-to-combat or
+slow-tempo-to-rest rules. Unknown periods remain unknown; never force minimum tags.
+
+Target: **local audio → cached musical evidence → optional text interpretation →
+canonical-ID validation → human review**. No AI cleanup stage. Keep deterministic
+alias, spelling and duplicate review in Vocabulary maintenance. Retire standalone
+AI cleanup from normal setup while preserving authored tags and historical records.
+Any later ambiguous-name AI helper needs its own justification and safeguards.
+
+The voice runtime currently selects exactly two predictions, voice/instrumental.
+Its published graph exposes intermediate features, but adding moods requires
+compatible trained heads or another checkpoint, not enabling a dormant setting.
+Reuse decoding/windowing where compatible and assess a shared encoder with small
+classifier heads before adding multiple full passes.
+[Voice model metadata](https://essentia.upf.edu/models/classifiers/voice_instrumental/voice_instrumental-musicnn-msd-2.json).
+
+Limit model exploration to two candidates:
+
+- **First: established music classifiers.** Essentia publishes mood/theme models,
+  including an MTG-Jamendo taxonomy, and demonstrates embedding reuse with downstream
+  classifiers. These can supply musical evidence, but do not certify tabletop tags.
+  MTG lists CC BY-NC-SA 4.0 or proprietary licensing for its models. Check the exact
+  artifact, Rust compatibility and resource cost before adoption.
+  [Catalog](https://essentia.upf.edu/models.html),
+  [embedding workflow](https://essentia.upf.edu/tutorial_tensorflow_auto-tagging_classification_embeddings.html).
+- **Alternative: music-trained audio/text matching.** LAION's `larger_clap_music`
+  card describes audio/text similarity and zero-shot classification and labels that
+  artifact Apache-2.0. Compare audio with musical descriptions attached to vocabulary
+  entries, including negative/abstention examples. Similarity is not a probability;
+  always choosing the closest label would recreate false tags. Resource use and
+  runtime compatibility remain unverified.
+  [Model card](https://huggingface.co/laion/larger_clap_music/blob/main/README.md).
+
+These are research candidates, not accepted dependencies or accuracy promises.
+Preserve the Rust runtime and analysis port. Do not introduce a Python production
+service, send songs to a provider or restore filename/title inference for this work.
+
+### Finite implementation plan
+
+| Order | Engineering work | Completion criterion |
+| --- | --- | --- |
+| 1. Explain and simplify | Expose profile evidence/confidence/context status; distinguish empty/failed/stale; fix current/deferred counts; remove cleanup from tagging setup and correct help. Allow selected-track reconsideration instead of directing users to rebuild everything. | Existing empty results become diagnosable without another provider request. Tagging readiness never requires cleanup certification. Empty profiles are not described as generated tags. |
+| 2. Stop avoidable waste | Persist tag-yield counts. Default new standard pilots to stop before scheduling another request when the first completed request yields no tags; preserve results and require deliberate continuation. Submit asynchronous Batch pilots separately: already submitted work cannot be unspent. | Tests cover zero-yield stop, continuation without duplicate paid work, cancellation and partial counters. Valid abstention does not trigger corrective retries. |
+| 3. Rework task and evaluation | Separate mood from session suitability; add positive context-only cases, sparse metadata, mixed sections, contradictory cues and production reliability/missingness. Use balanced synthetic examples instead of all-empty examples. | Always-abstain fails positive usefulness tests. Existing safety checks and quality thresholds remain. Version changed prompts/schemas/disclosures/fingerprints as applicable. |
+| 4. Compare compact context and one music model | Compare existing context, compact evidence and musical classifier evidence on one fixed cohort, retaining the same text model/Thinking setting. Start with the first candidate; investigate the alternative only for a demonstrated gap. | Select or reject using useful-tag precision/coverage, per-group errors, provider usage and local CPU/RSS. No speculative dependency expansion. |
+| 5. Integrate the winner and scale | Cache audio evidence by source/model/preprocessing identity and vocabulary interpretation separately. Integrate the useful source into existing review contracts; retain optional bounded text/Batch processing. | Unchanged runs do no new inference. Vocabulary edits do not require decoding unchanged audio. A reviewed pilot passes before a larger authorized run. |
+
+Compact input retains trends, significant transitions/endings, voice coverage and
+uncertainty; removes repeated prose and false precision. Send all meanings in the
+explicitly requested tag groups. Do not silently prune custom vocabulary using
+untested heuristics. Target 50% less input, conditional on preserving useful coverage;
+measure actual reported tokens as well as bytes.
+
+Use 30 varied tracks: 20 for development and 10 held out, spanning artists, styles,
+dynamics, voice states and metadata richness. Avoid an alphabetical single-artist
+slice as the only sample. The operator identifies useful tags and unacceptable
+suggestions independently of model output. Keep private examples local.
+
+Proposed pilot targets, to agree before comparing alternatives: at least 80% of
+proposed tags judged useful, and a useful suggestion for 60% of tracks where the
+operator identified a supported target tag. Score moods and session uses separately;
+retain all existing safety gates. Report raw counts: this small pilot is a go/no-go
+sample, not a general accuracy claim. Include certification, corrections and live
+comparison in one explicit usage budget; no automatic paid retesting/model shopping.
+
+### Ownership and stopping point
+
+**Engineering:** diagnostics, API/UI changes, regressions, compact input, model
+compatibility/resource checks, local benchmark tools and comparison reports. Steps
+1–2 require no paid library run. No unrelated playlist/EQ expansion is needed.
+
+**Operator:** make the existing records accessible through the new inspector,
+review one small listening sample, decide which suggested session uses are helpful,
+and authorize a capped provider comparison when ready. Deployment remains in the
+infrastructure repository. No complete local-analysis rerun or cleanup certification
+is needed merely to diagnose this run.
+
+If the tested approach misses the pilot targets, retain useful local filters and
+manual tags and leave paid tagging experimental. Stop spending or adding models
+until there is a concrete new reason to expect improvement.
+
+**Review validation:** source tracing, programmatic fixture/vocabulary counts and
+documentation checks. Production usage was supplied by the operator. No runtime
+change, private musical benchmark or new accuracy claim is made in this review.
+
+## Historical implementation review — 2026-09-06
 
 **Reviewed:** 2026-09-06. Scope: current Rust analysis, model input preparation,
 cost controls and music-tag usefulness. No private-library or paid-provider run.
@@ -13,7 +199,8 @@ make an acoustic statistic prove a scene such as a medieval tavern.
 One shared text model is sufficient as an architectural default. Tagging chooses
 canonical IDs; cleanup resolves ambiguous *manual tag names*. Local rules already
 resolve canonical names and declared aliases, and cleanup is not chained after
-tagging. A model that passes tagging still needs to pass cleanup independently.
+tagging. Only someone using AI cleanup needs to pass its independent check;
+tagging alone does not require cleanup configuration or certification.
 The supplied Luna cleanup export failed one of twenty strict cases, so unification
 does not establish that Luna is good enough for both tasks.
 
@@ -118,7 +305,7 @@ stacks with a particular cache discount or predicts this account's bill.
 | Step | Engineering work | Operator work | Exit condition |
 | --- | --- | --- | --- |
 | 1. Ship the bounded workflow | Implemented: limits, shared configuration, Batch recovery, accounting, stable identity, spectral coverage and reliability projection. Validate repository gates. | Deploy through the normal infrastructure workflow; retain the database backup and credential key. | Candidate starts, schema 12 is current, accepted/manual tags survive. |
-| 2. Verify the provider boundary | Tests cover the request/parser and durable lifecycle; address any real adapter failure. | Save Music tagging to link the shared model; run both strict task checks. Try at most 20 tracks with explicit request/reservation limits after local context refresh. Check provider billing and collected review-only results. | Real Batch completes or clearly reports its error; no unexplained repeat requests. |
+| 2. Verify the provider boundary | Tests cover the request/parser and durable lifecycle; address any real adapter failure. | Verify and certify only the task being used; tagging does not require cleanup certification. Try at most 20 tracks with explicit request/reservation limits after local context refresh. Check provider billing and collected review-only results. | Real Batch completes or clearly reports its error; no unexplained repeat requests. |
 | 3. Establish musical quality | Prepare a fixed, small comparison and aggregate errors/cost per useful accepted tag. Test improved intensity/tempo/context representations locally. | Select 20–50 varied tracks, listen, mark useful and unsupported tags, and allow abstention. | A reviewed baseline distinguishes semantic quality from schema success. |
 | 4. Improve only demonstrated weaknesses | Compare metadata-only, metadata plus current context, and a compact calibrated context, using the same model/Thinking and vocabulary. Consider one local encoder only if needed. | Choose the balance between missing useful tags and false scene/mood tags. | Quality improves at a measured, bounded cost; then expand gradually. |
 

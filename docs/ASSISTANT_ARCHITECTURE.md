@@ -141,7 +141,9 @@ current inference identity and review evidence, without requiring permission for
 Pending records block model/connection and credential mutations; terminal connection deletion
 also deletes its Batch records, while ordinary job history retains usage/results.
 
-The shared mood configuration retains independent gates for tagging and cleanup. Inference
+The shared mood configuration retains independent gates for tagging and cleanup.
+Cleanup is optional manual-tag catalog maintenance, never a prerequisite or second pass
+for tagging. Only the task being used needs its own current certification. Inference
 identity hashes the task's rendered prompt/schema and meaningful inference settings; runtime
 source fingerprints still govern certification. Per-track evidence/vocabulary/context hashes
 remain mandatory. See [ADR-025](ADR-025-bounded-shared-mood-inference.md) and the
