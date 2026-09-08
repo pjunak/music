@@ -6,7 +6,9 @@ export function ModelTaggingRunControls({ limits, onLimits, mode, onMode, batchA
 }) {
   return <section>
     <h3 className="section-label">Run limits</h3>
-    <p className="muted">Start with a small pilot. A later run skips current results.</p>
+    <p className="muted">Start with 20 varied tracks. A later run skips current results, including completed analyses that returned no tags.</p>
+    <label className="checkbox-row"><input type="checkbox" checked={limits.stop_on_empty_batch !== false} onChange={(event) => onLimits({ ...limits, stop_on_empty_batch: event.target.checked })} /><span>Stop when a request returns no tags</span></label>
+    <p className="muted">Completed results are kept. A new run can continue with unprocessed tracks. For asynchronous Batch, this protection limits the pilot to one request; disable it deliberately to submit a larger batch after reviewing the pilot.</p>
     {([
       ["max_tracks", "Maximum tracks", 1, 10000],
       ["max_requests", "Maximum model requests, including corrections", 1, 1000],

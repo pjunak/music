@@ -48,7 +48,7 @@ import { ModelTaggingPanel } from "./ModelTaggingPanel";
 
 const availability: ModelTaggingAvailability = {
   execution_mode: "standard", batch_available: false, pending_batch_id: null,
-  limits: { max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000 },
+  limits: { max_tracks: 20, max_requests: 10, max_token_reservation: 1_000_000, stop_on_empty_batch: true },
   run_tracks: 40, deferred_tracks: 0, token_reservation: 200_000,
   available: true,
   reason_code: null,
@@ -253,7 +253,7 @@ describe("ModelTaggingPanel", () => {
       progress_current: 40,
       result: {
         schema_version: "assistant-model-music-tagging-job-result/v6",
-        analyzer_id: "model-context-tagger/v6",
+        analyzer_id: "model-context-tagger/v7",
         vocabulary_fingerprint: "b".repeat(64),
         library_tracks: 45,
         scope_tracks: 45,
@@ -271,9 +271,10 @@ describe("ModelTaggingPanel", () => {
     renderPanel();
 
     expect(
-      await screen.findByText("Generated suggestions are ready for review"),
+      await screen.findByText("Model analysis completed"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Updated 40 profiles/)).toBeInTheDocument();
+    expect(screen.getByText(/40 profiles saved/)).toBeInTheDocument();
+    expect(screen.getByText(/older run did not record separate counts/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View saved results from this run" }).getAttribute("href")).toContain("model_job_id=");
     expect(screen.getByRole("link", { name: "Review AI results" })).toHaveAttribute(
       "href",

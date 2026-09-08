@@ -655,7 +655,7 @@ export function AssistantAiSetupView() {
   }
 
   const tagRoles = roles.filter((role) =>
-    ["music_tagger", "tag_cleanup"].includes(role.role_id),
+    role.role_id === "music_tagger",
   );
   const standaloneRoles = roles.filter(
     (role) => !["music_tagger", "tag_cleanup"].includes(role.role_id),
@@ -866,7 +866,7 @@ export function AssistantAiSetupView() {
             {
               roles.filter(
                 (role) =>
-                  role.effective_enabled &&
+                  role.role_id !== "tag_cleanup" && role.effective_enabled &&
                   qualityEvaluations.some(
                     (evaluation) =>
                       evaluation.role_id === role.role_id &&
@@ -888,7 +888,7 @@ export function AssistantAiSetupView() {
               <section className="assistant-role-family assistant-tag-role-family">
                 <div className="assistant-role-family-heading">
                   <div>
-                    <h3>Tag models</h3>
+                    <h3>Tag suggestions</h3>
                   </div>
                   <span>Shared vocabulary</span>
                 </div>
@@ -898,6 +898,11 @@ export function AssistantAiSetupView() {
               </section>
             ) : null}
             {standaloneRoles.map(renderRoleCard)}
+            <details className="assistant-role-family">
+              <summary>Legacy tag-name maintenance (optional)</summary>
+              <p>Only for ambiguous names in manually authored tags. Generated tags already use the vocabulary. Tagging never requires this task; ordinary cleanup is available in Mood vocabulary.</p>
+              {roles.filter((role) => role.role_id === "tag_cleanup").map(renderRoleCard)}
+            </details>
           </div>
         )}
         {connections.length > 0 ? (

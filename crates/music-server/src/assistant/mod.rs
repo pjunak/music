@@ -1161,12 +1161,14 @@ struct ModelTaggingStartRequest {
 #[serde(default, deny_unknown_fields)]
 #[schema(as = ModelTaggingLimits)]
 struct ModelTaggingLimitsWire {
-    #[schema(minimum = 1, maximum = 10000, default = 100)]
+    #[schema(minimum = 1, maximum = 10000, default = 20)]
     max_tracks: usize,
     #[schema(minimum = 1, maximum = 1000, default = 10)]
     max_requests: usize,
     #[schema(minimum = 1000, maximum = 100000000, default = 1000000)]
     max_token_reservation: u64,
+    #[schema(default = true)]
+    stop_on_empty_batch: bool,
 }
 
 impl Default for ModelTaggingLimitsWire {
@@ -1176,6 +1178,7 @@ impl Default for ModelTaggingLimitsWire {
             max_tracks: limits.max_tracks,
             max_requests: limits.max_requests,
             max_token_reservation: limits.max_token_reservation,
+            stop_on_empty_batch: limits.stop_on_empty_batch,
         }
     }
 }
@@ -1186,6 +1189,7 @@ impl ModelTaggingLimitsWire {
             max_tracks: self.max_tracks,
             max_requests: self.max_requests,
             max_token_reservation: self.max_token_reservation,
+            stop_on_empty_batch: self.stop_on_empty_batch,
         }
         .validate()
         .map_err(|_| ApiError::validation())
@@ -1954,7 +1958,7 @@ async fn start_model_tagging(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v12"
+    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v13"
         || !payload.consent
     {
         return Err(ApiError::validation());
@@ -2163,6 +2167,12 @@ async fn model_tagging_availability(
                 {
                     role.reason_code = Some("tagging_budget_too_small".to_owned());
                 }
+                if execution_mode == ModelTaggingExecutionModeWire::Batch
+                    && limits.stop_on_empty_batch
+                    && batches.len() > 1
+                {
+                    role.reason_code = Some("batch_pilot_required".to_owned());
+                }
                 batches.len()
             }
             Err(error) => {
@@ -2203,7 +2213,7 @@ async fn model_tagging_availability(
 
 fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingDisclosureResponse {
     ModelTaggingDisclosureResponse {
-        version: "assistant-model-music-tagging-disclosure/v12",
+        version: "assistant-model-music-tagging-disclosure/v13",
         shared_with_provider: vec![
             "Indexed artist, album, origin, and genre metadata",
             "Track durations and BPM values when available",
@@ -3548,6 +3558,28 @@ fn model_analysis_status_schema() -> RefOr<Schema> {
         )
         .property("job_id", nullable_string_schema())
         .property(
+            "suggested_tag_count",
+            AnyOfBuilder::new()
+                .item(openapi_integer())
+                .item(ObjectBuilder::new().schema_type(Type::Null)),
+        )
+        .property(
+            "evidence",
+            ArrayBuilder::new().items(ObjectBuilder::new().schema_type(Type::String)),
+        )
+        .property("confidence", nullable_confidence_schema())
+        .property("context_status", nullable_string_schema())
+        .property(
+            "input_snapshot",
+            AnyOfBuilder::new()
+                .item(
+                    ObjectBuilder::new()
+                        .schema_type(Type::Object)
+                        .additional_properties(Some(AdditionalProperties::FreeForm(true))),
+                )
+                .item(ObjectBuilder::new().schema_type(Type::Null)),
+        )
+        .property(
             "updated_at_unix_seconds",
             AnyOfBuilder::new()
                 .item(openapi_integer())
@@ -3704,7 +3736,7 @@ fn model_tag_cleanup_request_count_schema() -> RefOr<Schema> {
         .into()
 }
 fn model_tagging_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-model-music-tagging-disclosure/v12")
+    const_string_schema("assistant-model-music-tagging-disclosure/v13")
 }
 fn model_tagging_role_schema() -> RefOr<Schema> {
     const_string_schema("music_tagger")

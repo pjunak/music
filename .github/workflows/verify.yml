@@ -70,6 +70,7 @@ jobs:
 
       - name: Check architecture and final repository tree
         run: |
+          node --test tools/mood-pilot.test.mjs
           node --test .github/scripts/rust-architecture.test.mjs
           node .github/scripts/rust-architecture.mjs
           node --test .github/scripts/rewrite-tree.test.mjs

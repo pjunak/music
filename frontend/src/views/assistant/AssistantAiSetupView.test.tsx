@@ -236,7 +236,7 @@ beforeEach(() => {
 });
 
 describe("AssistantAiSetupView", () => {
-  it("groups tagging and cleanup around their shared vocabulary", async () => {
+  it("keeps optional legacy cleanup outside the tagging setup", async () => {
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
       musicTaggingRole,
@@ -246,7 +246,7 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     const heading = await screen.findByRole("heading", {
-      name: "Tag models",
+      name: "Tag suggestions",
     });
     const family = heading.closest("section");
     expect(family).not.toBeNull();
@@ -256,16 +256,17 @@ describe("AssistantAiSetupView", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      within(family as HTMLElement).getByRole("heading", {
+      within(family as HTMLElement).queryByRole("heading", {
         name: "Mood-tag cleanup",
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(
       within(family as HTMLElement).getByText("Canonical tag IDs"),
     ).toBeInTheDocument();
     expect(
-      within(family as HTMLElement).getByText("Canonical ID or no match"),
-    ).toBeInTheDocument();
+      screen.getByText("Legacy tag-name maintenance (optional)").closest("details"),
+    ).not.toHaveAttribute("open");
+    expect(within(family as HTMLElement).getByText(/No cleanup model or cleanup quality check is required/)).toBeInTheDocument();
   });
 
   it("explains per-task keys and shows which tasks reuse a connection", async () => {

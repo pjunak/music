@@ -10,7 +10,7 @@ describe("TagReviewSummary", () => {
   it("shows source-specific decisions and explains the denominator", async () => {
     render(<TagReviewSummary summary={{ matching_tracks: 200, sources: [
       { analyzer_id: "local-metadata/v1", pending: 5, accepted: 2, rejected: 1 },
-      { analyzer_id: "model-context-tagger/v6", pending: 8, accepted: 4, rejected: 0 },
+      { analyzer_id: "model-context-tagger/v7", pending: 8, accepted: 4, rejected: 0 },
     ] }} />);
     await userEvent.click(screen.getByText("Review summary · 7 of 20 suggestions reviewed"));
     const table = screen.getByRole("table", { name: "Current suggestion review counts" });

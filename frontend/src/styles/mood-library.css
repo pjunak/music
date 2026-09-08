@@ -180,3 +180,9 @@
   gap: var(--space-4);
   padding-top: var(--space-4);
 }
+.assistant-input-snapshot {
+  max-height: 24rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

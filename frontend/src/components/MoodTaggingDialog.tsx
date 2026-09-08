@@ -1,4 +1,5 @@
 import { ModelTaggingRunControls } from "./ModelTaggingRunControls";
+import { TaggingRunOutcome } from "@/views/assistant/TaggingRunOutcome";
 import { ModelBatchStatusPanel } from "./ModelBatchStatusPanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -25,7 +26,6 @@ import { wsClient } from "@/core/ws";
 import {
   MODEL_TAGGING_JOB_KIND,
   isModelTaggingJobActive,
-  modelTaggingResultFromJob,
   modelTaggingScopeFromJob,
 } from "@/views/assistant/modelTaggingJobs";
 
@@ -64,7 +64,9 @@ function unavailableMessage(reasonCode: string | null): string {
     case "batch_unsupported_adapter":
       return "Batch processing requires the OpenAI Responses connection and a model supporting Batch.";
     case "tagging_budget_too_small":
-      return "Reduce the track limit or raise the request and token reservation limits to cover this plan.";
+      return "Reduce the track limit or raise the limits to cover the plan.";
+    case "batch_pilot_required":
+      return "Use a pilot of one request, or disable the no-tag stop after reviewing a pilot. Batch cannot stop already submitted work.";
     case "request_too_large":
       return "The vocabulary and track metadata exceed the provider request limit. Shorten vocabulary descriptions, aliases, or context cues before starting.";
     case "model_quality_not_passed":
@@ -85,18 +87,20 @@ export function MoodTaggingDialog({
   checkedIds,
   onClose,
   onChanged,
+  reconsider = false,
 }: {
   path: string;
   checkedIds: number[];
   onClose: () => void;
   onChanged: () => void;
+  reconsider?: boolean;
 }) {
   const [step, setStep] = useState<Step>("configure");
   const [scopeType, setScopeType] = useState<ScopeType>(
     checkedIds.length > 0 ? "tracks" : path ? "folder" : "all",
   );
   const [recursive, setRecursive] = useState(true);
-  const [force, setForce] = useState(false);
+  const [force, setForce] = useState(reconsider);
   const [limits, setLimits] = useState(DEFAULT_MODEL_TAGGING_LIMITS);
   const [executionMode, setExecutionMode] = useState<"standard" | "batch">("standard");
   const [contextPolicy, setContextPolicy] =
@@ -557,6 +561,7 @@ export function MoodTaggingDialog({
       ) : (
         <p className="muted small">You can close this window; the server-side run will continue.</p>
       )}
+      {job.status === "failed" || job.status === "cancelled" ? <TaggingRunOutcome job={job} /> : null}
     </div>
   );
 
@@ -656,15 +661,9 @@ export function MoodTaggingDialog({
     </div>
   );
 
-  const result = modelTaggingResultFromJob(job);
   const doneBody = (
     <div className="mood-tagging-done">
-      <strong>Suggestions are ready for review</strong>
-      <p>
-        {result === null
-          ? "The run finished."
-          : `${result.updated_profiles} profiles were updated and ${result.unchanged_profiles} were already current.`}
-      </p>
+      <TaggingRunOutcome job={job} />
     </div>
   );
 

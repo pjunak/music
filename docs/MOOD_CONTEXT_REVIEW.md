@@ -1,8 +1,78 @@
-# Mood workflow: findings, proposed rework and evaluation
+# Mood workflow: implemented rework and remaining evaluation
 
-## Current assessment — 2026-09-08
+## Implementation — 2026-09-08
 
-**Status: analysis and proposed implementation, not an implemented redesign.**
+The application rework is implemented. Musical accuracy and adoption of a new
+audio classifier remain unproven, and no paid provider or private-library run was
+performed. The design assessment below records the pre-change diagnosis.
+
+- **One normal tagging setup.** Cleanup is collapsed under optional legacy
+  tag-name maintenance and excluded from normal tagging readiness. Deterministic
+  vocabulary maintenance and historical cleanup records remain available.
+- **Explain every saved outcome.** Review exposes tag count, public explanation,
+  confidence, recorded context coverage and, for new profiles, the exact bounded
+  per-track input. Empty results stay visible; older missing explanations/inputs
+  are reported honestly. Filters separate returned tags from no tags. Selected
+  reconsideration follows normal planning/consent and never rebuilds unselected
+  tracks by default. Manual/accepted tags remain untouched.
+- **Bound waste.** Default pilots are 20 tracks. The enabled no-tag guard saves a
+  valid empty request and stops before another request. Ordinary continuation
+  skips current empty profiles. Multi-request asynchronous plans require a
+  deliberate guard override. Corrected counters distinguish current/deferred,
+  processed/with-tags/empty, saved/changed and remaining work. Returned track
+  outcomes and partial counters survive in job records and exports.
+- **Improve the task.** Mood impressions and session-use suggestions are labeled
+  separately. Broad acoustic impressions may be proposed with restrained
+  confidence; nuanced emotion, setting, scene and period still need semantic
+  support. No minimum tag count, title inference or local mood guessing was added.
+  Every future abstention requires an explanation. Balanced structural examples
+  replace the repeated empty example.
+- **Test the sparse-metadata use case.** The suite grows from 56 to 63 scenarios,
+  with 13 safety repeats and an independent context-only gate. Seven new cases
+  cover calm/urgent/chaotic context, gain changes, conflicting endings, weak tempo
+  and unavailable measurements. Metadata success cannot mask failure on those
+  cases; existing vocabulary and safety gates remain.
+- **Compact the input.** Shared live/evaluation projection rounds numeric detail
+  and removes sampled tempo points and repeated prose while retaining all ten
+  bounded sections, endings, development, voice and reliability. In the fixed
+  synthetic 20-track regression, user payload falls from 102,461 to 70,261 UTF-8
+  bytes (31.4%); the new system prompt is 11,304 bytes. This isolates projection
+  savings using the same current vocabulary/envelope, not a reconstruction of the
+  operator's exact request or a billed-token comparison. The proposed 50% overall
+  target is not demonstrated.
+
+Contracts advance to input v21, output v4, disclosure v13, analyzer v7 and suite
+baseline v22. Existing `local-context/v2` results are reusable; no algorithmic or
+voice rerun is required by this change. Earlier AI profiles become outdated and
+the tagging task needs current conformance/quality checks before new inference.
+Older saved results remain inspectable. Nothing starts automatically.
+
+**Still to do, in order:** the operator reviews one fixed 30-track listening
+sample; engineering compares retained/compact results and profiles one compatible
+music classifier if the evidence justifies it; integrate/cache a useful winner;
+only then authorize scaling. The offline cohort/scoring tool and exact first
+candidate compatibility findings are in [the listening pilot](MOOD_PILOT.md).
+The candidate needs a separate Discogs-EffNet encoder and cannot consume existing
+voice scores. No new model weights, runtime service or dependency were added.
+
+Engineering validation covers mocked request/cancellation/continuation, Batch
+recovery, strict schemas and profile provenance, UI state and offline scoring.
+The explanation panel and controls were also inspected in a real local browser
+using synthetic data. Private listening accuracy and provider-reported savings
+remain the operator-assisted acceptance boundary.
+
+Validation: 388/388 Rust nextest cases passed; workspace check, strict Clippy,
+formatting, doc tests, architecture and generated-contract checks passed. The
+frontend suite passed 301 tests, followed by all five dialog tests after adding
+the selected-reconsideration regression (302 distinct current tests covered);
+lint, typecheck and production build passed. The four offline pilot tests pass
+and are included in CI. Windows FFmpeg tests required permitted child-process
+access; no test or guard was skipped to obtain the pass.
+
+## Pre-rework design assessment — 2026-09-08
+
+**Historical diagnosis and implementation proposal.** See the implementation
+status above for what has now changed.
 Reviewed source at `a66b039`, the supplied screenshots and the operator's report
 that algorithmic analysis completed for the library. No private database, exact
 production request/response, or audio was inspected. No paid model call was made.

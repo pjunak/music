@@ -142,12 +142,15 @@ No vocabulary entries are dropped. An oversized single-track request prevents en
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
 
-Mood tagging input v20 uses batch-local slots, a stable vocabulary reference prefix and
+Mood tagging input v21 uses batch-local slots, a stable vocabulary reference prefix and
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 The context implementation is `local-context/v2+rustfft/v2`: overlapping FFT windows cover
-every half-second frame. The model projection retains all ten sections.
+every half-second frame. The model projection retains all ten sections, rounded trajectory
+endpoints/extremes, tempo range, voice coverage and measurement reliability. Sampled tempo
+points and repeated prose stay local. `compact_context_evidence` is shared by live requests
+and quality fixtures, and its per-track input is saved without the track identifier.
 
 `ModelBatchTransport` is the separate asynchronous port; `model_jobs/batch.rs` owns the
 upload/submission/collection lifecycle. SQLite schema 12 stores durable pending batches.
@@ -269,12 +272,12 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v4+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v3` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v20+output/v3+local-context/v2` | `assistant-model-music-tagging-disclosure/v12` | `model-context-tagger/v6` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v21+output/v4+local-context/v2` | `assistant-model-music-tagging-disclosure/v13` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 
 Full task output contracts are `assistant-playlist-planner-output/v1`,
-`assistant-music-tagger-output/v3`, `assistant-model-tag-cleanup-output/v2`, and
+`assistant-music-tagger-output/v4`, `assistant-model-tag-cleanup-output/v2`, and
 `assistant-eq-draft-output/v1`. Reserved roles `library_cleanup` and `audio_analyzer` use
 `reserved-library-cleanup/v1` and `reserved-audio-analyzer/v1`; they are visible but not
 configurable. `library_cleanup` remains visible with the other planned roles in **AI setup**;
@@ -330,11 +333,13 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
-Tagging suite `controlled-vocabulary-tagging-baseline-v21` uses 50 bundled-vocabulary,
+Tagging suite `controlled-vocabulary-tagging-baseline-v22` uses 57 bundled-vocabulary,
 five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
 vocabularies during batching and validates fixed fixture identities for retests.
-Each vocabulary group must independently meet the existing 90% threshold; all
-blocking failures remain blocking. The ten safety scenarios are repeated once.
+Each vocabulary group and the context-only subset (no descriptive metadata) must independently
+meet the existing 90% threshold; all blocking failures remain blocking. Seven added acoustic
+cases cover supported calm/urgent/chaotic impressions, gain invariance, conflicting endings,
+weak tempo and missing measurements. These fixtures do not establish listening accuracy. The thirteen safety scenarios are repeated once.
 Playlist reports separately record labelled candidate recall before model ranking,
 including missing candidate IDs, even when the provider fails. These are synthetic
 diagnostics; they do not establish live-library recall or change retrieval policy.
@@ -497,7 +502,9 @@ version values and the tables locate the corresponding code and tests.
 ### Shared mood configuration
 
 - Mood tagging and optional tag cleanup share one connection/model/Thinking/request configuration.
-  Configure it through Music tagging; preserve independent enablement, conformance and quality gates.
+  Configure it through Mood tagging; preserve independent enablement, conformance and quality gates.
+  Cleanup appears only in collapsed optional legacy maintenance. It is excluded from normal
+  tagging setup/readiness and its certification is needed only to invoke that legacy helper.
   Local alias cleanup remains authoritative and never becomes a mandatory second model pass.
 
 ### Tagging bounds and inference identity
@@ -508,8 +515,28 @@ version values and the tables locate the corresponding code and tests.
   source changes must not automatically rebill unchanged evidence. Meaningful task/schema/adapter
   semantics must change the inference contract. New inference still requires current certification.
 
+Standard pilots default to 20 tracks with `stop_on_empty_batch=true`. A valid zero-tag
+response is saved with its explanation, is never corrected merely for being empty, and
+stops the run before another request. Count current profiles before truncating the work
+list; deferred tracks are not current. Standard result v7 and Batch result v2 distinguish
+processed tracks, tracks with/without tags, returned tags, saved profiles and unavailable
+work. Per-track outcomes survive in bounded job results; checkpoints retain prior feature
+progress through later uncertain attempts. The export reflects returned results, including
+changed tracks that could not be saved, rather than claiming every row became a profile.
+
+`ModelAnalysisStatus` projects the latest saved model profile even if empty or outdated:
+count, evidence, model confidence, recorded context status and optional bounded input snapshot.
+Old results show missing information explicitly; current context is not reconstructed as
+historical input. The inspector separates acoustic facts, musical impressions and session
+uses. Filters `with_suggestions`/`without_suggestions` are independent of freshness/review.
+Selected-track reconsideration uses an explicit forced scope and normal plan/consent gates.
+Accepted/manual tags never change as part of inference or reconsideration.
+
 ### Batch recovery
 
+- With the empty-request guard enabled, reject plans containing more than one asynchronous
+  request (`batch_pilot_required`) before upload. A deliberate guard override permits a larger
+  Batch after review; already submitted requests cannot be stopped by local yield checks.
 - OpenAI Batch uses the same strict task and review contracts. Persist state before upload/submit;
   never automatically repeat an uncertain submission. Batch collection alone is restartable and may
   collect already-paid responses without fresh certification, after checking current inference,
@@ -535,7 +562,10 @@ version values and the tables locate the corresponding code and tests.
   suggestions, playlists, review history, or credentials. Local context analysis must remain
   factual and may never propose setting, period, scene, mood, genre, or instrument tags.
   Context cues are global operator-managed vocabulary guidance, not per-track local tag
-  hypotheses; the model must confirm them against the complete untrusted metadata phrase.
+  hypotheses. Broad mood impressions may use multiple consistent acoustic cues at restrained
+  confidence. Emotional nuances and setting/scene/period choices need semantic support.
+  Scene and setting suggestions describe editorial suitability, not a literal depicted event.
+  Never force a tag, infer periods from recording technology, or turn loudness into combat.
   Keep each tag's ID, name, definition, aliases, and cues together in the provider input so the
   model never has to join a compact index to a second definition table. A run may spend at most
   two disclosed correction requests on malformed JSON, schema-invalid output, track-set mismatch,
@@ -546,10 +576,10 @@ version values and the tables locate the corresponding code and tests.
   evidence, not release date or recording technology. It is a zero-or-one categorical group;
   `cross era` replaces rather than accompanies its component period tags. The model must choose
   zero through eight exact IDs from the full controlled vocabulary and
-  return confidence plus at most four bounded evidence strings. Do not ask it for signal axes and
+  return confidence plus one to four bounded evidence strings. Do not ask it for signal axes and
   do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,
   missing track IDs, malformed confidence, extra fields, and truncated output; only incidental
-  evidence text may be bounded. Store output under `model-context-tagger/v6` in
+  evidence text may be bounded. Store output under `model-context-tagger/v7` in
   `track_analyses` and bind its source signature to metadata, current context signature (or its
   absence), vocabulary fingerprint, contract version, and role fingerprint.
   Before a live run, report full, partial, missing/stale, and failed context coverage. Let the

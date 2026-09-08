@@ -22,7 +22,7 @@ export function LibraryTagsView() {
     >
       <LibraryTagEditor
         key={params.toString()}
-        initialModelFilter={(["processed", "current", "stale", "missing"].includes(status) ? status : "") as "" | ModelTagFilter}
+        initialModelFilter={(["processed", "current", "stale", "missing", "with_suggestions", "without_suggestions"].includes(status) ? status : "") as "" | ModelTagFilter}
         initialSourceFilter={(["model", "metadata", "catalog"].includes(source) ? source : "") as "" | TagSuggestionSource}
         initialModelJobId={jobId}
       />

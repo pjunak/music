@@ -3750,6 +3750,48 @@
           "model_analysis": {
             "additionalProperties": false,
             "properties": {
+              "confidence": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "high",
+                      "medium",
+                      "low"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "context_status": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "evidence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "input_snapshot": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "job_id": {
                 "anyOf": [
                   {
@@ -3767,6 +3809,16 @@
                   "missing"
                 ],
                 "type": "string"
+              },
+              "suggested_tag_count": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "updated_at_unix_seconds": {
                 "anyOf": [
@@ -5140,7 +5192,7 @@
             "type": "integer"
           },
           "version": {
-            "const": "assistant-model-music-tagging-disclosure/v12",
+            "const": "assistant-model-music-tagging-disclosure/v13",
             "type": "string"
           }
         },
@@ -5179,10 +5231,14 @@
             "type": "integer"
           },
           "max_tracks": {
-            "default": 100,
+            "default": 20,
             "maximum": 10000,
             "minimum": 1,
             "type": "integer"
+          },
+          "stop_on_empty_batch": {
+            "default": true,
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -5214,7 +5270,8 @@
             "default": {
               "max_requests": 10,
               "max_token_reservation": 1000000,
-              "max_tracks": 100
+              "max_tracks": 20,
+              "stop_on_empty_batch": true
             },
             "oneOf": [
               {
@@ -5304,7 +5361,7 @@
             "type": "string"
           },
           "disclosure_version": {
-            "const": "assistant-model-music-tagging-disclosure/v12",
+            "const": "assistant-model-music-tagging-disclosure/v13",
             "type": "string"
           },
           "execution_mode": {

@@ -29,6 +29,7 @@ From the repository root:
 ```powershell
 cargo fmt --all --check
 node --test .github/scripts/rust-architecture.test.mjs
+node --test tools/mood-pilot.test.mjs
 node .github/scripts/rust-architecture.mjs
 cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings

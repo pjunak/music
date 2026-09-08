@@ -2,6 +2,8 @@ import { modelRunReviewUrl } from "@/views/assistant/tagProvenance";
 import { useEffect, useRef, useState } from "react";
 import { assistantApi, jobsApi, type ModelBatchStatus } from "@/core/api";
 import { ModelUsageSummary } from "@/views/assistant/ModelUsageSummary";
+import { TaggingYieldSummary } from "@/views/assistant/TaggingYieldSummary";
+import { TaggingRunExport } from "@/views/assistant/TaggingRunExport";
 import { confirmDialog } from "./confirmDialog";
 
 const TERMINAL = new Set(["completed", "failed", "expired", "cancelled"]);
@@ -100,8 +102,10 @@ export function ModelBatchStatusPanel({ id }: { id: string | null }) {
       ) : null}
       {status?.result ? (
         <>
+          <TaggingYieldSummary value={status.result} />
           <p>Saved {String(status.result.updated_profiles ?? 0)} profiles. Rejected or unavailable tracks: {String(Number(status.result.rejected_tracks ?? 0) + Number(status.result.unavailable_or_changed_tracks ?? 0))}. Suggestions still require review in the Mood Library.</p>
           <a href={modelRunReviewUrl(id)}>View saved results from this batch</a>
+          <TaggingRunExport id={id} result={status.result} />
           <ModelUsageSummary job={{ result: status.result }} />
         </>
       ) : null}

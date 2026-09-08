@@ -50,6 +50,13 @@ export function qualityEvidenceNotes(job: BackgroundJob | undefined): QualityEvi
   const evaluation = job?.result?.evaluation;
   if (!isRecord(evaluation)) return [];
   const notes: QualityEvidenceNote[] = [];
+  const context = evaluation.context_only_results;
+  if (isRecord(context) && typeof context.passed === "boolean" &&
+      isCount(context.passed_cases) && isCount(context.total_cases) &&
+      context.total_cases > 0 && context.passed_cases <= context.total_cases) {
+    notes.push({ id: "context-only", tone: context.passed ? "success" : "failure",
+      message: `Acoustic context without descriptive metadata: ${context.passed_cases}/${context.total_cases} scenarios; ${context.passed ? "passed" : "failed"} its independent quality gate. Listening accuracy still needs a reviewed music sample.` });
+  }
   if (Array.isArray(evaluation.vocabulary_results)) {
     const labels: Record<string, string> = {
       default: "Bundled vocabulary", custom: "Custom vocabulary", maximum: "200-tag vocabulary",

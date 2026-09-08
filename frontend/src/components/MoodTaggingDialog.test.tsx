@@ -50,7 +50,7 @@ import { MoodTaggingDialog } from "./MoodTaggingDialog";
 
 const availability: ModelTaggingAvailability = {
   execution_mode: "standard", batch_available: false, pending_batch_id: null,
-  limits: { max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000 },
+  limits: { max_tracks: 20, max_requests: 10, max_token_reservation: 1_000_000, stop_on_empty_batch: true },
   run_tracks: 1, deferred_tracks: 0, token_reservation: 200_000,
   available: true,
   reason_code: null,
@@ -86,7 +86,7 @@ const succeededJob: BackgroundJob = {
   parameters: {},
   result: {
     schema_version: "assistant-model-music-tagging-job-result/v6",
-    analyzer_id: "model-context-tagger/v6",
+    analyzer_id: "model-context-tagger/v7",
     vocabulary_fingerprint: "a".repeat(64),
     library_tracks: 90,
     scope_tracks: 1,
@@ -129,7 +129,7 @@ const reviewPage: LibraryTagPage = {
       analysis_suggestions: [
         {
           tag: "forest",
-          analyzer_id: "model-context-tagger/v6",
+          analyzer_id: "model-context-tagger/v7",
           source_signature: "source-1",
           confidence: "high",
           evidence: ["Library path contains Forest."],
@@ -137,7 +137,7 @@ const reviewPage: LibraryTagPage = {
         },
         {
           tag: "calm",
-          analyzer_id: "model-context-tagger/v6",
+          analyzer_id: "model-context-tagger/v7",
           source_signature: "source-1",
           confidence: "low",
           evidence: ["Bounded signal evidence is restrained."],
@@ -170,6 +170,20 @@ afterEach(() => {
 });
 
 describe("MoodTaggingDialog", () => {
+  it("reconsiders only selected tracks through the normal plan and consent", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><MoodTaggingDialog path="" checkedIds={[9]} reconsider onClose={vi.fn()} onChanged={vi.fn()} /></MemoryRouter>);
+    await waitFor(() => expect(assistantApi.planModelTagging).toHaveBeenCalledWith(
+      { type: "tracks", track_ids: [9] }, "include", true, availability.limits, "standard",
+    ));
+    expect(assistantApi.startModelTagging).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Create suggestions" }));
+    await waitFor(() => expect(assistantApi.startModelTagging).toHaveBeenCalledWith(
+      true, MODEL_TAGGING_DISCLOSURE_VERSION, { type: "tracks", track_ids: [9] }, "include", availability.limits, "standard",
+    ));
+    expect(confirmDialog).toHaveBeenCalledOnce();
+  });
+
   it("warns about incomplete context and lets the operator skip those tracks", async () => {
     vi.mocked(assistantApi.planModelTagging).mockResolvedValue({
       ...availability,

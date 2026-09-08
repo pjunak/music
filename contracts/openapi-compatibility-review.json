@@ -16,20 +16,20 @@
     "reason": "Catalog credential removal is an authenticated extension added after the frozen v1 reference."
   },
   "GET /api/assistant/library-tags/model-status#responses": {
-    "sha256": "071e6f824b228859f5ab7b98ea6a2e9ea925e8a2b501aa9392436cb391460480",
-    "reason": "ADR-025 adds bounded-run limits, selected/deferred counts, conservative reservation units, Batch availability and pending Batch identity. Existing status fields remain; disclosure v12 describes slots, reliability and optional provider file processing."
+    "sha256": "befc94244672bcaa4a294fc5ed63325b524fa81bef4df4c3d9dedde179e4de71",
+    "reason": "September 8 mood rework returns the 20-track pilot default, optional empty-request stop and disclosure v13. Existing counts and execution fields remain. Multi-request Batch plans with the stop enabled are unavailable before upload. Web Assistant consumes these fields; no native client change."
   },
   "GET /api/assistant/library-tags#parameters": {
     "sha256": "f3a5f738cec551f529854906b9f3e89b9fd86a4ebafe1c79248f10d1aacb6e87",
     "reason": "Adds optional model_status, model_job_id and suggestion_source filters for retained AI results. Existing search/tag/review/folder/pagination semantics and defaults remain supported; source narrows suggestions before review filtering. No playback or Baton contract change."
   },
   "GET /api/assistant/library-tags#responses": {
-    "sha256": "1ba402f59ac22339299e9e7cebeba239a7807f9ac182af15f51c5787970da16e",
-    "reason": "Retains ADR-022 optional review_summary and adds optional model_analysis to each track: current/stale/missing, saved job ID and timestamp. Processing is independent of tag count and decisions. Existing response fields and authentication are unchanged; older responses can omit provenance and the UI displays unavailable."
+    "sha256": "e75cf764ea97415f93598ff3581478ef707cfe5fa7ab72777b73832aa6fd5952",
+    "reason": "September 8 mood rework adds optional count, public explanation, confidence, recorded context status and bounded per-track input snapshot to model_analysis. Empty and outdated profiles remain inspectable; missing historical fields stay unknown. Existing tags, review authority and authentication remain unchanged. No playback or Baton DTO change."
   },
   "POST /api/assistant/library-tags/query#responses": {
-    "sha256": "1ba402f59ac22339299e9e7cebeba239a7807f9ac182af15f51c5787970da16e",
-    "reason": "Adds the same optional saved model_analysis provenance to model-only review items while preserving ADR-022 review_summary, request defaults and authentication. Empty results are discoverable through the GET processing filter; this review endpoint retains its pending-review default."
+    "sha256": "e75cf764ea97415f93598ff3581478ef707cfe5fa7ab72777b73832aa6fd5952",
+    "reason": "September 8 mood rework adds optional count, public explanation, confidence, recorded context status and bounded per-track input snapshot to model_analysis. Empty and outdated profiles remain inspectable; missing historical fields stay unknown. Existing tags, review authority and authentication remain unchanged. No playback or Baton DTO change."
   },
   "GET /api/library/cleanup/sources#operation": {
     "sha256": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
@@ -40,12 +40,12 @@
     "reason": "Readiness separates dependency readiness from liveness for the Rust runtime."
   },
   "POST /api/assistant/library-tags/model-jobs#request_body": {
-    "sha256": "062af072b38d2b40555af14bd5ebcaf036d07ceb89743cdc223e6116e60f1271",
-    "reason": "ADR-025 adds defaulted limits and processing mode to explicit mood-tagging jobs. Standard mode remains the default; new inference requires disclosure v12 and current quality gates. Old disclosure consent is intentionally rejected. No native playback DTO changes."
+    "sha256": "cf131875f8d10d8ff31087caa78cb38db2aaa28f55b34be322f8266280c7f253",
+    "reason": "September 8 mood rework defaults pilots to 20 tracks and adds optional stop_on_empty_batch=true. New inference requires disclosure v13 for compact evidence and an explanation on every result; old consent is deliberately rejected. Explicit scope, consent and quality gates remain. Assistant web only; no Baton or playback wire change."
   },
   "POST /api/assistant/library-tags/model-plan#responses": {
-    "sha256": "7526c3561beba558804c36a2de84af8241d071db0e315334cffc7bc5206f8568",
-    "reason": "ADR-025 adds explicit limits, selected/deferred counts, conservative reservations and Batch availability/status. Existing scope and context fields remain. The browser uses server-owned counts before requesting consent."
+    "sha256": "f71468091fddcd9b792af9cfb7591d66bc32842cb6720d76aa32366969550875",
+    "reason": "September 8 mood rework returns the 20-track pilot default, optional empty-request stop and disclosure v13. Existing counts and execution fields remain. Multi-request Batch plans with the stop enabled are unavailable before upload. Web Assistant consumes these fields; no native client change."
   },
   "POST /api/library/cleanup/enrichment-jobs#operation": {
     "sha256": "5116ecfeaaedce515fe1f6fabe3a31f60f01110fec9c9eba385f215062f61378",
@@ -60,8 +60,8 @@
     "reason": "Catalog source policy is an authenticated operator setting."
   },
   "POST /api/assistant/library-tags/model-plan#request_body": {
-    "sha256": "3acb49ce5914db7b563bbf3e553a4a8f2bb34490adf534c571b674c8e7784b14",
-    "reason": "ADR-025 adds defaulted run limits and processing mode to the read-only local planner. Existing callers retain bounded standard defaults; planning performs no provider inference."
+    "sha256": "ac3f0e0f870fe0738fd47f5e2a76594609c84bfd4c953a0a8c3c01b99cc5d3c2",
+    "reason": "September 8 mood rework defaults pilots to 20 tracks and adds optional stop_on_empty_batch=true. New inference requires disclosure v13 for compact evidence and an explanation on every result; old consent is deliberately rejected. Explicit scope, consent and quality gates remain. Assistant web only; no Baton or playback wire change."
   },
   "GET /api/assistant/library-tags/model-batches/{batch_id}#operation": {
     "sha256": "3635098b7aa1089dff47312339490e90b8b0eb9c13376580fd31da67eb7f5f38",
@@ -72,7 +72,7 @@
     "reason": "ADR-025 adds authenticated explicit collect/cancel/recovery actions for already-recorded batches. Recovery checks run and input-file identity. Actions cannot start new paid inference; abandonment requires an explicit acknowledgement in the browser."
   },
   "PATCH /api/assistant/library-tags/{track_id}#responses": {
-    "sha256": "a438cc728678d730168174e39632d257a3c4a7b606125809f24cb6292336ec0d",
-    "reason": "Returns optional model_analysis provenance with the refreshed track after explicit manual-tag edits, matching the list response. Mutation deltas, review freshness, authored-tag authority and authentication remain unchanged. Native playback clients do not consume this administrative endpoint."
+    "sha256": "c9d6adfa98974a0fc580a9b76c867dfe6e4d91b4908659565c0e90702cd296a3",
+    "reason": "September 8 mood rework adds optional count, public explanation, confidence, recorded context status and bounded per-track input snapshot to model_analysis. Empty and outdated profiles remain inspectable; missing historical fields stay unknown. Existing tags, review authority and authentication remain unchanged. No playback or Baton DTO change."
   }
 }

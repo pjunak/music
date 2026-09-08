@@ -214,9 +214,10 @@ model task.
 
 ## 5. Configure each model role
 
-Repeat this sequence for playlist planning, mood tagging, mood-tag cleanup, and EQ
-assistance. The same connection/model may be selected for all four, or each role may use
-a specialized model and separate key.
+Configure only the tasks you intend to use: playlist planning, mood tagging, or EQ
+assistance. Mood tagging needs one model and its own checks. **Mood-tag cleanup is not
+required.** It remains under **Legacy tag-name maintenance (optional)** for unresolved
+manual names and shares the tagging model; open it only if you need that separate helper.
 
 1. Select a verified connection and one of its reported model IDs.
 2. Keep the role disabled while saving its initial configuration.
@@ -276,11 +277,11 @@ Use a small, representative sample before running across the whole library.
    quality is uncertain.
 3. If the selected scope contains partial, stale, failed, or unanalyzed tracks, choose explicitly
    between running them with metadata-only context or skipping every track without full context.
-4. Confirm model output appears as generated `model-context-tagger/v6` suggestions,
+4. Confirm model output appears as generated `model-context-tagger/v7` suggestions,
    separate from local analysis and database mood tags.
 5. Inspect the disclosure: the model receives artist, album, origin, and genre metadata, the current full canonical
    ID/name/definition/alias list, and—when available—a bounded projection of locally measured
-   whole-track trajectories, tempo development, all ten bounded acoustic sections, repetition, coverage confidence, measurement reliability,
+   rounded whole-track trends and endpoints, tempo range, all ten bounded acoustic sections, repetition, coverage confidence, measurement reliability,
    and optional local voice/instrumental classifier evidence or explicit unknown/unavailable voice
    status. It does not receive a local tag hypothesis or model-owned
    signal axes. Track titles, display titles, file and folder names, library paths, audio,
@@ -300,13 +301,26 @@ Keep **Review: All states** to include tracks whose AI returned no tags, or whos
 suggestions you already reviewed. **Needs review** narrows this to pending tags.
 Use **Show all runs** to remove the run restriction.
 
-Every track shows **AI processed · current**, **AI processed · outdated**, or
+Use **AI returned tags** or **AI returned no tags** to distinguish outcomes independently
+of review state. Select tracks and use **Reconsider AI tags** to replace only that selection
+after reviewing its plan and cost; there is no need to rebuild the whole library.
+
+Every track shows **AI processed · current**, **AI processed · no tags**, **AI processed · outdated**, or
 **No saved AI result**. The inspector includes its saved date and run ID. Outdated
 means the retained result fails current evidence/configuration/profile checks;
 it is still identifiable but its old tags cannot be accepted. Failed attempts
 without a saved result remain in job diagnostics. Run views are not permanent
-history: a later run can replace a saved profile. Existing profiles need no new
-provider call just to appear in these filters.
+history: a later run can replace a saved profile. New runs also retain bounded returned
+track outcomes in job history; **Export retained run results** preserves that record for
+offline comparison, including output that could not be saved because evidence changed.
+Existing profiles need no new provider call just to appear in these filters.
+
+Empty profiles now expose the model explanation, or say that no reason was recorded.
+New results also retain the exact disclosed per-track input. **Track evidence sent to the
+model** summarizes metadata, pulse, voice and development; exact fields are expandable.
+Old results cannot recover an input snapshot that was never saved. Complete local analysis
+is coverage, not proof that a music mood classifier ran. Scene/setting suggestions are
+possible session uses, while mood tags describe a musical impression.
 
 **Metadata keyword guesses** is the corrected label for the older local suggestions
 previously shown as "Mood metadata". Those guesses match words in the title, album
@@ -315,16 +329,24 @@ can produce wrong guesses. Select **Suggestion source: AI suggestions** to exclu
 them from review, or reject individual guesses. Existing accepted/manual tags are
 preserved. The model does not receive these guesses or the track title.
 
-The default plan selects at most **100 tracks**, allows **10 model requests** including
+The default plan selects at most **20 tracks**, allows **10 model requests** including
 contract recovery, and reserves at most **1,000,000 units**. Adjust these limits before
 confirming. Reservation units conservatively combine prompt/schema UTF-8 bytes and
 maximum output tokens; they are not an exact token count, price estimate, or account-wide
 spending limit. Provider dashboards remain authoritative for charges and account limits.
+The default guard stops before another request when a completed request returns no tags.
+Review its explanations first. To continue, start a new run with Rebuild off; current empty
+results are skipped too. You can deliberately disable the guard. Counters distinguish
+analysed tracks, tracks with/without tags, saved profiles, current and deferred work.
+A cancelled or failed run retains completed results and recorded provider usage.
+
 A later ordinary run skips valid current results. Use rebuild only when deliberately
 replacing those results. API quota errors are distinguished from transient rate limits.
 
 With the native OpenAI Responses connection, select **OpenAI Batch** after passing the
-Music tagging gates. The configured model must support Batch. The same metadata, vocabulary
+Mood tagging gates. The configured model must support Batch. With the no-tag guard on,
+submit a single-request pilot (up to 20 tracks). Larger asynchronous plans require a
+deliberate guard override after review; submitted work cannot be unspent. The same metadata, vocabulary
 and optional local context are uploaded as JSONL; no audio, titles or paths are uploaded.
 Completion can take 24 hours. There are no automatic corrective calls or resubmissions.
 The server checks every five minutes, including after restart, and stores valid results
@@ -346,13 +368,17 @@ This update separates generated-result identity from model certification. Operat
 recertification, timeout and credential changes do not alone invalidate saved suggestions.
 Changes to the actual inference contract, model/Thinking/output allowance, vocabulary or
 input evidence do. New inference always requires current conformance and quality passes.
-The new input identity and corrected spectral implementation make older generated profiles
-and local context stale once. Accepted/manual tags remain intact; nothing runs automatically.
-Recompute local context first, then try a small bounded model sample.
+The September 8 task change makes older AI profiles outdated and requires fresh tagging
+checks before new inference. Existing `local-context/v2` analysis is reusable: this rework
+does not require another algorithmic/voice pass. Accepted/manual tags remain intact and
+nothing runs automatically. Start with existing explanations, then a small selected sample.
+The updated quality report has an independent acoustic-context gate; a synthetic pass is
+not a claim of musical accuracy. See the [offline listening pilot](docs/MOOD_PILOT.md).
 
 ### Mood-tag cleanup
 
-Configure its shared model in **Music tagging**, then run cleanup's own conformance and
+This optional legacy helper is not part of the tagging pipeline. If you need it,
+configure its shared model in **Mood tagging**, then run cleanup's own conformance and
 quality checks. Sharing a model does not transfer a pass between tasks. Existing independent
 cleanup assignments remain inactive until Music tagging is saved to link them. Cleanup is
 an optional operation on unresolved manual tag names, not a second pass over tagging output.

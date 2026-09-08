@@ -145,6 +145,7 @@ pub struct ProviderTokenUsage {
 pub struct ProviderUsageAccumulator {
     summary: ProviderUsageSummary,
     pending: bool,
+    feature_progress: Option<Value>,
 }
 
 impl ProviderUsageAccumulator {
@@ -152,6 +153,7 @@ impl ProviderUsageAccumulator {
         Self {
             summary,
             pending: false,
+            feature_progress: None,
         }
     }
 
@@ -197,11 +199,17 @@ impl ProviderUsageAccumulator {
                 run_manifest,
             },
             pending: false,
+            feature_progress: None,
         }
     }
 
     pub fn limit_token_reservation(&mut self, maximum: u64) {
         self.summary.run_manifest.max_token_reservation = Some(maximum);
+    }
+
+    /// Carry bounded feature outcomes through the write-ahead usage checkpoints.
+    pub fn set_feature_progress(&mut self, progress: Value) {
+        self.feature_progress = Some(progress);
     }
 
     fn begin(
@@ -347,6 +355,7 @@ impl ProviderUsageAccumulator {
                 json!("assistant-provider-usage-checkpoint/v2"),
             ),
             ("usage".to_owned(), json!(self.summary)),
+            ("feature_progress".to_owned(), json!(self.feature_progress)),
         ])
     }
 }

@@ -631,12 +631,13 @@ fn valid_model_profile(profile: &AnalysisWrite) -> bool {
         .all(|value| value.is_finite() && (0.0..=1.0).contains(&value))
         && valid_hex_digest(&profile.source_signature)
         && profile.moods.len() <= MAX_MODEL_TAGS_PER_TRACK
+        && !profile.evidence.is_empty()
         && profile.evidence.len() <= MAX_MODEL_EVIDENCE_ITEMS
         && profile
             .metrics
             .get("contract")
             .and_then(serde_json::Value::as_str)
-            == Some("assistant-music-tagger-output/v3")
+            == Some("assistant-music-tagger-output/v4")
 }
 
 fn valid_hex_digest(value: &str) -> bool {
@@ -1244,8 +1245,8 @@ mod tests {
                 moods: vec!["tense".to_owned()],
                 evidence: vec!["context section s1".to_owned()],
                 metrics: serde_json::json!({
-                    "contract": "assistant-music-tagger-output/v3",
-                    "input_contract": "assistant-music-tagger-input/v20",
+                    "contract": "assistant-music-tagger-output/v4",
+                    "input_contract": "assistant-music-tagger-input/v21",
                 })
                 .as_object()
                 .cloned()

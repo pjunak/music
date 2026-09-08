@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v8",
-  "id": "controlled-vocabulary-tagging-baseline-v21",
+  "id": "controlled-vocabulary-tagging-baseline-v22",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -141,6 +141,7 @@
           "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
+          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.8, "low": 0.65, "high": 0.92, "range": 0.27, "variability": 0.18, "slope": 0.0, "start": 0.8, "end": 0.8, "peak_at_fraction": 0.5, "high_fraction": 0.75, "shape": "steady"},
             "intensity": {"typical": 0.86, "low": 0.72, "high": 0.95, "range": 0.23, "variability": 0.16, "slope": 0.0, "start": 0.84, "end": 0.86, "peak_at_fraction": 0.6, "high_fraction": 0.8, "shape": "steady"},
@@ -725,6 +726,7 @@
           "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
+          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.62, "low": 0.16, "high": 0.93, "range": 0.77, "variability": 0.55, "slope": 0.8, "start": 0.14, "end": 0.91, "peak_at_fraction": 0.94, "high_fraction": 0.32, "shape": "stepped_build"},
             "intensity": {"typical": 0.68, "low": 0.12, "high": 0.96, "range": 0.84, "variability": 0.62, "slope": 0.92, "start": 0.1, "end": 0.95, "peak_at_fraction": 0.96, "high_fraction": 0.38, "shape": "stepped_build"},
@@ -764,6 +766,7 @@
           "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
+          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.84, "low": 0.75, "high": 0.94, "range": 0.19, "variability": 0.12, "slope": 0.0, "start": 0.82, "end": 0.86, "peak_at_fraction": 0.72, "high_fraction": 0.86, "shape": "steady"},
             "intensity": {"typical": 0.88, "low": 0.78, "high": 0.97, "range": 0.19, "variability": 0.13, "slope": 0.0, "start": 0.86, "end": 0.9, "peak_at_fraction": 0.78, "high_fraction": 0.9, "shape": "steady"},
@@ -799,6 +802,7 @@
           "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
+          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.48, "low": 0.38, "high": 0.61, "range": 0.23, "variability": 0.15, "slope": 0.0, "start": 0.46, "end": 0.5, "peak_at_fraction": 0.62, "high_fraction": 0.08, "shape": "steady"},
             "intensity": {"typical": 0.46, "low": 0.35, "high": 0.58, "range": 0.23, "variability": 0.14, "slope": 0.0, "start": 0.44, "end": 0.47, "peak_at_fraction": 0.56, "high_fraction": 0.04, "shape": "steady"},
@@ -937,6 +941,7 @@
           "analyzer_id": "local-context/v2",
           "completeness": "full",
           "confidence": "high",
+          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.52, "low": 0.4, "high": 0.64, "range": 0.24, "variability": 0.12, "slope": 0.0, "start": 0.51, "end": 0.52, "peak_at_fraction": 0.48, "high_fraction": 0.2, "shape": "steady"},
             "intensity": {"typical": 0.48, "low": 0.36, "high": 0.6, "range": 0.24, "variability": 0.11, "slope": 0.0, "start": 0.47, "end": 0.49, "peak_at_fraction": 0.55, "high_fraction": 0.15, "shape": "steady"},
@@ -1084,6 +1089,341 @@
       ],
       "maximum_tags": 1,
       "minimum_evidence_items": 1
+    },
+    {
+      "id": "acoustic-context-settled-texture",
+      "description": "A stable sparse texture with consistently low drive supports a restrained calm impression",
+      "track": {
+        "track_id": 600,
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 240,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "full",
+          "confidence": "medium",
+          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "trajectories": {
+            "loudness": {"typical": 0.3, "low": 0.26, "high": 0.33999999999999997, "start": 0.3, "end": 0.3, "peak_at_fraction": 0.5, "shape": "steady"},
+            "intensity": {"typical": 0.226, "low": 0.186, "high": 0.266, "start": 0.226, "end": 0.226, "peak_at_fraction": 0.5, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.12, "low": 0.07999999999999999, "high": 0.16, "start": 0.12, "end": 0.12, "peak_at_fraction": 0.5, "shape": "steady"},
+            "brightness": {"typical": 0.25, "low": 0.21, "high": 0.29, "start": 0.25, "end": 0.25, "peak_at_fraction": 0.5, "shape": "steady"},
+            "density": {"typical": 0.2, "low": 0.16, "high": 0.24000000000000002, "start": 0.2, "end": 0.2, "peak_at_fraction": 0.5, "shape": "steady"},
+            "spectral_flux": {"typical": 0.12, "low": 0.07999999999999999, "high": 0.16, "start": 0.12, "end": 0.12, "peak_at_fraction": 0.5, "shape": "steady"}
+          },
+          "tempo": {"status": "estimated", "typical_bpm": 70, "low_bpm": 68, "high_bpm": 72, "variability": 0.03},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "sections": [
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.226, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
+          ]
+        }
+      },
+      "required_tags": [
+        "calm"
+      ],
+      "forbidden_tags": [
+        "chaotic",
+        "urgent"
+      ],
+      "forbidden_groups": [
+        "setting",
+        "period",
+        "scene"
+      ],
+      "allowed_confidences": [
+        "medium",
+        "low"
+      ],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "acoustic-context-settled-loud-master",
+      "description": "Recording gain alone does not remove a calm impression from identical development and texture",
+      "track": {
+        "track_id": 601,
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 240,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "full",
+          "confidence": "medium",
+          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "trajectories": {
+            "loudness": {"typical": 0.88, "low": 0.84, "high": 0.92, "start": 0.88, "end": 0.88, "peak_at_fraction": 0.5, "shape": "steady"},
+            "intensity": {"typical": 0.516, "low": 0.476, "high": 0.556, "start": 0.516, "end": 0.516, "peak_at_fraction": 0.5, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.12, "low": 0.07999999999999999, "high": 0.16, "start": 0.12, "end": 0.12, "peak_at_fraction": 0.5, "shape": "steady"},
+            "brightness": {"typical": 0.25, "low": 0.21, "high": 0.29, "start": 0.25, "end": 0.25, "peak_at_fraction": 0.5, "shape": "steady"},
+            "density": {"typical": 0.2, "low": 0.16, "high": 0.24000000000000002, "start": 0.2, "end": 0.2, "peak_at_fraction": 0.5, "shape": "steady"},
+            "spectral_flux": {"typical": 0.12, "low": 0.07999999999999999, "high": 0.16, "start": 0.12, "end": 0.12, "peak_at_fraction": 0.5, "shape": "steady"}
+          },
+          "tempo": {"status": "estimated", "typical_bpm": 70, "low_bpm": 68, "high_bpm": 72, "variability": 0.03},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "sections": [
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.516, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
+          ]
+        }
+      },
+      "required_tags": [
+        "calm"
+      ],
+      "forbidden_tags": [
+        "chaotic",
+        "aggressive"
+      ],
+      "forbidden_groups": [
+        "setting",
+        "period",
+        "scene"
+      ],
+      "allowed_confidences": [
+        "medium",
+        "low"
+      ],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "acoustic-context-sustained-drive",
+      "description": "Sustained fast pulse, density and intensity can support urgency without an invented chase or battle",
+      "track": {
+        "track_id": 602,
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 240,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "full",
+          "confidence": "medium",
+          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "trajectories": {
+            "loudness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"},
+            "intensity": {"typical": 0.83, "low": 0.7899999999999999, "high": 0.87, "start": 0.83, "end": 0.83, "peak_at_fraction": 0.5, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.89, "low": 0.85, "high": 0.93, "start": 0.89, "end": 0.89, "peak_at_fraction": 0.5, "shape": "steady"},
+            "brightness": {"typical": 0.58, "low": 0.5399999999999999, "high": 0.62, "start": 0.58, "end": 0.58, "peak_at_fraction": 0.5, "shape": "steady"},
+            "density": {"typical": 0.8, "low": 0.76, "high": 0.8400000000000001, "start": 0.8, "end": 0.8, "peak_at_fraction": 0.5, "shape": "steady"},
+            "spectral_flux": {"typical": 0.6, "low": 0.5599999999999999, "high": 0.64, "start": 0.6, "end": 0.6, "peak_at_fraction": 0.5, "shape": "steady"}
+          },
+          "tempo": {"status": "estimated", "typical_bpm": 145, "low_bpm": 140, "high_bpm": 150, "variability": 0.03},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "sections": [
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.83, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
+          ]
+        }
+      },
+      "required_tags": [
+        "urgent"
+      ],
+      "forbidden_tags": [
+        "calm"
+      ],
+      "forbidden_groups": [
+        "setting",
+        "period",
+        "scene"
+      ],
+      "allowed_confidences": [
+        "medium",
+        "low"
+      ],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "acoustic-context-volatile-development",
+      "description": "Markedly volatile density and drive support a chaotic impression without locating an event",
+      "track": {
+        "track_id": 603,
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 240,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "full",
+          "confidence": "medium",
+          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "low", "structure": "medium", "voice": "low"},
+          "trajectories": {
+            "loudness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "volatile"},
+            "intensity": {"typical": 0.73, "low": 0.1, "high": 0.95, "start": 0.2, "end": 0.9, "peak_at_fraction": 0.5, "shape": "volatile"},
+            "rhythmic_drive": {"typical": 0.79, "low": 0.1, "high": 0.95, "start": 0.2, "end": 0.9, "peak_at_fraction": 0.5, "shape": "volatile"},
+            "brightness": {"typical": 0.7, "low": 0.6599999999999999, "high": 0.74, "start": 0.7, "end": 0.7, "peak_at_fraction": 0.5, "shape": "volatile"},
+            "density": {"typical": 0.83, "low": 0.1, "high": 0.95, "start": 0.2, "end": 0.9, "peak_at_fraction": 0.5, "shape": "volatile"},
+            "spectral_flux": {"typical": 0.88, "low": 0.1, "high": 0.95, "start": 0.2, "end": 0.9, "peak_at_fraction": 0.5, "shape": "volatile"}
+          },
+          "tempo": {"status": "unresolved", "typical_bpm": null, "low_bpm": null, "high_bpm": null, "variability": null},
+          "structure": {"section_count": 3, "major_change_count": 2, "repeated_section_count": 0, "development": "varied"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "sections": [
+            {"id": "s1", "start_fraction": 0.0, "end_fraction": 0.3333333333333333, "intensity": 0.3, "rhythmic_drive": 0.3, "brightness": 0.7, "density": 0.3, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": [], "repeats_section_ids": []},
+            {"id": "s2", "start_fraction": 0.3333333333333333, "end_fraction": 0.6666666666666666, "intensity": 0.91, "rhythmic_drive": 0.91, "brightness": 0.7, "density": 0.91, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": ["intensity", "rhythmic_drive", "density"], "repeats_section_ids": []},
+            {"id": "s3", "start_fraction": 0.6666666666666666, "end_fraction": 1.0, "intensity": 0.6, "rhythmic_drive": 0.6, "brightness": 0.7, "density": 0.6, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": ["intensity", "rhythmic_drive", "density"], "repeats_section_ids": []}
+          ]
+        }
+      },
+      "required_tags": [
+        "chaotic"
+      ],
+      "forbidden_tags": [
+        "calm"
+      ],
+      "forbidden_groups": [
+        "setting",
+        "period",
+        "scene"
+      ],
+      "allowed_confidences": [
+        "medium",
+        "low"
+      ],
+      "minimum_evidence_items": 1
+    },
+    {
+      "id": "acoustic-context-contradictory-ending",
+      "description": "An intense majority and ending contradict a calm short opening",
+      "track": {
+        "track_id": 604,
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 240,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "full",
+          "confidence": "medium",
+          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "trajectories": {
+            "loudness": {"typical": 0.3, "low": 0.26, "high": 0.33999999999999997, "start": 0.3, "end": 0.3, "peak_at_fraction": 0.5, "shape": "steady"},
+            "intensity": {"typical": 0.8, "low": 0.13999999999999999, "high": 0.9, "start": 0.18, "end": 0.85, "peak_at_fraction": 0.85, "shape": "stepped_build"},
+            "rhythmic_drive": {"typical": 0.8, "low": 0.07999999999999999, "high": 0.9, "start": 0.12, "end": 0.85, "peak_at_fraction": 0.85, "shape": "stepped_build"},
+            "brightness": {"typical": 0.25, "low": 0.21, "high": 0.29, "start": 0.25, "end": 0.25, "peak_at_fraction": 0.5, "shape": "steady"},
+            "density": {"typical": 0.8, "low": 0.16, "high": 0.9, "start": 0.2, "end": 0.85, "peak_at_fraction": 0.85, "shape": "stepped_build"},
+            "spectral_flux": {"typical": 0.8, "low": 0.07999999999999999, "high": 0.9, "start": 0.12, "end": 0.85, "peak_at_fraction": 0.85, "shape": "stepped_build"}
+          },
+          "tempo": {"status": "estimated", "typical_bpm": 70, "low_bpm": 68, "high_bpm": 72, "variability": 0.03},
+          "structure": {"section_count": 2, "major_change_count": 1, "repeated_section_count": 0, "development": "building"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "sections": [
+            {"id": "s1", "start_fraction": 0, "end_fraction": 0.2, "intensity": 0.18, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []},
+            {"id": "s2", "start_fraction": 0.2, "end_fraction": 1, "intensity": 0.83, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": ["intensity", "rhythmic_drive", "density"], "repeats_section_ids": []}
+          ]
+        }
+      },
+      "required_tags": [],
+      "forbidden_tags": [
+        "calm"
+      ],
+      "forbidden_groups": [
+        "setting",
+        "period",
+        "scene"
+      ],
+      "allowed_confidences": [
+        "medium",
+        "low"
+      ],
+      "minimum_evidence_items": 1,
+      "gate": "safety"
+    },
+    {
+      "id": "acoustic-context-slow-pulse-is-insufficient",
+      "description": "A weak slow pulse with otherwise neutral texture cannot establish rest or melancholy",
+      "track": {
+        "track_id": 605,
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 240,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "full",
+          "confidence": "medium",
+          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "low", "structure": "medium", "voice": "low"},
+          "trajectories": {
+            "loudness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"},
+            "intensity": {"typical": 0.48, "low": 0.44, "high": 0.52, "start": 0.48, "end": 0.48, "peak_at_fraction": 0.5, "shape": "steady"},
+            "rhythmic_drive": {"typical": 0.45, "low": 0.41000000000000003, "high": 0.49, "start": 0.45, "end": 0.45, "peak_at_fraction": 0.5, "shape": "steady"},
+            "brightness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"},
+            "density": {"typical": 0.48, "low": 0.44, "high": 0.52, "start": 0.48, "end": 0.48, "peak_at_fraction": 0.5, "shape": "steady"},
+            "spectral_flux": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"}
+          },
+          "tempo": {"status": "estimated", "typical_bpm": 40, "low_bpm": 39, "high_bpm": 41, "variability": 0.03},
+          "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "sections": [
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.48, "rhythmic_drive": 0.45, "brightness": 0.5, "density": 0.48, "tempo_bpm": 40, "tempo_confidence": 0.2, "changes_from_previous": [], "repeats_section_ids": []}
+          ]
+        }
+      },
+      "required_tags": [],
+      "forbidden_tags": [
+        "calm",
+        "melancholy"
+      ],
+      "forbidden_groups": [
+        "setting",
+        "period",
+        "scene"
+      ],
+      "allowed_confidences": [
+        "medium",
+        "low"
+      ],
+      "minimum_evidence_items": 1,
+      "gate": "safety"
+    },
+    {
+      "id": "acoustic-context-unresolved-measurements",
+      "description": "Unavailable measurements cannot be filled in from completeness labels",
+      "track": {
+        "track_id": 606,
+        "artist": "",
+        "album": "",
+        "origin": "",
+        "genre": "",
+        "length_s": 240,
+        "bpm": null,
+        "context_evidence": {
+          "analyzer_id": "local-context/v2",
+          "completeness": "partial",
+          "confidence": "low",
+          "measurement_reliability": {"loudness": "low", "intensity": "low", "rhythmic_drive": "low", "brightness": "low", "density": "low", "spectral_flux": "low", "tempo": "low", "voice": "low", "structure": "low"},
+          "trajectories": {},
+          "tempo": {"status": "unresolved", "typical_bpm": null, "low_bpm": null, "high_bpm": null, "variability": 0.03},
+          "structure": {},
+          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "sections": []
+        }
+      },
+      "required_tags": [],
+      "forbidden_tags": [],
+      "forbidden_groups": [
+        "setting",
+        "period",
+        "scene"
+      ],
+      "allowed_confidences": [
+        "low"
+      ],
+      "minimum_evidence_items": 1,
+      "gate": "safety",
+      "maximum_tags": 0
     }
   ]
 }

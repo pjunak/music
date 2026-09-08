@@ -29,6 +29,9 @@ impl ModelFeatureJobHandler {
         if requests.len() > parameters.limits.max_requests {
             return Err(JobHandlerError::new("model_run_request_budget_exhausted"));
         }
+        if parameters.limits.stop_on_empty_batch && requests.len() > 1 {
+            return Err(JobHandlerError::new("batch_pilot_required"));
+        }
         let mut usage = start_model_run(
             context,
             role,
@@ -281,6 +284,10 @@ impl ModelFeatureJobHandler {
                 && vocabulary.fingerprint == parameters.vocabulary_fingerprint;
             let mut updated = 0;
             let mut rejected = 0;
+            let mut processed = 0;
+            let mut with_suggestions = 0;
+            let mut suggested_tags = 0;
+            let mut track_results = Vec::new();
             for (index, result) in responses {
                 context
                     .check_cancelled()
@@ -320,6 +327,13 @@ impl ModelFeatureJobHandler {
                         TagConfidence::Medium => Confidence::Medium,
                         TagConfidence::Low => Confidence::Low,
                     };
+                    processed += 1;
+                    with_suggestions += usize::from(!profile.moods.is_empty());
+                    suggested_tags += profile.moods.len();
+                    track_results.push(json!({
+                        "track_id": profile.track_id.get(), "source_signature": profile.source_signature,
+                        "tags": profile.moods, "evidence": profile.evidence, "confidence": profile.confidence,
+                    }));
                     writes.push(ModelAnalysisWrite { profile });
                 }
                 ensure_vocabulary_unchanged(&self.assistant, &parameters.vocabulary_fingerprint)
@@ -339,13 +353,20 @@ impl ModelFeatureJobHandler {
                     )
                     .await
                     .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+                usage.set_feature_progress(json!({
+                    "processed_tracks": processed, "tracks_with_suggestions": with_suggestions,
+                    "tracks_without_suggestions": processed - with_suggestions, "suggested_tags": suggested_tags,
+                    "updated_profiles": updated, "rejected_tracks": rejected, "track_results": track_results,
+                }));
                 context
                     .checkpoint(usage.checkpoint())
                     .await
                     .map_err(JobHandlerError::from_execution)?;
             }
-            let result = json!({"schema_version":"assistant-model-batch-result/v1", "batch_id":record.id,"state":status.state,
+            let result = json!({"schema_version":"assistant-model-batch-result/v2", "batch_id":record.id,"state":status.state,
                 "updated_profiles":updated,"rejected_tracks":rejected,"unavailable_or_changed_tracks":templates.len().saturating_sub(updated + rejected),
+                "processed_tracks":processed,"tracks_with_suggestions":with_suggestions,"tracks_without_suggestions":processed - with_suggestions,
+                "suggested_tags":suggested_tags,"track_results":track_results,
                 "stale_configuration":!current,"usage":usage.summary()});
             record.document = json!({"result":result,"terminal_state":status.state,"output_file_id":status.output_file_id,"error_file_id":status.error_file_id});
             persist(services, &mut record, "results_saved").await?;

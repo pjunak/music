@@ -158,7 +158,7 @@ describe("LibraryTagEditor", () => {
     const expected = status === "missing" ? "No saved AI result" : `AI processed · ${status === "current" ? "current" : "outdated"}`;
     expect(screen.getByText(expected, { selector: ".assistant-track-model-status" })).toBeInTheDocument();
     expect(screen.getByText(expected, { selector: ".assistant-model-review-status > strong" })).toBeInTheDocument();
-    if (status === "current") expect(screen.getByText(/A completed analysis can return no tags/)).toBeInTheDocument();
+    if (status === "current") expect(screen.getByText(/exact input was not retained/)).toBeInTheDocument();
     if (status === "stale") expect(screen.getByText(/old suggestions cannot be accepted/)).toBeInTheDocument();
   });
 
@@ -168,6 +168,23 @@ describe("LibraryTagEditor", () => {
     expect(within(group).getByText(/not embedded mood tags or AI detection/)).toBeInTheDocument();
     expect(within(group).queryByText(/^Mood metadata:/)).not.toBeInTheDocument();
     expect(within(group).getAllByText("Keyword match: tavern, festive")).toHaveLength(2);
+  });
+
+  it("exposes an empty result's reason and saved context without inventing tags", async () => {
+    vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({ ...page, items: [{ ...track,
+      analysis_suggestions: [], model_analysis: { status: "current", job_id: "run-empty", updated_at_unix_seconds: 1788700000,
+        suggested_tag_count: 0, evidence: ["Audio context cannot establish an emotional character."], confidence: "low", context_status: "full",
+        input_snapshot: { genre: "", context_evidence: { completeness: "full" } },
+      },
+    }] });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+    expect(await screen.findByText("No supported tags returned")).toBeInTheDocument();
+    expect(screen.getByText("Audio context cannot establish an emotional character.")).toBeInTheDocument();
+    expect(screen.getByText(/Context used: complete local analysis/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter AI processing" }), "without_suggestions");
+    await waitFor(() => expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith(expect.objectContaining({ model_status: "without_suggestions" })));
+    expect(assistantApi.reviewAnalysisTag).not.toHaveBeenCalled();
   });
 
   const summary = { matching_tracks: 100, sources: [
@@ -242,7 +259,7 @@ describe("LibraryTagEditor", () => {
             {
               ...track.analysis_suggestions[0],
               tag: "dancing",
-              analyzer_id: "model-context-tagger/v6",
+              analyzer_id: "model-context-tagger/v7",
               evidence: ["Title and genre support a dancing scene."],
             },
           ],

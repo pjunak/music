@@ -500,14 +500,14 @@ export function TagVocabularyView() {
             <h2>Used tag maintenance</h2>
             <p>
               Rename or merge tags already attached to tracks, then use deterministic
-              aliases and spelling rules before involving a model.
+              aliases and spelling rules. AI tagging needs no cleanup pass.
             </p>
           </div>
         </div>
         <TagCatalogManager catalog={catalog} onChanged={refresh} />
       </section>
 
-      <ModelTagCleanupPanel onCatalogChanged={refresh} />
+      <details><summary>Legacy AI review of ambiguous tag names (optional)</summary><ModelTagCleanupPanel onCatalogChanged={refresh} /></details>
     </div>
   );
 }

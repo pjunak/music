@@ -5,16 +5,19 @@ import {
   type AnalysisTagReviewDecision,
   type AnalysisTagReviewResult,
   type AnalysisTagSuggestion,
+  type StarterTagGroup,
   assistantApi,
 } from "@/core/api";
 import { toast } from "@/core/toast";
 
 import { analysisTagSuggestionKey } from "./analysisTagSelection";
 import { modelStatusLabel, suggestionSource, suggestionSourceLabel } from "./tagProvenance";
+import { ModelInputEvidence } from "./ModelInputEvidence";
 
 interface AnalysisTagReviewProps {
   trackId: number;
   modelAnalysis?: LibraryTagTrack["model_analysis"];
+  vocabularyGroups?: StarterTagGroup[];
   suggestions: AnalysisTagSuggestion[];
   selectedSuggestionKeys: ReadonlySet<string>;
   disabled?: boolean;
@@ -34,6 +37,7 @@ function statusLabel(status: AnalysisTagReviewDecision): string {
 export function AnalysisTagReview({
   trackId,
   modelAnalysis,
+  vocabularyGroups = [],
   suggestions,
   selectedSuggestionKeys,
   disabled = false,
@@ -98,9 +102,12 @@ export function AnalysisTagReview({
         {modelAnalysis?.updated_at_unix_seconds != null ? (
           <span>Saved {new Date(modelAnalysis.updated_at_unix_seconds * 1000).toLocaleString()}</span>
         ) : null}
-        {modelAnalysis?.status === "current" && !suggestions.some((suggestion) => suggestionSource(suggestion.analyzer_id) === "model") ? (
-          <span>No AI suggestions in this view. A completed analysis can return no tags.</span>
-        ) : null}
+        {modelAnalysis?.suggested_tag_count === 0 ? <strong>No supported tags returned</strong> : null}
+        {modelAnalysis?.suggested_tag_count != null && modelAnalysis.suggested_tag_count > 0 ? <span>{modelAnalysis.suggested_tag_count} tags returned by this analysis; review filters may hide some.</span> : null}
+        {modelAnalysis?.evidence?.length ? <div><strong>Model explanation</strong><ul>{modelAnalysis.evidence.map((value, index) => <li key={index}>{value}</li>)}</ul></div> : modelAnalysis?.suggested_tag_count === 0 ? <span>The reason was not recorded in this older result.</span> : null}
+        {modelAnalysis?.context_status ? <span>Context used: {modelAnalysis.context_status === "full" ? "complete local analysis" : modelAnalysis.context_status === "partial" ? "partial local analysis" : "metadata only"}. Coverage does not measure mood accuracy.</span> : null}
+        {modelAnalysis?.confidence ? <span>Model-reported confidence: {modelAnalysis.confidence}</span> : null}
+        {modelAnalysis?.input_snapshot ? <ModelInputEvidence input={modelAnalysis.input_snapshot} /> : modelAnalysis?.status !== "missing" && modelAnalysis?.status ? <span>The exact input was not retained for this older result.</span> : null}
         {modelAnalysis?.status === "stale" ? <span>The saved AI result no longer matches current evidence or model settings. Its old suggestions cannot be accepted.</span> : null}
         {modelAnalysis?.status === "missing" ? <span>Local measurements and keyword guesses do not mean this track has an AI result.</span> : null}
         {modelAnalysis?.job_id ? <details><summary>AI run details</summary><code>{modelAnalysis.job_id}</code></details> : null}
@@ -118,7 +125,7 @@ export function AnalysisTagReview({
             <section key={group.source} className="assistant-review-source-group" aria-label={suggestionSourceLabel(group.items[0]!.analyzer_id)}>
               <h3>{suggestionSourceLabel(group.items[0]!.analyzer_id)}</h3>
               {group.source === "metadata" ? <p className="muted small">Guesses from words in the title, album and genre. These are not embedded mood tags or AI detection; misleading song names can produce wrong guesses. Reject any that do not fit.</p> : null}
-              {group.source === "model" ? <p className="muted small">AI suggestions from metadata and available local audio context. Accept only tags that fit the music.</p> : null}
+              {group.source === "model" ? <p className="muted small">Mood tags describe an impression. Scene and setting tags propose session uses; they do not claim the song depicts a literal event. Accept only tags you find useful for this music.</p> : null}
               {group.items.map((suggestion) => {
                 const key = analysisTagSuggestionKey(trackId, suggestion);
                 const saving = savingKey === key;
@@ -130,6 +137,10 @@ export function AnalysisTagReview({
                     <div className="assistant-analysis-review-heading">
                       <div>
                         <strong>{suggestion.tag}</strong>
+                        {group.source === "model" ? <span>{(() => {
+                          const kind = vocabularyGroups.find((item) => item.tags.includes(suggestion.tag))?.key;
+                          return kind === "mood" ? "Musical impression" : kind === "scene" || kind === "setting" ? "Suggested session use" : kind === "period" ? "Period character" : "Custom vocabulary suggestion";
+                        })()}</span> : null}
                         <span>
                           {suggestionSourceLabel(suggestion.analyzer_id)} · {suggestion.confidence} confidence
                         </span>

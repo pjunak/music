@@ -95,7 +95,7 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
                         tension: 0.5,
                         moods: vec!["calm".to_owned()],
                         evidence: vec!["Synthetic metadata".to_owned()],
-                        metrics: json!({"contract":"assistant-music-tagger-output/v3"})
+                        metrics: json!({"contract":"assistant-music-tagger-output/v4"})
                             .as_object()
                             .cloned()
                             .ok_or("metrics missing")?,
@@ -224,7 +224,7 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
                     moods: Vec::new(),
                     evidence: vec!["Insufficient evidence".to_owned()],
                     confidence: Confidence::Low,
-                    metrics: json!({"contract":"assistant-music-tagger-output/v3"})
+                    metrics: json!({"contract":"assistant-music-tagger-output/v4"})
                         .as_object()
                         .cloned()
                         .ok_or("metrics")?,

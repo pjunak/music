@@ -336,7 +336,7 @@ export function ModelRoleCard({
             : `Uses the mood-tagging model: ${role.model_id || "not configured"}.`} Change the shared connection, model and request settings in Music tagging, then save. Cleanup retains its own test and quality check.</p>
         ) : null}
         {role.role_id === "music_tagger" ? (
-          <p className="field-hint">Saving shares these settings with Mood tag cleanup. A configuration change resets both tasks' tests; each task must pass its own quality check.</p>
+          <p className="field-hint">This is the only model setup needed for tagging. Local analysis prepares evidence; the model suggests tags for review. No cleanup model or cleanup quality check is required.</p>
         ) : null}
         {role.role_id !== "tag_cleanup" ? <>
 

@@ -112,7 +112,10 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   this diagnostic does not certify model quality.
   Mood tagging sends bounded artist, album, origin, and genre metadata in
   batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
-  stores suggestions under `model-context-tagger/v6` for explicit per-tag review.
+  stores suggestions under `model-context-tagger/v7` for explicit per-tag review.
+  Pilots default to 20 tracks and stop after an empty request. Saved explanations,
+  outcome filters and selected-track reconsideration make results reviewable without
+  another whole-library pass. Cleanup is optional legacy tag-name maintenance.
   The pre-run plan shows the normal batch estimate and a maximum that includes up to two
   fresh contract-recovery requests; invalid output is never silently repaired.
   **Assistant → Mood library → Mood vocabulary** exposes every canonical name, definition, group,

@@ -1,4 +1,6 @@
 import { ModelTaggingRunControls } from "@/components/ModelTaggingRunControls";
+import { TaggingRunOutcome } from "./TaggingRunOutcome";
+import { TaggingRunExport } from "./TaggingRunExport";
 import { ModelBatchStatusPanel } from "@/components/ModelBatchStatusPanel";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -20,7 +22,6 @@ import { ProviderBoundaryPopover } from "./AssistantInfoPopover";
 import {
   MODEL_TAGGING_JOB_KIND,
   isModelTaggingJobActive,
-  modelTaggingResultFromJob,
 } from "./modelTaggingJobs";
 import { ModelUsageSummary } from "./ModelUsageSummary";
 import { modelRunReviewUrl } from "./tagProvenance";
@@ -35,6 +36,8 @@ function unavailableMessage(reasonCode: string | null): string {
       return "Collect or cancel the pending batch before starting another run.";
     case "tagging_budget_too_small":
       return "Reduce the track limit or raise the limits to cover the plan.";
+    case "batch_pilot_required":
+      return "Use a pilot of one request, or disable the no-tag stop after reviewing a pilot. Batch cannot stop already submitted work.";
     case "request_too_large":
       return "The vocabulary and track metadata exceed the provider request limit. Shorten vocabulary descriptions, aliases, or context cues before starting.";
     case "model_quality_not_passed":
@@ -116,7 +119,6 @@ export function ModelTaggingPanel() {
   }, [contextPolicy, executionMode, force, limits, refreshKey]);
 
   const active = isModelTaggingJobActive(job);
-  const result = modelTaggingResultFromJob(job);
   const headingStatusClass = active && job !== null
     ? job.status
     : job?.status === "failed" || job?.status === "cancelled"
@@ -332,23 +334,12 @@ export function ModelTaggingPanel() {
         </div>
       ) : job?.status === "succeeded" ? (
         <div className="assistant-quality-result">
-          <strong>Generated suggestions are ready for review</strong>
-          {result === null ? (
-            <p>The latest model tagging run completed.</p>
-          ) : (
-            <p>
-              Updated {result.updated_profiles} profiles; {result.unchanged_profiles}{" "}
-              were already current
-              {result.skipped_changed_tracks > 0
-                ? `; ${result.skipped_changed_tracks} changed during the run and were skipped`
-                : ""}
-              .
-            </p>
-          )}
+          <TaggingRunOutcome job={job} />
         </div>
       ) : job?.status === "failed" ? (
         <div className="assistant-quality-result is-failed">
           <strong>The model tagging run did not finish</strong>
+          <TaggingRunOutcome job={job} />
           <p>
             {readableBackgroundJobError(
               job.error,
@@ -359,11 +350,13 @@ export function ModelTaggingPanel() {
       ) : job?.status === "cancelled" ? (
         <div className="assistant-quality-result">
           <strong>The model tagging run was cancelled</strong>
+          <TaggingRunOutcome job={job} />
           <p>Completed batches remain available for review.</p>
         </div>
       ) : null}
 
       {job && !active ? <Link to={modelRunReviewUrl(job.id)}>View saved results from this run</Link> : null}
+      {job && !active ? <TaggingRunExport id={job.id} result={job.result} /> : null}
       <ModelUsageSummary job={job} />
 
       {active && job !== null ? (

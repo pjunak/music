@@ -35,7 +35,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         role_id: "music_tagger",
         label: "Mood tagging quality",
         description: "Runs fixed synthetic metadata and signal-evidence cases against bundled, custom, and 200-tag vocabularies. Each vocabulary must meet the same quality threshold. No songs or live library data are sent.",
-        suite_id: "controlled-vocabulary-tagging-baseline-v21",
+        suite_id: "controlled-vocabulary-tagging-baseline-v22",
         job_kind: "assistant.model-evaluation.music-tagging-quality-v1",
     },
     ModelEvaluationDefinition {
@@ -431,7 +431,7 @@ mod tests {
             role_fingerprint: fingerprint.to_owned(),
             status: status.to_owned(),
             suite_id: suite_id.to_owned(),
-            engine_id: "model-context-tagger/v6".to_owned(),
+            engine_id: "model-context-tagger/v7".to_owned(),
             passed_cases: 11,
             total_cases: 13,
             job_id: "1234567890abcdef1234567890abcdef".to_owned(),

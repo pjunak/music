@@ -32,6 +32,13 @@ or demonstrated defect rather than extend the cleanup phase indefinitely.
 
 ## Mood quality evaluation
 
+- **Run the fixed listening pilot before scaling.** The diagnostic UI, selected
+  reconsideration, 20-track/no-tag guard, compact input and context-only quality
+  gate are implemented. The operator supplies independent judgments; engineering
+  compares cost/usefulness and profiles the first music-classifier candidate.
+  Integrate/cache a winner only after compatibility and listening evidence.
+  See [the offline pilot and scorer](docs/MOOD_PILOT.md). No cleanup certification
+  or repeat algorithmic analysis is needed just to inspect existing AI results.
 - **Calibrate acoustic context.** Compare gain-normalized intensity evidence, a finer tempo
   estimator, and present context on a small reviewed sample before another full-library model
   pass. The spectral coverage defect is fixed; intensity still includes recording volume,

@@ -112,7 +112,7 @@ pub const MODEL_ROLES: &[ModelRoleDefinition] = &[
         description: "Suggest reviewable setting, period, scene, and mood database tags from approved track evidence.",
         required_capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
         configuration_available: true,
-        runtime_contract: "assistant-music-tagger-input/v20+output/v3+local-context/v2",
+        runtime_contract: "assistant-music-tagger-input/v21+output/v3+local-context/v2",
     },
     ModelRoleDefinition {
         id: "playlist_planner",

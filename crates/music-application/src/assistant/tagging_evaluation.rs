@@ -177,13 +177,17 @@ mod tests {
             results.push(result);
         }
         assert!(TagQualityEvaluationResult::summarize(&suite, results.clone())?.passed);
-        // 55/56 is above the aggregate threshold, but 4/5 custom cases is not.
-        results[50].passed = false;
-        results[50]
+        // One failure passes the aggregate gate, but 4/5 custom cases does not.
+        let custom = results
+            .iter_mut()
+            .find(|case| case.id == "custom-vocabulary-alias")
+            .ok_or("custom case missing")?;
+        custom.passed = false;
+        custom
             .failures
             .push("Missing required tags: quiet focus".to_owned());
         let summary = TagQualityEvaluationResult::summarize(&suite, results)?;
-        assert_eq!(summary.passed_cases, 55);
+        assert_eq!(summary.passed_cases as usize, suite.cases.len() - 1);
         assert!(!summary.passed);
         assert!(
             summary

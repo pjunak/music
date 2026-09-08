@@ -230,7 +230,7 @@ impl ModelFeatureJobHandler {
             &parameters.quality_evaluation_id,
             TAGGING_QUALITY_EVALUATION_ID,
             &parameters.disclosure_version,
-            "assistant-model-music-tagging-disclosure/v12",
+            "assistant-model-music-tagging-disclosure/v13",
             parameters.consent,
             &parameters.role_fingerprint,
         )?;
@@ -312,6 +312,7 @@ impl ModelFeatureJobHandler {
             })
             .collect::<Vec<_>>();
         let deferred_tracks = work.len().saturating_sub(parameters.limits.max_tracks);
+        let unchanged_profiles = planned.len().saturating_sub(work.len());
         let work = &work[..work.len().min(parameters.limits.max_tracks)];
         let total = work.len();
         let inputs = work
@@ -331,9 +332,10 @@ impl ModelFeatureJobHandler {
                 AnalysisWrite {
                     track_id: track.track.id, source_signature: signatures[&track.track.id].clone(),
                     energy, brightness, tension, moods: Vec::new(), evidence: Vec::new(), confidence: Confidence::Low,
-                    metrics: json!({"contract":"assistant-music-tagger-output/v3", "input_contract":MODEL_TAGGER_INPUT_CONTRACT,
+                    metrics: json!({"contract":"assistant-music-tagger-output/v4", "input_contract":MODEL_TAGGER_INPUT_CONTRACT,
                         "context_status":contexts.get(&track.track.id).map_or("missing", |context| context.completeness.as_str()),
-                        "role_fingerprint":parameters.role_fingerprint,"vocabulary_fingerprint":parameters.vocabulary_fingerprint}).as_object().cloned().unwrap_or_default(),
+                        "role_fingerprint":parameters.role_fingerprint,"vocabulary_fingerprint":parameters.vocabulary_fingerprint,
+                        "input_snapshot":super::super::model_tagger::model_tag_input_snapshot(&model_tag_track_input(&track.track, contexts.get(&track.track.id)))}).as_object().cloned().unwrap_or_default(),
                 }
             }).collect();
             return self
@@ -367,6 +369,11 @@ impl ModelFeatureJobHandler {
         .await?;
         let mut updated = 0_usize;
         let mut skipped_changed = 0_usize;
+        let mut processed_tracks = 0_usize;
+        let mut tracks_with_suggestions = 0_usize;
+        let mut suggested_tags = 0_usize;
+        let mut stopped_empty_batch = false;
+        let mut track_results = Vec::new();
         let mut provider_usage = start_model_run(
             context,
             &role,
@@ -470,11 +477,12 @@ impl ModelFeatureJobHandler {
                             moods: model.tags.clone(),
                             evidence: model.evidence.clone(),
                             metrics: json!({
-                                "contract": "assistant-music-tagger-output/v3",
+                                "contract": "assistant-music-tagger-output/v4",
                                 "input_contract": MODEL_TAGGER_INPUT_CONTRACT,
                                 "context_status": context_status,
                                 "role_fingerprint": parameters.role_fingerprint,
                                 "vocabulary_fingerprint": parameters.vocabulary_fingerprint,
+                                "input_snapshot": super::super::model_tagger::model_tag_input_snapshot(&model_tag_track_input(&track.track, contexts.get(&track.track.id))),
                             })
                             .as_object()
                             .cloned()
@@ -501,6 +509,38 @@ impl ModelFeatureJobHandler {
                 .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
             updated = updated.saturating_add(stored);
             skipped_changed = skipped_changed.saturating_add(batch.len().saturating_sub(stored));
+            let batch_tags = profiles
+                .values()
+                .map(|profile| profile.tags.len())
+                .sum::<usize>();
+            suggested_tags += batch_tags;
+            tracks_with_suggestions += profiles
+                .values()
+                .filter(|profile| !profile.tags.is_empty())
+                .count();
+            processed_tracks += batch.len();
+            track_results.extend(writes.iter().map(|write| {
+                json!({
+                    "track_id": write.profile.track_id.get(),
+                    "source_signature": write.profile.source_signature,
+                    "tags": write.profile.moods,
+                    "evidence": write.profile.evidence,
+                    "confidence": write.profile.confidence,
+                })
+            }));
+            provider_usage.set_feature_progress(json!({
+                "processed_tracks": processed_tracks,
+                "tracks_with_suggestions": tracks_with_suggestions,
+                "tracks_without_suggestions": processed_tracks - tracks_with_suggestions,
+                "suggested_tags": suggested_tags,
+                "updated_profiles": updated,
+                "skipped_changed_tracks": skipped_changed,
+                "track_results": track_results,
+            }));
+            context
+                .checkpoint(provider_usage.checkpoint())
+                .await
+                .map_err(JobHandlerError::from_execution)?;
             update_progress(
                 context,
                 (start + batch.len()).min(total),
@@ -509,9 +549,14 @@ impl ModelFeatureJobHandler {
                 format!("Processed {} of {total} tracks", start + batch.len()),
             )
             .await?;
+            if parameters.limits.stop_on_empty_batch && batch_tags == 0 && processed_tracks < total
+            {
+                stopped_empty_batch = true;
+                break;
+            }
         }
         Ok(json!({
-            "schema_version": "assistant-model-music-tagging-job-result/v6",
+            "schema_version": "assistant-model-music-tagging-job-result/v7",
             "disclosure_version": parameters.disclosure_version,
             "role_id": parameters.role_id,
             "role_fingerprint": parameters.role_fingerprint,
@@ -524,7 +569,14 @@ impl ModelFeatureJobHandler {
             "skipped_context_tracks": skipped_context_tracks,
             "deferred_tracks": deferred_tracks,
             "updated_profiles": updated,
-            "unchanged_profiles": planned.len().saturating_sub(work.len()),
+            "unchanged_profiles": unchanged_profiles,
+            "processed_tracks": processed_tracks,
+            "tracks_with_suggestions": tracks_with_suggestions,
+            "tracks_without_suggestions": processed_tracks - tracks_with_suggestions,
+            "suggested_tags": suggested_tags,
+            "stopped_empty_batch": stopped_empty_batch,
+            "remaining_tracks": total.saturating_sub(processed_tracks),
+            "track_results": track_results,
             "skipped_changed_tracks": skipped_changed,
             "usage": provider_usage.summary(),
         }))

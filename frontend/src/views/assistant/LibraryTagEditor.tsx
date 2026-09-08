@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { confirmDialog } from "@/components/confirmDialog";
+import { MoodTaggingDialog } from "@/components/MoodTaggingDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { FolderTree } from "@/components/FolderTree";
 import { LibrarySidebarRail } from "@/components/LibrarySidebarRail";
@@ -81,6 +82,7 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
   >("");
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [reconsiderIds, setReconsiderIds] = useState<number[]>([]);
   const [selectedTrackIds, setSelectedTrackIds] = useState<Set<number>>(new Set());
   const [selectedReviewItems, setSelectedReviewItems] = useState<
     Map<string, AnalysisTagReviewTarget>
@@ -601,6 +603,8 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
                   }}>
                   <option value="">All tracks</option>
                   <option value="processed">AI processed (any saved result)</option>
+                  <option value="with_suggestions">AI returned tags</option>
+                  <option value="without_suggestions">AI returned no tags</option>
                   <option value="current">AI processed · current</option>
                   <option value="stale">AI processed · outdated</option>
                   <option value="missing">No saved AI result</option>
@@ -873,6 +877,7 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
                     <span>{selected.artist || "Unknown artist"}{selected.album ? ` · ${selected.album}` : ""}</span>
                   </div>
                   <div className="assistant-tag-editor-actions">
+                    <button type="button" disabled={dirty || saving} onClick={() => setReconsiderIds(selectedTrackIds.size > 0 ? [...selectedTrackIds] : [selected.track_id])}>Reconsider AI tags{selectedTrackIds.size > 0 ? ` (${selectedTrackIds.size} selected)` : ""}</button>
                     {dirty ? <span className="assistant-unsaved">Unsaved changes</span> : null}
                     <button type="button" className="btn-ghost" disabled={!dirty || saving} onClick={() => setDraftTags(originalTags)}>
                       Discard
@@ -961,6 +966,7 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
                 <AnalysisTagReview
                   trackId={selected.track_id}
                   modelAnalysis={selected.model_analysis}
+                  vocabularyGroups={catalog?.starter_groups ?? []}
                   suggestions={selected.analysis_suggestions}
                   selectedSuggestionKeys={selectedReviewKeys}
                   disabled={dirty || saving}
@@ -971,7 +977,7 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
                 />
 
                 <details className="assistant-tag-audio-details">
-                  <summary>Local audio measurements</summary>
+                  <summary>Legacy signal measurements (not the saved AI input)</summary>
                   <AudioSignalEvidence profile={selected.audio_signal} />
                 </details>
               </div>
@@ -979,6 +985,7 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
           </div>
         </aside>
       </div>
+      {reconsiderIds.length > 0 ? <MoodTaggingDialog path={path} checkedIds={reconsiderIds} reconsider onClose={() => setReconsiderIds([])} onChanged={() => setReloadKey((key) => key + 1)} /> : null}
     </div>
   );
 }

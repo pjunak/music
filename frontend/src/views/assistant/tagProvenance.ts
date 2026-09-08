@@ -18,7 +18,7 @@ export function suggestionSourceLabel(analyzer: string): string {
 
 export function modelStatusLabel(analysis: LibraryTagTrack["model_analysis"]): string {
   switch (analysis?.status) {
-    case "current": return "AI processed · current";
+    case "current": return analysis.suggested_tag_count === 0 ? "AI processed · no tags" : "AI processed · current";
     case "stale": return "AI processed · outdated";
     case "missing": return "No saved AI result";
     default: return "AI status unavailable";

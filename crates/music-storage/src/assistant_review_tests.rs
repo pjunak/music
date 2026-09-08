@@ -286,7 +286,7 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
                             moods: vec!["calm".to_owned()],
                             evidence: vec!["Synthetic evidence".to_owned()],
                             metrics:
-                                serde_json::json!({"contract":"assistant-music-tagger-output/v3"})
+                                serde_json::json!({"contract":"assistant-music-tagger-output/v4"})
                                     .as_object()
                                     .cloned()
                                     .ok_or("metrics missing")?,

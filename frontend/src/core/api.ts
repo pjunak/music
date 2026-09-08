@@ -379,7 +379,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v12" as const;
+  "assistant-model-music-tagging-disclosure/v13" as const;
 
 export type ModelTaggingScope =
   | { type: "all" }
@@ -402,10 +402,11 @@ export interface ModelTaggingLimits {
   max_tracks: number;
   max_requests: number;
   max_token_reservation: number;
+  stop_on_empty_batch?: boolean;
 }
 
 export const DEFAULT_MODEL_TAGGING_LIMITS: ModelTaggingLimits = {
-  max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000,
+  max_tracks: 20, max_requests: 10, max_token_reservation: 1_000_000, stop_on_empty_batch: true,
 };
 
 export interface ModelBatchStatus {
@@ -722,10 +723,15 @@ export interface LibraryTagTrack {
     status: "current" | "stale" | "missing";
     job_id: string | null;
     updated_at_unix_seconds: number | null;
+    suggested_tag_count?: number | null;
+    evidence?: string[];
+    confidence?: "high" | "medium" | "low" | null;
+    context_status?: "full" | "partial" | "missing" | null;
+    input_snapshot?: Record<string, unknown> | null;
   };
 }
 
-export type ModelTagFilter = "processed" | "current" | "stale" | "missing";
+export type ModelTagFilter = "processed" | "current" | "stale" | "missing" | "with_suggestions" | "without_suggestions";
 export type TagSuggestionSource = "model" | "metadata" | "catalog";
 
 export interface TagReviewSummary {

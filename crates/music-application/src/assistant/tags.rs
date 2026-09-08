@@ -25,7 +25,7 @@ pub const MAX_TAGS_PER_TRACK: usize = 32;
 pub const MAX_TAG_LENGTH: usize = 64;
 pub const LOCAL_METADATA_ANALYZER_ID: &str = "local-metadata/v1";
 pub const LOCAL_AUDIO_ANALYZER_ID: &str = "local-audio/v1";
-pub const MODEL_TAG_ANALYZER_ID: &str = "model-context-tagger/v6";
+pub const MODEL_TAG_ANALYZER_ID: &str = "model-context-tagger/v7";
 pub const CATALOG_TAG_ANALYZER_ID: &str = "catalog-tags/v1";
 
 pub type AssistantDependencyError = Box<dyn Error + Send + Sync>;
@@ -140,6 +140,8 @@ pub enum ModelTagFilter {
     Current,
     Stale,
     Missing,
+    WithSuggestions,
+    WithoutSuggestions,
 }
 
 impl ModelTagFilter {
@@ -149,6 +151,8 @@ impl ModelTagFilter {
             "current" => Some(Self::Current),
             "stale" => Some(Self::Stale),
             "missing" => Some(Self::Missing),
+            "with_suggestions" => Some(Self::WithSuggestions),
+            "without_suggestions" => Some(Self::WithoutSuggestions),
             _ => None,
         }
     }
@@ -159,6 +163,11 @@ pub struct ModelAnalysisStatus {
     pub status: ModelAnalysisState,
     pub job_id: Option<String>,
     pub updated_at_unix_seconds: Option<i64>,
+    pub suggested_tag_count: Option<usize>,
+    pub evidence: Vec<String>,
+    pub confidence: Option<String>,
+    pub context_status: Option<String>,
+    pub input_snapshot: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize)]
@@ -177,6 +186,10 @@ impl ModelAnalysisStatus {
             ModelTagFilter::Current => self.status == ModelAnalysisState::Current,
             ModelTagFilter::Stale => self.status == ModelAnalysisState::Stale,
             ModelTagFilter::Missing => self.status == ModelAnalysisState::Missing,
+            ModelTagFilter::WithSuggestions => {
+                self.suggested_tag_count.is_some_and(|count| count > 0)
+            }
+            ModelTagFilter::WithoutSuggestions => self.suggested_tag_count == Some(0),
         }
     }
 }
@@ -1116,6 +1129,26 @@ fn view_for_track_with_model(
             },
             job_id: (!analysis.job_id.is_empty()).then(|| analysis.job_id.clone()),
             updated_at_unix_seconds: analysis.updated_at_unix_seconds,
+            suggested_tag_count: Some(analysis.moods.len()),
+            evidence: analysis
+                .evidence
+                .iter()
+                .take(4)
+                .map(|value| value.chars().take(512).collect())
+                .collect(),
+            confidence: Confidence::parse(&analysis.confidence)
+                .map(|_| analysis.confidence.clone()),
+            context_status: analysis
+                .metrics
+                .get("context_status")
+                .and_then(Value::as_str)
+                .filter(|value| matches!(*value, "full" | "partial" | "missing"))
+                .map(str::to_owned),
+            input_snapshot: analysis
+                .metrics
+                .get("input_snapshot")
+                .filter(|value| value.is_object() && value.to_string().len() <= 32_768)
+                .cloned(),
         }
     });
     let current = current_metadata_analysis(track);
@@ -1352,7 +1385,7 @@ mod tests {
                 moods: Vec::new(),
                 evidence: vec!["Insufficient evidence".to_owned()],
                 confidence: "low".to_owned(),
-                metrics: serde_json::json!({"contract": "assistant-music-tagger-output/v3"})
+                metrics: serde_json::json!({"contract": "assistant-music-tagger-output/v4"})
                     .as_object()
                     .cloned()
                     .ok_or("metrics")?,
@@ -1363,6 +1396,13 @@ mod tests {
         assert_eq!(view.model_analysis.job_id.as_deref(), Some("run-30"));
         assert_eq!(view.model_analysis.updated_at_unix_seconds, Some(123));
         assert!(view.analysis_suggestions.is_empty());
+        assert_eq!(view.model_analysis.suggested_tag_count, Some(0));
+        assert_eq!(view.model_analysis.evidence, ["Insufficient evidence"]);
+        assert!(
+            view.model_analysis
+                .matches(ModelTagFilter::WithoutSuggestions)
+        );
+        assert!(!view.model_analysis.matches(ModelTagFilter::WithSuggestions));
         assert!(view.model_analysis.matches(ModelTagFilter::Processed));
         evidence.analyses[0].moods = vec!["calm".to_owned()];
         evidence.reviews.push(StoredAnalysisReview {
