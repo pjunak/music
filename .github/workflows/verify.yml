@@ -61,7 +61,7 @@ jobs:
             fuzz -> target
 
       - name: Install pinned test runner
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
         with:
           tool: cargo-nextest@0.9.143
           fallback: none
@@ -125,7 +125,7 @@ jobs:
           rustup default 1.97.1
 
       - name: Install pinned dependency auditors
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
         with:
           tool: cargo-deny@0.20.2,cargo-audit@0.22.2,cargo-machete@0.9.2
           fallback: none
