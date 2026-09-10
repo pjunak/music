@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { mergeEnrichment, selectUnambiguous, toggleReviewOperation } from "@/components/cleanupReview";
+import { CleanupEvidence, CleanupEvidenceImport } from "@/components/CleanupEvidence";
+import { CleanupModelReview } from "@/components/CleanupModelReview";
 import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
 import { WarnIcon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
@@ -9,6 +12,8 @@ import type {
   CleanupAnalyzeResult,
   CleanupCatalogTagSuggestion,
   CleanupEnrichmentResult,
+  CleanupImportedEvidence,
+  CleanupModelResult,
   CleanupFolderSuggestion,
   CleanupOp,
   CleanupOpIn,
@@ -160,32 +165,6 @@ function enrichmentResult(job: BackgroundJob): CleanupEnrichmentResult | null {
   return result as unknown as CleanupEnrichmentResult;
 }
 
-function mergeEnrichment(
-  local: CleanupAnalyzeResult,
-  enrichment: CleanupEnrichmentResult,
-): CleanupAnalyzeResult {
-  const plans = new Map(local.plans.map((plan) => [plan.track_id, plan]));
-  for (const catalog of enrichment.plans) {
-    if (catalog.ops.length === 0) continue;
-    const current = plans.get(catalog.track_id);
-    const catalogFields = new Set(
-      catalog.ops.filter((operation) => operation.kind === "tag").map((operation) => operation.field),
-    );
-    plans.set(catalog.track_id, {
-      track_id: catalog.track_id,
-      path: catalog.path,
-      ops: [
-        ...(current?.ops.filter(
-          (operation) => operation.kind !== "tag" || !catalogFields.has(operation.field),
-        ) ?? []),
-        ...catalog.ops,
-      ],
-      notes: [...(current?.notes ?? []), ...catalog.notes],
-    });
-  }
-  return { ...local, plans: [...plans.values()] };
-}
-
 function opLabel(op: CleanupOp): string {
   if (op.kind === "rename") return "File";
   switch (op.field) {
@@ -267,6 +246,9 @@ export function CleanupWorkflow({
   const [recursive, setRecursive] = useState(true);
   const [rules, setRules] = useState<Set<CleanupRuleId>>(new Set(DEFAULT_RULES));
   const [useCatalogs, setUseCatalogs] = useState(true);
+  const [refreshCatalogs, setRefreshCatalogs] = useState(false);
+  const [imports, setImports] = useState<CleanupImportedEvidence[]>([]);
+  const [editions, setEditions] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CleanupAnalyzeResult | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
@@ -395,12 +377,12 @@ export function CleanupWorkflow({
     // High-confidence suggestions start ticked; guesses (including folder
     // rebuilds) start unticked so a quick "Apply" only commits the safe set.
     setTicked(
-      new Set([
+      selectUnambiguous([
         ...r.plans.flatMap((p) =>
           p.ops.filter((o) => o.confidence === "high").map((o) => o.op_id),
         ),
         ...r.folders.filter((f) => f.confidence === "high").map((f) => f.op_id),
-      ]),
+      ], r.plans.flatMap((plan) => plan.ops)),
     );
     setStep("review");
     return true;
@@ -444,6 +426,7 @@ export function CleanupWorkflow({
     setBusy(true);
     setEnrichmentJob(null);
     setEnrichmentSummary(null);
+    setEditions({});
     try {
       let r = await cleanupApi.analyze(scope, [...rules]);
       if (r.pending_lookups.length > 0) {
@@ -455,7 +438,7 @@ export function CleanupWorkflow({
       if (useCatalogs) {
         try {
           setStep("enriching");
-          let job = await cleanupApi.enrich(scope);
+          let job = await cleanupApi.enrich(scope, refreshCatalogs, imports);
           if (mountedRef.current) setEnrichmentJob(job);
           while (["queued", "running", "cancel_requested"].includes(job.status)) {
             await new Promise((resolve) => window.setTimeout(resolve, 1_000));
@@ -511,26 +494,43 @@ export function CleanupWorkflow({
   }
 
   function toggleOp(opId: string) {
-    setTicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(opId)) next.delete(opId);
-      else next.add(opId);
-      return next;
-    });
+    setTicked((prev) => toggleReviewOperation(prev, opId, plans.flatMap((plan) => plan.ops)));
   }
 
   function toggleLabel(opIds: string[]) {
-    // Header-checkbox semantics: if every op of this field is ticked,
-    // untick them all; otherwise tick them all.
     setTicked((prev) => {
+      const eligible = selectUnambiguous(opIds, plans.flatMap((plan) => plan.ops));
       const next = new Set(prev);
-      const allOn = opIds.every((id) => next.has(id));
-      for (const id of opIds) {
+      const allOn = [...eligible].every((id) => next.has(id));
+      for (const id of eligible) {
         if (allOn) next.delete(id);
         else next.add(id);
       }
       return next;
     });
+  }
+
+  function acceptModelReview(review: CleanupModelResult) {
+    const previous = new Set(plans.filter((p) => p.track_id === review.track_id).flatMap((p) => p.ops)
+      .filter((op) => op.rules.includes("model_catalog_choice")).map((op) => op.op_id));
+    setTicked((current) => new Set([...current].filter((id) => !previous.has(id))));
+    setResult((current) => current && ({ ...current, plans: current.plans.map((plan) => plan.track_id !== review.track_id ? plan : {
+      ...plan, ops: [...plan.ops.filter((op) => !previous.has(op.op_id)), ...review.ops],
+      notes: [...plan.notes, `AI review (${review.decision.decision.replaceAll("_", " ")}): ${review.decision.reason}`],
+    }) }));
+  }
+
+  function chooseEdition(folder: string, releaseId: string) {
+    setEditions((current) => ({ ...current, [folder]: releaseId }));
+    const editionFields = new Set(["album", "album_artist", "track_no", "disc_no", "year"]);
+    const removed = new Set(plans.filter((plan) => folderOf(plan.path) === folder).flatMap((plan) => plan.ops)
+      .filter((op) => op.rules.includes("catalog_identity") && editionFields.has(op.field ?? "")).map((op) => op.op_id));
+    setResult((current) => current && ({ ...current, plans: current.plans.map((plan) => {
+      if (folderOf(plan.path) !== folder) return plan;
+      const choice = catalogPlanByTrack.get(plan.track_id)?.release_choices?.find((item) => item.id === releaseId);
+      return { ...plan, ops: [...plan.ops.filter((op) => !removed.has(op.op_id)), ...(choice?.ops ?? [])] };
+    }) }));
+    setTicked((current) => new Set([...current].filter((id) => !removed.has(id))));
   }
 
   async function runApply() {
@@ -728,12 +728,16 @@ export function CleanupWorkflow({
             <span className="cleanup-hint muted">
               Uses the enabled Sources connectors. Ambiguous matches make no proposal; catalog
               repairs and community mood tags always start unticked. MusicBrainz receives title,
-              artist, album, and duration; AcoustID receives a local fingerprint and duration;
-              Last.fm receives the identified artist and title. Library paths and audio files are
+              artist, album, duration, and embedded or imported catalog identifiers; AcoustID receives a local fingerprint and duration;
+              Last.fm receives the identified recording ID. Library paths and audio files are
               never uploaded.
             </span>
           </span>
         </label>
+        {useCatalogs && <>
+          <label className="cleanup-choice"><input type="checkbox" checked={refreshCatalogs} onChange={(event) => setRefreshCatalogs(event.target.checked)} />Refresh catalog results, including previous no-match results</label>
+          <CleanupEvidenceImport imports={imports} onChange={setImports} />
+        </>}
       </section>
       <p className="muted small">
         Nothing is changed yet — the next step shows every proposed fix as a
@@ -761,20 +765,20 @@ export function CleanupWorkflow({
           {result ? <span className="muted"> (scanned {result.scanned})</span> : null}
         </span>
         <span className="cleanup-review-spacer" />
-        <span className="muted small">Tick:</span>
+        <span className="muted small">Choose one value per field. Tick:</span>
         <button
           type="button"
           className="btn-link"
-          onClick={() => setTicked(new Set(allItems.map((it) => it.op_id)))}
+          onClick={() => setTicked(selectUnambiguous(allItems.map((it) => it.op_id), plans.flatMap((plan) => plan.ops)))}
         >
-          All
+          All unambiguous
         </button>
         <button
           type="button"
           className="btn-link"
           onClick={() =>
             setTicked(
-              new Set(allItems.filter((it) => it.confidence === "high").map((it) => it.op_id)),
+              selectUnambiguous(allItems.filter((it) => it.confidence === "high").map((it) => it.op_id), plans.flatMap((plan) => plan.ops)),
             )
           }
         >
@@ -873,6 +877,7 @@ export function CleanupWorkflow({
                       <span className="cleanup-new">
                         <Value value={op.new} />
                       </span>
+                      <span className="badge cleanup-conf">{op.rules.includes("model_catalog_choice") ? "AI candidate review" : op.rules.includes("catalog_identity") ? "MusicBrainz" : "Local"}</span>
                       {op.confidence === "low" ? (
                         <span
                           className="badge badge-warn cleanup-conf"
@@ -884,14 +889,22 @@ export function CleanupWorkflow({
                       {op.verified ? (
                         <span
                           className="badge badge-ok cleanup-conf"
-                          title="Name verified against MusicBrainz"
+                          title="Value found in MusicBrainz; review whether it belongs to this recording or edition"
                         >
-                          verified
+                          catalog value
                         </span>
                       ) : null}
                     </span>
                   </label>
                 ))}
+                {catalogPlanByTrack.get(plan.track_id) && <CleanupEvidence
+                  plan={catalogPlanByTrack.get(plan.track_id)!}
+                  edition={editions[folderOf(plan.path)] ?? catalogPlanByTrack.get(plan.track_id)?.identity?.release_mbid ?? ""}
+                  onEdition={(id) => chooseEdition(folderOf(plan.path), id)}
+                />}
+                {enrichmentJob && catalogPlanByTrack.get(plan.track_id)?.status === "unmatched" && (catalogPlanByTrack.get(plan.track_id)?.candidates?.length ?? 0) > 0 && <CleanupModelReview
+                  trackId={plan.track_id} catalogJobId={enrichmentJob.id} onResult={acceptModelReview}
+                />}
                 {plan.notes.map((note) => (
                   <p key={note} className="cleanup-note">
                     <WarnIcon aria-hidden="true" /> {note}

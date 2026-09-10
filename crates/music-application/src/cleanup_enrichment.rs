@@ -1,4 +1,9 @@
+pub mod ai;
+pub mod album;
 pub mod catalog;
+mod editions;
+pub mod evidence;
+mod resolution;
 mod workflow;
 pub use workflow::{CleanupEnrichmentJobHandler, CleanupEnrichmentServices};
 
@@ -13,7 +18,7 @@ use sha2::{Digest, Sha256};
 pub const CLEANUP_ENRICHMENT_JOB_KIND: &str = "library.cleanup-enrichment";
 pub const CLEANUP_ENRICHMENT_SCHEMA: &str = "library-cleanup-enrichment/v1";
 /// Invalidates evidence generated before strict typed connector observations.
-pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v2";
+pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v3";
 pub const MAX_CLEANUP_ENRICHMENT_TRACKS: usize = 500;
 
 pub type CleanupEnrichmentDependencyError = Box<dyn Error + Send + Sync>;

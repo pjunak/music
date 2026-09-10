@@ -10,6 +10,7 @@ mod local_analysis;
 mod model_batch;
 mod model_eq;
 mod model_jobs;
+mod model_library_cleanup;
 mod model_playlist;
 mod model_quality;
 mod model_tag_cleanup;
@@ -46,6 +47,7 @@ pub use model_jobs::{
     MODEL_TAGGING_BATCH_COLLECT_JOB_KIND, MODEL_TAGGING_JOB_KIND, model_evaluation_job_handlers,
     model_feature_job_handlers,
 };
+pub use model_library_cleanup::*;
 pub use model_playlist::*;
 pub use model_quality::*;
 pub use model_tag_cleanup::*;

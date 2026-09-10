@@ -56,6 +56,8 @@ const APPROVED_TOKIO_SPAWN_COUNTS = new Map([
   ["crates/music-server/src/websocket.rs", 1],
 ]);
 const APPROVED_SPAWN_BLOCKING_COUNTS = new Map([
+  // Awaited one file at a time by the serialized provider job lane; bounded Lofty parsing.
+  ["crates/music-server/src/cleanup_enrichment.rs", 1],
   ["crates/music-application/src/auth.rs", 1],
   ["crates/music-media/src/discovery.rs", 1],
   ["crates/music-media/src/mode_mutation.rs", 5],

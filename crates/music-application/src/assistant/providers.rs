@@ -133,10 +133,10 @@ pub const MODEL_ROLES: &[ModelRoleDefinition] = &[
     ModelRoleDefinition {
         id: "library_cleanup",
         label: "Library cleanup",
-        description: "Reserved for a future model pass over the existing review-first cleanup.",
+        description: "Review ambiguous catalog candidates using disclosed text and closed evidence references.",
         required_capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
-        configuration_available: false,
-        runtime_contract: "reserved-library-cleanup/v1",
+        configuration_available: true,
+        runtime_contract: "assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1",
     },
     ModelRoleDefinition {
         id: "eq_assistant",

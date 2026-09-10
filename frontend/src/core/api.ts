@@ -1281,6 +1281,7 @@ export interface CleanupOp {
   confidence: "high" | "low";
   /** Value confirmed by an online name lookup (MusicBrainz). */
   verified: boolean;
+  evidence?: { source: string; entity: string; id?: string; recording_id?: string; release_id?: string | null; method?: string };
 }
 
 export interface CleanupTrackPlan {
@@ -1371,6 +1372,23 @@ export interface CleanupCatalogTagSuggestion extends AnalysisTagReviewTarget {
   confidence: "medium";
 }
 
+export interface CleanupImportedEvidence {
+  track_id: number;
+  fields: Record<string, string>;
+}
+
+export interface CleanupReleaseChoice {
+  id: string;
+  title: string;
+  artist: string;
+  date: string | null;
+  country: string | null;
+  barcode: string | null;
+  catalog_numbers: string[];
+  assignment: { classification: string; considered: number; matched: number; unmatched_tracks: number[]; unmatched_slots: string[] };
+  ops: CleanupOp[];
+}
+
 export interface CleanupEnrichmentPlan {
   schema: "library-cleanup-enrichment/v1";
   partial?: boolean;
@@ -1379,7 +1397,7 @@ export interface CleanupEnrichmentPlan {
   status: "identified" | "fingerprinted" | "unmatched" | "failed";
   identity: {
     recording_mbid: string;
-    method: "metadata" | "fingerprint";
+    method: "metadata" | "fingerprint" | "identifier" | "isrc" | "local_hypothesis";
     confidence: number;
     title: string;
     artist: string;
@@ -1389,6 +1407,11 @@ export interface CleanupEnrichmentPlan {
   tag_suggestions: CleanupCatalogTagSuggestion[];
   notes: string[];
   error_code?: string;
+  retrieved_at?: number;
+  local_evidence?: { observations: { field: string; value: string; source: string }[]; notes: string[] };
+  recording_observations?: { first_release_date: string | null; genres: string[]; credits: string[] };
+  release_choices?: CleanupReleaseChoice[];
+  candidates?: { id: string; title: string; artist: string; length_ms: number | null; provider_score: number }[];
 }
 
 export interface CleanupEnrichmentResult {
@@ -1402,7 +1425,30 @@ export interface CleanupEnrichmentResult {
   plans: CleanupEnrichmentPlan[];
 }
 
+export interface CleanupModelStatus {
+  available: boolean;
+  reason_code: string | null;
+  model_id: string | null;
+  disclosure_version: string;
+  shared_with_provider: string[];
+  never_shared: string[];
+  maximum_candidates: number;
+  may_incur_cost: boolean;
+}
+
+export interface CleanupModelResult {
+  schema_version: "assistant-library-cleanup-result/v1";
+  track_id: number;
+  decision: { decision: string; reason: string; candidate_id: string | null; evidence_ids: string[] };
+  ops: CleanupOp[];
+}
+
 export const cleanupApi = {
+  modelStatus: () => api.get<CleanupModelStatus>("/api/library/cleanup/model"),
+  reviewCandidates: (trackId: number, catalogJobId: string, disclosureVersion: string) =>
+    api.post<BackgroundJob>("/api/library/cleanup/model/jobs", {
+      track_id: trackId, catalog_job_id: catalogJobId, disclosure_version: disclosureVersion, consent: true,
+    }),
   analyze: (scope: CleanupScope, rules: CleanupRuleId[]) =>
     api.post<CleanupAnalyzeResult>("/api/library/cleanup/analyze", { scope, rules }),
   /** Resolve a small batch of names against MusicBrainz (server paces at
@@ -1423,10 +1469,11 @@ export const cleanupApi = {
     api.delete<CleanupSource>(
       `/api/library/cleanup/sources/${encodeURIComponent(sourceId)}/credential`,
     ),
-  enrich: (scope: CleanupScope, force = false) =>
+  enrich: (scope: CleanupScope, force = false, imports: CleanupImportedEvidence[] = []) =>
     api.post<BackgroundJob>("/api/library/cleanup/enrichment-jobs", {
       scope,
       force,
+      imports,
     }),
   /** One chunk of accepted ops. Pass the batch_id from the previous chunk
    *  so the whole run lands in a single revertable journal. */

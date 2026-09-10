@@ -1,10 +1,14 @@
 use crate::cleanup::MusicBrainzNameLookup;
+use crate::cleanup_enrichment_cache::ObservationCache;
 use futures_util::TryStreamExt;
 use music_application::assistant::{AssistantService, LocalAnalysisRepository};
 use music_application::cleanup::CleanupService;
 use music_application::cleanup_enrichment::catalog::{
     AcousticCandidate, Candidate, CatalogConnector, CatalogCredentialSource, CatalogError,
-    CatalogFuture, CommunityTag, Recording, ReleaseDetail, ReleaseSummary,
+    CatalogFuture, CommunityTag, Recording, ReleaseDetail, ReleaseSlot, ReleaseSummary,
+};
+use music_application::cleanup_enrichment::evidence::{
+    EvidenceField, LocalEvidence, normalized_value,
 };
 use music_application::cleanup_enrichment::{
     CleanupEnrichmentJobHandler, CleanupEnrichmentRepository,
@@ -21,6 +25,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const FINGERPRINT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -96,6 +101,8 @@ pub(crate) fn cleanup_enrichment_handler(
         library_root,
         config,
         http,
+        entities: Mutex::new(ObservationCache::default()),
+        fingerprints: Mutex::new(ObservationCache::default()),
     });
     Ok(CleanupEnrichmentJobHandler::new(
         ApplicationServices {
@@ -115,9 +122,32 @@ struct HttpCatalogConnector {
     library_root: LibraryRoot,
     config: CleanupConnectorConfig,
     http: Client,
+    entities: Mutex<ObservationCache<Value>>,
+    fingerprints: Mutex<ObservationCache<FingerprintOutput>>,
 }
 
 impl HttpCatalogConnector {
+    async fn entity_json(
+        &self,
+        resource: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value, CatalogError> {
+        let key = format!(
+            "{resource}:{}",
+            serde_json::to_string(query).map_err(|_| CatalogError::InvalidResponse)?
+        );
+        if let Some(value) = self.entities.lock().await.get(&key) {
+            return Ok(value);
+        }
+        let value = self
+            .musicbrainz
+            .fetch_json(resource, query)
+            .await
+            .map_err(|_| CatalogError::MusicBrainz)?;
+        self.entities.lock().await.insert(key, value.clone());
+        Ok(value)
+    }
+
     async fn search_metadata(&self, track: &IndexedTrack) -> Result<Vec<Candidate>, CatalogError> {
         let title = if track.metadata.title.trim().is_empty() {
             track.display_title.trim()
@@ -128,13 +158,7 @@ impl HttpCatalogConnector {
         if title.is_empty() || artist.is_empty() {
             return Ok(Vec::new());
         }
-        let duration_ms = u64::try_from(track.duration.as_millis()).unwrap_or(u64::MAX);
-        let query = format!(
-            "recording:{} AND artist:{} AND qdur:{}",
-            lucene_quote(title),
-            lucene_quote(artist),
-            duration_ms / 2_000,
-        );
+        let query = metadata_query(title, artist, track.duration);
         let payload = self
             .musicbrainz
             .fetch_json(
@@ -142,7 +166,7 @@ impl HttpCatalogConnector {
                 &[
                     ("query", query),
                     ("fmt", "json".to_owned()),
-                    ("limit", "5".to_owned()),
+                    ("limit", "25".to_owned()),
                 ],
             )
             .await
@@ -152,20 +176,64 @@ impl HttpCatalogConnector {
 
     async fn recording(&self, recording_id: &str) -> Result<Recording, CatalogError> {
         let payload = self
-            .musicbrainz
-            .fetch_json(
+            .entity_json(
                 &format!("recording/{recording_id}"),
                 &[
                     ("fmt", "json".to_owned()),
                     (
                         "inc",
-                        "artist-credits+releases+release-groups+genres+tags".to_owned(),
+                        "artist-credits+releases+release-groups+genres+artist-rels+work-rels+work-level-rels"
+                            .to_owned(),
                     ),
                 ],
             )
             .await
             .map_err(|_| CatalogError::MusicBrainz)?;
-        parse_recording(&payload, recording_id)
+        let mut recording = parse_recording(&payload, recording_id)?;
+        // Linked release lists are capped by MusicBrainz; browse explicitly.
+        let mut releases = recording
+            .releases
+            .iter()
+            .cloned()
+            .map(|r| (r.id.clone(), r))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut offset = 0;
+        recording.releases_complete = false;
+        while offset < MAX_RELEASES {
+            let Ok(page) = self
+                .entity_json(
+                    "release",
+                    &[
+                        ("recording", recording_id.to_owned()),
+                        ("fmt", "json".into()),
+                        ("limit", (MAX_RELEASES - offset).min(25).to_string()),
+                        ("offset", offset.to_string()),
+                    ],
+                )
+                .await
+            else {
+                break;
+            };
+            let Some(raw) = page.get("releases").and_then(Value::as_array) else {
+                break;
+            };
+            for release in parse_releases(Some(&Value::Array(raw.clone()))) {
+                releases.insert(release.id.clone(), release);
+            }
+            offset += raw.len();
+            let Some(count) = page.get("release-count").and_then(Value::as_u64) else {
+                break;
+            };
+            if offset as u64 >= count {
+                recording.releases_complete = true;
+                break;
+            }
+            if raw.is_empty() {
+                break;
+            }
+        }
+        recording.releases = releases.into_values().collect();
+        Ok(recording)
     }
 
     async fn release(
@@ -174,14 +242,13 @@ impl HttpCatalogConnector {
         recording_id: &str,
     ) -> Result<ReleaseDetail, CatalogError> {
         let payload = self
-            .musicbrainz
-            .fetch_json(
+            .entity_json(
                 &format!("release/{release_id}"),
                 &[
                     ("fmt", "json".to_owned()),
                     (
                         "inc",
-                        "recordings+artist-credits+release-groups+media".to_owned(),
+                        "recordings+artist-credits+release-groups+media+labels".to_owned(),
                     ),
                 ],
             )
@@ -199,26 +266,49 @@ impl HttpCatalogConnector {
             .library_root
             .resolve_existing(&track.path)
             .map_err(|_| CatalogError::Fingerprint)?;
-        let command = Command::new(&self.config.fpcalc_path)
-            .arg("-json")
-            .arg("-length")
-            .arg("120")
-            .arg("--")
-            .arg(absolute)
-            .kill_on_drop(true)
-            .output();
-        let output = tokio::time::timeout(FINGERPRINT_TIMEOUT, command)
+        let metadata = tokio::fs::metadata(&absolute)
             .await
-            .map_err(|_| CatalogError::Fingerprint)?
             .map_err(|_| CatalogError::Fingerprint)?;
-        if !output.status.success() || output.stdout.len() > MAX_RESPONSE_BYTES {
-            return Err(CatalogError::Fingerprint);
-        }
-        let fingerprint: FingerprintOutput =
-            serde_json::from_slice(&output.stdout).map_err(|_| CatalogError::Fingerprint)?;
-        if fingerprint.fingerprint.is_empty() || !(1.0..=86_400.0).contains(&fingerprint.duration) {
-            return Err(CatalogError::Fingerprint);
-        }
+        let modified = metadata.modified().map_err(|_| CatalogError::Fingerprint)?;
+        let key = format!("{}:{}:{modified:?}", track.path.as_str(), metadata.len());
+        let cached = self.fingerprints.lock().await.get(&key);
+        let fingerprint = if let Some(fingerprint) = cached {
+            fingerprint
+        } else {
+            let command = Command::new(&self.config.fpcalc_path)
+                .arg("-json")
+                .arg("-length")
+                .arg("120")
+                .arg("--")
+                .arg(&absolute)
+                .kill_on_drop(true)
+                .output();
+            let output = tokio::time::timeout(FINGERPRINT_TIMEOUT, command)
+                .await
+                .map_err(|_| CatalogError::Fingerprint)?
+                .map_err(|_| CatalogError::Fingerprint)?;
+            if !output.status.success() || output.stdout.len() > MAX_RESPONSE_BYTES {
+                return Err(CatalogError::Fingerprint);
+            }
+            let fingerprint: FingerprintOutput =
+                serde_json::from_slice(&output.stdout).map_err(|_| CatalogError::Fingerprint)?;
+            if fingerprint.fingerprint.is_empty()
+                || !(1.0..=86_400.0).contains(&fingerprint.duration)
+            {
+                return Err(CatalogError::Fingerprint);
+            }
+            let after = tokio::fs::metadata(&absolute)
+                .await
+                .map_err(|_| CatalogError::Fingerprint)?;
+            if after.len() != metadata.len() || after.modified().ok() != Some(modified) {
+                return Err(CatalogError::Fingerprint);
+            }
+            self.fingerprints
+                .lock()
+                .await
+                .insert(key, fingerprint.clone());
+            fingerprint
+        };
         let response = self
             .http
             .post(ACOUSTID_ENDPOINT)
@@ -245,18 +335,23 @@ impl HttpCatalogConnector {
         artist: &str,
         title: &str,
         api_key: &str,
+        recording_id: Option<&str>,
     ) -> Result<Vec<CommunityTag>, CatalogError> {
+        let mut form = vec![
+            ("method", "track.gettoptags"),
+            ("api_key", api_key),
+            ("autocorrect", "0"),
+            ("format", "json"),
+        ];
+        if let Some(id) = recording_id {
+            form.push(("mbid", id));
+        } else {
+            form.extend([("artist", artist), ("track", title)]);
+        }
         let response = self
             .http
             .post(LASTFM_ENDPOINT)
-            .form(&[
-                ("method", "track.gettoptags"),
-                ("artist", artist),
-                ("track", title),
-                ("api_key", api_key),
-                ("autocorrect", "0"),
-                ("format", "json"),
-            ])
+            .form(&form)
             .send()
             .await
             .map_err(|_| CatalogError::LastFm)?
@@ -270,6 +365,85 @@ impl HttpCatalogConnector {
 }
 
 impl CatalogConnector for HttpCatalogConnector {
+    fn begin_lookup(&self, refresh: bool) -> CatalogFuture<'_, ()> {
+        Box::pin(async move {
+            if refresh {
+                self.entities.lock().await.clear();
+                self.fingerprints.lock().await.clear();
+            }
+            Ok(())
+        })
+    }
+    fn community_tags_for_recording<'a>(
+        &'a self,
+        recording_id: &'a str,
+        artist: &'a str,
+        title: &'a str,
+        api_key: &'a str,
+    ) -> CatalogFuture<'a, Vec<CommunityTag>> {
+        Box::pin(HttpCatalogConnector::community_tags(
+            self,
+            artist,
+            title,
+            api_key,
+            Some(recording_id),
+        ))
+    }
+
+    fn local_evidence<'a>(&'a self, track: &'a IndexedTrack) -> CatalogFuture<'a, LocalEvidence> {
+        Box::pin(async move {
+            let path = self
+                .library_root
+                .resolve_existing(&track.path)
+                .map_err(|_| CatalogError::InvalidResponse)?;
+            let before = tokio::fs::metadata(&path)
+                .await
+                .map_err(|_| CatalogError::StaleSource)?;
+            let modified = before.modified().map_err(|_| CatalogError::StaleSource)?;
+            let seconds = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| CatalogError::StaleSource)?
+                .as_secs();
+            if before.len() != track.size_bytes
+                || i64::try_from(seconds).ok() != Some(track.mtime_unix_seconds)
+            {
+                return Err(CatalogError::StaleSource);
+            }
+            let checked_path = path.clone();
+            let evidence =
+                tokio::task::spawn_blocking(move || music_media::read_cleanup_evidence(&path))
+                    .await
+                    .map_err(|_| CatalogError::InvalidResponse)?
+                    .map_err(|_| CatalogError::InvalidResponse)?;
+            let after = tokio::fs::metadata(checked_path)
+                .await
+                .map_err(|_| CatalogError::StaleSource)?;
+            if after.len() != before.len() || after.modified().ok() != Some(modified) {
+                return Err(CatalogError::StaleSource);
+            }
+            Ok(evidence)
+        })
+    }
+    fn search_isrc<'a>(&'a self, isrc: &'a str) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async move {
+            let isrc =
+                normalized_value(EvidenceField::Isrc, isrc).ok_or(CatalogError::InvalidResponse)?;
+            let payload = self
+                .musicbrainz
+                .fetch_json(
+                    "recording",
+                    &[
+                        ("query", format!("isrc:{}", lucene_quote(&isrc))),
+                        ("fmt", "json".into()),
+                        ("limit", "25".into()),
+                    ],
+                )
+                .await
+                .map_err(|_| CatalogError::MusicBrainz)?;
+            parse_candidates(&payload)
+        })
+    }
+
     fn runtime_credential(&self, source: CatalogCredentialSource) -> Option<&str> {
         match source {
             CatalogCredentialSource::AcoustId => self.config.acoustid_api_key.as_ref(),
@@ -314,12 +488,12 @@ impl CatalogConnector for HttpCatalogConnector {
         api_key: &'a str,
     ) -> CatalogFuture<'a, Vec<CommunityTag>> {
         Box::pin(HttpCatalogConnector::community_tags(
-            self, artist, title, api_key,
+            self, artist, title, api_key, None,
         ))
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FingerprintOutput {
     duration: f64,
@@ -346,6 +520,23 @@ async fn bounded_json(response: reqwest::Response) -> Result<Value, CatalogError
         body.extend_from_slice(&chunk);
     }
     serde_json::from_slice(&body).map_err(|_| CatalogError::InvalidResponse)
+}
+
+fn metadata_query(title: &str, artist: &str, duration: Duration) -> String {
+    let ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+    let mut query = format!(
+        "recording:{} AND artist:{}",
+        lucene_quote(title),
+        lucene_quote(artist)
+    );
+    if ms > 0 {
+        query.push_str(&format!(
+            " AND dur:[{} TO {}]",
+            ms.saturating_sub(10_000),
+            ms.saturating_add(10_000)
+        ));
+    }
+    query
 }
 
 fn parse_candidates(payload: &Value) -> Result<Vec<Candidate>, CatalogError> {
@@ -456,6 +647,50 @@ fn parse_recording(value: &Value, expected_id: &str) -> Result<Recording, Catalo
             .and_then(Value::as_str)
             .and_then(bounded_catalog_text),
         releases: parse_releases(value.get("releases")),
+        releases_complete: false,
+        length_ms: value.get("length").and_then(Value::as_u64),
+        genres: value
+            .get("genres")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .take(20)
+            .filter_map(|g| {
+                g.get("name")
+                    .and_then(Value::as_str)
+                    .and_then(bounded_catalog_text)
+            })
+            .collect(),
+        credits: value
+            .get("relations")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .take(40)
+            .flat_map(|relation| {
+                std::iter::once(relation).chain(
+                    relation
+                        .get("work")
+                        .and_then(|work| work.get("relations"))
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .take(40),
+                )
+            })
+            .take(40)
+            .filter_map(|r| {
+                let kind = bounded_catalog_text(r.get("type")?.as_str()?)?;
+                let entity = r.get("artist").or_else(|| r.get("work"))?;
+                let name = bounded_catalog_text(
+                    entity
+                        .get("name")
+                        .or_else(|| entity.get("title"))?
+                        .as_str()?,
+                )?;
+                Some(format!("{kind}: {name}"))
+            })
+            .collect(),
     })
 }
 
@@ -488,6 +723,8 @@ fn parse_release_detail(
     }
     let mut track_no = None;
     let mut disc_no = None;
+    let mut occurrences = 0;
+    let mut slots = Vec::new();
     for medium in value
         .get("media")
         .and_then(Value::as_array)
@@ -503,6 +740,33 @@ fn parse_release_detail(
             .flatten()
             .take(MAX_TRACKS_PER_MEDIUM)
         {
+            if let Some(recording) = track.get("recording")
+                && let (Some(id), Some(recording_id)) = (
+                    track.get("id").and_then(parse_mbid),
+                    recording.get("id").and_then(parse_mbid),
+                )
+            {
+                slots.push(ReleaseSlot {
+                    id,
+                    recording_id,
+                    title: track
+                        .get("title")
+                        .or_else(|| recording.get("title"))
+                        .and_then(Value::as_str)
+                        .and_then(bounded_catalog_text)
+                        .unwrap_or_default(),
+                    artist: track
+                        .get("artist-credit")
+                        .or_else(|| recording.get("artist-credit"))
+                        .map_or_else(String::new, artist_credit),
+                    length_ms: track
+                        .get("length")
+                        .or_else(|| recording.get("length"))
+                        .and_then(Value::as_u64),
+                    track_no: parse_u32(track.get("position")),
+                    disc_no: medium_position,
+                });
+            }
             if track
                 .get("recording")
                 .and_then(|recording| recording.get("id"))
@@ -511,12 +775,13 @@ fn parse_release_detail(
             {
                 track_no = parse_u32(track.get("position"));
                 disc_no = medium_position;
-                break;
+                occurrences += 1;
             }
         }
-        if track_no.is_some() {
-            break;
-        }
+    }
+    if occurrences != 1 {
+        track_no = None;
+        disc_no = None;
     }
     Ok(ReleaseDetail {
         id: expected_release_id.to_owned(),
@@ -534,6 +799,27 @@ fn parse_release_detail(
             .and_then(bounded_catalog_text),
         track_no,
         disc_no,
+        country: value
+            .get("country")
+            .and_then(Value::as_str)
+            .and_then(bounded_catalog_text),
+        barcode: value
+            .get("barcode")
+            .and_then(Value::as_str)
+            .and_then(bounded_catalog_text),
+        catalog_numbers: value
+            .get("label-info")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .take(20)
+            .filter_map(|v| {
+                v.get("catalog-number")
+                    .and_then(Value::as_str)
+                    .and_then(bounded_catalog_text)
+            })
+            .collect(),
+        slots,
     })
 }
 
@@ -629,6 +915,41 @@ mod tests {
             parse_community_tags(&json!({"toptags": {"tag": []}}))
                 .is_ok_and(|tags| tags.is_empty())
         );
+    }
+
+    #[test]
+    fn duration_retrieval_spans_quantization_boundaries_and_handles_missing_duration() {
+        let query = metadata_query("Song", "Artist", Duration::from_millis(179999));
+        assert!(query.contains("dur:[169999 TO 189999]"));
+        assert!(!query.contains("qdur"));
+        assert!(!metadata_query("Song", "Artist", Duration::ZERO).contains("dur:"));
+        assert!(
+            metadata_query("Song", "Artist", Duration::from_millis(2)).contains("dur:[0 TO 10002]")
+        );
+    }
+
+    #[test]
+    fn repeated_recording_occurrences_preserve_slots_without_inventing_position()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let recording = "00000000-0000-0000-0000-000000000001";
+        let release = "00000000-0000-0000-0000-000000000002";
+        let payload = json!({"id":release,"title":"Album","date":"2026-09-10","country":"GB", "media":[
+            {"position":1,"tracks":[{"id":"00000000-0000-0000-0000-000000000003","position":1,"recording":{"id":recording,"title":"Song"}}]},
+            {"position":2,"tracks":[{"id":"00000000-0000-0000-0000-000000000004","position":5,"recording":{"id":recording,"title":"Song"}}]}
+        ]});
+        let detail = parse_release_detail(&payload, release, recording)?;
+        assert_eq!(detail.slots.len(), 2);
+        assert_eq!(detail.track_no, None);
+        assert_eq!(detail.disc_no, None);
+        assert_eq!(detail.date.as_deref(), Some("2026-09-10"));
+        let recording = parse_recording(
+            &json!({"id":recording,"title":"Song", "artist-credit":[{"name":"Artist"}],
+            "genres":[{"name":"ambient"}],"relations":[{"type":"composer","artist":{"name":"Composer"}}]}),
+            recording,
+        )?;
+        assert_eq!(recording.genres, vec!["ambient"]);
+        assert_eq!(recording.credits, vec!["composer: Composer"]);
+        Ok(())
     }
 
     #[test]

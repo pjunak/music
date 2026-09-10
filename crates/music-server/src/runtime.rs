@@ -376,6 +376,15 @@ impl AppRuntime {
                 voice_worker_factory,
             )),
         ];
+        job_handlers.push(Arc::new(
+            music_application::cleanup_enrichment::ai::CleanupAiJobHandler {
+                cleanup: Arc::clone(&cleanup_service),
+                cache: storage.clone(),
+                sources: Arc::clone(&cleanup_source_service),
+                quality: providers.quality_service(),
+                transport: providers.network_boundary(),
+            },
+        ));
         job_handlers.extend(model_evaluation_job_handlers(
             providers.quality_service(),
             providers.network_boundary(),

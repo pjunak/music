@@ -15,6 +15,7 @@ export const EQ_ASSISTANT_ROLE_ID = "eq_assistant";
 export const EQ_QUALITY_JOB_KIND = "assistant.model-evaluation.eq-quality-v1";
 
 export const MODEL_QUALITY_TARGETS = [
+  { roleId: "library_cleanup", jobKind: "assistant.model-evaluation.library-cleanup-quality-v1" },
   {
     roleId: PLAYLIST_MODEL_ROLE_ID,
     jobKind: PLAYLIST_QUALITY_JOB_KIND,

@@ -19,7 +19,7 @@ remain the operator-facing acceptance procedure.
 - Database mood tags remain separate from embedded file metadata and generated suggestions.
 - The local playlist planner creates a reviewable draft and is the default.
 - Optional provider models can assist playlist planning, mood tagging, mood-tag
-  cleanup, and ten-band EQ drafting.
+  cleanup, library metadata candidate review, and ten-band EQ drafting.
 - Every model task has a separate role. Roles may share one connection and key or
   use different connections, providers, models, and keys.
 - Playlist and EQ drafts go through Authoring import preview and explicit commit.
@@ -27,9 +27,8 @@ remain the operator-facing acceptance procedure.
 - Automatic playlists use only manual/accepted tags and optional current local
   metadata analysis. They never consume unreviewed provider suggestions.
 
-Specialized models that receive audio and model-assisted file cleanup are not ready.
-Their role names are visible in AI Setup but deliberately locked until they have a
-provider adapter, data limit, disclosure, quality suite, and review contract.
+Specialized models that receive audio remain reserved. Library cleanup text AI is available
+as a gated candidate-review pilot; it does not author arbitrary tags or change files itself.
 
 ## 1. Prepare or recover a deployment
 
@@ -483,9 +482,46 @@ automatic playlists are still a complete supported workflow.
 
 - A provider adapter and consent/quality contract for sending bounded audio to specialized
   audio models.
-- Model-assisted file/library cleanup on top of the existing review-first local cleanup.
+- Additional metadata providers and specialist OCR/audio enrichment after a labeled coverage pilot.
 - Provider-independent monetary cost estimates or hard budgets inside Music.
 - Any new export workflow beyond the existing Authoring/import and playlist interfaces.
 
 These items should not be enabled by merely unlocking their role in the UI. Each needs a
 separate data-minimization contract, tests, failure policy, and explicit review boundary.
+
+## Library cleanup and metadata evidence
+
+Open **Assistant → Library cleanup → Run**. Renaming collisions propose an unchecked numbered
+suffix while leaving embedded titles unchanged. Enable catalog evidence to identify recordings,
+review competing local/catalog values and choose an album edition for each folder. Matching a
+recording does not establish an edition or duplicate audio. **All unambiguous** leaves competing
+values unticked; choosing a value unticks its alternative for the same field.
+
+**Evidence and alternatives** shows embedded tag observations, full dates, MusicBrainz credits,
+recording candidates, sources and retrieval time. **Refresh catalog results** includes previously
+unmatched tracks. Catalog genres are embedded-tag proposals; Last.fm mood suggestions remain
+database tags. Every file/tag/folder change still requires Apply and appears in History & rollback.
+
+You can select a JSON metadata sidecar with this shape (the example ID is illustrative):
+
+```json
+{"tracks":[{"track_id":7,"fields":{"recording_mbid":"00000000-0000-0000-0000-000000000001","date":"2026-09-10"}}]}
+```
+
+Track IDs appear in each review evidence panel. Supported fields are `title`, `artist`,
+`album_artist`, `album`, `track_no`, `disc_no`, `date`, `original_date`, `genre`, `recording_mbid`,
+`release_mbid`, `release_track_mbid`, `release_group_mbid`, `isrc`, `barcode` and `catalog_number`.
+Use text values, at most 512 bytes each and 500 unique tracks in the selected scope. Imported
+observations support lookup; full dates/IDs are preserved as evidence rather than automatically
+written into extended embedded tags. CUE splitting, executable sidecars and arbitrary URL scraping
+are not part of this import.
+
+For ambiguous catalog results, configure **Library cleanup** in **AI setup**, verify its
+connection, pass conformance and all eight synthetic quality cases, and enable the role. On an
+unresolved track, choose **Review ambiguous candidates with AI** and review the disclosure.
+Explicit consent permits one request, which may incur provider charges. Only bounded indexed
+metadata, supplied candidates and comparison facts are sent. The model can abstain or recommend
+one candidate. Any resulting title/artist proposals remain unchecked until you select and apply
+them. Evidence older than six hours requires a fresh catalog lookup before AI review. There is no
+automatic retry after an uncertain paid request. Real-library accuracy and
+additional recognizer/provider coverage require a separate labeled pilot.

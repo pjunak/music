@@ -129,7 +129,7 @@ remain untrusted data and do not force a ranking. Disclosure v3 covers this inpu
 See [ADR-023](ADR-023-bounded-playlist-vocabulary-recall.md).
 
 Application-owned `model_jobs.rs` registers feature and evaluation handlers; its
-`model_jobs/` modules hold the four roles' execution paths. `StructuredModelTransport`
+`model_jobs/` modules hold the established roles' execution paths; `cleanup_enrichment/ai.rs` owns catalog candidate review. `StructuredModelTransport`
 is the outbound port. The server composes the HTTP adapter and exposes routes;
 application workflows own gates, checkpoints, retry budgets, and proposal writes.
 
@@ -187,9 +187,9 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v2` is included in evidence signatures.
+evidence. `catalog-evidence-policy/v3` is included in evidence signatures.
 
-The four model tasks derive their static output shapes from the strict Serde result
+The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
 confidence enums share one definition. Dynamic allowed IDs and task bounds extend
 the generated schema; cross-field policy and local reconstruction remain in Rust.
@@ -275,13 +275,15 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v22+output/v4+local-context/v2` | `assistant-model-music-tagging-disclosure/v13` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
+| Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1` | `assistant-library-cleanup-disclosure/v1` | `model-catalog-adjudication/v1` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |
 
 Full task output contracts are `assistant-playlist-planner-output/v1`,
-`assistant-music-tagger-output/v4`, `assistant-model-tag-cleanup-output/v2`, and
-`assistant-eq-draft-output/v1`. Reserved roles `library_cleanup` and `audio_analyzer` use
-`reserved-library-cleanup/v1` and `reserved-audio-analyzer/v1`; they are visible but not
-configurable. `library_cleanup` remains visible with the other planned roles in **AI setup**;
-task workspaces choose whether to use a configured model without duplicating model configuration.
+`assistant-music-tagger-output/v4`, `assistant-model-tag-cleanup-output/v2`,
+`assistant-eq-draft-output/v1`, and `assistant-library-cleanup-output/v1`.
+Only `audio_analyzer` remains reserved (`reserved-audio-analyzer/v1`).
+`library_cleanup` is configurable in **AI setup**, with independent conformance,
+`library-cleanup-quality-v1` certification and per-request disclosure consent.
+Task workspaces choose whether to use a configured model without duplicating configuration.
 
 The Library cleanup workspace preserves a separate local authority boundary. The local engine
 produces filename, folder, and embedded-tag proposals; `cleanup_batches` journals only explicitly
@@ -294,18 +296,47 @@ do not establish duplicate audio. Embedded titles are not suffixed. Existing app
 checks still reject destinations occupied since analysis, including files absent from the index.
 Folder metadata evidence always uses all indexed siblings, even when only selected tracks are
 being cleaned. Selection limits proposals, not the evidence used to infer their metadata.
-`musicbrainz`, `acoustid`, and `lastfm` policies are stored in `cleanup_source_policies`. MusicBrainz
-is the identity and canonical-metadata authority; exact local title/artist plus provider score,
-duration, album evidence, and a clear result margin are required. AcoustID is an opt-in identity
-fallback: `fpcalc` computes the fingerprint locally and only its fingerprint plus duration reaches
-the fixed AcoustID endpoint. Last.fm runs only after identity and maps top tags by exact controlled-
-vocabulary name or declared alias. Catalog metadata and mood tags are suggestions, never direct
-writes. Metadata returns through the normal cleanup diff/journal path; accepted community tags use
-the existing database-tag review transaction and do not alter audio files.
+`musicbrainz`, `acoustid`, and `lastfm` policies are stored in `cleanup_source_policies`.
+The comparison key retains Unicode letters/digits while folding case and accents.
+Catalog lookup reads all embedded tag containers for typed recording/release/release-track/group
+IDs, ISRCs, barcode, catalog number, secondary text and full dates. These observations stay in
+cleanup evidence, outside the playback metadata contract. Staged tag edits verify that existing
+recording/release/track identifiers survive readback, including the ID3 TXXX conversion workaround
+for Lofty 0.25.1. MP3, FLAC, Ogg and MP4 fixtures exercise this preservation. Selected JSON imports use the same
+field types, up to 500 unique tracks in the selected scope; arbitrary paths and executable sidecars
+are not accepted. Local cleanup hypotheses can improve retrieval without first writing tags.
+Conflicting recording IDs abstain. MusicBrainz recording ID lookup precedes bounded ISRC searches,
+then up to two title/artist searches (original and local hypothesis), then opt-in AcoustID.
+Text search retrieves 25 candidates with a +/-10-second duration range; zero/unknown duration
+omits that search constraint. Exact title/artist, duration, weighted score and margin still govern
+text selection. Repeated recording IDs merge; multi-recording fingerprint mappings remain competitors.
+Scores are matching heuristics, not calibrated probabilities. A text-request failure permits
+fingerprint fallback and makes the result partial rather than hiding that failure in cache.
 
-`library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. Results are
-cached by exact track/source signature and enabled-source set; partial connector failures are not
-cached, so the unavailable source retries. Authenticated operators can save, explicitly replace, or
+Release browsing retrieves at most 100 editions, with at most five detailed alternatives.
+An album title alone never selects among multiple editions. A typed release ID can target an edition
+outside that shortlist. The bounded assignment matches up to 100 folder tracks (including the
+current track) against 500 release slots with unmatched alternatives. It preserves compilation
+artists, repeated-recording ambiguity and missing tracks. Review chooses an edition for applicable
+tracks in one folder; its proposals start unchecked. Recording first-release date is retained
+separately from edition year. MusicBrainz genres and credits remain attributed observations;
+bounded genre proposals can update embedded genre through the journal. Last.fm receives the
+identified recording MBID and maps top tags by exact controlled-vocabulary names or aliases.
+Catalog metadata and mood tags are suggestions, never direct writes. Metadata returns through
+the cleanup diff/journal; accepted mood tags use the existing database-tag review transaction.
+Local and catalog alternatives remain visible together, and selection enforces one value per field.
+Bulk selection leaves conflicting values unresolved. AI candidate choices are separately labeled.
+
+`library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. Cache keys
+include exact indexed source, local observations, folder context and source/vocabulary revision.
+Complete matches expire after seven days; unmatched results after six hours; future timestamps
+and partial connector failures cannot be reused. The connector keeps bounded in-memory entity and
+local-fingerprint caches (256 entries each, one hour); fingerprint keys include rooted path and
+actual size/mtime, with a post-computation check. **Refresh catalog results** bypasses result reuse
+and clears these connector caches. A changed file stat requires library rescan. Extra tag parsing
+runs in one awaited blocking task at a time in the serialized provider lane.
+
+Authenticated operators can save, explicitly replace, or
 remove AcoustID and Last.fm keys under **Library cleanup → Sources**. They use dedicated records in
 the same AES-GCM vault as model-provider credentials; the browser receives only saved state, source,
 and a masked hint. A saved key takes precedence immediately, while `CLEANUP_ACOUSTID_API_KEY` and
@@ -314,20 +345,23 @@ invalidates affected enrichment evidence. Disabling Last.fm atomically clears it
 leaving already accepted operator tags intact. Arbitrary URL scraping is not a supported source
 contract.
 
-Metadata enrichment follow-ups (not implemented):
+The optional `assistant.model-library-cleanup` job handles one unresolved track from a completed
+catalog job whose evidence is less than six hours old. Expired or changed evidence fails before
+the provider call. It is non-restartable and checkpoints one provider attempt before external cost.
+`LibraryCleanupModelTask` discloses bounded indexed title/artist/album/duration and up to 25 catalog
+candidates with opaque IDs and local comparison facts. Paths, track IDs, raw sidecars, webpages,
+credentials and audio are excluded. The output selects a supplied candidate or explicitly abstains;
+selection must cite at least two supporting references belonging to that candidate and cannot
+cross a local version/duration contradiction or distinguish two candidates with identical
+disclosed identity evidence. The server reconstructs only candidate title/artist
+proposals, starts them unchecked and checks role/source revision and track signature again after
+the call. No model-authored metadata value reaches the cleanup journal.
 
-- Prefer embedded MusicBrainz recording/release IDs, then ISRC lookup, before text search when
-  available. The [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API) supports these
-  identifiers. This needs typed extraction and storage, source-signature invalidation, and
-  reviewed identity evidence; an identifier must not silently authorize metadata replacement.
-- Add release-edition review using album, date, disc count, track order and durations together.
-  Current `choose_release` selects the first eligible same-title edition, which can yield a
-  reissue date or different track position. Identity of a recording alone does not identify
-  its release. Preserve ambiguity instead of broadening automatic matching thresholds.
-- Surface unresolved identities for operator matching. The existing
-  [AcoustID lookup](https://acoustid.org/webservice) already provides fingerprint-based fallback;
-  it requires the enabled source, its API key and local `fpcalc`. Broader metadata coverage
-  should reuse this reviewed catalog workflow and its credential/consent boundaries.
+The eight synthetic quality cases cover version/order changes, indistinguishable recordings,
+Unicode, absent evidence, duration contradiction and injected instructions. All must pass for a
+configured model to become usable. This is a pilot gate, not measured accuracy on a private library.
+Additional providers, OCR/audio models and broader recognition remain conditional research pilots;
+see [metadata research](LIBRARY_METADATA_RESEARCH.md) for source policies and the held-out benchmark.
 
 ## Workflow traceability
 

@@ -1,5 +1,6 @@
 mod batch;
 mod eq;
+mod library_cleanup;
 mod playlist;
 mod tag_cleanup;
 mod tagging;
@@ -105,6 +106,7 @@ enum EvaluationKind {
     Tagging,
     TagCleanup,
     Eq,
+    LibraryCleanup,
 }
 
 impl EvaluationKind {
@@ -114,6 +116,7 @@ impl EvaluationKind {
             Self::Tagging => "music_tagger",
             Self::TagCleanup => "tag_cleanup",
             Self::Eq => "eq_assistant",
+            Self::LibraryCleanup => "library_cleanup",
         }
     }
 
@@ -123,6 +126,7 @@ impl EvaluationKind {
             Self::Tagging => TAGGING_QUALITY_EVALUATION_ID,
             Self::TagCleanup => TAG_CLEANUP_QUALITY_EVALUATION_ID,
             Self::Eq => EQ_QUALITY_EVALUATION_ID,
+            Self::LibraryCleanup => super::LIBRARY_CLEANUP_QUALITY_ID,
         }
     }
 
@@ -132,6 +136,7 @@ impl EvaluationKind {
             Self::Tagging => "assistant.model-evaluation.music-tagging-quality-v1",
             Self::TagCleanup => "assistant.model-evaluation.tag-cleanup-quality-v1",
             Self::Eq => "assistant.model-evaluation.eq-quality-v1",
+            Self::LibraryCleanup => "assistant.model-evaluation.library-cleanup-quality-v1",
         }
     }
 }
@@ -240,6 +245,9 @@ impl JobHandler for ModelEvaluationJobHandler {
                 EvaluationKind::Tagging => self.execute_tagging(context, &parameters).await,
                 EvaluationKind::TagCleanup => self.execute_tag_cleanup(context, &parameters).await,
                 EvaluationKind::Eq => self.execute_eq(context, &parameters).await,
+                EvaluationKind::LibraryCleanup => {
+                    self.execute_library_cleanup(context, &parameters).await
+                }
             }?;
             Ok(Value::Object(result))
         })
@@ -391,6 +399,7 @@ pub fn model_evaluation_job_handlers(
         EvaluationKind::Tagging,
         EvaluationKind::TagCleanup,
         EvaluationKind::Eq,
+        EvaluationKind::LibraryCleanup,
     ]
     .into_iter()
     .map(|kind| {
@@ -793,6 +802,7 @@ mod tests {
             EvaluationKind::Tagging,
             EvaluationKind::TagCleanup,
             EvaluationKind::Eq,
+            EvaluationKind::LibraryCleanup,
         ] {
             let definition = evaluation_job_definition(kind);
             assert_eq!(definition.lane, JobLane::Provider);

@@ -21,6 +21,9 @@ use serde_json::{Value, json};
 
 use crate::{SqliteStorage, SqliteStorageOptions};
 
+#[path = "cleanup_enrichment_workflow_tests/model_review.rs"]
+mod model_review;
+
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 const RECORDING: &str = "00000000-0000-0000-0000-000000000001";
 
@@ -43,6 +46,7 @@ struct FixtureCatalog {
     fingerprints: AtomicUsize,
     tag_calls: AtomicUsize,
     metadata_match: AtomicBool,
+    metadata_failure: AtomicBool,
     ambiguous_fingerprint: AtomicBool,
     release_failure: AtomicBool,
 }
@@ -55,6 +59,9 @@ impl CatalogConnector for FixtureCatalog {
     fn search_metadata<'a>(&'a self, _: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>> {
         Box::pin(async move {
             self.searches.fetch_add(1, Ordering::SeqCst);
+            if self.metadata_failure.load(Ordering::SeqCst) {
+                return Err(CatalogError::MusicBrainz);
+            }
             assert_eq!(
                 self.sources.update("musicbrainz", false).await,
                 Err(CleanupSourceError::Busy)
@@ -82,6 +89,8 @@ impl CatalogConnector for FixtureCatalog {
                 artist: "Artist".to_owned(),
                 first_release_date: Some("2026".to_owned()),
                 releases: vec![release_summary()],
+                releases_complete: true,
+                ..Recording::default()
             })
         })
     }
@@ -98,6 +107,18 @@ impl CatalogConnector for FixtureCatalog {
                 date: Some("2026".to_owned()),
                 track_no: Some(1),
                 disc_no: Some(1),
+                slots: vec![
+                    music_application::cleanup_enrichment::catalog::ReleaseSlot {
+                        id: "slot".into(),
+                        recording_id: "00000000-0000-0000-0000-000000000001".into(),
+                        title: "Song".into(),
+                        artist: "Artist".into(),
+                        length_ms: Some(120_000),
+                        track_no: Some(1),
+                        disc_no: Some(1),
+                    },
+                ],
+                ..ReleaseDetail::default()
             })
         })
     }
@@ -172,6 +193,7 @@ async fn setup(
         fingerprints: AtomicUsize::new(0),
         tag_calls: AtomicUsize::new(0),
         metadata_match: AtomicBool::new(true),
+        metadata_failure: AtomicBool::new(false),
         ambiguous_fingerprint: AtomicBool::new(false),
         release_failure: AtomicBool::new(false),
     });
@@ -189,11 +211,12 @@ async fn setup(
 }
 
 async fn run(service: &JobService, force: bool) -> TestResult<JobRecord> {
+    run_parameters(service, json!({"scope": {"type": "all"}, "force": force})).await
+}
+
+async fn run_parameters(service: &JobService, parameters: Value) -> TestResult<JobRecord> {
     let job = service
-        .enqueue(
-            CLEANUP_ENRICHMENT_JOB_KIND,
-            json!({"scope": {"type": "all"}, "force": force}),
-        )
+        .enqueue(CLEANUP_ENRICHMENT_JOB_KIND, parameters)
         .await?;
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -300,6 +323,47 @@ async fn catalog_workflow_bounds_fallback_and_retries_partial_results_on_explici
     assert_eq!(again["cached"], 0);
     assert_eq!(connector.fingerprints.load(Ordering::SeqCst), 3);
     assert_eq!(connector.tag_calls.load(Ordering::SeqCst), 0);
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn imports_prefer_typed_ids_invalidate_cache_and_reject_out_of_scope_before_requests()
+-> TestResult {
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    assert_eq!(
+        result(&run(&coordinator.service, false).await?)?["identified"],
+        1
+    );
+    let imports = json!({"scope":{"type":"all"}, "imports":[{"track_id":1,"fields":{"recording_mbid":RECORDING, "date":"2026-09-10"}}]});
+    let imported = result(&run_parameters(&coordinator.service, imports.clone()).await?)?;
+    assert_eq!(imported["cached"], 0);
+    assert_eq!(imported["plans"][0]["identity"]["method"], "identifier");
+    assert_eq!(connector.searches.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        result(&run_parameters(&coordinator.service, imports).await?)?["cached"],
+        1
+    );
+    let invalid = json!({"scope":{"type":"all"}, "imports":[{"track_id":9,"fields":{"recording_mbid":RECORDING}}]});
+    assert_eq!(
+        run_parameters(&coordinator.service, invalid).await?.status,
+        JobStatus::Failed
+    );
+    assert_eq!(connector.searches.load(Ordering::SeqCst), 1);
+    connector.metadata_failure.store(true, Ordering::SeqCst);
+    connector
+        .ambiguous_fingerprint
+        .store(false, Ordering::SeqCst);
+    let fallback = result(&run(&coordinator.service, true).await?)?;
+    assert_eq!(fallback["fingerprinted"], 1);
+    assert_eq!(fallback["plans"][0]["partial"], true);
     coordinator.service.shutdown();
     coordinator.local_task.await??;
     coordinator.provider_task.await??;

@@ -48,8 +48,8 @@
     "reason": "September 8 mood rework returns the 20-track pilot default, optional empty-request stop and disclosure v13. Existing counts and execution fields remain. Multi-request Batch plans with the stop enabled are unavailable before upload. Web Assistant consumes these fields; no native client change."
   },
   "POST /api/library/cleanup/enrichment-jobs#operation": {
-    "sha256": "5116ecfeaaedce515fe1f6fabe3a31f60f01110fec9c9eba385f215062f61378",
-    "reason": "Catalog enrichment creates bounded review-only jobs as an authenticated extension."
+    "sha256": "282a7902b9e1df5cce5254bbe2ac5abf2b86f70a809af2fbfe2add4bf0bb7ab9",
+    "reason": "Adds optional imported evidence to the existing bounded review-only job. Omitting imports preserves existing callers. The application validates typed fields, unique track IDs and selected scope before catalog requests; imports never directly write metadata."
   },
   "PUT /api/library/cleanup/sources/{source_id}/credential#operation": {
     "sha256": "17b6c9cc9e09c9a1b5503e5af2e0344e56a427f6a1b0c9c8d0c0e9c64cdf9794",
@@ -74,5 +74,13 @@
   "PATCH /api/assistant/library-tags/{track_id}#responses": {
     "sha256": "c9d6adfa98974a0fc580a9b76c867dfe6e4d91b4908659565c0e90702cd296a3",
     "reason": "September 8 mood rework adds optional count, public explanation, confidence, recorded context status and bounded per-track input snapshot to model_analysis. Empty and outdated profiles remain inspectable; missing historical fields stay unknown. Existing tags, review authority and authentication remain unchanged. No playback or Baton DTO change."
+  },
+  "GET /api/library/cleanup/model#operation": {
+    "sha256": "3fa6a9c1f94cc23cb05488ec86edddf2b8f09ca5c8f7f7de5cb2360cd6817c17",
+    "reason": "Adds authenticated availability and versioned disclosure for optional Library cleanup candidate review. Only the web cleanup workflow consumes this endpoint; playback and Baton contracts are unaffected."
+  },
+  "POST /api/library/cleanup/model/jobs#operation": {
+    "sha256": "d94b77f532014af4c45cd33d0439739597718211434a39c118b3f7c84a35a0aa",
+    "reason": "Adds authenticated single-track candidate review with current consent, conformance and quality gates. One checkpointed provider attempt yields unchecked catalog-owned title/artist proposals; it never writes tags or retries uncertain cost automatically. The web cleanup client is updated together; Baton does not consume this route."
   }
 }

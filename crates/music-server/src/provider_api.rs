@@ -142,6 +142,7 @@ pub(crate) fn provider_role_contract_digests() -> std::collections::BTreeMap<Str
         "playlist_planner",
         "music_tagger",
         "tag_cleanup",
+        "library_cleanup",
     ]
     .into_iter()
     .map(|role| {
@@ -1784,7 +1785,7 @@ mod tests {
             )
         );
         let roles = super::provider_role_contract_digests();
-        assert_eq!(roles.len(), 4);
+        assert_eq!(roles.len(), 5);
         assert!(
             roles
                 .values()
@@ -1795,7 +1796,7 @@ mod tests {
                 .values()
                 .collect::<std::collections::BTreeSet<_>>()
                 .len(),
-            4
+            5
         );
     }
 

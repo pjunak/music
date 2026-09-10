@@ -1697,6 +1697,10 @@
           "force": {
             "type": "boolean"
           },
+          "imports": {
+            "items": {},
+            "type": "array"
+          },
           "scope": {
             "$ref": "#/components/schemas/CleanupScope"
           }
@@ -1741,6 +1745,82 @@
           "new",
           "rules",
           "confidence"
+        ],
+        "type": "object"
+      },
+      "CleanupModelStart": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_job_id": {
+            "type": "string"
+          },
+          "consent": {
+            "type": "boolean"
+          },
+          "disclosure_version": {
+            "type": "string"
+          },
+          "track_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "catalog_job_id",
+          "disclosure_version",
+          "consent"
+        ],
+        "type": "object"
+      },
+      "CleanupModelStatus": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "disclosure_version": {
+            "type": "string"
+          },
+          "maximum_candidates": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "may_incur_cost": {
+            "type": "boolean"
+          },
+          "model_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "never_shared": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shared_with_provider": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "disclosure_version",
+          "shared_with_provider",
+          "never_shared",
+          "maximum_candidates",
+          "may_incur_cost"
         ],
         "type": "object"
       },
@@ -10811,6 +10891,66 @@
         },
         "tags": [
           "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/model": {
+      "get": {
+        "operationId": "cleanup_model_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupModelStatus"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/api/library/cleanup/model/jobs": {
+      "post": {
+        "operationId": "cleanup_model_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupModelStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "library"
         ]
       }
     },

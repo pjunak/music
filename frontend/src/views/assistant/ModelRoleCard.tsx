@@ -47,6 +47,7 @@ const ROLE_OUTPUT_CONSTRAINTS: Record<string, string> = {
   tag_cleanup: "Canonical ID or no match",
   playlist_planner: "Known track IDs; server-ranked",
   eq_assistant: "Ten bounded EQ gains",
+  library_cleanup: "Supplied catalog IDs and evidence; may abstain",
 };
 
 const ROLE_THINKING_RECOMMENDATIONS: Record<string, string> = {

@@ -29,7 +29,7 @@ pub use discovery::{
 pub use metadata::{
     AudioMetadata, FfmpegTools, MetadataAdapter, MetadataError, MetadataWriteCapability,
     StagedTagUpdate, TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata,
-    stage_tag_update,
+    read_cleanup_evidence, stage_tag_update,
 };
 pub use mode_mutation::{FilesystemModeMutations, ModeFilesystemMutationError};
 pub use modes::FilesystemModeCatalogSource;

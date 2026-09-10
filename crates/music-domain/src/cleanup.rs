@@ -216,7 +216,7 @@ pub fn cleanup_loose_key(value: &str) -> String {
         for lower in character.to_lowercase() {
             if lower == 'ß' {
                 output.push_str("ss");
-            } else if lower.is_ascii_alphanumeric() {
+            } else if lower.is_alphanumeric() {
                 output.push(lower);
             }
         }
@@ -1871,6 +1871,15 @@ mod tests {
             Some(CleanupValue::Number(value)) => Some(*value),
             _ => None,
         }
+    }
+
+    #[test]
+    fn loose_comparison_keeps_non_latin_letters_distinct() {
+        assert_ne!(cleanup_loose_key("東京2"), cleanup_loose_key("大阪2"));
+        assert_ne!(cleanup_loose_key("Москва"), cleanup_loose_key("Киев"));
+        assert!(!cleanup_loose_key("東京").is_empty());
+        assert_eq!(cleanup_loose_key("Beyoncé"), cleanup_loose_key("Beyonce"));
+        assert_eq!(cleanup_loose_key("Straße"), cleanup_loose_key("STRASSE"));
     }
 
     #[test]

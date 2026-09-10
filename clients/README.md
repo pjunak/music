@@ -296,3 +296,17 @@ its own control panel. For full-fidelity effects/crossfade on that box (rather t
 ambient playback), the alternative is to run a kiosk browser pointed at the player's web app
 instead of the headless client — heavier, and not required for music to come out of the
 speakers.
+
+### Cleanup metadata evidence and optional AI review
+
+Authenticated library administration adds optional `imports` to
+`POST /api/library/cleanup/enrichment-jobs`: an array of `{track_id, fields}` typed text
+observations; `force: true` refreshes complete and unmatched results. Existing requests remain
+valid. Results use the existing job JSON envelope and add local evidence, candidates, full dates,
+release choices and field provenance. Playback/WS track DTOs are unchanged.
+
+`GET /api/library/cleanup/model` reports the central role/quality gate and versioned disclosure.
+`POST /api/library/cleanup/model/jobs` takes `track_id`, `catalog_job_id`, `disclosure_version` and
+`consent: true`. It reviews one unresolved track from a successful catalog job and returns only
+unchecked title/artist proposals or abstention. It checks source/track/role freshness and never
+applies changes. Neither new API is needed by output clients or Baton playback.

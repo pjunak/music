@@ -1,4 +1,5 @@
 use music_domain::IndexedTrack;
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
@@ -6,6 +7,27 @@ use std::pin::Pin;
 /// Bounded connector observations. Scoring, fallback policy, vocabulary mapping,
 /// caching and proposal persistence belong to the application workflow.
 pub trait CatalogConnector: std::fmt::Debug + Send + Sync {
+    fn begin_lookup(&self, _refresh: bool) -> CatalogFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn community_tags_for_recording<'a>(
+        &'a self,
+        _recording_id: &'a str,
+        artist: &'a str,
+        title: &'a str,
+        api_key: &'a str,
+    ) -> CatalogFuture<'a, Vec<CommunityTag>> {
+        self.community_tags(artist, title, api_key)
+    }
+    fn local_evidence<'a>(
+        &'a self,
+        _track: &'a IndexedTrack,
+    ) -> CatalogFuture<'a, super::evidence::LocalEvidence> {
+        Box::pin(async { Ok(super::evidence::LocalEvidence::default()) })
+    }
+    fn search_isrc<'a>(&'a self, _isrc: &'a str) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
     fn runtime_credential(&self, source: CatalogCredentialSource) -> Option<&str>;
     fn search_metadata<'a>(&'a self, track: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>>;
     fn recording<'a>(&'a self, recording_id: &'a str) -> CatalogFuture<'a, Recording>;
@@ -35,7 +57,7 @@ pub enum CatalogCredentialSource {
     LastFm,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcousticCandidate {
     pub recording_ids: Vec<String>,
     pub score: f64,
@@ -47,7 +69,7 @@ pub struct CommunityTag {
     pub count: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Candidate {
     pub id: String,
     pub title: String,
@@ -57,22 +79,26 @@ pub struct Candidate {
     pub provider_score: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Recording {
     pub title: String,
     pub artist: String,
     pub first_release_date: Option<String>,
     pub releases: Vec<ReleaseSummary>,
+    pub releases_complete: bool,
+    pub genres: Vec<String>,
+    pub credits: Vec<String>,
+    pub length_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseSummary {
     pub id: String,
     pub title: String,
     pub status: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReleaseDetail {
     pub id: String,
     pub title: String,
@@ -80,10 +106,26 @@ pub struct ReleaseDetail {
     pub date: Option<String>,
     pub track_no: Option<u32>,
     pub disc_no: Option<u32>,
+    pub country: Option<String>,
+    pub barcode: Option<String>,
+    pub catalog_numbers: Vec<String>,
+    pub slots: Vec<ReleaseSlot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseSlot {
+    pub id: String,
+    pub recording_id: String,
+    pub title: String,
+    pub artist: String,
+    pub length_ms: Option<u64>,
+    pub track_no: Option<u32>,
+    pub disc_no: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum CatalogError {
+    StaleSource,
     MusicBrainz,
     AcoustIdUnavailable,
     AcoustId,
@@ -97,6 +139,7 @@ pub enum CatalogError {
 impl CatalogError {
     pub const fn code(self) -> &'static str {
         match self {
+            Self::StaleSource => "cleanup_source_changed_rescan_required",
             Self::MusicBrainz => "musicbrainz_unavailable",
             Self::AcoustIdUnavailable => "acoustid_not_configured",
             Self::AcoustId => "acoustid_unavailable",

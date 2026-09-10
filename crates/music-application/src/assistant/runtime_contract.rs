@@ -10,6 +10,34 @@ pub const ASSISTANT_RUNTIME_CONTRACT_VERSION: &str = "assistant-runtime-contract
 
 const ASSISTANT_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
     (
+        "cleanup_enrichment/workflow.rs",
+        include_str!("../cleanup_enrichment/workflow.rs"),
+    ),
+    (
+        "cleanup_enrichment.rs",
+        include_str!("../cleanup_enrichment.rs"),
+    ),
+    (
+        "music-domain/cleanup.rs",
+        include_str!("../../../music-domain/src/cleanup.rs"),
+    ),
+    (
+        "assistant/model_library_cleanup.rs",
+        include_str!("model_library_cleanup.rs"),
+    ),
+    (
+        "assistant/model_jobs/library_cleanup.rs",
+        include_str!("model_jobs/library_cleanup.rs"),
+    ),
+    (
+        "cleanup_enrichment/ai.rs",
+        include_str!("../cleanup_enrichment/ai.rs"),
+    ),
+    (
+        "cleanup_enrichment/resolution.rs",
+        include_str!("../cleanup_enrichment/resolution.rs"),
+    ),
+    (
         "assistant/model_jobs/batch.rs",
         include_str!("model_jobs/batch.rs"),
     ),
@@ -145,11 +173,18 @@ fn artifact_digest(role_id: Option<&str>, artifacts: &[(&str, &str)]) -> String 
 fn artifact_affects_role(name: &str, role: &str) -> bool {
     if !matches!(
         role,
-        "eq_assistant" | "playlist_planner" | "music_tagger" | "tag_cleanup"
+        "eq_assistant" | "playlist_planner" | "music_tagger" | "tag_cleanup" | "library_cleanup"
     ) {
         return true;
     }
     match name {
+        "cleanup_enrichment/workflow.rs"
+        | "cleanup_enrichment.rs"
+        | "music-domain/cleanup.rs"
+        | "assistant/model_library_cleanup.rs"
+        | "assistant/model_jobs/library_cleanup.rs"
+        | "cleanup_enrichment/ai.rs"
+        | "cleanup_enrichment/resolution.rs" => role == "library_cleanup",
         "assistant/model_eq.rs"
         | "assistant/model_jobs/eq.rs"
         | "assistant/evaluation_suites/eq-assistant-v1.json" => role == "eq_assistant",

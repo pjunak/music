@@ -1,7 +1,10 @@
 use super::catalog::{
     AcousticCandidate, Candidate, CatalogConnector, CatalogCredentialSource, CatalogError,
-    CommunityTag, Recording, ReleaseDetail, ReleaseSummary,
+    CommunityTag, Recording, ReleaseDetail,
 };
+use super::editions::resolve_editions;
+use super::evidence::{ImportedTrackEvidence, LocalEvidence, retrieval_hypothesis};
+use super::resolution::resolve_identity;
 use super::{
     CLEANUP_ENRICHMENT_JOB_KIND, CLEANUP_ENRICHMENT_SCHEMA, CleanupEnrichmentRecord,
     CleanupEnrichmentRepository, MAX_CLEANUP_ENRICHMENT_TRACKS,
@@ -24,6 +27,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const ACOUSTID_MIN_SCORE: f64 = 0.85;
 const ACOUSTID_MIN_MARGIN: f64 = 0.10;
@@ -84,6 +88,35 @@ impl CleanupEnrichmentJobHandler {
                 "cleanup enrichment is limited to {MAX_CLEANUP_ENRICHMENT_TRACKS} tracks per run; choose a smaller folder"
             )));
         }
+        if parameters.imports.len() > MAX_CLEANUP_ENRICHMENT_TRACKS
+            || parameters
+                .imports
+                .iter()
+                .any(|i| !i.valid() || !tracks.iter().any(|t| t.id.get() == i.track_id))
+            || parameters
+                .imports
+                .iter()
+                .map(|i| i.track_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != parameters.imports.len()
+        {
+            return Err(JobHandlerError::new(
+                "Imported evidence must contain unique tracks within the selected scope and bounded typed fields.",
+            ));
+        }
+        let all_tracks = self
+            .services
+            .cleanup
+            .tracks(CleanupScope::All)
+            .await
+            .map_err(|_| JobHandlerError::new("folder context is unavailable"))?;
+        let local_plans = music_domain::analyze_cleanup(
+            &all_tracks,
+            &all_tracks,
+            music_domain::DEFAULT_CLEANUP_RULES,
+            None,
+        );
         let _source_lease = self.services.sources.execution_lease().await;
         let source_states = self
             .services
@@ -156,6 +189,10 @@ impl CleanupEnrichmentJobHandler {
             lastfm_enabled,
             lastfm_api_key,
         };
+        self.connector
+            .begin_lookup(parameters.force)
+            .await
+            .map_err(|e| JobHandlerError::new(e.code()))?;
         let active_sources = active_source_ids(acoustid_enabled, lastfm_enabled);
         let vocabulary = if lastfm_enabled {
             Some(
@@ -201,8 +238,68 @@ impl CleanupEnrichmentJobHandler {
                     "Catalog settings or vocabulary changed; start a fresh lookup.",
                 ));
             }
+            let mut evidence = match self.connector.local_evidence(track).await {
+                Ok(evidence) => evidence,
+                Err(CatalogError::StaleSource) => return Err(JobHandlerError::new("Library files changed; rescan the library before enrichment.")),
+                Err(_) => LocalEvidence { observations: Vec::new(), notes: vec!["Additional embedded tags could not be read; indexed metadata remains available.".into()] },
+            };
+            if let Some(imported) = parameters
+                .imports
+                .iter()
+                .find(|i| i.track_id == track.id.get())
+            {
+                evidence.add_import(imported);
+            }
+            let hypothesis = retrieval_hypothesis(
+                track,
+                local_plans.iter().find(|p| p.track_id == track.id),
+                &evidence,
+            );
+            let evidence_signature = evidence
+                .signature(&hypothesis)
+                .map_err(JobHandlerError::new)?;
             let signature =
                 cleanup_enrichment_source_signature(track).map_err(JobHandlerError::new)?;
+            let folder = track
+                .path
+                .as_str()
+                .rsplit_once('/')
+                .map_or("", |(parent, _)| parent);
+            let siblings = all_tracks
+                .iter()
+                .filter(|t| {
+                    t.path
+                        .as_str()
+                        .rsplit_once('/')
+                        .map_or("", |(parent, _)| parent)
+                        == folder
+                })
+                .map(|t| {
+                    if t.id == track.id {
+                        return hypothesis.clone();
+                    }
+                    let mut sibling_evidence = LocalEvidence::default();
+                    if let Some(imported) =
+                        parameters.imports.iter().find(|i| i.track_id == t.id.get())
+                    {
+                        sibling_evidence.add_import(imported);
+                    }
+                    retrieval_hypothesis(
+                        t,
+                        local_plans.iter().find(|p| p.track_id == t.id),
+                        &sibling_evidence,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let signatures = siblings
+                .iter()
+                .map(cleanup_enrichment_source_signature)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(JobHandlerError::new)?;
+            let context_signature = {
+                use sha2::{Digest, Sha256};
+                format!("{:x}", Sha256::digest(signatures.join(":")))
+            };
             let result = if !parameters.force {
                 self.services
                     .cache
@@ -213,6 +310,14 @@ impl CleanupEnrichmentJobHandler {
                         record.source_signature == signature
                             && record.evidence_revision == evidence_revision
                             && cached_sources_match(&record.result, &active_sources)
+                            && record
+                                .result
+                                .get("local_evidence_signature")
+                                .and_then(Value::as_str)
+                                == Some(&evidence_signature)
+                            && record.result.get("folder_context_signature")
+                                == Some(&json!(context_signature))
+                            && cache_is_fresh(&record.result)
                     })
                     .map(|record| record.result)
             } else {
@@ -223,10 +328,23 @@ impl CleanupEnrichmentJobHandler {
                 result
             } else {
                 match self
-                    .enrich_track(track, catalog, vocabulary.as_ref(), context.job_id())
+                    .enrich_track(
+                        track,
+                        &hypothesis,
+                        &evidence,
+                        &siblings,
+                        catalog,
+                        vocabulary.as_ref(),
+                        context.job_id(),
+                    )
                     .await
                 {
                     Ok(mut result) => {
+                        result.insert("source_signature".into(), json!(signature));
+                        result.insert("local_evidence_signature".into(), json!(evidence_signature));
+                        result.insert("folder_context_signature".into(), json!(context_signature));
+                        result.insert("local_evidence".into(), json!(evidence));
+                        result.insert("retrieved_at".into(), json!(now_seconds()));
                         result.insert("evidence_revision".to_owned(), json!(evidence_revision));
                         result.insert(
                             "vocabulary_fingerprint".to_owned(),
@@ -313,78 +431,76 @@ impl CleanupEnrichmentJobHandler {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn enrich_track(
         &self,
         track: &IndexedTrack,
+        hypothesis: &IndexedTrack,
+        evidence: &LocalEvidence,
+        siblings: &[IndexedTrack],
         catalog: CatalogAccess<'_>,
         vocabulary: Option<&TagVocabularySnapshot>,
         job_id: &str,
     ) -> Result<Map<String, Value>, CatalogError> {
-        let candidates = self.connector.search_metadata(track).await?;
-        let metadata_match = select_candidate(track, candidates);
-        let (recording_id, method, confidence) = if let Some((candidate, score)) = metadata_match {
-            (candidate.id, "metadata", score)
-        } else if catalog.acoustid_enabled {
-            let recording_id = self
-                .connector
-                .fingerprint_candidates(
-                    track,
-                    catalog
-                        .acoustid_api_key
-                        .ok_or(CatalogError::AcoustIdUnavailable)?,
-                )
-                .await?;
-            let Some((recording_id, score)) = select_acoustic_candidate(recording_id) else {
-                return Ok(unmatched_result(
-                    track,
-                    catalog.acoustid_enabled,
-                    catalog.lastfm_enabled,
-                ));
-            };
-            (recording_id, "fingerprint", score)
-        } else {
-            return Ok(unmatched_result(
-                track,
-                catalog.acoustid_enabled,
-                catalog.lastfm_enabled,
-            ));
-        };
-
-        let recording = self.connector.recording(&recording_id).await?;
-        let release = choose_release(track, &recording.releases);
-        let mut partial = false;
-        let release_detail = match release {
-            Some(release) => match self.connector.release(&release.id, &recording_id).await {
-                Ok(detail) => Some(detail),
-                Err(_) => {
-                    partial = true;
-                    None
-                }
+        let mut resolution = resolve_identity(
+            self.connector.as_ref(),
+            track,
+            hypothesis,
+            evidence,
+            if catalog.acoustid_enabled {
+                catalog.acoustid_api_key
+            } else {
+                None
             },
-            None => None,
+        )
+        .await?;
+        let Some((recording_id, method, confidence, recording)) = resolution.identity.take() else {
+            let mut result =
+                unmatched_result(track, catalog.acoustid_enabled, catalog.lastfm_enabled);
+            result.insert("partial".into(), json!(resolution.partial));
+            result.insert("candidates".into(), json!(resolution.candidates));
+            if !resolution.notes.is_empty() {
+                result
+                    .get_mut("notes")
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .for_each(|notes| notes.extend(resolution.notes.iter().map(|n| json!(n))));
+            }
+            return Ok(result);
         };
-        let metadata = canonical_metadata(&recording, release_detail.as_ref());
-        let operations = metadata_operations(track, &metadata, &recording_id);
-        let mut tag_suggestions = Vec::new();
-        let mut notes = vec![format!(
-            "Matched {} — {} via {} evidence ({:.0}% confidence).",
-            recording.artist,
-            recording.title,
-            method,
-            confidence * 100.0,
-        )];
-        if release.is_some() && release_detail.is_none() {
-            notes.push(
-                "Release details were unavailable; recording-level metadata is still available and the release lookup will retry next run."
-                    .to_owned(),
-            );
+        let editions = resolve_editions(
+            self.connector.as_ref(),
+            track,
+            hypothesis,
+            &recording_id,
+            &recording,
+            evidence,
+            siblings,
+        )
+        .await;
+        // Proposals compare with the original indexed values, never retrieval hypotheses.
+        let metadata = canonical_metadata(&recording, editions.selected.as_ref());
+        let mut operations = metadata_operations(track, &metadata, &recording_id);
+        for op in &mut operations {
+            op["evidence"] = json!({"source": "musicbrainz", "entity": if matches!(op["field"].as_str(), Some("title" | "artist" | "genre")) { "recording" } else { "release" },
+                "recording_id": recording_id, "release_id": editions.selected.as_ref().map(|r| &r.id), "method": method});
         }
+        let choices = editions.choices;
+        let mut partial = resolution.partial || editions.partial;
+        let mut tag_suggestions = Vec::new();
+        let mut notes = resolution.notes;
+        notes.push(format!(
+            "Matched {} — {} via {} evidence (match score {:.2}; not a probability).",
+            recording.artist, recording.title, method, confidence
+        ));
+        notes.extend(editions.notes);
         if catalog.lastfm_enabled
             && let Some(vocabulary) = vocabulary
         {
             match self
                 .connector
-                .community_tags(
+                .community_tags_for_recording(
+                    &recording_id,
                     &recording.artist,
                     &recording.title,
                     catalog
@@ -454,8 +570,11 @@ impl CleanupEnrichmentJobHandler {
                 "confidence": confidence,
                 "title": recording.title,
                 "artist": recording.artist,
-                "release_mbid": release_detail.as_ref().map(|release| release.id.as_str()),
+                "release_mbid": editions.selected.as_ref().map(|release| release.id.as_str()),
             },
+            "candidates": resolution.candidates,
+            "release_choices": choices,
+            "recording_observations": {"first_release_date": recording.first_release_date, "genres": recording.genres, "credits": recording.credits},
             "ops": operations,
             "tag_suggestions": tag_suggestions,
             "notes": notes,
@@ -559,6 +678,8 @@ struct EnrichmentParameters {
     scope: EnrichmentScope,
     #[serde(default)]
     force: bool,
+    #[serde(default)]
+    imports: Vec<ImportedTrackEvidence>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -598,7 +719,7 @@ impl EnrichmentScope {
 }
 
 #[derive(Debug, Clone)]
-struct CanonicalMetadata {
+pub(super) struct CanonicalMetadata {
     title: String,
     artist: String,
     album_artist: String,
@@ -606,11 +727,27 @@ struct CanonicalMetadata {
     track_no: Option<u32>,
     disc_no: Option<u32>,
     year: Option<u32>,
+    genre: String,
 }
 
-fn select_candidate(track: &IndexedTrack, candidates: Vec<Candidate>) -> Option<(Candidate, f64)> {
-    let mut candidates = candidates
-        .into_iter()
+pub(super) fn select_candidate(
+    track: &IndexedTrack,
+    candidates: Vec<Candidate>,
+) -> Option<(Candidate, f64)> {
+    let mut unique = BTreeMap::<String, Candidate>::new();
+    for candidate in candidates {
+        if !(0.0..=1.0).contains(&candidate.provider_score) {
+            continue;
+        }
+        let current = unique
+            .entry(candidate.id.clone())
+            .or_insert_with(|| candidate.clone());
+        if candidate_score(track, &candidate) > candidate_score(track, current) {
+            *current = candidate;
+        }
+    }
+    let mut candidates = unique
+        .into_values()
         .map(|candidate| {
             let score = candidate_score(track, &candidate);
             (candidate, score)
@@ -626,10 +763,11 @@ fn select_candidate(track: &IndexedTrack, candidates: Vec<Candidate>) -> Option<
     };
     let exact_title = loose_equal(title, &best.title);
     let exact_artist = loose_equal(&track.metadata.artist, &best.artist);
-    let duration_close = best.length_ms.is_none_or(|length| {
-        let expected = track.duration.as_millis() as i128;
-        (expected - i128::from(length)).abs() <= 10_000
-    });
+    let duration_close = track.duration.is_zero()
+        || best.length_ms.is_none_or(|length| {
+            let expected = track.duration.as_millis() as i128;
+            (expected - i128::from(length)).abs() <= 10_000
+        });
     if *score >= METADATA_MIN_SCORE
         && margin >= METADATA_MIN_MARGIN
         && exact_title
@@ -642,7 +780,7 @@ fn select_candidate(track: &IndexedTrack, candidates: Vec<Candidate>) -> Option<
     }
 }
 
-fn candidate_score(track: &IndexedTrack, candidate: &Candidate) -> f64 {
+pub(super) fn candidate_score(track: &IndexedTrack, candidate: &Candidate) -> f64 {
     let title = if track.metadata.title.trim().is_empty() {
         track.display_title.as_str()
     } else {
@@ -669,16 +807,19 @@ fn candidate_score(track: &IndexedTrack, candidate: &Candidate) -> f64 {
     } else {
         0.0
     };
-    let duration_score = candidate.length_ms.map_or(0.5, |length| {
-        let delta = (track.duration.as_millis() as i128 - i128::from(length)).abs();
-        if delta <= 2_000 {
-            1.0
-        } else if delta <= 10_000 {
-            0.6
-        } else {
-            0.0
-        }
-    });
+    let duration_score = candidate
+        .length_ms
+        .filter(|_| !track.duration.is_zero())
+        .map_or(0.5, |length| {
+            let delta = (track.duration.as_millis() as i128 - i128::from(length)).abs();
+            if delta <= 2_000 {
+                1.0
+            } else if delta <= 10_000 {
+                0.6
+            } else {
+                0.0
+            }
+        });
     (candidate.provider_score * 0.4
         + title_score * 0.25
         + artist_score * 0.2
@@ -687,43 +828,37 @@ fn candidate_score(track: &IndexedTrack, candidate: &Candidate) -> f64 {
         .min(1.0)
 }
 
+#[cfg(test)]
 fn choose_release<'a>(
     track: &IndexedTrack,
-    releases: &'a [ReleaseSummary],
-) -> Option<&'a ReleaseSummary> {
-    if !track.metadata.album.trim().is_empty() {
-        return releases
-            .iter()
-            .filter(|release| {
-                release
-                    .status
-                    .as_deref()
-                    .is_none_or(|status| status == "Official")
-            })
-            .find(|release| loose_equal(&track.metadata.album, &release.title));
-    }
-    let official = releases
+    releases: &'a [super::catalog::ReleaseSummary],
+) -> Option<&'a super::catalog::ReleaseSummary> {
+    // Titles identify an album, not its edition. Deduplicate linked IDs, then
+    // require a single eligible edition before proposing edition-owned fields.
+    let eligible = releases
         .iter()
         .filter(|release| {
             release
                 .status
                 .as_deref()
                 .is_none_or(|status| status == "Official")
+                && (track.metadata.album.trim().is_empty()
+                    || loose_equal(&track.metadata.album, &release.title))
         })
-        .collect::<Vec<_>>();
-    let titles = official
-        .iter()
-        .map(|release| music_domain::cleanup_loose_key(&release.title))
-        .collect::<BTreeSet<_>>();
-    (titles.len() == 1)
-        .then(|| official.first().copied())
+        .map(|release| (&release.id, release))
+        .collect::<BTreeMap<_, _>>();
+    (eligible.len() == 1)
+        .then(|| eligible.values().next().copied())
         .flatten()
 }
 
-fn canonical_metadata(recording: &Recording, release: Option<&ReleaseDetail>) -> CanonicalMetadata {
-    let date = release
-        .and_then(|release| release.date.as_deref())
-        .or(recording.first_release_date.as_deref());
+pub(super) fn canonical_metadata(
+    recording: &Recording,
+    release: Option<&ReleaseDetail>,
+) -> CanonicalMetadata {
+    // The editable year describes this release; an original recording date
+    // must not silently become the date of an unidentified edition.
+    let date = release.and_then(|release| release.date.as_deref());
     CanonicalMetadata {
         title: recording.title.clone(),
         artist: recording.artist.clone(),
@@ -731,18 +866,37 @@ fn canonical_metadata(recording: &Recording, release: Option<&ReleaseDetail>) ->
         album: release.map_or_else(String::new, |release| release.title.clone()),
         track_no: release.and_then(|release| release.track_no),
         disc_no: release.and_then(|release| release.disc_no),
+        genre: recording
+            .genres
+            .iter()
+            .fold(String::new(), |mut joined, genre| {
+                let separator = if joined.is_empty() { "" } else { "; " };
+                if joined.len() + separator.len() + genre.len() <= 128 {
+                    joined.push_str(separator);
+                    joined.push_str(genre);
+                }
+                joined
+            }),
         year: date
             .and_then(|date| date.get(..4))
             .and_then(|year| year.parse().ok()),
     }
 }
 
-fn metadata_operations(
+pub(super) fn metadata_operations(
     track: &IndexedTrack,
     metadata: &CanonicalMetadata,
     recording_id: &str,
 ) -> Vec<Value> {
     let mut operations = Vec::new();
+    push_text_operation(
+        &mut operations,
+        track,
+        "genre",
+        &track.metadata.genre,
+        &metadata.genre,
+        recording_id,
+    );
     push_text_operation(
         &mut operations,
         track,
@@ -850,16 +1004,26 @@ fn push_number_operation(
     }));
 }
 
-fn select_acoustic_candidate(candidates: Vec<AcousticCandidate>) -> Option<(String, f64)> {
-    let mut matches = candidates
-        .into_iter()
-        .filter_map(|candidate| {
-            if !(0.0..=1.0).contains(&candidate.score) || candidate.recording_ids.len() != 1 {
-                return None;
-            }
-            Some((candidate.recording_ids.into_iter().next()?, candidate.score))
-        })
-        .collect::<Vec<_>>();
+pub(super) fn select_acoustic_candidate(
+    candidates: Vec<AcousticCandidate>,
+) -> Option<(String, f64)> {
+    let mut scores = BTreeMap::<String, f64>::new();
+    for candidate in candidates {
+        if !(0.0..=1.0).contains(&candidate.score) {
+            continue;
+        }
+        // A fingerprint linked to several recordings supports all of them.
+        // Discarding it would make weaker, unrelated evidence appear decisive.
+        for id in candidate
+            .recording_ids
+            .into_iter()
+            .filter(|id| !id.is_empty())
+        {
+            let score = scores.entry(id).or_default();
+            *score = score.max(candidate.score);
+        }
+    }
+    let mut matches = scores.into_iter().collect::<Vec<_>>();
     matches.sort_by(|left, right| right.1.total_cmp(&left.1));
     let best = matches.first()?;
     let margin = matches.get(1).map_or(1.0, |next| best.1 - next.1);
@@ -916,7 +1080,7 @@ fn map_community_tags(tags: &[CommunityTag], vocabulary: &TagVocabularySnapshot)
     values
 }
 
-fn loose_equal(left: &str, right: &str) -> bool {
+pub(super) fn loose_equal(left: &str, right: &str) -> bool {
     let left = music_domain::cleanup_loose_key(left);
     !left.is_empty() && left == music_domain::cleanup_loose_key(right)
 }
@@ -944,6 +1108,25 @@ fn cached_sources_match(result: &Map<String, Value>, expected: &[&str]) -> bool 
         })
 }
 
+fn now_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+pub(super) fn cache_is_fresh(result: &Map<String, Value>) -> bool {
+    let ttl = if result.get("status").and_then(Value::as_str) == Some("unmatched") {
+        6 * 3600
+    } else {
+        7 * 86400
+    };
+    result
+        .get("retrieved_at")
+        .and_then(Value::as_u64)
+        .is_some_and(|time| time <= now_seconds() && now_seconds().saturating_sub(time) < ttl)
+}
+
 fn result_is_cacheable(result: &Map<String, Value>) -> bool {
     result.get("partial").and_then(Value::as_bool) != Some(true)
 }
@@ -962,7 +1145,7 @@ fn unmatched_result(
         "identity": null,
         "ops": [],
         "tag_suggestions": [],
-        "notes": ["No single catalog recording met the local confidence and margin thresholds."],
+        "notes": ["No single catalog recording met the local matching and margin thresholds."],
     })
     .as_object()
     .cloned()
@@ -1018,6 +1201,7 @@ const fn default_true() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleanup_enrichment::catalog::ReleaseSummary;
     use music_domain::{LibraryPath, TrackMetadata};
     use std::time::Duration;
 
@@ -1075,6 +1259,71 @@ mod tests {
     }
 
     #[test]
+    fn imported_positions_support_assignment_without_mutating_indexed_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::super::evidence::{EvidenceField, ImportedTrackEvidence};
+        let authored = track()?;
+        let mut evidence = LocalEvidence::default();
+        evidence.add_import(&ImportedTrackEvidence {
+            track_id: 1,
+            fields: BTreeMap::from([
+                (EvidenceField::TrackNo, "5".into()),
+                (EvidenceField::DiscNo, "2".into()),
+            ]),
+        });
+        let hypothesis = retrieval_hypothesis(&authored, None, &evidence);
+        assert_eq!(
+            (hypothesis.metadata.track_no, hypothesis.metadata.disc_no),
+            (Some(5), Some(2))
+        );
+        assert_eq!(
+            (authored.metadata.track_no, authored.metadata.disc_no),
+            (None, None)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn conflicting_retrieval_hypotheses_abstain_regardless_of_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::super::resolution::select_text_identity;
+        let mut authored = track()?;
+        authored.metadata.title = "01 - Song".into();
+        let hypothesis = track()?;
+        let mut authored_candidate = candidate();
+        authored_candidate.id = "other-recording".into();
+        authored_candidate.title = authored.metadata.title.clone();
+        assert!(
+            select_text_identity(
+                &authored,
+                &hypothesis,
+                &[authored_candidate.clone(), candidate()]
+            )
+            .is_none()
+        );
+        assert!(
+            select_text_identity(&authored, &hypothesis, &[candidate(), authored_candidate])
+                .is_none()
+        );
+        assert_eq!(
+            select_text_identity(&authored, &hypothesis, &[candidate()]).map(|v| v.0),
+            Some(candidate().id)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_duration_is_neutral_but_known_duration_conflicts_veto()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut local = track()?;
+        local.duration = Duration::ZERO;
+        assert!(select_candidate(&local, vec![candidate()]).is_some());
+        local.duration = Duration::from_secs(30);
+        assert!(select_candidate(&local, vec![candidate()]).is_none());
+        Ok(())
+    }
+
+    #[test]
     fn acoustid_identity_requires_score_margin_and_one_recording() {
         let candidate = |score, ids: &[&str]| AcousticCandidate {
             score,
@@ -1098,6 +1347,131 @@ mod tests {
         let partial = Map::from_iter([("partial".to_owned(), json!(true))]);
         assert!(result_is_cacheable(&complete));
         assert!(!result_is_cacheable(&partial));
+    }
+
+    #[test]
+    fn stronger_ambiguous_fingerprints_veto_weaker_unique_mappings_and_repeats_merge() {
+        let candidate = |score, ids: &[&str]| AcousticCandidate {
+            score,
+            recording_ids: ids.iter().map(|id| (*id).into()).collect(),
+        };
+        assert!(
+            select_acoustic_candidate(vec![candidate(0.99, &["A", "B"]), candidate(0.87, &["C"])])
+                .is_none()
+        );
+        assert_eq!(
+            select_acoustic_candidate(vec![
+                candidate(0.95, &["A"]),
+                candidate(0.94, &["A"]),
+                candidate(0.7, &["B"])
+            ]),
+            Some(("A".into(), 0.95))
+        );
+        assert!(select_acoustic_candidate(vec![candidate(f64::NAN, &["A"])]).is_none());
+    }
+
+    #[test]
+    fn editions_and_dates_remain_distinct_and_repeated_candidates_do_not_compete()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let track = track()?;
+        assert!(select_candidate(&track, vec![candidate(), candidate()]).is_some());
+        let mut editions = candidate().releases;
+        let mut other = editions[0].clone();
+        other.id = "other-edition".into();
+        editions.push(other);
+        assert!(choose_release(&track, &editions).is_none());
+        editions.reverse();
+        assert!(choose_release(&track, &editions).is_none());
+        let recording = Recording {
+            first_release_date: Some("1960-02-03".into()),
+            ..Recording::default()
+        };
+        assert_eq!(canonical_metadata(&recording, None).year, None);
+        assert_eq!(
+            canonical_metadata(
+                &recording,
+                Some(&ReleaseDetail {
+                    date: Some("2026-09-10".into()),
+                    ..ReleaseDetail::default()
+                })
+            )
+            .year,
+            Some(2026)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn partial_compilations_and_repeated_recordings_do_not_force_track_positions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::super::{album::assign_album, catalog::ReleaseSlot};
+        let first = track()?;
+        let mut second = first.clone();
+        second.id = TrackId::new(2)?;
+        second.metadata.title = "Elsewhere".into();
+        second.metadata.artist = "Another Artist".into();
+        let mut missing = first.clone();
+        missing.id = TrackId::new(3)?;
+        missing.metadata.title = "Unlisted".into();
+        let slot = |id: &str, recording: &str, title: &str, artist: &str, number| ReleaseSlot {
+            id: id.into(),
+            recording_id: recording.into(),
+            title: title.into(),
+            artist: artist.into(),
+            length_ms: Some(180000),
+            track_no: Some(number),
+            disc_no: Some(1),
+        };
+        let mut release = ReleaseDetail {
+            slots: vec![
+                slot("slot-1", "r1", "Song", "Artist", 1),
+                slot("slot-2", "r2", "Elsewhere", "Another Artist", 2),
+                slot("slot-4", "r4", "Missing file", "Artist", 4),
+            ],
+            ..ReleaseDetail::default()
+        };
+        let result = assign_album(
+            &[first.clone(), second, missing],
+            &release,
+            (first.id, "r1"),
+        );
+        assert_eq!(result.classification, "compilation");
+        assert_eq!(result.matched, 2);
+        assert_eq!(result.unmatched_tracks, vec![3]);
+        assert_eq!(result.unmatched_slots, vec!["slot-4"]);
+        release
+            .slots
+            .push(slot("repeat", "r1", "Song", "Artist", 5));
+        assert_eq!(
+            assign_album(std::slice::from_ref(&first), &release, (first.id, "r1")).matched,
+            0
+        );
+        let mut positioned = first.clone();
+        positioned.metadata.track_no = Some(5);
+        assert_eq!(
+            assign_album(&[positioned], &release, (first.id, "r1"))
+                .slots
+                .get(&1)
+                .map(String::as_str),
+            Some("repeat")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn negative_results_expire_and_future_timestamps_are_not_trusted() {
+        assert!(!cache_is_fresh(&Map::from_iter([
+            ("status".into(), json!("unmatched")),
+            ("retrieved_at".into(), json!(now_seconds() - 21601))
+        ])));
+        assert!(!cache_is_fresh(&Map::from_iter([(
+            "retrieved_at".into(),
+            json!(now_seconds() + 60)
+        )])));
+        assert!(cache_is_fresh(&Map::from_iter([(
+            "retrieved_at".into(),
+            json!(now_seconds())
+        )])));
     }
 
     #[test]

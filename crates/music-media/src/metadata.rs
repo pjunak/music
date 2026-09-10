@@ -17,8 +17,10 @@ use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, Tag, TagExt, TagType};
 
 mod asf;
+mod cleanup_evidence;
 mod ffmpeg;
 
+pub use cleanup_evidence::read_cleanup_evidence;
 pub use ffmpeg::FfmpegTools;
 
 const MAX_TAG_ITEM_BYTES: usize = 16 * 1024 * 1024;
@@ -470,6 +472,7 @@ fn stage_tag_update_inner(
     copy_new_file(source, staged)?;
 
     let before = read_tagged_file(staged)?;
+    let protected_identifiers = cleanup_evidence::protected_identifiers(&before);
     let original_type = before.file_type();
     let original_duration = before.properties().duration();
     let trailing_iff_bytes = iff_trailing_bytes(staged, original_type)?;
@@ -493,16 +496,25 @@ fn stage_tag_update_inner(
         _ => {
             let mut tagged_file = before;
             apply_generic_patch(&mut tagged_file, patch)?;
-            tagged_file
+            let tag = tagged_file
                 .primary_tag()
-                .ok_or_else(|| MetadataError::Write("primary tag was not created".to_owned()))?
-                .save_to_path(staged, write_options())
-                .map_err(|error| MetadataError::Write(error.to_string()))?;
+                .ok_or_else(|| MetadataError::Write("primary tag was not created".to_owned()))?;
+            if tag.tag_type() == TagType::Id3v2 {
+                cleanup_evidence::save_id3_with_identifiers(tag, staged)?;
+            } else {
+                tag.save_to_path(staged, write_options())
+                    .map_err(|error| MetadataError::Write(error.to_string()))?;
+            }
         }
     }
     normalize_iff_stream_length(staged, original_type, trailing_iff_bytes)?;
 
     let verified = read_tagged_file(staged)?;
+    if cleanup_evidence::protected_identifiers(&verified) != protected_identifiers {
+        return Err(MetadataError::Write(
+            "catalog identifiers changed during metadata staging".to_owned(),
+        ));
+    }
     if verified.file_type() != original_type {
         return Err(MetadataError::FormatChanged);
     }

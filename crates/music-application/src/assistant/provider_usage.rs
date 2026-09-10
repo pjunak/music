@@ -19,6 +19,7 @@ pub enum ModelReviewDestination {
     EqAuthoring,
     PlaylistPreview,
     TagCleanupReview,
+    LibraryCleanupReview,
     TrackTagReview,
     QualityEvaluation,
 }

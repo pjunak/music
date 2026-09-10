@@ -18,6 +18,8 @@ mod authoring;
 mod blocking;
 mod cleanup;
 mod cleanup_enrichment;
+mod cleanup_enrichment_cache;
+mod cleanup_model;
 mod config;
 mod contracts;
 mod devices;

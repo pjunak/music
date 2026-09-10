@@ -55,6 +55,7 @@ const MUSICBRAINZ_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
+        .merge(crate::cleanup_model::router())
         .routes(routes!(analyze))
         .routes(routes!(verify_names))
         .routes(routes!(start_enrichment))
@@ -144,6 +145,8 @@ struct CleanupEnrichmentRequest {
     scope: CleanupScopeRequest,
     #[serde(default)]
     force: bool,
+    #[serde(default)]
+    imports: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -635,6 +638,11 @@ async fn start_enrichment(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    let imports: Vec<music_application::cleanup_enrichment::evidence::ImportedTrackEvidence> =
+        serde_json::from_value(json!(payload.imports)).map_err(|_| ApiError::validation())?;
+    if imports.len() > 500 || imports.iter().any(|item| !item.valid()) {
+        return Err(ApiError::validation());
+    }
     if payload.scope.track_ids.len() > MAX_SCOPE_TRACKS {
         return Err(ApiError::validation());
     }
@@ -651,7 +659,7 @@ async fn start_enrichment(
         .ok_or_else(ApiError::service_unavailable)?
         .enqueue(
             CLEANUP_ENRICHMENT_JOB_KIND,
-            json!({"scope": scope, "force": payload.force}),
+            json!({"scope": scope, "force": payload.force, "imports": imports}),
         )
         .await
         .map_err(map_job_error)?;

@@ -575,3 +575,12 @@
     display: none;
   }
 }
+
+/* Catalog evidence stays usable with long identifiers and small review panels. */
+.cleanup-evidence details { max-width: 100%; overflow-x: auto; }
+.cleanup-evidence table { width: 100%; border-collapse: collapse; margin-block: 0.75rem; }
+.cleanup-evidence th, .cleanup-evidence td { text-align: left; vertical-align: top; padding: 0.35rem; overflow-wrap: anywhere; }
+.cleanup-evidence select { display: block; max-width: 100%; margin-block: 0.4rem; }
+
+.cleanup-evidence { display: block; margin-block: 0.75rem; font-size: 0.875rem; }
+.cleanup-evidence details { margin-top: 0.75rem; }

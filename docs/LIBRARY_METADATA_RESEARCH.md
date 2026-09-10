@@ -1,5 +1,13 @@
 # Library cleanup and metadata enrichment research
 
+> Implementation follow-up (10 September 2026): the core correctness, local-observation/import,
+> bounded album-edition review, existing-provider enrichment/caching and closed-candidate text AI
+> work is implemented. The findings below describe the researched baseline and rationale. The
+> current behavior and limits are maintained in [Assistant architecture](ASSISTANT_ARCHITECTURE.md)
+> and the [operator guide](../ASSISTANT.md). Additional paid/source pilots and specialist OCR/audio
+> experiments remain conditional on coverage measurements; no private-library accuracy is claimed.
+
+
 ## Findings and recommendation
 
 The next substantial improvement should be a better evidence and matching pipeline, followed by a bounded AI review stage. Adding more catalogs to the current single-track matcher would improve coverage in some cases, but it would also expose weaknesses in multilingual comparison, candidate retrieval, release selection, and conflict presentation.
@@ -12,7 +20,7 @@ The recommended sequence is:
 4. Expand MusicBrainz enrichment and add selected external sources according to measured gaps.
 5. Test AI on the remaining ambiguous cases, requiring a choice among supplied candidates or an explicit abstention.
 
-This is a research and design recommendation, not an implemented contract. The implementation baseline is `f935177`, inspected on 10 September 2026. Source documentation was checked on that date. No private-library benchmark, paid recognition request, or live AI comparison was performed; expected improvements below are hypotheses to measure, not claimed accuracy gains.
+The research below records the design recommendation and the historical implementation baseline `f935177`, inspected on 10 September 2026; the follow-up note above links to the implemented contract. Source documentation was checked on that date. No private-library benchmark, paid recognition request, or live AI comparison was performed; expected improvements below are hypotheses to measure, not claimed accuracy gains.
 
 ## 1. What the current implementation does
 
