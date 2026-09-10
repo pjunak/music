@@ -1437,13 +1437,9 @@ pub fn analyze_cleanup(
     let mut plans = Vec::new();
     for (folder, mut group) in scope_by_folder {
         group.sort_by(|left, right| left.path.as_str().cmp(right.path.as_str()));
-        let context_tracks = if group.len() >= 2 {
-            group.as_slice()
-        } else {
-            all_by_folder
-                .get(&folder)
-                .map_or(group.as_slice(), Vec::as_slice)
-        };
+        let context_tracks = all_by_folder
+            .get(&folder)
+            .map_or(group.as_slice(), Vec::as_slice);
         let context = build_context(&folder, context_tracks, verdicts);
         let mut folder_plans = group
             .iter()
@@ -1472,23 +1468,28 @@ pub fn analyze_cleanup(
             };
             let suffix = stem_and_suffix(&plan.path).1;
             let target_name = format!("{new_stem}{suffix}");
-            let key = case_key(&target_name);
-            if existing
-                .get(&key)
-                .is_some_and(|track_id| *track_id != plan.track_id)
-            {
-                plan.operations.remove(rename_index);
-                plan.notes.push(format!(
-                    "rename dropped: \"{target_name}\" already exists in this folder"
-                ));
-                continue;
+            let occupied = |name: &str| {
+                let key = case_key(name);
+                existing
+                    .get(&key)
+                    .is_some_and(|track_id| *track_id != plan.track_id)
+                    || proposed.contains_key(&key)
+            };
+            let mut resolved_stem = new_stem.clone();
+            let mut counter = 2;
+            while occupied(&format!("{resolved_stem}{suffix}")) {
+                resolved_stem = format!("{new_stem} ({counter})");
+                counter += 1;
             }
-            if proposed.contains_key(&key) {
-                plan.operations.remove(rename_index);
+            let key = case_key(&format!("{resolved_stem}{suffix}"));
+            if resolved_stem != *new_stem {
                 plan.notes.push(format!(
-                    "rename dropped: another track would also become \"{target_name}\""
+                    "\"{target_name}\" is already used or proposed in this folder; review the unique filename \"{resolved_stem}{suffix}\". This does not indicate duplicate audio."
                 ));
-                continue;
+                let rename = &mut plan.operations[rename_index];
+                rename.new = text(resolved_stem);
+                rename.rules.push("resolve_name_collision".to_owned());
+                rename.confidence = CleanupConfidence::Low;
             }
             proposed.insert(key, plan.track_id);
         }
@@ -1982,8 +1983,78 @@ mod tests {
             DEFAULT_CLEANUP_RULES,
             None,
         );
-        assert!(operation(&collision, first.id, CleanupSuggestionKind::Rename, None).is_none());
-        assert!(collision[0].notes[0].contains("already exists"));
+        let rename = operation(&collision, first.id, CleanupSuggestionKind::Rename, None)
+            .ok_or("missing unique rename")?;
+        assert_eq!(text_value(&rename.new), Some("Bar (2)"));
+        assert_eq!(rename.confidence, CleanupConfidence::Low);
+        assert!(collision[0].notes[0].contains("already used"));
+        Ok(())
+    }
+
+    #[test]
+    fn collision_names_reserve_existing_and_proposed_paths() -> Result<(), Box<dyn Error>> {
+        let tracks = vec![
+            track(1, "Misc/01 - Song.mp3")?,
+            track(2, "Misc/02 - Song.mp3")?,
+            track(3, "Misc/SONG.MP3")?,
+            track(4, "Misc/Song (2).mp3")?,
+            track(5, "Misc/03 - Song.flac")?,
+        ];
+        let plans = analyze_cleanup(&tracks[..2], &tracks, DEFAULT_CLEANUP_RULES, None);
+        for (id, expected) in [(1, "Song (3)"), (2, "Song (4)")] {
+            let rename = operation(
+                &plans,
+                TrackId::new(id)?,
+                CleanupSuggestionKind::Rename,
+                None,
+            )
+            .ok_or("missing collision rename")?;
+            assert_eq!(text_value(&rename.new), Some(expected));
+            assert_eq!(rename.confidence, CleanupConfidence::Low);
+        }
+        let reversed = vec![tracks[1].clone(), tracks[0].clone()];
+        assert_eq!(
+            plans,
+            analyze_cleanup(&reversed, &tracks, DEFAULT_CLEANUP_RULES, None)
+        );
+        let flac = analyze_cleanup(&tracks[4..], &tracks, DEFAULT_CLEANUP_RULES, None);
+        assert_eq!(
+            text_value(
+                &operation(&flac, tracks[4].id, CleanupSuggestionKind::Rename, None)
+                    .ok_or("missing flac rename")?
+                    .new
+            ),
+            Some("Song")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn selection_uses_the_same_metadata_evidence_as_the_full_folder() -> Result<(), Box<dyn Error>>
+    {
+        let mut tracks = (1..=5)
+            .map(|id| track(id, &format!("Misc/{id:02} - Song {id}.mp3")))
+            .collect::<Result<Vec<_>, _>>()?;
+        for track in &mut tracks[2..] {
+            track.metadata.artist = "Known Artist".to_owned();
+        }
+        let full = analyze_cleanup(&tracks, &tracks, DEFAULT_CLEANUP_RULES, None);
+        let selected = analyze_cleanup(&tracks[..2], &tracks, DEFAULT_CLEANUP_RULES, None);
+        assert_eq!(
+            selected,
+            full.into_iter()
+                .filter(|plan| plan.track_id.get() <= 2)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            operation(
+                &selected,
+                tracks[0].id,
+                CleanupSuggestionKind::Tag,
+                Some(CleanupTagField::Artist)
+            )
+            .is_some()
+        );
         Ok(())
     }
 

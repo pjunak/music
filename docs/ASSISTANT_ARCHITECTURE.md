@@ -287,6 +287,13 @@ The Library cleanup workspace preserves a separate local authority boundary. The
 produces filename, folder, and embedded-tag proposals; `cleanup_batches` journals only explicitly
 selected writes. **History & rollback** reads those server journals, downloads the complete JSON,
 and invokes the existing conflict-aware revert path. **Sources** exposes only implemented adapters.
+Filename collisions propose a deterministic numeric suffix (`Song (2).mp3`, then `(3)`, etc.),
+reserving both indexed filenames and earlier proposals in the same folder, case-insensitively.
+These proposals are low-confidence and start unchecked; the note explains that matching names
+do not establish duplicate audio. Embedded titles are not suffixed. Existing apply-time conflict
+checks still reject destinations occupied since analysis, including files absent from the index.
+Folder metadata evidence always uses all indexed siblings, even when only selected tracks are
+being cleaned. Selection limits proposals, not the evidence used to infer their metadata.
 `musicbrainz`, `acoustid`, and `lastfm` policies are stored in `cleanup_source_policies`. MusicBrainz
 is the identity and canonical-metadata authority; exact local title/artist plus provider score,
 duration, album evidence, and a clear result margin are required. AcoustID is an opt-in identity
@@ -306,6 +313,21 @@ and a masked hint. A saved key takes precedence immediately, while `CLEANUP_ACOU
 invalidates affected enrichment evidence. Disabling Last.fm atomically clears its cached generated profiles and review decisions while
 leaving already accepted operator tags intact. Arbitrary URL scraping is not a supported source
 contract.
+
+Metadata enrichment follow-ups (not implemented):
+
+- Prefer embedded MusicBrainz recording/release IDs, then ISRC lookup, before text search when
+  available. The [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API) supports these
+  identifiers. This needs typed extraction and storage, source-signature invalidation, and
+  reviewed identity evidence; an identifier must not silently authorize metadata replacement.
+- Add release-edition review using album, date, disc count, track order and durations together.
+  Current `choose_release` selects the first eligible same-title edition, which can yield a
+  reissue date or different track position. Identity of a recording alone does not identify
+  its release. Preserve ambiguity instead of broadening automatic matching thresholds.
+- Surface unresolved identities for operator matching. The existing
+  [AcoustID lookup](https://acoustid.org/webservice) already provides fingerprint-based fallback;
+  it requires the enabled source, its API key and local `fpcalc`. Broader metadata coverage
+  should reuse this reviewed catalog workflow and its credential/consent boundaries.
 
 ## Workflow traceability
 
