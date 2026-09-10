@@ -13,6 +13,14 @@ Read the relevant rows before choosing checks. CI/release coverage is unchanged.
 | Fuzz sources/configuration | Fuzz formatting, Clippy and applicable dependency checks below. |
 | Packaging, release image or runtime-language boundary | Full applicable gates, final-tree checks, headless release binary and image verification on a Docker host. |
 
+Workflow changes also run `node --test .github/scripts/workflow-policy.test.mjs`.
+It covers pull requests, direct manual verification and reusable release calls.
+The release caller disables the reusable image job because publication already
+builds and smoke-tests the image; GitHub retains the caller's event name inside
+the reusable workflow. Both Cargo workspaces (`.` and `fuzz`) are cached, and
+all compile/test commands use the checked-in lockfiles. Vitest companion
+dependency updates are grouped to preserve their matching peer versions.
+
 Use current fixtures and local service instances. Hardware/private-library and
 paid-provider evidence stays separately identified; a documentation edit or
 passing local suite does not authorize an external run. Probe available tools

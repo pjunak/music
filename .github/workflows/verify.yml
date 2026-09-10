@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_container:
+        description: Build and smoke-test the release image
+        required: false
+        type: boolean
+        default: true
   pull_request:
     branches: [main]
 
@@ -51,6 +56,9 @@ jobs:
         with:
           cache-on-failure: true
           shared-key: verify
+          workspaces: |
+            . -> target
+            fuzz -> target
 
       - name: Install pinned test runner
         uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
@@ -65,12 +73,17 @@ jobs:
 
       - name: Install media test tools
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg
+          if [[ ! -x "$MUSIC_TEST_FFMPEG" || ! -x "$MUSIC_TEST_FFPROBE" ]]; then
+            sudo apt-get -o Acquire::Retries=3 update
+            sudo apt-get -o Acquire::Retries=3 install --yes --no-install-recommends ffmpeg
+          fi
+          "$MUSIC_TEST_FFMPEG" -version
+          "$MUSIC_TEST_FFPROBE" -version
 
       - name: Check architecture and final repository tree
         run: |
           node --test tools/mood-pilot.test.mjs
+          node --test .github/scripts/workflow-policy.test.mjs
           node --test .github/scripts/rust-architecture.test.mjs
           node .github/scripts/rust-architecture.mjs
           node --test .github/scripts/rewrite-tree.test.mjs
@@ -82,14 +95,22 @@ jobs:
           cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
           cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 
-      - name: Compile, lint, test, and document
+      - name: Check the default feature set
+        run: cargo check --locked --workspace --all-targets
+
+      - name: Lint the complete workspace and fuzz targets
         run: |
-          cargo check --workspace --all-targets
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
           cargo clippy --manifest-path fuzz/Cargo.toml --bins --locked -- -D warnings
-          cargo nextest run --workspace --all-features
-          cargo test --workspace --all-features --doc
-          cargo build --locked --release -p music-output --bin music-output
+
+      - name: Run all workspace tests
+        run: cargo nextest run --locked --workspace --all-features
+
+      - name: Test documentation
+        run: cargo test --locked --workspace --all-features --doc
+
+      - name: Build the release output client
+        run: cargo build --locked --release -p music-output --bin music-output
 
   dependency-audit:
     name: Dependency policy and advisories
@@ -129,6 +150,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: "26"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Lint, typecheck, test, and build
         working-directory: frontend
@@ -141,7 +164,9 @@ jobs:
 
   container:
     name: Non-root release container
-    if: ${{ github.event_name != 'workflow_call' || inputs.run_container }}
+    # Reusable workflows retain their caller's event name (push/dispatch).
+    # PRs always run this gate; manual verification defaults to enabling it.
+    if: ${{ github.event_name == 'pull_request' || inputs.run_container }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [rust, frontend, dependency-audit]

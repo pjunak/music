@@ -12,6 +12,11 @@ updates:
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
