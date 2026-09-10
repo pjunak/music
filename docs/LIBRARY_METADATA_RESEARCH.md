@@ -9,6 +9,9 @@
 > The current [ordered backlog](../TODO.md#library-metadata-ordered-implementation-plan) prioritizes
 > albums and game/film soundtracks. Compilation safeguards and informative collision suffixes
 > are implemented; the [offline pilot tooling](LIBRARY_METADATA_PILOT.md) is ready for independent labels.
+> The 11 September follow-up adds title/release-ID retrieval, album-title fallback, merged release
+> observations, corroborated position hypotheses and a veto when recording details contradict
+> text matching. Acceptance thresholds remain unchanged; regression cases are not a private-library benchmark.
 
 
 ## Findings and recommendation
@@ -297,6 +300,14 @@ Apply current per-source terms to cache lifetime, attribution and model eligibil
 New fields can begin in an internal observation store. Promote them into shared track/protocol models only when clients need them; then update schemas, browser validation and affected Baton models together. Do not add an unused field to every playback message merely because a provider exposes it.
 
 ## 8. Evaluation and implementation plan
+
+The first album retrieval slice uses the MusicBrainz recording search fields `reid` and `release`
+together with song title and a duration range. These fields and phrase-query rules were rechecked
+against the [official search reference](https://musicbrainz.org/doc/MusicBrainz_API/Search#Recording)
+on 11 September 2026. The implementation caps each query at 25 candidates and keeps the same
+identity checks; an album search may expose candidates with missing local artists for review.
+Album-wide discovery, alias expansion and broader version interpretation remain in the
+[active backlog](../TODO.md). Their accuracy still needs independent collection labels.
 
 ### Benchmark design
 

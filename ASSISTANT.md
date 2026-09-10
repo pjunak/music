@@ -494,8 +494,9 @@ separate data-minimization contract, tests, failure policy, and explicit review 
 
 ## Library cleanup and metadata evidence
 
-Open **Assistant → Library cleanup → Run**. Renaming collisions propose an unchecked numbered
-suffix while leaving embedded titles unchanged. Enable catalog evidence to identify recordings,
+Open **Assistant → Library cleanup → Run**. Renaming collisions propose an unchecked unique
+name using existing artist, album or track positions, with numbered suffixes as the fallback.
+Embedded titles stay unchanged by collision handling. Enable catalog evidence to identify recordings,
 review competing local/catalog values and choose an album edition for each folder. Matching a
 recording does not establish an edition or duplicate audio. **All unambiguous** leaves competing
 values unticked; choosing a value unticks its alternative for the same field.
@@ -504,6 +505,15 @@ values unticked; choosing a value unticks its alternative for the same field.
 recording candidates, sources and retrieval time. **Refresh catalog results** includes previously
 unmatched tracks. Catalog genres are embedded-tag proposals; Last.fm mood suggestions remain
 database tags. Every file/tag/folder change still requires Apply and appears in History & rollback.
+
+Catalog lookup can use a known release ID before ordinary text matching, or search by song and
+album title when the ordinary search fails. This can surface soundtrack candidates even when
+the track artist is missing; an album hit alone does not select an identity or edition.
+Corroborated numbers in filenames/disc folders can help place repeated tracks, while explicit
+tags and imported positions take precedence. These paths add at most two album-scoped search
+requests per track; successful ordinary matches need no album-title fallback. Query notes show
+which scope was tried. The [offline pilot](docs/LIBRARY_METADATA_PILOT.md) remains the next step
+for measuring accuracy on a collection.
 
 You can select a JSON metadata sidecar with this shape (the example ID is illustrative):
 

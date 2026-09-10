@@ -1284,6 +1284,110 @@ mod tests {
     }
 
     #[test]
+    fn corroborated_filename_positions_help_album_assignment_but_never_override_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use super::super::{
+            album::assign_album,
+            catalog::ReleaseSlot,
+            evidence::{EvidenceField, LocalObservation},
+        };
+        use music_domain::{
+            CleanupConfidence, CleanupTagField, DEFAULT_CLEANUP_RULES, analyze_cleanup,
+        };
+        let mut first = track()?;
+        first.path = LibraryPath::parse("Album/Disc 2/01 - Song.mp3")?;
+        let mut second = first.clone();
+        second.id = TrackId::new(2)?;
+        second.path = LibraryPath::parse("Album/Disc 2/02 - Other.mp3")?;
+        let tracks = vec![first.clone(), second];
+        let mut plan =
+            analyze_cleanup(&tracks[..1], &tracks, DEFAULT_CLEANUP_RULES, None).remove(0);
+        let hypothesis = retrieval_hypothesis(&first, Some(&plan), &LocalEvidence::default());
+        assert_eq!(
+            (hypothesis.metadata.track_no, hypothesis.metadata.disc_no),
+            (Some(1), Some(2))
+        );
+        assert_eq!(
+            (first.metadata.track_no, first.metadata.disc_no),
+            (None, None)
+        );
+        let release = ReleaseDetail {
+            slots: [1, 2]
+                .into_iter()
+                .map(|disc| ReleaseSlot {
+                    id: format!("disc-{disc}"),
+                    recording_id: "r".into(),
+                    title: "Song".into(),
+                    artist: "Artist".into(),
+                    length_ms: Some(180_000),
+                    track_no: Some(1),
+                    disc_no: Some(disc),
+                })
+                .collect(),
+            ..ReleaseDetail::default()
+        };
+        assert!(
+            assign_album(std::slice::from_ref(&first), &release, (first.id, "r"))
+                .slots
+                .is_empty()
+        );
+        assert_eq!(
+            assign_album(&[hypothesis], &release, (first.id, "r"))
+                .slots
+                .get(&first.id.get())
+                .map(String::as_str),
+            Some("disc-2")
+        );
+
+        let mut evidence = LocalEvidence {
+            observations: vec![LocalObservation {
+                field: EvidenceField::TrackNo,
+                value: "9".into(),
+                source: "imported sidecar".into(),
+            }],
+            notes: vec![],
+        };
+        assert_eq!(
+            retrieval_hypothesis(&first, Some(&plan), &evidence)
+                .metadata
+                .track_no,
+            Some(9)
+        );
+        evidence.observations.push(LocalObservation {
+            field: EvidenceField::TrackNo,
+            value: "7".into(),
+            source: "ID3".into(),
+        });
+        assert_eq!(
+            retrieval_hypothesis(&first, Some(&plan), &evidence)
+                .metadata
+                .track_no,
+            None
+        );
+        for op in &mut plan.operations {
+            if matches!(
+                op.field,
+                Some(CleanupTagField::TrackNumber | CleanupTagField::DiscNumber)
+            ) {
+                op.confidence = CleanupConfidence::Low;
+            }
+        }
+        let uncertain = retrieval_hypothesis(&first, Some(&plan), &LocalEvidence::default());
+        assert_eq!(
+            (uncertain.metadata.track_no, uncertain.metadata.disc_no),
+            (None, None)
+        );
+        first.metadata.track_no = Some(4);
+        assert_eq!(
+            retrieval_hypothesis(&first, Some(&plan), &evidence)
+                .metadata
+                .track_no,
+            Some(4)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn conflicting_retrieval_hypotheses_abstain_regardless_of_order()
     -> Result<(), Box<dyn std::error::Error>> {
         use super::super::resolution::select_text_identity;

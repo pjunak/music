@@ -451,6 +451,35 @@ impl CatalogConnector for HttpCatalogConnector {
         }
         .map(SecretString::expose_secret)
     }
+    fn search_album_metadata<'a>(
+        &'a self,
+        track: &'a IndexedTrack,
+        release_id: Option<&'a str>,
+    ) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async move {
+            let title = if track.metadata.title.trim().is_empty() {
+                track.display_title.trim()
+            } else {
+                track.metadata.title.trim()
+            };
+            let Some(query) =
+                album_metadata_query(title, &track.metadata.album, release_id, track.duration)?
+            else {
+                return Ok(Vec::new());
+            };
+            let payload = self
+                .entity_json(
+                    "recording",
+                    &[
+                        ("query", query),
+                        ("fmt", "json".into()),
+                        ("limit", "25".into()),
+                    ],
+                )
+                .await?;
+            parse_candidates(&payload)
+        })
+    }
     fn search_metadata<'a>(&'a self, track: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>> {
         Box::pin(HttpCatalogConnector::search_metadata(self, track))
     }
@@ -523,12 +552,45 @@ async fn bounded_json(response: reqwest::Response) -> Result<Value, CatalogError
 }
 
 fn metadata_query(title: &str, artist: &str, duration: Duration) -> String {
+    with_duration_query(
+        format!(
+            "recording:{} AND artist:{}",
+            lucene_quote(title),
+            lucene_quote(artist)
+        ),
+        duration,
+    )
+}
+
+fn album_metadata_query(
+    title: &str,
+    album: &str,
+    release_id: Option<&str>,
+    duration: Duration,
+) -> Result<Option<String>, CatalogError> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Ok(None);
+    }
+    let scope = if let Some(id) = release_id {
+        let id = normalized_value(EvidenceField::ReleaseMbid, id)
+            .ok_or(CatalogError::InvalidResponse)?;
+        format!("reid:{}", lucene_quote(&id))
+    } else {
+        let album = album.trim();
+        if album.is_empty() {
+            return Ok(None);
+        }
+        format!("release:{}", lucene_quote(album))
+    };
+    Ok(Some(with_duration_query(
+        format!("recording:{} AND {scope}", lucene_quote(title)),
+        duration,
+    )))
+}
+
+fn with_duration_query(mut query: String, duration: Duration) -> String {
     let ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
-    let mut query = format!(
-        "recording:{} AND artist:{}",
-        lucene_quote(title),
-        lucene_quote(artist)
-    );
     if ms > 0 {
         query.push_str(&format!(
             " AND dur:[{} TO {}]",
@@ -926,6 +988,40 @@ mod tests {
         assert!(
             metadata_query("Song", "Artist", Duration::from_millis(2)).contains("dur:[0 TO 10002]")
         );
+    }
+
+    #[test]
+    fn album_queries_use_release_scope_without_inventing_an_artist()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(
+            album_metadata_query("Finale", "Soundtrack", None, Duration::from_secs(180))?,
+            Some(
+                "recording:\"Finale\" AND release:\"Soundtrack\" AND dur:[170000 TO 190000]".into()
+            )
+        );
+        let release = "00000000-0000-0000-0000-000000000009";
+        assert_eq!(
+            album_metadata_query(
+                "Finale",
+                "Wrong edition title",
+                Some(release),
+                Duration::ZERO
+            )?,
+            Some(format!("recording:\"Finale\" AND reid:\"{release}\""))
+        );
+        assert!(album_metadata_query("Finale", "", None, Duration::ZERO)?.is_none());
+        assert!(album_metadata_query(" ", "Soundtrack", Some(release), Duration::ZERO)?.is_none());
+        assert!(
+            album_metadata_query("Finale", "Soundtrack", Some("bad-id"), Duration::ZERO).is_err()
+        );
+        let query = album_metadata_query("Finale\" OR *:*", "Game: II", None, Duration::ZERO)?
+            .ok_or("missing query")?;
+        assert_eq!(
+            query,
+            "recording:\"Finale\\\" OR *:*\" AND release:\"Game: II\""
+        );
+        assert!(!query.contains("artist:"));
+        Ok(())
     }
 
     #[test]

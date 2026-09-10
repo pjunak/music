@@ -187,8 +187,8 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v4` is included in evidence signatures and invalidates
-results created before compilation-aware local hypotheses.
+evidence. `catalog-evidence-policy/v5` is included in evidence signatures and invalidates
+results created before album-scoped retrieval and corroborated local position hypotheses.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -327,11 +327,21 @@ recording/release/track identifiers survive readback, including the ID3 TXXX con
 for Lofty 0.25.1. MP3, FLAC, Ogg and MP4 fixtures exercise this preservation. Selected JSON imports use the same
 field types, up to 500 unique tracks in the selected scope; arbitrary paths and executable sidecars
 are not accepted. Local cleanup hypotheses can improve retrieval without first writing tags.
-Conflicting recording IDs abstain. MusicBrainz recording ID lookup precedes bounded ISRC searches,
-then up to two title/artist searches (original and local hypothesis), then opt-in AcoustID.
+Conflicting recording IDs abstain. MusicBrainz recording ID lookup precedes bounded ISRC searches.
+If neither identifies the recording, one explicit release ID adds up to two title/release-ID
+searches before the ordinary title/artist searches. Without a release ID, an unresolved ordinary
+search can add up to two song-title/album-title searches, including tracks with missing artists.
+Conflicting release IDs suppress album-scoped retrieval; independent recording lookup remains
+available. Duplicate query terms are sent once, including when only position hypotheses differ.
+Opt-in AcoustID remains the fallback after text retrieval.
 Text search retrieves 25 candidates with a +/-10-second duration range; zero/unknown duration
 omits that search constraint. Exact title/artist, duration, weighted score and margin still govern
-text selection. Repeated recording IDs merge; multi-recording fingerprint mappings remain competitors.
+text selection. Missing artists are not inferred from an album search hit. Lookup notes identify
+the album/release scope and returned count. Repeated recording IDs merge deterministically and
+retain linked release observations from all queries; other recording IDs remain competitors.
+Fetched recording details must still agree with text-match title/artist evidence and known
+duration. Contradicting candidates are withheld from automatic and model-assisted proposals.
+Multi-recording fingerprint mappings remain competitors.
 Scores are matching heuristics, not calibrated probabilities. A text-request failure permits
 fingerprint fallback and makes the result partial rather than hiding that failure in cache.
 
@@ -340,7 +350,10 @@ An album title alone never selects among multiple editions. A typed release ID c
 outside that shortlist. The bounded assignment matches up to 100 folder tracks (including the
 current track) against 500 release slots with unmatched alternatives. It preserves compilation
 artists, repeated-recording ambiguity and missing tracks. Review chooses an edition for applicable
-tracks in one folder; its proposals start unchecked. Recording first-release date is retained
+tracks in one folder; its proposals start unchecked. Corroborated high-confidence positions
+from filenames/disc folders can support assignment without changing indexed tags; authored/imported positions take precedence
+and conflicting position observations suppress filename fallback. Low-confidence number guesses
+are excluded from assignment hypotheses. Recording first-release date is retained
 separately from edition year. MusicBrainz genres and credits remain attributed observations;
 bounded genre proposals can update embedded genre through the journal. Last.fm receives the
 identified recording MBID and maps top tags by exact controlled-vocabulary names or aliases.

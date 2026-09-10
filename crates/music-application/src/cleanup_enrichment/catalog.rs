@@ -28,6 +28,15 @@ pub trait CatalogConnector: std::fmt::Debug + Send + Sync {
     fn search_isrc<'a>(&'a self, _isrc: &'a str) -> CatalogFuture<'a, Vec<Candidate>> {
         Box::pin(async { Ok(Vec::new()) })
     }
+    /// Retrieve by song title within a release ID, or an album title when no ID is supplied.
+    /// Artist may be missing; the application still owns identity acceptance.
+    fn search_album_metadata<'a>(
+        &'a self,
+        _track: &'a IndexedTrack,
+        _release_id: Option<&'a str>,
+    ) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
     fn runtime_credential(&self, source: CatalogCredentialSource) -> Option<&str>;
     fn search_metadata<'a>(&'a self, track: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>>;
     fn recording<'a>(&'a self, recording_id: &'a str) -> CatalogFuture<'a, Recording>;

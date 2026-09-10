@@ -26,6 +26,7 @@ mod model_review;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 const RECORDING: &str = "00000000-0000-0000-0000-000000000001";
+const RELEASE: &str = "00000000-0000-0000-0000-000000000099";
 
 #[derive(Debug)]
 struct NoSavedCredentials;
@@ -49,15 +50,56 @@ struct FixtureCatalog {
     metadata_failure: AtomicBool,
     ambiguous_fingerprint: AtomicBool,
     release_failure: AtomicBool,
+    album_searches: AtomicUsize,
+    album_match: AtomicBool,
+    album_failure: AtomicBool,
+    album_competitor: AtomicBool,
+    last_release_scope: tokio::sync::Mutex<Option<String>>,
+    lookup_order: tokio::sync::Mutex<Vec<&'static str>>,
+    recording_conflict: AtomicBool,
 }
 
 impl CatalogConnector for FixtureCatalog {
+    fn search_album_metadata<'a>(
+        &'a self,
+        _: &'a IndexedTrack,
+        release_id: Option<&'a str>,
+    ) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async move {
+            self.lookup_order.lock().await.push("album");
+            self.album_searches.fetch_add(1, Ordering::SeqCst);
+            *self.last_release_scope.lock().await = release_id.map(str::to_owned);
+            if self.album_failure.load(Ordering::SeqCst) {
+                return Err(CatalogError::MusicBrainz);
+            }
+            let mut candidates = Vec::new();
+            if self.album_match.load(Ordering::SeqCst) {
+                let candidate = Candidate {
+                    id: RECORDING.into(),
+                    title: "Song".into(),
+                    artist: "Artist".into(),
+                    length_ms: Some(120_000),
+                    releases: vec![release_summary()],
+                    provider_score: 1.0,
+                };
+                candidates.push(candidate.clone());
+                if self.album_competitor.load(Ordering::SeqCst) {
+                    candidates.push(Candidate {
+                        id: "00000000-0000-0000-0000-000000000002".into(),
+                        ..candidate
+                    });
+                }
+            }
+            Ok(candidates)
+        })
+    }
     fn runtime_credential(&self, _: CatalogCredentialSource) -> Option<&str> {
         Some("synthetic-fixture")
     }
 
     fn search_metadata<'a>(&'a self, _: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>> {
         Box::pin(async move {
+            self.lookup_order.lock().await.push("artist");
             self.searches.fetch_add(1, Ordering::SeqCst);
             if self.metadata_failure.load(Ordering::SeqCst) {
                 return Err(CatalogError::MusicBrainz);
@@ -85,7 +127,12 @@ impl CatalogConnector for FixtureCatalog {
         Box::pin(async move {
             assert_eq!(id, RECORDING);
             Ok(Recording {
-                title: "Song".to_owned(),
+                title: if self.recording_conflict.load(Ordering::SeqCst) {
+                    "Song (live)"
+                } else {
+                    "Song"
+                }
+                .to_owned(),
                 artist: "Artist".to_owned(),
                 first_release_date: Some("2026".to_owned()),
                 releases: vec![release_summary()],
@@ -101,7 +148,7 @@ impl CatalogConnector for FixtureCatalog {
                 return Err(CatalogError::MusicBrainz);
             }
             Ok(ReleaseDetail {
-                id: "release".to_owned(),
+                id: RELEASE.to_owned(),
                 title: "Album".to_owned(),
                 artist: "Artist".to_owned(),
                 date: Some("2026".to_owned()),
@@ -109,7 +156,7 @@ impl CatalogConnector for FixtureCatalog {
                 disc_no: Some(1),
                 slots: vec![
                     music_application::cleanup_enrichment::catalog::ReleaseSlot {
-                        id: "slot".into(),
+                        id: "00000000-0000-0000-0000-000000000098".into(),
                         recording_id: "00000000-0000-0000-0000-000000000001".into(),
                         title: "Song".into(),
                         artist: "Artist".into(),
@@ -165,7 +212,7 @@ impl CatalogConnector for FixtureCatalog {
 
 fn release_summary() -> ReleaseSummary {
     ReleaseSummary {
-        id: "release".to_owned(),
+        id: RELEASE.to_owned(),
         title: "Album".to_owned(),
         status: Some("Official".to_owned()),
     }
@@ -196,6 +243,13 @@ async fn setup(
         metadata_failure: AtomicBool::new(false),
         ambiguous_fingerprint: AtomicBool::new(false),
         release_failure: AtomicBool::new(false),
+        album_searches: AtomicUsize::new(0),
+        album_match: AtomicBool::new(false),
+        album_failure: AtomicBool::new(false),
+        album_competitor: AtomicBool::new(false),
+        last_release_scope: tokio::sync::Mutex::new(None),
+        lookup_order: tokio::sync::Mutex::new(Vec::new()),
+        recording_conflict: AtomicBool::new(false),
     });
     let handler = CleanupEnrichmentJobHandler::new(
         CleanupEnrichmentServices {
@@ -251,6 +305,7 @@ async fn catalog_workflow_reuses_complete_cache_but_preserves_review_and_source_
     assert_eq!(first["identified"], 1);
     assert_eq!(first["plans"][0]["tag_suggestions"][0]["tag"], "dark");
     assert_eq!(connector.fingerprints.load(Ordering::SeqCst), 0);
+    assert_eq!(connector.album_searches.load(Ordering::SeqCst), 0);
     let second = result(&run(&coordinator.service, false).await?)?;
     assert_eq!(second["cached"], 1);
     assert_eq!(connector.searches.load(Ordering::SeqCst), 1);
@@ -364,6 +419,126 @@ async fn imports_prefer_typed_ids_invalidate_cache_and_reject_out_of_scope_befor
     let fallback = result(&run(&coordinator.service, true).await?)?;
     assert_eq!(fallback["fingerprinted"], 1);
     assert_eq!(fallback["plans"][0]["partial"], true);
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn album_retrieval_preserves_unknown_artists_competitors_and_review_only_writes() -> TestResult
+{
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    connector.metadata_match.store(false, Ordering::SeqCst);
+    connector.album_match.store(true, Ordering::SeqCst);
+    connector.sources.update("acoustid", false).await?;
+    connector.sources.update("lastfm", false).await?;
+    sqlx::query("UPDATE tracks SET artist = ''")
+        .execute(&storage.pool)
+        .await?;
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    let unknown = result(&run(&coordinator.service, false).await?)?;
+    assert_eq!(unknown["unmatched"], 1);
+    assert_eq!(unknown["plans"][0]["candidates"][0]["id"], RECORDING);
+    assert_eq!(unknown["plans"][0]["ops"], json!([]));
+    assert_eq!(connector.album_searches.load(Ordering::SeqCst), 1);
+    assert!(
+        unknown["plans"][0]["notes"]
+            .as_array()
+            .ok_or("missing notes")?
+            .iter()
+            .any(|n| n.as_str().is_some_and(|n| n.contains("album title")))
+    );
+    assert_eq!(
+        result(&run(&coordinator.service, false).await?)?["cached"],
+        1
+    );
+    assert_eq!(connector.album_searches.load(Ordering::SeqCst), 1);
+    let indexed_artist: String = sqlx::query_scalar("SELECT artist FROM tracks")
+        .fetch_one(&storage.pool)
+        .await?;
+    assert!(indexed_artist.is_empty());
+
+    // Album lookup can recover a match outside ordinary search's shortlist,
+    // but the artist/title/duration criteria remain exactly the same.
+    sqlx::query("UPDATE tracks SET artist = 'Artist'")
+        .execute(&storage.pool)
+        .await?;
+    let identified = result(&run(&coordinator.service, false).await?)?;
+    assert_eq!(identified["identified"], 1);
+    assert_eq!(
+        identified["plans"][0]["identity"]["recording_mbid"],
+        RECORDING
+    );
+    assert_eq!(identified["plans"][0]["ops"][0]["confidence"], "low");
+    let album_artist: String = sqlx::query_scalar("SELECT album_artist FROM tracks")
+        .fetch_one(&storage.pool)
+        .await?;
+    assert!(album_artist.is_empty());
+    connector.album_competitor.store(true, Ordering::SeqCst);
+    let ambiguous = result(&run(&coordinator.service, true).await?)?;
+    assert_eq!(ambiguous["unmatched"], 1);
+    assert_eq!(
+        ambiguous["plans"][0]["candidates"]
+            .as_array()
+            .ok_or("missing candidates")?
+            .len(),
+        2
+    );
+    connector.album_competitor.store(false, Ordering::SeqCst);
+    connector.recording_conflict.store(true, Ordering::SeqCst);
+    let contradicted = result(&run(&coordinator.service, true).await?)?;
+    assert_eq!(contradicted["unmatched"], 1);
+    assert_eq!(contradicted["plans"][0]["candidates"], json!([]));
+    assert_eq!(contradicted["plans"][0]["ops"], json!([]));
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn explicit_release_retrieval_precedes_text_and_partial_failures_do_not_poison_cache()
+-> TestResult {
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    connector.metadata_match.store(false, Ordering::SeqCst);
+    connector.album_match.store(true, Ordering::SeqCst);
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    let release = RELEASE;
+    let parameters = json!({"scope":{"type":"all"}, "imports":[{"track_id":1,"fields":{"release_mbid":release}}]});
+    let matched = result(&run_parameters(&coordinator.service, parameters).await?)?;
+    assert_eq!(matched["identified"], 1);
+    assert_eq!(
+        connector.last_release_scope.lock().await.as_deref(),
+        Some(release)
+    );
+    assert_eq!(connector.album_searches.load(Ordering::SeqCst), 1);
+    assert_eq!(connector.fingerprints.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        connector.lookup_order.lock().await.as_slice(),
+        &["album", "artist"]
+    );
+    let complete_cache = storage.cleanup_enrichment(TrackId::new(1)?).await?;
+    connector.album_failure.store(true, Ordering::SeqCst);
+    let partial = result(&run(&coordinator.service, true).await?)?;
+    assert_eq!(partial["fingerprinted"], 1);
+    assert_eq!(partial["plans"][0]["partial"], true);
+    assert_eq!(
+        storage.cleanup_enrichment(TrackId::new(1)?).await?,
+        complete_cache
+    );
+    assert_eq!(
+        result(&run(&coordinator.service, false).await?)?["cached"],
+        0
+    );
     coordinator.service.shutdown();
     coordinator.local_task.await??;
     coordinator.provider_task.await??;

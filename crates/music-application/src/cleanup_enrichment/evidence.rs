@@ -1,5 +1,7 @@
 //! Read-only observations: entity identifiers never share a namespace with titles.
-use music_domain::{CleanupTagField, CleanupTrackPlan, CleanupValue, IndexedTrack};
+use music_domain::{
+    CleanupConfidence, CleanupTagField, CleanupTrackPlan, CleanupValue, IndexedTrack,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -182,12 +184,38 @@ pub fn retrieval_hypothesis(
             *target = value;
         }
     }
-    for (field, target) in [
-        (EvidenceField::TrackNo, &mut query.metadata.track_no),
-        (EvidenceField::DiscNo, &mut query.metadata.disc_no),
+    for (field, tag_field, target) in [
+        (
+            EvidenceField::TrackNo,
+            CleanupTagField::TrackNumber,
+            &mut query.metadata.track_no,
+        ),
+        (
+            EvidenceField::DiscNo,
+            CleanupTagField::DiscNumber,
+            &mut query.metadata.disc_no,
+        ),
     ] {
         if target.is_none() {
             *target = evidence.single(field).and_then(|v| v.parse().ok());
+        }
+        // Explicit numbers and conflicting observations take precedence over
+        // filename hypotheses. Only corroborated local positions may break ties.
+        if target.is_none()
+            && evidence.values(field).is_empty()
+            && let Some(plan) = plan
+        {
+            *target = plan.operations.iter().find_map(|op| {
+                if op.field == Some(tag_field)
+                    && op.confidence == CleanupConfidence::High
+                    && let Some(CleanupValue::Number(value)) = op.new
+                    && value > 0
+                {
+                    Some(value)
+                } else {
+                    None
+                }
+            });
         }
     }
     query
