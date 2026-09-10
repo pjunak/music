@@ -736,7 +736,7 @@ input.volume-slider::-moz-range-thumb {
     justify-content: flex-start;
   }
   .assistant-test-log-line {
-    grid-template-columns: 5.75rem 3.25rem;
+    grid-template-columns: 5.75rem minmax(0, 1fr);
   }
   .assistant-test-log-line span {
     grid-column: 1 / -1;
@@ -831,11 +831,6 @@ input.volume-slider::-moz-range-thumb {
   }
   .assistant-tag-usage-list button {
     grid-column: 1 / -1;
-  }
-  .assistant-tag-cleanup-heading,
-  .assistant-tag-cleanup-actions {
-    align-items: stretch;
-    flex-direction: column;
   }
   /* Section-nav sub-tabs at narrow widths: tighter padding so the 4
    * Authoring sub-tabs (Playlists / Soundboards / Modes / Presets) come

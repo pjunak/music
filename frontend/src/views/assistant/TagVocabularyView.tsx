@@ -10,7 +10,6 @@ import type {
 import { ApiError, assistantApi } from "@/core/api";
 import { toast } from "@/core/toast";
 
-import { ModelTagCleanupPanel } from "./ModelTagCleanupPanel";
 import { AssistantInfoPopover } from "./AssistantInfoPopover";
 import { TagCatalogManager } from "./TagCatalogManager";
 
@@ -499,15 +498,13 @@ export function TagVocabularyView() {
             <p className="assistant-eyebrow">Operator-owned catalog</p>
             <h2>Used tag maintenance</h2>
             <p>
-              Rename or merge tags already attached to tracks, then use deterministic
-              aliases and spelling rules. AI tagging needs no cleanup pass.
+              Rename or merge tags already attached to tracks.
             </p>
           </div>
         </div>
         <TagCatalogManager catalog={catalog} onChanged={refresh} />
       </section>
 
-      <details><summary>Legacy AI review of ambiguous tag names (optional)</summary><ModelTagCleanupPanel onCatalogChanged={refresh} /></details>
     </div>
   );
 }

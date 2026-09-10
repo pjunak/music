@@ -1,5 +1,14 @@
 # Mood workflow: implemented rework and remaining evaluation
 
+## Interface update — 2026-09-11
+
+Mood-tag cleanup, including local suggestions and optional legacy AI maintenance,
+has been removed from AI setup, the test console and Mood vocabulary. Manual tag
+editing and rename/merge remain. Existing server contracts and stored records are
+unchanged. Specialized audio analysis now has a selectable **Planned** test-console
+entry; it cannot configure an analyzer, run tests or upload audio yet. This supersedes
+the cleanup-interface description in the September 8 implementation below.
+
 ## Implementation — 2026-09-08
 
 The application rework is implemented. Musical accuracy and adoption of a new

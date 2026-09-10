@@ -166,6 +166,32 @@ function buildLogEntries(
   qualityLoading: boolean,
   qualityLoadError: string | null,
 ): LogEntry[] {
+  if (!role.configuration_available) {
+    return [
+      {
+        id: "planned",
+        time: null,
+        tone: "muted",
+        message: `${role.label} is planned. Configuration and test runs are not available yet.`,
+      },
+      {
+        id: "planned-scope",
+        time: null,
+        tone: "info",
+        message: role.role_id === "audio_analyzer"
+          ? "This task will evaluate specialized analyzers that work with audio. Existing local track-context analysis remains available in Mood library."
+          : role.description,
+      },
+      {
+        id: "planned-tests",
+        time: null,
+        tone: "muted",
+        message: role.role_id === "audio_analyzer"
+          ? "Before tests can run: dedicated audio adapters, bounded audio input, separate consent, validated results, and conformance and quality suites. No audio is uploaded from this console."
+          : "Configuration opens when its task and quality contracts are ready.",
+      },
+    ];
+  }
   const entries: LogEntry[] = [];
   const quality = modelQualityView(evaluation, role, jobs);
   const gateSummary = qualityGateSummary(quality.reportJob);
@@ -468,11 +494,13 @@ export function ModelTestConsole({
   qualityActionBusy,
   onOpenChange,
 }: Props) {
-  const taskRoles = roles.filter((role) => role.configuration_available);
+  const taskRoles = roles.filter((role) => role.role_id !== "tag_cleanup");
   const role =
     taskRoles.find((item) => item.role_id === selectedRoleId) ?? taskRoles[0];
-  const evaluation = evaluations.find((item) => item.role_id === role?.role_id);
-  const jobs = role
+  const evaluation = role?.configuration_available
+    ? evaluations.find((item) => item.role_id === role.role_id)
+    : undefined;
+  const jobs = role?.configuration_available
     ? history.filter(
         (job) =>
           job.parameters.role_id === role.role_id &&
@@ -486,7 +514,7 @@ export function ModelTestConsole({
   );
   const connection = connections.find((item) => item.id === role?.connection_id);
   const adapter = adapters.find((item) => item.id === connection?.adapter_id);
-  const modelResult = role
+  const modelResult = role?.configuration_available
     ? currentModelTestResult(role, modelTestResults[role.role_id])
     : null;
   const entries = role
@@ -505,7 +533,7 @@ export function ModelTestConsole({
     schema_version: "assistant-model-test-console/v1",
     task: role ?? null,
     connection:
-      role === undefined
+      !role?.configuration_available
         ? null
         : {
             id: connection?.id ?? role.connection_id,
@@ -520,7 +548,7 @@ export function ModelTestConsole({
               connection?.verified_capability_ids ?? [],
           },
     request:
-      role === undefined
+      !role?.configuration_available
         ? null
         : {
             model_id: role.model_id,
@@ -532,8 +560,8 @@ export function ModelTestConsole({
           },
     model_test: {
       latest_response: modelResult,
-      latest_request_error: role ? (modelTestErrors[role.role_id] ?? null) : null,
-      running: role?.role_id === testingRoleId,
+      latest_request_error: role?.configuration_available ? (modelTestErrors[role.role_id] ?? null) : null,
+      running: role?.configuration_available === true && role.role_id === testingRoleId,
     },
     quality: {
       evaluation: evaluation ?? null,
@@ -545,20 +573,24 @@ export function ModelTestConsole({
   const logText = role
     ? [
         `${role.label} test log`,
-        `Connection: ${role.connection_name ?? "not configured"}`,
-        `Model: ${role.model_id || "not selected"}`,
-        `Thinking: ${thinkingModeLabel(role.thinking_mode)}`,
+        ...(role.configuration_available ? [
+          `Connection: ${role.connection_name ?? "not configured"}`,
+          `Model: ${role.model_id || "not selected"}`,
+          `Thinking: ${thinkingModeLabel(role.thinking_mode)}`,
+        ] : ["Status: Planned"]),
         "",
         ...entries.map(
           (entry) =>
             `[${shortTime(entry.time)}] ${TONE_LABELS[entry.tone].padEnd(4)} ${entry.message}`,
         ),
       ].join("\n")
-    : "No configurable model task is available.";
+    : "No model task is available.";
   const consoleStatus =
     role === undefined
-      ? "No configurable task"
-      : role.conformance_status === "failed"
+      ? "No task available"
+      : !role.configuration_available
+        ? "Planned"
+        : role.conformance_status === "failed"
         ? "Model test failed"
         : qualityStatusLabel(evaluation, quality, qualityLoading);
 
@@ -650,14 +682,18 @@ export function ModelTestConsole({
           );
           const itemQuality = modelQualityView(itemEvaluation, item, itemJobs);
           const tone =
-            item.conformance_status === "failed"
+            !item.configuration_available
+              ? "muted"
+              : item.conformance_status === "failed"
               ? "failure"
               : item.conformance_status === "never" &&
                   itemQuality.activeJob === undefined
                 ? "muted"
                 : qualityTone(itemEvaluation, itemQuality, qualityLoading);
           const statusLabel =
-            item.conformance_status === "failed"
+            !item.configuration_available
+              ? "Planned"
+              : item.conformance_status === "failed"
               ? "Model failed"
               : item.conformance_status === "never"
                 ? "Model test needed"

@@ -281,7 +281,7 @@ describe("AssistantAiSetupView", () => {
     expect(screen.getByRole("button", { name: "Test and make available" })).toBeEnabled();
   });
 
-  it("keeps optional legacy cleanup outside the tagging setup", async () => {
+  it("removes retired cleanup from setup, connection labels and test polling", async () => {
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
       musicTaggingRole,
@@ -308,10 +308,20 @@ describe("AssistantAiSetupView", () => {
     expect(
       within(family as HTMLElement).getByText("Canonical tag IDs"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Legacy tag-name maintenance (optional)").closest("details"),
-    ).not.toHaveAttribute("open");
-    expect(within(family as HTMLElement).getByText(/No cleanup model or cleanup quality check is required/)).toBeInTheDocument();
+    expect(screen.queryByText(/Legacy tag-name maintenance/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Mood-tag cleanup/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Test console"));
+    expect(screen.queryByRole("button", { name: /Mood-tag cleanup/ })).not.toBeInTheDocument();
+    expect(assistantProvidersApi.listRoleEvaluations).not.toHaveBeenCalledWith("tag_cleanup");
+    expect(jobsApi.list).not.toHaveBeenCalledWith(expect.objectContaining({
+      kind: "assistant.model-evaluation.tag-cleanup-quality-v1",
+    }));
+    await userEvent.click(screen.getByRole("heading", { name: connection.name }).closest("summary")!);
+    expect(screen.queryByText(/Mood-tag cleanup/)).not.toBeInTheDocument();
+    vi.mocked(assistantProvidersApi.updateRole).mockResolvedValue(musicTaggingRole);
+    await userEvent.click(within(family as HTMLElement).getByRole("button", { name: "Save task" }));
+    await waitFor(() => expect(assistantProvidersApi.listRoles).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Mood-tag cleanup/)).not.toBeInTheDocument();
   });
 
   it("explains per-task keys and shows which tasks reuse a connection", async () => {
@@ -380,6 +390,17 @@ describe("AssistantAiSetupView", () => {
     expect(
       within(card as HTMLElement).queryByRole("button", { name: "Save task" }),
     ).not.toBeInTheDocument();
+    await userEvent.click(within(card as HTMLElement).getByRole("link", { name: "View test plan" }));
+    const audioTab = screen.getByRole("button", { name: /Specialized audio analysis\s*Planned/ });
+    expect(audioTab).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByRole("log")).getByText(/Configuration and test runs are not available yet/)).toBeVisible();
+    expect(within(screen.getByRole("log")).getByText(/separate consent/)).toBeVisible();
+    expect(within(screen.getByRole("log")).queryByText(/Choose a verified connection|No task-quality suite|test has not run/)).not.toBeInTheDocument();
+    const diagnostics = JSON.parse(screen.getByLabelText("Selected model task diagnostics JSON").textContent!);
+    expect(diagnostics).toMatchObject({ task: { role_id: "audio_analyzer" }, request: null, quality: { evaluation: null } });
+    expect(assistantProvidersApi.listRoleEvaluations).not.toHaveBeenCalledWith("audio_analyzer");
+    expect(assistantProvidersApi.testRole).not.toHaveBeenCalled();
+    expect(assistantProvidersApi.startRoleEvaluation).not.toHaveBeenCalled();
   });
 
   it("keeps the planned library cleanup model in global AI setup", async () => {

@@ -89,7 +89,7 @@ export function AssistantAiSetupView() {
         if (disposed) return;
         setStatus(nextStatus);
         setConnections(nextConnections);
-        setRoles(nextRoles);
+        setRoles(nextRoles.filter((role) => role.role_id !== "tag_cleanup"));
         setSetupHubOpen(nextConnections.length === 0);
         const defaultAdapterId = nextStatus.adapters[0]?.id || "";
         setAdapterId((current) => current || defaultAdapterId);
@@ -170,7 +170,7 @@ export function AssistantAiSetupView() {
       if (
         current !== null &&
         roles.some(
-          (role) => role.role_id === current && role.configuration_available,
+          (role) => role.role_id === current,
         )
       ) {
         return current;
@@ -401,7 +401,7 @@ export function AssistantAiSetupView() {
     setBusyItem(`role:${roleId}`);
     try {
       const updated = await assistantProvidersApi.updateRole(roleId, payload);
-      setRoles(await assistantProvidersApi.listRoles());
+      setRoles((await assistantProvidersApi.listRoles()).filter((role) => role.role_id !== "tag_cleanup"));
       toast.success("Model task saved", updated.label);
       refreshQuality();
     } catch (error) {
@@ -496,25 +496,20 @@ export function AssistantAiSetupView() {
     setSelectedTestRoleId(evaluation.role_id);
     setTestConsoleOpen(true);
     const isMusicTagging = evaluation.role_id === "music_tagger";
-    const isTagCleanup = evaluation.role_id === "tag_cleanup";
     const isEqAssistance = evaluation.role_id === "eq_assistant";
     const confirmed = await confirmDialog({
       title: isMusicTagging
         ? "Run mood tagging model quality check?"
-        : isTagCleanup
-          ? "Run mood-tag cleanup model quality check?"
-          : isEqAssistance
-            ? "Run EQ assistant model quality check?"
-            : "Run playlist model quality check?",
+        : isEqAssistance
+          ? "Run EQ assistant model quality check?"
+          : "Run playlist model quality check?",
       body:
         `The provider will receive fixed synthetic ${
           isMusicTagging
             ? "music metadata cases"
-            : isTagCleanup
-              ? "tag-catalog cleanup cases"
-              : isEqAssistance
-                ? "EQ drafting scenarios"
-                : "playlist scenarios"
+            : isEqAssistance
+              ? "EQ drafting scenarios"
+              : "playlist scenarios"
         }. ` +
         "No songs or live library data are sent, but repeated model calls may incur cost.",
       confirmLabel: "Run quality check",
@@ -658,7 +653,7 @@ export function AssistantAiSetupView() {
     role.role_id === "music_tagger",
   );
   const standaloneRoles = roles.filter(
-    (role) => !["music_tagger", "tag_cleanup"].includes(role.role_id),
+    (role) => role.role_id !== "music_tagger",
   );
 
   return (
@@ -866,7 +861,7 @@ export function AssistantAiSetupView() {
             {
               roles.filter(
                 (role) =>
-                  role.role_id !== "tag_cleanup" && role.effective_enabled &&
+                  role.effective_enabled &&
                   qualityEvaluations.some(
                     (evaluation) =>
                       evaluation.role_id === role.role_id &&
@@ -898,11 +893,6 @@ export function AssistantAiSetupView() {
               </section>
             ) : null}
             {standaloneRoles.map(renderRoleCard)}
-            <details className="assistant-role-family">
-              <summary>Legacy tag-name maintenance (optional)</summary>
-              <p>Only for ambiguous names in manually authored tags. Generated tags already use the vocabulary. Tagging never requires this task; ordinary cleanup is available in Mood vocabulary.</p>
-              {roles.filter((role) => role.role_id === "tag_cleanup").map(renderRoleCard)}
-            </details>
           </div>
         )}
         {connections.length > 0 ? (

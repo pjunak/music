@@ -223,10 +223,16 @@ model task.
 
 ## 5. Configure each model role
 
-Configure only the tasks you intend to use: playlist planning, mood tagging, or EQ
-assistance. Mood tagging needs one model and its own checks. **Mood-tag cleanup is not
-required.** It remains under **Legacy tag-name maintenance (optional)** for unresolved
-manual names and shares the tagging model; open it only if you need that separate helper.
+Configure only the tasks you intend to use: playlist planning, mood tagging, library
+cleanup, or EQ assistance. Mood tagging needs one model and its own checks.
+Mood-tag cleanup and its legacy maintenance controls have been removed from the UI.
+Manual tag editing and rename/merge remain available in Mood vocabulary.
+
+**Specialized audio analysis** appears in the test console as **Planned**. Select it
+or use **View test plan** to see the prerequisites. Configuration and test runs stay
+unavailable until dedicated audio adapters, bounded input, separate consent, result
+validation, and conformance/quality suites are implemented. This entry does not upload
+audio or replace the existing local track-context analysis.
 
 1. Select a verified connection and one of its reported model IDs.
 2. Keep the role disabled while saving its initial configuration.
@@ -395,25 +401,6 @@ does not require another algorithmic/voice pass. Accepted/manual tags remain int
 nothing runs automatically. Start with existing explanations, then a small selected sample.
 The updated quality report has an independent acoustic-context gate; a synthetic pass is
 not a claim of musical accuracy. See the [offline listening pilot](docs/MOOD_PILOT.md).
-
-### Mood-tag cleanup
-
-This optional legacy helper is not part of the tagging pipeline. If you need it,
-configure its shared model in **Mood tagging**, then run cleanup's own conformance and
-quality checks. Sharing a model does not transfer a pass between tasks. Existing independent
-cleanup assignments remain inactive until Music tagging is saved to link them. Cleanup is
-an optional operation on unresolved manual tag names, not a second pass over tagging output.
-
-1. Open **Assistant -> Mood library -> Mood vocabulary** and review local conservative cleanup there.
-   Declared aliases, spelling, and plural rules run
-   before its provider boundary and does not spend a provider request when they resolve
-   every candidate.
-2. Run model cleanup only after reviewing its disclosure: it receives unresolved source
-   IDs/names and usage counts plus canonical ID definitions, not songs or generated
-   analysis. It must return one canonical-ID-or-null decision for every source. Confirm
-   each proposal labels its origin as local rule or model.
-3. Select individual proposed renames. Confirm unselected items remain unchanged and a
-   stale proposal is rejected rather than guessed or partially repaired.
 
 ### EQ assistance
 

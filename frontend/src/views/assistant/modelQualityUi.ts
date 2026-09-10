@@ -275,14 +275,12 @@ export function modelTestStatusLabel(role: ModelRole): string {
 
 export function taskNameForRole(roleId: string): string {
   if (roleId === "music_tagger") return "mood tagging";
-  if (roleId === "tag_cleanup") return "mood-tag cleanup";
   if (roleId === "eq_assistant") return "EQ drafting";
   return "playlist planning";
 }
 
 export function qualityProgressLabel(roleId: string): string {
   if (roleId === "music_tagger") return "Mood tagging model quality progress";
-  if (roleId === "tag_cleanup") return "Mood-tag cleanup model quality progress";
   if (roleId === "eq_assistant") return "EQ model quality progress";
   return "Playlist model quality progress";
 }

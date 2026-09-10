@@ -441,44 +441,6 @@ export interface ModelTaggingAvailability {
   disclosure: ModelTaggingDisclosure;
 }
 
-export const MODEL_TAG_CLEANUP_DISCLOSURE_VERSION =
-  "assistant-model-tag-cleanup-disclosure/v3" as const;
-
-export interface ModelTagCleanupDisclosure {
-  version: typeof MODEL_TAG_CLEANUP_DISCLOSURE_VERSION;
-  shared_with_provider: string[];
-  never_shared: string[];
-  maximum_tags: number;
-  may_incur_cost: boolean;
-}
-
-export interface ModelTagCleanupAvailability {
-  available: boolean;
-  reason_code: string | null;
-  role_id: "tag_cleanup";
-  connection_name: string | null;
-  model_id: string | null;
-  quality_evaluation_id: "tag-cleanup-quality-v1";
-  job_kind: string;
-  catalog_signature: string;
-  vocabulary_fingerprint: string;
-  manual_tags: number;
-  estimated_provider_requests: number;
-  disclosure: ModelTagCleanupDisclosure;
-}
-
-export interface ModelTagCleanupSuggestion {
-  id: string;
-  source: string;
-  target: string;
-  origin: "local-rule" | "model";
-  confidence: "high" | "medium" | "low";
-  reason: string;
-  source_track_count: number;
-  target_track_count: number;
-  merged: boolean;
-}
-
 export type BackgroundJobStatus =
   | "queued"
   | "running"
@@ -622,34 +584,6 @@ export interface ManualTagRenameResult {
   target: string;
   affected_tracks: number;
   merged: boolean;
-}
-
-export interface TagCleanupSuggestion {
-  id: string;
-  source: string;
-  target: string;
-  reason_code:
-    | "vocabulary_alias"
-    | "vocabulary_plural"
-    | "vocabulary_typo";
-  reason: string;
-  source_track_count: number;
-  target_track_count: number;
-  merged: boolean;
-}
-
-export interface TagCleanupPreview {
-  schema_version: "assistant-tag-cleanup-preview/v2";
-  catalog_signature: string;
-  vocabulary_fingerprint: string;
-  suggestions: TagCleanupSuggestion[];
-}
-
-export interface TagCleanupApplyResult {
-  schema_version: "assistant-tag-cleanup-apply/v1";
-  requested_items: number;
-  applied: ManualTagRenameResult[];
-  catalog_signature: string;
 }
 
 export type AnalysisTagReviewDecision = "pending" | "accepted" | "rejected";
@@ -912,49 +846,6 @@ export const assistantApi = {
     api.post<ManualTagRenameResult>(
       "/api/assistant/library-tags/catalog/rename",
       { source, target },
-    ),
-  previewTagCleanup: () =>
-    api.get<TagCleanupPreview>(
-      "/api/assistant/library-tags/catalog/cleanup-preview",
-    ),
-  applyTagCleanup: (
-    catalogSignature: string,
-    vocabularyFingerprint: string,
-    items: Array<Pick<TagCleanupSuggestion, "source" | "target">>,
-  ) =>
-    api.post<TagCleanupApplyResult>(
-      "/api/assistant/library-tags/catalog/cleanup-apply",
-      {
-        catalog_signature: catalogSignature,
-        vocabulary_fingerprint: vocabularyFingerprint,
-        items,
-      },
-    ),
-  getModelTagCleanupAvailability: () =>
-    api.get<ModelTagCleanupAvailability>(
-      "/api/assistant/library-tags/catalog/model-cleanup-status",
-    ),
-  startModelTagCleanup: (
-    disclosureVersion: typeof MODEL_TAG_CLEANUP_DISCLOSURE_VERSION,
-  ) =>
-    api.post<BackgroundJob>(
-      "/api/assistant/library-tags/catalog/model-cleanup-jobs",
-      { disclosure_version: disclosureVersion, consent: true },
-    ),
-  applyModelTagCleanup: (
-    jobId: string,
-    catalogSignature: string,
-    vocabularyFingerprint: string,
-    items: Array<Pick<ModelTagCleanupSuggestion, "source" | "target">>,
-  ) =>
-    api.post<TagCleanupApplyResult>(
-      "/api/assistant/library-tags/catalog/model-cleanup-apply",
-      {
-        job_id: jobId,
-        catalog_signature: catalogSignature,
-        vocabulary_fingerprint: vocabularyFingerprint,
-        items,
-      },
     ),
   reviewAnalysisTag: (
     trackId: number,

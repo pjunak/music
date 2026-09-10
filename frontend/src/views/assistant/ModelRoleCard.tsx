@@ -44,7 +44,6 @@ interface Props {
 
 const ROLE_OUTPUT_CONSTRAINTS: Record<string, string> = {
   music_tagger: "Canonical tag IDs",
-  tag_cleanup: "Canonical ID or no match",
   playlist_planner: "Known track IDs; server-ranked",
   eq_assistant: "Ten bounded EQ gains",
   library_cleanup: "Supplied catalog IDs and evidence; may abstain",
@@ -267,6 +266,9 @@ export function ModelRoleCard({
           <strong>Requires {requiredCapabilityLabels.join(" · ")}</strong>
           <span>Configuration opens when its task and quality contracts are ready.</span>
         </div>
+        <a className="assistant-role-test-plan" href="#assistant-test-console" onClick={onViewTestLog}>
+          View test plan
+        </a>
         {configured ? (
           <button
             className="btn-ghost"
@@ -323,15 +325,9 @@ export function ModelRoleCard({
       </div>
 
       <form className="assistant-role-route-form" onSubmit={(event) => void save(event)}>
-        {role.role_id === "tag_cleanup" ? (
-          <p className="field-hint">{role.conformance_error_code === "shared_mood_model_required"
-            ? "The old cleanup assignment is inactive. Save Music tagging to link the shared model."
-            : `Uses the mood-tagging model: ${role.model_id || "not configured"}.`} Change the shared connection, model and request settings in Music tagging, then save. Cleanup retains its own test and quality check.</p>
-        ) : null}
         {role.role_id === "music_tagger" ? (
-          <p className="field-hint">This is the only model setup needed for tagging. Local analysis prepares evidence; the model suggests tags for review. No cleanup model or cleanup quality check is required.</p>
+          <p className="field-hint">Local analysis prepares evidence; the model suggests vocabulary tags for review.</p>
         ) : null}
-        {role.role_id !== "tag_cleanup" ? <>
 
         <label className="field">
           <span className="field-label">Connection</span>
@@ -395,7 +391,6 @@ export function ModelRoleCard({
           />
         </div>
 
-        </> : null}
 
         <div className="assistant-role-checks" aria-label={`${role.label} checks`}>
           <a
@@ -425,7 +420,7 @@ export function ModelRoleCard({
           </p>
         ) : null}
 
-        {role.role_id !== "tag_cleanup" ? <div
+        <div
           className="assistant-role-settings"
           role="group"
           aria-label="Request settings"
@@ -491,7 +486,6 @@ export function ModelRoleCard({
           </label>
         </div>
 
-        : null}
 
         <div className="assistant-role-actions">
           <button

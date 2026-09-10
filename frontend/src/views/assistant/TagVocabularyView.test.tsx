@@ -22,10 +22,6 @@ vi.mock("@/core/api", async (importActual) => {
   };
 });
 
-vi.mock("./ModelTagCleanupPanel", () => ({
-  ModelTagCleanupPanel: () => <div>Cleanup pipeline</div>,
-}));
-
 vi.mock("./TagCatalogManager", () => ({
   TagCatalogManager: () => <div>Used-tag tools</div>,
 }));
@@ -128,6 +124,13 @@ beforeEach(() => {
 });
 
 describe("TagVocabularyView", () => {
+  it("keeps vocabulary and manual tag tools without legacy AI maintenance", async () => {
+    render(<TagVocabularyView />);
+    expect(await screen.findByRole("heading", { name: "Setting" })).toBeVisible();
+    expect(screen.getByText("Used-tag tools")).toBeVisible();
+    expect(screen.queryByText(/Legacy AI review/)).not.toBeInTheDocument();
+  });
+
   it("creates a stable ID from a new canonical tag name", async () => {
     vi.mocked(inputDialog).mockResolvedValueOnce("Heroic Arrival");
     const user = userEvent.setup();

@@ -600,13 +600,18 @@ version values and the tables locate the corresponding code and tests.
   import preview/select/commit transaction. Never send songs, audio, library metadata, paths,
   playlists, existing presets, or credentials to the EQ role.
 
-### Shared mood configuration
+### Retired cleanup interface and planned audio tests
 
-- Mood tagging and optional tag cleanup share one connection/model/Thinking/request configuration.
-  Configure it through Mood tagging; preserve independent enablement, conformance and quality gates.
-  Cleanup appears only in collapsed optional legacy maintenance. It is excluded from normal
-  tagging setup/readiness and its certification is needed only to invoke that legacy helper.
-  Local alias cleanup remains authoritative and never becomes a mandatory second model pass.
+- AI setup, connection role labels, quality polling, and the test console exclude
+  `tag_cleanup`. Mood vocabulary offers manual editing and rename/merge; local cleanup
+  suggestions and legacy model-cleanup panels and browser API helpers are removed.
+  Existing server cleanup contracts and stored records are retained; this UI change
+  does not remove HTTP endpoints or migrate persisted configuration.
+- The console includes reserved roles. `audio_analyzer` has a selectable **Planned**
+  entry and a **View test plan** link from its role card, without model-test prompts,
+  quality polling, or executable controls. Dedicated audio adapters, bounded input,
+  separate consent, validated results, and conformance/quality suites must precede
+  enabling it. Existing local track-context analysis stays independent.
 
 ### Tagging bounds and inference identity
 
