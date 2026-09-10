@@ -415,7 +415,7 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
-Tagging suite `controlled-vocabulary-tagging-baseline-v23` uses 57 bundled-vocabulary,
+Tagging suite `controlled-vocabulary-tagging-baseline-v24` uses 57 bundled-vocabulary,
 five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
 vocabularies during batching and validates fixed fixture identities for retests.
 Each vocabulary group and the context-only subset (no descriptive metadata) must independently
@@ -430,6 +430,12 @@ and suspenseful genre evidence in two previously ambiguous metadata fixtures. In
 explains the recording-level contribution to intensity and avoids counting these correlated
 measurements as independent mood evidence. Quality result v5 retains bounded public evidence
 and confidence for primary and safety-repeat answers; historical reports without it still load.
+Suite v24 corrects the sustained-drive fixture's synthetic intensity from 0.83 to 0.677,
+consistent with its supplied loudness, drive and density. A regression checks the four steady
+acoustic controls' opening/ending intensity against the DSP formula, allowing fixture rounding;
+it does not equate independently computed medians or percentiles. All expected tags and gates
+remain unchanged. The correction requires fresh matching conformance and full quality evidence;
+it does not certify any model or establish that this contradiction caused a prior abstention.
 Playlist reports separately record labelled candidate recall before model ranking,
 including missing candidate IDs, even when the provider fails. These are synthetic
 diagnostics; they do not establish live-library recall or change retrieval policy.

@@ -17,7 +17,7 @@ use super::{
 pub const MODEL_TAGGER_INPUT_CONTRACT: &str = "assistant-music-tagger-input/v22";
 pub const MODEL_TAGGER_OUTPUT_CONTRACT: &str = "assistant-music-tagger-output/v4";
 pub const MODEL_TAGGING_EVALUATION_CONTRACT: &str = "assistant-music-tagger-evaluation/v8";
-pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v23";
+pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v24";
 pub const MODEL_TAG_BATCH_SIZE: usize = 20;
 pub const MAX_MODEL_TAGS_PER_TRACK: usize = 8;
 pub const MAX_MODEL_EVIDENCE_ITEMS: usize = 4;
@@ -1496,6 +1496,46 @@ mod tests {
                 "case {case_id} must retain explicit {cue} evidence outside excluded identity fields"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn steady_acoustic_quality_fixtures_keep_intensity_consistent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let suite = tag_quality_suite()?;
+        let mut checked = 0;
+        for case in &suite.cases {
+            let context = &case.track["context_evidence"];
+            let trajectories = &context["trajectories"];
+            if !case.id.starts_with("acoustic-context-")
+                || context["structure"]["section_count"] != 1
+                || ["loudness", "intensity", "rhythmic_drive", "density"]
+                    .iter()
+                    .any(|axis| trajectories[axis]["shape"] != "steady")
+            {
+                continue;
+            }
+            // The DSP averages each axis over the same opening/ending windows.
+            // Those means preserve the linear intensity formula; medians and
+            // percentiles do not, so deliberately do not equate their sums.
+            for edge in ["start", "end"] {
+                let value = |axis: &str| {
+                    trajectories[axis][edge]
+                        .as_f64()
+                        .ok_or("steady acoustic fixture is missing a measurement")
+                };
+                let expected = 0.5 * value("loudness")?
+                    + 0.3 * value("rhythmic_drive")?
+                    + 0.2 * value("density")?;
+                assert!(
+                    (value("intensity")? - expected).abs() <= 0.005,
+                    "{} {edge} intensity contradicts its DSP inputs",
+                    case.id
+                );
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "retain the four steady acoustic controls");
         Ok(())
     }
 

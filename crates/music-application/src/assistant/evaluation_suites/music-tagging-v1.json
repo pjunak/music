@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v8",
-  "id": "controlled-vocabulary-tagging-baseline-v23",
+  "id": "controlled-vocabulary-tagging-baseline-v24",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -1208,7 +1208,7 @@
           "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
           "trajectories": {
             "loudness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"},
-            "intensity": {"typical": 0.83, "low": 0.7899999999999999, "high": 0.87, "start": 0.83, "end": 0.83, "peak_at_fraction": 0.5, "shape": "steady"},
+            "intensity": {"typical": 0.677, "low": 0.637, "high": 0.717, "start": 0.677, "end": 0.677, "peak_at_fraction": 0.5, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.89, "low": 0.85, "high": 0.93, "start": 0.89, "end": 0.89, "peak_at_fraction": 0.5, "shape": "steady"},
             "brightness": {"typical": 0.58, "low": 0.5399999999999999, "high": 0.62, "start": 0.58, "end": 0.58, "peak_at_fraction": 0.5, "shape": "steady"},
             "density": {"typical": 0.8, "low": 0.76, "high": 0.8400000000000001, "start": 0.8, "end": 0.8, "peak_at_fraction": 0.5, "shape": "steady"},
@@ -1218,7 +1218,7 @@
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
           "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
           "sections": [
-            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.83, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.677, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
           ]
         }
       },
