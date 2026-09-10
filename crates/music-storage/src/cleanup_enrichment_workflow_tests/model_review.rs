@@ -27,6 +27,7 @@ impl ProviderConnectionPolicy for Policy {
 struct Transport {
     calls: AtomicUsize,
     timeout: AtomicBool,
+    change_folder: tokio::sync::Mutex<Option<Arc<SqliteStorage>>>,
 }
 impl StructuredModelTransport for Transport {
     fn validate_request(
@@ -45,6 +46,14 @@ impl StructuredModelTransport for Transport {
             self.calls.fetch_add(1, Ordering::SeqCst);
             assert!(!request.user_prompt.contains("album/song.mp3"));
             assert!(!request.user_prompt.contains(RECORDING));
+            if let Some(storage) = self.change_folder.lock().await.take() {
+                assert!(
+                    sqlx::query("UPDATE tracks SET path = 'album/neighbor.mp3' WHERE id = 2")
+                        .execute(&storage.pool)
+                        .await
+                        .is_ok()
+                );
+            }
             let timeout = self.timeout.load(Ordering::SeqCst);
             StructuredModelResult {
                 succeeded: !timeout,
@@ -120,11 +129,15 @@ async fn model_review_gates_cost_and_keeps_suggestions_separate_from_authored_me
     let tracks = cleanup.tracks(CleanupScope::All).await?;
     let signature =
         cleanup_enrichment_source_signature(&tracks[0]).map_err(std::io::Error::other)?;
+    // One track in this folder. The independent fixture hashes that source once.
+    use sha2::{Digest, Sha256};
+    let folder_signature = format!("{:x}", Sha256::digest(signature.as_bytes()));
+    sqlx::query("INSERT INTO tracks (path, title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, bpm, size_bytes, mtime, added_at, display_title, origin) SELECT 'other/neighbor.mp3', title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, bpm, size_bytes, mtime, added_at, display_title, origin FROM tracks WHERE id = 1").execute(&storage.pool).await?;
     let revision = storage.catalog_evidence_revision().await?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let mut catalog_result = json!({"plans":[{"track_id":1,"status":"unmatched","source_signature":signature,"evidence_revision":revision,"retrieved_at":now,
+    let mut catalog_result = json!({"plans":[{"track_id":1,"status":"unmatched","source_signature":signature,"indexed_folder_signature":folder_signature,"evidence_revision":revision,"retrieved_at":now,
         "candidates":[{"id":RECORDING,"title":"Reviewed Song","artist":"Artist","length_ms":120000,"provider_score":0.8,"releases":[]}]}]});
     sqlx::query("INSERT INTO background_jobs (id,kind,status,parameters_json,result_json,progress_current,progress_total,progress_phase,progress_message,attempts,created_at,updated_at,lane,schema_version,restartable,checkpoint_policy) VALUES ('catalog',?,'succeeded','{}',?,1,1,'Done','Done',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'provider',1,0,'replace')")
         .bind(CLEANUP_ENRICHMENT_JOB_KIND).bind(catalog_result.to_string()).execute(&storage.pool).await?;
@@ -174,6 +187,30 @@ async fn model_review_gates_cost_and_keeps_suggestions_separate_from_authored_me
         .fetch_one(&storage.pool)
         .await?;
     assert_eq!(title, "Song");
+    // An unrelated folder is harmless, but a changed sibling set invalidates
+    // candidate evidence before cost and again before publishing model proposals.
+    sqlx::query("UPDATE tracks SET path = 'album/neighbor.mp3' WHERE id = 2")
+        .execute(&storage.pool)
+        .await?;
+    let changed = review(&coordinator.service, params.clone()).await?;
+    assert_eq!(changed.error.as_deref(), Some("cleanup_evidence_stale"));
+    assert_eq!(transport.calls.load(Ordering::SeqCst), 1);
+    sqlx::query("UPDATE tracks SET path = 'other/neighbor.mp3' WHERE id = 2")
+        .execute(&storage.pool)
+        .await?;
+    *transport.change_folder.lock().await = Some(storage.clone());
+    let raced = review(&coordinator.service, params.clone()).await?;
+    assert_eq!(raced.error.as_deref(), Some("cleanup_evidence_stale"));
+    assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
+    assert!(
+        raced
+            .result
+            .as_ref()
+            .is_some_and(|result| !result.contains_key("ops"))
+    );
+    sqlx::query("UPDATE tracks SET path = 'other/neighbor.mp3' WHERE id = 2")
+        .execute(&storage.pool)
+        .await?;
     transport.timeout.store(true, Ordering::SeqCst);
     let uncertain = review(&coordinator.service, params).await?;
     assert_eq!(uncertain.status, JobStatus::Failed);
@@ -183,7 +220,7 @@ async fn model_review_gates_cost_and_keeps_suggestions_separate_from_authored_me
         uncertain.result.is_some(),
         "paid attempt checkpoint must survive failure"
     );
-    assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(transport.calls.load(Ordering::SeqCst), 3);
     coordinator.service.shutdown();
     coordinator.local_task.await??;
     coordinator.provider_task.await??;

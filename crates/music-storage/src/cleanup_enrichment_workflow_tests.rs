@@ -23,6 +23,8 @@ use crate::{SqliteStorage, SqliteStorageOptions};
 
 #[path = "cleanup_enrichment_workflow_tests/model_review.rs"]
 mod model_review;
+#[path = "cleanup_enrichment_workflow_tests/sibling_discovery.rs"]
+mod sibling_discovery;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 const RECORDING: &str = "00000000-0000-0000-0000-000000000001";
@@ -57,6 +59,13 @@ struct FixtureCatalog {
     last_release_scope: tokio::sync::Mutex<Option<String>>,
     lookup_order: tokio::sync::Mutex<Vec<&'static str>>,
     recording_conflict: AtomicBool,
+    sibling_candidates: tokio::sync::Mutex<std::collections::BTreeMap<i64, Vec<Candidate>>>,
+    sibling_failures: tokio::sync::Mutex<std::collections::BTreeSet<i64>>,
+    sibling_queries: tokio::sync::Mutex<Vec<i64>>,
+    album_requires_release: AtomicBool,
+    scoped_candidates: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<Candidate>>>,
+    scoped_failures: tokio::sync::Mutex<std::collections::BTreeSet<String>>,
+    multiple_editions: AtomicBool,
 }
 
 impl CatalogConnector for FixtureCatalog {
@@ -69,6 +78,16 @@ impl CatalogConnector for FixtureCatalog {
             self.lookup_order.lock().await.push("album");
             self.album_searches.fetch_add(1, Ordering::SeqCst);
             *self.last_release_scope.lock().await = release_id.map(str::to_owned);
+            if let Some(id) = release_id {
+                if self.scoped_failures.lock().await.contains(id) {
+                    return Err(CatalogError::MusicBrainz);
+                }
+                if let Some(candidates) = self.scoped_candidates.lock().await.get(id) {
+                    return Ok(candidates.clone());
+                }
+            } else if self.album_requires_release.load(Ordering::SeqCst) {
+                return Ok(Vec::new());
+            }
             if self.album_failure.load(Ordering::SeqCst) {
                 return Err(CatalogError::MusicBrainz);
             }
@@ -97,10 +116,23 @@ impl CatalogConnector for FixtureCatalog {
         Some("synthetic-fixture")
     }
 
-    fn search_metadata<'a>(&'a self, _: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>> {
+    fn search_metadata<'a>(&'a self, track: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>> {
         Box::pin(async move {
             self.lookup_order.lock().await.push("artist");
             self.searches.fetch_add(1, Ordering::SeqCst);
+            if track.id.get() != 1 {
+                self.sibling_queries.lock().await.push(track.id.get());
+                if self.sibling_failures.lock().await.contains(&track.id.get()) {
+                    return Err(CatalogError::MusicBrainz);
+                }
+                return Ok(self
+                    .sibling_candidates
+                    .lock()
+                    .await
+                    .get(&track.id.get())
+                    .cloned()
+                    .unwrap_or_default());
+            }
             if self.metadata_failure.load(Ordering::SeqCst) {
                 return Err(CatalogError::MusicBrainz);
             }
@@ -126,6 +158,13 @@ impl CatalogConnector for FixtureCatalog {
     fn recording<'a>(&'a self, id: &'a str) -> CatalogFuture<'a, Recording> {
         Box::pin(async move {
             assert_eq!(id, RECORDING);
+            let mut releases = vec![release_summary()];
+            if self.multiple_editions.load(Ordering::SeqCst) {
+                releases.push(ReleaseSummary {
+                    id: "00000000-0000-0000-0000-000000000097".into(),
+                    ..release_summary()
+                });
+            }
             Ok(Recording {
                 title: if self.recording_conflict.load(Ordering::SeqCst) {
                     "Song (live)"
@@ -135,20 +174,20 @@ impl CatalogConnector for FixtureCatalog {
                 .to_owned(),
                 artist: "Artist".to_owned(),
                 first_release_date: Some("2026".to_owned()),
-                releases: vec![release_summary()],
+                releases,
                 releases_complete: true,
                 ..Recording::default()
             })
         })
     }
 
-    fn release<'a>(&'a self, _: &'a str, _: &'a str) -> CatalogFuture<'a, ReleaseDetail> {
+    fn release<'a>(&'a self, release_id: &'a str, _: &'a str) -> CatalogFuture<'a, ReleaseDetail> {
         Box::pin(async move {
             if self.release_failure.load(Ordering::SeqCst) {
                 return Err(CatalogError::MusicBrainz);
             }
             Ok(ReleaseDetail {
-                id: RELEASE.to_owned(),
+                id: release_id.to_owned(),
                 title: "Album".to_owned(),
                 artist: "Artist".to_owned(),
                 date: Some("2026".to_owned()),
@@ -250,6 +289,13 @@ async fn setup(
         last_release_scope: tokio::sync::Mutex::new(None),
         lookup_order: tokio::sync::Mutex::new(Vec::new()),
         recording_conflict: AtomicBool::new(false),
+        sibling_candidates: tokio::sync::Mutex::default(),
+        sibling_failures: tokio::sync::Mutex::default(),
+        sibling_queries: tokio::sync::Mutex::default(),
+        album_requires_release: AtomicBool::new(false),
+        scoped_candidates: tokio::sync::Mutex::default(),
+        scoped_failures: tokio::sync::Mutex::default(),
+        multiple_editions: AtomicBool::new(false),
     });
     let handler = CleanupEnrichmentJobHandler::new(
         CleanupEnrichmentServices {

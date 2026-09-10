@@ -511,8 +511,16 @@ album title when the ordinary search fails. This can surface soundtrack candidat
 the track artist is missing; an album hit alone does not select an identity or edition.
 Corroborated numbers in filenames/disc folders can help place repeated tracks, while explicit
 tags and imported positions take precedence. These paths add at most two album-scoped search
-requests per track; successful ordinary matches need no album-title fallback. Query notes show
-which scope was tried. The [offline pilot](docs/LIBRARY_METADATA_PILOT.md) remains the next step
+requests per track; successful ordinary matches need no album-title fallback.
+
+For still-unresolved songs without a release ID, cleanup can look up at most three well-tagged
+neighbors in the same folder, including unselected tracks. At least two differently titled songs
+must agree on one or two release hints before those releases expand the search. Compilations may
+have different track artists; conflicting album tags, duplicate song copies and incomplete lookups
+cannot establish agreement. This adds up to seven requests per unresolved track before cache reuse
+(three neighbor lookups and up to four searches within shared releases). Only selected tracks get
+proposals, and each song still has to pass its own identity checks. Query notes show the neighboring
+evidence and scopes tried. The [offline pilot](docs/LIBRARY_METADATA_PILOT.md) remains the next step
 for measuring accuracy on a collection.
 
 You can select a JSON metadata sidecar with this shape (the example ID is illustrative):

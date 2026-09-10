@@ -87,19 +87,23 @@ impl CleanupAiJobHandler {
             .map_err(|_| JobHandlerError::new("cleanup_track_invalid"))?;
         let tracks = self
             .cleanup
-            .tracks(CleanupScope::Tracks(vec![id]))
+            .tracks(CleanupScope::All)
             .await
             .map_err(|_| JobHandlerError::new("cleanup_track_unavailable"))?;
         let track = tracks
-            .first()
+            .iter()
+            .find(|track| track.id == id)
             .ok_or_else(|| JobHandlerError::new("cleanup_track_unavailable"))?;
         let signature = cleanup_enrichment_source_signature(track).map_err(JobHandlerError::new)?;
+        let folder_signature = super::discovery::indexed_folder_signature(track, tracks.iter())
+            .map_err(JobHandlerError::new)?;
         let revision = self
             .cache
             .catalog_evidence_revision()
             .await
             .map_err(|_| JobHandlerError::new("cleanup_evidence_unavailable"))?;
         if plan["source_signature"].as_str() != Some(&signature)
+            || plan["indexed_folder_signature"].as_str() != Some(&folder_signature)
             || plan["evidence_revision"].as_i64() != Some(revision)
         {
             return Err(JobHandlerError::new("cleanup_evidence_stale"));
@@ -138,7 +142,7 @@ impl CleanupAiJobHandler {
             .map_err(|e| JobHandlerError::new(e.code))?;
         let current = self
             .cleanup
-            .tracks(CleanupScope::Tracks(vec![id]))
+            .tracks(CleanupScope::All)
             .await
             .map_err(|_| JobHandlerError::new("cleanup_track_unavailable"))?;
         let current_role = self
@@ -154,10 +158,15 @@ impl CleanupAiJobHandler {
                 .map_err(|_| JobHandlerError::new("cleanup_evidence_unavailable"))?
                 != revision
             || current
-                .first()
+                .iter()
+                .find(|track| track.id == id)
                 .and_then(|t| cleanup_enrichment_source_signature(t).ok())
                 .as_deref()
                 != Some(&signature)
+            || super::discovery::indexed_folder_signature(track, current.iter())
+                .ok()
+                .as_deref()
+                != Some(&folder_signature)
         {
             return Err(JobHandlerError::new("cleanup_evidence_stale"));
         }

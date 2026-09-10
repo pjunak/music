@@ -306,8 +306,16 @@ together with song title and a duration range. These fields and phrase-query rul
 against the [official search reference](https://musicbrainz.org/doc/MusicBrainz_API/Search#Recording)
 on 11 September 2026. The implementation caps each query at 25 candidates and keeps the same
 identity checks; an album search may expose candidates with missing local artists for review.
-Album-wide discovery, alias expansion and broader version interpretation remain in the
-[active backlog](../TODO.md). Their accuracy still needs independent collection labels.
+The next slice adds corroborated sibling discovery: up to three existing title/artist/album
+observations retrieve candidates; at least two independently titled recording matches must share
+one or two eligible releases. These IDs only scope further searches for the selected song.
+Mixed album tags, duplicate copies, conflicting release intersections and incomplete requests
+withhold the fallback. Raw sibling changes invalidate cached evidence even if local inference
+would reconstruct the same metadata. This uses the existing API, cache and rate limit, adds at
+most seven requests per unresolved track before cache reuse, and does not relax identity or
+edition acceptance. Fixtures verify these mechanics, not collection accuracy.
+Artist alias expansion, broader version interpretation and discovery across disc folders remain
+in the [active backlog](../TODO.md). Accuracy still needs independent collection labels.
 
 ### Benchmark design
 

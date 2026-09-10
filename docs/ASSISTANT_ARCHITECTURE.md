@@ -187,8 +187,8 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v5` is included in evidence signatures and invalidates
-results created before album-scoped retrieval and corroborated local position hypotheses.
+evidence. `catalog-evidence-policy/v6` is included in evidence signatures and invalidates
+results created before corroborated sibling release discovery.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -333,6 +333,20 @@ searches before the ordinary title/artist searches. Without a release ID, an unr
 search can add up to two song-title/album-title searches, including tracks with missing artists.
 Conflicting release IDs suppress album-scoped retrieval; independent recording lookup remains
 available. Duplicate query terms are sent once, including when only position hypotheses differ.
+If these queries remain unresolved and there are no explicit release IDs, `discovery.rs` can
+query at most three independently titled, already-tagged siblings in deterministic path order.
+All indexed tracks in the same non-root folder are eligible, even outside the selected scope.
+Nonempty album tags must agree with each other and the current album hypothesis; artists may
+differ on compilations. Anchor searches use raw indexed title/artist/album, never inferred or
+newly proposed values, and use the existing identity score, margin and duration checks.
+At least two distinct recording IDs must share one or two eligible release IDs with matching
+album titles. Every successfully matched anchor participates in the intersection. No common
+release, more than two common releases, or any failed anchor request withholds expansion.
+Each shared release allows up to two target-title queries (at most seven added requests total,
+using the existing connector cache and rate limit). All responses merge before selection;
+a failed shared-release query withholds text selection from this fallback. Discovery IDs are
+retrieval hints only and never become explicit release evidence or bypass edition ambiguity.
+Notes retain anchor track IDs, title/artist, recording IDs, release counts and searched release IDs.
 Opt-in AcoustID remains the fallback after text retrieval.
 Text search retrieves 25 candidates with a +/-10-second duration range; zero/unknown duration
 omits that search constraint. Exact title/artist, duration, weighted score and margin still govern
@@ -363,7 +377,9 @@ Local and catalog alternatives remain visible together, and selection enforces o
 Bulk selection leaves conflicting values unresolved. AI candidate choices are separately labeled.
 
 `library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. Cache keys
-include exact indexed source, local observations, folder context and source/vocabulary revision.
+include exact indexed source, local observations, raw and hypothesized folder context in
+deterministic path order, and source/vocabulary revision. An anchor's authored tag change expires
+the cache even when local inference could reconstruct the previous value.
 Complete matches expire after seven days; unmatched results after six hours; future timestamps
 and partial connector failures cannot be reused. The connector keeps bounded in-memory entity and
 local-fingerprint caches (256 entries each, one hour); fingerprint keys include rooted path and
@@ -382,7 +398,9 @@ contract.
 
 The optional `assistant.model-library-cleanup` job handles one unresolved track from a completed
 catalog job whose evidence is less than six hours old. Expired or changed evidence fails before
-the provider call. It is non-restartable and checkpoints one provider attempt before external cost.
+the provider call. The raw indexed folder signature is checked both before the request and before
+returning proposals, so changed or moved neighbors cannot leave sibling-derived candidates current.
+It is non-restartable and checkpoints one provider attempt before external cost.
 `LibraryCleanupModelTask` discloses bounded indexed title/artist/album/duration and up to 25 catalog
 candidates with opaque IDs and local comparison facts. Paths, track IDs, raw sidecars, webpages,
 credentials and audio are excluded. The output selects a supplied candidate or explicitly abstains;

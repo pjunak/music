@@ -265,7 +265,7 @@ impl CleanupEnrichmentJobHandler {
                 .as_str()
                 .rsplit_once('/')
                 .map_or("", |(parent, _)| parent);
-            let siblings = all_tracks
+            let mut indexed_siblings = all_tracks
                 .iter()
                 .filter(|t| {
                     t.path
@@ -274,6 +274,14 @@ impl CleanupEnrichmentJobHandler {
                         .map_or("", |(parent, _)| parent)
                         == folder
                 })
+                .collect::<Vec<_>>();
+            indexed_siblings.sort_by(|left, right| left.path.cmp(&right.path));
+            let indexed_folder_signature =
+                super::discovery::indexed_folder_signature(track, indexed_siblings.iter().copied())
+                    .map_err(JobHandlerError::new)?;
+            let siblings = indexed_siblings
+                .iter()
+                .copied()
                 .map(|t| {
                     if t.id == track.id {
                         return hypothesis.clone();
@@ -291,8 +299,10 @@ impl CleanupEnrichmentJobHandler {
                     )
                 })
                 .collect::<Vec<_>>();
-            let signatures = siblings
+            let signatures = indexed_siblings
                 .iter()
+                .copied()
+                .chain(siblings.iter())
                 .map(cleanup_enrichment_source_signature)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(JobHandlerError::new)?;
@@ -333,6 +343,7 @@ impl CleanupEnrichmentJobHandler {
                         &hypothesis,
                         &evidence,
                         &siblings,
+                        &indexed_siblings,
                         catalog,
                         vocabulary.as_ref(),
                         context.job_id(),
@@ -343,6 +354,10 @@ impl CleanupEnrichmentJobHandler {
                         result.insert("source_signature".into(), json!(signature));
                         result.insert("local_evidence_signature".into(), json!(evidence_signature));
                         result.insert("folder_context_signature".into(), json!(context_signature));
+                        result.insert(
+                            "indexed_folder_signature".into(),
+                            json!(indexed_folder_signature),
+                        );
                         result.insert("local_evidence".into(), json!(evidence));
                         result.insert("retrieved_at".into(), json!(now_seconds()));
                         result.insert("evidence_revision".to_owned(), json!(evidence_revision));
@@ -438,6 +453,7 @@ impl CleanupEnrichmentJobHandler {
         hypothesis: &IndexedTrack,
         evidence: &LocalEvidence,
         siblings: &[IndexedTrack],
+        indexed_siblings: &[&IndexedTrack],
         catalog: CatalogAccess<'_>,
         vocabulary: Option<&TagVocabularySnapshot>,
         job_id: &str,
@@ -447,6 +463,7 @@ impl CleanupEnrichmentJobHandler {
             track,
             hypothesis,
             evidence,
+            indexed_siblings,
             if catalog.acoustid_enabled {
                 catalog.acoustid_api_key
             } else {

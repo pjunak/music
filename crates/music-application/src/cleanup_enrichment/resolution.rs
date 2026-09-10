@@ -1,4 +1,5 @@
 use super::catalog::{Candidate, CatalogConnector, CatalogError, Recording};
+use super::discovery::discover_releases;
 use super::evidence::{EvidenceField, LocalEvidence};
 use super::workflow::{candidate_score, loose_equal, select_acoustic_candidate, select_candidate};
 use music_domain::IndexedTrack;
@@ -16,6 +17,7 @@ pub(super) async fn resolve_identity(
     track: &IndexedTrack,
     hypothesis: &IndexedTrack,
     evidence: &LocalEvidence,
+    indexed_siblings: &[&IndexedTrack],
     acoustid_key: Option<&str>,
 ) -> Result<IdentityResolution, CatalogError> {
     let mut result = IdentityResolution {
@@ -139,6 +141,32 @@ pub(super) async fn resolve_identity(
     } else if matched.is_none() && releases.len() > 1 {
         result.notes.push("Release IDs disagree; album-scoped retrieval was withheld while independent recording lookup remains available.".into());
     }
+    if matched.is_none() && releases.is_empty() {
+        let discovery = discover_releases(connector, track, hypothesis, indexed_siblings).await;
+        result.partial |= discovery.partial;
+        result.notes.extend(discovery.notes);
+        let mut complete = true;
+        for id in discovery.releases {
+            complete &= retrieve_album_candidates(
+                connector,
+                track,
+                hypothesis,
+                Some(&id),
+                &mut candidates,
+                &mut result,
+            )
+            .await;
+        }
+        // Every discovered release contributes before selection, so the first
+        // successful query cannot hide a competing recording from another edition.
+        if complete {
+            matched = select_text_identity(
+                track,
+                hypothesis,
+                &candidates.values().cloned().collect::<Vec<_>>(),
+            );
+        }
+    }
     result.candidates = candidates.into_values().collect();
     result.candidates.sort_by(|a, b| {
         candidate_score(hypothesis, b)
@@ -229,7 +257,8 @@ async fn retrieve_album_candidates(
     release_id: Option<&str>,
     candidates: &mut BTreeMap<String, Candidate>,
     result: &mut IdentityResolution,
-) {
+) -> bool {
+    let mut complete = true;
     let mut seen = std::collections::BTreeSet::new();
     for query in [track, hypothesis] {
         let title = if query.metadata.title.trim().is_empty() {
@@ -254,11 +283,13 @@ async fn retrieve_album_candidates(
                 }
             }
             Err(_) => {
+                complete = false;
                 result.partial = true;
                 result.notes.push(format!("Lookup by {scope} was unavailable; independent recording and fingerprint lookup remain available."));
             }
         }
     }
+    complete
 }
 
 fn merge_candidate(candidates: &mut BTreeMap<String, Candidate>, mut incoming: Candidate) {
