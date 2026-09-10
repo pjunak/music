@@ -82,5 +82,33 @@
   "POST /api/library/cleanup/model/jobs#operation": {
     "sha256": "d94b77f532014af4c45cd33d0439739597718211434a39c118b3f7c84a35a0aa",
     "reason": "Adds authenticated single-track candidate review with current consent, conformance and quality gates. One checkpointed provider attempt yields unchecked catalog-owned title/artist proposals; it never writes tags or retries uncertain cost automatically. The web cleanup client is updated together; Baton does not consume this route."
+  },
+  "GET /api/assistant/providers/roles#responses": {
+    "sha256": "25bf832fe5d3a100b3d3311baa906cc772bb57d8909f33690ae126cb36f43b9a",
+    "reason": "ADR-011 September 10 adds explicit low/medium/high/xhigh/max thinking values while retaining provider_default/enabled/disabled. Reviewed provider-scoped profiles reject unsupported choices before network access. Saved roles remain readable and require fresh conformance after profile/handler changes. Browser settings migrate with the server; Baton does not consume these Assistant routes."
+  },
+  "GET /api/assistant/providers/status#responses": {
+    "sha256": "29fd6d805b91a6398f95e30de36ccb4d14991fa52ef5c04bddbe9e3258afc5ba",
+    "reason": "ADR-011 September 10 adds model_profiles and default_model_profile to each adapter, including supported efforts, reviewed identity/revision, token ceiling, notice and source URL. Discovery is access evidence only; verified_capability_ids remains present but empty. Existing storage initialization/reset semantics are unchanged. Browser controls use these profiles; native output clients do not consume this response."
+  },
+  "POST /api/assistant/providers/credential-storage/initialize#responses": {
+    "sha256": "81fd7b62525316bb7c909bd4fe7c4c12cdf6ccbf897b5c721d19062fcaa098a6",
+    "reason": "ADR-011 September 10 adds model_profiles and default_model_profile to each adapter, including supported efforts, reviewed identity/revision, token ceiling, notice and source URL. Discovery is access evidence only; verified_capability_ids remains present but empty. Existing storage initialization/reset semantics are unchanged. Browser controls use these profiles; native output clients do not consume this response."
+  },
+  "POST /api/assistant/providers/credential-storage/reset#responses": {
+    "sha256": "7238f0900008144926576c2e8f7e58fe7517308fe8c205076ac5de7d2f5dd060",
+    "reason": "ADR-011 September 10 adds model_profiles and default_model_profile to each adapter, including supported efforts, reviewed identity/revision, token ceiling, notice and source URL. Discovery is access evidence only; verified_capability_ids remains present but empty. Existing storage initialization/reset semantics are unchanged. Browser controls use these profiles; native output clients do not consume this response."
+  },
+  "POST /api/assistant/providers/roles/{role_id}/test#responses": {
+    "sha256": "b83432452300f499ce480deaf29cd29ed03f2b5f2fc083c76b30bf385ff9789f",
+    "reason": "ADR-011 September 10 extends thinking values and adds safe request_settings plus nullable reasoning_tokens to the model-test result. Settings describe the exact model/profile/adapter, endpoint path, thinking mode, configured token allowance and timeout. No credentials, connection URLs, prompts or response text are included. Result contract v3 remains; challenge v5 invalidates old checks. The browser consumes these additive diagnostics; Baton does not use this route."
+  },
+  "PUT /api/assistant/providers/roles/{role_id}#request_body": {
+    "sha256": "2410733baa1cef38750c32a8aa23ed602034f8f36b272a069b9d5a19c6b3a7fb",
+    "reason": "ADR-011 September 10 adds explicit low/medium/high/xhigh/max thinking values while retaining provider_default/enabled/disabled. Reviewed provider-scoped profiles reject unsupported choices before network access. Saved roles remain readable and require fresh conformance after profile/handler changes. Browser settings migrate with the server; Baton does not consume these Assistant routes."
+  },
+  "PUT /api/assistant/providers/roles/{role_id}#responses": {
+    "sha256": "e74c49a761f7596d3cf10ce015a8d468385324d6390e246f3aea2f64ade0e5dc",
+    "reason": "ADR-011 September 10 adds explicit low/medium/high/xhigh/max thinking values while retaining provider_default/enabled/disabled. Reviewed provider-scoped profiles reject unsupported choices before network access. Saved roles remain readable and require fresh conformance after profile/handler changes. Browser settings migrate with the server; Baton does not consume these Assistant routes."
   }
 }

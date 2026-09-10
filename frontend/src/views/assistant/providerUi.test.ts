@@ -15,6 +15,8 @@ describe("provider UI helpers", () => {
       "https://generativelanguage.googleapis.com/v1beta/openai",
     );
     expect(defaultProviderAddress("openai-compatible/v1")).toBe("");
+    expect(defaultProviderAddress("deepseek-chat/v1")).toBe("https://api.deepseek.com");
+    expect(defaultProviderAddress("deepseek-responses/v1")).toBe("https://api.deepseek.com");
   });
 
   it("replaces only an empty or prior fixed address when the adapter changes", () => {

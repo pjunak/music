@@ -19,13 +19,15 @@ use super::{AssistantDependencyError, AssistantFuture};
 pub const OPENAI_COMPATIBLE_ADAPTER: &str = "openai-compatible/v1";
 pub const OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER: &str = "openai-compatible-json-schema/v1";
 pub const OPENAI_RESPONSES_ADAPTER: &str = "openai-responses/v1";
+pub const DEEPSEEK_CHAT_ADAPTER: &str = "deepseek-chat/v1";
+pub const DEEPSEEK_RESPONSES_ADAPTER: &str = "deepseek-responses/v1";
 pub const GOOGLE_GEMINI_OPENAI_ADAPTER: &str = "google-gemini-openai/v1";
 pub const GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER: &str = "google-gemini-openai-json-schema/v1";
 pub const STRUCTURED_TEXT_CAPABILITY: &str = "structured-text/v1";
 pub const STRICT_JSON_SCHEMA_CAPABILITY: &str = "strict-json-schema/v1";
 pub const AUDIO_INPUT_CAPABILITY: &str = "audio-input/v1";
 pub const PROVIDER_CONFORMANCE_CONTRACT: &str = "assistant-provider-conformance/v3";
-const PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT: &str = "assistant-provider-conformance-challenge/v4";
+const PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT: &str = "assistant-provider-conformance-challenge/v5";
 pub const STRUCTURED_HARNESS_CONTRACT: &str = "assistant-structured-harness/v3";
 const CONFORMANCE_CHALLENGE_BYTES: usize = 24;
 
@@ -73,6 +75,18 @@ pub const PROVIDER_CAPABILITIES: &[ProviderCapabilityDefinition] = &[
 ];
 
 pub const PROVIDER_ADAPTERS: &[ProviderAdapterDefinition] = &[
+    ProviderAdapterDefinition {
+        id: DEEPSEEK_CHAT_ADAPTER,
+        label: "DeepSeek API",
+        description: "DeepSeek Chat Completions with thinking effort controls, JSON-object output and strict local validation.",
+        capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
+    },
+    ProviderAdapterDefinition {
+        id: DEEPSEEK_RESPONSES_ADAPTER,
+        label: "DeepSeek API (Responses)",
+        description: "DeepSeek's Responses API with native schema output. Test the exact model and task before use.",
+        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY],
+    },
     ProviderAdapterDefinition {
         id: OPENAI_RESPONSES_ADAPTER,
         label: "OpenAI API (Responses)",
@@ -231,6 +245,11 @@ pub enum ThinkingMode {
     ProviderDefault,
     Enabled,
     Disabled,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
 }
 
 impl ThinkingMode {
@@ -240,6 +259,11 @@ impl ThinkingMode {
             Self::ProviderDefault => "provider_default",
             Self::Enabled => "enabled",
             Self::Disabled => "disabled",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
         }
     }
 
@@ -248,7 +272,25 @@ impl ThinkingMode {
         match value {
             "enabled" => Self::Enabled,
             "disabled" => Self::Disabled,
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::Xhigh,
+            "max" => Self::Max,
             _ => Self::ProviderDefault,
+        }
+    }
+
+    #[must_use]
+    pub const fn effort(self) -> Option<&'static str> {
+        match self {
+            Self::ProviderDefault => None,
+            Self::Enabled | Self::High => Some("high"),
+            Self::Disabled => Some("none"),
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::Xhigh => Some("xhigh"),
+            Self::Max => Some("max"),
         }
     }
 }
@@ -345,7 +387,8 @@ impl From<&ProviderConnectionRecord> for ProviderConnectionView {
             verification_status: ProviderVerificationStatus::parse(&value.verification_status),
             verification_error_code: value.verification_error_code.clone(),
             verified_models: bounded_unique_strings(&value.verified_models, 200),
-            verified_capability_ids: verified_capabilities(value),
+            // Model discovery establishes access, not output capabilities.
+            verified_capability_ids: Vec::new(),
             last_verified_at_unix_seconds: value.last_verified_at_unix_seconds,
             created_at_unix_seconds: value.created_at_unix_seconds,
             updated_at_unix_seconds: value.updated_at_unix_seconds,
@@ -715,7 +758,8 @@ impl ProviderConformanceTarget {
                 "checks": ["schema", "identity"],
             })
             .to_string(),
-            max_output_tokens: 256,
+            // Reasoning and the final JSON share this explicit operator ceiling.
+            max_output_tokens: self.execution.max_output_tokens,
             output_schema_name: Some("assistant-provider-conformance".to_owned()),
             output_schema: Some(json!({
                 "type": "object",
@@ -1209,30 +1253,11 @@ impl ProviderService {
         target: &ProviderVerificationTarget,
         result: ProviderVerificationResult,
     ) -> Result<ProviderVerificationView, ProviderServiceError> {
-        let adapter = require_adapter(&target.adapter_id)?;
+        require_adapter(&target.adapter_id)?;
         let error_code = normalize_verification_error(result.error_code.as_deref());
         let verified = result.verified && error_code.is_none();
         let models = if verified {
             bounded_unique_strings(&result.models, 200)
-        } else {
-            Vec::new()
-        };
-        let known = PROVIDER_CAPABILITIES
-            .iter()
-            .map(|definition| definition.id)
-            .collect::<BTreeSet<_>>();
-        let supported = adapter
-            .capability_ids
-            .iter()
-            .copied()
-            .collect::<BTreeSet<_>>();
-        let capability_ids = if verified {
-            bounded_unique_strings(&result.capability_ids, PROVIDER_CAPABILITIES.len())
-                .into_iter()
-                .filter(|value| {
-                    known.contains(value.as_str()) && supported.contains(value.as_str())
-                })
-                .collect()
         } else {
             Vec::new()
         };
@@ -1246,7 +1271,8 @@ impl ProviderService {
                 Some(error_code.unwrap_or_else(|| "verification_failed".to_owned()))
             },
             models,
-            capability_ids,
+            // Discovery proves access only. Exact task output is tested separately.
+            capability_ids: Vec::new(),
         };
         let connection = match self
             .repository
@@ -1350,6 +1376,12 @@ impl ProviderService {
             }
             ProviderRolePreparation::ModelJobActive => return Err(role_job_active()),
         };
+        validate_role_model_settings(
+            &runtime.connection,
+            &runtime.role.model_id,
+            ThinkingMode::parse(&runtime.role.thinking_mode),
+            runtime.role.max_output_tokens,
+        )?;
         self.ensure_shared_mood_configuration(&runtime.role).await?;
         if ProviderVerificationStatus::parse(&runtime.connection.verification_status)
             != ProviderVerificationStatus::Verified
@@ -1361,7 +1393,7 @@ impl ProviderService {
             ));
         }
         if !capabilities_satisfy(
-            &verified_capabilities(&runtime.connection),
+            &declared_connection_capabilities(&runtime.connection),
             definition.required_capability_ids,
         ) {
             return Err(incompatible_connection());
@@ -1456,6 +1488,12 @@ impl ProviderService {
         }
         let connection = self.connection_record(&request.connection_id).await?;
         let adapter = require_adapter(&connection.adapter_id)?;
+        validate_role_model_settings(
+            &connection,
+            &request.model_id,
+            request.thinking_mode,
+            request.max_output_tokens,
+        )?;
         if !capabilities_satisfy(adapter.capability_ids, definition.required_capability_ids) {
             return Err(incompatible_connection());
         }
@@ -1471,7 +1509,7 @@ impl ProviderService {
         }
         if request.enabled
             && !capabilities_satisfy(
-                &verified_capabilities(&connection),
+                &declared_connection_capabilities(&connection),
                 definition.required_capability_ids,
             )
         {
@@ -1667,11 +1705,17 @@ impl ProviderService {
             return Err(connection_not_verified());
         }
         if !capabilities_satisfy(
-            &verified_capabilities(&connection),
+            &declared_connection_capabilities(&connection),
             definition.required_capability_ids,
         ) {
             return Err(incompatible_connection());
         }
+        validate_role_model_settings(
+            &connection,
+            &role.model_id,
+            ThinkingMode::parse(&role.thinking_mode),
+            role.max_output_tokens,
+        )?;
         if self.current_conformance_status(&role, &connection) != ModelConformanceStatus::Passed {
             return Err(model_not_tested());
         }
@@ -1782,7 +1826,7 @@ impl ProviderService {
             .collect::<Vec<_>>();
         let capabilities_satisfied = connection.is_some_and(|connection| {
             capabilities_satisfy(
-                &verified_capabilities(connection),
+                &declared_connection_capabilities(connection),
                 definition.required_capability_ids,
             )
         });
@@ -1843,7 +1887,14 @@ impl ProviderService {
         let connection_fingerprint = connection.fingerprint();
         let timeout_seconds = role.timeout_seconds.to_string();
         let max_output_tokens = role.max_output_tokens.to_string();
+        let profile = super::provider_model_profile(&connection.adapter_id, &role.model_id);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
         let value = [
+            super::MODEL_PROFILE_CONTRACT,
+            profile.id,
+            profile.revision_at(now),
             PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
             STRUCTURED_HARNESS_CONTRACT,
             connection_fingerprint.as_str(),
@@ -1885,23 +1936,34 @@ impl ProviderService {
     }
 }
 
-fn verified_capabilities(connection: &ProviderConnectionRecord) -> Vec<String> {
+fn declared_connection_capabilities(connection: &ProviderConnectionRecord) -> Vec<String> {
     if ProviderVerificationStatus::parse(&connection.verification_status)
         != ProviderVerificationStatus::Verified
     {
         return Vec::new();
     }
-    let known = PROVIDER_CAPABILITIES
-        .iter()
-        .map(|definition| definition.id)
-        .collect::<BTreeSet<_>>();
-    bounded_unique_strings(
-        &connection.verified_capability_ids,
-        PROVIDER_CAPABILITIES.len(),
-    )
-    .into_iter()
-    .filter(|value| known.contains(value.as_str()))
-    .collect()
+    // These are declared adapter capabilities used for task compatibility only.
+    // Successful exact-configuration conformance remains the execution gate.
+    provider_adapter(&connection.adapter_id).map_or_else(Vec::new, |adapter| {
+        adapter
+            .capability_ids
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect()
+    })
+}
+
+fn validate_role_model_settings(
+    connection: &ProviderConnectionRecord,
+    model_id: &str,
+    mode: ThinkingMode,
+    output_tokens: u32,
+) -> Result<(), ProviderServiceError> {
+    super::validate_model_settings(&connection.adapter_id, model_id, mode, output_tokens)
+        .map_err(|code| ProviderServiceError::public(
+            ProviderServiceErrorKind::Invalid, code,
+            "The selected model does not support these reasoning or output settings. Choose a supported setting.",
+        ))
 }
 
 fn bounded_unique_strings(values: &[String], limit: usize) -> Vec<String> {
@@ -2199,7 +2261,7 @@ mod tests {
             connection_fingerprint: "c".repeat(64),
         };
         let request = target.request();
-        assert_eq!(request.max_output_tokens, 256);
+        assert_eq!(request.max_output_tokens, 2_000);
         assert_eq!(
             request.output_schema.as_ref().and_then(|schema| {
                 schema

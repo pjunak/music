@@ -10,6 +10,10 @@ pub const ASSISTANT_RUNTIME_CONTRACT_VERSION: &str = "assistant-runtime-contract
 
 const ASSISTANT_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
     (
+        "assistant/provider_profiles.rs",
+        include_str!("provider_profiles.rs"),
+    ),
+    (
         "cleanup_enrichment/workflow.rs",
         include_str!("../cleanup_enrichment/workflow.rs"),
     ),

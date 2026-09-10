@@ -231,6 +231,7 @@ operator request / indexed library / local audio
 |---|---|---|---|
 | Task prompt, example, schema, untrusted-data labels | [`structured_harness.rs`](../crates/music-application/src/assistant/structured_harness.rs) | colocated strict-shape and bounds tests | [ADR-007](ADR-007-algorithm-first-structured-model-harness.md) |
 | Adapter/capability/role inventory and runtime fingerprints | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`runtime_contract.rs`](../crates/music-application/src/assistant/runtime_contract.rs) | colocated inventory and digest tests | [ADR-001](ADR-001-assistant-provider-connections.md), [ADR-002](ADR-002-assistant-model-execution.md) |
+| Reviewed model settings and provider alias revisions | [`provider_profiles.rs`](../crates/music-application/src/assistant/provider_profiles.rs) | provider-scoped settings and alias-boundary tests | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
 | Provider-specific model IDs, request schemas, inference parameters, and response shapes | [`provider_handlers.rs`](../crates/music-server/src/provider_handlers.rs) | transport-free production-shaped request and parser tests | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
 | Bounded request execution | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs), task types under [`assistant/`](../crates/music-application/src/assistant) | local fixture-server, strict parsing, and bounds tests | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
 | URL validation, SSRF boundary, redirect refusal, byte/time limits | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | pinned-DNS, special-range, redirect, timeout, and response-limit tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
@@ -249,7 +250,10 @@ Shared contracts:
 
 - harness: `assistant-structured-harness/v3`
 - provider conformance result: `assistant-provider-conformance/v3`
-- provider conformance challenge: `assistant-provider-conformance-challenge/v4`
+- provider conformance challenge: `assistant-provider-conformance-challenge/v5`
+- model settings profiles: `assistant-model-profiles/v1`
+- DeepSeek Chat adapter: `deepseek-chat/v1`
+- DeepSeek Responses adapter: `deepseek-responses/v1`
 - OpenAI Responses adapter: `openai-responses/v1`
 - standard adapter: `openai-compatible/v1`
 - strict-schema adapter: `openai-compatible-json-schema/v1`
@@ -261,6 +265,11 @@ native Responses requests with `max_output_tokens`, `reasoning.effort`, and the 
 `text.format`; its wire projection removes only unsupported `uniqueItems` while keeping OpenAI's
 supported array and string constraints. The generic adapters are reserved for third-party
 OpenAI-compatible services.
+Both DeepSeek adapters pin `https://api.deepseek.com`. Chat uses JSON-object output,
+`thinking.type`, and `reasoning_effort`; Responses uses `text.format` with JSON Schema and
+`reasoning.effort`. Both enforce the complete task schema locally. The reviewed model profile
+controls available effort levels; discovery alone does not establish a model capability.
+
 Both Gemini adapter IDs use the exact base URL
 `https://generativelanguage.googleapis.com/v1beta/openai`, canonicalize `models/` resource IDs,
 send Google's integration-identification header, and constrain results with a Gemini-compatible
@@ -501,9 +510,12 @@ version values and the tables locate the corresponding code and tests.
   Removing or replacing a connection credential keeps role drafts but resets verification,
   conformance, and quality results, so enabled roles remain ineffective until the new credential is
   saved and every gate passes again.
-  Adapters declare transport capabilities, successful verification persists the capabilities
-  actually confirmed, and roles declare their required capabilities. Enforce compatibility again
-  during role save, testing, enablement, and execution; never infer it from provider or model names.
+  Adapters declare transport capabilities; `/models` verification proves access and discovers IDs
+  only. The legacy `verified_capability_ids` field is returned empty. Roles declare required
+  capabilities, and their exact settings must pass conformance before execution. Provider-scoped,
+  reviewed model profiles describe supported effort levels and known alias revisions. Unknown
+  models remain explicitly unreviewed and require an operator-triggered test. Validate settings
+  during role save, testing, enablement, and execution; do not guess a provider from a model name.
   Roles without a complete feature, quality, consent, and review contract stay explicitly
   unavailable for configuration even if their future role ID is already reserved.
   Never return or log a provider key, never infer provider capabilities from a saved URL, and never
@@ -512,12 +524,14 @@ version values and the tables locate the corresponding code and tests.
   event loop, bounded by request size, time, and response size, and protected against redirects and
   unsafe destinations. Keep provider-specific model-ID normalization and inference parameters in
   explicit versioned adapter handlers; handlers shape requests but must not bypass the shared
-  pinned-DNS transport or infer behavior from connection names, URLs, or model names.
+  pinned-DNS transport or infer behavior from connection names or URLs. Exact model IDs are matched only within the
+  selected adapter's reviewed profile registry.
   OpenAI-compatible structured requests must carry the generated task JSON
   Schema. The standard adapter uses JSON-object response mode; the explicit strict adapter may use
   `json_schema` only when selected and proven by conformance. Each fixed feature prompt includes a
   locally validated example of its strict output shape. Include the versioned harness, conformance,
-  and per-role feature contracts in the runtime fingerprint so a transport or task-contract change
+  model-profile revision (including announced remote alias transitions), and per-role feature
+  contracts in the runtime fingerprint so a transport or task-contract change
   makes existing model tests and quality results stale instead of silently reusing them. Feature
   code resolves usable roles through `prepare_role_execution()` and
   owns a fixed prompt plus strict result schema; do not expose a browser-facing general prompt

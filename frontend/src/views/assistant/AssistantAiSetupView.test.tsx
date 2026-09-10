@@ -236,6 +236,51 @@ beforeEach(() => {
 });
 
 describe("AssistantAiSetupView", () => {
+  it("blocks Astra Off and saves a supported effort without changing the model", async () => {
+    const user = userEvent.setup();
+    const astraConnection = { ...connection, adapter_id: "openai-responses/v1", verified_models: ["gpt-6-astra"], verified_capability_ids: [] };
+    const astraRole: ModelRole = { ...role, connection_id: connection.id, connection_name: connection.name, model_id: "gpt-6-astra", thinking_mode: "disabled", verification_status: "verified" };
+    vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({
+      ...frameworkStatus,
+      adapters: [{ ...frameworkStatus.adapters[0]!, id: "openai-responses/v1", model_profiles: [{
+        id: "openai-astra", revision: "fixture", model_ids: ["gpt-6-astra"],
+        reasoning_modes: ["provider_default", "low", "medium", "high", "xhigh", "max"],
+        max_output_tokens: 128000, documented: true, notice: "Astra requires reasoning. Thinking cannot be turned off.", source_url: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      }] }],
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([astraConnection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([astraRole]);
+    vi.mocked(assistantProvidersApi.updateRole).mockResolvedValue({ ...astraRole, thinking_mode: "low" });
+    render(<AssistantAiSetupView />);
+    expect(await screen.findByRole("radio", { name: "Off" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Off" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Test and make available" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save task" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("saved thinking setting is not supported");
+    await user.click(screen.getByRole("radio", { name: "Low" }));
+    await user.click(screen.getByRole("button", { name: "Save task" }));
+    expect(assistantProvidersApi.updateRole).toHaveBeenCalledWith(role.role_id, expect.objectContaining({ model_id: "gpt-6-astra", thinking_mode: "low", enabled: false }));
+    expect(assistantProvidersApi.testRole).not.toHaveBeenCalled();
+  });
+
+  it("takes DeepSeek effort options from the server and labels unreviewed models", async () => {
+    vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({
+      ...frameworkStatus,
+      adapters: [{ ...frameworkStatus.adapters[0]!, id: "deepseek-chat/v1", default_model_profile: {
+        id: "deepseek-unverified", revision: "fixture", model_ids: [],
+        reasoning_modes: ["provider_default", "disabled", "low", "high", "max"],
+        max_output_tokens: null, documented: false, notice: "This model has no reviewed settings profile.", source_url: "",
+      } }],
+    });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([{ ...connection, adapter_id: "deepseek-chat/v1", verified_models: ["future-deepseek"], verified_capability_ids: [] }]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([{ ...role, connection_id: connection.id, model_id: "future-deepseek", verification_status: "verified" }]);
+    render(<AssistantAiSetupView />);
+    expect(await screen.findByText("This model has no reviewed settings profile.")).toBeVisible();
+    expect(screen.getByRole("radio", { name: "Maximum" })).toBeEnabled();
+    expect(screen.queryByRole("radio", { name: "Medium" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Test and make available" })).toBeEnabled();
+  });
+
   it("keeps optional legacy cleanup outside the tagging setup", async () => {
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([connection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([
@@ -293,7 +338,7 @@ describe("AssistantAiSetupView", () => {
       screen.getByRole("heading", { name: "Hosted models" }).closest("summary")!,
     );
     expect(screen.getByText("Playlist planner · Music tagger")).toBeInTheDocument();
-    expect(screen.getByText("Structured text")).toBeInTheDocument();
+    expect(screen.getByText(/Structured text \(adapter support/)).toBeInTheDocument();
     expect(
       screen.queryByText(/other tasks may reuse this key/i),
     ).not.toBeInTheDocument();
@@ -361,7 +406,7 @@ describe("AssistantAiSetupView", () => {
     ).toBeVisible();
   });
 
-  it("does not allow testing when verification lacks the required capability", async () => {
+  it("allows model conformance after discovery without claiming verified capabilities", async () => {
     const capabilityMissingConnection: ProviderConnection = {
       ...connection,
       verified_capability_ids: [],
@@ -388,14 +433,12 @@ describe("AssistantAiSetupView", () => {
         .closest("summary")!,
     );
     expect(
-      within(connectionCard as HTMLElement).getByText("None confirmed"),
+      within(connectionCard as HTMLElement).getByText(/adapter support; model tests required/),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Test and make available" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText(/Verification did not confirm Structured text/),
-    ).toBeInTheDocument();
+    ).toBeEnabled();
+    expect(screen.getByText(/Connection access verified/)).toBeInTheDocument();
   });
 
   it("shows only the models verified for the selected connection", async () => {
@@ -664,7 +707,7 @@ describe("AssistantAiSetupView", () => {
     expect(allowCheckbox.closest(".assistant-role-heading")).not.toBeNull();
     expect(screen.getByRole("group", { name: "Request settings" })).toBeVisible();
     expect(screen.getByLabelText("Provider default")).toBeVisible();
-    expect(screen.getByText("Off recommended")).toBeVisible();
+    expect(screen.getByText("Provider default first")).toBeVisible();
     const modelPicker = screen.getByLabelText("Model");
     await user.click(modelPicker);
     expect(screen.getByText("2 available models")).toBeInTheDocument();
@@ -1302,7 +1345,7 @@ describe("AssistantAiSetupView", () => {
     });
     const card = heading.closest("article");
     expect(card).not.toBeNull();
-    expect(within(card as HTMLElement).getByText("Off recommended")).toBeVisible();
+    expect(within(card as HTMLElement).getByText("Provider default first")).toBeVisible();
     await user.click(
       within(card as HTMLElement).getByRole("button", {
         name: "Run quality check",
@@ -1577,7 +1620,7 @@ describe("AssistantAiSetupView", () => {
       screen.getByText(/Tavern dancing: recall_at_k below threshold; engine error:/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Turn Thinking Off for this task and rerun/),
+      screen.getByText(/Choose a lower supported effort/),
     ).toBeInTheDocument();
     const taskCard = screen
       .getByRole("heading", { name: "Playlist planner" })

@@ -1,9 +1,13 @@
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+mod compatibility_tests;
+
 use music_application::assistant::{
-    GOOGLE_GEMINI_OPENAI_ADAPTER, GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
-    OPENAI_COMPATIBLE_ADAPTER, OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER, OPENAI_RESPONSES_ADAPTER,
-    StructuredModelRequest, StructuredModelResult, ThinkingMode,
+    DEEPSEEK_CHAT_ADAPTER, DEEPSEEK_RESPONSES_ADAPTER, GOOGLE_GEMINI_OPENAI_ADAPTER,
+    GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER, OPENAI_COMPATIBLE_ADAPTER,
+    OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER, OPENAI_RESPONSES_ADAPTER, StructuredModelRequest,
+    StructuredModelResult, ThinkingMode,
 };
 use serde_json::Value;
 
@@ -19,6 +23,7 @@ enum StructuredOutputMode {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum ThinkingParameterStyle {
     ThinkingObject,
+    Deepseek,
     ReasoningEffort,
     ReasoningObject,
 }
@@ -38,6 +43,7 @@ enum OutputSchemaDialect {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProviderHandler {
+    adapter_id: &'static str,
     models_path: &'static str,
     completion_path: &'static str,
     model_resource_prefix: Option<&'static str>,
@@ -118,6 +124,13 @@ impl ProviderHandler {
         thinking_mode: ThinkingMode,
         request: &StructuredModelRequest,
     ) -> Result<PreparedProviderRequest, ProviderHandlerError> {
+        music_application::assistant::validate_model_settings(
+            self.adapter_id,
+            model_id,
+            thinking_mode,
+            target_max_output_tokens,
+        )
+        .map_err(|code| ProviderHandlerError { code })?;
         let provider_schema = request
             .output_schema
             .as_ref()
@@ -190,9 +203,15 @@ impl ProviderHandler {
             }),
         };
         self.apply_thinking_mode(&mut payload, thinking_mode);
+        if self.adapter_id == DEEPSEEK_RESPONSES_ADAPTER {
+            // DeepSeek documents text.format but not OpenAI's strict switch.
+            if let Some(format) = payload["text"]["format"].as_object_mut() {
+                format.remove("strict");
+            }
+        }
         // Keep static, untrusted reference data in its own user message. This
         // creates a stable cache boundary without granting vocabulary authority.
-        if self.execution_api_style == ExecutionApiStyle::Responses
+        if self.adapter_id == OPENAI_RESPONSES_ADAPTER
             && request.output_schema_name.as_deref() == Some("assistant-music-tagger-response")
         {
             let input: Value =
@@ -255,6 +274,11 @@ impl ProviderHandler {
         result.token_details = music_application::assistant::ModelTokenDetails {
             cached_input_tokens: payload["usage"][input]["cached_tokens"]
                 .as_u64()
+                .or_else(|| {
+                    (self.adapter_id == DEEPSEEK_CHAT_ADAPTER)
+                        .then(|| payload["usage"]["prompt_cache_hit_tokens"].as_u64())
+                        .flatten()
+                })
                 .filter(|count| result.input_tokens.is_none_or(|total| *count <= total)),
             cache_write_tokens: payload["usage"][input]["cache_write_tokens"]
                 .as_u64()
@@ -277,19 +301,25 @@ impl ProviderHandler {
     }
 
     fn apply_thinking_mode(self, payload: &mut Value, mode: ThinkingMode) {
-        if mode == ThinkingMode::ProviderDefault {
+        let Some(effort) = mode.effort() else {
             return;
-        }
+        };
         let value = match self.thinking_parameter_style {
-            ThinkingParameterStyle::ReasoningEffort => {
-                ("reasoning_effort", json_string(thinking_effort(mode)))
+            ThinkingParameterStyle::ReasoningEffort => ("reasoning_effort", json_string(effort)),
+            ThinkingParameterStyle::ReasoningObject => {
+                ("reasoning", serde_json::json!({"effort": effort}))
             }
-            ThinkingParameterStyle::ReasoningObject => (
-                "reasoning",
-                serde_json::json!({"effort": thinking_effort(mode)}),
-            ),
             ThinkingParameterStyle::ThinkingObject => {
                 ("thinking", serde_json::json!({"type": mode.as_str()}))
+            }
+            ThinkingParameterStyle::Deepseek => {
+                if mode != ThinkingMode::Disabled {
+                    payload["reasoning_effort"] = json_string(effort);
+                }
+                (
+                    "thinking",
+                    serde_json::json!({"type": if mode == ThinkingMode::Disabled { "disabled" } else { "enabled" }}),
+                )
             }
         };
         if let Some(object) = payload.as_object_mut() {
@@ -318,6 +348,7 @@ pub(crate) fn validate_structured_request(
 #[must_use]
 pub(crate) fn provider_handler(adapter_id: &str) -> Option<ProviderHandler> {
     let compatible = ProviderHandler {
+        adapter_id: music_application::assistant::provider_adapter(adapter_id)?.id,
         models_path: "/models",
         completion_path: "/chat/completions",
         model_resource_prefix: None,
@@ -328,6 +359,17 @@ pub(crate) fn provider_handler(adapter_id: &str) -> Option<ProviderHandler> {
         output_schema_dialect: OutputSchemaDialect::Full,
     };
     match adapter_id {
+        DEEPSEEK_CHAT_ADAPTER => Some(ProviderHandler {
+            thinking_parameter_style: ThinkingParameterStyle::Deepseek,
+            ..compatible
+        }),
+        DEEPSEEK_RESPONSES_ADAPTER => Some(ProviderHandler {
+            completion_path: "/responses",
+            structured_output_mode: StructuredOutputMode::JsonSchema,
+            thinking_parameter_style: ThinkingParameterStyle::ReasoningObject,
+            execution_api_style: ExecutionApiStyle::Responses,
+            ..compatible
+        }),
         OPENAI_RESPONSES_ADAPTER => Some(ProviderHandler {
             completion_path: "/responses",
             structured_output_mode: StructuredOutputMode::JsonSchema,
@@ -352,14 +394,6 @@ pub(crate) fn provider_handler(adapter_id: &str) -> Option<ProviderHandler> {
             })
         }
         _ => None,
-    }
-}
-
-fn thinking_effort(mode: ThinkingMode) -> &'static str {
-    match mode {
-        ThinkingMode::Enabled => "high",
-        ThinkingMode::Disabled => "none",
-        ThinkingMode::ProviderDefault => "",
     }
 }
 
@@ -450,15 +484,63 @@ fn parse_chat_completions_result(payload: &Value) -> StructuredModelResult {
         );
     };
     let finish_reason = optional_bounded_text(choice.get("finish_reason"), 64);
+    // Interpret termination before content: reasoning-only exhaustion has null
+    // or empty final text, and interrupted JSON may happen to be parseable.
+    let failure = match finish_reason.as_deref() {
+        Some("stop") => None,
+        Some("length" | "max_tokens") => Some("incomplete_structured_output"),
+        Some("content_filter") => Some("model_refusal"),
+        Some("insufficient_system_resource" | "aborted") => Some("provider_interrupted"),
+        Some("tool_calls" | "function_call") => Some("unexpected_tool_call"),
+        _ => Some("invalid_response"),
+    };
+    let message = choice.get("message").and_then(Value::as_object);
+    let failure = failure.or_else(|| {
+        message
+            .filter(|message| message.get("refusal").is_some_and(|v| !v.is_null()))
+            .map(|_| "model_refusal")
+    });
+    let failure = failure.or_else(|| {
+        message
+            .filter(|message| {
+                message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .is_some_and(|calls| !calls.is_empty())
+                    || message
+                        .get("function_call")
+                        .is_some_and(|value| !value.is_null())
+            })
+            .map(|_| "unexpected_tool_call")
+    });
+    if let Some(code) = failure {
+        return structured_model_result(
+            false,
+            Some(code),
+            None,
+            provider_model_id,
+            finish_reason,
+            input_tokens,
+            output_tokens,
+        );
+    }
     let Some(content) = choice
         .get("message")
         .and_then(Value::as_object)
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
     else {
+        let code = if message
+            .and_then(|message| message.get("content"))
+            .is_some_and(Value::is_null)
+        {
+            "empty_structured_output"
+        } else {
+            "invalid_response"
+        };
         return structured_model_result(
             false,
-            Some("invalid_response"),
+            Some(code),
             None,
             provider_model_id,
             finish_reason,
@@ -503,7 +585,11 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
                 .and_then(|details| optional_bounded_text(details.get("reason"), 64));
             return structured_model_result(
                 false,
-                Some("incomplete_structured_output"),
+                Some(if finish_reason.as_deref() == Some("content_filter") {
+                    "model_refusal"
+                } else {
+                    "incomplete_structured_output"
+                }),
                 None,
                 provider_model_id,
                 finish_reason,
@@ -538,8 +624,37 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
     let mut text = String::new();
     let mut refused = false;
     for item in output {
+        if matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("function_call" | "custom_tool_call")
+        ) {
+            return structured_model_result(
+                false,
+                Some("unexpected_tool_call"),
+                None,
+                provider_model_id,
+                Some("tool_calls".to_owned()),
+                input_tokens,
+                output_tokens,
+            );
+        }
         if item.get("type").and_then(Value::as_str) != Some("message") {
             continue;
+        }
+        if item
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| status != "completed")
+        {
+            return structured_model_result(
+                false,
+                Some("incomplete_structured_output"),
+                None,
+                provider_model_id,
+                None,
+                input_tokens,
+                output_tokens,
+            );
         }
         let Some(parts) = item.get("content").and_then(Value::as_array) else {
             continue;
@@ -556,7 +671,7 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
             }
         }
     }
-    if text.is_empty() {
+    if refused || text.is_empty() {
         return structured_model_result(
             false,
             Some(if refused {

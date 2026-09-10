@@ -88,17 +88,10 @@ function structuredOutputTroubleshooting(
       failure.includes("model_output_incomplete"),
   );
   if (!outputBudgetFailure) return null;
-  if (role.thinking_mode === "enabled") {
+  if (role.thinking_mode !== "disabled") {
     return (
-      "The provider returned no complete final JSON while Thinking was On. " +
-      "Turn Thinking Off for this task and rerun; raise the response-token limit " +
-      "only when reasoning is genuinely needed."
-    );
-  }
-  if (role.thinking_mode === "provider_default") {
-    return (
-      "The provider returned no complete final JSON. If it reasons by default, " +
-      "choose Thinking Off; otherwise raise the response-token limit before a deliberate rerun."
+      "The provider returned no complete final JSON. Reasoning and the final answer share the response-token allowance. " +
+      "Choose a lower supported effort or raise the allowance before a deliberate rerun. Some models cannot turn thinking off."
     );
   }
   return (
@@ -392,6 +385,16 @@ function buildLogEntries(
 
   for (const note of qualityEvidenceNotes(quality.currentJob)) {
     entries.push({ ...note, time: quality.currentJob?.finished_at ?? null });
+  }
+
+  if (modelResult?.request_settings !== undefined) {
+    const settings = modelResult.request_settings;
+    entries.push({
+      id: "model-request-settings",
+      time: role.last_conformance_at,
+      tone: "info",
+      message: `Test settings: ${settings.model_id} · thinking ${thinkingModeLabel(settings.thinking_mode)} · ${settings.max_output_tokens} token allowance · ${settings.timeout_seconds}s timeout. Provider reported ${modelResult.reasoning_tokens ?? "unknown"} reasoning tokens.`,
+    });
   }
 
   const usage = providerUsageFromJob(quality.currentJob);

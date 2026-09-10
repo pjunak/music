@@ -181,7 +181,12 @@ task ownership clearer.
 
 For each connection:
 
-1. Choose `openai-compatible/v1` for the widest provider compatibility. If the
+1. For OpenAI, choose `openai-responses/v1` with `https://api.openai.com/v1`.
+   For DeepSeek, choose `deepseek-chat/v1` (JSON-object output) or
+   `deepseek-responses/v1` (native JSON Schema) with `https://api.deepseek.com`.
+   Use `deepseek-flash` for new DeepSeek configurations. Both paths require a model test.
+
+   Choose `openai-compatible/v1` for other OpenAI-shaped services. If the
    provider explicitly documents OpenAI-style `response_format` with
    `type: json_schema`, you may instead choose
    `openai-compatible-json-schema/v1` for API-enforced strict output. Do not choose
@@ -203,10 +208,15 @@ For each connection:
    masked hint.
 5. A saved API key is write-once. To use another key, explicitly delete the current one
    from the connection and then enter the replacement.
-6. Click **Verify connection**. Verification lists models and confirms the adapter's
-   structured-text capability; it does not send library data.
+6. Click **Verify connection**. Verification establishes connection access and lists model IDs;
+   it does not prove structured-output support or send library data.
 7. If verification fails, correct the base URL, credential, TLS, or provider access.
    Do not work around a failure by enabling private-network access for a public host.
+
+To switch an existing DeepSeek connection from a generic adapter, edit its connection type and
+base URL, keep its saved credential, then verify and rerun model and quality checks. Model-profile
+or handler changes make old checks stale. The announced September 14, 2026, 04:00 UTC transition
+of `deepseek-v4-pro` to Flash also invalidates its evidence at that time.
 
 Saving and verification are separate by design. A saved credential alone cannot run a
 model task.
@@ -220,9 +230,15 @@ manual names and shares the tagging model; open it only if you need that separat
 
 1. Select a verified connection and one of its reported model IDs.
 2. Keep the role disabled while saving its initial configuration.
-3. Choose **Provider default** when first testing a new provider/model pair. Explicit
-   **On** and **Off** controls are translated by the selected handler and remain
-   model-dependent; the conformance test rejects an unsupported choice.
+3. Choose a thinking setting from the model's reviewed profile. **Astra requires thinking**: use
+   **Low** for less reasoning; **Off** is unavailable. DeepSeek supports Off, Low,
+   High, and Maximum. **Provider default** sends no override (DeepSeek defaults to high effort).
+   Unknown models show an unreviewed-settings notice and need an explicit test. Older saved
+   **On** settings keep their high-effort meaning for native adapters. An unsupported saved choice
+   remains visible until you select a supported setting. Set a response-token allowance large
+   enough for both reasoning and final JSON. The conformance test uses that configured allowance;
+   task requests can impose smaller limits. Model test logs include effective settings and any
+   provider-reported reasoning usage.
 4. Run the role's fixed conformance test. This makes one small provider request and
    checks strict structured output for that exact connection, model, timeout, and output
    limit.

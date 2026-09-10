@@ -19,6 +19,7 @@ mod model_transport;
 mod planner;
 mod playlist_evaluation;
 mod playlist_retrieval;
+mod provider_profiles;
 mod provider_usage;
 mod providers;
 mod runtime_contract;
@@ -58,6 +59,7 @@ pub use planner::{
     PlaylistPlan, PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
 };
 pub use playlist_evaluation::*;
+pub use provider_profiles::*;
 pub use provider_usage::*;
 pub use providers::*;
 pub use runtime_contract::{

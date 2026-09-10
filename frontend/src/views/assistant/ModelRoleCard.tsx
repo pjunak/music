@@ -20,7 +20,7 @@ import {
   qualityStatusLabel,
   qualityTone,
 } from "./modelQualityUi";
-import { modelTestFailureMessage, roleConnection } from "./providerUi";
+import { modelProfile, modelTestFailureMessage, roleConnection, supportsThinking, thinkingModeLabels } from "./providerUi";
 
 interface Props {
   role: ModelRole;
@@ -48,12 +48,6 @@ const ROLE_OUTPUT_CONSTRAINTS: Record<string, string> = {
   playlist_planner: "Known track IDs; server-ranked",
   eq_assistant: "Ten bounded EQ gains",
   library_cleanup: "Supplied catalog IDs and evidence; may abstain",
-};
-
-const ROLE_THINKING_RECOMMENDATIONS: Record<string, string> = {
-  music_tagger: "Off recommended",
-  playlist_planner: "Off recommended",
-  eq_assistant: "Off recommended",
 };
 
 function includesEveryCapability(
@@ -136,17 +130,15 @@ export function ModelRoleCard({
   const connectionAdapter = adapters.find(
     (adapter) => adapter.id === connection?.adapter_id,
   );
-  const thinkingRecommendation = connection?.adapter_id.startsWith(
-    "google-gemini-openai",
-  )
-    ? "Provider default first"
-    : ROLE_THINKING_RECOMMENDATIONS[role.role_id];
+  const profile = modelProfile(connectionAdapter, modelId.trim());
+  const reasoningModes = profile?.reasoning_modes ?? ["provider_default", "enabled", "disabled"] as const;
+  const thinkingSupported = supportsThinking(reasoningModes, thinkingMode);
+  const thinkingOptions = [...new Set<ModelThinkingMode>([
+    ...reasoningModes, "disabled", thinkingMode,
+  ])];
+  const thinkingRecommendation = profile?.documented ? "Model settings" : "Provider default first";
   const adapterSupportsRole = includesEveryCapability(
     connectionAdapter?.capability_ids,
-    role.required_capability_ids,
-  );
-  const verifiedCapabilitiesSatisfied = includesEveryCapability(
-    connection?.verified_capability_ids,
     role.required_capability_ids,
   );
   const verifiedModels =
@@ -168,6 +160,7 @@ export function ModelRoleCard({
     thinkingMode === role.thinking_mode;
   const taskDraftMatches = configurationMatches && enabled === role.enabled;
   const canTest =
+    thinkingSupported &&
     credentialStorageReady &&
     configured &&
     configurationMatches &&
@@ -175,7 +168,7 @@ export function ModelRoleCard({
     connection?.credential_saved === true &&
     connection?.verification_status === "verified" &&
     connection.verified_models.includes(role.model_id) &&
-    verifiedCapabilitiesSatisfied;
+    adapterSupportsRole;
   const canEnable =
     canTest && role.conformance_status === "passed";
   const quality = modelQualityView(qualityEvaluation, role, qualityHistory);
@@ -208,10 +201,8 @@ export function ModelRoleCard({
       )}.`;
     } else if (connection.verification_status !== "verified") {
       setupHint = "Verify the selected connection before testing this model.";
-    } else if (!verifiedCapabilitiesSatisfied) {
-      setupHint = `Verification did not confirm ${requiredCapabilityLabels.join(
-        " and ",
-      )} for this connection.`;
+    } else if (!thinkingSupported) {
+      setupHint = "Select a supported thinking setting before saving or testing.";
     } else if (!configurationMatches) {
       setupHint = "Save these changes before testing the model.";
     } else if (role.conformance_status === "passed") {
@@ -225,6 +216,7 @@ export function ModelRoleCard({
       !role.configuration_available ||
       !connectionId ||
       !selectedModelAvailable
+      || !thinkingSupported
     ) {
       return;
     }
@@ -251,7 +243,7 @@ export function ModelRoleCard({
     role,
     configured,
     connection?.credential_saved === true,
-    verifiedCapabilitiesSatisfied,
+    adapterSupportsRole,
     qualityEvaluation,
     qualityActive,
   );
@@ -448,29 +440,25 @@ export function ModelRoleCard({
               ) : null}
             </legend>
             <div className="assistant-thinking-options">
-              {(
-                [
-                  ["provider_default", "Provider default"],
-                  ["enabled", "On"],
-                  ["disabled", "Off"],
-                ] as const
-              ).map(([value, label]) => (
+              {thinkingOptions.map((value) => (
                 <label key={value}>
                   <input
                     type="radio"
                     name={`assistant-thinking-${role.role_id}`}
                     value={value}
                     checked={thinkingMode === value}
-                    disabled={qualityActive}
+                    disabled={qualityActive || !supportsThinking(reasoningModes, value)}
                     onChange={() => {
                       setThinkingMode(value);
                       setEnabled(false);
                     }}
                   />
-                  <span>{label}</span>
+                  <span>{value === "enabled" && reasoningModes.includes("high") ? "On (high)" : thinkingModeLabels[value]}</span>
                 </label>
               ))}
             </div>
+            <p className="field-hint">{profile?.notice ?? "Test the exact model settings before use."}</p>
+            {!thinkingSupported ? <p className="assistant-provider-problem" role="alert">The saved thinking setting is not supported. Select a supported effort level before saving or testing.</p> : null}
           </fieldset>
           <label className="field">
             <span className="field-label">Timeout (seconds)</span>
@@ -499,6 +487,7 @@ export function ModelRoleCard({
                 setEnabled(false);
               }}
             />
+            <small className="field-hint">The model test uses this allowance for reasoning and the final answer. Task requests may use a smaller limit.</small>
           </label>
         </div>
 
@@ -509,7 +498,7 @@ export function ModelRoleCard({
             className="btn-primary"
             type="submit"
             disabled={
-              actionsBusy || !connectionId || !selectedModelAvailable
+              actionsBusy || !connectionId || !selectedModelAvailable || !thinkingSupported
             }
           >
             {busy ? "Saving…" : "Save task"}

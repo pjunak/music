@@ -4,7 +4,7 @@
   "reference_operation_count": 144,
   "candidate_operation_count": 154,
   "matched_operation_count": 144,
-  "fully_compatible_operation_count": 135,
+  "fully_compatible_operation_count": 129,
   "missing_operations": [],
   "candidate_only_operations": [
     "DELETE /api/library/cleanup/sources/{source_id}/credential",
@@ -24,16 +24,23 @@
   "request_body_mismatches": [
     "POST /api/assistant/library-tags/model-jobs",
     "POST /api/assistant/library-tags/model-plan",
-    "POST /api/assistant/playlists/model-suggestions/jobs"
+    "POST /api/assistant/playlists/model-suggestions/jobs",
+    "PUT /api/assistant/providers/roles/{role_id}"
   ],
   "response_mismatches": [
     "GET /api/assistant/library-tags",
     "GET /api/assistant/library-tags/model-status",
     "GET /api/assistant/playlists/model-status",
+    "GET /api/assistant/providers/roles",
+    "GET /api/assistant/providers/status",
     "GET /api/auth/sessions",
     "PATCH /api/assistant/library-tags/{track_id}",
     "POST /api/assistant/library-tags/model-plan",
-    "POST /api/assistant/library-tags/query"
+    "POST /api/assistant/library-tags/query",
+    "POST /api/assistant/providers/credential-storage/initialize",
+    "POST /api/assistant/providers/credential-storage/reset",
+    "POST /api/assistant/providers/roles/{role_id}/test",
+    "PUT /api/assistant/providers/roles/{role_id}"
   ],
   "security_mismatches": [],
   "difference_fingerprints": {
@@ -43,6 +50,8 @@
     "GET /api/assistant/library-tags/model-batches/{batch_id}#operation": "3635098b7aa1089dff47312339490e90b8b0eb9c13376580fd31da67eb7f5f38",
     "GET /api/assistant/library-tags/model-status#responses": "befc94244672bcaa4a294fc5ed63325b524fa81bef4df4c3d9dedde179e4de71",
     "GET /api/assistant/playlists/model-status#responses": "714cc661641bef1e52aea7664848a4f7e46bd6b395efaedf83756f13b4fcae83",
+    "GET /api/assistant/providers/roles#responses": "25bf832fe5d3a100b3d3311baa906cc772bb57d8909f33690ae126cb36f43b9a",
+    "GET /api/assistant/providers/status#responses": "29fd6d805b91a6398f95e30de36ccb4d14991fa52ef5c04bddbe9e3258afc5ba",
     "GET /api/auth/sessions#responses": "e3c35a44aa35fc6961bbe2a2979f7ab34332482d3ae19b619149c8c24b715754",
     "GET /api/library/cleanup/model#operation": "3fa6a9c1f94cc23cb05488ec86edddf2b8f09ca5c8f7f7de5cb2360cd6817c17",
     "GET /api/library/cleanup/sources#operation": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
@@ -54,8 +63,13 @@
     "POST /api/assistant/library-tags/model-plan#responses": "f71468091fddcd9b792af9cfb7591d66bc32842cb6720d76aa32366969550875",
     "POST /api/assistant/library-tags/query#responses": "e75cf764ea97415f93598ff3581478ef707cfe5fa7ab72777b73832aa6fd5952",
     "POST /api/assistant/playlists/model-suggestions/jobs#request_body": "85f087cc040a4b649beacee78b0f12da2a0462207816d85f01d49ca6da283387",
+    "POST /api/assistant/providers/credential-storage/initialize#responses": "81fd7b62525316bb7c909bd4fe7c4c12cdf6ccbf897b5c721d19062fcaa098a6",
+    "POST /api/assistant/providers/credential-storage/reset#responses": "7238f0900008144926576c2e8f7e58fe7517308fe8c205076ac5de7d2f5dd060",
+    "POST /api/assistant/providers/roles/{role_id}/test#responses": "b83432452300f499ce480deaf29cd29ed03f2b5f2fc083c76b30bf385ff9789f",
     "POST /api/library/cleanup/enrichment-jobs#operation": "282a7902b9e1df5cce5254bbe2ac5abf2b86f70a809af2fbfe2add4bf0bb7ab9",
     "POST /api/library/cleanup/model/jobs#operation": "d94b77f532014af4c45cd33d0439739597718211434a39c118b3f7c84a35a0aa",
+    "PUT /api/assistant/providers/roles/{role_id}#request_body": "2410733baa1cef38750c32a8aa23ed602034f8f36b272a069b9d5a19c6b3a7fb",
+    "PUT /api/assistant/providers/roles/{role_id}#responses": "e74c49a761f7596d3cf10ce015a8d468385324d6390e246f3aea2f64ade0e5dc",
     "PUT /api/library/cleanup/sources/{source_id}#operation": "c9127de19696ead776f7b7819c8555d661639987e8adbfb788f4a7b2d3e2ab38",
     "PUT /api/library/cleanup/sources/{source_id}/credential#operation": "17b6c9cc9e09c9a1b5503e5af2e0344e56a427f6a1b0c9c8d0c0e9c64cdf9794"
   }

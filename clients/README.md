@@ -19,6 +19,14 @@ already works today against an unmodified server.
 
 ## The model in one paragraph
 
+The authenticated Assistant provider-management API is separate from this output protocol.
+Its September 2026 revision adds provider model profiles, reasoning effort values, and model-test
+request/usage diagnostics. Legacy `enabled`/`disabled` thinking values remain readable; model
+profiles can reject unsupported combinations before a request. Connection verification proves
+access only, and its legacy `verified_capability_ids` array is empty. See
+[Assistant setup](../ASSISTANT.md) and the [generated OpenAPI](../contracts/generated/rust/openapi.json).
+The bundled output client and Baton do not consume these Assistant settings.
+
 The server holds a canonical `PlayerState`. A client connects, learns the current state,
 and on every change decides: *should I be producing sound, and if so, which track at what
 position?* It then plays `GET /api/library/tracks/{id}/stream`. There is **no per-client

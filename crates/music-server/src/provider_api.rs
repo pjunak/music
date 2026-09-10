@@ -219,6 +219,45 @@ struct ProviderAdapterResponse {
     label: String,
     description: String,
     capability_ids: Vec<String>,
+    default_model_profile: ModelProfileResponse,
+    model_profiles: Vec<ModelProfileResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ModelProfileResponse {
+    id: String,
+    revision: String,
+    model_ids: Vec<String>,
+    reasoning_modes: Vec<ThinkingModeWire>,
+    #[schema(required = true)]
+    max_output_tokens: Option<u32>,
+    documented: bool,
+    notice: String,
+    source_url: String,
+}
+
+impl From<music_application::assistant::ProviderModelProfile> for ModelProfileResponse {
+    fn from(value: music_application::assistant::ProviderModelProfile) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        Self {
+            id: value.id.to_owned(),
+            revision: value.revision_at(now).to_owned(),
+            model_ids: value.model_ids.iter().map(|id| (*id).to_owned()).collect(),
+            reasoning_modes: value
+                .reasoning_modes
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+            max_output_tokens: value.max_output_tokens,
+            documented: value.documented,
+            notice: value.notice.to_owned(),
+            source_url: value.source_url.to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -293,6 +332,17 @@ impl From<CredentialStorageStatus> for ProviderFrameworkStatusResponse {
             adapters: PROVIDER_ADAPTERS
                 .iter()
                 .map(|definition| ProviderAdapterResponse {
+                    default_model_profile: music_application::assistant::default_model_profile(
+                        definition.id,
+                    )
+                    .into(),
+                    model_profiles: music_application::assistant::provider_model_profiles(
+                        definition.id,
+                    )
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect(),
                     id: definition.id.to_owned(),
                     label: definition.label.to_owned(),
                     description: definition.description.to_owned(),
@@ -524,10 +574,57 @@ struct ModelConformanceResponse {
     output_tokens: Option<i64>,
     #[schema(schema_with = integer_schema)]
     duration_ms: i64,
+    request_settings: ModelRequestSettingsResponse,
+    #[schema(required = true)]
+    reasoning_tokens: Option<u64>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ModelRequestSettingsResponse {
+    adapter_id: String,
+    endpoint_path: String,
+    model_id: String,
+    model_profile: ModelProfileResponse,
+    thinking_mode: ThinkingModeWire,
+    max_output_tokens: u32,
+    timeout_seconds: u16,
+}
+
+impl ModelRequestSettingsResponse {
+    fn from_target(target: &music_application::assistant::ProviderExecutionTarget) -> Self {
+        Self {
+            adapter_id: target.adapter_id.clone(),
+            endpoint_path: if matches!(
+                target.adapter_id.as_str(),
+                music_application::assistant::OPENAI_RESPONSES_ADAPTER
+                    | music_application::assistant::DEEPSEEK_RESPONSES_ADAPTER
+            ) {
+                "/responses"
+            } else {
+                "/chat/completions"
+            }
+            .to_owned(),
+            model_id: target.model_id.clone(),
+            model_profile: music_application::assistant::provider_model_profile(
+                &target.adapter_id,
+                &target.model_id,
+            )
+            .into(),
+            thinking_mode: target.thinking_mode.into(),
+            max_output_tokens: target.max_output_tokens,
+            timeout_seconds: target.timeout_seconds,
+        }
+    }
 }
 
 impl ModelConformanceResponse {
-    fn from_view(value: ProviderConformanceView, duration_ms: u128) -> Result<Self, ApiError> {
+    fn from_view(
+        value: ProviderConformanceView,
+        duration_ms: u128,
+        request_settings: ModelRequestSettingsResponse,
+        reasoning_tokens: Option<u64>,
+    ) -> Result<Self, ApiError> {
         Ok(Self {
             role: value.role.try_into()?,
             passed: value.passed,
@@ -538,6 +635,8 @@ impl ModelConformanceResponse {
             input_tokens: value.input_tokens.map(saturating_i64),
             output_tokens: value.output_tokens.map(saturating_i64),
             duration_ms: i64::try_from(duration_ms).unwrap_or(i64::MAX),
+            request_settings,
+            reasoning_tokens,
         })
     }
 }
@@ -549,6 +648,11 @@ enum ThinkingModeWire {
     ProviderDefault,
     Enabled,
     Disabled,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
 }
 
 impl From<ThinkingModeWire> for ThinkingMode {
@@ -557,6 +661,11 @@ impl From<ThinkingModeWire> for ThinkingMode {
             ThinkingModeWire::ProviderDefault => Self::ProviderDefault,
             ThinkingModeWire::Enabled => Self::Enabled,
             ThinkingModeWire::Disabled => Self::Disabled,
+            ThinkingModeWire::Low => Self::Low,
+            ThinkingModeWire::Medium => Self::Medium,
+            ThinkingModeWire::High => Self::High,
+            ThinkingModeWire::Xhigh => Self::Xhigh,
+            ThinkingModeWire::Max => Self::Max,
         }
     }
 }
@@ -567,6 +676,11 @@ impl From<ThinkingMode> for ThinkingModeWire {
             ThinkingMode::ProviderDefault => Self::ProviderDefault,
             ThinkingMode::Enabled => Self::Enabled,
             ThinkingMode::Disabled => Self::Disabled,
+            ThinkingMode::Low => Self::Low,
+            ThinkingMode::Medium => Self::Medium,
+            ThinkingMode::High => Self::High,
+            ThinkingMode::Xhigh => Self::Xhigh,
+            ThinkingMode::Max => Self::Max,
         }
     }
 }
@@ -1321,6 +1435,7 @@ async fn test_role_model(
         .execute_structured_model_request(&target.execution, &request)
         .await;
     let duration_ms = started_at.elapsed().as_millis();
+    let reasoning_tokens = result.token_details.reasoning_output_tokens;
     let result = target.evaluate(result);
     let value = providers
         .service
@@ -1330,6 +1445,8 @@ async fn test_role_model(
     Ok(Json(ModelConformanceResponse::from_view(
         value,
         duration_ms,
+        ModelRequestSettingsResponse::from_target(&target.execution),
+        reasoning_tokens,
     )?))
 }
 
@@ -1616,14 +1733,32 @@ fn model_evaluation_status_schema() -> RefOr<Schema> {
 fn thinking_mode_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
-        .enum_values(Some(["provider_default", "enabled", "disabled"]))
+        .enum_values(Some([
+            "provider_default",
+            "enabled",
+            "disabled",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        ]))
         .into()
 }
 
 fn thinking_mode_default_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
-        .enum_values(Some(["provider_default", "enabled", "disabled"]))
+        .enum_values(Some([
+            "provider_default",
+            "enabled",
+            "disabled",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        ]))
         .default(Some(serde_json::json!("provider_default")))
         .into()
 }
@@ -1921,7 +2056,26 @@ mod tests {
         let status = body_json(status).await?;
         assert_eq!(status["credential_storage_ready"], true);
         assert_eq!(status["credential_storage_source"], "environment");
-        assert_eq!(status["adapters"].as_array().map(Vec::len), Some(5));
+        assert_eq!(status["adapters"].as_array().map(Vec::len), Some(7));
+        let openai = status["adapters"]
+            .as_array()
+            .ok_or("missing adapters")?
+            .iter()
+            .find(|adapter| adapter["id"] == "openai-responses/v1")
+            .ok_or("missing OpenAI adapter")?;
+        let astra = openai["model_profiles"]
+            .as_array()
+            .ok_or("missing profiles")?
+            .iter()
+            .find(|profile| profile["id"] == "openai-astra")
+            .ok_or("missing Astra profile")?;
+        assert_eq!(astra["documented"], true);
+        assert!(
+            !astra["reasoning_modes"]
+                .as_array()
+                .ok_or("missing modes")?
+                .contains(&serde_json::json!("disabled"))
+        );
 
         let created = router
             .clone()
@@ -1962,6 +2116,10 @@ mod tests {
             serde_json::json!(["fixture-model", "second-model"])
         );
         assert_eq!(verified["connection"]["verification_status"], "verified");
+        assert_eq!(
+            verified["connection"]["verified_capability_ids"],
+            serde_json::json!([])
+        );
         assert!(!verified.to_string().contains("provider-secret-value"));
 
         let configured = router
@@ -1999,6 +2157,20 @@ mod tests {
         assert_eq!(conformance["provider_model_id"], "fixture-model");
         assert_eq!(conformance["input_tokens"], 23);
         assert_eq!(conformance["output_tokens"], 11);
+        assert_eq!(conformance["request_settings"]["max_output_tokens"], 2000);
+        assert_eq!(
+            conformance["request_settings"]["thinking_mode"],
+            "provider_default"
+        );
+        assert_eq!(
+            conformance["request_settings"]["endpoint_path"],
+            "/chat/completions"
+        );
+        assert_eq!(
+            conformance["request_settings"]["model_profile"]["documented"],
+            false
+        );
+        assert_eq!(conformance["reasoning_tokens"], Value::Null);
         assert_eq!(conformance["role"]["conformance_status"], "passed");
         assert!(!conformance.to_string().contains("provider-secret-value"));
 

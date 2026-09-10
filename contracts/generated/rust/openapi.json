@@ -4381,6 +4381,17 @@
               }
             ]
           },
+          "reasoning_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "request_settings": {
+            "$ref": "#/components/schemas/ModelRequestSettingsResponse"
+          },
           "role": {
             "$ref": "#/components/schemas/ModelRoleOut"
           }
@@ -4394,7 +4405,9 @@
           "finish_reason",
           "input_tokens",
           "output_tokens",
-          "duration_ms"
+          "duration_ms",
+          "request_settings",
+          "reasoning_tokens"
         ],
         "type": "object"
       },
@@ -4636,6 +4649,57 @@
         ],
         "type": "object"
       },
+      "ModelProfileResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "documented": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "model_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "notice": {
+            "type": "string"
+          },
+          "reasoning_modes": {
+            "items": {
+              "$ref": "#/components/schemas/ThinkingModeWire"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "model_ids",
+          "reasoning_modes",
+          "max_output_tokens",
+          "documented",
+          "notice",
+          "source_url"
+        ],
+        "type": "object"
+      },
       "ModelQualityEvaluationOut": {
         "additionalProperties": false,
         "properties": {
@@ -4702,6 +4766,46 @@
           "total_cases",
           "last_job_id",
           "last_evaluated_at"
+        ],
+        "type": "object"
+      },
+      "ModelRequestSettingsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter_id": {
+            "type": "string"
+          },
+          "endpoint_path": {
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "model_profile": {
+            "$ref": "#/components/schemas/ModelProfileResponse"
+          },
+          "thinking_mode": {
+            "$ref": "#/components/schemas/ThinkingModeWire"
+          },
+          "timeout_seconds": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "adapter_id",
+          "endpoint_path",
+          "model_id",
+          "model_profile",
+          "thinking_mode",
+          "max_output_tokens",
+          "timeout_seconds"
         ],
         "type": "object"
       },
@@ -4822,7 +4926,12 @@
             "enum": [
               "provider_default",
               "enabled",
-              "disabled"
+              "disabled",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
             ],
             "type": "string"
           },
@@ -4906,7 +5015,12 @@
             "enum": [
               "provider_default",
               "enabled",
-              "disabled"
+              "disabled",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
             ],
             "type": "string"
           },
@@ -6205,6 +6319,9 @@
             },
             "type": "array"
           },
+          "default_model_profile": {
+            "$ref": "#/components/schemas/ModelProfileResponse"
+          },
           "description": {
             "type": "string"
           },
@@ -6213,13 +6330,21 @@
           },
           "label": {
             "type": "string"
+          },
+          "model_profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ModelProfileResponse"
+            },
+            "type": "array"
           }
         },
         "required": [
           "id",
           "label",
           "description",
-          "capability_ids"
+          "capability_ids",
+          "default_model_profile",
+          "model_profiles"
         ],
         "type": "object"
       },
@@ -7398,6 +7523,19 @@
         "type": "object"
       },
       "ThemeFileResponse": {},
+      "ThinkingModeWire": {
+        "enum": [
+          "provider_default",
+          "enabled",
+          "disabled",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "type": "string"
+      },
       "TrackAddRequest": {
         "properties": {
           "position": {

@@ -3004,17 +3004,16 @@
 }
 .assistant-role-settings {
   display: grid;
-  grid-template-columns:
-    minmax(9.5rem, 1.05fr)
-    minmax(7.5rem, 0.8fr)
-    minmax(10rem, 1fr);
-  align-items: end;
+  grid-template-columns: minmax(7.5rem, 0.8fr) minmax(10rem, 1fr);
+  align-items: start;
   gap: var(--space-2);
   padding: var(--space-2) 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 .assistant-thinking-mode {
+  grid-column: 1 / -1;
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
@@ -3033,17 +3032,16 @@
   font-weight: 600;
 }
 .assistant-thinking-options {
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
 }
 .assistant-thinking-options label {
   position: relative;
   cursor: pointer;
-}
-.assistant-thinking-options label + label {
-  border-left: 1px solid var(--border);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 .assistant-thinking-options input {
   position: absolute;
@@ -3059,6 +3057,10 @@
 .assistant-thinking-options input:checked + span {
   color: var(--accent2-strong);
   background: var(--accent2-soft);
+}
+.assistant-thinking-options input:disabled + span {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .assistant-thinking-options input:focus-visible + span {
   box-shadow: inset var(--focus-ring);

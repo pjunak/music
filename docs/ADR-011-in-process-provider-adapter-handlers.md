@@ -4,7 +4,7 @@
 
 **Date:** 2026-08-25
 
-**Amended:** 2026-08-30
+**Amended:** 2026-09-10
 
 **Decider:** Project owner
 
@@ -32,7 +32,7 @@ checks, quality gates, and review-only results.
 
 ## Decision
 
-- Keep network I/O in Music's existing `providers.transport` implementation.
+- Keep network I/O in Music's existing `provider_transport.rs` implementation.
 - Add a small registry of versioned, transport-free adapter handlers in
   `provider_handlers.rs`. The registry provides one internal contract for model-list parsing,
   endpoint paths, provider-reported model-ID normalization, request construction, JSON-object versus
@@ -45,24 +45,39 @@ checks, quality gates, and review-only results.
   broad compatibility path for third-party OpenAI-shaped services.
 - Add `openai-responses/v1` for OpenAI itself. Pin `https://api.openai.com/v1`, use the native
   Responses request and response contracts, disable provider storage for these stateless task
-  calls, and map Thinking On/Off to nested `reasoning.effort=high/none`; Provider default sends no
-  override. Project the canonical task schema to OpenAI's documented Structured Outputs subset at
+  calls, and map supported thinking efforts to nested `reasoning.effort`. Provider default sends
+  no override; legacy On retains high effort. Reviewed Astra settings exclude Off. Project the canonical task schema to OpenAI's documented Structured Outputs subset at
   the wire boundary by removing `uniqueItems`, which OpenAI does not list among supported array
   constraints. Keep supported constraints such as `minItems`, `maxItems`, and string patterns.
   Preserve the complete canonical schema in the task prompt and enforce uniqueness locally.
 - Add explicit Google Gemini profiles. They pin the documented Google AI Studio base URL,
-  canonicalize the `models/` resource prefix, and map thinking On/Off to
-  `reasoning_effort=high/none`; Provider default sends no override. Both saved adapter IDs send a
+  canonicalize the `models/` resource prefix, and map supported thinking settings to
+  `reasoning_effort`; Provider default sends no override. Reviewed models that require thinking
+  exclude Off. Both saved adapter IDs send a
   provider-compatible projection of the exact task JSON Schema because Gemini structured output
   supports only a documented subset of JSON Schema. Unsupported wire constraints such as string
   length, pattern, uniqueness, and exclusive bounds are omitted, and scalar `const` becomes a
   single-value `enum`. The complete generated schema remains in the fixed task prompt and the
-  unchanged Pydantic model validates every response locally, so this transport projection does not
+  unchanged Rust task validator validates every response locally, so this transport projection does not
   weaken the application contract. The older strict-schema ID remains a compatibility alias rather
   than forcing existing connections to migrate. Send the documented `x-goog-api-client`
   integration-identification header.
-- Include handler source in every model-role runtime fingerprint. A handler change invalidates old
+- Add explicit DeepSeek Chat and Responses adapters, both pinned to `https://api.deepseek.com`.
+  Chat uses JSON-object output and separate thinking mode/effort fields. Responses uses native
+  schema output without undocumented OpenAI strict or cache-control switches.
+- Keep reviewed provider-scoped model settings in `provider_profiles.rs`, shared by server
+  validation and browser controls. Unknown models are unreviewed, not rejected by name. Preserve
+  saved settings and reject known unsupported combinations before network I/O. The provider model
+  list establishes access only; it cannot certify structured-output capabilities.
+- Include handler and profile source in every model-role runtime fingerprint. Include the selected
+  profile revision too, so an announced alias transition can expire evidence at its effective time. A handler change invalidates old
   conformance and quality records even when the saved connection and model are unchanged.
+- Give conformance the operator's configured output allowance instead of a hidden 256-token cap.
+  Reasoning shares this allowance with final output. Report effective settings and bounded usage
+  details without response text or credentials. Task-specific request limits remain in force.
+- Classify finish/status/refusal/tool-call signals before parsing text. Never accept valid-looking
+  JSON from a truncated, refused, interrupted, or tool-call response. Preserve token usage on
+  unsuccessful responses.
 - Make the fixed conformance challenge exercise a bounded, unique array as well as exact scalar
   identity. This catches schema-dialect regressions before a full task-quality suite incurs calls.
 - Continue reducing upstream failures to bounded machine-readable codes. Read error JSON within the
@@ -97,7 +112,11 @@ resolver, private-network decision, no-redirect policy, explicit no-retry policy
 reader, and durable per-attempt accounting. `async-openai` is configurable and supports the
 Responses API, but is OpenAI-focused and advertises automatic rate-limit retries, which conflicts
 with Music's explicit cost boundary. Their handler and extension organization is a design
-reference; adding any of them as an execution dependency was rejected for the current scope.
+reference. The September 2026 review identified `rust-genai` as the closest optional future
+  candidate, with explicit adapters and custom reqwest clients. No execution dependency is added
+  in this change: its byte-bounded response handling, disabled retries, usage fidelity on failures,
+  and provider-specific structured-output behavior still require a separate prototype with the
+  same fixture matrix before adoption. A custom client alone is insufficient evidence.
 
 ### External multi-provider gateway
 
@@ -136,6 +155,11 @@ validation, disclosure, and review boundary. Selected.
 - [Google Gemini structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)
 - [Google Gemini partner integration requirements](https://ai.google.dev/gemini-api/docs/partner-integration)
 - [Google Gemini API errors](https://ai.google.dev/gemini-api/docs/api-errors)
+- [DeepSeek model updates and alias transitions](https://api-docs.deepseek.com/updates/)
+- [DeepSeek thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/)
+- [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)
+- [DeepSeek Responses](https://api-docs.deepseek.com/api/create-response/)
+- [OpenAI Astra supported reasoning settings](https://developers.openai.com/api/docs/models/gpt-6-astra)
 - [OpenAI latest-model migration guidance](https://developers.openai.com/api/docs/guides/latest-model)
 - [OpenAI Responses API reference](https://developers.openai.com/api/reference/resources/responses/methods/create)
 - [OpenAI Structured Outputs schema subset](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas)

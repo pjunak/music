@@ -1,9 +1,13 @@
 import type {
+  ModelThinkingMode,
+  ProviderAdapter,
   ProviderConnection,
   ProviderVerificationStatus,
 } from "@/core/assistantProvidersApi";
 
 const FIXED_PROVIDER_ADDRESSES: Record<string, string> = {
+  "deepseek-chat/v1": "https://api.deepseek.com",
+  "deepseek-responses/v1": "https://api.deepseek.com",
   "openai-responses/v1": "https://api.openai.com/v1",
   "google-gemini-openai/v1":
     "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -38,6 +42,10 @@ const VERIFICATION_FAILURES: Record<string, string> = {
 };
 
 const MODEL_TEST_FAILURES: Record<string, string> = {
+  unsupported_reasoning_mode: "This model does not support the selected thinking setting. Choose one of its supported effort levels.",
+  unsupported_output_budget: "The response-token allowance exceeds this model's supported limit.",
+  provider_interrupted: "The provider interrupted generation before completing the result. Review this attempt before deliberately rerunning.",
+  unexpected_tool_call: "The model requested a tool instead of returning the required JSON result.",
   unauthorized: "The provider rejected this API key.",
   forbidden: "This API key cannot use the selected model.",
   completion_endpoint_not_found:
@@ -62,7 +70,7 @@ const MODEL_TEST_FAILURES: Record<string, string> = {
   empty_structured_output:
     "The model returned an empty response instead of the required JSON object.",
   incomplete_structured_output:
-    "The model ran out of response tokens before completing the JSON object.",
+    "The model exhausted its allowance for reasoning and final output before completing the JSON object. Raise the allowance or choose a lower supported effort before rerunning.",
   model_refusal: "The model declined to produce the required structured result.",
   conformance_mismatch:
     "The model did not copy the one-time test values exactly.",
@@ -115,4 +123,20 @@ export function roleConnection(
   connectionId: string,
 ): ProviderConnection | undefined {
   return connections.find((connection) => connection.id === connectionId);
+}
+
+export function modelProfile(adapter: ProviderAdapter | undefined, modelId: string) {
+  const id = adapter?.id.startsWith("google-gemini-openai")
+    ? modelId.replace(/^models\//, "") : modelId;
+  return adapter?.model_profiles?.find((profile) => profile.model_ids.includes(id))
+    ?? adapter?.default_model_profile;
+}
+
+export const thinkingModeLabels: Record<ModelThinkingMode, string> = {
+  provider_default: "Provider default", enabled: "On", disabled: "Off",
+  low: "Low", medium: "Medium", high: "High", xhigh: "Very high", max: "Maximum",
+};
+
+export function supportsThinking(modes: readonly ModelThinkingMode[], mode: ModelThinkingMode) {
+  return modes.includes(mode) || (mode === "enabled" && modes.includes("high"));
 }

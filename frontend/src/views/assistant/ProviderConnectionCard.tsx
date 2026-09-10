@@ -76,7 +76,7 @@ export function ProviderConnectionCard({
   }
 
   const models = connection.verified_models;
-  const verifiedCapabilityLabels = connection.verified_capability_ids.map(
+  const declaredCapabilityLabels = (adapters.find((adapter) => adapter.id === connection.adapter_id)?.capability_ids ?? []).map(
     (capabilityId) =>
       capabilities.find((capability) => capability.id === capabilityId)?.label ??
       capabilityId,
@@ -104,13 +104,7 @@ export function ProviderConnectionCard({
           {verificationFailureMessage(connection.verification_error_code)}
         </p>
       ) : null}
-      {connection.verification_status === "verified" &&
-      verifiedCapabilityLabels.length === 0 ? (
-        <p className="assistant-provider-problem" role="status">
-          This connection cannot be assigned to a model task until verification
-          confirms a compatible capability.
-        </p>
-      ) : null}
+      {connection.verification_status === "verified" ? <p className="field-hint">Connection access verified. Test each model's settings and task quality separately.</p> : null}
 
       <div className="assistant-provider-actions">
         <button
@@ -148,8 +142,8 @@ export function ProviderConnectionCard({
             </dd>
           </div>
           <div>
-            <dt>Verified capabilities</dt>
-            <dd>{verifiedCapabilityLabels.join(" · ") || "None confirmed"}</dd>
+            <dt>Connection features</dt>
+            <dd>{declaredCapabilityLabels.join(" · ") || "None declared"} (adapter support; model tests required)</dd>
           </div>
           <div>
             <dt>Available models</dt>

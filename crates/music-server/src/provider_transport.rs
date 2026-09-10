@@ -14,7 +14,7 @@ use music_application::assistant::{
     GOOGLE_GEMINI_OPENAI_ADAPTER, GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
     OPENAI_RESPONSES_ADAPTER, ProviderAttemptOutcome, ProviderConnectionPolicy,
     ProviderExecutionTarget, ProviderPolicyError, ProviderVerificationResult,
-    ProviderVerificationTarget, StructuredModelRequest, StructuredModelResult, provider_adapter,
+    ProviderVerificationTarget, StructuredModelRequest, StructuredModelResult,
 };
 use reqwest::header::{
     ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT,
@@ -115,19 +115,11 @@ impl ProviderNetworkBoundary {
         let Some(models) = handler.parse_models(&response.payload, MAX_VERIFIED_MODELS) else {
             return failed_verification("invalid_response");
         };
-        let capability_ids =
-            provider_adapter(&target.adapter_id).map_or_else(Vec::new, |adapter| {
-                adapter
-                    .capability_ids
-                    .iter()
-                    .map(|value| (*value).to_owned())
-                    .collect()
-            });
         ProviderVerificationResult {
             verified: true,
             error_code: None,
             models,
-            capability_ids,
+            capability_ids: Vec::new(),
         }
     }
 
@@ -630,6 +622,10 @@ fn validate_adapter_base_url(
     normalized: String,
 ) -> Result<String, ProviderPolicyError> {
     let expected = match adapter_id {
+        music_application::assistant::DEEPSEEK_CHAT_ADAPTER
+        | music_application::assistant::DEEPSEEK_RESPONSES_ADAPTER => {
+            Some("https://api.deepseek.com")
+        }
         OPENAI_RESPONSES_ADAPTER => Some(OPENAI_API_BASE_URL),
         GOOGLE_GEMINI_OPENAI_ADAPTER | GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER => {
             Some(GOOGLE_GEMINI_OPENAI_BASE_URL)
@@ -790,6 +786,22 @@ mod tests {
         .await?;
         assert_eq!(result.outcome, ProviderAttemptOutcome::PreflightRejected);
         assert_eq!(result.error_code.as_deref(), Some("unsupported_adapter"));
+        let mut target = execution_target(
+            OPENAI_RESPONSES_ADAPTER,
+            OPENAI_API_BASE_URL.to_owned(),
+            ThinkingMode::Disabled,
+        );
+        target.model_id = "gpt-6-astra".to_owned();
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            boundary.execute_structured_model_request(&target, &structured_request()),
+        )
+        .await?;
+        assert_eq!(result.outcome, ProviderAttemptOutcome::PreflightRejected);
+        assert_eq!(
+            result.error_code.as_deref(),
+            Some("unsupported_reasoning_mode")
+        );
         Ok(())
     }
 
@@ -953,6 +965,32 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_adapters_pin_the_provider_origin() {
+        let policy = ProviderNetworkBoundary::new();
+        for adapter in [
+            music_application::assistant::DEEPSEEK_CHAT_ADAPTER,
+            music_application::assistant::DEEPSEEK_RESPONSES_ADAPTER,
+        ] {
+            assert_eq!(
+                policy
+                    .normalize_base_url(adapter, "https://api.deepseek.com/", false)
+                    .as_deref(),
+                Ok("https://api.deepseek.com")
+            );
+            assert!(
+                policy
+                    .normalize_base_url(adapter, "https://proxy.example/v1", false)
+                    .is_err()
+            );
+            assert!(
+                policy
+                    .normalize_base_url(adapter, "http://127.0.0.1", true)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn public_destination_filter_is_conservative_for_special_ranges()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         for address in [
@@ -1013,7 +1051,10 @@ mod tests {
         server.abort();
         assert!(result.verified);
         assert_eq!(result.models, ["model-b", "model-a"]);
-        assert_eq!(result.capability_ids, ["structured-text/v1"]);
+        assert!(
+            result.capability_ids.is_empty(),
+            "model listing must not certify output capabilities"
+        );
         Ok(())
     }
 

@@ -2,7 +2,7 @@ import { api, type BackgroundJob } from "@/core/api";
 
 export type ProviderVerificationStatus = "never" | "verified" | "failed";
 export type ModelConformanceStatus = "never" | "passed" | "failed";
-export type ModelThinkingMode = "provider_default" | "enabled" | "disabled";
+export type ModelThinkingMode = "provider_default" | "enabled" | "disabled" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelQualityEvaluationStatus =
   | "never"
   | "passed"
@@ -20,6 +20,19 @@ export interface ProviderAdapter {
   label: string;
   description: string;
   capability_ids: string[];
+  default_model_profile?: ProviderModelProfile;
+  model_profiles?: ProviderModelProfile[];
+}
+
+export interface ProviderModelProfile {
+  id: string;
+  revision: string;
+  model_ids: string[];
+  reasoning_modes: ModelThinkingMode[];
+  max_output_tokens: number | null;
+  documented: boolean;
+  notice: string;
+  source_url: string;
 }
 
 export interface ModelRoleDefinition {
@@ -122,6 +135,16 @@ export interface ModelConformance {
   input_tokens: number | null;
   output_tokens: number | null;
   duration_ms: number;
+  reasoning_tokens?: number | null;
+  request_settings?: {
+    adapter_id: string;
+    endpoint_path: string;
+    model_id: string;
+    model_profile: ProviderModelProfile;
+    thinking_mode: ModelThinkingMode;
+    max_output_tokens: number;
+    timeout_seconds: number;
+  };
 }
 
 export interface ModelQualityEvaluation {
