@@ -12,6 +12,8 @@ not a second description of the implementation.
 - Optional model setup and operator acceptance: [AI setup guide](../ASSISTANT.md)
 - Mood workflow rework and remaining evaluation: [findings and plan](MOOD_CONTEXT_REVIEW.md),
   [offline listening pilot](MOOD_PILOT.md)
+- Library cleanup detection, metadata sources and bounded AI options:
+  [metadata research and implementation priorities](LIBRARY_METADATA_RESEARCH.md)
 - Post-audit release and model acceptance: [validation plan](AI_ACCEPTANCE.md)
 - Queue measurements and scheduling limits: [job diagnostics](JOB_DIAGNOSTICS.md)
 - Assistant code, contracts, privacy boundaries, tests, and change procedure:
