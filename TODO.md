@@ -11,6 +11,35 @@ and AI-role checks, with the engineering/operator split, are in
 write code or design tests. Further refactoring should accompany a concrete change
 or demonstrated defect rather than extend the cleanup phase indefinitely.
 
+## Library metadata: ordered implementation plan
+
+The core cleanup, compilation safeguards, informative collision names and offline
+pilot tooling are implemented. This is the remaining plan for albums and game/film
+soundtracks, ordered by expected useful corrections, protection of correct metadata,
+review effort and implementation cost. Benefits are engineering estimates;
+they are not measured accuracy gains. The [research](docs/LIBRARY_METADATA_RESEARCH.md)
+records the alternatives and sources. Completed work moves into the living
+Assistant contract and is removed from this backlog.
+
+| Order | Work and expected usefulness | Downsides and mitigation | Effort / next step |
+|---|---|---|---|
+| 1 | Curate and score the fixed album/soundtrack pilot with the [implemented tooling](docs/LIBRARY_METADATA_PILOT.md). Establish recording/edition precision, missed candidates, harmful field changes and abstention before changing retrieval. | Independent labels require operator time; small or album-leaking samples mislead. Keep artist/release families together, report denominators and unknowns. | Small–medium; engineering prepares samples/exports, operator judges ambiguous identities. |
+| 2 | Album-first recovery, artist aliases/transliterations and explicit version evidence. Helps tracks with poor text when siblings or catalog aliases are useful. | More requests and potential false matches; transliteration can collapse distinct names. Bound expansion, retain query provenance and reject version/identity contradictions. Conservative encoding repair is an optional substep, never blanket normalization. | Large; evaluate against the fixed benchmark before relaxing acceptance. |
+| 3 | Writable richer metadata: full/original dates, artist lists, credits, work/movement, label and track totals. Useful for soundtracks/classical libraries and export. | More complicated forms, tag-format differences and cross-client schemas; some catalog facts belong to a work rather than a recording. Choose a small useful field set before changing playback/client models; preserve original values and unknown frames. | Large; consult on fields and whether they need tag export, browsing, or both. |
+| 4 | Remember rejected metadata proposals. Reduces repeated review of the same unhelpful suggestion. | Needs durable decisions and carefully scoped invalidation; an old rejection must not hide new evidence forever. Bind it to track, field/value and evidence version, with a visible reset. | Medium; retain accepted user metadata authority. |
+| 5 | CUE sheets and purchase/creator manifests. Recovers authoritative local track lists and source context. | Format-specific parsing, private receipt data and uncertain file mapping. Explicit selected imports only; never execute sidecars or split audio implicitly. | Medium; prioritize actual formats present in the collection. |
+| 6 | Exact-file duplicate groups and a comparison/review screen. Finds wasted copies without equating same titles with same audio. | Reading whole files costs I/O. Same audio can carry different tags/artwork; deleting a copy can damage playlists or references. Start with read-only size/hash grouping; discuss retention and deletion before adding actions. Decoded/acoustic comparison is a later, separate experiment. | Medium–large; consult on duplicate retention workflow. |
+| 7 | Fingerprint reuse after renames/tag-only edits. Saves repeated analysis on large libraries. | Audio-content identity and persistent cache invalidation are more complex than path/stat keys; decoding or hashing can itself be expensive. Profile first and retain parameter/version keys. | Medium; conditional on measured repeated work. |
+| 8 | One additional catalog or paid recognition fallback. May resolve cases missed by current sources. | Coverage is unknown; credentials, requests, attribution, persistence/export terms and possible charges add maintenance. Compare incremental useful matches on the same unresolved cohort. | Medium–large; consult on a concrete provider, permitted data, and request/cost cap. |
+| 9 | Broader AI text parsing, booklet OCR and audio/ambience models. Could help niche material with little catalog coverage. | Hallucinations/OCR errors, private content disclosure, runtime/model size, licensing and uncertain benefit. Separate experiments with evidence references, abstention, explicit review and small evaluation budgets. | Large; consult after benchmark results justify a specific experiment. |
+
+Albums and soundtracks put edition/position recovery, full dates and credits ahead
+of duplicate cleanup and ambience models. Richer writable fields require a choice
+of the first field set and its tag-export/browsing use before shared schemas change.
+Paid recognition and broader AI stay deferred pending a concrete gap, proposed
+provider/data scope and cost cap. Normal regression gates establish correctness,
+not recognition accuracy on the collection; the pilot still needs independent labels.
+
 ## Conditional cleanup
 
 - **Remove the SPA end-of-track stall backstop.** The server-side advancer has
@@ -58,9 +87,6 @@ or demonstrated defect rather than extend the cleanup phase indefinitely.
   consent, a synthetic quality suite, durable non-restartable execution, and a
   review-only result contract. Do not unlock the reserved role before all of
   those boundaries exist.
-- **Model-assisted library cleanup.** Extend the existing propose -> review ->
-  journal -> execute cleanup workflow with a minimized model input and fixed
-  output schema. The model must not move, rename, or delete files directly.
 - **Provider-independent cost controls.** Provider dashboards remain the source
   of truth for spending limits. The current track/request/reservation limits bound individual tagging runs. Add
   currency or account-wide budgets only with a trustworthy accounting contract;

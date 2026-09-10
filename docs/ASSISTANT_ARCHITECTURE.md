@@ -187,7 +187,8 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v3` is included in evidence signatures.
+evidence. `catalog-evidence-policy/v4` is included in evidence signatures and invalidates
+results created before compilation-aware local hypotheses.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -289,13 +290,25 @@ The Library cleanup workspace preserves a separate local authority boundary. The
 produces filename, folder, and embedded-tag proposals; `cleanup_batches` journals only explicitly
 selected writes. **History & rollback** reads those server journals, downloads the complete JSON,
 and invokes the existing conflict-aware revert path. **Sources** exposes only implemented adapters.
-Filename collisions propose a deterministic numeric suffix (`Song (2).mp3`, then `(3)`, etc.),
-reserving both indexed filenames and earlier proposals in the same folder, case-insensitively.
+Filename collisions first try a distinguishing indexed artist, album, disc/track position,
+artist plus album, or album plus position, in that order. They fall back to a deterministic
+numeric suffix (`Song (2).mp3`, then `(3)`, etc.), reserving indexed filenames and earlier
+proposals in the same folder, case-insensitively. Unreviewed tag proposals never supply a
+collision label. Added labels replace control/Windows-reserved punctuation and the resulting
+filename is bounded to 240 UTF-8 bytes including its extension, retaining the suffix.
+An unusually long extension that prevents a bounded suffix produces a note without a rename.
 These proposals are low-confidence and start unchecked; the note explains that matching names
 do not establish duplicate audio. Embedded titles are not suffixed. Existing apply-time conflict
 checks still reject destinations occupied since analysis, including files absent from the index.
 Folder metadata evidence always uses all indexed siblings, even when only selected tracks are
 being cleaned. Selection limits proposals, not the evidence used to infer their metadata.
+Conflicting nonempty artist/album-artist values or collective credits (such as Various Artists)
+veto artist inheritance. Conflicting album values also veto inherited artist, album, disc and
+year suggestions. Missing values are not disagreement. Per-file filename evidence remains
+available; consistent compilation albums may still supply album tags. Review notes explain
+withheld inheritance. Folder rebuilds require album agreement and prefer a unanimous album
+artist over per-track artists. This deliberately leaves more uncertain fields unresolved;
+the collective-credit vocabulary is conservative and does not classify every compilation.
 `musicbrainz`, `acoustid`, and `lastfm` policies are stored in `cleanup_source_policies`.
 The comparison key retains Unicode letters/digits while folding case and accents.
 Catalog lookup reads all embedded tag containers for typed recording/release/release-track/group
@@ -362,6 +375,10 @@ Unicode, absent evidence, duration contradiction and injected instructions. All 
 configured model to become usable. This is a pilot gate, not measured accuracy on a private library.
 Additional providers, OCR/audio models and broader recognition remain conditional research pilots;
 see [metadata research](LIBRARY_METADATA_RESEARCH.md) for source policies and the held-out benchmark.
+The [offline metadata pilot](LIBRARY_METADATA_PILOT.md) scores exported catalog proposals against
+independent recording/edition/field labels with artist/release families kept in one split.
+It reports missing/failed results, unknown labels and harmful changes separately; it neither
+certifies a model nor applies library changes.
 
 ## Workflow traceability
 

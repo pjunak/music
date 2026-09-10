@@ -6,6 +6,9 @@
 > current behavior and limits are maintained in [Assistant architecture](ASSISTANT_ARCHITECTURE.md)
 > and the [operator guide](../ASSISTANT.md). Additional paid/source pilots and specialist OCR/audio
 > experiments remain conditional on coverage measurements; no private-library accuracy is claimed.
+> The current [ordered backlog](../TODO.md#library-metadata-ordered-implementation-plan) prioritizes
+> albums and game/film soundtracks. Compilation safeguards and informative collision suffixes
+> are implemented; the [offline pilot tooling](LIBRARY_METADATA_PILOT.md) is ready for independent labels.
 
 
 ## Findings and recommendation

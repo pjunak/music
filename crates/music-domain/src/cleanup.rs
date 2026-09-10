@@ -540,6 +540,22 @@ fn dominant(values: impl IntoIterator<Item = String>) -> (Option<String>, bool) 
     (canonical, count == total)
 }
 
+fn has_conflicting_values<'a>(values: impl Iterator<Item = &'a str>) -> bool {
+    values
+        .map(cleanup_loose_key)
+        .filter(|key| !key.is_empty())
+        .collect::<BTreeSet<_>>()
+        .len()
+        > 1
+}
+
+fn is_collective_artist(value: &str) -> bool {
+    matches!(
+        cleanup_loose_key(value).as_str(),
+        "variousartists" | "variousperformers" | "variouscomposers" | "multipleartists" | "va"
+    )
+}
+
 #[derive(Debug)]
 struct FolderContext<'a> {
     name: String,
@@ -557,6 +573,8 @@ struct FolderContext<'a> {
     dominant_artist_unanimous: bool,
     dominant_album: Option<String>,
     dominant_album_unanimous: bool,
+    inherit_artist: bool,
+    inherit_album: bool,
     verdicts: Option<&'a NameVerdicts>,
 }
 
@@ -697,6 +715,21 @@ fn build_context<'a>(
 
     let (dominant_artist, dominant_artist_unanimous) =
         dominant(tracks.iter().map(|track| track.metadata.artist.clone()));
+    // Missing tags are not votes. Conflicting authored tags veto folder-wide inheritance,
+    // including evidence from siblings outside the selected cleanup scope.
+    let inherit_album =
+        !has_conflicting_values(tracks.iter().map(|track| track.metadata.album.as_str()));
+    let inherit_artist = inherit_album
+        && !has_conflicting_values(tracks.iter().map(|track| track.metadata.artist.as_str()))
+        && !has_conflicting_values(
+            tracks
+                .iter()
+                .map(|track| track.metadata.album_artist.as_str()),
+        )
+        && !tracks.iter().any(|track| {
+            is_collective_artist(&track.metadata.album_artist)
+                || is_collective_artist(&track.metadata.artist)
+        });
     let (dominant_album, dominant_album_unanimous) = dominant(
         tracks
             .iter()
@@ -728,6 +761,8 @@ fn build_context<'a>(
         dominant_artist_unanimous,
         dominant_album,
         dominant_album_unanimous,
+        inherit_artist,
+        inherit_album,
         verdicts,
     }
 }
@@ -802,10 +837,11 @@ fn classify_segment(
             None,
         ));
     }
-    if context
-        .folder_artist
-        .as_ref()
-        .is_some_and(|value| loose_eq(segment, value))
+    if context.inherit_artist
+        && context
+            .folder_artist
+            .as_ref()
+            .is_some_and(|value| loose_eq(segment, value))
     {
         return Some(classification(
             CleanupRule::StripArtist,
@@ -813,10 +849,11 @@ fn classify_segment(
             artist_empty.then(|| guess(CleanupTagField::Artist, CleanupConfidence::High)),
         ));
     }
-    if context
-        .folder_album
-        .as_ref()
-        .is_some_and(|value| loose_eq(segment, value))
+    if context.inherit_album
+        && context
+            .folder_album
+            .as_ref()
+            .is_some_and(|value| loose_eq(segment, value))
         && context.folder_artist.is_some()
     {
         return Some(classification(
@@ -825,7 +862,7 @@ fn classify_segment(
             album_empty.then(|| guess(CleanupTagField::Album, CleanupConfidence::High)),
         ));
     }
-    if loose_eq(segment, &context.grandparent) {
+    if context.inherit_artist && loose_eq(segment, &context.grandparent) {
         return Some(classification(
             CleanupRule::StripArtist,
             CleanupConfidence::High,
@@ -839,11 +876,17 @@ fn classify_segment(
             .is_some_and(|value| loose_eq(segment, value))
     {
         if known_kind(Some(segment), context.verdicts) == Some(NameVerdictKind::Album) {
+            if !context.inherit_album {
+                return None;
+            }
             return Some(classification(
                 CleanupRule::StripAlbum,
                 CleanupConfidence::High,
                 album_empty.then(|| guess(CleanupTagField::Album, CleanupConfidence::High)),
             ));
+        }
+        if !context.inherit_artist {
+            return None;
         }
         let confidence =
             if known_kind(Some(segment), context.verdicts) == Some(NameVerdictKind::Artist) {
@@ -866,11 +909,17 @@ fn classify_segment(
         if known_kind(Some(segment), context.verdicts) == Some(NameVerdictKind::Album)
             && album_empty
         {
+            if !context.inherit_album {
+                return None;
+            }
             return Some(classification(
                 CleanupRule::StripAlbum,
                 CleanupConfidence::High,
                 Some(guess(CleanupTagField::Album, CleanupConfidence::High)),
             ));
+        }
+        if !context.inherit_artist {
+            return None;
         }
         let confidence =
             if known_kind(Some(segment), context.verdicts) == Some(NameVerdictKind::Artist) {
@@ -884,7 +933,8 @@ fn classify_segment(
             artist_empty.then(|| guess(CleanupTagField::Artist, confidence)),
         ));
     }
-    if position == 1
+    if context.inherit_album
+        && position == 1
         && context
             .second_segment
             .as_ref()
@@ -1173,30 +1223,40 @@ fn plan_track(
     let mut artist_confidence = CleanupConfidence::Low;
     let mut artist_flippable = false;
     if artist_allowed {
-        if !track.metadata.album_artist.is_empty() {
-            artist_new = Some(track.metadata.album_artist.clone());
-            artist_confidence = CleanupConfidence::High;
-        } else if let Some(extracted) = extraction.artist.clone() {
+        if let Some(extracted) = extraction
+            .artist
+            .clone()
+            .filter(|value| !is_collective_artist(value))
+        {
             artist_new = Some(extracted);
             artist_confidence = extraction
                 .artist_confidence
                 .unwrap_or(CleanupConfidence::Low);
             artist_flippable = artist_confidence == CleanupConfidence::Low;
-        } else if let Some(dominant) = context.dominant_artist.clone() {
+        } else if context.inherit_artist && !track.metadata.album_artist.trim().is_empty() {
+            artist_new = Some(track.metadata.album_artist.clone());
+            artist_confidence = CleanupConfidence::High;
+        } else if context.inherit_artist
+            && let Some(dominant) = context.dominant_artist.clone()
+        {
             artist_new = Some(dominant);
             artist_confidence = if context.dominant_artist_unanimous {
                 CleanupConfidence::High
             } else {
                 CleanupConfidence::Low
             };
-        } else if context
-            .folder_artist
-            .as_ref()
-            .is_some_and(|artist| !is_generic_name(artist))
+        } else if context.inherit_artist
+            && context
+                .folder_artist
+                .as_ref()
+                .is_some_and(|artist| !is_generic_name(artist))
         {
             artist_new = context.folder_artist.clone();
             artist_flippable = true;
-        } else if context.albumish && !is_generic_name(&context.grandparent) {
+        } else if context.inherit_artist
+            && context.albumish
+            && !is_generic_name(&context.grandparent)
+        {
             artist_new = Some(context.grandparent.clone());
             artist_flippable = true;
         }
@@ -1232,19 +1292,23 @@ fn plan_track(
             };
             album_new = Some(extracted);
             album_flippable = album_confidence == CleanupConfidence::Low;
-        } else if let Some(dominant) = context.dominant_album.clone() {
+        } else if context.inherit_album
+            && let Some(dominant) = context.dominant_album.clone()
+        {
             album_new = Some(dominant);
             album_confidence = if context.dominant_album_unanimous {
                 CleanupConfidence::High
             } else {
                 CleanupConfidence::Low
             };
-        } else if let Some(folder_album) = context.folder_album.as_ref().filter(|folder_album| {
-            !is_generic_name(folder_album)
-                && !artistish
-                    .iter()
-                    .any(|artist| loose_eq(folder_album, artist))
-        }) {
+        } else if context.inherit_album
+            && let Some(folder_album) = context.folder_album.as_ref().filter(|folder_album| {
+                !is_generic_name(folder_album)
+                    && !artistish
+                        .iter()
+                        .any(|artist| loose_eq(folder_album, artist))
+            })
+        {
             album_new = Some(folder_album.clone());
             album_confidence = if context.albumish {
                 CleanupConfidence::High
@@ -1276,6 +1340,7 @@ fn plan_track(
         album_new = None;
     }
     if flip_album
+        && context.inherit_artist
         && artist_allowed
         && artist_new.is_none()
         && let Some(swapped) = swapped_album.clone()
@@ -1284,6 +1349,7 @@ fn plan_track(
         artist_confidence = CleanupConfidence::High;
     }
     if flip_artist
+        && context.inherit_album
         && album_allowed
         && album_new.is_none()
         && let Some(swapped) = swapped_artist.clone()
@@ -1313,7 +1379,13 @@ fn plan_track(
         }
     }
 
-    if let Some(artist) = artist_new {
+    if artist_allowed && artist_new.is_none() && !context.inherit_artist {
+        plan.notes.push("Artist inheritance withheld: this folder has conflicting artist/album tags or a collective artist credit. Review per-track evidence.".to_owned());
+    }
+    if album_allowed && album_new.is_none() && !context.inherit_album {
+        plan.notes.push("Album, disc and year inheritance withheld: this folder contains conflicting album tags.".to_owned());
+    }
+    if let Some(artist) = artist_new.filter(|value| !is_collective_artist(value)) {
         let verified = known_kind(Some(&artist), context.verdicts) == Some(NameVerdictKind::Artist);
         plan.operations.push(tag_suggestion(
             track.id,
@@ -1361,8 +1433,10 @@ fn plan_track(
                     .number_confidence
                     .unwrap_or(CleanupConfidence::Low),
             )
-        } else {
+        } else if context.inherit_album {
             (context.disc_from_folder, CleanupConfidence::High)
+        } else {
+            (None, CleanupConfidence::Low)
         };
         if track.metadata.disc_no.is_none()
             && let Some(disc_number) = disc_number
@@ -1379,6 +1453,7 @@ fn plan_track(
         }
     }
     if enabled.contains(CleanupRule::TagYear)
+        && context.inherit_album
         && track.metadata.year.is_none()
         && let Some(year) = context.folder_year
     {
@@ -1425,6 +1500,61 @@ fn group_by_folder(tracks: &[IndexedTrack]) -> BTreeMap<String, Vec<&IndexedTrac
     grouped
 }
 
+fn collision_label(track: &IndexedTrack, kind: usize) -> String {
+    let metadata = &track.metadata;
+    let artist = if is_collective_artist(&metadata.artist) {
+        ""
+    } else {
+        metadata.artist.trim()
+    };
+    let album = metadata.album.trim();
+    let position = match (metadata.disc_no, metadata.track_no) {
+        (Some(disc), Some(number)) if disc > 0 && number > 0 => {
+            format!("Disc {disc} Track {number:02}")
+        }
+        (_, Some(number)) if number > 0 => format!("Track {number:02}"),
+        (Some(disc), _) if disc > 0 => format!("Disc {disc}"),
+        _ => String::new(),
+    };
+    match kind {
+        0 => artist.to_owned(),
+        1 => album.to_owned(),
+        2 => position,
+        3 if !artist.is_empty() && !album.is_empty() => format!("{artist} - {album}"),
+        4 if !album.is_empty() && !position.is_empty() => format!("{album} - {position}"),
+        _ => String::new(),
+    }
+}
+
+fn portable_collision_part(value: &str) -> String {
+    collapse_whitespace(
+        &value
+            .chars()
+            .map(|character| {
+                if character.is_control() || "<>:\"/\\|?*".contains(character) {
+                    '-'
+                } else {
+                    character
+                }
+            })
+            .collect::<String>(),
+    )
+    .trim_matches([' ', '.'])
+    .to_owned()
+}
+
+fn collision_stem(stem: &str, label: &str, extension: &str) -> String {
+    // Reserve room for the distinguishing suffix before truncating the base. UTF-8
+    // bytes also conservatively bound UTF-16 components on Windows.
+    let budget = 240_usize.saturating_sub(extension.len());
+    let label = portable_collision_part(label);
+    let label = &label[..label.floor_char_boundary(budget.saturating_sub(8).min(96))];
+    let annotation = format!(" ({label})");
+    let base = portable_collision_part(stem);
+    let base = &base[..base.floor_char_boundary(budget.saturating_sub(annotation.len()))];
+    format!("{}{annotation}", base.trim_end_matches([' ', '.']))
+}
+
 #[must_use]
 pub fn analyze_cleanup(
     scope_tracks: &[IndexedTrack],
@@ -1454,6 +1584,27 @@ pub fn analyze_cleanup(
             existing.insert(case_key(leaf(track.path.as_str())), track.id);
         }
         let mut proposed = BTreeMap::<String, TrackId>::new();
+        let tracks_by_id = context_tracks
+            .iter()
+            .map(|track| (track.id, *track))
+            .collect::<BTreeMap<_, _>>();
+        let mut target_owners = BTreeMap::<String, Vec<TrackId>>::new();
+        for plan in &folder_plans {
+            if let Some(CleanupValue::Text(stem)) = plan
+                .operations
+                .iter()
+                .find(|operation| operation.kind == CleanupSuggestionKind::Rename)
+                .and_then(|operation| operation.new.as_ref())
+            {
+                target_owners
+                    .entry(case_key(&format!(
+                        "{stem}{}",
+                        stem_and_suffix(&plan.path).1
+                    )))
+                    .or_default()
+                    .push(plan.track_id);
+            }
+        }
         for plan in &mut folder_plans {
             let rename_index = plan
                 .operations
@@ -1476,10 +1627,48 @@ pub fn analyze_cleanup(
                     || proposed.contains_key(&key)
             };
             let mut resolved_stem = new_stem.clone();
-            let mut counter = 2;
-            while occupied(&format!("{resolved_stem}{suffix}")) {
-                resolved_stem = format!("{new_stem} ({counter})");
-                counter += 1;
+            if occupied(&target_name) {
+                // Leave enough space for every numeric fallback as well as the base.
+                // Indexed audio normally has a short extension, but analysis must
+                // also terminate for an unusual imported filename.
+                if suffix.len() > 208 {
+                    plan.notes.push("The filename extension leaves insufficient room for a unique name; review this filename manually.".to_owned());
+                    plan.operations.remove(rename_index);
+                    continue;
+                }
+                let target_key = case_key(&target_name);
+                let competitors = target_owners
+                    .get(&target_key)
+                    .into_iter()
+                    .flatten()
+                    .chain(existing.get(&target_key))
+                    .filter(|id| **id != plan.track_id)
+                    .filter_map(|id| tracks_by_id.get(id).copied())
+                    .collect::<Vec<_>>();
+                if let Some(track) = tracks_by_id.get(&plan.track_id) {
+                    // Only indexed tags may distinguish names. A separate unchecked tag
+                    // suggestion must not become evidence for a rename the user accepts.
+                    for kind in 0..5 {
+                        let label = collision_label(track, kind);
+                        if cleanup_loose_key(&label).is_empty()
+                            || competitors
+                                .iter()
+                                .any(|other| loose_eq(&label, &collision_label(other, kind)))
+                        {
+                            continue;
+                        }
+                        let candidate = collision_stem(new_stem, &label, suffix);
+                        if !occupied(&format!("{candidate}{suffix}")) {
+                            resolved_stem = candidate;
+                            break;
+                        }
+                    }
+                }
+                let mut counter = 2;
+                while occupied(&format!("{resolved_stem}{suffix}")) {
+                    resolved_stem = collision_stem(new_stem, &counter.to_string(), suffix);
+                    counter += 1;
+                }
             }
             let key = case_key(&format!("{resolved_stem}{suffix}"));
             if resolved_stem != *new_stem {
@@ -1565,12 +1754,14 @@ struct FolderClues {
     year: Option<u32>,
 }
 
-fn single_or_dominant(values: Vec<String>) -> Option<String> {
+fn single_or_unanimous(values: Vec<String>) -> Option<String> {
     let cleaned = values
         .into_iter()
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>();
-    if cleaned.len() == 1 {
+    if has_conflicting_values(cleaned.iter().map(String::as_str)) {
+        None
+    } else if cleaned.len() == 1 {
         cleaned.into_iter().next()
     } else {
         dominant(cleaned).0
@@ -1600,13 +1791,25 @@ fn folder_clues(folder: &str, tracks: &[&IndexedTrack]) -> FolderClues {
         .copied()
         .filter(|first| years.iter().all(|year| year == first));
     FolderClues {
-        album: single_or_dominant(albums),
-        artist: single_or_dominant(
+        album: if has_conflicting_values(tracks.iter().map(|track| track.metadata.album.as_str())) {
+            None
+        } else {
+            single_or_unanimous(albums)
+        },
+        artist: single_or_unanimous(
             tracks
                 .iter()
-                .map(|track| track.metadata.artist.clone())
+                .map(|track| track.metadata.album_artist.clone())
                 .collect(),
-        ),
+        )
+        .or_else(|| {
+            single_or_unanimous(
+                tracks
+                    .iter()
+                    .map(|track| track.metadata.artist.clone())
+                    .collect(),
+            )
+        }),
         year,
     }
 }
@@ -2063,6 +2266,238 @@ mod tests {
                 Some(CleanupTagField::Artist)
             )
             .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn compilation_artist_is_not_inherited_but_filename_evidence_survives()
+    -> Result<(), Box<dyn Error>> {
+        let mut tracks = vec![
+            track(1, "Soundtrack/01 - Overture.mp3")?,
+            track(2, "Soundtrack/02 - Singer - Finale.mp3")?,
+            track(3, "Soundtrack/03 - Credits.mp3")?,
+        ];
+        for track in &mut tracks {
+            track.metadata.album_artist = "Various Artists".to_owned();
+        }
+        tracks[2].metadata.artist = "Composer".to_owned();
+        let plans = analyze_cleanup(&tracks, &tracks, DEFAULT_CLEANUP_RULES, None);
+        assert!(
+            operation(
+                &plans,
+                tracks[0].id,
+                CleanupSuggestionKind::Tag,
+                Some(CleanupTagField::Artist)
+            )
+            .is_none()
+        );
+        assert_eq!(
+            operation(
+                &plans,
+                tracks[1].id,
+                CleanupSuggestionKind::Tag,
+                Some(CleanupTagField::Artist)
+            )
+            .and_then(|op| text_value(&op.new)),
+            Some("Singer")
+        );
+        assert!(
+            plans
+                .iter()
+                .find(|plan| plan.track_id == tracks[0].id)
+                .ok_or("missing review note")?
+                .notes
+                .iter()
+                .any(|note| note.contains("inheritance withheld"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_folder_vetoes_majority_artist_and_album_inheritance() -> Result<(), Box<dyn Error>> {
+        let mut tracks = (1..=4)
+            .map(|id| {
+                track(
+                    id,
+                    &format!("Composer/Collection (2020)/Disc 2/{id:02} - Song {id}.mp3"),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for track in &mut tracks[..2] {
+            track.metadata.artist = "Composer".to_owned();
+            track.metadata.album = "First Album".to_owned();
+        }
+        tracks[2].metadata.artist = "Guest".to_owned();
+        tracks[2].metadata.album = "Second Album".to_owned();
+        tracks[3].metadata.album.clear();
+        tracks[3].metadata.album_artist = "Composer".to_owned();
+        let plans = analyze_cleanup(&tracks[3..], &tracks, DEFAULT_CLEANUP_RULES, None);
+        for field in [
+            CleanupTagField::Artist,
+            CleanupTagField::Album,
+            CleanupTagField::DiscNumber,
+            CleanupTagField::Year,
+        ] {
+            assert!(
+                operation(
+                    &plans,
+                    tracks[3].id,
+                    CleanupSuggestionKind::Tag,
+                    Some(field)
+                )
+                .is_none(),
+                "unexpected {field:?}"
+            );
+        }
+        assert!(
+            operation(
+                &plans,
+                tracks[3].id,
+                CleanupSuggestionKind::Tag,
+                Some(CleanupTagField::TrackNumber)
+            )
+            .is_some()
+        );
+        assert_eq!(
+            plans,
+            analyze_cleanup(&tracks, &tracks, DEFAULT_CLEANUP_RULES, None)
+                .into_iter()
+                .filter(|plan| plan.track_id == tracks[3].id)
+                .collect::<Vec<_>>()
+        );
+        // Artist diversity alone does not block a coherent soundtrack album.
+        tracks[2].metadata.album = "First Album".to_owned();
+        let plans = analyze_cleanup(&tracks[3..], &tracks, DEFAULT_CLEANUP_RULES, None);
+        assert!(
+            operation(
+                &plans,
+                tracks[3].id,
+                CleanupSuggestionKind::Tag,
+                Some(CleanupTagField::Artist)
+            )
+            .is_none()
+        );
+        assert_eq!(
+            operation(
+                &plans,
+                tracks[3].id,
+                CleanupSuggestionKind::Tag,
+                Some(CleanupTagField::Album)
+            )
+            .and_then(|op| text_value(&op.new)),
+            Some("First Album")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn folder_rebuild_requires_album_agreement_and_prefers_album_artist()
+    -> Result<(), Box<dyn Error>> {
+        let mut tracks = (1..=3)
+            .map(|id| track(id, &format!("1/{id}.mp3")))
+            .collect::<Result<Vec<_>, _>>()?;
+        for track in &mut tracks {
+            track.metadata.album = "Soundtrack".to_owned();
+            track.metadata.artist = "Composer".to_owned();
+            track.metadata.album_artist = "Various Artists".to_owned();
+        }
+        tracks[2].metadata.artist = "Guest".to_owned();
+        assert_eq!(
+            analyze_cleanup_folders(&tracks, &tracks, DEFAULT_CLEANUP_RULES)[0].new,
+            "Various Artists - Soundtrack"
+        );
+        tracks[2].metadata.album = "Other Album".to_owned();
+        assert!(analyze_cleanup_folders(&tracks, &tracks, DEFAULT_CLEANUP_RULES).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn collision_names_use_distinguishing_authored_metadata() -> Result<(), Box<dyn Error>> {
+        let mut tracks = vec![
+            track(1, "Soundtrack/01 - Finale.mp3")?,
+            track(2, "Soundtrack/Finale.mp3")?,
+        ];
+        tracks[0].metadata.artist = "Guest".to_owned();
+        tracks[1].metadata.artist = "Composer".to_owned();
+        let renamed = |tracks: &[IndexedTrack]| {
+            analyze_cleanup(&tracks[..1], tracks, DEFAULT_CLEANUP_RULES, None)
+                .into_iter()
+                .flat_map(|plan| plan.operations)
+                .find(|op| op.kind == CleanupSuggestionKind::Rename)
+                .ok_or("missing rename")
+        };
+        let rename = renamed(&tracks)?;
+        assert_eq!(text_value(&rename.new), Some("Finale (Guest)"));
+        assert_eq!(rename.confidence, CleanupConfidence::Low);
+        assert!(
+            rename
+                .rules
+                .iter()
+                .any(|rule| rule == "resolve_name_collision")
+        );
+        tracks[0].metadata.artist = "Composer".to_owned();
+        tracks[0].metadata.disc_no = Some(2);
+        tracks[0].metadata.track_no = Some(8);
+        assert_eq!(
+            text_value(&renamed(&tracks)?.new),
+            Some("Finale (Disc 2 Track 08)")
+        );
+        tracks[0].metadata.album = "Second Soundtrack".to_owned();
+        assert_eq!(
+            text_value(&renamed(&tracks)?.new),
+            Some("Finale (Second Soundtrack)")
+        );
+        // Sanitization must still reserve occupied names, and unchecked inferred
+        // tags must not be used when the indexed metadata cannot distinguish files.
+        tracks[0].metadata.artist = "A/B: C?".to_owned();
+        tracks.push(track(3, "Soundtrack/Finale (A-B- C-).mp3")?);
+        assert_eq!(
+            text_value(&renamed(&tracks)?.new),
+            Some("Finale (Second Soundtrack)")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn collision_names_bound_unicode_and_keep_the_suffix_unique() -> Result<(), Box<dyn Error>> {
+        let title = "界".repeat(65);
+        let mut tracks = vec![
+            track(1, &format!("Album/01 - {title}.mp3"))?,
+            track(2, &format!("Album/{title}.mp3"))?,
+        ];
+        tracks[0].metadata.artist = format!("{}: Performer?", "音".repeat(60));
+        let plans = analyze_cleanup(&tracks[..1], &tracks, DEFAULT_CLEANUP_RULES, None);
+        let stem = operation(&plans, tracks[0].id, CleanupSuggestionKind::Rename, None)
+            .and_then(|op| text_value(&op.new))
+            .ok_or("missing rename")?;
+        assert!(stem.len() + 4 <= 240);
+        assert!(!stem.contains([':', '?']));
+        assert!(stem.ends_with(')'));
+        tracks.push(track(3, &format!("Album/{stem}.mp3"))?);
+        let plans = analyze_cleanup(&tracks[..1], &tracks, DEFAULT_CLEANUP_RULES, None);
+        let fallback = operation(&plans, tracks[0].id, CleanupSuggestionKind::Rename, None)
+            .and_then(|op| text_value(&op.new))
+            .ok_or("missing fallback")?;
+        assert!(fallback.ends_with(" (2)"));
+        assert!(fallback.len() + 4 <= 240);
+        Ok(())
+    }
+
+    #[test]
+    fn collision_names_abstain_when_the_extension_leaves_no_room() -> Result<(), Box<dyn Error>> {
+        let extension = "x".repeat(240);
+        let tracks = vec![
+            track(1, &format!("Album/01 - Song.{extension}"))?,
+            track(2, &format!("Album/Song.{extension}"))?,
+        ];
+        let plans = analyze_cleanup(&tracks[..1], &tracks, DEFAULT_CLEANUP_RULES, None);
+        assert!(operation(&plans, tracks[0].id, CleanupSuggestionKind::Rename, None).is_none());
+        assert!(
+            plans[0]
+                .notes
+                .iter()
+                .any(|note| note.contains("insufficient room"))
         );
         Ok(())
     }
