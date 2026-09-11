@@ -121,6 +121,18 @@ this public request only: the application's actual credential, recording lookup,
 container network and deployed build still need separate verification. Do not
 replace a scoped recording lookup with a title search solely to suppress an error.
 
+If that control returns the normal placeholder-key error, the next useful comparison
+uses the same key configured in Music: one known public song, followed by one of the
+already reviewed recordings by MBID and by exact artist/title. Run this as an explicit
+operator diagnostic; prompt for the key locally without echoing it, prevent redirects,
+bound requests and bodies, and print only status, body category, numeric API code and
+tag count. Never put the real key in a pasted command, process arguments or output.
+A failed public control points toward the credential or provider before recording
+coverage is assessed. Different ID/name outcomes warrant investigating that resource;
+they do not authorize changing the application's identity scope. If the diagnostic
+succeeds while the application fails, compare the actual backend image and container
+network before changing matching rules.
+
 ### Score saved results
 
 ```powershell
