@@ -163,6 +163,7 @@ pub enum CatalogFailure {
     InvalidPayload,
     ResponseTooLarge,
     ProviderCode(u32),
+    HttpProviderCode { status: u16, code: u32 },
 }
 
 impl Display for CatalogFailure {
@@ -175,6 +176,9 @@ impl Display for CatalogFailure {
             Self::InvalidPayload => formatter.write_str("unexpected response structure"),
             Self::ResponseTooLarge => formatter.write_str("response exceeded the size limit"),
             Self::ProviderCode(code) => write!(formatter, "provider error code {code}"),
+            Self::HttpProviderCode { status, code } => {
+                write!(formatter, "HTTP {status}; provider error code {code}")
+            }
         }
     }
 }

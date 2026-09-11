@@ -11,6 +11,15 @@ numbers ([track.getTopTags](https://www.last.fm/api/show/track.getTopTags)). Pre
 those distinctions before choosing a retry or configuration fix. No automatic
 retry or match-threshold change is implied by diagnostic enrichment.
 
+Last.fm's [REST request guide](https://www.last.fm/api/rest) and method examples use
+GET for reads; the cleanup adapter now follows that format with HTTPS and preserves
+MBID scoping and `autocorrect=0`. Previously, checking HTTP status before reading the
+bounded body discarded the provider's numeric explanation for HTTP errors. The
+adapter now retains both status and numeric API code, without accepting tag data
+from a failed response. This fixes the diagnostic gap; it does not establish that
+POST caused a particular live error or that changing methods will resolve it.
+Request URLs contain the API key and remain excluded from retained errors and logs.
+
 > Implementation follow-up (10 September 2026): the core correctness, local-observation/import,
 > bounded album-edition review, existing-provider enrichment/caching and closed-candidate text AI
 > work is implemented. The findings below describe the researched baseline and rationale. The

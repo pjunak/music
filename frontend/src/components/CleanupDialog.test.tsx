@@ -222,6 +222,42 @@ describe("CleanupWorkflow catalog enrichment", () => {
     expect(screen.queryByText(/Catalog evidence is incomplete/)).not.toBeInTheDocument();
   });
 
+  it("copies the original catalog job without downloads, new lookups or applying review choices", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await screen.findByText("01_song.mp3");
+    await user.click(screen.getByRole("button", { name: "None" }));
+    await user.click(screen.getByText("Copy or view catalog results"));
+    await user.click(screen.getByRole("button", { name: "Copy JSON" }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify(catalogJob, null, 2));
+    expect(screen.getByText(/Catalog results copied/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Catalog results JSON" })).toHaveValue(JSON.stringify(catalogJob, null, 2));
+    expect(cleanupApi.enrich).toHaveBeenCalledOnce();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+    expect(assistantApi.reviewAnalysisTagsBulk).not.toHaveBeenCalled();
+  });
+
+  it("provides selectable complete JSON when browser clipboard access fails", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("Clipboard denied"));
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await screen.findByText("01_song.mp3");
+    await user.click(screen.getByText("Copy or view catalog results"));
+    await user.click(screen.getByRole("button", { name: "Copy JSON" }));
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Catalog results JSON" });
+    expect(await screen.findByText(/Clipboard access is unavailable/)).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("readonly");
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+    expect(JSON.parse(input.value)).toEqual(catalogJob);
+    expect(cleanupApi.enrich).toHaveBeenCalledOnce();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+  });
+
   it("distinguishes incomplete identified and unmatched results without selecting catalog edits", async () => {
     const result = catalogJob.result as unknown as CleanupEnrichmentResult;
     const plan = result.plans[0]!;

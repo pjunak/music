@@ -7,6 +7,22 @@
   width: min(780px, 94vw);
 }
 
+.cleanup-catalog-copy {
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+.cleanup-catalog-copy summary {
+  cursor: pointer;
+}
+.cleanup-catalog-copy textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--space-2);
+  font-family: monospace;
+  overflow-wrap: anywhere;
+}
+
 .cleanup-options {
   display: flex;
   flex-direction: column;

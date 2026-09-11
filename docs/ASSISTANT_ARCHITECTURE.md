@@ -477,6 +477,9 @@ independent recording/edition/field labels with artist/release families kept in 
 After a completed catalog lookup, the browser can download the original job JSON, including
 empty results. The export preserves provider evidence and proposals before local/edition/model
 review changes; downloading neither makes provider requests nor applies metadata changes.
+**Copy or view catalog results** exposes the same original JSON when a browser cannot
+save downloads. Clipboard copying has a selectable, read-only text fallback when
+permission is unavailable; neither export path applies review choices or repeats lookups.
 Completed-run summaries expose incomplete evidence, including the unmatched subset,
 even when there are no proposed edits. A completed job is not a claim that every
 provider lookup succeeded; available proposals remain reviewable without an automatic retry.
@@ -484,6 +487,12 @@ Catalog failure notes retain typed HTTP status, timeout/transport and response-f
 categories, plus numeric Last.fm API error codes. They exclude request URLs, credentials,
 raw response bodies and provider messages. Existing error codes, partial-result cache
 rules, matching thresholds and retry policy remain unchanged.
+Last.fm tag reads use HTTPS GET with `autocorrect=0`, retaining recording-MBID-only
+scoping for identified tracks. HTTP error bodies are read under the existing timeout
+and size limits to retain a numeric API code alongside the HTTP status when available.
+Malformed, oversized or non-JSON error bodies retain the HTTP status; an HTTP error
+can never produce tag suggestions even if its body resembles a success response.
+GET query strings contain the source key and must not be logged or exported.
 It reports missing/failed results, unknown labels and harmful changes separately. Paired run
 comparisons identify per-track regressions, improvements and mixed changes, default to the
 development split and require an explicit holdout selection. Unknown labels and unavailable

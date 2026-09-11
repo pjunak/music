@@ -36,6 +36,9 @@ mod alias_tests;
 mod failures;
 use failures::{http_failure, musicbrainz_failure};
 
+#[path = "cleanup_enrichment_lastfm.rs"]
+mod lastfm;
+
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const FINGERPRINT_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -356,33 +359,15 @@ impl HttpCatalogConnector {
         api_key: &str,
         recording_id: Option<&str>,
     ) -> Result<Vec<CommunityTag>, CatalogError> {
-        let mut form = vec![
-            ("method", "track.gettoptags"),
-            ("api_key", api_key),
-            ("autocorrect", "0"),
-            ("format", "json"),
-        ];
-        if let Some(id) = recording_id {
-            form.push(("mbid", id));
-        } else {
-            form.extend([("artist", artist), ("track", title)]);
-        }
-        let response = self
-            .http
-            .post(LASTFM_ENDPOINT)
-            .form(&form)
-            .send()
-            .await
-            .map_err(|error| CatalogError::LastFmFailure(http_failure(&error)))?
-            .error_for_status()
-            .map_err(|error| CatalogError::LastFmFailure(http_failure(&error)))?;
-        let payload = bounded_json(response)
-            .await
-            .map_err(CatalogError::LastFmFailure)?;
-        parse_community_tags(&payload).map_err(|error| match error {
-            CatalogError::LastFmFailure(_) => error,
-            _ => CatalogError::LastFmFailure(CatalogFailure::InvalidPayload),
-        })
+        lastfm::community_tags(
+            &self.http,
+            LASTFM_ENDPOINT,
+            artist,
+            title,
+            api_key,
+            recording_id,
+        )
+        .await
     }
 }
 

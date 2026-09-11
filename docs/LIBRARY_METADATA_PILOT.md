@@ -69,9 +69,12 @@ Record longer research notes separately and reference them in the short evidence
 After a completed lookup, **Download catalog results** saves the original
 `library.cleanup-enrichment` job as JSON from the cleanup screen, including runs with
 no proposals. The export retains scope, results and evidence before local suggestions,
-edition choices or review selections are merged into the review. It does not run a
-provider or apply changes. Failed or incomplete jobs are not offered as catalog-result
-exports. For older deployments, engineering can save the authenticated
+edition choices or review selections are merged into the review. If the browser cannot
+save the file, expand **Copy or view catalog results**, copy the JSON into a text file
+and save it with a `.json` extension. The full text remains selectable if clipboard
+permission is unavailable. Exporting does not run a provider or apply changes.
+Only succeeded jobs with a valid catalog result are offered, including completed
+runs whose provider evidence is partial. For older deployments, engineering can save the authenticated
 `GET /api/jobs/{job_id}` response, or its `result` object, as `run.json`. Use the same indexed
 metadata snapshot for baseline and changed runs; do not apply proposed changes between them.
 The scorer checks original values for proposed, labeled fields and rejects mismatched
@@ -80,7 +83,10 @@ The cleanup summary also counts tracks with incomplete evidence and how many of
 those are unmatched, including runs with no proposed edits. Keep these availability
 gaps separate from complete no-match results when deciding what to improve next.
 New lookup notes include safe HTTP/transport/response categories and Last.fm API
-error numbers. Older jobs cannot recover discarded error details; retain them as
+error numbers, including numeric codes carried inside HTTP error responses.
+An HTTP 400 alone cannot distinguish a missing parameter, unknown resource or
+credential problem; retain the API code before deciding on a remedy.
+Older jobs cannot recover discarded error details; retain them as
 baselines and inspect a new bounded lookup after deploying the diagnostics. A rate
 limit, invalid credential and missing catalog record need different remedies; an
 unavailable response alone does not justify changing acceptance thresholds.

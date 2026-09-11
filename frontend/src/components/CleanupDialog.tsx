@@ -5,6 +5,7 @@ import { CleanupRejectedPanel } from "@/components/CleanupRejectedPanel";
 import { CleanupEvidence, CleanupEvidenceImport } from "@/components/CleanupEvidence";
 import { CleanupModelReview } from "@/components/CleanupModelReview";
 import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
+import { CleanupCatalogCopy } from "@/components/CleanupCatalogCopy";
 import { WarnIcon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
 import { assistantApi, cleanupApi, jobsApi } from "@/core/api";
@@ -1277,6 +1278,7 @@ export function CleanupWorkflow({
           </button>
           <span className="muted small"> Saves this run's original proposals and evidence as JSON.</span>
         </p>
+        <CleanupCatalogCopy key={enrichmentJob.id} job={enrichmentJob} />
       </>
     )}
     {stepBody}

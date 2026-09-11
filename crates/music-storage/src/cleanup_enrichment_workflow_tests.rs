@@ -299,9 +299,12 @@ impl CatalogConnector for FixtureCatalog {
         Box::pin(async move {
             self.tag_calls.fetch_add(1, Ordering::SeqCst);
             if self.tag_failure.load(Ordering::SeqCst) {
-                return Err(CatalogError::LastFmFailure(CatalogFailure::ProviderCode(
-                    26,
-                )));
+                return Err(CatalogError::LastFmFailure(
+                    CatalogFailure::HttpProviderCode {
+                        status: 400,
+                        code: 6,
+                    },
+                ));
             }
             Ok(vec![
                 CommunityTag {
@@ -526,7 +529,7 @@ async fn catalog_failures_retain_safe_diagnostics_without_losing_identity_or_cac
     for detail in [
         "MusicBrainz: HTTP 429",
         "MusicBrainz: HTTP 503",
-        "Last.fm: provider error code 26",
+        "Last.fm: HTTP 400; provider error code 6",
     ] {
         assert!(
             notes
