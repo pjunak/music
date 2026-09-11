@@ -2,6 +2,7 @@ use super::catalog::{
     AcousticCandidate, Candidate, CatalogConnector, CatalogCredentialSource, CatalogError,
     CommunityTag, Recording, ReleaseDetail,
 };
+use super::credits::preserve_credit;
 use super::editions::resolve_editions;
 use super::evidence::{ImportedTrackEvidence, LocalEvidence, retrieval_hypothesis};
 use super::resolution::resolve_identity;
@@ -332,7 +333,7 @@ impl CleanupEnrichmentJobHandler {
             } else {
                 None
             };
-            let result = if let Some(result) = result {
+            let mut result = if let Some(result) = result {
                 cached = cached.saturating_add(1);
                 result
             } else {
@@ -395,6 +396,14 @@ impl CleanupEnrichmentJobHandler {
                     }
                 }
             };
+            super::imported::append_review_import(
+                &mut result,
+                track,
+                parameters
+                    .imports
+                    .iter()
+                    .find(|i| i.track_id == track.id.get()),
+            );
             match result.get("status").and_then(Value::as_str) {
                 Some("identified") => identified = identified.saturating_add(1),
                 Some("fingerprinted") => {
@@ -484,6 +493,13 @@ impl CleanupEnrichmentJobHandler {
             }
             return Ok(result);
         };
+        let credit = preserve_credit(
+            self.connector.as_ref(),
+            &track.metadata.artist,
+            &recording.artist,
+            &recording.artist_credits,
+        )
+        .await;
         let editions = resolve_editions(
             self.connector.as_ref(),
             track,
@@ -497,14 +513,20 @@ impl CleanupEnrichmentJobHandler {
         // Proposals compare with the original indexed values, never retrieval hypotheses.
         let metadata = canonical_metadata(&recording, editions.selected.as_ref());
         let mut operations = metadata_operations(track, &metadata, &recording_id);
+        operations.retain(|op| {
+            !(credit.preserve && op["field"] == "artist"
+                || editions.preserve_album_artist && op["field"] == "album_artist")
+        });
         for op in &mut operations {
             op["evidence"] = json!({"source": "musicbrainz", "entity": if matches!(op["field"].as_str(), Some("title" | "artist" | "genre")) { "recording" } else { "release" },
                 "recording_id": recording_id, "release_id": editions.selected.as_ref().map(|r| &r.id), "method": method});
         }
         let choices = editions.choices;
-        let mut partial = resolution.partial || editions.partial;
+        let mut partial = resolution.partial || editions.partial || credit.partial;
         let mut tag_suggestions = Vec::new();
         let mut notes = resolution.notes;
+        notes.extend(recording.lookup_notes.iter().cloned());
+        notes.extend(credit.notes);
         notes.push(format!(
             "Matched {} — {} via {} evidence (match score {:.2}; not a probability).",
             recording.artist, recording.title, method, confidence
@@ -1195,7 +1217,7 @@ fn failed_result(track: &IndexedTrack, code: &str) -> Map<String, Value> {
         "identity": null,
         "ops": [],
         "tag_suggestions": [],
-        "notes": [format!("Catalog enrichment failed ({code}); no change was proposed.")],
+        "notes": [format!("Catalog enrichment failed ({code}); catalog metadata was not proposed.")],
     })
     .as_object()
     .cloned()
@@ -1343,6 +1365,7 @@ mod tests {
                 (EvidenceField::TrackNo, "5".into()),
                 (EvidenceField::DiscNo, "2".into()),
             ]),
+            ..ImportedTrackEvidence::default()
         });
         let hypothesis = retrieval_hypothesis(&authored, None, &evidence);
         assert_eq!(

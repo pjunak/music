@@ -615,3 +615,6 @@
 
 .cleanup-evidence { display: block; margin-block: 0.75rem; font-size: 0.875rem; }
 .cleanup-evidence details { margin-top: 0.75rem; }
+.cleanup-evidence-input { display: grid; gap: var(--space-2); min-width: 0; margin-block: var(--space-3); }
+.cleanup-evidence-input input { width: 100%; min-width: 0; box-sizing: border-box; }
+.cleanup-evidence-toggle { display: flex; align-items: flex-start; gap: var(--space-2); margin-block: var(--space-3); }

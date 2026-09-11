@@ -179,7 +179,42 @@ The application shares one MusicBrainz limiter between name and catalog lookups,
 waiting 1.1 seconds after response headers. A 503 alone does not prove an application
 pacing defect: MusicBrainz documents application, source-IP and global load limits
 ([rate-limiting reference](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)).
-Use bounded availability checks before changing retries or acceptance thresholds.
+The current implementation adds one paced retry for transient read failures with a ten-retry
+run budget and shared provider cooldown. This is bounded recovery, not a finding that local
+pacing caused the baseline failures. Permanent errors and invalid bodies are not retried automatically.
+
+### Remaining development fixes and deployment check
+
+The retained It Follows results already contain release
+`1e18da96-4713-41d2-8c3b-17a5743736d1`. The former exact album-title filter excluded it because
+the catalog title includes `(Deluxe Reissue)`. The
+[MusicBrainz release](https://musicbrainz.org/release/1e18da96-4713-41d2-8c3b-17a5743736d1)
+and [creator release page](https://disasterpeace.bandcamp.com/album/it-follows-deluxe-reissue)
+both describe the 34-track reissue dated 17 October 2025. The updated filter retains this
+narrow class of edition suffix as an alternative, and the review can target an explicit
+release ID outside the five-detail shortlist. It does not relax recording acceptance.
+MusicBrainz divides this release into two media (18 and 16 tracks), while Bandcamp lists
+34 consecutive positions. Do not treat those numbering conventions as interchangeable.
+
+Corroborated full-credit script choices now suppress unnecessary artist/album-artist replacements.
+Every credited artist must match canonical or typed artist-name evidence, preserving order and
+join phrases. Search hints and same-script abbreviations remain ineligible. This targets the
+Romanized/native-script cases while retaining useful Boris-to-Borislav spelling corrections;
+the saved baseline alone cannot establish which live aliases will pass.
+
+Explicitly sourced imports can now propose existing writable fields even for unmatched tracks.
+For the confirmed Bandcamp edition of Bridges of the South, the
+[creator tracklist](https://blackhill1.bandcamp.com/album/bridges-of-the-south) supplies Bridges
+at position two and Rivers Crossing at four. Such operator-supplied corrections are source review,
+not catalog recognition gains. Keep them separate from the fixed benchmark's independent labels;
+feeding expected answers back as imports and reporting them as detection accuracy would leak labels.
+
+After deployment, refresh the existing development folders, retain each unmodified export and
+compare with the fixed baseline. Check edition choice/positions, full composer credits, recovered
+request categories and the new source-review controls. Do not change source settings, apply tags,
+or use the 75-track holdout as part of this development check. The local regression suite validates
+behavior; new live coverage and recording/edition precision remain unmeasured until those results
+and independent identity judgments exist.
 
 ### Score saved results
 

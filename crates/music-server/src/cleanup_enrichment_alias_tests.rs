@@ -56,6 +56,14 @@ fn artist_queries_keep_aliases_in_the_artist_index_and_quote_literal_text() -> T
 fn artist_observations_validate_ids_and_treat_bounded_aliases_as_a_set() -> TestResult {
     let artist = parse_artist(&artist_payload(), Some(ARTIST))?;
     assert_eq!(artist.aliases, ["作曲家"]);
+    assert_eq!(artist.credit_aliases, ["作曲家"]);
+    let mut hints = artist_payload();
+    hints["aliases"][0]["type"] = json!("Search hint");
+    assert!(
+        parse_artist(&hints, Some(ARTIST))?
+            .credit_aliases
+            .is_empty()
+    );
     assert!(parse_artist(&artist_payload(), Some(OTHER)).is_err());
     assert!(parse_artist(&json!({"id":ARTIST,"name":"Artist"}), Some(ARTIST)).is_err());
     assert!(parse_artist(&json!({"id":ARTIST,"name":"Artist","aliases":{}}), None).is_err());
@@ -99,6 +107,8 @@ struct Fixture {
     requests: Mutex<Vec<(String, BTreeMap<String, String>)>>,
     invalid_recording: AtomicBool,
     invalid_artist: AtomicBool,
+    invalid_browse: AtomicBool,
+    invalid_detail: AtomicBool,
 }
 
 async fn catalog_fixture(
@@ -113,6 +123,17 @@ async fn catalog_fixture(
         }
         "recording" => recordings(),
         "artist" => json!({"artists":[{"id":ARTIST,"name":"Artist"}]}),
+        "release" if state.invalid_browse.swap(false, Ordering::SeqCst) => {
+            json!({"releases":[],"release-count":"invalid"})
+        }
+        "release" => json!({"releases":[],"release-count":0}),
+        _ if path.starts_with("recording/") => {
+            let mut payload = recordings()["recordings"][0].clone();
+            if state.invalid_detail.swap(false, Ordering::SeqCst) {
+                payload["id"] = json!(OTHER);
+            }
+            payload
+        }
         _ if path == format!("artist/{ARTIST}")
             && state.invalid_artist.swap(false, Ordering::SeqCst) =>
         {
@@ -126,6 +147,45 @@ async fn catalog_fixture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn invalid_entity_and_browse_responses_retry_without_poisoning_cache() -> TestResult {
+        let state = Arc::new(Fixture::default());
+        state.invalid_detail.store(true, Ordering::SeqCst);
+        state.invalid_browse.store(true, Ordering::SeqCst);
+        let router = Router::new()
+            .route("/{*path}", get(catalog_fixture))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("http://{}", listener.local_addr()?);
+        let server = tokio::spawn(async move { axum::serve(listener, router).await });
+        let directory = tempfile::tempdir()?;
+        let connector = HttpCatalogConnector {
+            musicbrainz: Arc::new(MusicBrainzNameLookup::fixture_endpoint(&endpoint)?),
+            library_root: LibraryRoot::open(directory.path())?,
+            config: CleanupConnectorConfig::new(None, None, "unused-fixture-fpcalc".into()),
+            http: Client::new(),
+            entities: Mutex::default(),
+            fingerprints: Mutex::default(),
+        };
+        let recording_id = "00000000-0000-0000-0000-000000000001";
+        assert!(connector.recording(recording_id).await.is_err());
+        let incomplete = connector.recording(recording_id).await?;
+        assert!(!incomplete.releases_complete);
+        assert!(
+            incomplete
+                .lookup_notes
+                .iter()
+                .any(|note| note.contains("MusicBrainz: unexpected response structure"))
+        );
+        let repaired = connector.recording(recording_id).await?;
+        assert!(repaired.releases_complete);
+        assert!(repaired.lookup_notes.is_empty());
+        connector.recording(recording_id).await?;
+        assert_eq!(state.requests.lock().await.len(), 4);
+        server.abort();
+        Ok(())
+    }
 
     #[tokio::test]
     async fn cached_alias_text_and_isrc_queries_retry_bad_responses_and_respect_refresh()

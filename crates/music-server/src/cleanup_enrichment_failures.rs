@@ -13,6 +13,7 @@ pub(super) fn http_failure(error: &reqwest::Error) -> CatalogFailure {
 
 pub(super) fn musicbrainz_failure(error: MusicBrainzLookupError) -> CatalogError {
     CatalogError::MusicBrainzFailure(match error {
+        MusicBrainzLookupError::CoolingDown => CatalogFailure::CoolingDown,
         MusicBrainzLookupError::Http(error) => http_failure(&error),
         MusicBrainzLookupError::Json(_) => CatalogFailure::InvalidJson,
         MusicBrainzLookupError::ResponseTooLarge => CatalogFailure::ResponseTooLarge,

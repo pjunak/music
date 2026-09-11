@@ -29,6 +29,8 @@ mod edition_positions;
 mod model_review;
 #[path = "cleanup_enrichment_workflow_tests/sibling_discovery.rs"]
 mod sibling_discovery;
+#[path = "cleanup_enrichment_workflow_tests/source_review.rs"]
+mod source_review;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 const RECORDING: &str = "00000000-0000-0000-0000-000000000001";
@@ -65,6 +67,7 @@ struct FixtureCatalog {
     last_release_scope: tokio::sync::Mutex<Option<String>>,
     lookup_order: tokio::sync::Mutex<Vec<&'static str>>,
     recording_conflict: AtomicBool,
+    recording_credits: tokio::sync::Mutex<Vec<ArtistCredit>>,
     sibling_candidates: tokio::sync::Mutex<std::collections::BTreeMap<i64, Vec<Candidate>>>,
     sibling_failures: tokio::sync::Mutex<std::collections::BTreeSet<i64>>,
     sibling_queries: tokio::sync::Mutex<Vec<i64>>,
@@ -72,6 +75,7 @@ struct FixtureCatalog {
     scoped_candidates: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<Candidate>>>,
     scoped_failures: tokio::sync::Mutex<std::collections::BTreeSet<String>>,
     multiple_editions: AtomicBool,
+    deluxe_edition: AtomicBool,
     artist_hits: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<Artist>>>,
     artist_details: tokio::sync::Mutex<std::collections::BTreeMap<String, Artist>>,
     artist_recordings: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<Candidate>>>,
@@ -223,6 +227,9 @@ impl CatalogConnector for FixtureCatalog {
         Box::pin(async move {
             assert_eq!(id, RECORDING);
             let mut releases = vec![release_summary()];
+            if self.deluxe_edition.load(Ordering::SeqCst) {
+                releases[0].title = "Album (Deluxe Reissue)".into();
+            }
             if self.multiple_editions.load(Ordering::SeqCst) {
                 releases.push(ReleaseSummary {
                     id: "00000000-0000-0000-0000-000000000097".into(),
@@ -237,6 +244,7 @@ impl CatalogConnector for FixtureCatalog {
                 }
                 .to_owned(),
                 artist: "Artist".to_owned(),
+                artist_credits: self.recording_credits.lock().await.clone(),
                 first_release_date: Some("2026".to_owned()),
                 releases,
                 releases_complete: true,
@@ -254,9 +262,15 @@ impl CatalogConnector for FixtureCatalog {
             }
             Ok(ReleaseDetail {
                 id: release_id.to_owned(),
-                title: "Album".to_owned(),
+                title: if release_id == RELEASE && self.deluxe_edition.load(Ordering::SeqCst) {
+                    "Album (Deluxe Reissue)"
+                } else {
+                    "Album"
+                }
+                .to_owned(),
                 artist: "Artist".to_owned(),
                 date: Some("2026".to_owned()),
+                artist_credits: self.recording_credits.lock().await.clone(),
                 track_no: Some(1),
                 disc_no: Some(1),
                 slots: self.release_slots.lock().await.clone().unwrap_or_else(|| {
@@ -367,6 +381,7 @@ async fn setup(
         last_release_scope: tokio::sync::Mutex::new(None),
         lookup_order: tokio::sync::Mutex::new(Vec::new()),
         recording_conflict: AtomicBool::new(false),
+        recording_credits: tokio::sync::Mutex::default(),
         sibling_candidates: tokio::sync::Mutex::default(),
         sibling_failures: tokio::sync::Mutex::default(),
         sibling_queries: tokio::sync::Mutex::default(),
@@ -374,6 +389,7 @@ async fn setup(
         scoped_candidates: tokio::sync::Mutex::default(),
         scoped_failures: tokio::sync::Mutex::default(),
         multiple_editions: AtomicBool::new(false),
+        deluxe_edition: AtomicBool::new(false),
         artist_hits: tokio::sync::Mutex::default(),
         artist_details: tokio::sync::Mutex::default(),
         artist_recordings: tokio::sync::Mutex::default(),

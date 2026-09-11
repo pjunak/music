@@ -30,7 +30,6 @@ use music_domain::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
-use tokio::time::Instant;
 use utoipa::ToSchema;
 use utoipa::openapi::RefOr;
 use utoipa::openapi::schema::{
@@ -52,6 +51,10 @@ const MUSICBRAINZ_USER_AGENT: &str = "music-dnd-orchestrator/0.1 (https://github
 const MUSICBRAINZ_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MUSICBRAINZ_MIN_INTERVAL: Duration = Duration::from_millis(1_100);
 const MUSICBRAINZ_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+
+#[path = "cleanup_musicbrainz_requests.rs"]
+mod musicbrainz_requests;
+use musicbrainz_requests::RequestAdmission;
 
 pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
@@ -1240,7 +1243,7 @@ fn cleanup_revert_items_schema() -> RefOr<Schema> {
 pub(crate) struct MusicBrainzNameLookup {
     client: reqwest::Client,
     base_url: Arc<str>,
-    last_request_at: Arc<Mutex<Option<Instant>>>,
+    admission: Arc<Mutex<RequestAdmission>>,
     minimum_interval: Duration,
 }
 
@@ -1266,7 +1269,7 @@ impl MusicBrainzNameLookup {
         Ok(Self {
             client,
             base_url: base_url.into(),
-            last_request_at: Arc::new(Mutex::new(None)),
+            admission: Arc::new(Mutex::new(RequestAdmission::default())),
             minimum_interval,
         })
     }
@@ -1307,25 +1310,7 @@ impl MusicBrainzNameLookup {
         resource: &str,
         query: &[(&str, String)],
     ) -> Result<Value, MusicBrainzLookupError> {
-        let endpoint = format!("{}/{resource}", self.base_url.trim_end_matches('/'));
-        // Hold admission through receipt of the response headers and start the
-        // next interval there. This is deliberately more conservative than
-        // spacing local request construction: network latency can otherwise
-        // make two requests arrive at MusicBrainz less than one interval apart.
-        let mut last_request_at = self.last_request_at.lock().await;
-        if let Some(previous_request) = *last_request_at {
-            let next_request_at = previous_request + self.minimum_interval;
-            if next_request_at > Instant::now() {
-                tokio::time::sleep_until(next_request_at).await;
-            }
-        }
-        let response = self.client.get(endpoint).query(query).send().await;
-        *last_request_at = Some(Instant::now());
-        drop(last_request_at);
-        let response = response
-            .map_err(MusicBrainzLookupError::Http)?
-            .error_for_status()
-            .map_err(MusicBrainzLookupError::Http)?;
+        let response = self.fetch_response(resource, query).await?;
         if response
             .content_length()
             .is_some_and(|length| length > MUSICBRAINZ_MAX_RESPONSE_BYTES as u64)
@@ -1406,11 +1391,14 @@ pub(crate) enum MusicBrainzLookupError {
     InvalidScore(CleanupNameScoreError),
     InvalidPayload(&'static str),
     ResponseTooLarge,
+    CoolingDown,
 }
 
 impl Display for MusicBrainzLookupError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CoolingDown => formatter
+                .write_str("MusicBrainz requested a longer cooldown; retry this lookup later"),
             Self::Http(_) => formatter.write_str("MusicBrainz request failed"),
             Self::Json(_) => formatter.write_str("MusicBrainz returned invalid JSON"),
             Self::InvalidScore(_) => {
@@ -1435,7 +1423,7 @@ impl Error for MusicBrainzLookupError {
             Self::Http(source) => Some(source),
             Self::Json(source) => Some(source),
             Self::InvalidScore(source) => Some(source),
-            Self::InvalidPayload(_) | Self::ResponseTooLarge => None,
+            Self::InvalidPayload(_) | Self::ResponseTooLarge | Self::CoolingDown => None,
         }
     }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { catalogReviewContext, mergeEnrichment, rejectedOperationIds, reviewProposal, selectUnambiguous, toggleReviewOperation } from "@/components/cleanupReview";
 import { CleanupRejectedPanel } from "@/components/CleanupRejectedPanel";
-import { CleanupEvidence, CleanupEvidenceImport } from "@/components/CleanupEvidence";
+import { CleanupEvidence, CleanupEvidenceImport, CleanupEditionTarget } from "@/components/CleanupEvidence";
 import { CleanupModelReview } from "@/components/CleanupModelReview";
 import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
 import { CleanupCatalogCopy } from "@/components/CleanupCatalogCopy";
@@ -702,6 +702,19 @@ export function CleanupWorkflow({
     }
   }
 
+  function prepareEditionLookup(folder: string, releaseId: string) {
+    const ids = enrichmentSummary?.plans.filter((plan) => folderOf(plan.path) === folder).map((plan) => plan.track_id) ?? [];
+    if (ids.length === 0) return;
+    // A new edition must not inherit another source's field mapping or proposal opt-in.
+    setImports(ids.map((track_id) => ({ track_id, fields: { release_mbid: releaseId } })));
+    setCheckedIds(ids);
+    setScopeType("tracks");
+    setPath(folder);
+    setUseCatalogs(true);
+    setRefreshCatalogs(true);
+    setStep("configure");
+  }
+
   async function downloadJournal(batchId: number) {
     try {
       const detail = await cleanupApi.batch(batchId);
@@ -897,6 +910,7 @@ export function CleanupWorkflow({
           return (
           <section key={folder || "(root)"}>
             <h3 className="section-label cleanup-folder">{folder || "(root)"}</h3>
+            {enrichmentSummary?.plans.some((plan) => folderOf(plan.path) === folder) && <CleanupEditionTarget folder={folder} disabled={busy} onTarget={(id) => prepareEditionLookup(folder, id)} />}
             {folderSugg ? (
               <div className="cleanup-review-row"><label className="cleanup-op cleanup-op-folder">
                 <input
@@ -945,7 +959,7 @@ export function CleanupWorkflow({
                       <span className="cleanup-new">
                         <Value value={op.new} />
                       </span>
-                      <span className="badge cleanup-conf">{op.rules.includes("model_catalog_choice") ? "AI candidate review" : op.rules.includes("catalog_identity") ? "MusicBrainz" : "Local"}</span>
+                      <span className="badge cleanup-conf">{op.rules.includes("model_catalog_choice") ? "AI candidate review" : op.rules.includes("catalog_identity") ? "MusicBrainz" : op.rules.includes("imported_metadata") ? "Imported source" : "Local"}</span>
                       {op.confidence === "low" ? (
                         <span
                           className="badge badge-warn cleanup-conf"

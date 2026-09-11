@@ -534,6 +534,20 @@ using the same cache and rate limit. Notes identify the verified spelling and ar
 Ordinary text and ISRC searches now share the observation cache with album and artist searches;
 repeated neighbor lookups are reused, and malformed search responses are retried.
 
+Once a recording is identified, a complete catalog credit and typed artist-name aliases can
+preserve your existing Romanized/native-script spelling. All artists and join phrases must
+agree; abbreviated or otherwise different same-script spellings still receive ordinary review
+proposals. Missing evidence stays visible and never turns an alias into a confirmed recording.
+
+Deluxe, expanded and remastered album alternatives now remain in the edition selector when
+their base title agrees. They require an explicit edition choice. If a known edition is outside
+the shortlist, open **Find a known album edition** for the folder, paste its MusicBrainz release
+URL or ID, then choose **Prepare edition lookup** and **Find issues**. This prepares a refreshed
+review for those tracks. It does not apply tags, and conflicting embedded release IDs remain unresolved.
+Preparing a different edition replaces the previous JSON imports so their source fields and
+proposal opt-in are not attributed to the new edition. Re-import any independently applicable
+evidence deliberately when configuring that lookup.
+
 You can select a JSON metadata sidecar with this shape (the example ID is illustrative):
 
 ```json
@@ -547,6 +561,27 @@ Use text values, at most 512 bytes each and 500 unique tracks in the selected sc
 observations support lookup; full dates/IDs are preserved as evidence rather than automatically
 written into extended embedded tags. CUE splitting, executable sidecars and arbitrary URL scraping
 are not part of this import.
+
+For metadata from a confirmed creator tracklist, booklet or purchase manifest, add a `source`
+reference and opt into **Propose imported metadata changes for review**. For example:
+
+```json
+{"tracks":[{"track_id":7,"source":"Creator tracklist, confirmed edition","propose":true,"fields":{"album":"Example album","track_no":"4","date":"2025-10-17"}}]}
+```
+
+These become unchecked suggestions even when the catalog cannot identify the recording.
+Check which file each entry describes; a source label does not verify its content. Album,
+album artist, artist, title, genre, track/disc numbers and release year use the existing tag
+review. Full dates and identifiers stay in evidence, and original release date never replaces
+edition year. Source references are limited to 512 bytes and are not fetched automatically.
+Genre proposals use the existing 128-byte catalog limit; longer genre text stays in evidence.
+Catalog lookup must remain enabled for this workflow. Imported and catalog alternatives stay
+visible together; conflicting values are excluded from bulk selection. Rejected source suggestions
+remain accessible in **Rejected suggestions**, just like other cleanup proposals.
+
+Transient MusicBrainz failures receive one paced retry, capped at ten added retries per run.
+Long provider cooldowns return partial results with a retry-later note. Refresh preserves that
+cooldown and can retry incomplete results later; it does not override the provider's limit.
 
 For ambiguous catalog results, configure **Library cleanup** in **AI setup**, verify its
 connection, pass conformance and all eight synthetic quality cases, and enable the role. On an

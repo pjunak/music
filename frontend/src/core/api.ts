@@ -1284,6 +1284,8 @@ export interface CleanupCatalogTagSuggestion extends AnalysisTagReviewTarget {
 export interface CleanupImportedEvidence {
   track_id: number;
   fields: Record<string, string>;
+  source?: string;
+  propose?: boolean;
 }
 
 export interface CleanupReleaseChoice {

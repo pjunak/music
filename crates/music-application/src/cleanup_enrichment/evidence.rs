@@ -42,22 +42,34 @@ pub struct LocalEvidence {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportedTrackEvidence {
     pub track_id: i64,
     pub fields: BTreeMap<EvidenceField, String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub propose: bool,
 }
 
 impl ImportedTrackEvidence {
     pub fn valid(&self) -> bool {
         self.track_id > 0
+            && self.source.as_ref().is_none_or(|source| {
+                !source.trim().is_empty()
+                    && source.len() <= 512
+                    && !source.chars().any(char::is_control)
+            })
+            && (!self.propose || self.source.is_some())
             && !self.fields.is_empty()
             && self.fields.len() <= 17
-            && self
-                .fields
-                .iter()
-                .all(|(field, value)| normalized_value(*field, value).is_some())
+            && self.fields.iter().all(|(field, value)| {
+                normalized_value(*field, value).is_some()
+                    && (!self.propose
+                        || *field != EvidenceField::Date
+                        || super::imported::release_year(value).is_some())
+            })
     }
 }
 
@@ -118,7 +130,20 @@ impl LocalEvidence {
                 .map(|(field, value)| LocalObservation {
                     field: *field,
                     value: value.clone(),
-                    source: "imported sidecar".to_owned(),
+                    source: imported.source.as_ref().map_or_else(
+                        || "imported sidecar".to_owned(),
+                        |source| {
+                            format!(
+                                "imported {}: {}",
+                                if imported.propose {
+                                    "review source"
+                                } else {
+                                    "evidence"
+                                },
+                                source.trim()
+                            )
+                        },
+                    ),
                 }),
         );
     }

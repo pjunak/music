@@ -1892,6 +1892,7 @@ dependencies = [
  "dotenvy",
  "flate2",
  "futures-util",
+ "httpdate",
  "music-analysis",
  "music-application",
  "music-domain",

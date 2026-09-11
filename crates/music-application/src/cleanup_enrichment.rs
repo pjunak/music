@@ -2,9 +2,11 @@ pub mod ai;
 pub mod album;
 mod aliases;
 pub mod catalog;
+mod credits;
 mod discovery;
 mod editions;
 pub mod evidence;
+mod imported;
 mod resolution;
 mod workflow;
 pub use workflow::{CleanupEnrichmentJobHandler, CleanupEnrichmentServices};
@@ -19,8 +21,8 @@ use sha2::{Digest, Sha256};
 
 pub const CLEANUP_ENRICHMENT_JOB_KIND: &str = "library.cleanup-enrichment";
 pub const CLEANUP_ENRICHMENT_SCHEMA: &str = "library-cleanup-enrichment/v1";
-/// Invalidates evidence generated before title-style preservation and position notes.
-pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v9";
+/// Invalidates evidence generated before corroborated credit preservation and source review.
+pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v10";
 pub const MAX_CLEANUP_ENRICHMENT_TRACKS: usize = 500;
 
 pub(crate) fn review_context_signature(

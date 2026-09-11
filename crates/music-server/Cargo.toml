@@ -16,6 +16,7 @@ clap.workspace = true
 dotenvy.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
+httpdate.workspace = true
 music-analysis = { path = "../music-analysis", version = "0.1.0" }
 music-application = { path = "../music-application", version = "0.1.0" }
 music-domain = { path = "../music-domain", version = "0.1.0" }

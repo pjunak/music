@@ -187,8 +187,8 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v9` is included in evidence signatures and invalidates
-results created before title-style preservation and release-position review notes.
+evidence. `catalog-evidence-policy/v10` is included in evidence signatures and invalidates
+results created before full-credit script preservation, edition alternatives and imported-source review.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -346,6 +346,18 @@ recording/release/track identifiers survive readback, including the ID3 TXXX con
 for Lofty 0.25.1. MP3, FLAC, Ogg and MP4 fixtures exercise this preservation. Selected JSON imports use the same
 field types, up to 500 unique tracks in the selected scope; arbitrary paths and executable sidecars
 are not accepted. Local cleanup hypotheses can improve retrieval without first writing tags.
+An import may include a nonempty `source` reference (at most 512 bytes, no control characters)
+and explicit `propose: true`. This adds unchecked, low-confidence `imported_metadata` proposals
+for existing writable title/artist/album/album-artist/genre/position/year fields, including when
+catalog identity is unresolved. The source is an attributed operator observation, not a fetched
+URL. Genre proposals retain the existing 128-byte catalog limit. The source does not establish an
+independently verified recording identity. Release `date` accepts real calendar dates
+at year/month/day precision and proposes only the existing numeric year; `original_date` and
+identifiers remain observations. Imports without `propose` remain retrieval evidence only.
+The source and proposal mode participate in evidence signatures; source proposals are appended
+once per response after catalog-cache reuse and never contaminate the stored catalog result.
+The existing one-value-per-field selection, rejection pool and apply/journal own these proposals.
+This import still runs inside an enabled catalog lookup, not a separate offline importer.
 Conflicting recording IDs abstain. MusicBrainz recording ID lookup precedes bounded ISRC searches.
 If neither identifies the recording, one explicit release ID adds up to two title/release-ID
 searches before the ordinary title/artist searches. Without a release ID, an unresolved ordinary
@@ -426,6 +438,27 @@ distinct. The provider spelling remains in identity evidence, and deliberate cas
 uses the separate local cleanup rule. Substantive title repairs still pass through the
 existing recording-identity checks.
 
+After identification, `credits.rs` can preserve an authored Romanized/native-script credit
+when every credited artist ID's detail record corroborates the spelling. It checks the complete
+ordered credit and exact join phrases, with at most eight members and 100 typed artist-name
+aliases per artist. Canonical and sort names are also evidence. Alternate spellings qualify
+only when the accent-folded name crosses the ASCII/non-ASCII boundary; this is a conservative
+script-choice heuristic, not automatic translation or arbitrary alias acceptance. Search hints,
+abbreviations and same-script spelling differences do not suppress canonical repairs. Missing or
+mismatched artist details make the result partial and leave the ordinary unchecked proposal.
+Recording artist and edition album artist are checked separately; identity evidence keeps the
+provider spelling. These checks never establish recording identity or remove another credit member.
+
+The edition filter also retains a narrowly listed final deluxe/expanded/remastered suffix in
+parentheses or brackets when the base album title agrees. Live/remix/piano/sequel titles remain
+distinct. A suffix match adds review alternatives and cannot establish a unique edition by itself;
+the five-detail cap still applies. **Find a known album edition** accepts a MusicBrainz release ID
+or official HTTPS release URL, scopes the next refresh to reviewed tracks in that folder and adds
+explicit release evidence. It prepares configuration without starting a request or applying tags.
+Previous JSON imports are replaced, preventing another edition's source label, field mapping
+or proposal opt-in from carrying into the new lookup.
+Existing embedded-ID conflicts, recording membership and release-track assignment checks still apply.
+
 Bounded genre proposals can update embedded genre through the journal. Last.fm receives the
 identified recording MBID and maps top tags by exact controlled-vocabulary names or aliases.
 Catalog metadata and mood tags are suggestions, never direct writes. Metadata returns through
@@ -446,11 +479,22 @@ Complete matches expire after seven days; unmatched results after six hours; fut
 and partial connector failures cannot be reused. The connector keeps bounded in-memory entity and
 local-fingerprint caches (256 entries each, one hour); fingerprint keys include rooted path and
 actual size/mtime, with a post-computation check. Ordinary text, ISRC, album and artist queries
-share the entity cache; malformed recording/artist search lists and invalid artist details are
-validated before cache insertion so an explicit retry can obtain a corrected response.
+share the entity cache; malformed recording/artist search lists, release browse pages and invalid
+recording/artist/release details are validated before cache insertion so an explicit retry can
+obtain a corrected response. Failed release browsing retains its safe failure category in notes;
+already retrieved editions remain incomplete alternatives.
 **Refresh catalog results** bypasses result reuse
 and clears these connector caches. A changed file stat requires library rescan. Extra tag parsing
 runs in one awaited blocking task at a time in the serialized provider lane.
+
+MusicBrainz name and catalog reads share admission through response headers and a 1.1-second
+post-header interval, including failed requests. HTTP 429/502/503/504 and connect/header-timeout
+failures permit one retry, with at most ten retries added per catalog run. `Retry-After` seconds
+and HTTP dates establish a shared cooldown; otherwise the delay is twice the admission interval.
+Waits above 30 seconds return a visible cooldown failure instead of holding the job. Refresh resets
+the retry budget but preserves an outstanding cooldown. Unrepresentably large cooldowns fail closed
+for that connector's lifetime. Permanent errors, malformed bodies and body-transfer failures do not
+retry automatically. No paid/model request or Last.fm name fallback is added by this policy.
 
 Authenticated operators can save, explicitly replace, or
 remove AcoustID and Last.fm keys under **Library cleanup → Sources**. They use dedicated records in

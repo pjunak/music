@@ -98,6 +98,8 @@ pub struct Artist {
     pub name: String,
     pub sort_name: Option<String>,
     pub aliases: Vec<String>,
+    /// Only explicitly typed artist-name aliases, excluding search hints and untyped entries.
+    pub credit_aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +116,10 @@ pub struct Candidate {
 pub struct Recording {
     pub title: String,
     pub artist: String,
+    #[serde(default)]
+    pub artist_credits: Vec<ArtistCredit>,
+    #[serde(default)]
+    pub lookup_notes: Vec<String>,
     pub first_release_date: Option<String>,
     pub releases: Vec<ReleaseSummary>,
     pub releases_complete: bool,
@@ -134,6 +140,8 @@ pub struct ReleaseDetail {
     pub id: String,
     pub title: String,
     pub artist: String,
+    #[serde(default)]
+    pub artist_credits: Vec<ArtistCredit>,
     pub date: Option<String>,
     pub track_no: Option<u32>,
     pub disc_no: Option<u32>,
@@ -141,6 +149,14 @@ pub struct ReleaseDetail {
     pub barcode: Option<String>,
     pub catalog_numbers: Vec<String>,
     pub slots: Vec<ReleaseSlot>,
+}
+
+/// Every credit member and its join phrase must survive before alias comparison.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtistCredit {
+    pub artist_id: String,
+    pub name: String,
+    pub join_phrase: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +172,7 @@ pub struct ReleaseSlot {
 
 #[derive(Debug, Clone, Copy)]
 pub enum CatalogFailure {
+    CoolingDown,
     HttpStatus(u16),
     Timeout,
     Transport,
@@ -169,6 +186,7 @@ pub enum CatalogFailure {
 impl Display for CatalogFailure {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CoolingDown => formatter.write_str("provider cooldown; retry later"),
             Self::HttpStatus(status) => write!(formatter, "HTTP {status}"),
             Self::Timeout => formatter.write_str("request timed out"),
             Self::Transport => formatter.write_str("connection or response transfer failed"),

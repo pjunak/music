@@ -173,6 +173,45 @@ describe("CleanupWorkflow catalog enrichment", () => {
     );
   });
 
+  it("prepares a scoped edition refresh without applying tags or starting another lookup", async () => {
+    const release = "1e18da96-4713-41d2-8c3b-17a5743736d1";
+    const user = userEvent.setup();
+    renderWorkflow();
+    const oldImport = { tracks: [{ track_id: 7, source: "Earlier edition booklet", propose: true, fields: { album: "Earlier edition", track_no: "9" } }] };
+    const file = new File([JSON.stringify(oldImport)], "source.json", { type: "application/json" });
+    Object.defineProperty(file, "text", { value: async () => JSON.stringify(oldImport) });
+    await user.upload(screen.getByLabelText("Import metadata evidence (JSON)"), file);
+    await screen.findByDisplayValue("Earlier edition booklet");
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await screen.findByText("01_song.mp3");
+    await user.click(screen.getByText("Find a known album edition"));
+    await user.type(screen.getByRole("textbox", { name: "MusicBrainz release URL or ID for Album" }), release);
+    await user.click(screen.getByRole("button", { name: "Prepare edition lookup" }));
+    expect(cleanupApi.enrich).toHaveBeenCalledOnce();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await waitFor(() => expect(cleanupApi.enrich).toHaveBeenCalledTimes(2));
+    expect(cleanupApi.enrich).toHaveBeenLastCalledWith({ type: "tracks", track_ids: [7] }, true, [{ track_id: 7, fields: { release_mbid: release } }]);
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+  });
+
+  it("leaves imported source corrections unchecked and keeps conflicting values out of bulk selection", async () => {
+    const sourceJob = structuredClone(catalogJob);
+    const result = sourceJob.result as unknown as CleanupEnrichmentResult;
+    result.plans[0]!.ops = [{ op_id: "source-title", track_id: 7, kind: "tag", field: "title", old: "", new: "Creator title", rules: ["imported_metadata"], confidence: "low", verified: false }];
+    vi.mocked(cleanupApi.enrich).mockResolvedValue(sourceJob);
+    const user = userEvent.setup();
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await screen.findByText("Creator title");
+    expect(screen.getByText("Imported source")).toBeInTheDocument();
+    const source = screen.getByText("Creator title").closest("label");
+    expect(source?.querySelector("input")).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "All unambiguous" }));
+    expect(source?.querySelector("input")).not.toBeChecked();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+  });
+
   it("downloads the original catalog job without local proposals or selection changes", async () => {
     const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:catalog-export");
     const revokeObjectURL = vi.fn();

@@ -4,9 +4,9 @@ use futures_util::TryStreamExt;
 use music_application::assistant::{AssistantService, LocalAnalysisRepository};
 use music_application::cleanup::CleanupService;
 use music_application::cleanup_enrichment::catalog::{
-    AcousticCandidate, Artist, Candidate, CatalogConnector, CatalogCredentialSource, CatalogError,
-    CatalogFailure, CatalogFuture, CommunityTag, Recording, ReleaseDetail, ReleaseSlot,
-    ReleaseSummary,
+    AcousticCandidate, Artist, ArtistCredit, Candidate, CatalogConnector, CatalogCredentialSource,
+    CatalogError, CatalogFailure, CatalogFuture, CommunityTag, Recording, ReleaseDetail,
+    ReleaseSlot, ReleaseSummary,
 };
 use music_application::cleanup_enrichment::evidence::{
     EvidenceField, LocalEvidence, normalized_value,
@@ -157,19 +157,35 @@ impl HttpCatalogConnector {
             .await
             .map_err(musicbrainz_failure)?;
         // An invalid search response must be retried, not retained for the cache TTL.
-        match resource {
-            "recording" => {
-                parse_candidates(&value)?;
-            }
-            "artist" => {
-                parse_artist_candidates(&value)?;
-            }
-            _ => {
-                if let Some(id) = resource.strip_prefix("artist/") {
-                    parse_artist(&value, Some(id))?;
+        let validation = (|| {
+            match resource {
+                "recording" => {
+                    parse_candidates(&value)?;
+                }
+                "artist" => {
+                    parse_artist_candidates(&value)?;
+                }
+                "release" => {
+                    validate_release_page(&value)?;
+                }
+                _ => {
+                    if let Some(id) = resource.strip_prefix("artist/") {
+                        parse_artist(&value, Some(id))?;
+                    } else if let Some(id) = resource.strip_prefix("recording/") {
+                        parse_recording(&value, id)?;
+                    } else if let Some(id) = resource.strip_prefix("release/") {
+                        parse_release_detail(&value, id, "")?;
+                    }
                 }
             }
-        }
+            Ok::<(), CatalogError>(())
+        })();
+        validation.map_err(|error| match error {
+            CatalogError::InvalidResponse => {
+                CatalogError::MusicBrainzFailure(CatalogFailure::InvalidPayload)
+            }
+            other => other,
+        })?;
         self.entities.lock().await.insert(key, value.clone());
         Ok(value)
     }
@@ -223,7 +239,7 @@ impl HttpCatalogConnector {
         let mut offset = 0;
         recording.releases_complete = false;
         while offset < MAX_RELEASES {
-            let Ok(page) = self
+            let page = match self
                 .entity_json(
                     "release",
                     &[
@@ -234,8 +250,12 @@ impl HttpCatalogConnector {
                     ],
                 )
                 .await
-            else {
-                break;
+            {
+                Ok(page) => page,
+                Err(error) => {
+                    recording.lookup_notes.push(error.annotate("Release browsing was incomplete; retrieved editions remain alternatives and no missing edition is treated as absent from the catalog."));
+                    break;
+                }
             };
             let Some(raw) = page.get("releases").and_then(Value::as_array) else {
                 break;
@@ -374,6 +394,7 @@ impl HttpCatalogConnector {
 impl CatalogConnector for HttpCatalogConnector {
     fn begin_lookup(&self, refresh: bool) -> CatalogFuture<'_, ()> {
         Box::pin(async move {
+            self.musicbrainz.begin_catalog_lookup().await;
             if refresh {
                 self.entities.lock().await.clear();
                 self.fingerprints.lock().await.clear();
@@ -705,6 +726,22 @@ fn parse_artist(value: &Value, expected_id: Option<&str>) -> Result<Artist, Cata
         id,
         name,
         aliases,
+        credit_aliases: value
+            .get("aliases")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|alias| alias.get("type").and_then(Value::as_str) == Some("Artist name"))
+            .filter_map(|alias| {
+                alias
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .and_then(bounded_catalog_text)
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .take(100)
+            .collect(),
         sort_name: value
             .get("sort-name")
             .and_then(Value::as_str)
@@ -890,6 +927,8 @@ fn parse_recording(value: &Value, expected_id: &str) -> Result<Recording, Catalo
     Ok(Recording {
         title,
         artist,
+        artist_credits: parse_artist_credits(value.get("artist-credit")),
+        lookup_notes: Vec::new(),
         first_release_date: value
             .get("first-release-date")
             .and_then(Value::as_str)
@@ -961,12 +1000,39 @@ fn parse_releases(value: Option<&Value>) -> Vec<ReleaseSummary> {
         .collect()
 }
 
+fn validate_release_page(value: &Value) -> Result<(), CatalogError> {
+    let raw = value
+        .get("releases")
+        .and_then(Value::as_array)
+        .ok_or(CatalogError::InvalidResponse)?;
+    let count = value
+        .get("release-count")
+        .and_then(Value::as_u64)
+        .ok_or(CatalogError::InvalidResponse)?;
+    if raw.len() > 25
+        || count < raw.len() as u64
+        || parse_releases(value.get("releases")).len() != raw.len()
+        || raw
+            .iter()
+            .filter_map(|r| r.get("id").and_then(Value::as_str))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != raw.len()
+    {
+        return Err(CatalogError::InvalidResponse);
+    }
+    Ok(())
+}
+
 fn parse_release_detail(
     value: &Value,
     expected_release_id: &str,
     recording_id: &str,
 ) -> Result<ReleaseDetail, CatalogError> {
     if value.get("id").and_then(Value::as_str) != Some(expected_release_id) {
+        return Err(CatalogError::InvalidResponse);
+    }
+    if !value.get("media").is_some_and(Value::is_array) {
         return Err(CatalogError::InvalidResponse);
     }
     let mut track_no = None;
@@ -1041,6 +1107,7 @@ fn parse_release_detail(
         artist: value
             .get("artist-credit")
             .map_or_else(String::new, artist_credit),
+        artist_credits: parse_artist_credits(value.get("artist-credit")),
         date: value
             .get("date")
             .and_then(Value::as_str)
@@ -1086,6 +1153,30 @@ fn artist_credit(value: &Value) -> String {
         }
     }
     rendered.trim().to_owned()
+}
+
+fn parse_artist_credits(value: Option<&Value>) -> Vec<ArtistCredit> {
+    let Some(credits) = value
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty() && items.len() <= 8)
+    else {
+        return Vec::new();
+    };
+    credits
+        .iter()
+        .map(|credit| {
+            let join = credit.get("joinphrase").map_or(Some(""), Value::as_str)?;
+            if join.len() > 64 || join.chars().any(char::is_control) {
+                return None;
+            }
+            Some(ArtistCredit {
+                artist_id: parse_mbid(credit.get("artist")?.get("id")?)?,
+                name: bounded_catalog_text(credit.get("name")?.as_str()?)?,
+                join_phrase: join.into(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default()
 }
 
 fn bounded_catalog_text(value: &str) -> Option<String> {
@@ -1155,6 +1246,25 @@ mod tests {
 
     #[test]
     fn missing_catalog_collections_are_errors_not_cached_abstentions() {
+        let release = json!({"id":"00000000-0000-0000-0000-000000000002","title":"Album"});
+        assert!(
+            validate_release_page(&json!({"releases":[release.clone()],"release-count":1})).is_ok()
+        );
+        for bad in [
+            json!({"releases":[]}),
+            json!({"releases":[{}],"release-count":1}),
+            json!({"releases":[release.clone(),release],"release-count":2}),
+        ] {
+            assert!(validate_release_page(&bad).is_err());
+        }
+        assert!(
+            parse_release_detail(
+                &json!({"id":"00000000-0000-0000-0000-000000000002","title":"Album"}),
+                "00000000-0000-0000-0000-000000000002",
+                ""
+            )
+            .is_err()
+        );
         assert!(parse_candidates(&json!({})).is_err());
         assert!(parse_acoustic_candidates(&json!({"status": "ok"})).is_err());
         assert!(parse_community_tags(&json!({"toptags": {}})).is_err());

@@ -80,3 +80,16 @@ export function toggleReviewOperation(current: Set<string>, id: string, ops: Cle
   next.add(id);
   return next;
 }
+export function releaseIdFromInput(value: string): string | null {
+  let id = value.trim();
+  if (/^https?:\/\//iu.test(id)) {
+    try {
+      const url = new URL(id);
+      if (url.protocol !== "https:" || url.hostname !== "musicbrainz.org" || url.username || url.password || url.port || url.search || url.hash) return null;
+      const match = /^\/release\/([^/]+)\/?$/u.exec(url.pathname);
+      if (!match) return null;
+      id = match[1]!;
+    } catch { return null; }
+  }
+  return /^(?!00000000-0000-0000-0000-000000000000$)[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(id) ? id.toLowerCase() : null;
+}

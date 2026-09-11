@@ -33,6 +33,12 @@ Restoration returns a proposal for the ordinary cleanup apply/journal workflow; 
 metadata by itself. These additive authoring endpoints do not change playback, track models,
 WebSocket messages or the output/Baton contract. See the generated OpenAPI for request shapes.
 
+Cleanup enrichment's existing `imports` entries may also carry optional `source` text and
+`propose: true`. The source reference is required for proposals; omitted `propose` retains the
+existing evidence-only behavior. These add unchecked suggestions for existing writable fields,
+not new playback metadata fields. See [the operator format](../ASSISTANT.md) and
+[cleanup evidence contracts](../docs/ASSISTANT_ARCHITECTURE.md) for bounds and review semantics.
+
 The server holds a canonical `PlayerState`. A client connects, learns the current state,
 and on every change decides: *should I be producing sound, and if so, which track at what
 position?* It then plays `GET /api/library/tracks/{id}/stream`. There is **no per-client

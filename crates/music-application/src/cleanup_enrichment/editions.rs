@@ -1,5 +1,6 @@
 use super::album::assign_album;
 use super::catalog::{CatalogConnector, Recording, ReleaseDetail, ReleaseSlot};
+use super::credits::preserve_credit;
 use super::evidence::{EvidenceField, LocalEvidence};
 use super::workflow::{canonical_metadata, loose_equal, metadata_operations};
 use music_domain::IndexedTrack;
@@ -7,6 +8,7 @@ use serde_json::{Value, json};
 
 pub(super) struct EditionResolution {
     pub selected: Option<ReleaseDetail>,
+    pub preserve_album_artist: bool,
     pub choices: Vec<Value>,
     pub notes: Vec<String>,
     pub partial: bool,
@@ -24,6 +26,7 @@ pub(super) async fn resolve_editions(
 ) -> EditionResolution {
     let mut result = EditionResolution {
         selected: None,
+        preserve_album_artist: false,
         choices: Vec::new(),
         notes: Vec::new(),
         partial: !recording.releases_complete,
@@ -40,7 +43,8 @@ pub(super) async fn resolve_editions(
         .iter()
         .filter(|r| {
             r.status.as_deref().is_none_or(|s| s == "Official")
-                && (query.metadata.album.is_empty() || loose_equal(&query.metadata.album, &r.title))
+                && (query.metadata.album.is_empty()
+                    || edition_album_matches(&query.metadata.album, &r.title))
         })
         .map(|r| r.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
@@ -48,7 +52,20 @@ pub(super) async fn resolve_editions(
         ids.clear();
         ids.insert(id.clone());
     }
-    let unique = ids.len() == 1 && (recording.releases_complete || pinned.is_some());
+    let exact_title = recording.releases.iter().any(|release| {
+        ids.contains(&release.id) && loose_equal(&query.metadata.album, &release.title)
+    });
+    // An edition suffix expands review alternatives, never establishes an edition.
+    let unique = ids.len() == 1
+        && (recording.releases_complete || pinned.is_some())
+        && (pinned.is_some() || query.metadata.album.is_empty() || exact_title);
+    if pinned.is_none()
+        && recording.releases.iter().any(|release| {
+            ids.contains(&release.id) && !loose_equal(&query.metadata.album, &release.title)
+        })
+    {
+        result.notes.push("Recognized edition suffixes expanded the album alternatives. Choose the edition explicitly; a shared base title does not establish the release year or track positions.".into());
+    }
     if ids.len() > 5 || !recording.releases_complete {
         result.notes.push("Release browsing is bounded to 100 editions and five detailed alternatives. More editions may exist; import a release ID to target one explicitly.".into());
     }
@@ -104,13 +121,28 @@ pub(super) async fn resolve_editions(
         // Keep the source position visible even when it equals the indexed tag
         // and therefore produces no operation.
         result.notes.push(position_note);
+        let credit = preserve_credit(
+            connector,
+            &track.metadata.album_artist,
+            &detail.artist,
+            &detail.artist_credits,
+        )
+        .await;
+        result.partial |= credit.partial;
+        result.notes.extend(
+            credit
+                .notes
+                .into_iter()
+                .map(|note| format!("Edition {id}: {note}")),
+        );
         let metadata = canonical_metadata(recording, Some(&detail));
         let mut ops = metadata_operations(track, &metadata, recording_id);
         ops.retain(|op| {
-            matches!(
-                op["field"].as_str(),
-                Some("album" | "album_artist" | "track_no" | "disc_no" | "year")
-            )
+            !(credit.preserve && op["field"] == "album_artist")
+                && matches!(
+                    op["field"].as_str(),
+                    Some("album" | "album_artist" | "track_no" | "disc_no" | "year")
+                )
         });
         for op in &mut ops {
             op["op_id"] = json!(format!(
@@ -127,6 +159,7 @@ pub(super) async fn resolve_editions(
             "assignment": assignment, "ops": ops,
         }));
         if unique {
+            result.preserve_album_artist = credit.preserve;
             result.selected = Some(detail);
         }
     }
@@ -149,5 +182,53 @@ fn release_position_note(release_id: &str, slot: Option<&ReleaseSlot>) -> String
         None => format!(
             "Edition {release_id}: no usable release-track assignment; track and disc positions remain unresolved."
         ),
+    }
+}
+
+fn edition_album_matches(local: &str, catalog: &str) -> bool {
+    fn base(value: &str) -> &str {
+        let value = value.trim();
+        for (open, close) in [('(', ')'), ('[', ']')] {
+            if let Some(without_close) = value.strip_suffix(close)
+                && let Some((title, qualifier)) = without_close.rsplit_once(open)
+                && matches!(
+                    qualifier.trim().to_lowercase().as_str(),
+                    "deluxe"
+                        | "deluxe edition"
+                        | "deluxe reissue"
+                        | "expanded"
+                        | "expanded edition"
+                        | "remaster"
+                        | "remastered"
+                        | "remastered edition"
+                )
+            {
+                return title.trim();
+            }
+        }
+        value
+    }
+    loose_equal(local, catalog) || loose_equal(base(local), base(catalog))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn edition_qualifiers_expand_album_review_without_stripping_recording_versions() {
+        assert!(edition_album_matches(
+            "It Follows",
+            "It Follows (Deluxe Reissue)"
+        ));
+        assert!(edition_album_matches("Album [Expanded Edition]", "Album"));
+        for other in [
+            "It Follows 2",
+            "It Follows (Live)",
+            "It Follows (Remix)",
+            "Other Album (Deluxe Reissue)",
+            "It Follows (Piano Version)",
+        ] {
+            assert!(!edition_album_matches("It Follows", other));
+        }
     }
 }
