@@ -477,6 +477,9 @@ independent recording/edition/field labels with artist/release families kept in 
 After a completed catalog lookup, the browser can download the original job JSON, including
 empty results. The export preserves provider evidence and proposals before local/edition/model
 review changes; downloading neither makes provider requests nor applies metadata changes.
+Completed-run summaries expose incomplete evidence, including the unmatched subset,
+even when there are no proposed edits. A completed job is not a claim that every
+provider lookup succeeded; available proposals remain reviewable without an automatic retry.
 It reports missing/failed results, unknown labels and harmful changes separately. Paired run
 comparisons identify per-track regressions, improvements and mixed changes, default to the
 development split and require an explicit holdout selection. Unknown labels and unavailable

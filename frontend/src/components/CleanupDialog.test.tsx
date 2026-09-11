@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
-import type { BackgroundJob, CleanupAnalyzeResult, CleanupReviewProposal } from "@/core/api";
+import type { BackgroundJob, CleanupAnalyzeResult, CleanupEnrichmentResult, CleanupReviewProposal } from "@/core/api";
 
 vi.mock("@/core/api", async (importActual) => {
   const actual = await importActual<typeof ApiModule>();
@@ -219,6 +219,48 @@ describe("CleanupWorkflow catalog enrichment", () => {
     await user.click(screen.getByRole("button", { name: "Find issues" }));
     expect(await screen.findByRole("button", { name: "Download catalog results" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Find issues" })).toBeEnabled();
+    expect(screen.queryByText(/Catalog evidence is incomplete/)).not.toBeInTheDocument();
+  });
+
+  it("distinguishes incomplete identified and unmatched results without selecting catalog edits", async () => {
+    const result = catalogJob.result as unknown as CleanupEnrichmentResult;
+    const plan = result.plans[0]!;
+    vi.mocked(cleanupApi.enrich).mockResolvedValue({ ...catalogJob, result: {
+      ...result, scanned: 3, unmatched: 2,
+      plans: [
+        { ...plan, partial: true },
+        { ...plan, track_id: 8, path: "Album/unknown.mp3", status: "unmatched", identity: null, partial: true, tag_suggestions: [] },
+        { ...plan, track_id: 9, path: "Album/no-match.mp3", status: "unmatched", identity: null, partial: false, tag_suggestions: [] },
+      ],
+    } });
+    const user = userEvent.setup();
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("1 identified · 2 unmatched");
+    expect(screen.getByRole("status")).toHaveTextContent("Catalog evidence is incomplete for 2 tracks.");
+    expect(screen.getByRole("status")).toHaveTextContent("1 of the unmatched tracks had incomplete lookups.");
+    expect(screen.getByRole("checkbox", { name: /Mood.*dark/ })).not.toBeChecked();
+    expect(cleanupApi.enrich).toHaveBeenCalledOnce();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+  });
+
+  it("shows incomplete evidence even when there are no proposed changes", async () => {
+    vi.mocked(cleanupApi.analyze).mockResolvedValue({ scanned: 1, plans: [], folders: [], pending_lookups: [] });
+    const result = catalogJob.result as unknown as CleanupEnrichmentResult;
+    vi.mocked(cleanupApi.enrich).mockResolvedValue({ ...catalogJob, result: {
+      ...result, identified: 0, unmatched: 1,
+      plans: [{ ...result.plans[0]!, status: "unmatched", identity: null, partial: true, tag_suggestions: [] }],
+    } });
+    const user = userEvent.setup();
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Catalog evidence is incomplete for 1 track.");
+    expect(screen.getByRole("button", { name: "Apply 0 changes" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: "Find issues" })).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Catalog evidence is incomplete for 1 track.");
+    expect(screen.getByRole("button", { name: "Download catalog results" })).toBeEnabled();
+    expect(cleanupApi.enrich).toHaveBeenCalledOnce();
   });
 
   it("skips oversized catalog jobs using the scanned count and retains local review", async () => {

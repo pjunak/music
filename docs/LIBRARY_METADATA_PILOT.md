@@ -76,6 +76,9 @@ exports. For older deployments, engineering can save the authenticated
 metadata snapshot for baseline and changed runs; do not apply proposed changes between them.
 The scorer checks original values for proposed, labeled fields and rejects mismatched
 snapshots. It cannot detect a changed source field that produces no operation.
+The cleanup summary also counts tracks with incomplete evidence and how many of
+those are unmatched, including runs with no proposed edits. Keep these availability
+gaps separate from complete no-match results when deciding what to improve next.
 An apply/rollback journal or AI candidate-review result is a different schema and is rejected.
 New catalog requests remain governed by the configured source policy; saving an existing
 result and scoring it do not make requests. Inputs are limited to 10 MiB each.

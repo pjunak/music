@@ -317,6 +317,8 @@ export function CleanupWorkflow({
     () => new Map(enrichmentSummary?.plans.map((plan) => [plan.track_id, plan]) ?? []),
     [enrichmentSummary],
   );
+  const incompleteCatalogPlans = enrichmentSummary?.plans.filter((plan) => plan.partial) ?? [];
+  const incompleteUnmatchedCount = incompleteCatalogPlans.filter((plan) => plan.status === "unmatched").length;
 
   // Every tickable change (track ops + folder renames) flattened to a common
   // {op_id, confidence, label} shape — drives the count, the All/Confident/
@@ -888,17 +890,6 @@ export function CleanupWorkflow({
           })}
         </div>
       ) : null}
-      {enrichmentSummary !== null ? (
-        <div className="cleanup-catalog-summary" role="status">
-          <strong>{enrichmentSummary.identified}</strong> identified
-          {enrichmentSummary.fingerprinted > 0
-            ? ` · ${enrichmentSummary.fingerprinted} needed fingerprinting`
-            : ""}
-          {enrichmentSummary.unmatched > 0 ? ` · ${enrichmentSummary.unmatched} unmatched` : ""}
-          {enrichmentSummary.failed > 0 ? ` · ${enrichmentSummary.failed} failed` : ""}
-          {enrichmentSummary.cached > 0 ? ` · ${enrichmentSummary.cached} reused from cache` : ""}
-        </div>
-      ) : null}
       <div className="cleanup-review">
         {folderGroups.map(([folder, group]) => {
           const folderSugg = folderSuggByPath.get(folder);
@@ -1261,12 +1252,32 @@ export function CleanupWorkflow({
     )}
     {enrichmentJob?.status === "succeeded" && enrichmentSummary !== null && !busy &&
       (step === "configure" || step === "review" || step === "done") && (
-      <p>
-        <button type="button" className="btn-ghost" onClick={downloadCatalogResult}>
-          Download catalog results
-        </button>
-        <span className="muted small"> Saves this run's original proposals and evidence as JSON.</span>
-      </p>
+      <>
+        <div className="cleanup-catalog-summary" role="status">
+          <strong>{enrichmentSummary.identified}</strong> identified
+          {enrichmentSummary.fingerprinted > 0
+            ? ` · ${enrichmentSummary.fingerprinted} needed fingerprinting`
+            : ""}
+          {enrichmentSummary.unmatched > 0 ? ` · ${enrichmentSummary.unmatched} unmatched` : ""}
+          {enrichmentSummary.failed > 0 ? ` · ${enrichmentSummary.failed} failed` : ""}
+          {enrichmentSummary.cached > 0 ? ` · ${enrichmentSummary.cached} reused from cache` : ""}
+          {incompleteCatalogPlans.length > 0 && (
+            <p>
+              Catalog evidence is incomplete for {incompleteCatalogPlans.length} track{incompleteCatalogPlans.length === 1 ? "" : "s"}.
+              {incompleteUnmatchedCount > 0
+                ? ` ${incompleteUnmatchedCount} of the unmatched tracks had incomplete lookups.`
+                : ""}
+              {" "}Available suggestions remain reviewable. Run the lookup again to retry missing evidence.
+            </p>
+          )}
+        </div>
+        <p>
+          <button type="button" className="btn-ghost" onClick={downloadCatalogResult}>
+            Download catalog results
+          </button>
+          <span className="muted small"> Saves this run's original proposals and evidence as JSON.</span>
+        </p>
+      </>
     )}
     {stepBody}
   </>;
