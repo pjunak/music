@@ -21,6 +21,8 @@ use serde_json::{Value, json};
 
 use crate::{SqliteStorage, SqliteStorageOptions};
 
+#[path = "cleanup_enrichment_workflow_tests/artist_aliases.rs"]
+mod artist_aliases;
 #[path = "cleanup_enrichment_workflow_tests/model_review.rs"]
 mod model_review;
 #[path = "cleanup_enrichment_workflow_tests/sibling_discovery.rs"]
@@ -66,9 +68,65 @@ struct FixtureCatalog {
     scoped_candidates: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<Candidate>>>,
     scoped_failures: tokio::sync::Mutex<std::collections::BTreeSet<String>>,
     multiple_editions: AtomicBool,
+    artist_hits: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<Artist>>>,
+    artist_details: tokio::sync::Mutex<std::collections::BTreeMap<String, Artist>>,
+    artist_recordings: tokio::sync::Mutex<std::collections::BTreeMap<String, Vec<Candidate>>>,
+    artist_requests: tokio::sync::Mutex<Vec<String>>,
+    artist_failures: tokio::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl CatalogConnector for FixtureCatalog {
+    fn search_artists<'a>(&'a self, name: &'a str) -> CatalogFuture<'a, Vec<Artist>> {
+        Box::pin(async move {
+            let key = format!("name:{name}");
+            self.artist_requests.lock().await.push(key.clone());
+            if self.artist_failures.lock().await.contains(&key) {
+                return Err(CatalogError::MusicBrainz);
+            }
+            Ok(self
+                .artist_hits
+                .lock()
+                .await
+                .get(name)
+                .cloned()
+                .unwrap_or_default())
+        })
+    }
+    fn artist<'a>(&'a self, artist_id: &'a str) -> CatalogFuture<'a, Artist> {
+        Box::pin(async move {
+            self.artist_requests
+                .lock()
+                .await
+                .push(format!("artist:{artist_id}"));
+            self.artist_details
+                .lock()
+                .await
+                .get(artist_id)
+                .cloned()
+                .ok_or(CatalogError::MusicBrainz)
+        })
+    }
+    fn search_artist_recordings<'a>(
+        &'a self,
+        track: &'a IndexedTrack,
+        artist_id: &'a str,
+    ) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async move {
+            let key = format!("recordings:{artist_id}");
+            self.artist_requests.lock().await.push(key.clone());
+            assert!(!track.metadata.title.is_empty());
+            if self.artist_failures.lock().await.contains(&key) {
+                return Err(CatalogError::MusicBrainz);
+            }
+            Ok(self
+                .artist_recordings
+                .lock()
+                .await
+                .get(artist_id)
+                .cloned()
+                .unwrap_or_default())
+        })
+    }
     fn search_album_metadata<'a>(
         &'a self,
         _: &'a IndexedTrack,
@@ -296,6 +354,11 @@ async fn setup(
         scoped_candidates: tokio::sync::Mutex::default(),
         scoped_failures: tokio::sync::Mutex::default(),
         multiple_editions: AtomicBool::new(false),
+        artist_hits: tokio::sync::Mutex::default(),
+        artist_details: tokio::sync::Mutex::default(),
+        artist_recordings: tokio::sync::Mutex::default(),
+        artist_requests: tokio::sync::Mutex::default(),
+        artist_failures: tokio::sync::Mutex::default(),
     });
     let handler = CleanupEnrichmentJobHandler::new(
         CleanupEnrichmentServices {

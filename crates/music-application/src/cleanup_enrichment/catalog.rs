@@ -37,6 +37,19 @@ pub trait CatalogConnector: std::fmt::Debug + Send + Sync {
     ) -> CatalogFuture<'a, Vec<Candidate>> {
         Box::pin(async { Ok(Vec::new()) })
     }
+    fn search_artists<'a>(&'a self, _name: &'a str) -> CatalogFuture<'a, Vec<Artist>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn artist<'a>(&'a self, _artist_id: &'a str) -> CatalogFuture<'a, Artist> {
+        Box::pin(async { Err(CatalogError::InvalidResponse) })
+    }
+    fn search_artist_recordings<'a>(
+        &'a self,
+        _track: &'a IndexedTrack,
+        _artist_id: &'a str,
+    ) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
     fn runtime_credential(&self, source: CatalogCredentialSource) -> Option<&str>;
     fn search_metadata<'a>(&'a self, track: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>>;
     fn recording<'a>(&'a self, recording_id: &'a str) -> CatalogFuture<'a, Recording>;
@@ -76,6 +89,15 @@ pub struct AcousticCandidate {
 pub struct CommunityTag {
     pub name: String,
     pub count: u64,
+}
+
+/// Catalog spellings are retrieval observations, not replacements for track credits.
+#[derive(Debug, Clone, Default)]
+pub struct Artist {
+    pub id: String,
+    pub name: String,
+    pub sort_name: Option<String>,
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

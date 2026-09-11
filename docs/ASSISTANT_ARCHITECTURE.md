@@ -187,8 +187,8 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v6` is included in evidence signatures and invalidates
-results created before corroborated sibling release discovery.
+evidence. `catalog-evidence-policy/v7` is included in evidence signatures and invalidates
+results created before catalog-backed artist alias retrieval.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -347,6 +347,22 @@ using the existing connector cache and rate limit). All responses merge before s
 a failed shared-release query withholds text selection from this fallback. Discovery IDs are
 retrieval hints only and never become explicit release evidence or bypass edition ambiguity.
 Notes retain anchor track IDs, title/artist, recording IDs, release counts and searched release IDs.
+For remaining unmatched tracks, `aliases.rs` searches up to two distinct original/hypothesized
+artist names against the artist name, alias and sort-name indexes (ten hits per query).
+More than three unique artist IDs withholds expansion; otherwise each gets one `inc=aliases`
+lookup. The requested spelling must match a retrieved name, sort name or alias using the existing
+Unicode comparison. Aliases are bounded to 100 unique strings in deterministic order; names are
+bounded to 512 bytes. The full credit is never split into guessed artist names.
+Each verified artist allows at most two title/artist-ID recording searches, with the normal
+duration range and 25-hit cap (at most eleven requests before cache reuse). Returned recordings
+must actually credit the requested artist ID; complete joined credits are preserved. All
+candidates merge before selection, duplicate queries/IDs are deduplicated, and failures make
+results partial. Alias retrieval never substitutes a name in the acceptance query or raises
+confidence; exact original/local full title and artist remain required for text acceptance.
+An incomplete lookup cannot create a text winner by dropping an unavailable competitor.
+Notes show searched spellings, artist IDs, checked names and withheld expansion. Alias spellings
+that differ from the full recording credit only provide review candidates, including for the
+existing optional model review; no additional provider or model request is enabled.
 Opt-in AcoustID remains the fallback after text retrieval.
 Text search retrieves 25 candidates with a +/-10-second duration range; zero/unknown duration
 omits that search constraint. Exact title/artist, duration, weighted score and margin still govern
@@ -383,7 +399,10 @@ the cache even when local inference could reconstruct the previous value.
 Complete matches expire after seven days; unmatched results after six hours; future timestamps
 and partial connector failures cannot be reused. The connector keeps bounded in-memory entity and
 local-fingerprint caches (256 entries each, one hour); fingerprint keys include rooted path and
-actual size/mtime, with a post-computation check. **Refresh catalog results** bypasses result reuse
+actual size/mtime, with a post-computation check. Ordinary text, ISRC, album and artist queries
+share the entity cache; malformed recording/artist search lists and invalid artist details are
+validated before cache insertion so an explicit retry can obtain a corrected response.
+**Refresh catalog results** bypasses result reuse
 and clears these connector caches. A changed file stat requires library rescan. Extra tag parsing
 runs in one awaited blocking task at a time in the serialized provider lane.
 

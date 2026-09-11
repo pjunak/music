@@ -523,6 +523,17 @@ proposals, and each song still has to pass its own identity checks. Query notes 
 evidence and scopes tried. The [offline pilot](docs/LIBRARY_METADATA_PILOT.md) remains the next step
 for measuring accuracy on a collection.
 
+If artist spelling still prevents retrieval, cleanup can search MusicBrainz artist names,
+sort names and aliases, then check the returned artist details before searching that artist's
+recordings. This can surface alternate-language and alternate-spelling candidates without
+guessing transliterations or changing your preferred credit. The full song title, artist,
+duration and ambiguity checks still apply; candidates that only agree through an alias stay
+for review. More than three artist IDs withholds this expansion. Its upper bound is eleven
+additional requests (two name searches, three artist details and six recording searches),
+using the same cache and rate limit. Notes identify the verified spelling and artist ID.
+Ordinary text and ISRC searches now share the observation cache with album and artist searches;
+repeated neighbor lookups are reused, and malformed search responses are retried.
+
 You can select a JSON metadata sidecar with this shape (the example ID is illustrative):
 
 ```json

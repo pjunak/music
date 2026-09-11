@@ -4,7 +4,7 @@ use futures_util::TryStreamExt;
 use music_application::assistant::{AssistantService, LocalAnalysisRepository};
 use music_application::cleanup::CleanupService;
 use music_application::cleanup_enrichment::catalog::{
-    AcousticCandidate, Candidate, CatalogConnector, CatalogCredentialSource, CatalogError,
+    AcousticCandidate, Artist, Candidate, CatalogConnector, CatalogCredentialSource, CatalogError,
     CatalogFuture, CommunityTag, Recording, ReleaseDetail, ReleaseSlot, ReleaseSummary,
 };
 use music_application::cleanup_enrichment::evidence::{
@@ -26,6 +26,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+
+#[cfg(test)]
+#[path = "cleanup_enrichment_alias_tests.rs"]
+mod alias_tests;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const FINGERPRINT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -144,6 +148,20 @@ impl HttpCatalogConnector {
             .fetch_json(resource, query)
             .await
             .map_err(|_| CatalogError::MusicBrainz)?;
+        // An invalid search response must be retried, not retained for the cache TTL.
+        match resource {
+            "recording" => {
+                parse_candidates(&value)?;
+            }
+            "artist" => {
+                parse_artist_candidates(&value)?;
+            }
+            _ => {
+                if let Some(id) = resource.strip_prefix("artist/") {
+                    parse_artist(&value, Some(id))?;
+                }
+            }
+        }
         self.entities.lock().await.insert(key, value.clone());
         Ok(value)
     }
@@ -160,8 +178,7 @@ impl HttpCatalogConnector {
         }
         let query = metadata_query(title, artist, track.duration);
         let payload = self
-            .musicbrainz
-            .fetch_json(
+            .entity_json(
                 "recording",
                 &[
                     ("query", query),
@@ -169,8 +186,7 @@ impl HttpCatalogConnector {
                     ("limit", "25".to_owned()),
                 ],
             )
-            .await
-            .map_err(|_| CatalogError::MusicBrainz)?;
+            .await?;
         parse_candidates(&payload)
     }
 
@@ -429,8 +445,7 @@ impl CatalogConnector for HttpCatalogConnector {
             let isrc =
                 normalized_value(EvidenceField::Isrc, isrc).ok_or(CatalogError::InvalidResponse)?;
             let payload = self
-                .musicbrainz
-                .fetch_json(
+                .entity_json(
                     "recording",
                     &[
                         ("query", format!("isrc:{}", lucene_quote(&isrc))),
@@ -438,8 +453,7 @@ impl CatalogConnector for HttpCatalogConnector {
                         ("limit", "25".into()),
                     ],
                 )
-                .await
-                .map_err(|_| CatalogError::MusicBrainz)?;
+                .await?;
             parse_candidates(&payload)
         })
     }
@@ -482,6 +496,66 @@ impl CatalogConnector for HttpCatalogConnector {
     }
     fn search_metadata<'a>(&'a self, track: &'a IndexedTrack) -> CatalogFuture<'a, Vec<Candidate>> {
         Box::pin(HttpCatalogConnector::search_metadata(self, track))
+    }
+
+    fn search_artists<'a>(&'a self, name: &'a str) -> CatalogFuture<'a, Vec<Artist>> {
+        Box::pin(async move {
+            let Some(query) = artist_name_query(name) else {
+                return Ok(Vec::new());
+            };
+            let payload = self
+                .entity_json(
+                    "artist",
+                    &[
+                        ("query", query),
+                        ("fmt", "json".into()),
+                        ("limit", "10".into()),
+                    ],
+                )
+                .await?;
+            parse_artist_candidates(&payload)
+        })
+    }
+
+    fn artist<'a>(&'a self, artist_id: &'a str) -> CatalogFuture<'a, Artist> {
+        Box::pin(async move {
+            let id = catalog_artist_id(artist_id).ok_or(CatalogError::InvalidResponse)?;
+            let payload = self
+                .entity_json(
+                    &format!("artist/{id}"),
+                    &[("fmt", "json".into()), ("inc", "aliases".into())],
+                )
+                .await?;
+            parse_artist(&payload, Some(&id))
+        })
+    }
+
+    fn search_artist_recordings<'a>(
+        &'a self,
+        track: &'a IndexedTrack,
+        artist_id: &'a str,
+    ) -> CatalogFuture<'a, Vec<Candidate>> {
+        Box::pin(async move {
+            let title = if track.metadata.title.trim().is_empty() {
+                &track.display_title
+            } else {
+                &track.metadata.title
+            };
+            let Some(query) = artist_recording_query(title, artist_id, track.duration)? else {
+                return Ok(Vec::new());
+            };
+            let payload = self
+                .entity_json(
+                    "recording",
+                    &[
+                        ("query", query),
+                        ("fmt", "json".into()),
+                        ("limit", "25".into()),
+                    ],
+                )
+                .await?;
+            parse_artist_recordings(&payload, artist_id)
+        })
     }
 
     fn recording<'a>(&'a self, recording_id: &'a str) -> CatalogFuture<'a, Recording> {
@@ -560,6 +634,123 @@ fn metadata_query(title: &str, artist: &str, duration: Duration) -> String {
         ),
         duration,
     )
+}
+
+fn catalog_artist_id(value: &str) -> Option<String> {
+    let id = uuid::Uuid::parse_str(value).ok()?;
+    (!id.is_nil()).then(|| id.hyphenated().to_string())
+}
+
+fn artist_name_query(name: &str) -> Option<String> {
+    let name = bounded_catalog_text(name)?;
+    let quoted = lucene_quote(&name);
+    Some(format!(
+        "artist:{quoted} OR alias:{quoted} OR sortname:{quoted}"
+    ))
+}
+
+fn artist_recording_query(
+    title: &str,
+    artist_id: &str,
+    duration: Duration,
+) -> Result<Option<String>, CatalogError> {
+    let Some(title) = bounded_catalog_text(title) else {
+        return Ok(None);
+    };
+    let id = catalog_artist_id(artist_id).ok_or(CatalogError::InvalidResponse)?;
+    Ok(Some(with_duration_query(
+        format!(
+            "recording:{} AND arid:{}",
+            lucene_quote(&title),
+            lucene_quote(&id)
+        ),
+        duration,
+    )))
+}
+
+fn parse_artist_candidates(payload: &Value) -> Result<Vec<Artist>, CatalogError> {
+    let artists = payload
+        .get("artists")
+        .and_then(Value::as_array)
+        .ok_or(CatalogError::InvalidResponse)?;
+    Ok(artists
+        .iter()
+        .take(10)
+        .filter_map(|artist| parse_artist(artist, None).ok())
+        .collect())
+}
+
+fn parse_artist(value: &Value, expected_id: Option<&str>) -> Result<Artist, CatalogError> {
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(catalog_artist_id)
+        .ok_or(CatalogError::InvalidResponse)?;
+    if expected_id.is_some_and(|expected| expected != id) {
+        return Err(CatalogError::InvalidResponse);
+    }
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .and_then(bounded_catalog_text)
+        .ok_or(CatalogError::InvalidResponse)?;
+    let aliases = match value.get("aliases") {
+        None if expected_id.is_none() => Vec::new(),
+        Some(Value::Array(aliases)) => aliases
+            .iter()
+            .filter_map(|alias| {
+                alias
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .and_then(bounded_catalog_text)
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .take(100)
+            .collect(),
+        _ => return Err(CatalogError::InvalidResponse),
+    };
+    Ok(Artist {
+        id,
+        name,
+        aliases,
+        sort_name: value
+            .get("sort-name")
+            .and_then(Value::as_str)
+            .and_then(bounded_catalog_text),
+    })
+}
+
+fn parse_artist_recordings(
+    payload: &Value,
+    artist_id: &str,
+) -> Result<Vec<Candidate>, CatalogError> {
+    let artist_id = catalog_artist_id(artist_id).ok_or(CatalogError::InvalidResponse)?;
+    let recordings = payload
+        .get("recordings")
+        .and_then(Value::as_array)
+        .ok_or(CatalogError::InvalidResponse)?;
+    Ok(recordings
+        .iter()
+        .take(25)
+        .filter(|recording| {
+            recording
+                .get("artist-credit")
+                .and_then(Value::as_array)
+                .is_some_and(|credits| {
+                    credits.iter().any(|credit| {
+                        credit
+                            .get("artist")
+                            .and_then(|artist| artist.get("id"))
+                            .and_then(Value::as_str)
+                            .and_then(catalog_artist_id)
+                            .as_deref()
+                            == Some(&artist_id)
+                    })
+                })
+        })
+        .filter_map(parse_candidate)
+        .collect())
 }
 
 fn album_metadata_query(

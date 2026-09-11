@@ -1,3 +1,4 @@
+use super::aliases::retrieve_alias_candidates;
 use super::catalog::{Candidate, CatalogConnector, CatalogError, Recording};
 use super::discovery::discover_releases;
 use super::evidence::{EvidenceField, LocalEvidence};
@@ -160,6 +161,23 @@ pub(super) async fn resolve_identity(
         // Every discovered release contributes before selection, so the first
         // successful query cannot hide a competing recording from another edition.
         if complete {
+            matched = select_text_identity(
+                track,
+                hypothesis,
+                &candidates.values().cloned().collect::<Vec<_>>(),
+            );
+        }
+    }
+    if matched.is_none() {
+        let aliases = retrieve_alias_candidates(connector, track, hypothesis).await;
+        result.partial |= aliases.partial;
+        result.notes.extend(aliases.notes);
+        for candidate in aliases.candidates {
+            merge_candidate(&mut candidates, candidate);
+        }
+        if !result.partial {
+            // Catalog aliases only retrieve candidates. Acceptance still compares
+            // the original/local title and complete artist credit, without alias substitution.
             matched = select_text_identity(
                 track,
                 hypothesis,

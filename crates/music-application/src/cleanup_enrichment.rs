@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod album;
+mod aliases;
 pub mod catalog;
 mod discovery;
 mod editions;
@@ -18,8 +19,8 @@ use sha2::{Digest, Sha256};
 
 pub const CLEANUP_ENRICHMENT_JOB_KIND: &str = "library.cleanup-enrichment";
 pub const CLEANUP_ENRICHMENT_SCHEMA: &str = "library-cleanup-enrichment/v1";
-/// Invalidates evidence generated before corroborated sibling release discovery.
-pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v6";
+/// Invalidates evidence generated before catalog-backed artist alias retrieval.
+pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v7";
 pub const MAX_CLEANUP_ENRICHMENT_TRACKS: usize = 500;
 
 pub type CleanupEnrichmentDependencyError = Box<dyn Error + Send + Sync>;

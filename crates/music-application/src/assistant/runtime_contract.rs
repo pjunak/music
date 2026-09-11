@@ -50,6 +50,10 @@ const ASSISTANT_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
         include_str!("../cleanup_enrichment/discovery.rs"),
     ),
     (
+        "cleanup_enrichment/aliases.rs",
+        include_str!("../cleanup_enrichment/aliases.rs"),
+    ),
+    (
         "assistant/model_jobs/batch.rs",
         include_str!("model_jobs/batch.rs"),
     ),
@@ -198,6 +202,7 @@ fn artifact_affects_role(name: &str, role: &str) -> bool {
         | "cleanup_enrichment/ai.rs"
         | "cleanup_enrichment/resolution.rs"
         | "cleanup_enrichment/discovery.rs"
+        | "cleanup_enrichment/aliases.rs"
         | "cleanup_enrichment/evidence.rs" => role == "library_cleanup",
         "assistant/model_eq.rs"
         | "assistant/model_jobs/eq.rs"

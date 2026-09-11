@@ -314,8 +314,20 @@ withhold the fallback. Raw sibling changes invalidate cached evidence even if lo
 would reconstruct the same metadata. This uses the existing API, cache and rate limit, adds at
 most seven requests per unresolved track before cache reuse, and does not relax identity or
 edition acceptance. Fixtures verify these mechanics, not collection accuracy.
-Artist alias expansion, broader version interpretation and discovery across disc folders remain
-in the [active backlog](../TODO.md). Accuracy still needs independent collection labels.
+Artist alias retrieval now searches the artist index rather than the recording `alias` field:
+the latter describes recording aliases, while artist search supports `artist`, `alias` and
+`sortname`, and recording search supports `arid` ([search reference](https://musicbrainz.org/doc/MusicBrainz_API/Search)).
+Fetched artist names/aliases must corroborate the local spelling before an artist-ID-scoped
+recording query. Alias sets are explicitly requested with `inc=aliases`
+([API reference](https://musicbrainz.org/doc/MusicBrainz_API)); this avoids depending on aliases
+being embedded in search responses. Search hints can represent misspellings, while other aliases
+represent localized names or credits ([alias definitions](https://musicbrainz.org/doc/Aliases)).
+These fields were checked on 11 September 2026. Expansion is capped at three artist IDs and
+eleven requests per unresolved track before cache reuse. Full artist credits remain intact;
+alias agreement does not relax automatic identity acceptance or mandate a tag spelling.
+Text/ISRC requests also reuse the bounded entity cache, fixing repeated sibling search work.
+Alias-assisted acceptance, broader version interpretation and discovery across disc folders
+remain in the [active backlog](../TODO.md). Accuracy still needs independent collection labels.
 
 ### Benchmark design
 

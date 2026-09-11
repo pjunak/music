@@ -1244,6 +1244,11 @@ pub(crate) struct MusicBrainzNameLookup {
 }
 
 impl MusicBrainzNameLookup {
+    #[cfg(test)]
+    pub(crate) fn fixture_endpoint(base_url: &str) -> Result<Self, reqwest::Error> {
+        Self::with_endpoint(base_url, Duration::ZERO)
+    }
+
     pub(crate) fn new() -> Result<Self, reqwest::Error> {
         Self::with_endpoint(MUSICBRAINZ_ROOT, MUSICBRAINZ_MIN_INTERVAL)
     }
