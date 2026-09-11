@@ -43,12 +43,11 @@ pub(super) async fn resolve_identity(
                 result.notes.push("The recording ID conflicts with the audio duration; no identity change was proposed.".into());
                 return Ok(result);
             }
-            Err(_) => {
+            Err(error) => {
                 result.partial = true;
-                result.notes.push(
-                    "The embedded recording ID lookup failed; other evidence will still be tried."
-                        .into(),
-                );
+                result.notes.push(error.annotate(
+                    "The embedded recording ID lookup failed; other evidence will still be tried.",
+                ));
             }
         }
     }
@@ -60,9 +59,11 @@ pub(super) async fn resolve_identity(
                     merge_candidate(&mut candidates, candidate);
                 }
             }
-            Err(_) => {
+            Err(error) => {
                 result.partial = true;
-                result.notes.push("ISRC lookup was unavailable.".into());
+                result
+                    .notes
+                    .push(error.annotate("ISRC lookup was unavailable."));
             }
         }
     }
@@ -108,9 +109,9 @@ pub(super) async fn resolve_identity(
                         merge_candidate(&mut candidates, candidate);
                     }
                 }
-                Err(_) => {
+                Err(error) => {
                     result.partial = true;
-                    result.notes.push("Text lookup was unavailable; fingerprint fallback remains available when enabled.".into());
+                    result.notes.push(error.annotate("Text lookup was unavailable; fingerprint fallback remains available when enabled."));
                 }
             }
         }
@@ -201,21 +202,20 @@ pub(super) async fn resolve_identity(
                 matched = select_acoustic_candidate(candidates)
                     .map(|(id, score)| (id, "fingerprint", score));
             }
-            Err(_) => {
+            Err(error) => {
                 result.partial = true;
-                result.notes.push(
-                    "Fingerprint lookup failed; text candidates remain available for review."
-                        .into(),
-                );
+                result.notes.push(error.annotate(
+                    "Fingerprint lookup failed; text candidates remain available for review.",
+                ));
             }
         }
     }
     if let Some((id, method, score)) = matched {
         let recording = match connector.recording(&id).await {
             Ok(recording) => recording,
-            Err(_) => {
+            Err(error) => {
                 result.partial = true;
-                result.notes.push("Recording details were unavailable; retrieved candidates remain available for review.".into());
+                result.notes.push(error.annotate("Recording details were unavailable; retrieved candidates remain available for review."));
                 return Ok(result);
             }
         };
@@ -301,10 +301,10 @@ async fn retrieve_album_candidates(
                     merge_candidate(candidates, candidate);
                 }
             }
-            Err(_) => {
+            Err(error) => {
                 complete = false;
                 result.partial = true;
-                result.notes.push(format!("Lookup by {scope} was unavailable; independent recording and fingerprint lookup remain available."));
+                result.notes.push(error.annotate(&format!("Lookup by {scope} was unavailable; independent recording and fingerprint lookup remain available.")));
             }
         }
     }

@@ -559,12 +559,11 @@ impl CleanupEnrichmentJobHandler {
                         );
                     }
                 }
-                Err(_) => {
+                Err(error) => {
                     partial = true;
-                    notes.push(
+                    notes.push(error.annotate(
                         "Last.fm tag evidence was unavailable; metadata proposals are still available and tags will retry next run."
-                            .to_owned(),
-                    );
+                    ));
                 }
             }
         }

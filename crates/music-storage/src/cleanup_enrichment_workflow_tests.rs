@@ -50,6 +50,7 @@ struct FixtureCatalog {
     searches: AtomicUsize,
     fingerprints: AtomicUsize,
     tag_calls: AtomicUsize,
+    tag_failure: AtomicBool,
     metadata_match: AtomicBool,
     metadata_failure: AtomicBool,
     ambiguous_fingerprint: AtomicBool,
@@ -192,7 +193,9 @@ impl CatalogConnector for FixtureCatalog {
                     .unwrap_or_default());
             }
             if self.metadata_failure.load(Ordering::SeqCst) {
-                return Err(CatalogError::MusicBrainz);
+                return Err(CatalogError::MusicBrainzFailure(
+                    CatalogFailure::HttpStatus(429),
+                ));
             }
             assert_eq!(
                 self.sources.update("musicbrainz", false).await,
@@ -242,7 +245,9 @@ impl CatalogConnector for FixtureCatalog {
     fn release<'a>(&'a self, release_id: &'a str, _: &'a str) -> CatalogFuture<'a, ReleaseDetail> {
         Box::pin(async move {
             if self.release_failure.load(Ordering::SeqCst) {
-                return Err(CatalogError::MusicBrainz);
+                return Err(CatalogError::MusicBrainzFailure(
+                    CatalogFailure::HttpStatus(503),
+                ));
             }
             Ok(ReleaseDetail {
                 id: release_id.to_owned(),
@@ -293,6 +298,11 @@ impl CatalogConnector for FixtureCatalog {
     ) -> CatalogFuture<'a, Vec<CommunityTag>> {
         Box::pin(async move {
             self.tag_calls.fetch_add(1, Ordering::SeqCst);
+            if self.tag_failure.load(Ordering::SeqCst) {
+                return Err(CatalogError::LastFmFailure(CatalogFailure::ProviderCode(
+                    26,
+                )));
+            }
             Ok(vec![
                 CommunityTag {
                     name: "dark".to_owned(),
@@ -336,6 +346,7 @@ async fn setup(
         searches: AtomicUsize::new(0),
         fingerprints: AtomicUsize::new(0),
         tag_calls: AtomicUsize::new(0),
+        tag_failure: AtomicBool::new(false),
         metadata_match: AtomicBool::new(true),
         metadata_failure: AtomicBool::new(false),
         ambiguous_fingerprint: AtomicBool::new(false),
@@ -487,6 +498,50 @@ async fn catalog_workflow_bounds_fallback_and_retries_partial_results_on_explici
     assert_eq!(again["cached"], 0);
     assert_eq!(connector.fingerprints.load(Ordering::SeqCst), 3);
     assert_eq!(connector.tag_calls.load(Ordering::SeqCst), 0);
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn catalog_failures_retain_safe_diagnostics_without_losing_identity_or_caching_partial_results()
+-> TestResult {
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    connector.metadata_failure.store(true, Ordering::SeqCst);
+    connector.release_failure.store(true, Ordering::SeqCst);
+    connector.tag_failure.store(true, Ordering::SeqCst);
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    let result = result(&run(&coordinator.service, false).await?)?;
+    assert_eq!(result["fingerprinted"], 1);
+    assert_eq!(result["plans"][0]["partial"], true);
+    assert_eq!(result["plans"][0]["identity"]["recording_mbid"], RECORDING);
+    let notes = result["plans"][0]["notes"]
+        .as_array()
+        .ok_or("missing notes")?;
+    for detail in [
+        "MusicBrainz: HTTP 429",
+        "MusicBrainz: HTTP 503",
+        "Last.fm: provider error code 26",
+    ] {
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.as_str().is_some_and(|note| note.contains(detail)))
+        );
+    }
+    assert_eq!(connector.tag_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(connector.fingerprints.load(Ordering::SeqCst), 1);
+    assert!(
+        storage
+            .cleanup_enrichment(TrackId::new(1)?)
+            .await?
+            .is_none()
+    );
     coordinator.service.shutdown();
     coordinator.local_task.await??;
     coordinator.provider_task.await??;

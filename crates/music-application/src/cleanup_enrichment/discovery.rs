@@ -103,9 +103,9 @@ pub(super) async fn discover_releases(
     for anchor in anchors {
         let values = match connector.search_metadata(anchor).await {
             Ok(values) => values,
-            Err(_) => {
+            Err(error) => {
                 result.partial = true;
-                result.notes.push(format!("Sibling lookup for track {} was unavailable; no album hint will be inferred from this incomplete lookup.", anchor.id.get()));
+                result.notes.push(error.annotate(&format!("Sibling lookup for track {} was unavailable; no album hint will be inferred from this incomplete lookup.", anchor.id.get())));
                 continue;
             }
         };

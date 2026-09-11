@@ -55,9 +55,9 @@ pub(super) async fn resolve_editions(
     for id in ids.iter().take(5) {
         let mut detail = match connector.release(id, recording_id).await {
             Ok(detail) => detail,
-            Err(_) => {
+            Err(error) => {
                 result.partial = true;
-                result.notes.push("Release details were unavailable; recording metadata remains reviewable and release lookup can retry.".into());
+                result.notes.push(error.annotate("Release details were unavailable; recording metadata remains reviewable and release lookup can retry."));
                 continue;
             }
         };

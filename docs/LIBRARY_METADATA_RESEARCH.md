@@ -1,5 +1,16 @@
 # Library cleanup and metadata enrichment research
 
+Provider diagnosis precedes retry tuning when live evidence is incomplete. Cleanup
+notes now preserve safe transport/HTTP/response categories and numeric Last.fm API
+errors without raw provider messages or credential-bearing URLs. MusicBrainz documents
+HTTP 503 for several throttling conditions, including overall service load
+([rate limiting](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)); status
+alone does not prove that this client exceeded its allowance. Last.fm distinguishes
+invalid/suspended keys, temporary service failures and rate limits through API error
+numbers ([track.getTopTags](https://www.last.fm/api/show/track.getTopTags)). Preserve
+those distinctions before choosing a retry or configuration fix. No automatic
+retry or match-threshold change is implied by diagnostic enrichment.
+
 > Implementation follow-up (10 September 2026): the core correctness, local-observation/import,
 > bounded album-edition review, existing-provider enrichment/caching and closed-candidate text AI
 > work is implemented. The findings below describe the researched baseline and rationale. The

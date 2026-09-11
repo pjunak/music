@@ -79,6 +79,11 @@ snapshots. It cannot detect a changed source field that produces no operation.
 The cleanup summary also counts tracks with incomplete evidence and how many of
 those are unmatched, including runs with no proposed edits. Keep these availability
 gaps separate from complete no-match results when deciding what to improve next.
+New lookup notes include safe HTTP/transport/response categories and Last.fm API
+error numbers. Older jobs cannot recover discarded error details; retain them as
+baselines and inspect a new bounded lookup after deploying the diagnostics. A rate
+limit, invalid credential and missing catalog record need different remedies; an
+unavailable response alone does not justify changing acceptance thresholds.
 An apply/rollback journal or AI candidate-review result is a different schema and is rejected.
 New catalog requests remain governed by the configured source policy; saving an existing
 result and scoring it do not make requests. Inputs are limited to 10 MiB each.

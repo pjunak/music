@@ -155,6 +155,31 @@ pub struct ReleaseSlot {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum CatalogFailure {
+    HttpStatus(u16),
+    Timeout,
+    Transport,
+    InvalidJson,
+    InvalidPayload,
+    ResponseTooLarge,
+    ProviderCode(u32),
+}
+
+impl Display for CatalogFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HttpStatus(status) => write!(formatter, "HTTP {status}"),
+            Self::Timeout => formatter.write_str("request timed out"),
+            Self::Transport => formatter.write_str("connection or response transfer failed"),
+            Self::InvalidJson => formatter.write_str("invalid JSON response"),
+            Self::InvalidPayload => formatter.write_str("unexpected response structure"),
+            Self::ResponseTooLarge => formatter.write_str("response exceeded the size limit"),
+            Self::ProviderCode(code) => write!(formatter, "provider error code {code}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum CatalogError {
     StaleSource,
     MusicBrainz,
@@ -165,21 +190,36 @@ pub enum CatalogError {
     LastFm,
     Storage,
     InvalidResponse,
+    MusicBrainzFailure(CatalogFailure),
+    AcoustIdFailure(CatalogFailure),
+    LastFmFailure(CatalogFailure),
 }
 
 impl CatalogError {
     pub const fn code(self) -> &'static str {
         match self {
             Self::StaleSource => "cleanup_source_changed_rescan_required",
-            Self::MusicBrainz => "musicbrainz_unavailable",
+            Self::MusicBrainz | Self::MusicBrainzFailure(_) => "musicbrainz_unavailable",
             Self::AcoustIdUnavailable => "acoustid_not_configured",
-            Self::AcoustId => "acoustid_unavailable",
+            Self::AcoustId | Self::AcoustIdFailure(_) => "acoustid_unavailable",
             Self::Fingerprint => "fingerprint_failed",
             Self::LastFmUnavailable => "lastfm_not_configured",
-            Self::LastFm => "lastfm_unavailable",
+            Self::LastFm | Self::LastFmFailure(_) => "lastfm_unavailable",
             Self::Storage => "catalog_suggestions_not_stored",
             Self::InvalidResponse => "catalog_response_invalid",
         }
+    }
+
+    /// Only typed categories and numeric codes reach retained review evidence.
+    /// Raw HTTP errors, request URLs and provider messages can contain secrets.
+    pub fn annotate(self, note: &str) -> String {
+        let (provider, failure) = match self {
+            Self::MusicBrainzFailure(failure) => ("MusicBrainz", failure),
+            Self::AcoustIdFailure(failure) => ("AcoustID", failure),
+            Self::LastFmFailure(failure) => ("Last.fm", failure),
+            _ => return note.to_owned(),
+        };
+        format!("{note} Details: {provider}: {failure}.")
     }
 }
 

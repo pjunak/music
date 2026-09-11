@@ -41,11 +41,11 @@ pub(super) async fn retrieve_alias_candidates(
                     artists.entry(artist.id).or_default().insert(name);
                 }
             }
-            Err(_) => {
+            Err(error) => {
                 result.partial = true;
-                result.notes.push(format!(
+                result.notes.push(error.annotate(&format!(
                     "Artist name/alias search for {name:?} was unavailable."
-                ));
+                )));
             }
         }
     }
@@ -57,9 +57,15 @@ pub(super) async fn retrieve_alias_candidates(
     for (id, names) in artists {
         let artist = match connector.artist(&id).await {
             Ok(artist) if artist.id == id => artist,
-            _ => {
+            response => {
                 result.partial = true;
-                result.notes.push(format!("Artist alias details for {id} were unavailable or contradicted the requested ID."));
+                let note = format!(
+                    "Artist alias details for {id} were unavailable or contradicted the requested ID."
+                );
+                result.notes.push(match response {
+                    Err(error) => error.annotate(&note),
+                    Ok(_) => note,
+                });
                 continue;
             }
         };
@@ -87,9 +93,9 @@ pub(super) async fn retrieve_alias_candidates(
                     result.notes.push(format!("Catalog artist {} ({:?}) lists spelling {name:?}; song-title {:?} lookup within that artist returned {} candidates. This does not authorize replacing the credited artist or selecting an album edition.", id, artist.name, title(query), values.len().min(25)));
                     result.candidates.extend(values.into_iter().take(25));
                 }
-                Err(_) => {
+                Err(error) => {
                     result.partial = true;
-                    result.notes.push(format!("Song lookup within catalog artist {id} was unavailable; other evidence remains available for review."));
+                    result.notes.push(error.annotate(&format!("Song lookup within catalog artist {id} was unavailable; other evidence remains available for review.")));
                 }
             }
         }

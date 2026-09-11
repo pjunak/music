@@ -5,7 +5,8 @@ use music_application::assistant::{AssistantService, LocalAnalysisRepository};
 use music_application::cleanup::CleanupService;
 use music_application::cleanup_enrichment::catalog::{
     AcousticCandidate, Artist, Candidate, CatalogConnector, CatalogCredentialSource, CatalogError,
-    CatalogFuture, CommunityTag, Recording, ReleaseDetail, ReleaseSlot, ReleaseSummary,
+    CatalogFailure, CatalogFuture, CommunityTag, Recording, ReleaseDetail, ReleaseSlot,
+    ReleaseSummary,
 };
 use music_application::cleanup_enrichment::evidence::{
     EvidenceField, LocalEvidence, normalized_value,
@@ -30,6 +31,10 @@ use tokio::sync::Mutex;
 #[cfg(test)]
 #[path = "cleanup_enrichment_alias_tests.rs"]
 mod alias_tests;
+
+#[path = "cleanup_enrichment_failures.rs"]
+mod failures;
+use failures::{http_failure, musicbrainz_failure};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const FINGERPRINT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -147,7 +152,7 @@ impl HttpCatalogConnector {
             .musicbrainz
             .fetch_json(resource, query)
             .await
-            .map_err(|_| CatalogError::MusicBrainz)?;
+            .map_err(musicbrainz_failure)?;
         // An invalid search response must be retried, not retained for the cache TTL.
         match resource {
             "recording" => {
@@ -203,8 +208,7 @@ impl HttpCatalogConnector {
                     ),
                 ],
             )
-            .await
-            .map_err(|_| CatalogError::MusicBrainz)?;
+            .await?;
         let mut recording = parse_recording(&payload, recording_id)?;
         // Linked release lists are capped by MusicBrainz; browse explicitly.
         let mut releases = recording
@@ -268,8 +272,7 @@ impl HttpCatalogConnector {
                     ),
                 ],
             )
-            .await
-            .map_err(|_| CatalogError::MusicBrainz)?;
+            .await?;
         parse_release_detail(&payload, release_id, recording_id)
     }
 
@@ -337,12 +340,12 @@ impl HttpCatalogConnector {
             ])
             .send()
             .await
-            .map_err(|_| CatalogError::AcoustId)?
+            .map_err(|error| CatalogError::AcoustIdFailure(http_failure(&error)))?
             .error_for_status()
-            .map_err(|_| CatalogError::AcoustId)?;
+            .map_err(|error| CatalogError::AcoustIdFailure(http_failure(&error)))?;
         let payload = bounded_json(response)
             .await
-            .map_err(|_| CatalogError::AcoustId)?;
+            .map_err(CatalogError::AcoustIdFailure)?;
         parse_acoustic_candidates(&payload)
     }
 
@@ -370,13 +373,16 @@ impl HttpCatalogConnector {
             .form(&form)
             .send()
             .await
-            .map_err(|_| CatalogError::LastFm)?
+            .map_err(|error| CatalogError::LastFmFailure(http_failure(&error)))?
             .error_for_status()
-            .map_err(|_| CatalogError::LastFm)?;
+            .map_err(|error| CatalogError::LastFmFailure(http_failure(&error)))?;
         let payload = bounded_json(response)
             .await
-            .map_err(|_| CatalogError::LastFm)?;
-        parse_community_tags(&payload)
+            .map_err(CatalogError::LastFmFailure)?;
+        parse_community_tags(&payload).map_err(|error| match error {
+            CatalogError::LastFmFailure(_) => error,
+            _ => CatalogError::LastFmFailure(CatalogFailure::InvalidPayload),
+        })
     }
 }
 
@@ -603,26 +609,26 @@ struct FingerprintOutput {
     fingerprint: String,
 }
 
-async fn bounded_json(response: reqwest::Response) -> Result<Value, CatalogError> {
+async fn bounded_json(response: reqwest::Response) -> Result<Value, CatalogFailure> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
     {
-        return Err(CatalogError::InvalidResponse);
+        return Err(CatalogFailure::ResponseTooLarge);
     }
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream
         .try_next()
         .await
-        .map_err(|_| CatalogError::InvalidResponse)?
+        .map_err(|error| http_failure(&error))?
     {
         if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-            return Err(CatalogError::InvalidResponse);
+            return Err(CatalogFailure::ResponseTooLarge);
         }
         body.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&body).map_err(|_| CatalogError::InvalidResponse)
+    serde_json::from_slice(&body).map_err(|_| CatalogFailure::InvalidJson)
 }
 
 fn metadata_query(title: &str, artist: &str, duration: Duration) -> String {
@@ -834,8 +840,12 @@ fn parse_acoustic_candidates(payload: &Value) -> Result<Vec<AcousticCandidate>, 
 }
 
 fn parse_community_tags(payload: &Value) -> Result<Vec<CommunityTag>, CatalogError> {
-    if payload.get("error").is_some() {
-        return Err(CatalogError::LastFm);
+    if let Some(error) = payload.get("error") {
+        let failure = error
+            .as_u64()
+            .and_then(|code| u32::try_from(code).ok())
+            .map_or(CatalogFailure::InvalidPayload, CatalogFailure::ProviderCode);
+        return Err(CatalogError::LastFmFailure(failure));
     }
     let tags = payload
         .get("toptags")

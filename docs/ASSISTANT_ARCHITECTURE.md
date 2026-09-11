@@ -480,6 +480,10 @@ review changes; downloading neither makes provider requests nor applies metadata
 Completed-run summaries expose incomplete evidence, including the unmatched subset,
 even when there are no proposed edits. A completed job is not a claim that every
 provider lookup succeeded; available proposals remain reviewable without an automatic retry.
+Catalog failure notes retain typed HTTP status, timeout/transport and response-format
+categories, plus numeric Last.fm API error codes. They exclude request URLs, credentials,
+raw response bodies and provider messages. Existing error codes, partial-result cache
+rules, matching thresholds and retry policy remain unchanged.
 It reports missing/failed results, unknown labels and harmful changes separately. Paired run
 comparisons identify per-track regressions, improvements and mixed changes, default to the
 development split and require an explicit holdout selection. Unknown labels and unavailable
