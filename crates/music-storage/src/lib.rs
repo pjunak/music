@@ -15,6 +15,7 @@ mod auth;
 mod backup;
 mod catalog_evidence;
 mod cleanup_enrichment;
+mod cleanup_rejections;
 mod cleanup_sources;
 mod crypto;
 mod devices;

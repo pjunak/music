@@ -1138,8 +1138,7 @@ export const libraryApi = {
 
 // --- library cleanup -----------------------------------------------------
 
-// Keep in lockstep with the backend `RuleId` Literal in app/api/cleanup.py
-// and the engine rule constants in app/library/cleanup.py.
+// Keep in lockstep with the Rust cleanup rules and generated API contract.
 export type CleanupRuleId =
   | "strip_track_numbers"
   | "strip_artist"
@@ -1173,6 +1172,25 @@ export interface CleanupOp {
   /** Value confirmed by an online name lookup (MusicBrainz). */
   verified: boolean;
   evidence?: { source: string; entity: string; id?: string; recording_id?: string; release_id?: string | null; method?: string };
+  /** Stable evidence identity used by the rejection pool; excludes job IDs and retrieval time. */
+  review_context?: string;
+}
+
+export interface CleanupReviewProposal extends Omit<CleanupOp, "kind" | "evidence"> {
+  kind: "tag" | "rename" | "folder_rename";
+  path: string;
+  evidence: CleanupOp["evidence"] | null;
+  evidence_context: string | null;
+}
+export interface CleanupRejectedItem {
+  id: number;
+  proposal: CleanupReviewProposal;
+  rejected_at: number;
+  current: boolean;
+}
+export interface CleanupRejectedPage {
+  items: CleanupRejectedItem[];
+  next_before: number | null;
 }
 
 export interface CleanupTrackPlan {
@@ -1299,6 +1317,9 @@ export interface CleanupEnrichmentPlan {
   notes: string[];
   error_code?: string;
   retrieved_at?: number;
+  local_evidence_signature?: string;
+  folder_context_signature?: string;
+  evidence_revision?: number;
   local_evidence?: { observations: { field: string; value: string; source: string }[]; notes: string[] };
   recording_observations?: { first_release_date: string | null; genres: string[]; credits: string[] };
   release_choices?: CleanupReleaseChoice[];
@@ -1332,9 +1353,20 @@ export interface CleanupModelResult {
   track_id: number;
   decision: { decision: string; reason: string; candidate_id: string | null; evidence_ids: string[] };
   ops: CleanupOp[];
+  source_signature?: string;
+  role_fingerprint?: string;
 }
 
 export const cleanupApi = {
+  rejected: (before: number | null = null, search = "") => {
+    const query = new URLSearchParams({ search });
+    if (before !== null) query.set("before", String(before));
+    return api.get<CleanupRejectedPage>(`/api/library/cleanup/rejections?${query}`);
+  },
+  matchRejected: (proposals: CleanupReviewProposal[]) => api.post<(number | null)[]>("/api/library/cleanup/rejections/match", proposals),
+  reject: (proposal: CleanupReviewProposal) => api.post<CleanupRejectedItem>("/api/library/cleanup/rejections", proposal),
+  restoreRejected: (id: number) => api.post<CleanupReviewProposal>(`/api/library/cleanup/rejections/${id}/restore`),
+  forgetRejected: (id: number) => api.delete<void>(`/api/library/cleanup/rejections/${id}`),
   modelStatus: () => api.get<CleanupModelStatus>("/api/library/cleanup/model"),
   reviewCandidates: (trackId: number, catalogJobId: string, disclosureVersion: string) =>
     api.post<BackgroundJob>("/api/library/cleanup/model/jobs", {

@@ -6,6 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+
+#[cfg(test)]
+#[path = "runtime_cleanup_rejection_tests.rs"]
+mod cleanup_rejection_tests;
 use music_analysis::{
     AnalysisExecutor, AudioContextAnalyzer, AudioSignalAnalyzer, FfmpegContextAnalyzer,
     FfmpegSignalAnalyzer, VoiceBackend,
@@ -3821,6 +3825,14 @@ mod tests {
             )
             .await?;
         assert_eq!(missing_cleanup_batch.status(), StatusCode::NOT_FOUND);
+
+        super::cleanup_rejection_tests::exercise(
+            &router,
+            &cookie,
+            first_id.get(),
+            &directory.path().join("music"),
+        )
+        .await?;
 
         let search = router
             .clone()

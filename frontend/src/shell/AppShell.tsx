@@ -28,6 +28,7 @@ import {
   InterruptsView,
   LibraryAnalysisView,
   LibraryCleanupHistoryView,
+  LibraryCleanupRejectedView,
   LibraryCleanupRunView,
   LibraryCleanupShell,
   LibraryCleanupSourcesView,
@@ -214,6 +215,7 @@ export default function AppShell() {
               <Route path="run" element={<LibraryCleanupRunView />} />
               <Route path="sources" element={<LibraryCleanupSourcesView />} />
               <Route path="history" element={<LibraryCleanupHistoryView />} />
+              <Route path="rejected" element={<LibraryCleanupRejectedView />} />
               <Route
                 path="model"
                 element={<Navigate to="/assistant/ai" replace />}

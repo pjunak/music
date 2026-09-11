@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 12;
+pub const CURRENT_SCHEMA_VERSION: i64 = 13;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
@@ -28,6 +28,8 @@ const CATALOG_EVIDENCE_SCHEMA_SQL: &str =
     include_str!("../migrations/0010_catalog_evidence_revision.sql");
 const HASHED_SESSIONS_SCHEMA_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
 const MODEL_BATCH_SCHEMA_SQL: &str = include_str!("../migrations/0012_model_batches.sql");
+const CLEANUP_REJECTIONS_SCHEMA_SQL: &str =
+    include_str!("../migrations/0013_cleanup_rejections.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
@@ -631,6 +633,9 @@ async fn expected_shape() -> Result<(DatabaseShape, TableShape), StorageError> {
         .execute(&pool)
         .await?;
     sqlx::raw_sql(MODEL_BATCH_SCHEMA_SQL).execute(&pool).await?;
+    sqlx::raw_sql(CLEANUP_REJECTIONS_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
     let shape = read_shape(&pool).await;
     pool.close().await;
     shape.map(|shape| (shape, legacy_sessions))

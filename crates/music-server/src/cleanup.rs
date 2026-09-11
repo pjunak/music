@@ -56,6 +56,7 @@ const MUSICBRAINZ_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 pub(crate) fn cleanup_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .merge(crate::cleanup_model::router())
+        .merge(crate::cleanup_rejections::router())
         .routes(routes!(analyze))
         .routes(routes!(verify_names))
         .routes(routes!(start_enrichment))
@@ -1202,7 +1203,7 @@ fn cleanup_confidence_schema() -> RefOr<Schema> {
         .into()
 }
 
-fn cleanup_value_schema() -> RefOr<Schema> {
+pub(crate) fn cleanup_value_schema() -> RefOr<Schema> {
     Schema::AnyOf(
         AnyOfBuilder::new()
             .item(openapi_integer())

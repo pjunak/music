@@ -299,6 +299,25 @@ The Library cleanup workspace preserves a separate local authority boundary. The
 produces filename, folder, and embedded-tag proposals; `cleanup_batches` journals only explicitly
 selected writes. **History & rollback** reads those server journals, downloads the complete JSON,
 and invokes the existing conflict-aware revert path. **Sources** exposes only implemented adapters.
+**Rejected suggestions** is a persistent, searchable pool for file, folder and metadata proposals.
+Rejecting is an explicit row action; leaving a checkbox unticked does not record a rejection.
+Schema 13 stores the bounded proposal, its evidence references, indexed context signature and
+rejection time separately from cleanup journals. Items remain available after restart, source-policy
+changes, moves or track removal. Search is literal text across path, field and old/new values; pages
+contain 50 newest-first items with an ID cursor. There is no automatic retention purge.
+Matching is bounded to 100 proposals per request and excludes job-specific operation IDs from
+decision identity. Kind/field/value, rules, grading, provenance, stable local/catalog/model context,
+catalog revision where applicable and the review policy all participate. Changed evidence can
+therefore surface a new suggestion while the old rejection remains in the pool. All potential
+disc siblings participate in indexed context, even outside the selected scope.
+The browser checks rejections after local/catalog merging, edition changes and model review;
+rejected operations are removed from selection as well as display. **Restore to review** checks
+current indexed evidence again in the storage write transaction, removes the rejection and returns
+the stored proposal to an unchecked review. It does not write files. Applying that reviewed change
+uses the existing coordinator and journal, including old-value checks and rollback. Stale entries
+offer **Check again** with their track/folder scope; **Remove rejection** clears the decision without
+applying its value. All pool endpoints require operator authentication. Database mood-tag decisions
+remain in their separate controlled-vocabulary review workflow.
 Filename collisions first try a distinguishing indexed artist, album, disc/track position,
 artist plus album, or album plus position, in that order. They fall back to a deterministic
 numeric suffix (`Song (2).mp3`, then `(3)`, etc.), reserving indexed filenames and earlier

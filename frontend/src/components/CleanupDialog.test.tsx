@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
-import type { BackgroundJob, CleanupAnalyzeResult } from "@/core/api";
+import type { BackgroundJob, CleanupAnalyzeResult, CleanupReviewProposal } from "@/core/api";
 
 vi.mock("@/core/api", async (importActual) => {
   const actual = await importActual<typeof ApiModule>();
@@ -14,6 +14,11 @@ vi.mock("@/core/api", async (importActual) => {
       analyze: vi.fn(),
       enrich: vi.fn(),
       apply: vi.fn(),
+      matchRejected: vi.fn(async (proposals: unknown[]) => proposals.map(() => null)),
+      reject: vi.fn(),
+      rejected: vi.fn(),
+      restoreRejected: vi.fn(),
+      forgetRejected: vi.fn(),
     },
     assistantApi: {
       ...actual.assistantApi,
@@ -130,6 +135,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(cleanupApi.analyze).mockResolvedValue(localResult);
+    vi.mocked(cleanupApi.matchRejected).mockImplementation(async (proposals) => proposals.map(() => null));
     vi.mocked(cleanupApi.enrich).mockResolvedValue(catalogJob);
     vi.mocked(cleanupApi.apply).mockResolvedValue({ batch_id: 3, applied: 1, skipped: [] });
     vi.mocked(assistantApi.reviewAnalysisTagsBulk).mockResolvedValue({
@@ -160,6 +166,76 @@ describe("CleanupWorkflow catalog enrichment", () => {
       "Catalog enrichment unavailable",
       expect.stringContaining("Local cleanup suggestions are still available"),
     );
+  });
+
+  it("keeps explicit rejections in the pool and restores them unchecked before applying", async () => {
+    vi.mocked(cleanupApi.enrich).mockRejectedValue(new Error("catalog offline"));
+    const proposal: CleanupReviewProposal = { ...localResult.plans[0]!.ops[0]!, path: "Album/01_song.mp3", evidence: null, evidence_context: null };
+    const item = { id: 12, proposal, current: true, rejected_at: 1_800_000_000 };
+    vi.mocked(cleanupApi.reject).mockResolvedValue(item);
+    vi.mocked(cleanupApi.rejected).mockResolvedValue({ items: [item], next_before: null });
+    vi.mocked(cleanupApi.restoreRejected).mockResolvedValue(proposal);
+    const user = userEvent.setup(); renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    const checkbox = await screen.findByRole("checkbox", { name: /Title/ });
+    expect(checkbox).toBeChecked();
+    await user.click(checkbox);
+    expect(cleanupApi.reject).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Reject Title suggestion for 01_song.mp3" }));
+    await waitFor(() => expect(cleanupApi.reject).toHaveBeenCalledWith(proposal));
+    expect(screen.getByRole("button", { name: "Apply 0 changes" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /Rejected suggestions/ }));
+    expect(await screen.findByText("Album/01_song.mp3")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Restore to review" }));
+    const restored = await screen.findByRole("checkbox", { name: /Title/ });
+    expect(restored).not.toBeChecked();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+    await user.click(restored);
+    await user.click(screen.getByRole("button", { name: "Apply 1 change" }));
+    await waitFor(() => expect(cleanupApi.apply).toHaveBeenCalledWith([{ track_id: 7, kind: "tag", field: "title", old: "", new: "Song" }], null, "restored rejected suggestion"));
+    await user.click(await screen.findByRole("button", { name: "Rejected suggestions" }));
+    expect(await screen.findByRole("searchbox", { name: "Search rejected suggestions" })).toBeVisible();
+  });
+
+  it("does not select or show a previously rejected operation on a new scan", async () => {
+    vi.mocked(cleanupApi.enrich).mockRejectedValue(new Error("catalog offline"));
+    vi.mocked(cleanupApi.matchRejected).mockResolvedValue([12]);
+    const user = userEvent.setup(); renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    expect(await screen.findByRole("button", { name: "Rejected suggestions (1 hidden)" })).toBeVisible();
+    expect(screen.queryByRole("checkbox", { name: /Title/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply 0 changes" })).toBeDisabled();
+  });
+
+  it("keeps stale pool entries searchable and starts a selected-track recheck", async () => {
+    const proposal: CleanupReviewProposal = { ...localResult.plans[0]!.ops[0]!, path: "Album/01_song.mp3", evidence: null, evidence_context: null };
+    vi.mocked(cleanupApi.rejected).mockResolvedValue({ items: [{ id: 12, proposal, current: false, rejected_at: 1_800_000_000 }], next_before: 12 });
+    const user = userEvent.setup(); renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Rejected suggestions" }));
+    expect(await screen.findByRole("button", { name: "Check again" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Restore to review" })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox", { name: "Search rejected suggestions" }), "Song");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(cleanupApi.rejected).toHaveBeenLastCalledWith(null, "Song"));
+    await user.click(screen.getByRole("button", { name: "Older suggestions" }));
+    await waitFor(() => expect(cleanupApi.rejected).toHaveBeenLastCalledWith(12, "Song"));
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await waitFor(() => expect(cleanupApi.analyze).toHaveBeenCalledWith({ type: "tracks", track_ids: [7] }, expect.any(Array)));
+    expect(cleanupApi.restoreRejected).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed restore visible without applying or losing the pool entry", async () => {
+    const proposal: CleanupReviewProposal = { ...localResult.plans[0]!.ops[0]!, path: "Album/01_song.mp3", evidence: null, evidence_context: null };
+    vi.mocked(cleanupApi.rejected).mockResolvedValue({ items: [{ id: 12, proposal, current: true, rejected_at: 1_800_000_000 }], next_before: null });
+    vi.mocked(cleanupApi.restoreRejected).mockRejectedValue(new Error("The evidence changed. Check again."));
+    const user = userEvent.setup(); renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Rejected suggestions" }));
+    await user.click(await screen.findByRole("button", { name: "Restore to review" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The evidence changed");
+    expect(screen.getByText("Album/01_song.mp3")).toBeVisible();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+    expect(cleanupApi.forgetRejected).not.toHaveBeenCalled();
   });
 
   it("keeps catalog mood tags unticked until they are explicitly accepted", async () => {

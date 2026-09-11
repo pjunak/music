@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { mergeEnrichment, selectUnambiguous, toggleReviewOperation } from "@/components/cleanupReview";
+import { catalogReviewContext, mergeEnrichment, rejectedOperationIds, reviewProposal, selectUnambiguous, toggleReviewOperation } from "@/components/cleanupReview";
+import { CleanupRejectedPanel } from "@/components/CleanupRejectedPanel";
 import { CleanupEvidence, CleanupEvidenceImport } from "@/components/CleanupEvidence";
 import { CleanupModelReview } from "@/components/CleanupModelReview";
 import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
@@ -20,6 +21,7 @@ import type {
   CleanupRuleId,
   CleanupScope,
   CleanupTrackPlan,
+  CleanupReviewProposal,
 } from "@/core/api";
 import { toast } from "@/core/toast";
 
@@ -43,6 +45,7 @@ type Step =
   | "review"
   | "applying"
   | "done"
+  | "rejected"
   | "history";
 
 interface RuleMeta {
@@ -229,17 +232,23 @@ export interface CleanupWorkflowProps {
   /** Workspace mount sends history to its dedicated route. The modal keeps
    *  the same reusable panel inline so older entry points remain complete. */
   onOpenHistory?: () => void;
+  startInRejected?: boolean;
 }
 
 export function CleanupWorkflow({
-  path,
-  checkedIds,
+  path: initialPath,
+  checkedIds: initialCheckedIds,
   onClose,
   onApplied,
   presentation = "workspace",
   onOpenHistory,
+  startInRejected = false,
 }: CleanupWorkflowProps) {
-  const [step, setStep] = useState<Step>("configure");
+  const [path, setPath] = useState(initialPath);
+  const [checkedIds, setCheckedIds] = useState(initialCheckedIds);
+  const [step, setStep] = useState<Step>(startInRejected ? "rejected" : "configure");
+  const [rejectedIds, setRejectedIds] = useState<Set<string>>(new Set());
+  const [restoredReview, setRestoredReview] = useState(false);
   const [scopeType, setScopeType] = useState<ScopeType>(
     checkedIds.length > 0 ? "tracks" : path ? "folder" : "all",
   );
@@ -284,17 +293,17 @@ export function CleanupWorkflow({
         ? { type: "folder", path, recursive }
         : { type: "all" };
 
-  const scopeLabel =
+  const scopeLabel = restoredReview ? "restored rejected suggestion" :
     scopeType === "tracks"
       ? `${checkedIds.length} selected track${checkedIds.length === 1 ? "" : "s"}`
       : scopeType === "folder"
         ? `folder “${path || "(root)"}”${recursive ? "" : " (no subfolders)"}`
         : "entire library";
 
-  const plans: CleanupTrackPlan[] = useMemo(() => result?.plans ?? [], [result]);
+  const plans: CleanupTrackPlan[] = useMemo(() => (result?.plans ?? []).map((plan) => ({ ...plan, ops: plan.ops.filter((op) => !rejectedIds.has(op.op_id)) })), [result, rejectedIds]);
   const folderSuggestions: CleanupFolderSuggestion[] = useMemo(
-    () => result?.folders ?? [],
-    [result],
+    () => (result?.folders ?? []).filter((folder) => !rejectedIds.has(folder.op_id)),
+    [result, rejectedIds],
   );
   const folderSuggByPath = useMemo(() => {
     const m = new Map<string, CleanupFolderSuggestion>();
@@ -360,10 +369,10 @@ export function CleanupWorkflow({
     });
   }
 
-  function prepareReview(
+  async function prepareReview(
     r: CleanupAnalyzeResult,
     tags: CleanupCatalogTagSuggestion[] = [],
-  ): boolean {
+  ): Promise<boolean> {
     if (r.plans.length === 0 && r.folders.length === 0 && tags.length === 0) {
       toast.success(
         "Nothing to clean",
@@ -371,6 +380,8 @@ export function CleanupWorkflow({
       );
       return false;
     }
+    const rejected = await rejectedOperationIds(r);
+    setRejectedIds(rejected);
     setResult(r);
     setCatalogTags(tags);
     setTickedCatalogTags(new Set());
@@ -379,9 +390,9 @@ export function CleanupWorkflow({
     setTicked(
       selectUnambiguous([
         ...r.plans.flatMap((p) =>
-          p.ops.filter((o) => o.confidence === "high").map((o) => o.op_id),
+          p.ops.filter((o) => o.confidence === "high" && !rejected.has(o.op_id)).map((o) => o.op_id),
         ),
-        ...r.folders.filter((f) => f.confidence === "high").map((f) => f.op_id),
+        ...r.folders.filter((f) => f.confidence === "high" && !rejected.has(f.op_id)).map((f) => f.op_id),
       ], r.plans.flatMap((plan) => plan.ops)),
     );
     setStep("review");
@@ -423,6 +434,7 @@ export function CleanupWorkflow({
   }
 
   async function runAnalyze() {
+    setRestoredReview(false);
     setBusy(true);
     setEnrichmentJob(null);
     setEnrichmentSummary(null);
@@ -452,7 +464,7 @@ export function CleanupWorkflow({
               setEnrichmentSummary(enrichment);
               const tags = enrichment.plans.flatMap((plan) => plan.tag_suggestions);
               r = mergeEnrichment(r, enrichment);
-              if (!prepareReview(r, tags)) setStep("configure");
+              if (!await prepareReview(r, tags)) setStep("configure");
               return;
             }
           }
@@ -470,7 +482,7 @@ export function CleanupWorkflow({
         }
       }
       setEnrichmentSummary(null);
-      if (!prepareReview(r)) setStep("configure");
+      if (!await prepareReview(r)) setStep("configure");
     } catch (e) {
       toast.error("Analysis failed", e instanceof Error ? e.message : undefined);
       setStep("configure");
@@ -510,27 +522,61 @@ export function CleanupWorkflow({
     });
   }
 
-  function acceptModelReview(review: CleanupModelResult) {
-    const previous = new Set(plans.filter((p) => p.track_id === review.track_id).flatMap((p) => p.ops)
-      .filter((op) => op.rules.includes("model_catalog_choice")).map((op) => op.op_id));
-    setTicked((current) => new Set([...current].filter((id) => !previous.has(id))));
-    setResult((current) => current && ({ ...current, plans: current.plans.map((plan) => plan.track_id !== review.track_id ? plan : {
-      ...plan, ops: [...plan.ops.filter((op) => !previous.has(op.op_id)), ...review.ops],
-      notes: [...plan.notes, `AI review (${review.decision.decision.replaceAll("_", " ")}): ${review.decision.reason}`],
-    }) }));
+  async function updateReview(next: CleanupAnalyzeResult, removed: Set<string>) {
+    setBusy(true);
+    try {
+      const rejected = await rejectedOperationIds(next);
+      setRejectedIds(rejected); setResult(next);
+      setTicked((current) => new Set([...current].filter((id) => !removed.has(id) && !rejected.has(id))));
+      return true;
+    } catch (cause) { toast.error("Could not check rejected suggestions", cause instanceof Error ? cause.message : undefined); return false; }
+    finally { setBusy(false); }
   }
 
-  function chooseEdition(folder: string, releaseId: string) {
-    setEditions((current) => ({ ...current, [folder]: releaseId }));
+  async function rejectOperation(op: CleanupOp | CleanupFolderSuggestion, opPath: string) {
+    setBusy(true);
+    try {
+      await cleanupApi.reject(reviewProposal(op, opPath));
+      setRejectedIds((current) => new Set([...current, op.op_id]));
+      setTicked((current) => new Set([...current].filter((id) => id !== op.op_id)));
+      toast.success("Suggestion rejected", "You can find it in Rejected suggestions and restore it later.");
+    } catch (cause) { toast.error("Could not reject suggestion", cause instanceof Error ? cause.message : undefined); }
+    finally { setBusy(false); }
+  }
+
+  function restoreProposal(proposal: CleanupReviewProposal) {
+    const { evidence, evidence_context, ...fields } = proposal;
+    const op = { ...fields, ...(evidence ? { evidence } : {}), ...(evidence_context ? { review_context: evidence_context } : {}) };
+    setResult({ scanned: 1, pending_lookups: [],
+      plans: proposal.kind === "folder_rename" ? [] : [{ track_id: proposal.track_id, path: proposal.path, ops: [{ ...op, kind: proposal.kind }], notes: ["Restored from rejected suggestions. Review and tick this change to apply it."] }],
+      folders: proposal.kind === "folder_rename" ? [{ op_id: proposal.op_id, path: proposal.path, old: String(proposal.old), new: String(proposal.new), rules: proposal.rules, confidence: proposal.confidence }] : [],
+    });
+    setRejectedIds(new Set()); setTicked(new Set()); setCatalogTags([]); setTickedCatalogTags(new Set());
+    setEnrichmentSummary(null); setEnrichmentJob(null); setEditions({}); setRestoredReview(true); setStep("review");
+  }
+
+  async function acceptModelReview(review: CleanupModelResult) {
+    if (!result) return;
+    const previous = new Set(plans.filter((p) => p.track_id === review.track_id).flatMap((p) => p.ops)
+      .filter((op) => op.rules.includes("model_catalog_choice")).map((op) => op.op_id));
+    await updateReview({ ...result, plans: result.plans.map((plan) => plan.track_id !== review.track_id ? plan : {
+      ...plan, ops: [...plan.ops.filter((op) => !op.rules.includes("model_catalog_choice")), ...review.ops.map((op) => ({ ...op, review_context: JSON.stringify([review.source_signature, review.role_fingerprint]) }))],
+      notes: [...plan.notes, `AI review (${review.decision.decision.replaceAll("_", " ")}): ${review.decision.reason}`],
+    }) }, previous);
+  }
+
+  async function chooseEdition(folder: string, releaseId: string) {
+    if (!result) return;
     const editionFields = new Set(["album", "album_artist", "track_no", "disc_no", "year"]);
-    const removed = new Set(plans.filter((plan) => folderOf(plan.path) === folder).flatMap((plan) => plan.ops)
+    const removed = new Set(result.plans.filter((plan) => folderOf(plan.path) === folder).flatMap((plan) => plan.ops)
       .filter((op) => op.rules.includes("catalog_identity") && editionFields.has(op.field ?? "")).map((op) => op.op_id));
-    setResult((current) => current && ({ ...current, plans: current.plans.map((plan) => {
+    const updated = await updateReview({ ...result, plans: result.plans.map((plan) => {
       if (folderOf(plan.path) !== folder) return plan;
-      const choice = catalogPlanByTrack.get(plan.track_id)?.release_choices?.find((item) => item.id === releaseId);
-      return { ...plan, ops: [...plan.ops.filter((op) => !removed.has(op.op_id)), ...(choice?.ops ?? [])] };
-    }) }));
-    setTicked((current) => new Set([...current].filter((id) => !removed.has(id))));
+      const catalog = catalogPlanByTrack.get(plan.track_id);
+      const choice = catalog?.release_choices?.find((item) => item.id === releaseId);
+      return { ...plan, ops: [...plan.ops.filter((op) => !removed.has(op.op_id)), ...(choice?.ops ?? []).map((op) => ({ ...op, ...(catalog ? { review_context: catalogReviewContext(catalog) } : {}) }))] };
+    }) }, removed);
+    if (updated) setEditions((current) => ({ ...current, [folder]: releaseId }));
   }
 
   async function runApply() {
@@ -750,8 +796,9 @@ export function CleanupWorkflow({
 
   const tickedCount = ticked.size + tickedCatalogTags.size;
   const reviewBody = (
-    <>
+    <fieldset className="cleanup-review-fieldset" disabled={busy}>
       <div className="cleanup-review-controls">
+        <button type="button" className="btn-link" disabled={busy} onClick={() => setStep("rejected")}>Rejected suggestions{rejectedIds.size ? ` (${rejectedIds.size} hidden)` : ""}</button>
         <span>
           <strong>{allItems.length}</strong> proposed change{allItems.length === 1 ? "" : "s"} across{" "}
           <strong>{plans.length}</strong> track{plans.length === 1 ? "" : "s"}
@@ -830,7 +877,7 @@ export function CleanupWorkflow({
           <section key={folder || "(root)"}>
             <h3 className="section-label cleanup-folder">{folder || "(root)"}</h3>
             {folderSugg ? (
-              <label className="cleanup-op cleanup-op-folder">
+              <div className="cleanup-review-row"><label className="cleanup-op cleanup-op-folder">
                 <input
                   type="checkbox"
                   checked={ticked.has(folderSugg.op_id)}
@@ -852,7 +899,7 @@ export function CleanupWorkflow({
                     </span>
                   ) : null}
                 </span>
-              </label>
+              </label><button type="button" className="btn-link" disabled={busy} onClick={() => void rejectOperation(folderSugg, folderSugg.path)}>Reject folder suggestion</button></div>
             ) : null}
             {group.map((plan) => (
               <div key={plan.track_id} className="cleanup-track">
@@ -860,7 +907,7 @@ export function CleanupWorkflow({
                   {basename(plan.path)}
                 </div>
                 {plan.ops.map((op) => (
-                  <label key={op.op_id} className="cleanup-op">
+                  <div key={op.op_id} className="cleanup-review-row"><label className="cleanup-op">
                     <input
                       type="checkbox"
                       checked={ticked.has(op.op_id)}
@@ -895,15 +942,15 @@ export function CleanupWorkflow({
                         </span>
                       ) : null}
                     </span>
-                  </label>
+                  </label><button type="button" className="btn-link" disabled={busy} aria-label={`Reject ${opLabel(op)} suggestion for ${basename(plan.path)}`} onClick={() => void rejectOperation(op, plan.path)}>Reject</button></div>
                 ))}
                 {catalogPlanByTrack.get(plan.track_id) && <CleanupEvidence
                   plan={catalogPlanByTrack.get(plan.track_id)!}
                   edition={editions[folderOf(plan.path)] ?? catalogPlanByTrack.get(plan.track_id)?.identity?.release_mbid ?? ""}
-                  onEdition={(id) => chooseEdition(folderOf(plan.path), id)}
+                  onEdition={(id) => void chooseEdition(folderOf(plan.path), id)}
                 />}
                 {enrichmentJob && catalogPlanByTrack.get(plan.track_id)?.status === "unmatched" && (catalogPlanByTrack.get(plan.track_id)?.candidates?.length ?? 0) > 0 && <CleanupModelReview
-                  trackId={plan.track_id} catalogJobId={enrichmentJob.id} onResult={acceptModelReview}
+                  trackId={plan.track_id} catalogJobId={enrichmentJob.id} onResult={(review) => void acceptModelReview(review)}
                 />}
                 {plan.notes.map((note) => (
                   <p key={note} className="cleanup-note">
@@ -951,7 +998,7 @@ export function CleanupWorkflow({
           </section>
         ) : null}
       </div>
-    </>
+    </fieldset>
   );
 
   const applyingBody = (
@@ -1048,12 +1095,18 @@ export function CleanupWorkflow({
   ) : null;
 
   const historyBody = <CleanupHistoryPanel onApplied={onApplied} />;
+  const rejectedBody = <CleanupRejectedPanel onRestore={restoreProposal} onRecheck={(proposal) => {
+    setRestoredReview(false); setPath(proposal.kind === "folder_rename" ? proposal.path : folderOf(proposal.path));
+    setCheckedIds(proposal.track_id > 0 ? [proposal.track_id] : []); setScopeType(proposal.track_id > 0 ? "tracks" : "folder");
+    setImports([]); setStep("configure");
+  }} />;
 
   // --- footers ---------------------------------------------------------------
 
   const footer =
     step === "configure" ? (
       <>
+        <button type="button" className="btn-ghost" disabled={busy} onClick={() => setStep("rejected")}>Rejected suggestions</button>
         <button
           type="button"
           className="btn-ghost"
@@ -1084,7 +1137,7 @@ export function CleanupWorkflow({
         <button
           type="button"
           className="btn-primary"
-          disabled={tickedCount === 0}
+          disabled={busy || tickedCount === 0}
           onClick={() => void runApply()}
         >
           Apply {tickedCount} change{tickedCount === 1 ? "" : "s"}
@@ -1092,6 +1145,9 @@ export function CleanupWorkflow({
       </>
     ) : step === "done" ? (
       <>
+        <button type="button" className="btn-ghost" onClick={() => setStep("rejected")}>
+          Rejected suggestions
+        </button>
         {summary?.batchId != null ? (
           <button
             type="button"
@@ -1105,7 +1161,7 @@ export function CleanupWorkflow({
           Close
         </button>
       </>
-    ) : step === "history" ? (
+    ) : step === "history" || step === "rejected" ? (
       <button type="button" className="btn-ghost" onClick={() => setStep("configure")}>
         Back
       </button>
@@ -1145,6 +1201,7 @@ export function CleanupWorkflow({
     applying: "Applying changes",
     done: "Cleanup applied",
     history: "Cleanup history",
+    rejected: "Rejected suggestions",
   };
 
   function closeDialog() {
@@ -1167,7 +1224,7 @@ export function CleanupWorkflow({
             ? applyingBody
             : step === "done"
               ? doneBody
-              : historyBody;
+              : step === "rejected" ? rejectedBody : historyBody;
 
   if (presentation === "modal") {
     return (

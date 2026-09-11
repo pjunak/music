@@ -110,5 +110,25 @@
   "PUT /api/assistant/providers/roles/{role_id}#responses": {
     "sha256": "e74c49a761f7596d3cf10ce015a8d468385324d6390e246f3aea2f64ade0e5dc",
     "reason": "ADR-011 September 10 adds explicit low/medium/high/xhigh/max thinking values while retaining provider_default/enabled/disabled. Reviewed provider-scoped profiles reject unsupported choices before network access. Saved roles remain readable and require fresh conformance after profile/handler changes. Browser settings migrate with the server; Baton does not consume these Assistant routes."
+  },
+  "DELETE /api/library/cleanup/rejections/{id}#operation": {
+    "sha256": "9527f07eddd1ce743833b15bf58b1bb95855f992bfd60a357f336db4e2ecdead",
+    "reason": "Adds authenticated removal of a saved cleanup rejection. This clears only the review decision; it never deletes media or changes authored metadata. No playback or Baton contract change."
+  },
+  "GET /api/library/cleanup/rejections#operation": {
+    "sha256": "b16f5d002a3402cdc7768d14704f253539f89ed306665c75720da91d5244739f",
+    "reason": "Adds an authenticated, paginated, literal-search pool of retained file, folder and metadata rejections with current-evidence status. Existing cleanup and playback routes are unchanged; Baton does not consume this authoring endpoint."
+  },
+  "POST /api/library/cleanup/rejections#operation": {
+    "sha256": "5a85e0e760f420a11c7b6682a90c4ff8e5e0f0cee5a0630325253e3fe938f4e9",
+    "reason": "Adds authenticated storage of a bounded cleanup proposal and its evidence identity after a transactional indexed-context check. Rejecting never writes media or tags. Existing apply, journal and rollback contracts remain authoritative."
+  },
+  "POST /api/library/cleanup/rejections/match#operation": {
+    "sha256": "fa1921ca51fbfad367a0766e025215c2693da53b6f4b1f4a37a7efcb02110cfd",
+    "reason": "Adds authenticated matching of at most 100 cleanup proposals against saved rejection fingerprints. Changed values or evidence do not match; this read-only decision check does not change playback or native client DTOs."
+  },
+  "POST /api/library/cleanup/rejections/{id}/restore#operation": {
+    "sha256": "49e5e8faeea792fc2cbdf7892145e18d71a38eefde6c985e766384afb67bc428",
+    "reason": "Adds authenticated restoration of a saved proposal into unchecked browser review after a fresh transactional indexed-context check. Stale proposals remain retained and return conflict. Restoration removes only the rejection; explicit apply still uses the existing coordinator, journal and rollback."
   }
 }

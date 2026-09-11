@@ -13,7 +13,7 @@ describe("cleanup review alternatives", () => {
       { schema: "library-cleanup-enrichment/v1", track_id: 2, path: "b.mp3", status: "unmatched", identity: null, ops: [], tag_suggestions: [], notes: ["Conflicting recording IDs"] },
     ] };
     const merged = mergeEnrichment(analysis, result);
-    expect(merged.plans[0].ops).toEqual([local, catalog]);
+    expect(merged.plans[0].ops).toEqual([local, { ...catalog, review_context: "[null,null,null]" }]);
     expect(merged.plans[1].notes).toEqual(["Conflicting recording IDs"]);
     expect(analysis.plans[0].ops).toEqual([local]);
   });

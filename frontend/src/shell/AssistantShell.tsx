@@ -159,6 +159,10 @@ export function LibraryCleanupShell() {
           label: "Clean up",
         },
         {
+          to: "rejected",
+          label: "Rejected suggestions",
+        },
+        {
           to: "sources",
           label: "Sources",
         },

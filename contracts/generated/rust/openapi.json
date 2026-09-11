@@ -1965,6 +1965,133 @@
         ],
         "type": "object"
       },
+      "CleanupRejectedItem": {
+        "properties": {
+          "current": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/CleanupReviewProposal"
+          },
+          "rejected_at": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "proposal",
+          "rejected_at",
+          "current"
+        ],
+        "type": "object"
+      },
+      "CleanupRejectedPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CleanupRejectedItem"
+            },
+            "type": "array"
+          },
+          "next_before": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CleanupReviewProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "type": "string"
+          },
+          "evidence": {},
+          "evidence_context": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "new": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "old": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "op_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "track_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "op_id",
+          "track_id",
+          "path",
+          "kind",
+          "old",
+          "new",
+          "rules",
+          "confidence",
+          "verified"
+        ],
+        "type": "object"
+      },
       "CleanupScope": {
         "properties": {
           "path": {
@@ -11089,6 +11216,181 @@
         },
         "tags": [
           "library"
+        ]
+      }
+    },
+    "/api/library/cleanup/rejections": {
+      "get": {
+        "operationId": "list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "before",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "path",
+            "name": "search",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupRejectedPage"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "library-cleanup"
+        ]
+      },
+      "post": {
+        "operationId": "reject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupReviewProposal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupRejectedItem"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/rejections/match": {
+      "post": {
+        "operationId": "matching",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/CleanupReviewProposal"
+                },
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "format": "int64",
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/rejections/{id}": {
+      "delete": {
+        "operationId": "forget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "library-cleanup"
+        ]
+      }
+    },
+    "/api/library/cleanup/rejections/{id}/restore": {
+      "post": {
+        "operationId": "restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupReviewProposal"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "library-cleanup"
         ]
       }
     },

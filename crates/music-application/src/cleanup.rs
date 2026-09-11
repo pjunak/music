@@ -12,6 +12,8 @@ use music_domain::{
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 
+pub mod rejections;
+
 use crate::library::{
     LibraryDependencyError, LibraryFileMutation, LibraryFileMutationOutcome,
     LibraryMutationRepository, LibraryRepository, LibraryStatus,
@@ -22,7 +24,7 @@ pub type CleanupDependencyError = Box<dyn Error + Send + Sync>;
 pub type CleanupFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CleanupDependencyError>> + Send + 'a>>;
 
-pub trait CleanupRepository: LibraryRepository {
+pub trait CleanupRepository: LibraryRepository + rejections::CleanupRejectionRepository {
     fn cleanup_name_verdicts(&self) -> CleanupFuture<'_, NameVerdicts>;
 
     fn cleanup_batches(&self) -> CleanupFuture<'_, Vec<CleanupBatchSummary>>;

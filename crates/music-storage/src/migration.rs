@@ -32,6 +32,8 @@ const CATALOG_EVIDENCE_MIGRATION_SQL: &str =
     include_str!("../migrations/0010_catalog_evidence_revision.sql");
 const HASHED_SESSIONS_MIGRATION_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
 const MODEL_BATCH_MIGRATION_SQL: &str = include_str!("../migrations/0012_model_batches.sql");
+const CLEANUP_REJECTIONS_MIGRATION_SQL: &str =
+    include_str!("../migrations/0013_cleanup_rejections.sql");
 
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
@@ -289,6 +291,13 @@ fn migrator() -> Migrator {
             "durable model batches".into(),
             MigrationType::Simple,
             MODEL_BATCH_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            13,
+            "recoverable cleanup rejections".into(),
+            MigrationType::Simple,
+            CLEANUP_REJECTIONS_MIGRATION_SQL.into_sql_str(),
             false,
         ),
     ])

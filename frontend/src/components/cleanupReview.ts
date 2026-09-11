@@ -1,4 +1,32 @@
-import type { CleanupAnalyzeResult, CleanupEnrichmentResult, CleanupOp } from "@/core/api";
+import { cleanupApi } from "@/core/api";
+import type { CleanupAnalyzeResult, CleanupEnrichmentResult, CleanupOp, CleanupReviewProposal, CleanupFolderSuggestion, CleanupEnrichmentPlan } from "@/core/api";
+
+export function catalogReviewContext(plan: CleanupEnrichmentPlan): string {
+  return JSON.stringify([plan.local_evidence_signature, plan.folder_context_signature, plan.evidence_revision]);
+}
+
+export function reviewProposal(op: CleanupOp | CleanupFolderSuggestion, path: string): CleanupReviewProposal {
+  const trackOp = "track_id" in op ? op : null;
+  return {
+    op_id: op.op_id, track_id: trackOp?.track_id ?? 0, kind: trackOp?.kind ?? "folder_rename",
+    path, field: trackOp?.field ?? null, old: op.old, new: op.new, rules: op.rules,
+    confidence: op.confidence, verified: trackOp?.verified ?? false,
+    evidence: trackOp?.evidence ?? null, evidence_context: trackOp?.review_context ?? null,
+  };
+}
+
+export async function rejectedOperationIds(result: CleanupAnalyzeResult): Promise<Set<string>> {
+  const proposals = [...result.plans.flatMap((plan) => plan.ops.map((op) => reviewProposal(op, plan.path))),
+    ...result.folders.map((folder) => reviewProposal(folder, folder.path))];
+  const rejected = new Set<string>();
+  for (let i = 0; i < proposals.length; i += 100) {
+    const chunk = proposals.slice(i, i + 100);
+    const matches = await cleanupApi.matchRejected(chunk);
+    if (matches.length !== chunk.length) throw new Error("The rejected suggestion list could not be checked.");
+    matches.forEach((id, index) => { if (id !== null) rejected.add(chunk[index]!.op_id); });
+  }
+  return rejected;
+}
 
 export function mergeEnrichment(local: CleanupAnalyzeResult, enrichment: CleanupEnrichmentResult): CleanupAnalyzeResult {
   const plans = new Map(local.plans.map((plan) => [plan.track_id, plan]));
@@ -7,7 +35,7 @@ export function mergeEnrichment(local: CleanupAnalyzeResult, enrichment: Cleanup
     plans.set(catalog.track_id, {
       track_id: catalog.track_id,
       path: catalog.path,
-      ops: [...(current?.ops ?? []), ...catalog.ops],
+      ops: [...(current?.ops ?? []), ...catalog.ops.map((op) => ({ ...op, review_context: catalogReviewContext(catalog) }))],
       notes: [...new Set([...(current?.notes ?? []), ...catalog.notes])],
     });
   }

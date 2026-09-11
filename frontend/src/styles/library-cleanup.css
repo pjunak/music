@@ -115,6 +115,21 @@
   transform: translateY(1px);
 }
 
+.cleanup-review-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.cleanup-review-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.cleanup-review-row > .cleanup-op { flex: 1 1 24rem; min-width: 0; }
+.cleanup-rejected-pool { display: grid; gap: var(--space-4); }
+.cleanup-rejected-search, .cleanup-rejected-actions { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); }
+.cleanup-rejected-search label { display: grid; gap: var(--space-2); flex: 1 1 16rem; }
+.cleanup-rejected-item { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: var(--space-4); min-width: 0; }
+.cleanup-rejected-item h3, .cleanup-rejected-item pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+.cleanup-rejected-item details { margin-bottom: var(--space-3); }
+
 /* Folder renames are structural (folder-level, not per-track) — mark them
    with the authoring/structural accent so they read distinctly from the
    per-track op rows under the same section. */

@@ -110,6 +110,11 @@ export function LibraryCleanupHistoryView() {
   );
 }
 
+export function LibraryCleanupRejectedView() {
+  const navigate = useNavigate();
+  return <CleanupWorkflow path="" checkedIds={[]} startInRejected onClose={() => navigate("/library")} onApplied={() => undefined} />;
+}
+
 function capabilityLabel(capability: string): string {
   switch (capability) {
     case "artist_name_verification":

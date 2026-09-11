@@ -63,6 +63,7 @@ export const TagVocabularyView = lazyNamed(
   (module) => module.TagVocabularyView,
 );
 const loadLibraryCleanupViews = () => import("@/views/assistant/LibraryCleanupViews");
+export const LibraryCleanupRejectedView = lazyNamed(loadLibraryCleanupViews, (module) => module.LibraryCleanupRejectedView);
 export const LibraryCleanupRunView = lazyNamed(
   loadLibraryCleanupViews,
   (module) => module.LibraryCleanupRunView,

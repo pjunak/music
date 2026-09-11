@@ -23,6 +23,13 @@ pub const CLEANUP_ENRICHMENT_SCHEMA: &str = "library-cleanup-enrichment/v1";
 pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v8";
 pub const MAX_CLEANUP_ENRICHMENT_TRACKS: usize = 500;
 
+pub(crate) fn review_context_signature(
+    track: &music_domain::IndexedTrack,
+    tracks: &[music_domain::IndexedTrack],
+) -> Result<String, String> {
+    discovery::indexed_folder_signature(track, tracks.iter())
+}
+
 pub type CleanupEnrichmentDependencyError = Box<dyn Error + Send + Sync>;
 pub type CleanupEnrichmentFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, CleanupEnrichmentDependencyError>> + Send + 'a>>;

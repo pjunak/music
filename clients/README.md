@@ -27,6 +27,12 @@ access only, and its legacy `verified_capability_ids` array is empty. See
 [Assistant setup](../ASSISTANT.md) and the [generated OpenAPI](../contracts/generated/rust/openapi.json).
 The bundled output client and Baton do not consume these Assistant settings.
 
+Library cleanup also exposes authenticated rejection-pool endpoints under
+`/api/library/cleanup/rejections`: list/search, save, match, restore-to-review and delete.
+Restoration returns a proposal for the ordinary cleanup apply/journal workflow; it never applies
+metadata by itself. These additive authoring endpoints do not change playback, track models,
+WebSocket messages or the output/Baton contract. See the generated OpenAPI for request shapes.
+
 The server holds a canonical `PlayerState`. A client connects, learns the current state,
 and on every change decides: *should I be producing sound, and if so, which track at what
 position?* It then plays `GET /api/library/tracks/{id}/stream`. There is **no per-client
