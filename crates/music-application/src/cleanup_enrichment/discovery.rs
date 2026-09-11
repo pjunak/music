@@ -1,12 +1,13 @@
 //! Siblings supply bounded retrieval hints, never a recording or edition decision.
 use super::catalog::CatalogConnector;
-use super::evidence::{EvidenceField, normalized_value};
+use super::evidence::{EvidenceField, LocalEvidence, normalized_value};
 use super::workflow::{loose_equal, select_candidate};
-use music_domain::IndexedTrack;
-use std::collections::BTreeSet;
+use music_domain::{IndexedTrack, cleanup_disc_folder_number};
+use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_ANCHORS: usize = 3;
 const MAX_RELEASES: usize = 2;
+const MAX_DISC_FOLDERS: usize = 20;
 
 #[derive(Default)]
 pub(super) struct Discovery {
@@ -19,6 +20,7 @@ pub(super) async fn discover_releases(
     connector: &dyn CatalogConnector,
     track: &IndexedTrack,
     hypothesis: &IndexedTrack,
+    evidence: &LocalEvidence,
     indexed_siblings: &[&IndexedTrack],
 ) -> Discovery {
     let mut result = Discovery::default();
@@ -27,11 +29,17 @@ pub(super) async fn discover_releases(
     if folder.is_empty() {
         return result;
     }
-    let siblings = indexed_siblings
-        .iter()
-        .copied()
-        .filter(|sibling| parent(sibling) == folder)
-        .collect::<Vec<_>>();
+    let mut siblings = indexed_context(track, indexed_siblings.iter().copied());
+    let mut across_discs = siblings.iter().any(|sibling| parent(sibling) != folder);
+    if across_discs {
+        if let Err(reason) = validate_disc_group(hypothesis, evidence, &siblings) {
+            result.notes.push(format!("Discovery across disc folders withheld: {reason}. Same-folder evidence remains available."));
+            siblings.retain(|sibling| parent(sibling) == folder);
+            across_discs = false;
+        } else {
+            result.notes.push("Release discovery includes explicitly numbered sibling disc folders with consistent album and disc evidence. This does not select an edition or expand the review scope.".into());
+        }
+    }
     let Some(album) = siblings
         .iter()
         .map(|sibling| sibling.metadata.album.trim())
@@ -57,25 +65,36 @@ pub(super) async fn discover_releases(
         })
         .collect::<Vec<_>>();
     anchors.sort_by(|left, right| {
-        left.path
-            .cmp(&right.path)
-            .then_with(|| left.id.cmp(&right.id))
+        // Sample the current disc first, then the other folders in path order.
+        (across_discs && parent(left) != folder)
+            .cmp(&(across_discs && parent(right) != folder))
+            .then_with(|| {
+                left.path
+                    .cmp(&right.path)
+                    .then_with(|| left.id.cmp(&right.id))
+            })
     });
     // Duplicate files or different artists' copies of one song cannot provide
     // the independent title evidence needed for album agreement.
-    let mut titles = Vec::<&str>::new();
-    let anchors = anchors
-        .into_iter()
-        .filter(|sibling| {
-            let title = sibling.metadata.title.as_str();
-            if titles.iter().any(|seen| loose_equal(seen, title)) {
-                return false;
-            }
-            titles.push(title);
-            true
-        })
-        .take(MAX_ANCHORS)
-        .collect::<Vec<_>>();
+    let mut chosen = Vec::<&IndexedTrack>::new();
+    let mut folders = BTreeSet::new();
+    while chosen.len() < MAX_ANCHORS {
+        let distinct = |sibling: &&IndexedTrack| {
+            !chosen
+                .iter()
+                .any(|seen| loose_equal(&seen.metadata.title, &sibling.metadata.title))
+        };
+        let next = anchors
+            .iter()
+            .copied()
+            .filter(distinct)
+            .find(|sibling| !folders.contains(parent(sibling)))
+            .or_else(|| anchors.iter().copied().find(distinct));
+        let Some(next) = next else { break };
+        folders.insert(parent(next));
+        chosen.push(next);
+    }
+    let anchors = chosen;
     if anchors.len() < 2 {
         return result;
     }
@@ -139,17 +158,104 @@ fn parent(track: &IndexedTrack) -> &str {
         .map_or("", |(folder, _)| folder)
 }
 
+fn disc_location(track: &IndexedTrack) -> Option<(&str, u32)> {
+    let (album_folder, disc_folder) = parent(track).rsplit_once('/')?;
+    if album_folder.is_empty() {
+        return None;
+    }
+    Some((album_folder, cleanup_disc_folder_number(disc_folder)?))
+}
+
+/// Include structural candidates even when their tags veto discovery: editing,
+/// adding or moving those tracks must invalidate cached and model-review evidence.
+pub(super) fn indexed_context<'a>(
+    track: &IndexedTrack,
+    tracks: impl IntoIterator<Item = &'a IndexedTrack>,
+) -> Vec<&'a IndexedTrack> {
+    let disc = disc_location(track);
+    let mut siblings = tracks
+        .into_iter()
+        .filter(|sibling| {
+            parent(sibling) == parent(track)
+                || disc.is_some_and(|(album_folder, _)| {
+                    parent(sibling)
+                        .rsplit_once('/')
+                        .is_some_and(|(other, name)| {
+                            other == album_folder && cleanup_disc_folder_number(name).is_some()
+                        })
+                })
+        })
+        .collect::<Vec<_>>();
+    siblings.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    siblings
+}
+
+fn validate_disc_group(
+    hypothesis: &IndexedTrack,
+    evidence: &LocalEvidence,
+    siblings: &[&IndexedTrack],
+) -> Result<(), &'static str> {
+    let album = hypothesis.metadata.album.trim();
+    if album.is_empty() {
+        return Err("the current song has no album evidence");
+    }
+    if evidence
+        .values(EvidenceField::Album)
+        .iter()
+        .any(|value| !loose_equal(album, value))
+    {
+        return Err("embedded or imported album observations disagree");
+    }
+    let Some((_, current_disc)) = disc_location(hypothesis) else {
+        return Err("the current folder has no explicit disc number");
+    };
+    if evidence
+        .values(EvidenceField::DiscNo)
+        .iter()
+        .any(|value| value.parse::<u32>().ok() != Some(current_disc))
+    {
+        return Err("an embedded or imported disc position contradicts its folder number");
+    }
+    let mut folders = BTreeMap::new();
+    for sibling in siblings.iter().copied().chain(std::iter::once(hypothesis)) {
+        let Some((_, disc)) = disc_location(sibling) else {
+            return Err("a folder has no explicit disc number");
+        };
+        if folders
+            .insert(disc, parent(sibling))
+            .is_some_and(|previous| previous != parent(sibling))
+        {
+            return Err("multiple folders claim the same disc number");
+        }
+        if folders.len() > MAX_DISC_FOLDERS {
+            return Err("more than 20 disc folders need manual grouping");
+        }
+        if sibling
+            .metadata
+            .disc_no
+            .is_some_and(|number| number != disc)
+        {
+            return Err("a disc tag or imported position contradicts its folder number");
+        }
+        if !sibling.metadata.album.trim().is_empty() && !loose_equal(album, &sibling.metadata.album)
+        {
+            return Err("album tags or the current album evidence disagree");
+        }
+    }
+    Ok(())
+}
+
 /// Also checked around model review: candidates can depend on unselected neighbors.
 pub(super) fn indexed_folder_signature<'a>(
     track: &IndexedTrack,
     tracks: impl IntoIterator<Item = &'a IndexedTrack>,
 ) -> Result<String, String> {
     use sha2::{Digest, Sha256};
-    let mut siblings = tracks
-        .into_iter()
-        .filter(|sibling| parent(sibling) == parent(track))
-        .collect::<Vec<_>>();
-    siblings.sort_by(|left, right| left.path.cmp(&right.path));
+    let siblings = indexed_context(track, tracks);
     let signatures = siblings
         .into_iter()
         .map(super::cleanup_enrichment_source_signature)

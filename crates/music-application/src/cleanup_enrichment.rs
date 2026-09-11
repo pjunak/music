@@ -19,8 +19,8 @@ use sha2::{Digest, Sha256};
 
 pub const CLEANUP_ENRICHMENT_JOB_KIND: &str = "library.cleanup-enrichment";
 pub const CLEANUP_ENRICHMENT_SCHEMA: &str = "library-cleanup-enrichment/v1";
-/// Invalidates evidence generated before catalog-backed artist alias retrieval.
-pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v7";
+/// Invalidates evidence generated before bounded discovery across disc folders.
+pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v8";
 pub const MAX_CLEANUP_ENRICHMENT_TRACKS: usize = 500;
 
 pub type CleanupEnrichmentDependencyError = Box<dyn Error + Send + Sync>;

@@ -143,7 +143,8 @@ pub(super) async fn resolve_identity(
         result.notes.push("Release IDs disagree; album-scoped retrieval was withheld while independent recording lookup remains available.".into());
     }
     if matched.is_none() && releases.is_empty() {
-        let discovery = discover_releases(connector, track, hypothesis, indexed_siblings).await;
+        let discovery =
+            discover_releases(connector, track, hypothesis, evidence, indexed_siblings).await;
         result.partial |= discovery.partial;
         result.notes.extend(discovery.notes);
         let mut complete = true;

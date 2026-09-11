@@ -18,7 +18,7 @@ pub use cleanup::{
     ALL_CLEANUP_RULES, CleanupConfidence, CleanupFolderSuggestion, CleanupRule, CleanupRuleSet,
     CleanupSuggestion, CleanupSuggestionKind, CleanupTagField, CleanupTrackPlan, CleanupValue,
     DEFAULT_CLEANUP_RULES, NameVerdictKind, NameVerdicts, analyze_cleanup, analyze_cleanup_folders,
-    cleanup_loose_key, pending_cleanup_lookups, verdict_kind,
+    cleanup_disc_folder_number, cleanup_loose_key, pending_cleanup_lookups, verdict_kind,
 };
 
 pub use library::{IndexedTrack, LibraryGeneration, LibraryRecordError, TrackMetadata};

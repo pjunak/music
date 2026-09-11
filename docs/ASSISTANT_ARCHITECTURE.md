@@ -187,8 +187,8 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v7` is included in evidence signatures and invalidates
-results created before catalog-backed artist alias retrieval.
+evidence. `catalog-evidence-policy/v8` is included in evidence signatures and invalidates
+results created before bounded discovery across disc folders.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -334,7 +334,7 @@ search can add up to two song-title/album-title searches, including tracks with 
 Conflicting release IDs suppress album-scoped retrieval; independent recording lookup remains
 available. Duplicate query terms are sent once, including when only position hypotheses differ.
 If these queries remain unresolved and there are no explicit release IDs, `discovery.rs` can
-query at most three independently titled, already-tagged siblings in deterministic path order.
+query at most three independently titled, already-tagged siblings in deterministic order.
 All indexed tracks in the same non-root folder are eligible, even outside the selected scope.
 Nonempty album tags must agree with each other and the current album hypothesis; artists may
 differ on compilations. Anchor searches use raw indexed title/artist/album, never inferred or
@@ -347,6 +347,19 @@ using the existing connector cache and rate limit). All responses merge before s
 a failed shared-release query withholds text selection from this fallback. Discovery IDs are
 retrieval hints only and never become explicit release evidence or bypass edition ambiguity.
 Notes retain anchor track IDs, title/artist, recording IDs, release counts and searched release IDs.
+Explicit sibling disc folders (`Disc 1`, `CD_02`, `disk-3`) under the same non-root album parent
+may share this retrieval context. Labels use the same positive 1-99 parser as local cleanup.
+Bare numbers, part/bonus folders, root-level discs, nested extras and other edition parents
+do not expand the context. More than 20 disc folders, duplicate disc numbers in different
+folders, contradictory indexed disc tags or disagreeing nonempty album tags withhold expansion.
+The current song must have album evidence; its embedded/imported album and disc observations
+must also agree, including observations that do not override already-authored tags.
+When expansion is withheld, the existing same-folder discovery remains available with a note.
+Anchors prefer the current disc and then previously unsampled disc folders, with path order
+breaking ties; duplicate titles remain ineligible as independent evidence. The three-anchor
+and seven-request caps still apply, so this is sampled corroboration rather than a complete
+validation of every disc. Only raw indexed neighbors supply search anchors. Cross-disc artist
+inheritance, edition selection and review application are not introduced by grouping folders.
 For remaining unmatched tracks, `aliases.rs` searches up to two distinct original/hypothesized
 artist names against the artist name, alias and sort-name indexes (ten hits per query).
 More than three unique artist IDs withholds expansion; otherwise each gets one `inc=aliases`
@@ -393,8 +406,9 @@ Local and catalog alternatives remain visible together, and selection enforces o
 Bulk selection leaves conflicting values unresolved. AI candidate choices are separately labeled.
 
 `library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. Cache keys
-include exact indexed source, local observations, raw and hypothesized folder context in
-deterministic path order, and source/vocabulary revision. An anchor's authored tag change expires
+include exact indexed source, local observations, raw discovery context (including potential
+disc siblings even when their tags veto grouping), same-folder hypotheses in deterministic
+path order, and source/vocabulary revision. An anchor's authored tag change expires
 the cache even when local inference could reconstruct the previous value.
 Complete matches expire after seven days; unmatched results after six hours; future timestamps
 and partial connector failures cannot be reused. The connector keeps bounded in-memory entity and
@@ -417,8 +431,9 @@ contract.
 
 The optional `assistant.model-library-cleanup` job handles one unresolved track from a completed
 catalog job whose evidence is less than six hours old. Expired or changed evidence fails before
-the provider call. The raw indexed folder signature is checked both before the request and before
-returning proposals, so changed or moved neighbors cannot leave sibling-derived candidates current.
+the provider call. The raw indexed discovery-context signature is checked both before the request
+and before returning proposals, so changed, added or moved neighbors, including other disc folders,
+cannot leave sibling-derived candidates current.
 It is non-restartable and checkpoints one provider attempt before external cost.
 `LibraryCleanupModelTask` discloses bounded indexed title/artist/album/duration and up to 25 catalog
 candidates with opaque IDs and local comparison facts. Paths, track IDs, raw sidecars, webpages,

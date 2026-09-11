@@ -406,3 +406,303 @@ async fn explicit_release_evidence_bypasses_siblings_and_discovery_never_pins_an
     coordinator.provider_task.await??;
     Ok(())
 }
+
+#[tokio::test]
+async fn disc_siblings_recover_selected_tracks_and_expire_on_neighbor_edits_or_moves() -> TestResult
+{
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    configure(&connector).await?;
+    sqlx::query("UPDATE tracks SET path = 'Album/Disc 1/song.mp3' WHERE id = 1")
+        .execute(&storage.pool)
+        .await?;
+    for (id, path, title, artist) in [
+        (2, "Album/CD_02/opening.mp3", "Opening", "Composer A"),
+        (3, "Album/disk-03/finale.mp3", "Finale", "Composer B"),
+    ] {
+        add_sibling(&storage, &connector, id, path, title, artist, &[RELEASE]).await?;
+        sqlx::query("UPDATE tracks SET disc_no = ? WHERE id = ?")
+            .bind(id)
+            .bind(id)
+            .execute(&storage.pool)
+            .await?;
+    }
+    connector.multiple_editions.store(true, Ordering::SeqCst);
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    let recovered = selected(&coordinator.service, false).await?;
+    assert_eq!(recovered["identified"], 1);
+    assert_eq!(recovered["plans"].as_array().ok_or("plans")?.len(), 1);
+    assert_eq!(recovered["plans"][0]["track_id"], 1);
+    assert!(recovered["plans"][0]["identity"]["release_mbid"].is_null());
+    assert_eq!(
+        recovered["plans"][0]["release_choices"]
+            .as_array()
+            .ok_or("choices")?
+            .len(),
+        2
+    );
+    assert_eq!(recovered["plans"][0]["ops"], json!([]));
+    assert_eq!(connector.sibling_queries.lock().await.as_slice(), &[2, 3]);
+    assert_eq!(selected(&coordinator.service, false).await?["cached"], 1);
+    sqlx::query("UPDATE tracks SET artist = '' WHERE id = 3")
+        .execute(&storage.pool)
+        .await?;
+    let changed = selected(&coordinator.service, false).await?;
+    assert_eq!(changed["cached"], 0);
+    assert_eq!(changed["unmatched"], 1);
+    sqlx::query("UPDATE tracks SET artist = 'Composer B' WHERE id = 3")
+        .execute(&storage.pool)
+        .await?;
+    assert_eq!(
+        selected(&coordinator.service, false).await?["identified"],
+        1
+    );
+    sqlx::query("UPDATE tracks SET path = 'Other/Disc 3/finale.mp3' WHERE id = 3")
+        .execute(&storage.pool)
+        .await?;
+    let moved = selected(&coordinator.service, false).await?;
+    assert_eq!(moved["cached"], 0);
+    assert_eq!(moved["unmatched"], 1);
+    sqlx::query("UPDATE tracks SET path = 'Album/Disc 3/finale.mp3' WHERE id = 3")
+        .execute(&storage.pool)
+        .await?;
+    assert_eq!(
+        selected(&coordinator.service, false).await?["identified"],
+        1
+    );
+    let untouched: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tracks WHERE album_artist = ''")
+        .fetch_one(&storage.pool)
+        .await?;
+    assert_eq!(untouched, 3);
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn disc_discovery_withholds_unclear_layouts_and_conflicting_evidence() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    configure(&connector).await?;
+    for (id, title) in [(2, "Opening"), (3, "Finale")] {
+        add_sibling(
+            &storage,
+            &connector,
+            id,
+            &format!("Album/CD2/{id}.mp3"),
+            title,
+            "Artist",
+            &[RELEASE],
+        )
+        .await?;
+    }
+    sqlx::query("UPDATE tracks SET disc_no = NULL")
+        .execute(&storage.pool)
+        .await?;
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    for (target, neighbors) in [
+        ("Disc 1", "Disc 2"),      // no album parent
+        ("Album", "Album/Disc 2"), // not a disc folder
+        ("Album/01", "Album/02"),
+        ("Album/Part 1", "Album/Part 2"),
+        ("Album/Disc 0", "Album/Disc 2"),
+        ("Album/Disc 1", "Album/Disc 2 Bonus"),
+        ("Album/Disc 1", "Album/Disc 2/extras"),
+        ("Album/Disc 1", "Album/Other Edition/Disc 2"),
+        ("Album/Disc 1", "Elsewhere/Disc 2"),
+    ] {
+        for (id, folder) in [(1, target), (2, neighbors), (3, neighbors)] {
+            sqlx::query("UPDATE tracks SET path = ? WHERE id = ?")
+                .bind(format!("{folder}/{id}.mp3"))
+                .bind(id)
+                .execute(&storage.pool)
+                .await?;
+        }
+        let result = selected(&coordinator.service, true).await?;
+        assert_eq!(result["unmatched"], 1, "{target} / {neighbors}");
+        assert!(connector.sibling_queries.lock().await.is_empty());
+    }
+    sqlx::query("UPDATE tracks SET path = CASE id WHEN 1 THEN 'Album/Disc 1/1.mp3' ELSE 'Album/Disc 2/' || id || '.mp3' END").execute(&storage.pool).await?;
+    assert_eq!(
+        selected(&coordinator.service, false).await?["identified"],
+        1
+    );
+    for (mutation, restore, reason) in [
+        (
+            "UPDATE tracks SET album = 'Different Album' WHERE id = 3",
+            "UPDATE tracks SET album = 'Album' WHERE id = 3",
+            "album",
+        ),
+        (
+            "UPDATE tracks SET disc_no = 1 WHERE id = 3",
+            "UPDATE tracks SET disc_no = NULL WHERE id = 3",
+            "disc tag",
+        ),
+        (
+            "UPDATE tracks SET path = 'Album/CD1/3.mp3' WHERE id = 3",
+            "UPDATE tracks SET path = 'Album/Disc 2/3.mp3' WHERE id = 3",
+            "same disc number",
+        ),
+    ] {
+        connector.sibling_queries.lock().await.clear();
+        sqlx::query(mutation).execute(&storage.pool).await?;
+        let blocked = selected(&coordinator.service, false).await?;
+        assert_eq!(blocked["cached"], 0);
+        assert_eq!(blocked["unmatched"], 1);
+        assert!(connector.sibling_queries.lock().await.is_empty());
+        assert!(
+            blocked["plans"][0]["notes"]
+                .as_array()
+                .ok_or("notes")?
+                .iter()
+                .any(|note| note.as_str().is_some_and(|s| s.contains(reason)))
+        );
+        sqlx::query(restore).execute(&storage.pool).await?;
+        assert_eq!(
+            selected(&coordinator.service, false).await?["identified"],
+            1
+        );
+    }
+    connector.sibling_queries.lock().await.clear();
+    // Authored tags must not hide conflicting imported observations.
+    sqlx::query("UPDATE tracks SET disc_no = 1 WHERE id = 1")
+        .execute(&storage.pool)
+        .await?;
+    for fields in [json!({"disc_no":"3"}), json!({"album":"Different Album"})] {
+        let imported = run_parameters(&coordinator.service, json!({"scope":{"type":"tracks", "track_ids":[1]}, "imports":[{"track_id":1,"fields":fields}]})).await?;
+        assert_eq!(result(&imported)?["unmatched"], 1);
+        assert!(connector.sibling_queries.lock().await.is_empty());
+    }
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn disc_anchors_sample_distinct_folders_within_the_existing_request_bound() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    configure(&connector).await?;
+    sqlx::query("UPDATE tracks SET path = 'Album/Disc 2/song.mp3', disc_no = 2 WHERE id = 1")
+        .execute(&storage.pool)
+        .await?;
+    for (id, disc, title) in [
+        (2, 2, "Opening"),
+        (3, 1, "Opening"),
+        (4, 1, "Finale"),
+        (5, 1, "Credits"),
+        (6, 3, "Scene"),
+    ] {
+        add_sibling(
+            &storage,
+            &connector,
+            id,
+            &format!("Album/Disc {disc}/{id}.mp3"),
+            title,
+            "Artist",
+            &[RELEASE],
+        )
+        .await?;
+        sqlx::query("UPDATE tracks SET disc_no = ? WHERE id = ?")
+            .bind(disc)
+            .bind(id)
+            .execute(&storage.pool)
+            .await?;
+    }
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    assert_eq!(
+        selected(&coordinator.service, false).await?["identified"],
+        1
+    );
+    assert_eq!(
+        connector.sibling_queries.lock().await.as_slice(),
+        &[2, 4, 6]
+    );
+    connector
+        .sibling_candidates
+        .lock()
+        .await
+        .insert(6, vec![candidate(6, "Scene", "Artist", &[OTHER_RELEASE])]);
+    assert_eq!(selected(&coordinator.service, true).await?["unmatched"], 1);
+    // Conflicting cross-disc tags still allow corroborated same-folder recovery.
+    sqlx::query("UPDATE tracks SET album = 'Other Album' WHERE id = 6")
+        .execute(&storage.pool)
+        .await?;
+    add_sibling(
+        &storage,
+        &connector,
+        7,
+        "Album/Disc 2/7.mp3",
+        "Ending",
+        "Artist",
+        &[RELEASE],
+    )
+    .await?;
+    sqlx::query("UPDATE tracks SET disc_no = 2 WHERE id = 7")
+        .execute(&storage.pool)
+        .await?;
+    connector.sibling_queries.lock().await.clear();
+    assert_eq!(
+        selected(&coordinator.service, false).await?["identified"],
+        1
+    );
+    assert_eq!(connector.sibling_queries.lock().await.as_slice(), &[2, 7]);
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn disc_groups_above_the_limit_are_withheld_instead_of_silently_truncated() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let (connector, handler) = setup(storage.clone()).await?;
+    configure(&connector).await?;
+    sqlx::query("UPDATE tracks SET path = 'Album/Disc 1/song.mp3' WHERE id = 1")
+        .execute(&storage.pool)
+        .await?;
+    for id in 2..=21 {
+        add_sibling(
+            &storage,
+            &connector,
+            id,
+            &format!("Album/Disc {id}/{id}.mp3"),
+            &format!("Chapter {id}"),
+            "Artist",
+            &[RELEASE],
+        )
+        .await?;
+    }
+    sqlx::query("UPDATE tracks SET disc_no = id")
+        .execute(&storage.pool)
+        .await?;
+    let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
+    let oversized = selected(&coordinator.service, false).await?;
+    assert_eq!(oversized["unmatched"], 1);
+    assert!(connector.sibling_queries.lock().await.is_empty());
+    sqlx::query("UPDATE tracks SET path = 'Other/Disc 21/21.mp3' WHERE id = 21")
+        .execute(&storage.pool)
+        .await?;
+    let bounded = selected(&coordinator.service, false).await?;
+    assert_eq!(bounded["cached"], 0);
+    assert_eq!(bounded["identified"], 1);
+    assert_eq!(connector.sibling_queries.lock().await.len(), 3);
+    coordinator.service.shutdown();
+    coordinator.local_task.await??;
+    coordinator.provider_task.await??;
+    Ok(())
+}

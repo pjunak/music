@@ -27,7 +27,7 @@ impl ProviderConnectionPolicy for Policy {
 struct Transport {
     calls: AtomicUsize,
     timeout: AtomicBool,
-    change_folder: tokio::sync::Mutex<Option<Arc<SqliteStorage>>>,
+    change_folder: tokio::sync::Mutex<Option<(Arc<SqliteStorage>, String)>>,
 }
 impl StructuredModelTransport for Transport {
     fn validate_request(
@@ -46,9 +46,10 @@ impl StructuredModelTransport for Transport {
             self.calls.fetch_add(1, Ordering::SeqCst);
             assert!(!request.user_prompt.contains("album/song.mp3"));
             assert!(!request.user_prompt.contains(RECORDING));
-            if let Some(storage) = self.change_folder.lock().await.take() {
+            if let Some((storage, path)) = self.change_folder.lock().await.take() {
                 assert!(
-                    sqlx::query("UPDATE tracks SET path = 'album/neighbor.mp3' WHERE id = 2")
+                    sqlx::query("UPDATE tracks SET path = ? WHERE id = 2")
+                        .bind(path)
                         .execute(&storage.pool)
                         .await
                         .is_ok()
@@ -87,11 +88,25 @@ async fn review(service: &JobService, parameters: Value) -> TestResult<JobRecord
 #[tokio::test]
 async fn model_review_gates_cost_and_keeps_suggestions_separate_from_authored_metadata()
 -> TestResult {
+    run_model_review("album/song.mp3", "album/neighbor.mp3").await
+}
+
+#[tokio::test]
+async fn model_review_rechecks_neighboring_disc_evidence_before_and_after_provider_cost()
+-> TestResult {
+    run_model_review("album/Disc 1/song.mp3", "album/CD2/neighbor.mp3").await
+}
+
+async fn run_model_review(track_path: &str, neighbor_path: &str) -> TestResult {
     let directory = tempfile::tempdir()?;
     let storage = Arc::new(
         SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
     );
     let (catalog, _) = setup(storage.clone()).await?;
+    sqlx::query("UPDATE tracks SET path = ? WHERE id = 1")
+        .bind(track_path)
+        .execute(&storage.pool)
+        .await?;
     let vault = Arc::new(crate::CredentialVault::from_key([7; 32])?);
     let encrypted = vault.encrypt("fixture", "synthetic-test-credential")?;
     sqlx::query("INSERT INTO assistant_provider_connections (id,name,adapter_id,base_url,encrypted_api_key,api_key_nonce,api_key_hint,allow_private_network,verification_status,verified_models_json,verified_capabilities_json,created_at,updated_at) VALUES ('fixture','Fixture','openai-responses/v1','https://api.openai.com/v1',?,?,?,0,'verified','[\"fixture-model\"]','[\"structured-text/v1\"]',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
@@ -189,7 +204,8 @@ async fn model_review_gates_cost_and_keeps_suggestions_separate_from_authored_me
     assert_eq!(title, "Song");
     // An unrelated folder is harmless, but a changed sibling set invalidates
     // candidate evidence before cost and again before publishing model proposals.
-    sqlx::query("UPDATE tracks SET path = 'album/neighbor.mp3' WHERE id = 2")
+    sqlx::query("UPDATE tracks SET path = ? WHERE id = 2")
+        .bind(neighbor_path)
         .execute(&storage.pool)
         .await?;
     let changed = review(&coordinator.service, params.clone()).await?;
@@ -198,7 +214,7 @@ async fn model_review_gates_cost_and_keeps_suggestions_separate_from_authored_me
     sqlx::query("UPDATE tracks SET path = 'other/neighbor.mp3' WHERE id = 2")
         .execute(&storage.pool)
         .await?;
-    *transport.change_folder.lock().await = Some(storage.clone());
+    *transport.change_folder.lock().await = Some((storage.clone(), neighbor_path.into()));
     let raced = review(&coordinator.service, params.clone()).await?;
     assert_eq!(raced.error.as_deref(), Some("cleanup_evidence_stale"));
     assert_eq!(transport.calls.load(Ordering::SeqCst), 2);

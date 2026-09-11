@@ -454,6 +454,16 @@ fn disc_folder_regex() -> &'static Regex {
     regex!(r"(?i)^(?:cd|disc|disk)[\s._-]*(\d{1,2})$")
 }
 
+/// Explicit numbered disc folders shared by local cleanup and catalog retrieval.
+#[must_use]
+pub fn cleanup_disc_folder_number(name: &str) -> Option<u32> {
+    disc_folder_regex()
+        .captures(name.trim())
+        .and_then(|captures| captures.get(1))
+        .and_then(|value| value.as_str().parse::<u32>().ok())
+        .filter(|number| *number > 0)
+}
+
 fn part_folder_regex() -> &'static Regex {
     regex!(r"(?i)^(?:pt|part)[\s._-]*(\d{1,3})$")
 }
@@ -648,10 +658,7 @@ fn build_context<'a>(
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     let parent_name = parts.last().copied().unwrap_or("").to_owned();
-    let disc = disc_folder_regex()
-        .captures(parent_name.trim())
-        .and_then(|captures| captures.get(1))
-        .and_then(|value| value.as_str().parse::<u32>().ok());
+    let disc = cleanup_disc_folder_number(&parent_name);
     let album_parts = if disc.is_some() && !parts.is_empty() {
         &parts[..parts.len() - 1]
     } else {
@@ -1699,11 +1706,7 @@ fn sanitize_leaf(name: &str) -> String {
 
 fn disc_part_canonical(name: &str) -> Option<(String, &'static str)> {
     let name = name.trim();
-    if let Some(number) = disc_folder_regex()
-        .captures(name)
-        .and_then(|captures| captures.get(1))
-        .and_then(|value| value.as_str().parse::<u32>().ok())
-    {
+    if let Some(number) = cleanup_disc_folder_number(name) {
         return Some((format!("Disc {number}"), "disc_canonical"));
     }
     part_folder_regex()
@@ -2021,6 +2024,23 @@ mod tests {
     use crate::{LibraryPath, TrackMetadata};
 
     use super::*;
+
+    #[test]
+    fn disc_folder_numbers_require_explicit_positive_labels() {
+        for (name, number) in [("Disc 1", 1), (" CD_02 ", 2), ("disk-99", 99)] {
+            assert_eq!(cleanup_disc_folder_number(name), Some(number));
+        }
+        for name in [
+            "Disc 0",
+            "Disc 100",
+            "1",
+            "Part 1",
+            "Disc 1 Bonus",
+            "Album CD1",
+        ] {
+            assert_eq!(cleanup_disc_folder_number(name), None, "{name}");
+        }
+    }
 
     fn track(id: i64, path: &str) -> Result<IndexedTrack, Box<dyn Error>> {
         let path = LibraryPath::parse(path)?;

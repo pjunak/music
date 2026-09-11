@@ -265,8 +265,15 @@ impl CleanupEnrichmentJobHandler {
                 .as_str()
                 .rsplit_once('/')
                 .map_or("", |(parent, _)| parent);
-            let mut indexed_siblings = all_tracks
+            let indexed_siblings = super::discovery::indexed_context(track, all_tracks.iter());
+            let indexed_folder_signature =
+                super::discovery::indexed_folder_signature(track, indexed_siblings.iter().copied())
+                    .map_err(JobHandlerError::new)?;
+            let siblings = indexed_siblings
                 .iter()
+                .copied()
+                // Edition assignment/review still applies to one folder. Only
+                // raw recording-retrieval evidence may cross disc folders.
                 .filter(|t| {
                     t.path
                         .as_str()
@@ -274,14 +281,6 @@ impl CleanupEnrichmentJobHandler {
                         .map_or("", |(parent, _)| parent)
                         == folder
                 })
-                .collect::<Vec<_>>();
-            indexed_siblings.sort_by(|left, right| left.path.cmp(&right.path));
-            let indexed_folder_signature =
-                super::discovery::indexed_folder_signature(track, indexed_siblings.iter().copied())
-                    .map_err(JobHandlerError::new)?;
-            let siblings = indexed_siblings
-                .iter()
-                .copied()
                 .map(|t| {
                     if t.id == track.id {
                         return hypothesis.clone();
