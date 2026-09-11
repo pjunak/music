@@ -23,6 +23,8 @@ use crate::{SqliteStorage, SqliteStorageOptions};
 
 #[path = "cleanup_enrichment_workflow_tests/artist_aliases.rs"]
 mod artist_aliases;
+#[path = "cleanup_enrichment_workflow_tests/edition_positions.rs"]
+mod edition_positions;
 #[path = "cleanup_enrichment_workflow_tests/model_review.rs"]
 mod model_review;
 #[path = "cleanup_enrichment_workflow_tests/sibling_discovery.rs"]
@@ -55,6 +57,7 @@ struct FixtureCatalog {
     metadata_failure: AtomicBool,
     ambiguous_fingerprint: AtomicBool,
     release_failure: AtomicBool,
+    release_slots: tokio::sync::Mutex<Option<Vec<ReleaseSlot>>>,
     album_searches: AtomicUsize,
     album_match: AtomicBool,
     album_failure: AtomicBool,
@@ -256,17 +259,19 @@ impl CatalogConnector for FixtureCatalog {
                 date: Some("2026".to_owned()),
                 track_no: Some(1),
                 disc_no: Some(1),
-                slots: vec![
-                    music_application::cleanup_enrichment::catalog::ReleaseSlot {
-                        id: "00000000-0000-0000-0000-000000000098".into(),
-                        recording_id: "00000000-0000-0000-0000-000000000001".into(),
-                        title: "Song".into(),
-                        artist: "Artist".into(),
-                        length_ms: Some(120_000),
-                        track_no: Some(1),
-                        disc_no: Some(1),
-                    },
-                ],
+                slots: self.release_slots.lock().await.clone().unwrap_or_else(|| {
+                    vec![
+                        music_application::cleanup_enrichment::catalog::ReleaseSlot {
+                            id: "00000000-0000-0000-0000-000000000098".into(),
+                            recording_id: "00000000-0000-0000-0000-000000000001".into(),
+                            title: "Song".into(),
+                            artist: "Artist".into(),
+                            length_ms: Some(120_000),
+                            track_no: Some(1),
+                            disc_no: Some(1),
+                        },
+                    ]
+                }),
                 ..ReleaseDetail::default()
             })
         })
@@ -354,6 +359,7 @@ async fn setup(
         metadata_failure: AtomicBool::new(false),
         ambiguous_fingerprint: AtomicBool::new(false),
         release_failure: AtomicBool::new(false),
+        release_slots: tokio::sync::Mutex::default(),
         album_searches: AtomicUsize::new(0),
         album_match: AtomicBool::new(false),
         album_failure: AtomicBool::new(false),

@@ -187,8 +187,8 @@ Its `CatalogConnector` port returns typed observations; server adapters retain H
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v8` is included in evidence signatures and invalidates
-results created before bounded discovery across disc folders.
+evidence. `catalog-evidence-policy/v9` is included in evidence signatures and invalidates
+results created before title-style preservation and release-position review notes.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -417,7 +417,16 @@ from filenames/disc folders can support assignment without changing indexed tags
 and conflicting position observations suppress filename fallback. Low-confidence number guesses
 are excluded from assignment hypotheses. Recording first-release date is retained
 separately from edition year. MusicBrainz genres and credits remain attributed observations;
-bounded genre proposals can update embedded genre through the journal. Last.fm receives the
+each eligible detailed edition also retains its matched release-track ID and catalog
+disc/track numbers in review notes, including unchanged or unknown positions. An unusable
+assignment is reported separately from a matched slot with missing numbers. Catalog title
+proposals omit differences limited to capitalization, curly apostrophes, or typographic
+hyphens (U+2010/U+2011). Spaces, version text, other punctuation and dash types remain
+distinct. The provider spelling remains in identity evidence, and deliberate case repair
+uses the separate local cleanup rule. Substantive title repairs still pass through the
+existing recording-identity checks.
+
+Bounded genre proposals can update embedded genre through the journal. Last.fm receives the
 identified recording MBID and maps top tags by exact controlled-vocabulary names or aliases.
 Catalog metadata and mood tags are suggestions, never direct writes. Metadata returns through
 the cleanup diff/journal; accepted mood tags use the existing database-tag review transaction.

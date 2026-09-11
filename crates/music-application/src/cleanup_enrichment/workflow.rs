@@ -982,6 +982,11 @@ fn push_text_operation(
     if new.trim().is_empty() || old == new {
         return;
     }
+    // Catalog typography is not evidence that an authored spelling is wrong.
+    // Deliberate case repair remains a separate local cleanup rule.
+    if field == "title" && title_spelling(old) == title_spelling(new) {
+        return;
+    }
     operations.push(json!({
         "op_id": format!("catalog:{}:{field}:{recording_id}", track.id.get()),
         "track_id": track.id.get(),
@@ -993,6 +998,18 @@ fn push_text_operation(
         "confidence": "low",
         "verified": true,
     }));
+}
+
+fn title_spelling(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .map(|character| match character {
+            '\u{2018}' | '\u{2019}' => '\'',
+            '\u{2010}' | '\u{2011}' => '-',
+            _ => character,
+        })
+        .collect()
 }
 
 fn push_number_operation(
@@ -1257,6 +1274,47 @@ mod tests {
             }],
             provider_score: 1.0,
         }
+    }
+
+    #[test]
+    fn catalog_titles_preserve_style_but_still_repair_substantive_differences()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut track = track()?;
+        for (old, new, expected) in [
+            ("Song (Alternate)", "Song (alternate)", false),
+            ("Élan", "élan", false),
+            ("SONG", "Song", false),
+            ("Hunter's Dream", "Hunter’s Dream", false),
+            ("Blood-starved Beast", "Blood‐Starved Beast", false),
+            ("Long-Term", "Long‑Term", false),
+            ("", "Song", true),
+            ("Artist - Song", "Song", true),
+            ("Song ", "Song", true),
+            ("Song (live)", "Song", true),
+            ("Hunters Dream", "Hunter's Dream", true),
+            ("Song - Part 1", "Song – Part 1", true),
+        ] {
+            track.metadata.title = old.into();
+            let metadata = canonical_metadata(
+                &Recording {
+                    title: new.into(),
+                    ..Recording::default()
+                },
+                None,
+            );
+            let ops = metadata_operations(&track, &metadata, "recording");
+            assert_eq!(
+                ops.iter().any(|op| op["field"] == "title"),
+                expected,
+                "{old} -> {new}"
+            );
+            assert_eq!(
+                metadata.title, new,
+                "catalog spelling remains available as evidence"
+            );
+            assert_eq!(track.metadata.title, old);
+        }
+        Ok(())
     }
 
     #[test]

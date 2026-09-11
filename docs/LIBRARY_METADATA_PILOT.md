@@ -143,6 +143,44 @@ field proposals while reporting optional tag failures as partial evidence. Do no
 silently turn the HTTP error into a successful empty result or label it as a missing
 recording without an identified provider error.
 
+### Development baseline and title-style replay
+
+The 11 September 2026 private baseline collection now covers all 114 development
+tracks in four artist/release families; the fixed 75-track holdout remains unused.
+The four original jobs are preserved separately with byte counts, hashes, scope
+checks and metadata-snapshot checks. Their unmodified plans form a derived baseline
+collection, not a single live run or a controlled deployment comparison. The first
+job predates the Last.fm GET fix; later jobs retain the new request diagnostics.
+
+The baseline contains 63 field proposals: 30 independently correct, three unwanted
+changes to already-correct titles, and 30 unscored. Recording and release IDs remain
+unlabeled, so the 65 proposed recording identities and one selected edition do not
+establish identity precision. Evidence is partial for 111 tracks, including 46 of
+the 49 unmatched tracks. Availability gaps must remain separate from matching failures.
+
+An offline replay of only the title-style filter removes 12 cosmetic title
+proposals: the three unwanted labeled edits and nine unscored edits. All 30 known
+useful corrections remain, with no labeled field regression; 21 remaining field
+proposals are unscored. The filter preserves authored capitalization, apostrophe
+style and typographic hyphens while retaining the catalog spelling as evidence.
+It does not change recording acceptance, retrieve new evidence or resolve editions.
+The replay is a derived artifact, not a newly executed catalog job or holdout result.
+
+The next live check requires the updated application and a small refreshed sample.
+New edition notes distinguish an unchanged catalog position, a matched slot with
+missing numbers, and an unusable assignment. Older exports cannot recover those
+previously omitted observations. Remaining development gaps include the absent
+confirmed reissue in the returned edition choices, Romanized composer credits being
+replaced by native-script catalog names, and MusicBrainz HTTP 503/timeouts. Some
+native-script names may identify the same composer; this still requires explicit
+credit/alias evidence and does not establish a useful metadata replacement.
+
+The application shares one MusicBrainz limiter between name and catalog lookups,
+waiting 1.1 seconds after response headers. A 503 alone does not prove an application
+pacing defect: MusicBrainz documents application, source-IP and global load limits
+([rate-limiting reference](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)).
+Use bounded availability checks before changing retries or acceptance thresholds.
+
 ### Score saved results
 
 ```powershell

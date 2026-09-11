@@ -1,5 +1,5 @@
 use super::album::assign_album;
-use super::catalog::{CatalogConnector, Recording, ReleaseDetail};
+use super::catalog::{CatalogConnector, Recording, ReleaseDetail, ReleaseSlot};
 use super::evidence::{EvidenceField, LocalEvidence};
 use super::workflow::{canonical_metadata, loose_equal, metadata_operations};
 use music_domain::IndexedTrack;
@@ -84,6 +84,7 @@ pub(super) async fn resolve_editions(
                 .iter()
                 .find(|s| &s.id == id && s.recording_id == recording_id)
         });
+        let position_note = release_position_note(id, slot);
         if !detail.slots.is_empty() {
             detail.track_no = slot.and_then(|s| s.track_no);
             detail.disc_no = slot.and_then(|s| s.disc_no);
@@ -100,6 +101,9 @@ pub(super) async fn resolve_editions(
         {
             continue;
         }
+        // Keep the source position visible even when it equals the indexed tag
+        // and therefore produces no operation.
+        result.notes.push(position_note);
         let metadata = canonical_metadata(recording, Some(&detail));
         let mut ops = metadata_operations(track, &metadata, recording_id);
         ops.retain(|op| {
@@ -130,4 +134,20 @@ pub(super) async fn resolve_editions(
         result.notes.push("Recording identified; choose an album edition to propose its date, album artist and track positions.".into());
     }
     result
+}
+
+fn release_position_note(release_id: &str, slot: Option<&ReleaseSlot>) -> String {
+    match slot {
+        Some(slot) => format!(
+            "Edition {release_id}: matched release track {} has catalog disc {}, track {}.",
+            slot.id,
+            slot.disc_no
+                .map_or_else(|| "unknown".into(), |n| n.to_string()),
+            slot.track_no
+                .map_or_else(|| "unknown".into(), |n| n.to_string()),
+        ),
+        None => format!(
+            "Edition {release_id}: no usable release-track assignment; track and disc positions remain unresolved."
+        ),
+    }
 }
