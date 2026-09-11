@@ -168,8 +168,50 @@ describe("CleanupWorkflow catalog enrichment", () => {
     );
   });
 
+  it("skips oversized catalog jobs using the scanned count and retains local review", async () => {
+    vi.mocked(cleanupApi.analyze).mockResolvedValue({ ...localResult, scanned: 501 });
+    const user = userEvent.setup();
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+
+    expect(await screen.findByText("01_song.mp3")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("501-track scan");
+    expect(screen.getByRole("status")).toHaveTextContent("up to 500 tracks");
+    expect(cleanupApi.enrich).not.toHaveBeenCalled();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    vi.mocked(cleanupApi.analyze).mockResolvedValue({ ...localResult, scanned: 500 });
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await waitFor(() => expect(cleanupApi.enrich).toHaveBeenCalledOnce());
+    expect(screen.queryByText(/501-track scan/)).not.toBeInTheDocument();
+  });
+
+  it("explains an oversized catalog skip even when local analysis finds no issues", async () => {
+    vi.mocked(cleanupApi.analyze).mockResolvedValue({ scanned: 501, plans: [], folders: [], pending_lookups: [] });
+    const user = userEvent.setup();
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Catalog lookup was skipped");
+    expect(screen.getByRole("button", { name: "Find issues" })).toBeEnabled();
+    expect(cleanupApi.enrich).not.toHaveBeenCalled();
+  });
+
+  it("does not report skipped catalog work when catalogs were not requested", async () => {
+    vi.mocked(cleanupApi.analyze).mockResolvedValue({ ...localResult, scanned: 501 });
+    const user = userEvent.setup();
+    renderWorkflow();
+    await user.click(screen.getByRole("checkbox", { name: /Identify tracks and retrieve canonical metadata/ }));
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+
+    expect(await screen.findByText("01_song.mp3")).toBeInTheDocument();
+    expect(screen.queryByText(/Catalog lookup was skipped/)).not.toBeInTheDocument();
+    expect(cleanupApi.enrich).not.toHaveBeenCalled();
+  });
+
   it("keeps explicit rejections in the pool and restores them unchecked before applying", async () => {
-    vi.mocked(cleanupApi.enrich).mockRejectedValue(new Error("catalog offline"));
+    vi.mocked(cleanupApi.analyze).mockResolvedValue({ ...localResult, scanned: 501 });
     const proposal: CleanupReviewProposal = { ...localResult.plans[0]!.ops[0]!, path: "Album/01_song.mp3", evidence: null, evidence_context: null };
     const item = { id: 12, proposal, current: true, rejected_at: 1_800_000_000 };
     vi.mocked(cleanupApi.reject).mockResolvedValue(item);
@@ -179,6 +221,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
     await user.click(screen.getByRole("button", { name: "Find issues" }));
     const checkbox = await screen.findByRole("checkbox", { name: /Title/ });
     expect(checkbox).toBeChecked();
+    expect(screen.getByRole("status")).toHaveTextContent("501-track scan");
     await user.click(checkbox);
     expect(cleanupApi.reject).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Reject Title suggestion for 01_song.mp3" }));
@@ -189,6 +232,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
     await user.click(screen.getByRole("button", { name: "Restore to review" }));
     const restored = await screen.findByRole("checkbox", { name: /Title/ });
     expect(restored).not.toBeChecked();
+    expect(screen.queryByText(/501-track scan/)).not.toBeInTheDocument();
     expect(cleanupApi.apply).not.toHaveBeenCalled();
     await user.click(restored);
     await user.click(screen.getByRole("button", { name: "Apply 1 change" }));

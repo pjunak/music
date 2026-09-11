@@ -424,7 +424,11 @@ the cleanup diff/journal; accepted mood tags use the existing database-tag revie
 Local and catalog alternatives remain visible together, and selection enforces one value per field.
 Bulk selection leaves conflicting values unresolved. AI candidate choices are separately labeled.
 
-`library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. Cache keys
+`library.cleanup-enrichment` is a restartable provider-lane job bounded to 500 tracks. The browser
+uses the local analysis's scanned count to skip oversized catalog jobs, keeps local proposals
+reviewable, and explains the smaller folder/selection requirement even when there are no local
+issues. The job still checks its resolved scope at execution time for direct callers and index
+changes between analysis and execution. Cache keys
 include exact indexed source, local observations, raw discovery context (including potential
 disc siblings even when their tags veto grouping), same-folder hypotheses in deterministic
 path order, and source/vocabulary revision. An anchor's authored tag change expires

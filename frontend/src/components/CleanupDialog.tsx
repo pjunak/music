@@ -155,6 +155,8 @@ const APPLY_CHUNK = 20;
 const VERIFY_CHUNK = 5;
 const REVIEW_CHUNK = 500;
 const CLEANUP_ENRICHMENT_JOB_KIND = "library.cleanup-enrichment";
+// Mirrors the provider job's bound; its execution-time check remains authoritative.
+const MAX_CATALOG_TRACKS = 500;
 
 function enrichmentResult(job: BackgroundJob): CleanupEnrichmentResult | null {
   const result = job.result;
@@ -265,6 +267,7 @@ export function CleanupWorkflow({
   const [tickedCatalogTags, setTickedCatalogTags] = useState<Set<string>>(new Set());
   const [enrichmentJob, setEnrichmentJob] = useState<BackgroundJob | null>(null);
   const [enrichmentSummary, setEnrichmentSummary] = useState<CleanupEnrichmentResult | null>(null);
+  const [catalogScopeNotice, setCatalogScopeNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [checkProgress, setCheckProgress] = useState({ done: 0, total: 0 });
   // Set by the Skip button (or closing the dialog) to stop further lookup
@@ -438,6 +441,7 @@ export function CleanupWorkflow({
     setBusy(true);
     setEnrichmentJob(null);
     setEnrichmentSummary(null);
+    setCatalogScopeNotice(null);
     setEditions({});
     try {
       let r = await cleanupApi.analyze(scope, [...rules]);
@@ -447,7 +451,11 @@ export function CleanupWorkflow({
         await checkNamesOnline(r.pending_lookups);
         r = await cleanupApi.analyze(scope, [...rules]);
       }
-      if (useCatalogs) {
+      if (useCatalogs && r.scanned > MAX_CATALOG_TRACKS) {
+        setCatalogScopeNotice(
+          `Catalog lookup was skipped for this ${r.scanned}-track scan. Choose a folder or selection of up to ${MAX_CATALOG_TRACKS} tracks to identify them. Local cleanup suggestions are still available.`,
+        );
+      } else if (useCatalogs) {
         try {
           setStep("enriching");
           let job = await cleanupApi.enrich(scope, refreshCatalogs, imports);
@@ -545,6 +553,7 @@ export function CleanupWorkflow({
   }
 
   function restoreProposal(proposal: CleanupReviewProposal) {
+    setCatalogScopeNotice(null);
     const { evidence, evidence_context, ...fields } = proposal;
     const op = { ...fields, ...(evidence ? { evidence } : {}), ...(evidence_context ? { review_context: evidence_context } : {}) };
     setResult({ scanned: 1, pending_lookups: [],
@@ -781,6 +790,7 @@ export function CleanupWorkflow({
           </span>
         </label>
         {useCatalogs && <>
+          <p className="cleanup-hint muted">Catalog lookup supports up to {MAX_CATALOG_TRACKS} tracks per run. Larger scans still produce local cleanup suggestions.</p>
           <label className="cleanup-choice"><input type="checkbox" checked={refreshCatalogs} onChange={(event) => setRefreshCatalogs(event.target.checked)} />Refresh catalog results, including previous no-match results</label>
           <CleanupEvidenceImport imports={imports} onChange={setImports} />
         </>}
@@ -1211,7 +1221,7 @@ export function CleanupWorkflow({
     onClose();
   }
 
-  const body =
+  const stepBody =
     step === "configure"
       ? configureBody
       : step === "checking"
@@ -1225,6 +1235,13 @@ export function CleanupWorkflow({
             : step === "done"
               ? doneBody
               : step === "rejected" ? rejectedBody : historyBody;
+
+  const body = <>
+    {catalogScopeNotice && !busy && (step === "configure" || step === "review") && (
+      <p className="cleanup-catalog-summary" role="status">{catalogScopeNotice}</p>
+    )}
+    {stepBody}
+  </>;
 
   if (presentation === "modal") {
     return (
