@@ -94,6 +94,35 @@ An apply/rollback journal or AI candidate-review result is a different schema an
 New catalog requests remain governed by the configured source policy; saving an existing
 result and scoring it do not make requests. Inputs are limited to 10 MiB each.
 
+### When an HTTP error has no API code
+
+A fresh Last.fm lookup can still retain only an HTTP status after the GET/error
+handling fix. This means no usable numeric code was parsed under the response
+bounds; it does not prove the body was empty, the key was invalid, or the track was
+absent. Preserve the original job and confirm the running backend image revision.
+A newly visible frontend control alone cannot establish that backend revision.
+
+To distinguish basic endpoint access from a configured lookup, an operator can run
+this read-only public example from the server host. Keep `YOUR_API_KEY` literally
+as written; it deliberately avoids reading or transmitting a saved credential or
+private library metadata. It requires curl and makes one request, with no retries:
+
+```sh
+curl --silent --show-error --max-time 20 --include --user-agent 'music-dnd-orchestrator/0.1 (https://github.com/pjunak/music)' 'https://ws.audioscrobbler.com/2.0/?method=track.gettoptags&api_key=YOUR_API_KEY&autocorrect=0&format=json&artist=radiohead&track=paranoid%20android'
+```
+
+The local check on 11 September 2026 returned HTTP 403 and JSON error 10 with both
+PowerShell and reqwest 0.13.4 using the application client configuration. Last.fm
+documents code 10 as an invalid API key ([method reference](https://www.last.fm/api/show/track.getTopTags)).
+Compare the status, response type and numeric code; do not assume every environment
+will return the same status. A different response is evidence to investigate the
+network path, not proof of its cause. A matching response establishes access for
+this public request only: the application's actual credential, recording lookup,
+container network and deployed build still need separate verification. Do not
+replace a scoped recording lookup with a title search solely to suppress an error.
+
+### Score saved results
+
 ```powershell
 node tools/cleanup-pilot.mjs score cohort.json baseline-run.json > baseline-score.json
 node tools/cleanup-pilot.mjs score cohort.json changed-run.json > changed-score.json
