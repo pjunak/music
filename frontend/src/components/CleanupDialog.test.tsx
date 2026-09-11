@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
 import type { BackgroundJob, CleanupAnalyzeResult, CleanupReviewProposal } from "@/core/api";
@@ -132,6 +132,10 @@ function renderWorkflow(onApplied = vi.fn()) {
 }
 
 describe("CleanupWorkflow catalog enrichment", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(cleanupApi.analyze).mockResolvedValue(localResult);
@@ -162,10 +166,59 @@ describe("CleanupWorkflow catalog enrichment", () => {
 
     expect(await screen.findByText("01_song.mp3")).toBeInTheDocument();
     expect(screen.getByText("Song")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download catalog results" })).not.toBeInTheDocument();
     expect(toast.warn).toHaveBeenCalledWith(
       "Catalog enrichment unavailable",
       expect.stringContaining("Local cleanup suggestions are still available"),
     );
+  });
+
+  it("downloads the original catalog job without local proposals or selection changes", async () => {
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:catalog-export");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", class extends URL {
+      static override createObjectURL = createObjectURL;
+      static override revokeObjectURL = revokeObjectURL;
+    });
+    let filename = "";
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      filename = this.download;
+    });
+    const user = userEvent.setup();
+    renderWorkflow();
+    expect(screen.queryByRole("button", { name: "Download catalog results" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    await screen.findByText("01_song.mp3");
+    await user.click(screen.getByRole("button", { name: "None" }));
+    await user.click(screen.getByRole("button", { name: "Download catalog results" }));
+
+    const blob = createObjectURL.mock.calls[0]![0];
+    const text = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    expect(JSON.parse(text)).toEqual(catalogJob);
+    expect(blob.type).toBe("application/json");
+    expect(filename).toBe("cleanup-catalog-cleanup-enrichment-1.json");
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:catalog-export");
+    expect(cleanupApi.enrich).toHaveBeenCalledOnce();
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+    expect(assistantApi.reviewAnalysisTagsBulk).not.toHaveBeenCalled();
+  });
+
+  it("retains export access when a completed run has no proposals to review", async () => {
+    vi.mocked(cleanupApi.analyze).mockResolvedValue({ scanned: 0, plans: [], folders: [], pending_lookups: [] });
+    vi.mocked(cleanupApi.enrich).mockResolvedValue({ ...catalogJob, result: {
+      schema: "library-cleanup-enrichment/v1", scanned: 0, identified: 0,
+      fingerprinted: 0, unmatched: 0, failed: 0, cached: 0, plans: [],
+    } });
+    const user = userEvent.setup();
+    renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    expect(await screen.findByRole("button", { name: "Download catalog results" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Find issues" })).toBeEnabled();
   });
 
   it("skips oversized catalog jobs using the scanned count and retains local review", async () => {

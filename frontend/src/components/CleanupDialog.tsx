@@ -680,6 +680,25 @@ export function CleanupWorkflow({
     if (applied > 0 || acceptedTags > 0) onApplied();
   }
 
+  function downloadCatalogResult() {
+    if (enrichmentJob?.status !== "succeeded" || enrichmentSummary === null) return;
+    let url: string | undefined;
+    try {
+      // Preserve the original job, including scope and evidence. Review choices
+      // and merged local suggestions are not a retained catalog run.
+      const blob = new Blob([JSON.stringify(enrichmentJob, null, 2)], { type: "application/json" });
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `cleanup-catalog-${enrichmentJob.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
+      link.click();
+    } catch (error) {
+      toast.error("Could not download catalog results", error instanceof Error ? error.message : undefined);
+    } finally {
+      if (url !== undefined) URL.revokeObjectURL(url);
+    }
+  }
+
   async function downloadJournal(batchId: number) {
     try {
       const detail = await cleanupApi.batch(batchId);
@@ -1239,6 +1258,15 @@ export function CleanupWorkflow({
   const body = <>
     {catalogScopeNotice && !busy && (step === "configure" || step === "review") && (
       <p className="cleanup-catalog-summary" role="status">{catalogScopeNotice}</p>
+    )}
+    {enrichmentJob?.status === "succeeded" && enrichmentSummary !== null && !busy &&
+      (step === "configure" || step === "review" || step === "done") && (
+      <p>
+        <button type="button" className="btn-ghost" onClick={downloadCatalogResult}>
+          Download catalog results
+        </button>
+        <span className="muted small"> Saves this run's original proposals and evidence as JSON.</span>
+      </p>
     )}
     {stepBody}
   </>;

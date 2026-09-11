@@ -66,8 +66,13 @@ Record longer research notes separately and reference them in the short evidence
 
 ## Compare retained catalog runs
 
-Engineering saves the authenticated `GET /api/jobs/{job_id}` response for a completed
-`library.cleanup-enrichment` job, or its `result` object, as `run.json`. Use the same indexed
+After a completed lookup, **Download catalog results** saves the original
+`library.cleanup-enrichment` job as JSON from the cleanup screen, including runs with
+no proposals. The export retains scope, results and evidence before local suggestions,
+edition choices or review selections are merged into the review. It does not run a
+provider or apply changes. Failed or incomplete jobs are not offered as catalog-result
+exports. For older deployments, engineering can save the authenticated
+`GET /api/jobs/{job_id}` response, or its `result` object, as `run.json`. Use the same indexed
 metadata snapshot for baseline and changed runs; do not apply proposed changes between them.
 The scorer checks original values for proposed, labeled fields and rejects mismatched
 snapshots. It cannot detect a changed source field that produces no operation.
