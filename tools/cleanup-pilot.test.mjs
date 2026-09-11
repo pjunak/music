@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCohort, scorePilot, main } from "./cleanup-pilot.mjs";
+import { createCohort, scorePilot, comparePilot, main } from "./cleanup-pilot.mjs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
 const manifest = Array.from({ length: 10 }, (_, index) => ({ track_id: index + 1, family: `composer-${Math.floor(index / 2)}`, stratum: index % 2 ? "partial album" : "soundtrack" }));
@@ -136,5 +138,140 @@ test("CLI preparation preserves existing files and bounds input size", async () 
     await assert.rejects(main(["init", source, target]), /EEXIST/);
     await writeFile(source, " ".repeat(10 * 1024 * 1024 + 1));
     await assert.rejects(main(["init", source, target]), /10 MiB/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+const developmentTrack = (labeled) => labeled.tracks.find((track) => track.split === "development");
+const trackOp = (track, field, old, value) => ({ ...op(field, old, value), track_id: track.track_id });
+
+test("comparisons isolate development from pending holdout judgments and require an explicit holdout choice", () => {
+  const labeled = cohort(), track = developmentTrack(labeled);
+  for (const item of labeled.tracks.filter((item) => item.split === "holdout")) {
+    item.reviewed = false; item.evidence_notes = "";
+  }
+  const before = run([plan(track.track_id)]);
+  const result = comparePilot(labeled, before, before);
+  assert.equal(result.split, "development");
+  assert.equal(result.baseline.tracks, 8);
+  assert.equal(result.unchanged_tracks, 8);
+  assert.deepEqual(result.differences, []);
+  assert.equal(result.delta.recording_precision, 0);
+  assert.equal(result.delta.field_precision, null);
+  assert.throws(() => comparePilot(labeled, before, before, "holdout"), /independent/);
+  assert.throws(() => comparePilot(labeled, before, before, "all"), /never combine/);
+  const holdout = comparePilot(cohort(), before, before, "holdout");
+  assert.equal(holdout.baseline.tracks, 2);
+  assert.equal(holdout.baseline.recording_proposals, 0);
+  assert.equal(holdout.delta.recording_precision, null);
+});
+
+test("paired comparisons expose mixed identity gains and damage to already-correct fields", () => {
+  const labeled = cohort(), track = developmentTrack(labeled);
+  const before = plan(track.track_id, "unmatched"), after = plan(track.track_id);
+  after.ops = [trackOp(track, "artist", "Composer", "Various Artists"), trackOp(track, "title", "01 - Song", "Song")];
+  const result = comparePilot(labeled, run([before]), { result: run([after]) });
+  assert.equal(result.differences.length, 1);
+  const difference = result.differences[0];
+  assert.equal(difference.classification, "mixed");
+  assert.equal(difference.track_id, track.track_id);
+  assert.deepEqual(difference.regressions, ["new_damaged_field"]);
+  assert.ok(difference.improvements.includes("recovered_correct_recording"));
+  assert.ok(difference.improvements.includes("recovered_useful_correction"));
+  assert.equal(result.tracks_with_improvements, 1);
+  assert.equal(result.tracks_with_regressions, 1);
+  assert.equal(result.delta.damaged_correct_fields, 1);
+  assert.equal(result.delta.useful_corrections, 1);
+  assert.equal(difference.changed.fields.artist.state, "damaged_correct");
+  assert.equal(difference.changed.fields.artist.proposal.new, "Various Artists");
+  assert.equal(result.delta.recording_precision, null);
+});
+
+test("lost matches and useful corrections are regressions even when aggregate precision stays perfect", () => {
+  const labeled = cohort(), tracks = labeled.tracks.filter((track) => track.split === "development").slice(0, 2);
+  const first = plan(tracks[0].track_id), second = plan(tracks[1].track_id);
+  first.ops = [trackOp(tracks[0], "title", "01 - Song", "Song")];
+  const result = comparePilot(labeled, run([first, second]), run([plan(first.track_id, "unmatched"), second]));
+  assert.equal(result.baseline.recording_precision, 1);
+  assert.equal(result.changed.recording_precision, 1);
+  assert.equal(result.delta.correct_recordings, -1);
+  assert.equal(result.delta.useful_corrections, -1);
+  assert.ok(result.differences[0].regressions.includes("lost_correct_recording"));
+  assert.ok(result.differences[0].regressions.includes("lost_useful_correction"));
+  assert.ok(result.differences[0].regressions.includes("lost_candidate"));
+});
+
+test("missing and failed results never receive credit for avoiding wrong identities or field changes", () => {
+  const labeled = cohort(), track = developmentTrack(labeled), wrong = plan(track.track_id);
+  wrong.identity.recording_mbid = id(999); wrong.identity.release_mbid = id(999);
+  wrong.ops = [trackOp(track, "artist", "Composer", "Wrong"), trackOp(track, "title", "01 - Song", "Wrong")];
+  for (const plans of [[], [plan(track.track_id, "failed")]]) {
+    const result = comparePilot(labeled, run([wrong]), run(plans));
+    assert.equal(result.tracks_with_improvements, 0);
+    assert.deepEqual(result.differences[0].regressions, ["lost_result"]);
+    assert.deepEqual(result.differences[0].improvements, []);
+  }
+  const abstained = comparePilot(labeled, run([wrong]), run([plan(track.track_id, "unmatched")]));
+  assert.equal(abstained.tracks_with_regressions, 0);
+  assert.ok(abstained.differences[0].improvements.includes("avoided_wrong_recording"));
+  assert.ok(abstained.differences[0].improvements.includes("preserved_correct_field"));
+  assert.ok(abstained.differences[0].improvements.includes("avoided_wrong_field"));
+});
+
+test("unknown identities and fields remain unscored when predictions change", () => {
+  const labeled = cohort(), track = developmentTrack(labeled);
+  track.expected_recording_mbids = null; track.expected_release_mbids = null; track.fields = {};
+  const before = plan(track.track_id), after = plan(track.track_id);
+  after.identity.recording_mbid = id(999);
+  after.ops = [trackOp(track, "artist", "Unknown", "Claimed")];
+  const result = comparePilot(labeled, run([before]), run([after]));
+  assert.equal(result.differences[0].classification, "changed");
+  assert.equal(result.tracks_with_improvements, 0);
+  assert.equal(result.tracks_with_regressions, 0);
+  assert.equal(result.changed.unscored_fields, 1);
+  assert.equal(result.delta.recording_precision, null);
+});
+
+test("candidate recovery, partial results, acceptable variants and field damage stay distinct", () => {
+  const labeled = cohort(), track = developmentTrack(labeled);
+  track.fields.artist.acceptable.push("Composer Alias");
+  const before = plan(track.track_id, "unmatched"), retrieved = { ...before, candidates: [{ id: id(track.track_id) }], partial: true };
+  const candidates = comparePilot(labeled, run([before]), run([retrieved])).differences[0];
+  assert.equal(candidates.classification, "mixed");
+  assert.deepEqual(candidates.improvements, ["recovered_candidate"]);
+  assert.deepEqual(candidates.regressions, ["became_partial"]);
+  const wrong = plan(track.track_id), alternate = plan(track.track_id);
+  wrong.ops = [trackOp(track, "artist", "Composer", "Wrong")];
+  alternate.ops = [trackOp(track, "artist", "Composer", "Composer Alias")];
+  const repaired = comparePilot(labeled, run([wrong]), run([alternate])).differences[0];
+  assert.equal(repaired.classification, "improvement");
+  assert.deepEqual(repaired.improvements, ["avoided_damaged_field"]);
+  assert.equal(comparePilot(labeled, run([plan(track.track_id)]), run([alternate])).differences[0].regressions[0], "new_unnecessary_field_change");
+});
+
+test("comparison validates both metadata snapshots, normalizes IDs and does not modify its inputs", () => {
+  const labeled = cohort(), track = developmentTrack(labeled), before = plan(track.track_id), after = plan(track.track_id);
+  before.identity.recording_mbid = "abcdefab-abcd-4000-8000-000000000001";
+  after.identity.recording_mbid = before.identity.recording_mbid.toUpperCase();
+  track.expected_recording_mbids = [before.identity.recording_mbid];
+  const input = JSON.stringify([labeled, before, after]);
+  assert.deepEqual(comparePilot(labeled, run([before]), run([after])).differences, []);
+  assert.equal(JSON.stringify([labeled, before, after]), input);
+  before.ops = [trackOp(track, "artist", "Incorrect snapshot", "Wrong")];
+  assert.throws(() => comparePilot(labeled, run([before]), run([after])), /different original metadata snapshots/);
+  assert.throws(() => comparePilot(labeled, run([after]), run([before])), /different original metadata snapshots/);
+});
+
+test("CLI comparison reads retained exports, produces JSON and leaves input files unchanged", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cleanup-compare-"));
+  try {
+    const inputs = [cohort(), run([]), run([])];
+    const paths = ["cohort.json", "baseline.json", "changed.json"].map((name) => join(directory, name));
+    await Promise.all(paths.map((path, i) => writeFile(path, JSON.stringify(inputs[i]))));
+    const { stdout } = await promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mjs", "compare", ...paths]);
+    assert.deepEqual(JSON.parse(stdout), comparePilot(...inputs));
+    const holdout = await promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mjs", "compare", ...paths, "holdout"]);
+    assert.equal(JSON.parse(holdout.stdout).split, "holdout");
+    for (const [i, path] of paths.entries()) assert.deepEqual(JSON.parse(await readFile(path, "utf8")), inputs[i]);
+    await assert.rejects(promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mjs", "compare", ...paths, "all"]), /never combine/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

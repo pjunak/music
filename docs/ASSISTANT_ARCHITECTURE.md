@@ -470,8 +470,11 @@ Additional providers, OCR/audio models and broader recognition remain conditiona
 see [metadata research](LIBRARY_METADATA_RESEARCH.md) for source policies and the held-out benchmark.
 The [offline metadata pilot](LIBRARY_METADATA_PILOT.md) scores exported catalog proposals against
 independent recording/edition/field labels with artist/release families kept in one split.
-It reports missing/failed results, unknown labels and harmful changes separately; it neither
-certifies a model nor applies library changes.
+It reports missing/failed results, unknown labels and harmful changes separately. Paired run
+comparisons identify per-track regressions, improvements and mixed changes, default to the
+development split and require an explicit holdout selection. Unknown labels and unavailable
+results cannot establish safer identity/field proposals. It neither certifies a model nor
+applies library changes.
 
 ## Workflow traceability
 

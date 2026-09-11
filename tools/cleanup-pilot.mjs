@@ -42,14 +42,16 @@ export function createCohort(manifest) {
   })) };
 }
 
-function validateCohort(cohort) {
+function validateCohort(cohort, reviewedSplit = null) {
   requireValue(cohort?.schema_version === COHORT_SCHEMA, "Expected a cleanup pilot cohort.");
   const expected = createCohort(cohort.tracks);
   requireValue(cohort.manifest_fingerprint === expected.manifest_fingerprint, "Preserve the fixed manifest; prepare a new cohort when scope changes.");
   const splits = new Map(expected.tracks.map((track) => [track.track_id, track.split]));
   for (const track of cohort.tracks) {
     requireValue(track.split === splits.get(track.track_id), "Preserve the family-based development/holdout split.");
-    requireValue(track.reviewed === true && name(track.evidence_notes), "Finish independent labels and short evidence notes for every track before scoring.");
+    if (reviewedSplit === null || track.split === reviewedSplit) {
+      requireValue(track.reviewed === true && name(track.evidence_notes), "Finish independent labels and short evidence notes for every scored track.");
+    }
     requireValue(validLabels(track.expected_recording_mbids) && validLabels(track.expected_release_mbids), "Expected IDs must be MBID arrays, or null for unknown labels.");
     requireValue(object(track.fields) && Object.keys(track.fields).length <= 8, "Invalid field judgments.");
     for (const [field, judgment] of Object.entries(track.fields)) {
@@ -147,6 +149,95 @@ export function scorePilot(cohort, run) {
     })) };
 }
 
+function assessTrack(track, plan, fields) {
+  const available = plan !== undefined && plan.status !== "failed";
+  const identity = (kind) => {
+    const value = plan?.identity?.[`${kind}_mbid`]?.toLowerCase() ?? null;
+    const labels = track[`expected_${kind}_mbids`];
+    return { value, state: !available ? "unavailable" : value === null ? "abstained"
+      : labels === null ? "unscored" : labels.some((id) => id.toLowerCase() === value.toLowerCase()) ? "correct" : "wrong" };
+  };
+  const candidates = new Set((plan?.candidates ?? []).map((candidate) => candidate.id.toLowerCase()));
+  if (plan?.identity) candidates.add(plan.identity.recording_mbid.toLowerCase());
+  return {
+    availability: !plan ? "missing" : plan.status === "failed" ? "failed" : plan.partial ? "partial" : "complete",
+    recording: identity("recording"), release: identity("release"),
+    retrieval: !available ? "unavailable" : !track.expected_recording_mbids?.length ? "unscored"
+      : track.expected_recording_mbids.some((id) => candidates.has(id.toLowerCase())) ? "retrieved" : "missed",
+    fields: Object.fromEntries(fields.map((field) => {
+      const op = plan?.ops.find((op) => op.field === field);
+      const judgment = track.fields[field];
+      const alreadyCorrect = judgment?.acceptable.includes(judgment.current);
+      const correct = op && judgment?.acceptable.includes(op.new);
+      const state = !available ? "unavailable" : !judgment ? "unscored"
+        : !op ? alreadyCorrect ? "kept_correct" : "missed_correction"
+          : alreadyCorrect ? correct ? "changed_correct" : "damaged_correct"
+            : correct ? "useful_correction" : "wrong_correction";
+      return [field, { state, proposal: op ? { old: op.old, new: op.new } : null }];
+    })),
+  };
+}
+
+function compareTrack(track, before, after) {
+  const available = (value) => ["complete", "partial"].includes(value.availability);
+  const improvements = new Set(), regressions = new Set();
+  if (available(before) && !available(after)) regressions.add("lost_result");
+  if (!available(before) && available(after)) improvements.add("recovered_result");
+  if (before.availability === "complete" && after.availability === "partial") regressions.add("became_partial");
+  if (before.availability === "partial" && after.availability === "complete") improvements.add("completed_partial_result");
+  for (const kind of ["recording", "release"]) {
+    const previous = before[kind].state, current = after[kind].state;
+    if (current === "wrong" && previous !== "wrong") regressions.add(`new_wrong_${kind}`);
+    if (previous === "correct" && current !== "correct") regressions.add(`lost_correct_${kind}`);
+    if (current === "correct" && previous !== "correct") improvements.add(`recovered_correct_${kind}`);
+    if (previous === "wrong" && current === "abstained") improvements.add(`avoided_wrong_${kind}`);
+  }
+  if (before.retrieval === "retrieved" && after.retrieval === "missed") regressions.add("lost_candidate");
+  if (before.retrieval === "missed" && after.retrieval === "retrieved") improvements.add("recovered_candidate");
+  for (const field of Object.keys(before.fields)) {
+    const previous = before.fields[field].state, current = after.fields[field].state;
+    if (current === "damaged_correct" && previous !== current) regressions.add("new_damaged_field");
+    if (current === "wrong_correction" && previous !== current) regressions.add("new_wrong_field");
+    if (current === "changed_correct" && previous === "kept_correct") regressions.add("new_unnecessary_field_change");
+    if (previous === "useful_correction" && previous !== current) regressions.add("lost_useful_correction");
+    if (current === "useful_correction" && previous !== current) improvements.add("recovered_useful_correction");
+    if (previous === "damaged_correct" && current === "kept_correct") improvements.add("preserved_correct_field");
+    if (previous === "damaged_correct" && current === "changed_correct") improvements.add("avoided_damaged_field");
+    if (previous === "wrong_correction" && current === "missed_correction") improvements.add("avoided_wrong_field");
+    if (previous === "changed_correct" && current === "kept_correct") improvements.add("avoided_unnecessary_field_change");
+  }
+  return { track_id: track.track_id, family: track.family, stratum: track.stratum,
+    classification: improvements.size && regressions.size ? "mixed" : regressions.size ? "regression" : improvements.size ? "improvement" : "changed",
+    improvements: [...improvements].sort(), regressions: [...regressions].sort(), baseline: before, changed: after };
+}
+
+export function comparePilot(cohort, baselineRun, changedRun, split = "development") {
+  requireValue(["development", "holdout"].includes(split), "Choose development or holdout explicitly; comparisons never combine the splits.");
+  validateCohort(cohort, split);
+  const baselinePlans = readPlans(baselineRun), changedPlans = readPlans(changedRun);
+  const tracks = cohort.tracks.filter((track) => track.split === split).sort((a, b) => a.track_id - b.track_id);
+  // Scoring both sides also validates the original metadata values before any
+  // gains are reported. Unavailable results cannot count as safer abstentions.
+  const baseline = scoreTracks(tracks, baselinePlans), changed = scoreTracks(tracks, changedPlans);
+  const differences = [];
+  for (const track of tracks) {
+    const oldPlan = baselinePlans.get(track.track_id), newPlan = changedPlans.get(track.track_id);
+    const fields = [...new Set([...Object.keys(track.fields), ...(oldPlan?.ops ?? []).map((op) => op.field), ...(newPlan?.ops ?? []).map((op) => op.field)])].sort();
+    const before = assessTrack(track, oldPlan, fields), after = assessTrack(track, newPlan, fields);
+    if (JSON.stringify(before) !== JSON.stringify(after)) differences.push(compareTrack(track, before, after));
+  }
+  return { schema_version: "library-cleanup-pilot-comparison/v1", split, manifest_fingerprint: cohort.manifest_fingerprint,
+    selected_labels_fingerprint: hash(tracks), baseline_run_fingerprint: hash(baselineRun), changed_run_fingerprint: hash(changedRun),
+    scope_note: "Selected split only. Track signals can overlap; mixed changes need review. Unknown labels do not establish improvement. Missing/failed results do not count as safer abstentions. Rate deltas are fractions, and stay null when either denominator is empty. No automatic pass threshold.",
+    baseline, changed,
+    delta: Object.fromEntries(Object.keys(baseline).map((key) => [key, baseline[key] === null || changed[key] === null ? null : changed[key] - baseline[key]])),
+    unchanged_tracks: tracks.length - differences.length,
+    tracks_with_regressions: differences.filter((track) => track.regressions.length).length,
+    tracks_with_improvements: differences.filter((track) => track.improvements.length).length,
+    differences,
+  };
+}
+
 async function readJson(path) {
   requireValue((await stat(path)).size <= 10 * 1024 * 1024, "Pilot input exceeds 10 MiB.");
   return JSON.parse(await readFile(path, "utf8"));
@@ -158,7 +249,10 @@ export async function main(args) {
   } else if (args[0] === "score" && args.length === 3) {
     const [cohort, run] = await Promise.all(args.slice(1).map(readJson));
     process.stdout.write(`${JSON.stringify(scorePilot(cohort, run), null, 2)}\n`);
-  } else throw new Error("Usage: node tools/cleanup-pilot.mjs init manifest.json cohort.json | score cohort.json run.json");
+  } else if (args[0] === "compare" && [4, 5].includes(args.length)) {
+    const [cohort, baseline, changed] = await Promise.all(args.slice(1, 4).map(readJson));
+    process.stdout.write(`${JSON.stringify(comparePilot(cohort, baseline, changed, args[4]), null, 2)}\n`);
+  } else throw new Error("Usage: node tools/cleanup-pilot.mjs init manifest.json cohort.json | score cohort.json run.json | compare cohort.json baseline.json changed.json [development|holdout]");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

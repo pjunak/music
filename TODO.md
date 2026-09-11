@@ -15,7 +15,7 @@ or demonstrated defect rather than extend the cleanup phase indefinitely.
 
 The core cleanup, compilation safeguards, informative collision names, album-scoped
 retrieval, corroborated discovery within and across explicit disc folders, catalog artist aliases,
-an accessible rejection pool and offline pilot tooling are implemented. This is the remaining plan for
+an accessible rejection pool and offline pilot scoring/comparison tooling are implemented. This is the remaining plan for
 albums and game/film soundtracks, ordered by expected useful corrections, protection of correct metadata,
 review effort and implementation cost. Benefits are engineering estimates;
 they are not measured accuracy gains. The [research](docs/LIBRARY_METADATA_RESEARCH.md)

@@ -100,7 +100,45 @@ mistakes and family counts, not just aggregate percentages. A tiny holdout canno
 99% precision. Capture request counts, elapsed time, operator review time, costs and accepted
 changes separately; current catalog exports do not provide all of those measurements.
 
-Album-first retrieval is the next priority in the [backlog](../TODO.md). Additional paid
+## Find improvements and regressions between runs
+
+Engineering can compare the same fixed cohort against two retained runs:
+
+```powershell
+node tools/cleanup-pilot.mjs compare cohort.json baseline-run.json changed-run.json > development-comparison.json
+# Only after development decisions are fixed:
+node tools/cleanup-pilot.mjs compare cohort.json baseline-run.json changed-run.json holdout > holdout-comparison.json
+```
+
+Comparison defaults to the development split. It requires independent judgments and evidence
+notes only for the selected split, so pending holdout labels do not block development. The
+holdout report requires an explicit selection; there is no combined comparison mode. Each
+report includes only the selected tracks' counts and differences. The original `score` command
+still requires all labels and returns both splits, so reserve it for the final complete report.
+
+The comparison retains both sets of denominators, count/rate deltas, run fingerprints and a
+fingerprint of the selected labels. Rate deltas are fractions, not percentage points; they stay
+`null` if either rate has no denominator. Per-track differences show the original and proposed
+field values, identity outcomes, retrieval coverage and availability. They flag recovered/lost
+correct identities, useful corrections, damaged correct fields and unnecessary changes to
+already-acceptable values. An acceptable alternative spelling remains an unnecessary change
+when the original was already acceptable; it is not counted as damage.
+
+One track can improve identity detection while acquiring a harmful field proposal. Such a
+track is marked `mixed` and appears in both the improvement and regression counts. Inspect
+these cases before the totals: precision can remain perfect while useful matches disappear.
+Unknown labels produce unscored differences, and a missing/failed result never receives credit
+for avoiding a wrong proposal. Returning a result after a failure is an availability gain,
+not proof that its unknown identity is correct. Candidate recovery and incomplete results are
+also reported separately.
+
+Neither comparison nor scoring proves that all source metadata stayed identical: the
+original-value check covers proposed fields with known judgments. Preserve the indexed
+snapshot even when an untouched field produces no proposal. Family counts, evidence and
+operator review still determine whether the observed changes justify a retrieval change;
+the tool does not automatically accept a change or establish statistical significance.
+
+The independently labeled album/soundtrack pilot is the next priority in the [backlog](../TODO.md). Additional paid
 recognition, broader AI, OCR and duplicate deletion need their own concrete scope and
 operator discussion. This scorer evaluates the existing catalog proposal format; those
 experiments may need additional export adapters and labels before they can be compared.
