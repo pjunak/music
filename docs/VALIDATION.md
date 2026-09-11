@@ -21,6 +21,13 @@ the reusable workflow. Both Cargo workspaces (`.` and `fuzz`) are cached, and
 all compile/test commands use the checked-in lockfiles. Vitest companion
 dependency updates are grouped to preserve their matching peer versions.
 
+The separate fuzz workspace links the application crates, including `music-server`.
+Adding a dependency to one of those crates can require updates to both lockfiles even
+when the package already exists transitively and no version changes. For dependency
+edits, check both workspaces before longer builds with `cargo metadata --locked
+--format-version 1` and `cargo metadata --manifest-path fuzz/Cargo.toml --locked
+--format-version 1`. Include the fuzz Clippy and dependency checks below in validation.
+
 Use current fixtures and local service instances. Hardware/private-library and
 paid-provider evidence stays separately identified; a documentation edit or
 passing local suite does not authorize an external run. Probe available tools
