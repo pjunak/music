@@ -25,8 +25,8 @@ Assistant contract and is removed from this backlog.
 
 | Order | Work and expected usefulness | Downsides and mitigation | Effort / next step |
 |---|---|---|---|
-| 1 | Isolate persistent Last.fm HTTP 400 responses after the GET/error-handling retest. The export is retained, but no usable API code was returned. The local Rust probe and production-host curl control both receive the normal placeholder-key error. Assess MusicBrainz timeouts separately. | The public control does not validate the configured key or recording resource. Host/container networking and backend build differences remain possible; blind retries add latency and traffic. | Small–medium; compare a configured-key public control with one recording's ID/name lookups using the [diagnostic sequence](docs/LIBRARY_METADATA_PILOT.md#when-an-http-error-has-no-api-code). If the application differs, confirm its running backend image and container path. |
-| 2 | Finish the fixed album/soundtrack pilot with the [implemented tooling](docs/LIBRARY_METADATA_PILOT.md). Establish recording/edition precision, missed candidates, harmful field changes and abstention before changing retrieval. | Independent labels require operator time; small or album-leaking samples mislead. Keep artist/release families together, report denominators and unknowns. | Small–medium; complete missing baseline runs and independent recording/edition judgments, preserving the fixed holdout. |
+| 1 | Finish the fixed album/soundtrack pilot with the [implemented tooling](docs/LIBRARY_METADATA_PILOT.md). Establish recording/edition precision, missed candidates, harmful field changes and abstention before changing retrieval. Evaluate available metadata proposals even when optional tag evidence is incomplete. | Independent labels require operator time; small or album-leaking samples mislead. Keep artist/release families together, report denominators and unknowns; partial evidence never counts as a complete no-match. | Small–medium; complete missing baseline runs and independent recording/edition judgments, preserving the fixed holdout. |
+| 2 | Assess MusicBrainz timeouts affecting recording and edition coverage. Recovering missing evidence comes before relaxing matching. | A timeout alone does not identify pacing, provider load or a network problem. Blind retries add latency and traffic; an unavailable response is not a no-match judgment. | Small–medium; use the retained baseline's failed request categories to choose a bounded availability diagnostic before changing retry policy. |
 | 3 | Evaluate alias-assisted identity acceptance and explicit version evidence. Helps tracks still unresolved after catalog alias retrieval, album hints and bounded disc-folder discovery. | Accepting alternate artist spellings can collapse distinct identities. Preserve full credits, retain provenance and reject version/identity contradictions. Conservative encoding repair is an optional substep, never blanket normalization. | Large; use independently labeled misses before relaxing acceptance or adding speculative normalization. |
 | 4 | Writable richer metadata: full/original dates, artist lists, credits, work/movement, label and track totals. Useful for soundtracks/classical libraries and export. | More complicated forms, tag-format differences and cross-client schemas; some catalog facts belong to a work rather than a recording. Choose a small useful field set before changing playback/client models; preserve original values and unknown frames. | Large; consult on fields and whether they need tag export, browsing, or both. |
 | 5 | CUE sheets and purchase/creator manifests. Recovers authoritative local track lists and source context. | Format-specific parsing, private receipt data and uncertain file mapping. Explicit selected imports only; never execute sidecars or split audio implicitly. | Medium; prioritize actual formats present in the collection. |
@@ -41,6 +41,15 @@ of the first field set and its tag-export/browsing use before shared schemas cha
 Paid recognition and broader AI stay deferred pending a concrete gap, proposed
 provider/data scope and cost cap. Normal regression gates establish correctness,
 not recognition accuracy on the collection; field judgments alone do not establish recording or edition identity.
+
+Last.fm's configured-key control succeeded, while the tested recording-ID query
+returned HTTP 400 and its exact name query returned no tags. The operator chose to
+keep recording-ID matching strict and prioritize album metadata. A separately
+labeled name fallback remains deferred; this sample showed no useful added tags,
+and name equality cannot establish a particular recording version. Do not rotate
+the working key, disable the source, or block the album pilot on this optional
+tag gap. Its exact error payload remains unclassified; keep the retained diagnostic
+and [interpretation limits](docs/LIBRARY_METADATA_PILOT.md#when-an-http-error-has-no-api-code).
 
 ## Conditional cleanup
 

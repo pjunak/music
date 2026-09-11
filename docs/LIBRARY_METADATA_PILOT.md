@@ -133,6 +133,16 @@ they do not authorize changing the application's identity scope. If the diagnost
 succeeds while the application fails, compare the actual backend image and container
 network before changing matching rules.
 
+The current operator decision is to keep recording-ID matching strict and prioritize
+album metadata. The configured-key control succeeded; the tested ID query returned
+HTTP 400/JSON without a usable numeric code, and its name query succeeded with zero
+tags. This establishes different outcomes for that request pair, not a wrong
+MusicBrainz ID or a failure of every Last.fm MBID lookup. No name fallback benefit
+was demonstrated on that track. Continue evaluating available recording/edition and
+field proposals while reporting optional tag failures as partial evidence. Do not
+silently turn the HTTP error into a successful empty result or label it as a missing
+recording without an identified provider error.
+
 ### Score saved results
 
 ```powershell
