@@ -216,6 +216,62 @@ or use the 75-track holdout as part of this development check. The local regress
 behavior; new live coverage and recording/edition precision remain unmeasured until those results
 and independent identity judgments exist.
 
+### Refreshed development results: 13 September 2026
+
+Four fresh, uncached jobs cover the same 114 development tracks with empty imports.
+Original exports and hashes are retained privately. Scope, track IDs, paths, source IDs,
+exported embedded observations and vocabulary fingerprints match the baselines; the
+scorer also checks original values for labeled proposed fields. The fixed labels and
+75-track holdout are unchanged. Versioned source signatures differ because their input
+includes the catalog-policy version; a fresh full-index/source-settings snapshot is not
+available, so complete equality of those inputs is not independently established.
+
+| Measure | Retained baseline | Refreshed collection |
+|---|---:|---:|
+| Recording proposals (identity unscored) | 65 | 83 |
+| Selected edition proposals (identity unscored) | 1 | 8 |
+| Field proposals | 63 | 50 |
+| Known useful field corrections | 30 | 30 |
+| Proposals contrary to fixed field labels | 3 | 2 |
+| Unscored field proposals | 30 | 18 |
+| Partial results | 111 | 114 |
+
+Known correction coverage remains 30/133 needed fields. The recording total comprises
+36 new identifications and 18 lost identifications; surviving identities retain their
+recording IDs. Ten lost useful BG3 artist corrections each report a failed MusicBrainz
+recording-detail read with HTTP 503. Nine recovered BG3 corrections and one additional
+Bridges correction offset them in the total. This is a mixed development result, not a
+recording-accuracy claim or an isolated measurement of the code change.
+
+All three previously unwanted title edits disappeared. Ten Bloodborne composer spellings
+are now preserved with explicit full-credit alias evidence; those credits remain unscored
+in the fixed cohort. The confirmed It Follows reissue is available for all 22 identified
+tracks, with 22 album proposals and 15 year corrections among its alternatives. These
+edition-review operations are separate from the automatic-proposal score. Its two-disc
+positions still require review against the creator's consecutive numbering convention.
+
+The newly identified Detroit alternate proposes a title/artist presentation that conflicts
+with two creator-based labels. The [creator track page](https://disasterpeace.bandcamp.com/track/detroit-alternate-feat-super-hoop-vrc6-demake)
+retains the existing title and Disasterpeace credit. Keep this source disagreement explicit
+and reviewable; fingerprint identity does not make every catalog field authoritative.
+Do not generalize feature-credit punctuation into a new equivalence rule or relabel the
+fixed benchmark to hide the disagreement. The confirmed Bridges source correction also
+remains separate: the current MusicBrainz positions reverse the two positions on the
+[creator tracklist](https://blackhill1.bandcamp.com/album/bridges-of-the-south).
+
+MusicBrainz HTTP 503 appears in evidence for 80 tracks, including failed shared-context
+lookups; these are affected-track counts, not request counts or proof of rate-limit origin.
+Twenty-six of 31 unmatched tracks report a failed recording-detail read, and the remaining
+five also have provider-error notes. Last.fm HTTP 400 remains on all 83 identified tracks.
+The four jobs completed in 636 seconds combined, excluding operator gaps. None failed
+outright, but none of the unmatched results establishes a complete catalog no-match.
+
+The exports do not report retry counts, response headers or the production network path.
+Further availability work needs a bounded production-side diagnostic before changing
+retry limits or matching rules. Strict Last.fm identity scope remains unchanged. No source
+imports, model calls, applied changes or holdout tuning were part of this comparison.
+Independent recording/edition judgments and assisted-review acceptance remain outstanding.
+
 ### Score saved results
 
 ```powershell
