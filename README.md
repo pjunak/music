@@ -501,3 +501,20 @@ Rust 1.97.1 · Tokio · Axum · SQLx/SQLite · Serde · Lofty · RustFFT · trac
 React · TypeScript 7 · Vite · Zustand · Oxlint · Web Audio API. The release is packaged as a
 multi-stage image (`node:26.7.0-alpine` + `rust:1.97.1-trixie` builders → non-root
 `debian:trixie-slim` runtime).
+
+## Automated deployment
+
+A successful current-main build publishes the verified image and waits for the
+infrastructure deployment to finish. Production runs are queued so new commits
+do not cancel an active rollout. Superseded sources skip publication. Application
+checks and the exact-image smoke gate still run before publication.
+
+Set `INFRA_REPO=pjunak/infra` and `INFRA_DISPATCH_TOKEN`, scoped to infra with
+Contents read/write and Actions read. The target is the `music` stack;
+`INFRA_SERVICE` is no longer used. Server SSH credentials stay in infra.
+
+Use **Deploy published release** with a completed build run ID to retry its
+retained `published-image` artifact without rebuilding. The shared pinned infra
+client checks the source and publication job, dispatches the exact digest and
+waits for the matching health-checked rollout. Failure or an unknown result fails
+the workflow. See the [shared contract](https://github.com/pjunak/infra/blob/main/docs/application-deployments.md).

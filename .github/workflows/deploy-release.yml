@@ -1,0 +1,59 @@
+name: Deploy published release
+run-name: Deploy published music build ${{ inputs.source_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed main build run with a successful publication job
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: music-production
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.INFRA_REPO }}
+          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          ref: d3c0603834b4d15a4a52e3b1b2b1cfdd1ab45578
+          persist-credentials: false
+          sparse-checkout: scripts/application-release.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: published-image
+          path: release
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify the published release
+        id: release
+        run: python3 scripts/application-release.py verify
+        env:
+          APP_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_WORKFLOW: build-and-dispatch.yml
+          PUBLISH_JOB: Build, verify, and publish image
+      - name: Dispatch and wait for infrastructure health
+        run: python3 scripts/application-release.py deploy
+        env:
+          APP_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          INFRA_REPO: ${{ vars.INFRA_REPO }}
+          DEPLOY_SERVICE: music
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+          DEPLOY_IMAGE: ${{ steps.release.outputs.image_ref }}

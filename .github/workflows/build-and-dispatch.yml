@@ -4,8 +4,7 @@ name: Build and dispatch
 # asks the infrastructure repository to deploy the exact source revision.
 #
 # Required secret  : INFRA_DISPATCH_TOKEN  (fine-grained PAT on the infra repo)
-# Required variable: INFRA_REPO            (e.g. pjunak/junak.eu)
-# Required variable: INFRA_SERVICE         (e.g. music)
+# Required variable: INFRA_REPO            (e.g. pjunak/infra)
 
 on:
   push:
@@ -16,8 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  group: music-${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'production' || github.ref }}
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   verify:
@@ -31,6 +31,7 @@ jobs:
   release:
     name: Build, verify, and publish image
     needs: verify
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
@@ -80,6 +81,22 @@ jobs:
             grep --quiet '"status":"ok"'
           curl --fail --silent http://127.0.0.1:18000/ | grep --quiet '<!doctype html>'
 
+      - name: Skip superseded main revisions
+        id: current
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$main_sha" =~ ^[a-f0-9]{40}$ ]]
+          if [[ "$main_sha" == "$GITHUB_SHA" ]]; then
+            echo 'current=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'current=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::A newer main revision exists; publication and deployment skipped.'
+          fi
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -91,6 +108,7 @@ jobs:
       # exports the verified result with registry provenance but does not
       # repeat dependency or application compilation.
       - name: Publish the verified cached image
+        if: steps.current.outputs.current == 'true'
         id: publish
         uses: docker/build-push-action@v7
         with:
@@ -100,6 +118,7 @@ jobs:
           cache-from: type=gha,scope=music-release-image
 
       - name: Promote the verified digest to latest
+        if: steps.current.outputs.current == 'true'
         id: promote
         env:
           IMAGE_NAME: ${{ steps.img.outputs.name }}
@@ -114,37 +133,45 @@ jobs:
           docker buildx imagetools create --tag "${IMAGE_NAME}:latest" "$image_ref"
           echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
 
-  dispatch:
-    name: Dispatch deploy to infra repo
-    needs: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Verify dispatch config
+      - name: Retain published release metadata
+        if: steps.current.outputs.current == 'true'
         env:
-          TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
-          REPO: ${{ vars.INFRA_REPO }}
-          SERVICE: ${{ vars.INFRA_SERVICE }}
-          IMAGE_REF: ${{ needs.release.outputs.image_ref }}
+          IMAGE_REF: ${{ steps.promote.outputs.image_ref }}
         run: |
           set -euo pipefail
-          : "${TOKEN:?INFRA_DISPATCH_TOKEN secret is not set}"
-          : "${REPO:?INFRA_REPO variable is not set (e.g. owner/infra-repo)}"
-          : "${SERVICE:?INFRA_SERVICE variable is not set (e.g. music)}"
-          [[ "$IMAGE_REF" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]] || {
-            echo "::error::Release job did not provide a valid immutable GHCR image reference"
-            exit 1
-          }
-
-      - name: Trigger infra deploy
-        uses: peter-evans/repository-dispatch@v4
+          [[ "$IMAGE_REF" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]
+          mkdir -p release
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" --arg image "$IMAGE_REF" \
+            '{format: 1, repository: $repository, sha: $sha, image_ref: $image}' > release/published-image.json
+      - uses: actions/upload-artifact@v4
+        if: steps.current.outputs.current == 'true'
         with:
-          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          name: published-image
+          path: release/published-image.json
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy:
+    name: Deploy and verify music
+    needs: release
+    if: needs.release.outputs.image_ref != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
           repository: ${{ vars.INFRA_REPO }}
-          event-type: deploy
-          client-payload: |-
-            {
-              "service": "${{ vars.INFRA_SERVICE }}",
-              "sha": "${{ github.sha }}",
-              "image_ref": "${{ needs.release.outputs.image_ref }}"
-            }
+          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          ref: d3c0603834b4d15a4a52e3b1b2b1cfdd1ab45578
+          persist-credentials: false
+          sparse-checkout: scripts/application-release.py
+          sparse-checkout-cone-mode: false
+      - name: Dispatch and wait for infrastructure health
+        run: python3 scripts/application-release.py deploy
+        env:
+          APP_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          INFRA_REPO: ${{ vars.INFRA_REPO }}
+          DEPLOY_SERVICE: music
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_IMAGE: ${{ needs.release.outputs.image_ref }}
