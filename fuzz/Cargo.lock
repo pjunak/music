@@ -766,7 +766,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2143,7 +2143,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2420,7 +2420,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2477,7 +2477,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3095,10 +3095,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3417,9 +3417,9 @@ dependencies = [
 
 [[package]]
 name = "tract-core"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "123353d6cbb5175d3753dbfa6b62ec04a4ea1ad8cdddde040854c4463de8f96f"
+checksum = "67786dad63505354ec2d1b3925c78fdd155d8101558f3810639aa55077156d81"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -3447,9 +3447,9 @@ dependencies = [
 
 [[package]]
 name = "tract-data"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74e5e955b0ff8e7018c78dfd90ecf2f20eff3f4cb79a20090b98b380ce509942"
+checksum = "bfbe59c58d1c7c52941c73e7efe08059fbb1cab29510f9bc459b95e0ab32d459"
 dependencies = [
  "anyhow",
  "downcast-rs",
@@ -3475,9 +3475,9 @@ dependencies = [
 
 [[package]]
 name = "tract-hir"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e64ed0becab2547692ff1f534f04a4e102d04559277e7fb4279ca368154e260f"
+checksum = "981e9a8d15d54201afc91ea7b06786b6ec52cb5627ce2a8403c1ee3a2c1f96b2"
 dependencies = [
  "derive-new",
  "log",
@@ -3486,9 +3486,9 @@ dependencies = [
 
 [[package]]
 name = "tract-linalg"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09801234205dc22366c1609d09343e80757846cf1a27bfc310696e0e67b9c038"
+checksum = "eab0651b49eaa0c64bebe290cf981878f47843cf1bb424c15bdef832f8d1e153"
 dependencies = [
  "byteorder",
  "cc",
@@ -3498,7 +3498,9 @@ dependencies = [
  "dyn-eq",
  "dyn-hash",
  "half",
+ "inventory",
  "lazy_static",
+ "libc",
  "log",
  "minijinja",
  "num-traits",
@@ -3510,9 +3512,9 @@ dependencies = [
 
 [[package]]
 name = "tract-nnef"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9ece262d9c703468a8640be92a4b5319a130d462c23b2fb1fb74c0bae9e03a5"
+checksum = "051be16c8824ceefdb9cd0c121d7a97c89ca530c6cb0d1f1af6fcc27d8531597"
 dependencies = [
  "byteorder",
  "erased-serde",
@@ -3532,9 +3534,9 @@ dependencies = [
 
 [[package]]
 name = "tract-pulse"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16cdb58e8f55ff9ae49a1c108eb95b114481552a7392b9cc6a0034b9aad422b6"
+checksum = "103941bf671feb7cb11d81747ab224a584b728a31b8dd931ad02a2381f031bf2"
 dependencies = [
  "downcast-rs",
  "dyn-eq",
@@ -3548,9 +3550,9 @@ dependencies = [
 
 [[package]]
 name = "tract-pulse-opl"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13d78280da9d02c796aa9efb0ba03ad3ce16faf6ee67177e0afbed3621025665"
+checksum = "2ef5ca8d1aca1269c43aefade345baff14a5c3a69e86c0a2fea19f11eabb1b5a"
 dependencies = [
  "downcast-rs",
  "dyn-eq",
@@ -3560,9 +3562,9 @@ dependencies = [
 
 [[package]]
 name = "tract-tensorflow"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a593239cb9e9909d04a0f34ad07230fd493f3986d56f4b0cba9ba3a26750219b"
+checksum = "646f43e27f810b710b483d2683db2cfa0af681054783e8c52b6b23a7b8732ff3"
 dependencies = [
  "bytes",
  "derive-new",
@@ -3576,9 +3578,9 @@ dependencies = [
 
 [[package]]
 name = "tract-transformers"
-version = "0.23.5"
+version = "0.23.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51768e1bd913dd2b21ac748821b267fb76c12c86baf6e47667258d9f15208b0d"
+checksum = "467fb40ac38951bfa57202eeaa88028705b2cb1f0ff15d1238fcb6dcb89cf574"
 dependencies = [
  "float-ord",
  "rayon",
@@ -3950,7 +3952,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
