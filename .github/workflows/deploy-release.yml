@@ -28,7 +28,7 @@ jobs:
         with:
           repository: ${{ vars.INFRA_REPO }}
           token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
-          ref: d3c0603834b4d15a4a52e3b1b2b1cfdd1ab45578
+          ref: 4f8db1dd266eda21b9f9044f86b53fbb0a07061c
           persist-credentials: false
           sparse-checkout: scripts/application-release.py
           sparse-checkout-cone-mode: false

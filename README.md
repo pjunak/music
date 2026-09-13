@@ -510,7 +510,7 @@ do not cancel an active rollout. Superseded sources skip publication. Applicatio
 checks and the exact-image smoke gate still run before publication.
 
 Set `INFRA_REPO=pjunak/infra` and `INFRA_DISPATCH_TOKEN`, scoped to infra with
-Contents read/write and Actions read. The target is the `music` stack;
+Contents read and Actions write. The target is the `music` stack;
 `INFRA_SERVICE` is no longer used. Server SSH credentials stay in infra.
 
 Use **Deploy published release** with a completed build run ID to retry its
